@@ -15,6 +15,10 @@ namespace safe_browsing {
 class RealTimeUrlLookupService;
 }
 
+namespace variations {
+class VariationsService;
+}
+
 namespace web {
 class BrowserState;
 }
@@ -26,7 +30,7 @@ class RealTimeUrlLookupServiceFactory : public BrowserStateKeyedServiceFactory {
   // TODO(crbug.com/358301380): remove this method.
   static safe_browsing::RealTimeUrlLookupService* GetForBrowserState(
       ProfileIOS* profile);
-  // Returns null if `browser_state` is in Incognito mode.
+  // Returns null if `profile` is in Incognito mode.
   static safe_browsing::RealTimeUrlLookupService* GetForProfile(
       ProfileIOS* profile);
   static RealTimeUrlLookupServiceFactory* GetInstance();
@@ -40,6 +44,8 @@ class RealTimeUrlLookupServiceFactory : public BrowserStateKeyedServiceFactory {
   // BrowserStateKeyedServiceFactory:
   std::unique_ptr<KeyedService> BuildServiceInstanceFor(
       web::BrowserState* browser_state) const override;
+
+  static variations::VariationsService* GetVariationsService();
 };
 
 #endif  // IOS_CHROME_BROWSER_SAFE_BROWSING_MODEL_REAL_TIME_URL_LOOKUP_SERVICE_FACTORY_H_

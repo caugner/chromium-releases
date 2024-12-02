@@ -1778,8 +1778,7 @@ void InlineCursor::MoveToVisualFirstOrLastForCulledInline(bool last) {
   }
 
   DCHECK(found_position);
-  if (RuntimeEnabledFeatures::InlineCursorMultiColFixEnabled() &&
-      fragment_index_ > found_fragment_index) {
+  if (fragment_index_ > found_fragment_index) {
     while (fragment_index_ > found_fragment_index) {
       DecrementFragmentIndex();
     }

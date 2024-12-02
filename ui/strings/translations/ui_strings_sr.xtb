@@ -144,7 +144,7 @@
 <translation id="6007284015834422026">Додатак је закачен</translation>
 <translation id="6040143037577758943">Затвори</translation>
 <translation id="6117103120090651229">Централно дугме</translation>
-<translation id="6129953537138746214">Размак</translation>
+<translation id="6129953537138746214">Тастер за размак</translation>
 <translation id="6135826906199951471">Del</translation>
 <translation id="6142413573757616983"><ph name="QUANTITY" /> B/s</translation>
 <translation id="6237461503717005873">Изабрали сте <ph name="ROW_NAME" />.</translation>
@@ -224,6 +224,7 @@
 <translation id="9044832324875206639">{SECONDS,plural, =1{1 сек}one{# сек}few{# сек}other{# сек}}</translation>
 <translation id="9059834730836941392">Скупи обавештење</translation>
 <translation id="9170848237812810038">&amp;Опозови</translation>
+<translation id="9195990613383871904">Сутра</translation>
 <translation id="932327136139879170">Почетна</translation>
 <translation id="944069440740578670">Непрочитана обавештења</translation>
 <translation id="966963601246348639">{SECONDS,plural, =1{Пре 1 секунде}one{Пре # секунде}few{Пре # секунде}other{Пре # секунди}}</translation>

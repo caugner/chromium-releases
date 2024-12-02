@@ -1808,6 +1808,18 @@ TEST_F(ArcVmClientAdapterTest, MetadataDisk_EnabledForArcU) {
   EXPECT_TRUE(HasDiskImage(req, metadta_disk_path));
 }
 
+TEST_F(ArcVmClientAdapterTest, SyspropDiskAlwaysEnabled) {
+  StartParams start_params(GetPopulatedStartParams());
+  StartMiniArcWithParams(true, std::move(start_params));
+  const auto& request = GetTestConciergeClient()->start_arc_vm_request();
+
+  const std::string sysprop_disk_path =
+      base::StringPrintf("/run/daemon-store/crosvm/%s/YXJjdm0=.runtime.prop",
+                         std::string(kUserIdHash).c_str());
+  EXPECT_TRUE(HasDiskImage(request, sysprop_disk_path));
+  EXPECT_EQ(request.disks(5).path(), sysprop_disk_path);
+}
+
 TEST_F(ArcVmClientAdapterTest, ArcErofsImagesDisabled) {
   StartParams start_params(GetPopulatedStartParams());
   StartMiniArcWithParams(true, std::move(start_params));
@@ -2886,22 +2898,6 @@ TEST_F(ArcVmClientAdapterTest, LazyWebViewInitDisabled) {
 
   const auto& request = GetTestConciergeClient()->start_arc_vm_request();
   EXPECT_FALSE(request.enable_web_view_zygote_lazy_init());
-}
-
-TEST_F(ArcVmClientAdapterTest, ArcKeyboardShortcutHelperIntegrationEnabled) {
-  StartParams start_params(GetPopulatedStartParams());
-  start_params.enable_keyboard_shortcut_helper_integration = true;
-  StartMiniArcWithParams(true, std::move(start_params));
-  const auto& request = GetTestConciergeClient()->start_arc_vm_request();
-  EXPECT_TRUE(request.enable_keyboard_shortcut_helper_integration());
-}
-
-TEST_F(ArcVmClientAdapterTest, ArcKeyboardShortcutHelperIntegrationDisabled) {
-  StartParams start_params(GetPopulatedStartParams());
-  start_params.enable_keyboard_shortcut_helper_integration = false;
-  StartMiniArcWithParams(true, std::move(start_params));
-  const auto& request = GetTestConciergeClient()->start_arc_vm_request();
-  EXPECT_FALSE(request.enable_keyboard_shortcut_helper_integration());
 }
 
 TEST_F(ArcVmClientAdapterTest, ArcFilePickerExperimentFalse) {

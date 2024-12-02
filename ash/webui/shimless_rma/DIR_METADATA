@@ -1,4 +1,1 @@
-# ChromeOS > Software > System Services > Serviceability > Shimless RMA
-buganizer {
-  component_id: 1242658
-}
+mixins: "//ash/webui/shimless_rma/COMMON_METADATA"

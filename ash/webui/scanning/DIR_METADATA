@@ -1,4 +1,1 @@
-# ChromeOS > Software > System Services > Peripherals > Scanning
-buganizer {
-  component_id: 1131927
-}
+mixins: "//ash/webui/scanning/COMMON_METADATA"

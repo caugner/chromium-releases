@@ -102,6 +102,7 @@ void RecordModelExecutionResultHistogram(ModelBasedCapabilityKey feature,
 void NoOpExecuteRemoteFn(
     ModelBasedCapabilityKey feature,
     const google::protobuf::MessageLite& request,
+    std::optional<base::TimeDelta> timeout,
     std::unique_ptr<proto::LogAiDataRequest> log_ai_data_request,
     OptimizationGuideModelExecutionResultCallback callback) {
   std::move(callback).Run(
@@ -185,13 +186,10 @@ ModelExecutionManager::ModelExecutionManager(
     return;
   }
 
-  did_register_for_supplementary_on_device_models_ = true;
-  model_provider_->AddObserverForOptimizationTargetModel(
-      proto::OptimizationTarget::OPTIMIZATION_TARGET_TEXT_SAFETY,
-      /*model_metadata=*/std::nullopt, this);
-  model_provider_->AddObserverForOptimizationTargetModel(
-      proto::OptimizationTarget::OPTIMIZATION_TARGET_LANGUAGE_DETECTION,
-      /*model_metadata=*/std::nullopt, this);
+  if (on_device_component_state_manager &&
+      on_device_component_state_manager->IsInstallerRegistered()) {
+    RegisterTextSafetyAndLanguageModels();
+  }
 }
 
 ModelExecutionManager::~ModelExecutionManager() {
@@ -216,6 +214,7 @@ void ModelExecutionManager::Shutdown() {
 void ModelExecutionManager::ExecuteModel(
     ModelBasedCapabilityKey feature,
     const google::protobuf::MessageLite& request_metadata,
+    std::optional<base::TimeDelta> timeout,
     std::unique_ptr<proto::LogAiDataRequest> log_ai_data_request,
     OptimizationGuideModelExecutionResultCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -241,16 +240,21 @@ void ModelExecutionManager::ExecuteModel(
         request_metadata.SerializeToString(any.mutable_value());
         auto tab_request = optimization_guide::ParsedAnyMetadata<
             optimization_guide::proto::TabOrganizationRequest>(any);
-        std::string titles = "";
+        std::string tabs = "";
         for (const auto& tab : tab_request->tabs()) {
-          titles += base::StringPrintf("%s\"%s\"", titles.empty() ? "" : ",",
-                                       tab.title().c_str());
+          tabs += base::StringPrintf("%s\"%s\"", tabs.empty() ? "" : ",",
+                                     tab.title().c_str());
         }
         OPTIMIZATION_GUIDE_LOGGER(
             optimization_guide_common::mojom::LogSource::MODEL_EXECUTION,
             optimization_guide_logger_)
             << "TabOrganization Request: "
-            << base::StringPrintf("{\"titles\" : [%s]}", titles.c_str());
+            << base::StringPrintf(
+                   "{\"model_strategy\": \"%s\", \"tabs\" : [%s]}",
+                   optimization_guide::proto::
+                       TabOrganizationRequest_TabOrganizationModelStrategy_Name(
+                           tab_request->model_strategy()),
+                   tabs.c_str());
 
         break;
       }
@@ -273,7 +277,7 @@ void ModelExecutionManager::ExecuteModel(
       std::forward_as_tuple(url_loader_factory_, model_execution_service_url_,
                             optimization_guide_logger_));
   fetcher_it.first->second.ExecuteModel(
-      feature, identity_manager_, request_metadata,
+      feature, identity_manager_, request_metadata, timeout,
       base::BindOnce(&ModelExecutionManager::OnModelExecuteResponse,
                      weak_ptr_factory_.GetWeakPtr(), feature,
                      std::move(log_ai_data_request), std::move(callback)));
@@ -445,6 +449,18 @@ void ModelExecutionManager::OnModelExecuteResponse(
                           std::move(log_entry));
 }
 
+void ModelExecutionManager::RegisterTextSafetyAndLanguageModels() {
+  if (!did_register_for_supplementary_on_device_models_) {
+    did_register_for_supplementary_on_device_models_ = true;
+    model_provider_->AddObserverForOptimizationTargetModel(
+        proto::OptimizationTarget::OPTIMIZATION_TARGET_TEXT_SAFETY,
+        /*model_metadata=*/std::nullopt, this);
+    model_provider_->AddObserverForOptimizationTargetModel(
+        proto::OptimizationTarget::OPTIMIZATION_TARGET_LANGUAGE_DETECTION,
+        /*model_metadata=*/std::nullopt, this);
+  }
+}
+
 void ModelExecutionManager::OnModelUpdated(
     proto::OptimizationTarget optimization_target,
     base::optional_ref<const ModelInfo> model_info) {
@@ -464,6 +480,13 @@ void ModelExecutionManager::OnModelUpdated(
 
     default:
       break;
+  }
+}
+
+void ModelExecutionManager::StateChanged(
+    const OnDeviceModelComponentState* state) {
+  if (state) {
+    RegisterTextSafetyAndLanguageModels();
   }
 }
 
