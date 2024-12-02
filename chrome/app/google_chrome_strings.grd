@@ -46,7 +46,13 @@ Chrome supports. -->
     <output filename="google_chrome_strings_nb.pak" type="data_package" lang="no" />
     <!-- 'no' for Norwegian Bokmål. It should be 'nb'. -->
     <output filename="google_chrome_strings_pl.pak" type="data_package" lang="pl" />
-    <output filename="google_chrome_strings_pt-BR.pak" type="data_package" lang="pt-BR" />
+    <if expr="pp_ifdef('ios')">
+      <!-- iOS uses pt for pt-BR -->
+      <output filename="google_chrome_strings_pt.pak" type="data_package" lang="pt-BR" />
+    </if>
+    <if expr="not pp_ifdef('ios')">
+      <output filename="google_chrome_strings_pt-BR.pak" type="data_package" lang="pt-BR" />
+    </if>
     <output filename="google_chrome_strings_pt-PT.pak" type="data_package" lang="pt-PT" />
     <output filename="google_chrome_strings_ro.pak" type="data_package" lang="ro" />
     <output filename="google_chrome_strings_ru.pak" type="data_package" lang="ru" />
@@ -170,6 +176,9 @@ Chrome supports. -->
         <message name="IDS_CHROME_FRAME_READY_MODE_PROMPT" desc="Ready Mode prompt message">
           This site recommends Google Chrome Frame (already installed).
         </message>
+        <message name="IDS_SHORTCUT_NEW_WINDOW" desc="The text label of the New window shortcut context menu entry as of Windows 8">
+          New window
+        </message>
       </if>
       <message name="IDS_INSTANT_OPT_IN_TITLE" desc="Title of the instant confirm dialog">
         Google Chrome Instant
@@ -216,7 +225,7 @@ Chrome supports. -->
         Google Inc.
       </message>
       <message name="IDS_ABOUT_VERSION_COPYRIGHT" desc="Copyright information on the about pages">
-        Copyright © 2006-2012 Google Inc. All Rights Reserved.
+        Copyright 2012 Google Inc. All rights reserved.
       </message>
       <message name="IDS_ABOUT_VERSION_LICENSE" desc="The label below the copyright message, containing the URLs.">
         Google Chrome is made possible by the <ph name="BEGIN_LINK_CHROMIUM">&lt;a target="_blank" href="$1"&gt;</ph>Chromium<ph name="END_LINK_CHROMIUM">&lt;/a&gt;</ph> open source project and other <ph name="BEGIN_LINK_OSS">&lt;a target="_blank" href="$2"&gt;</ph>open source software<ph name="END_LINK_OSS">&lt;/a&gt;</ph>.
@@ -249,9 +258,14 @@ Chrome supports. -->
         Sadly, your Mozilla Firefox settings are not available while that browser is running. To import those settings to Google Chrome, save your work and close all Firefox windows. Then click Continue.
       </message>
       <!-- Uninstall messages -->
-      <message name="IDS_UNINSTALL_CLOSE_APP" desc="Message to user when uninstall detects other app instance running">
-        Please close all Google Chrome windows and try again.
-      </message>
+      <if expr="is_win">
+        <message name="IDS_UNINSTALL_CLOSE_APP" desc="Message to user when uninstall detects other app instance running">
+          Please close all Google Chrome windows and try again.
+        </message>
+        <message name="IDS_UNINSTALL_CLOSE_APP_IMMERSIVE" desc="Message to user when uninstall detects other app instance running, possibly in the Windows 8 immersive mode">
+          Please close all Google Chrome windows (including those in Windows 8 mode) and try again.
+        </message>
+      </if>
       <message name="IDS_UNINSTALL_VERIFY" desc="Message to confirm user wants to uninstall">
         Are you sure you want to uninstall Google Chrome?
       </message>
@@ -267,15 +281,21 @@ Chrome supports. -->
       <message name="IDS_FR_CUSTOMIZE_DEFAULT_BROWSER" desc="Default browser checkbox label">
         Make Google Chrome the default browser
       </message>
+      <if expr="pp_ifdef('chromeos')">
+        <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
+                 desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
+          Get Started with Chrome OS
+        </message>
+      </if>
       <if expr="pp_ifdef('ios')">
         <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
                  desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show. [Length: 14em]">
           Welcome
         </message>
       </if>
-      <if expr="not pp_ifdef('ios')">
+      <if expr="not pp_ifdef('chromeos') and not pp_ifdef('ios')">
         <message name="IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE"
-                 desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
+                 desc="Title for the hard-coded thumbnail that represents the Google Chrome OS Welcome page. This is used on the NTP when there aren't enough thumbnails to show.">
           Welcome to Google Chrome
         </message>
       </if>
@@ -707,6 +727,9 @@ For Google Chrome, processes used to display diagnostics information (such as th
       <!-- Sync promo page chrome://signin -->
       <message name="IDS_SYNC_PROMO_V_LEARN_MORE" desc="Learn more link at the bottom of the sync promo.">
         See <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph>more benefits<ph name="END_LINK">&lt;/a&gt;</ph> of signing in to Chrome.
+      </message>
+      <message name="IDS_SYNC_DIFFERENT_EMAIL" desc="Error message to display when setting up sync for a second time and the user name is different from the previous user name.">
+        You were previously signed in with a different account, signing in will merge your data. Consider creating a new Chrome user via the <ph name="BEGIN_LINK">&lt;a href="chrome://settings/search#Users" target="_parent"&gt;</ph>settings page<ph name="END_LINK">&lt;/a&gt;</ph> for your Chrome stuff.
       </message>
 
       <!-- One click sign in infobar -->

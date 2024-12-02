@@ -76,6 +76,8 @@ DirectoryModel.prototype.__proto__ = cr.EventTarget.prototype;
 DirectoryModel.prototype.start = function() {
   var volumesChangeHandler = this.onMountChanged_.bind(this);
   this.volumeManager_.addEventListener('change', volumesChangeHandler);
+  this.volumeManager_.addEventListener('gdata-status-changed',
+      this.onGDataStatusChanged_.bind(this));
   this.updateRoots_();
 };
 
@@ -399,7 +401,8 @@ DirectoryModel.prototype.rescan = function() {
  */
 DirectoryModel.prototype.clearAndScan_ = function(newDirContents,
                                                   opt_callback) {
-  this.currentDirContents_.cancelScan();
+  if (this.currentDirContents_.isScanning())
+    this.currentDirContents_.cancelScan();
   this.currentDirContents_ = newDirContents;
   this.clearRescanTimeout_();
 
@@ -770,8 +773,11 @@ DirectoryModel.prototype.changeDirectoryEntrySilent_ = function(dirEntry,
  */
 DirectoryModel.prototype.changeDirectoryEntry_ = function(initial, dirEntry,
                                                           opt_callback) {
-  if (dirEntry == DirectoryModel.fakeGDataEntry_)
+  if (dirEntry == DirectoryModel.fakeGDataEntry_ &&
+      this.volumeManager_.getGDataStatus() ==
+          VolumeManager.GDataStatus.UNMOUNTED) {
     this.volumeManager_.mountGData(function() {}, function() {});
+  }
 
   this.clearSearch_();
   var previous = this.currentDirContents_.getDirectoryEntry();
@@ -830,19 +836,13 @@ DirectoryModel.prototype.createDirectoryChangeTracker = function() {
  * file or directory).
  *
  * @param {string} path The root path to use
- * @param {function=} opt_loadedCallback Invoked when the entire directory
- *     has been loaded and any default file selected.  If there are any
- *     errors loading the directory this will not get called (even if the
- *     directory loads OK on retry later). Will NOT be called if another
- *     directory change happened while setupPath was in progress.
  * @param {function=} opt_pathResolveCallback Invoked as soon as the path has
  *     been resolved, and called with the base and leaf portions of the path
  *     name, and a flag indicating if the entry exists. Will be called even
  *     if another directory change happened while setupPath was in progress,
  *     but will pass |false| as |exist| parameter.
  */
-DirectoryModel.prototype.setupPath = function(path, opt_loadedCallback,
-                                              opt_pathResolveCallback) {
+DirectoryModel.prototype.setupPath = function(path, opt_pathResolveCallback) {
   var tracker = this.createDirectoryChangeTracker();
   tracker.start();
 
@@ -906,8 +906,6 @@ DirectoryModel.prototype.setupPath = function(path, opt_loadedCallback,
                              !INITIAL /*HACK*/,
                              function() {
                                self.selectEntry(fileName);
-                               if (opt_loadedCallback)
-                                 opt_loadedCallback();
                              });
         // TODO(kaznacheev): Fix history.replaceState for the File Browser and
         // change !INITIAL to INITIAL. Passing |false| makes things
@@ -922,10 +920,10 @@ DirectoryModel.prototype.setupPath = function(path, opt_loadedCallback,
 };
 
 /**
- * @param {function} opt_callback Callback on done.
+ * Sets up the default path.
  */
-DirectoryModel.prototype.setupDefaultPath = function(opt_callback) {
-  this.setupPath(this.getDefaultDirectory(), opt_callback);
+DirectoryModel.prototype.setupDefaultPath = function() {
+  this.setupPath(this.getDefaultDirectory());
 };
 
 /**
@@ -1081,15 +1079,16 @@ DirectoryModel.prototype.updateRootsListSelection_ = function() {
 };
 
 /**
- * @return {true} True if GDATA mounted.
+ * @return {boolean} True if GDATA is fully mounted.
  * @private
  */
 DirectoryModel.prototype.isGDataMounted_ = function() {
-  return this.volumeManager_.isMounted(RootDirectory.GDATA);
+  return this.volumeManager_.getGDataStatus() ==
+      VolumeManager.GDataStatus.MOUNTED;
 };
 
 /**
- * Handler for the VolumeManager's event.
+ * Handler for the VolumeManager's 'change' event.
  * @private
  */
 DirectoryModel.prototype.onMountChanged_ = function() {
@@ -1101,9 +1100,15 @@ DirectoryModel.prototype.onMountChanged_ = function() {
       !this.volumeManager_.isMounted(this.getCurrentRootPath())) {
     this.changeDirectory(this.getDefaultDirectory());
   }
+};
 
-  if (rootType != RootType.GDATA)
-    return;
+/**
+ * Handler for the VolumeManager's 'gdata-status-changed' event.
+ * @private
+ */
+DirectoryModel.prototype.onGDataStatusChanged_ = function() {
+  if (this.getCurrentRootType() != RootType.GDATA)
+     return;
 
   var mounted = this.isGDataMounted_();
   if (this.getCurrentDirEntry() == DirectoryModel.fakeGDataEntry_) {
@@ -1176,25 +1181,18 @@ DirectoryModel.prototype.search = function(query,
                                            onClearSearch) {
   query = query.trimLeft();
 
+  this.clearSearch_();
+
   var newDirContents;
   if (!query) {
     if (this.isSearching()) {
       newDirContents = new DirectoryContentsBasic(
           this.currentFileListContext_,
-          this.currentDirContents_.getDirectoryEntry());
+          this.currentDirContents_.getLastNonSearchDirectoryEntry());
       this.clearAndScan_(newDirContents);
-      this.clearSearch_();
     }
     return;
   }
-
-  // If we already have event listener for an old search, we have to remove it.
-  if (this.onSearchCompleted_)
-    this.removeEventListener('scan-completed', this.onSearchCompleted_);
-
-  // Current search will be cancelled.
-  if (this.onClearSearch_)
-    this.onClearSearch_();
 
   this.onSearchCompleted_ = onSearchRescan;
   this.onClearSearch_ = onClearSearch;
@@ -1203,8 +1201,13 @@ DirectoryModel.prototype.search = function(query,
 
   // If we are offline, let's fallback to file name search inside dir.
   if (this.getCurrentRootType() === RootType.GDATA && !this.isOffline()) {
+    // GData search is performed over the whole drive, so pass drive root as
+    // |directoryEntry|.
     newDirContents = new DirectoryContentsGDataSearch(
-        this.currentFileListContext_, this.getCurrentDirEntry(), query);
+        this.currentFileListContext_,
+        this.getSelectedRootDirEntry_(),
+        this.currentDirContents_.getLastNonSearchDirectoryEntry(),
+        query);
   } else {
     newDirContents = new DirectoryContentsLocalSearch(
         this.currentFileListContext_, this.getCurrentDirEntry(), query);

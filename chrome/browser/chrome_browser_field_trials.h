@@ -23,32 +23,15 @@ class ChromeBrowserFieldTrials {
   FRIEND_TEST_ALL_PREFIXES(BrowserMainTest, WarmConnectionFieldTrial_Random);
   FRIEND_TEST_ALL_PREFIXES(BrowserMainTest, WarmConnectionFieldTrial_Invalid);
 
-  // A/B test for the maximum number of persistent connections per host.
-  void ConnectionFieldTrial();
-
-  // A/B test for determining a value for unused socket timeout.
-  void SocketTimeoutFieldTrial();
-
-  // A/B test for the maximum number of connections per proxy server.
-  void ProxyConnectionsFieldTrial();
-
   // A/B test for spdy when --use-spdy not set.
   void SpdyFieldTrial();
 
   // A/B test for warmest socket vs. most recently used socket.
   void WarmConnectionFieldTrial();
 
-  // A/B test for automatically establishing a backup TCP connection when a
-  // specified timeout value is reached.
-  void ConnectBackupJobsFieldTrial();
-
   // Field trial to see what disabling DNS pre-resolution does to
   // latency of page loads.
   void PredictorFieldTrial();
-
-  // Field trial to see what effect installing defaults in the NTP apps pane
-  // has on retention and general apps/webstore usage.
-  void DefaultAppsFieldTrial();
 
   // A field trial to see what effects launching Chrome automatically on
   // computer startup has on retention and usage of Chrome.
@@ -67,6 +50,9 @@ class ChromeBrowserFieldTrials {
 
   // Sets up the InfiniteCache field trial.
   void SetUpInfiniteCacheFieldTrial();
+
+  // Sets up field trials for doing Cache Sensitivity Analysis.
+  void SetUpCacheSensitivityAnalysisFieldTrial();
 
   const CommandLine& parsed_command_line_;
 

@@ -12,40 +12,41 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/instant/instant_commit_type.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 struct InstantAutocompleteResult;
-class InstantLoaderDelegate;
+class InstantController;
 class TabContents;
 
 namespace content {
 class NotificationDetails;
 class NotificationSource;
+class WebContents;
 }
 
 namespace gfx {
 class Rect;
 }
 
-namespace history {
-class HistoryAddPageArgs;
-}
-
 // InstantLoader is created with an "Instant URL". It loads the URL and tells
-// its delegate (usually InstantController) of all interesting events. For
-// example, it determines if the page actually supports the Instant API
-// (http://dev.chromium.org/searchbox) and forwards messages (such as queries
-// and autocomplete suggestions) between the page and the delegate.
+// the InstantController of all interesting events. For example, it determines
+// if the page supports the Instant API (http://dev.chromium.org/searchbox) and
+// forwards messages (such as queries and autocomplete suggestions) between the
+// page and the controller.
 class InstantLoader : public content::NotificationObserver {
  public:
+  // Returns the Instant loader for |web_contents| if it's used for Instant.
+  static InstantLoader* FromWebContents(content::WebContents* web_contents);
+
   // Creates a new empty WebContents. Use Init() to actually load |instant_url|.
   // |tab_contents| is the page the preview will be shown on top of and
   // potentially replace. |instant_url| is typically the instant_url field of
   // the default search engine's TemplateURL, with the "{searchTerms}" parameter
   // replaced with an empty string.
-  InstantLoader(InstantLoaderDelegate* delegate,
+  InstantLoader(InstantController* controller,
                 const std::string& instant_url,
                 const TabContents* tab_contents);
   virtual ~InstantLoader();
@@ -72,9 +73,23 @@ class InstantLoader : public content::NotificationObserver {
   // is a repeat count, negative for moving up, positive for moving down.
   void OnUpOrDownKeyPressed(int count);
 
+  // Tells the preview page that the searchbox has been focused.
+  void OnAutocompleteGotFocus();
+
+  // Tells the preview page that the searchbox has lost focus.
+  void OnAutocompleteLostFocus();
+
+  // Tells the preview page that the active tab's "NTP status" has changed.
+  void OnActiveTabModeChanged(bool active_tab_is_ntp);
+
+  // Called by the history tab helper with the information that it would have
+  // added to the history service had this web contents not been used for
+  // Instant.
+  void DidNavigate(const history::HistoryAddPageArgs& add_page_args);
+
   // Releases the preview TabContents passing ownership to the caller. This
   // should be called when the preview is committed. Notifies the page but not
-  // the delegate. |text| is the final omnibox text being committed. NOTE: The
+  // the controller. |text| is the final omnibox text being committed. NOTE: The
   // caller should destroy this loader object right after this method, since
   // none of the other methods will work once the preview has been released.
   TabContents* ReleasePreviewContents(InstantCommitType type,
@@ -94,8 +109,8 @@ class InstantLoader : public content::NotificationObserver {
   const std::string& instant_url() const { return instant_url_; }
 
   // Returns info about the last navigation by the Instant page. If the page
-  // hasn't navigated since the last Update(), this contains NULL.
-  scoped_refptr<history::HistoryAddPageArgs> last_navigation() const {
+  // hasn't navigated since the last Update(), the URL is empty.
+  const history::HistoryAddPageArgs& last_navigation() const {
     return last_navigation_;
   }
 
@@ -113,9 +128,10 @@ class InstantLoader : public content::NotificationObserver {
 
   void SetupPreviewContents();
   void CleanupPreviewContents();
-  void ReplacePreviewContents(TabContents* old_tc, TabContents* new_tc);
+  void ReplacePreviewContents(content::WebContents* old_contents,
+                              content::WebContents* new_contents);
 
-  InstantLoaderDelegate* const loader_delegate_;
+  InstantController* const controller_;
 
   // See comments on the getter above.
   scoped_ptr<TabContents> preview_contents_;
@@ -134,7 +150,7 @@ class InstantLoader : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
 
   // See comments on the getter above.
-  scoped_refptr<history::HistoryAddPageArgs> last_navigation_;
+  history::HistoryAddPageArgs last_navigation_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantLoader);
 };

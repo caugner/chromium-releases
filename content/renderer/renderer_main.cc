@@ -24,6 +24,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/browser_plugin/browser_plugin_manager_impl.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
@@ -40,6 +41,8 @@
 #include "third_party/mach_override/mach_override.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
+
+namespace content {
 
 namespace {
 
@@ -121,7 +124,7 @@ class RendererMessageLoopObserver : public MessageLoop::TaskObserver {
 };
 
 // mainline routine for running as the Renderer process
-int RendererMain(const content::MainFunctionParams& parameters) {
+int RendererMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN_ETW("RendererMain", 0, "");
 
   const CommandLine& parsed_command_line = parameters.command_line;
@@ -153,7 +156,7 @@ int RendererMain(const content::MainFunctionParams& parameters) {
 
   webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager =
       webkit::ppapi::PpapiInterfaceFactoryManager::GetInstance();
-  content::GetContentClient()->renderer()->RegisterPPAPIInterfaceFactories(
+  GetContentClient()->renderer()->RegisterPPAPIInterfaceFactories(
       factory_manager);
 
   base::StatsCounterTimer stats_counter_timer("Content.RendererInit");
@@ -223,8 +226,9 @@ int RendererMain(const content::MainFunctionParams& parameters) {
     RenderProcessImpl render_process;
     new RenderThreadImpl();
 #endif
+    new BrowserPluginManagerImpl();
 
-    platform.RunSandboxTests();
+    platform.RunSandboxTests(no_sandbox);
 
     startup_timer.Stop();  // End of Startup Time Measurement.
 
@@ -242,3 +246,5 @@ int RendererMain(const content::MainFunctionParams& parameters) {
   TRACE_EVENT_END_ETW("RendererMain", 0, "");
   return 0;
 }
+
+}  // namespace content

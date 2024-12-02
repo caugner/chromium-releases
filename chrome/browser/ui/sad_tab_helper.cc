@@ -24,6 +24,8 @@
 #include "chrome/browser/ui/gtk/tab_contents/chrome_web_contents_view_delegate_gtk.h"
 #endif
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(SadTabHelper)
+
 SadTabHelper::SadTabHelper(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents) {
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
@@ -44,14 +46,13 @@ void SadTabHelper::RenderViewGone(base::TerminationStatus status) {
   if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
     return;
 
-  // Don't build the sad tab view when the termination status is normal.
-  if (status == base::TERMINATION_STATUS_NORMAL_TERMINATION)
-    return;
-
   if (HasSadTab())
     return;
 
-  InstallSadTab(status);
+  if (status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION ||
+      status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ||
+      status == base::TERMINATION_STATUS_PROCESS_CRASHED)
+    InstallSadTab(status);
 }
 
 void SadTabHelper::Observe(int type,

@@ -4,7 +4,6 @@
 
 #include "content/common/npobject_stub.h"
 
-#include "base/command_line.h"
 #include "content/common/np_channel_base.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
@@ -13,10 +12,16 @@
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
-#include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_host.h"
 
+#if defined(OS_WIN)
+#include "base/command_line.h"
+#include "webkit/plugins/npapi/plugin_constants_win.h"
+#endif
+
 using WebKit::WebBindings;
+
+namespace content {
 
 NPObjectStub::NPObjectStub(
     NPObject* npobject,
@@ -70,7 +75,7 @@ IPC::Listener* NPObjectStub::GetChannelListener() {
 }
 
 bool NPObjectStub::OnMessageReceived(const IPC::Message& msg) {
-  content::GetContentClient()->SetActiveURL(page_url_);
+  GetContentClient()->SetActiveURL(page_url_);
   if (!npobject_) {
     if (msg.is_sync()) {
       // The object could be garbage because the frame has gone away, so
@@ -398,3 +403,5 @@ void NPObjectStub::OnEvaluate(const std::string& script,
   NPObjectMsg_Evaluate::WriteReplyParams(reply_msg, result_param, return_value);
   channel_->Send(reply_msg);
 }
+
+}  // namespace content

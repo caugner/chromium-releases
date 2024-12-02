@@ -4,6 +4,7 @@
 
 #include "win8/metro_driver/stdafx.h"
 #include "win8/metro_driver/chrome_app_view.h"
+#include "win8/metro_driver/direct3d_helper.h"
 
 #include <algorithm>
 #include <windows.applicationModel.datatransfer.h>
@@ -13,8 +14,12 @@
 #include "base/message_loop.h"
 #include "base/win/metro.h"
 
+#include "ui/gfx/native_widget_types.h"
+#include "ui/metro_viewer/metro_viewer_messages.h"
+
 // This include allows to send WM_SYSCOMMANDs to chrome.
 #include "chrome/app/chrome_command_ids.h"
+#include "win8/metro_driver/metro_driver.h"
 #include "win8/metro_driver/winrt_utils.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -38,6 +43,14 @@ typedef winfoundtn::ITypedEventHandler<
     winui::ViewManagement::InputPane*,
     winui::ViewManagement::InputPaneVisibilityEventArgs*>
     InputPaneEventHandler;
+
+typedef winfoundtn::ITypedEventHandler<
+    winui::Core::CoreWindow*,
+    winui::Core::PointerEventArgs*> PointerEventHandler;
+
+typedef winfoundtn::ITypedEventHandler<
+    winui::Core::CoreWindow*,
+    winui::Core::KeyEventArgs*> KeyEventHandler;
 
 struct Globals globals;
 
@@ -490,7 +503,9 @@ extern "C" __declspec(dllexport)
 void DisplayNotification(const char* origin_url, const char* icon_url,
                          const wchar_t* title, const wchar_t* body,
                          const wchar_t* display_source,
-                         const char* notification_id) {
+                         const char* notification_id,
+                         base::win::MetroNotificationClickedHandler handler,
+                         const wchar_t* handler_context) {
   // TODO(ananta)
   // Needs implementation.
   DVLOG(1) << __FUNCTION__;
@@ -500,7 +515,9 @@ void DisplayNotification(const char* origin_url, const char* icon_url,
                                                              title,
                                                              body,
                                                              display_source,
-                                                             notification_id);
+                                                             notification_id,
+                                                             handler,
+                                                             handler_context);
   globals.appview_msg_loop->PostTask(
       FROM_HERE, base::Bind(&ChromeAppView::DisplayNotification,
                             globals.view, notification));
@@ -586,17 +603,6 @@ void SetFullscreen(bool fullscreen) {
           globals.view, fullscreen));
 }
 
-BOOL CALLBACK CoreWindowFinder(HWND hwnd, LPARAM) {
-  char classname[128];
-  if (::GetClassNameA(hwnd, classname, ARRAYSIZE(classname))) {
-    if (lstrcmpiA("Windows.UI.Core.CoreWindow", classname) == 0) {
-      globals.core_window = hwnd;
-      return FALSE;
-    }
-  }
-  return TRUE;
-}
-
 template <typename ContainerT>
 void CloseSecondaryWindows(ContainerT& windows) {
   DVLOG(1) << "Closing secondary windows", windows.size();
@@ -662,7 +668,6 @@ ChromeAppView::SetWindow(winui::Core::ICoreWindow* window) {
 
   HRESULT hr = url_launch_handler_.Initialize();
   CheckHR(hr, "Failed to initialize url launch handler.");
-
   // Register for size notifications.
   hr = window_->add_SizeChanged(mswr::Callback<SizeChangedHandler>(
       this, &ChromeAppView::OnSizeChanged).Get(),
@@ -707,7 +712,6 @@ ChromeAppView::SetWindow(winui::Core::ICoreWindow* window) {
   // The documented InputPane notifications don't fire on Windows 8 in metro
   // chrome. Uncomment this once we figure out why they don't fire.
   // RegisterInputPaneNotifications();
-
   hr = winrt_utils::CreateActivationFactory(
       RuntimeClass_Windows_UI_ViewManagement_ApplicationView,
       app_view_.GetAddressOf());
@@ -786,7 +790,7 @@ void ChromeAppView::CheckForOSKActivation() {
 
 IFACEMETHODIMP
 ChromeAppView::Run() {
-  DVLOG(1) << __FUNCTION__ << ", hwnd=" << LONG_PTR(window_.Get());
+  DVLOG(1) << __FUNCTION__;
   mswr::ComPtr<winui::Core::ICoreDispatcher> dispatcher;
   HRESULT hr = window_->get_Dispatcher(&dispatcher);
   CheckHR(hr, "Dispatcher failed.");
@@ -905,10 +909,8 @@ HRESULT ChromeAppView::OnActivate(winapp::Core::ICoreApplicationView*,
     return S_OK;
   }
 
-  do {
-    ::Sleep(10);
-    ::EnumThreadWindows(globals.main_thread_id, &CoreWindowFinder, 0);
-  } while (globals.core_window == NULL);
+  globals.core_window =
+      winrt_utils::FindCoreWindow(globals.main_thread_id, 10);
 
   DVLOG(1) << "CoreWindow found: " << std::hex << globals.core_window;
 
@@ -916,7 +918,7 @@ HRESULT ChromeAppView::OnActivate(winapp::Core::ICoreApplicationView*,
     DWORD chrome_ui_thread_id = 0;
     globals.host_thread =
         ::CreateThread(NULL, 0, HostMainThreadProc, NULL, 0,
-                       &chrome_ui_thread_id);
+                      &chrome_ui_thread_id);
 
     if (!globals.host_thread) {
       NOTREACHED() << "thread creation failed.";

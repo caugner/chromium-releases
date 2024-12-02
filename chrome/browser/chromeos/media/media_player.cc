@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/chromeos/extensions/media_player_event_router.h"
@@ -26,7 +27,6 @@
 #include "ui/gfx/screen.h"
 
 using content::BrowserThread;
-using content::UserMetricsAction;
 
 static const char* kMediaPlayerAppName = "mediaplayer";
 static const int kPopupRight = 20;
@@ -38,7 +38,8 @@ static const int kPopupWidth = 280;
 // SetWindowHeight will be called soon after the popup creation with the correct
 // height which will cause a nice slide-up animation.
 // TODO(kaznacheev): Remove kTitleHeight when MediaPlayer becomes chromeless.
-static const int kTitleHeight = 24;
+// kTitleHeight is an approximate value. May be different for touch-enabled UI.
+static const int kTitleHeight = 35;
 static const int kTrackHeight = 58;
 static const int kControlsHeight = 35;
 static const int kPopupHeight = kTitleHeight + kTrackHeight + kControlsHeight;
@@ -65,11 +66,15 @@ MediaPlayer* MediaPlayer::GetInstance() {
   return Singleton<MediaPlayer>::get();
 }
 
-void MediaPlayer::SetWindowHeight(int content_height) {
+// The client knows how high the client part of the window should be but
+// cannot translate it to the window height (because the window title bar height
+// is unknown). Instead it passes the height difference which this method
+// applies to the window height.
+void MediaPlayer::AdjustWindowHeight(int height_diff) {
   Browser* browser = GetBrowser();
   if (browser != NULL) {
-    int window_height = content_height + kTitleHeight;
     gfx::Rect bounds = browser->window()->GetBounds();
+    int window_height = bounds.height() + height_diff;
     browser->window()->SetBounds(gfx::Rect(
         bounds.x(),
         std::max(0, bounds.bottom() - window_height),
@@ -119,18 +124,18 @@ void MediaPlayer::PopupMediaPlayer() {
 
   Browser* browser = GetBrowser();
   if (!browser) {
-    const gfx::Size screen = gfx::Screen::GetPrimaryDisplay().size();
+    const gfx::Size screen =
+        ash::Shell::GetScreen()->GetPrimaryDisplay().size();
     const gfx::Rect bounds(screen.width() - kPopupRight - kPopupWidth,
                            screen.height() - kPopupBottom - kPopupHeight,
                            kPopupWidth,
                            kPopupHeight);
 
     Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-    browser = new Browser(
-        Browser::CreateParams::CreateForApp(Browser::TYPE_PANEL,
-                                            kMediaPlayerAppName,
-                                            bounds,
-                                            profile));
+    Browser::CreateParams params(Browser::TYPE_POPUP, profile);
+    params.app_name = kMediaPlayerAppName;
+    params.initial_bounds = bounds;
+    browser = new Browser(params);
 
     chrome::AddSelectedTabWithURL(browser, GetMediaPlayerUrl(),
                                   content::PAGE_TRANSITION_LINK);

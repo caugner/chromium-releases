@@ -23,6 +23,7 @@
 #include "remoting/protocol/input_filter.h"
 #include "remoting/protocol/input_stub.h"
 #include "third_party/skia/include/core/SkPoint.h"
+#include "third_party/skia/include/core/SkSize.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -34,9 +35,10 @@ class AudioEncoder;
 class AudioScheduler;
 struct ClientSessionTraits;
 class DesktopEnvironment;
-class ScreenRecorder;
+class DesktopEnvironmentFactory;
 class VideoEncoder;
 class VideoFrameCapturer;
+class VideoScheduler;
 
 // A ClientSession keeps a reference to a connection to a client, and maintains
 // per-client state.
@@ -75,17 +77,23 @@ class ClientSession
         const std::string& channel_name,
         const protocol::TransportRoute& route) = 0;
 
+    // Called when the initial client dimensions are received, and when they
+    // change.
+    virtual void OnClientDimensionsChanged(ClientSession* client,
+                                           const SkISize& size) = 0;
+
    protected:
     virtual ~EventHandler() {}
   };
 
+  // |event_handler| must outlive |this|. |desktop_environment_factory| is only
+  // used by the constructor to create an instance of DesktopEnvironment.
   ClientSession(EventHandler* event_handler,
-                scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
                 scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
                 scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
                 scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
                 scoped_ptr<protocol::ConnectionToClient> connection,
-                scoped_ptr<DesktopEnvironment> desktop_environment,
+                DesktopEnvironmentFactory* desktop_environment_factory,
                 const base::TimeDelta& max_duration);
 
   // protocol::HostStub interface.
@@ -93,6 +101,8 @@ class ClientSession
       const protocol::ClientDimensions& dimensions) OVERRIDE;
   virtual void ControlVideo(
       const protocol::VideoControl& video_control) OVERRIDE;
+  virtual void ControlAudio(
+      const protocol::AudioControl& audio_control) OVERRIDE;
 
   // protocol::ConnectionToClient::EventHandler interface.
   virtual void OnConnectionAuthenticated(
@@ -153,7 +163,7 @@ class ClientSession
       const protocol::SessionConfig& config);
 
   // Creates a video encoder for the specified configuration.
-  static VideoEncoder* CreateVideoEncoder(
+  static scoped_ptr<VideoEncoder> CreateVideoEncoder(
       const protocol::SessionConfig& config);
 
   EventHandler* event_handler_;
@@ -206,14 +216,13 @@ class ClientSession
   // is reached.
   base::OneShotTimer<ClientSession> max_duration_timer_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   // Schedulers for audio and video capture.
   scoped_refptr<AudioScheduler> audio_scheduler_;
-  scoped_refptr<ScreenRecorder> video_recorder_;
+  scoped_refptr<VideoScheduler> video_scheduler_;
 
   // Number of screen recorders and audio schedulers that are currently being
   // used or shutdown. Used to delay shutdown if one or more

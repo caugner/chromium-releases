@@ -346,8 +346,6 @@ const Network* NetworkLibraryImplBase::active_network() const {
     result = highest_priority(result, active_cellular_);
   if (active_wimax_ && active_wimax_->is_active())
     result = highest_priority(result, active_wimax_);
-  if (active_virtual_ && active_virtual_->is_active())
-    result = highest_priority(result, active_virtual_);
   return result;
 }
 
@@ -987,6 +985,7 @@ void NetworkLibraryImplBase::ConnectToUnconfiguredVirtualNetwork(
   connect_data_.passphrase = config.user_passphrase;
   connect_data_.otp = config.otp;
   connect_data_.group_name = config.group_name;
+  connect_data_.save_credentials = config.save_credentials;
   CallRequestVirtualNetworkAndConnect(
       service_name, server_hostname, provider_type);
 }
@@ -1086,6 +1085,7 @@ void NetworkLibraryImplBase::ConnectToVirtualNetworkUsingConnectData(
       NOTREACHED();
       break;
   }
+  vpn->SetSaveCredentials(data.save_credentials);
 
   NetworkConnectStartVPN(vpn);
 }

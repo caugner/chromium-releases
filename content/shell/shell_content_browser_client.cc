@@ -17,6 +17,7 @@
 #include "content/shell/shell_web_contents_view_delegate_creator.h"
 #include "content/shell/webkit_test_runner_host.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/glue/webpreferences.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/path_utils.h"
@@ -53,6 +54,17 @@ void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
     command_line->AppendSwitch(switches::kDumpRenderTree);
 }
 
+void ShellContentBrowserClient::OverrideWebkitPrefs(
+    RenderViewHost* render_view_host,
+    const GURL& url,
+    webkit_glue::WebPreferences* prefs) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return;
+  prefs->dom_paste_enabled = true;
+  prefs->javascript_can_access_clipboard = true;
+  prefs->allow_universal_access_from_file_urls = true;
+}
+
 void ShellContentBrowserClient::ResourceDispatcherHostCreated() {
   resource_dispatcher_host_delegate_.reset(
       new ShellResourceDispatcherHostDelegate());
@@ -76,10 +88,12 @@ WebContentsViewDelegate* ShellContentBrowserClient::GetWebContentsViewDelegate(
 #if defined(OS_ANDROID)
 void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const CommandLine& command_line,
-    base::GlobalDescriptors::Mapping* mappings) {
+    int child_process_id,
+    std::vector<content::FileDescriptorInfo>* mappings) {
   int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
   FilePath pak_file;
-  DCHECK(PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file));
+  bool r = PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file);
+  CHECK(r);
   pak_file = pak_file.Append(FILE_PATH_LITERAL("paks"));
   pak_file = pak_file.Append(FILE_PATH_LITERAL("content_shell.pak"));
 
@@ -89,8 +103,9 @@ void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     NOTREACHED() << "Failed to open file when creating renderer process: "
                  << "content_shell.pak";
   }
-  mappings->push_back(std::pair<base::GlobalDescriptors::Key, int>(
-      kShellPakDescriptor, f));
+  mappings->push_back(
+      content::FileDescriptorInfo(kShellPakDescriptor,
+                                  base::FileDescriptor(f, true)));
 }
 #endif
 

@@ -22,6 +22,21 @@ namespace {
 // Used to indicate that no line is currently selected by the user.
 const int kNoSelection = -1;
 
+// Size difference between value text and label text in pixels.
+const int kLabelFontSizeDelta = -2;
+
+// The vertical height of each row in pixels.
+const size_t kRowHeight = 24;
+
+// The vertical height of a separator in pixels.
+const size_t kSeparatorHeight = 1;
+
+// The amount of minimum padding between the Autofill value and label in pixels.
+const size_t kLabelPadding = 15;
+
+// The maximum amount of characters to display from either the label or value.
+const size_t kMaxTextLength = 15;
+
 struct DataResource {
   const char* name;
   int id;
@@ -40,11 +55,20 @@ const DataResource kDataResources[] = {
 
 }  // end namespace
 
+const size_t AutofillPopupView::kBorderThickness = 1;
+const size_t AutofillPopupView::kIconPadding = 5;
+const size_t AutofillPopupView::kEndPadding = 3;
+const size_t AutofillPopupView::kDeleteIconHeight = 16;
+const size_t AutofillPopupView::kDeleteIconWidth = 16;
+const size_t AutofillPopupView::kAutofillIconHeight = 16;
+const size_t AutofillPopupView::kAutofillIconWidth = 25;
+
 AutofillPopupView::AutofillPopupView(
     content::WebContents* web_contents,
     AutofillExternalDelegate* external_delegate)
     : external_delegate_(external_delegate),
-      selected_line_(kNoSelection) {
+      selected_line_(kNoSelection),
+      delete_icon_selected_(false) {
   if (!web_contents)
     return;
 
@@ -56,6 +80,8 @@ AutofillPopupView::AutofillPopupView(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<content::NavigationController>(
           &(web_contents->GetController())));
+
+  label_font_ = value_font_.DeriveFont(kLabelFontSizeDelta);
 }
 
 AutofillPopupView::~AutofillPopupView() {}
@@ -75,7 +101,36 @@ void AutofillPopupView::Show(const std::vector<string16>& autofill_values,
   autofill_icons_ = autofill_icons;
   autofill_unique_ids_ = autofill_unique_ids;
 
+  // TODO(csharp): Fix crbug.com/156163 and use better logic when clipping.
+  for (size_t i = 0; i < autofill_values_.size(); ++i) {
+    if (autofill_values_[i].length() > 15)
+      autofill_values_[i].erase(15);
+    if (autofill_labels[i].length() > 15)
+      autofill_labels_[i].erase(15);
+  }
+
   ShowInternal();
+}
+
+void AutofillPopupView::SetSelectedPosition(int x, int y) {
+  int line = LineFromY(y);
+
+  SetSelectedLine(line);
+
+  bool delete_icon_selected = DeleteIconIsSelected(x, y);
+  if (delete_icon_selected != delete_icon_selected_) {
+    delete_icon_selected_ = delete_icon_selected;
+    InvalidateRow(selected_line());
+  }
+}
+
+void AutofillPopupView::AcceptSelectedPosition(int x, int y) {
+  DCHECK_EQ(selected_line(), LineFromY(y));
+
+  if (DeleteIconIsSelected(x, y))
+    RemoveSelectedLine();
+  else
+    AcceptSelectedLine();
 }
 
 void AutofillPopupView::SetSelectedLine(int selected_line) {
@@ -103,6 +158,12 @@ void AutofillPopupView::ClearSelectedLine() {
 void AutofillPopupView::SelectNextLine() {
   int new_selected_line = selected_line_ + 1;
 
+  // Skip over any lines that can't be selected.
+  while (static_cast<size_t>(new_selected_line) < autofill_values_.size() &&
+         !CanAccept(autofill_unique_ids()[new_selected_line])) {
+    ++new_selected_line;
+  }
+
   if (new_selected_line == static_cast<int>(autofill_values_.size()))
     new_selected_line = 0;
 
@@ -111,6 +172,12 @@ void AutofillPopupView::SelectNextLine() {
 
 void AutofillPopupView::SelectPreviousLine() {
   int new_selected_line = selected_line_ - 1;
+
+  // Skip over any lines that can't be selected.
+  while (new_selected_line > kNoSelection &&
+         !CanAccept(autofill_unique_ids()[new_selected_line])) {
+    --new_selected_line;
+  }
 
   if (new_selected_line <= kNoSelection)
     new_selected_line = autofill_values_.size() - 1;
@@ -184,6 +251,91 @@ bool AutofillPopupView::CanDelete(int id) {
   return id > 0 ||
       id == WebAutofillClient::MenuItemIDAutocompleteEntry ||
       id == WebAutofillClient::MenuItemIDPasswordEntry;
+}
+
+int AutofillPopupView::GetPopupRequiredWidth() {
+  int popup_width = element_bounds().width();
+  DCHECK_EQ(autofill_values().size(), autofill_labels().size());
+  for (size_t i = 0; i < autofill_values().size(); ++i) {
+    int row_size = kEndPadding +
+        value_font_.GetStringWidth(autofill_values()[i]) +
+        kLabelPadding +
+        label_font_.GetStringWidth(autofill_labels()[i]);
+
+    // Add the Autofill icon size, if required.
+    if (!autofill_icons()[i].empty())
+      row_size += kAutofillIconWidth + kIconPadding;
+
+    // Add delete icon, if required.
+    if (CanDelete(autofill_unique_ids()[i]))
+      row_size += kDeleteIconWidth + kIconPadding;
+
+    // Add the padding at the end
+    row_size += kEndPadding;
+
+    popup_width = std::max(popup_width, row_size);
+  }
+
+  return popup_width;
+}
+
+int AutofillPopupView::GetPopupRequiredHeight() {
+  int popup_height = 0;
+
+  for (size_t i = 0; i < autofill_unique_ids().size(); ++i) {
+    popup_height += GetRowHeightFromId(autofill_unique_ids()[i]);
+  }
+
+  return popup_height;
+}
+
+int AutofillPopupView::LineFromY(int y) {
+  int current_height = 0;
+
+  for (size_t i = 0; i < autofill_unique_ids().size(); ++i) {
+    current_height += GetRowHeightFromId(autofill_unique_ids()[i]);
+
+    if (y <= current_height)
+      return i;
+  }
+
+  // The y value goes beyond the popup so stop the selection at the last line.
+  return autofill_unique_ids().size() - 1;
+}
+
+int AutofillPopupView::GetRowHeightFromId(int unique_id) {
+  if (unique_id == WebAutofillClient::MenuItemIDSeparator)
+    return kSeparatorHeight;
+
+  return kRowHeight;
+}
+
+gfx::Rect AutofillPopupView::GetRectForRow(size_t row, int width) {
+  int top = 0;
+  for (size_t i = 0; i < row; ++i) {
+    top += GetRowHeightFromId(autofill_unique_ids()[i]);
+  }
+
+  return gfx::Rect(
+      0, top, width, GetRowHeightFromId(autofill_unique_ids()[row]));
+}
+
+bool AutofillPopupView::DeleteIconIsSelected(int x, int y) {
+  if (!CanDelete(selected_line()))
+    return false;
+
+  int row_start_y = 0;
+  for (int i = 0; i < selected_line(); ++i) {
+    row_start_y += GetRowHeightFromId(autofill_unique_ids()[i]);
+  }
+
+  gfx::Rect delete_icon_bounds = gfx::Rect(
+      GetPopupRequiredWidth() - kDeleteIconWidth - kIconPadding,
+      row_start_y + ((kRowHeight - kDeleteIconHeight) / 2),
+      kDeleteIconWidth,
+      kDeleteIconHeight);
+
+  return delete_icon_bounds.Contains(x, y);
 }
 
 bool AutofillPopupView::CanAccept(int id) {

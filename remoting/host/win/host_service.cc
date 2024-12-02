@@ -17,9 +17,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -29,6 +27,8 @@
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/base/stoppable.h"
 #include "remoting/host/branding.h"
+#include "remoting/host/host_exit_codes.h"
+#include "remoting/host/logging.h"
 
 #if defined(REMOTING_MULTI_PROCESS)
 #include "remoting/host/daemon_process.h"
@@ -39,7 +39,7 @@
 #include "remoting/host/win/wts_console_observer.h"
 
 #if !defined(REMOTING_MULTI_PROCESS)
-#include "remoting/host/win/wts_session_process_launcher.h"
+#include "remoting/host/win/wts_console_session_process_driver.h"
 #endif  // !defined(REMOTING_MULTI_PROCESS)
 
 using base::StringPrintf;
@@ -82,11 +82,6 @@ const wchar_t kUsageMessage[] =
 const char* kCopiedSwitchNames[] = {
     "host-config", "daemon-pipe", switches::kV, switches::kVModule };
 
-// Exit codes:
-const int kSuccessExitCode = 0;
-const int kUsageExitCode = 1;
-const int kErrorExitCode = 2;
-
 void usage(const FilePath& program_name) {
   LOG(INFO) << StringPrintf(kUsageMessage,
                             UTF16ToWide(program_name.value()).c_str());
@@ -114,6 +109,8 @@ void HostService::AddWtsConsoleObserver(WtsConsoleObserver* observer) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
   console_observers_.AddObserver(observer);
+  if (console_session_id_ != kInvalidSessionId)
+    observer->OnSessionAttached(console_session_id_);
 }
 
 void HostService::RemoveWtsConsoleObserver(WtsConsoleObserver* observer) {
@@ -128,6 +125,8 @@ void HostService::OnChildStopped() {
 }
 
 void HostService::OnSessionChange() {
+  DCHECK(main_task_runner_->BelongsToCurrentThread());
+
   // WTSGetActiveConsoleSessionId is a very cheap API. It basically reads
   // a single value from shared memory. Therefore it is better to check if
   // the console session is still the same every time a session change
@@ -201,7 +200,7 @@ int HostService::Run() {
 }
 
 void HostService::CreateLauncher(
-    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
+    scoped_refptr<AutoThreadTaskRunner> io_task_runner) {
 
 #if defined(REMOTING_MULTI_PROCESS)
 
@@ -213,8 +212,8 @@ void HostService::CreateLauncher(
 
 #else  // !defined(REMOTING_MULTI_PROCESS)
 
-  // Create the session process launcher.
-  child_.reset(new WtsSessionProcessLauncher(
+  // Create the console session process driver.
+  child_.reset(new WtsConsoleSessionProcessDriver(
       base::Bind(&HostService::OnChildStopped, base::Unretained(this)),
       this,
       main_task_runner_,
@@ -249,7 +248,7 @@ int HostService::Elevate() {
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
                                 kCopiedSwitchNames,
-                                _countof(kCopiedSwitchNames));
+                                arraysize(kCopiedSwitchNames));
   CommandLine::StringType parameters = command_line.GetCommandLineString();
 
   // Launch the child process requesting elevation.
@@ -277,7 +276,7 @@ int HostService::RunAsService() {
   if (!StartServiceCtrlDispatcherW(dispatch_table)) {
     LOG_GETLASTERROR(ERROR)
         << "Failed to connect to the service control manager";
-    return kErrorExitCode;
+    return kInitializationFailed;
   }
 
   return kSuccessExitCode;
@@ -292,7 +291,7 @@ int HostService::RunInConsole() {
       new AutoThreadTaskRunner(message_loop.message_loop_proxy(),
                                base::Bind(&QuitMessageLoop, &message_loop));
 
-  int result = kErrorExitCode;
+  int result = kInitializationFailed;
 
   // Subscribe to Ctrl-C and other console events.
   if (!SetConsoleCtrlHandler(&HostService::ConsoleControlHandler, TRUE)) {
@@ -482,26 +481,19 @@ int CALLBACK WinMain(HINSTANCE instance,
   // FilePath, LazyInstance, MessageLoop).
   base::AtExitManager exit_manager;
 
-  // Write logs to the application profile directory.
-  FilePath debug_log = remoting::GetConfigDir().
-      Append(FILE_PATH_LITERAL("debug.log"));
-  InitLogging(debug_log.value().c_str(),
-              logging::LOG_ONLY_TO_FILE,
-              logging::DONT_LOCK_LOG_FILE,
-              logging::APPEND_TO_OLD_LOG_FILE,
-              logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  remoting::InitHostLogging();
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(kHelpSwitchName) ||
       command_line->HasSwitch(kQuestionSwitchName)) {
     usage(command_line->GetProgram());
-    return kSuccessExitCode;
+    return remoting::kSuccessExitCode;
   }
 
   remoting::HostService* service = remoting::HostService::GetInstance();
   if (!service->InitWithCommandLine(command_line)) {
     usage(command_line->GetProgram());
-    return kUsageExitCode;
+    return remoting::kUsageExitCode;
   }
 
   return service->Run();

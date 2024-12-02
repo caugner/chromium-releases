@@ -33,20 +33,46 @@ const AcceleratorData kAcceleratorData[] = {
   // Shortcut for Koren IME.
   { true, ui::VKEY_HANGUL, ui::EF_NONE, SWITCH_IME },
 
-  { true, ui::VKEY_TAB, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU },
+  { true, ui::VKEY_TAB, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU_PRESSED },
+  { false, ui::VKEY_TAB, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU_RELEASED },
   { true, ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
-    CYCLE_BACKWARD_MRU },
-  { true, ui::VKEY_F5, ui::EF_NONE, CYCLE_FORWARD_LINEAR },
-  { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_NONE, CYCLE_FORWARD_LINEAR },
+    CYCLE_BACKWARD_MRU_PRESSED },
+  { false, ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+    CYCLE_BACKWARD_MRU_RELEASED },
+  { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_NONE,
+      CYCLE_FORWARD_LINEAR_PRESSED },
+  { false, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_NONE,
+      CYCLE_FORWARD_LINEAR_RELEASED },
 #if defined(OS_CHROMEOS)
+  { true, ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, TOGGLE_APP_LIST },
   { true, ui::VKEY_WLAN, ui::EF_NONE, TOGGLE_WIFI },
   { true, ui::VKEY_BRIGHTNESS_DOWN, ui::EF_NONE, BRIGHTNESS_DOWN },
   { true, ui::VKEY_BRIGHTNESS_UP, ui::EF_NONE, BRIGHTNESS_UP },
   { true, ui::VKEY_KBD_BRIGHTNESS_DOWN, ui::EF_NONE, KEYBOARD_BRIGHTNESS_DOWN },
   { true, ui::VKEY_KBD_BRIGHTNESS_UP, ui::EF_NONE, KEYBOARD_BRIGHTNESS_UP },
+  { true, ui::VKEY_F4, ui::EF_NONE, TOGGLE_MAXIMIZED_PRESSED },
+  { false, ui::VKEY_F4, ui::EF_NONE, TOGGLE_MAXIMIZED_RELEASED },
   { true, ui::VKEY_F4, ui::EF_CONTROL_DOWN, CYCLE_DISPLAY_MODE },
-  { true, ui::VKEY_F4, ui::EF_NONE, TOGGLE_MAXIMIZED },
+  { true, ui::VKEY_F4, ui::EF_ALT_DOWN, SWAP_PRIMARY_DISPLAY },
+  { true, ui::VKEY_F5, ui::EF_NONE, CYCLE_FORWARD_LINEAR_PRESSED },
+  { false, ui::VKEY_F5, ui::EF_NONE, CYCLE_FORWARD_LINEAR_RELEASED },
+  { true, ui::VKEY_F5, ui::EF_SHIFT_DOWN, CYCLE_BACKWARD_LINEAR_PRESSED },
+  { false, ui::VKEY_F5, ui::EF_SHIFT_DOWN, CYCLE_BACKWARD_LINEAR_RELEASED },
+  { true, ui::VKEY_F5, ui::EF_CONTROL_DOWN, TAKE_SCREENSHOT },
+  { true, ui::VKEY_F5, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+    TAKE_PARTIAL_SCREENSHOT },
+  { true, ui::VKEY_F6, ui::EF_NONE, BRIGHTNESS_DOWN },
+  { true, ui::VKEY_F6, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_DOWN },
+  { true, ui::VKEY_F7, ui::EF_NONE, BRIGHTNESS_UP },
+  { true, ui::VKEY_F7, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_UP },
+  { true, ui::VKEY_F6, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+    MAGNIFY_SCREEN_ZOOM_OUT},
+  { true, ui::VKEY_F7, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
+    MAGNIFY_SCREEN_ZOOM_IN},
   { true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, LOCK_SCREEN },
+  { true, ui::VKEY_F8, ui::EF_NONE, VOLUME_MUTE },
+  { true, ui::VKEY_F9, ui::EF_NONE, VOLUME_DOWN },
+  { true, ui::VKEY_F10, ui::EF_NONE, VOLUME_UP },
   // F13 (which is also for locking screen) is handled directly in power
   // manager.
   { true, ui::VKEY_POWER, ui::EF_NONE, POWER_PRESSED },
@@ -54,6 +80,15 @@ const AcceleratorData kAcceleratorData[] = {
 #if !defined(NDEBUG)
   // Extra shortcut for debug build to activate lock screen on linux desktop.
   { true, ui::VKEY_L, ui::EF_ALT_DOWN, LOCK_SCREEN },
+  // Extra shortcut for display swaping as alt-f4 is taken on linux desktop.
+  { true, ui::VKEY_F4, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN,
+    SWAP_PRIMARY_DISPLAY },
+  // Extra shortcut to exit on linux desktop.
+  { true, ui::VKEY_F11, ui::EF_NONE, POWER_PRESSED },
+  { false, ui::VKEY_F11, ui::EF_NONE, POWER_RELEASED },
+  // Extra shortcut to lock the screen on linux desktop.
+  { true, ui::VKEY_F11, ui::EF_SHIFT_DOWN, LOCK_PRESSED },
+  { false, ui::VKEY_F11, ui::EF_SHIFT_DOWN, LOCK_RELEASED },
 #endif
   { true, ui::VKEY_O, ui::EF_CONTROL_DOWN, OPEN_FILE_MANAGER_DIALOG },
   { true, ui::VKEY_M, ui::EF_CONTROL_DOWN, OPEN_FILE_MANAGER_TAB },
@@ -76,39 +111,28 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_F3,
     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     ROTATE_WINDOWS },
-  { true, ui::VKEY_F5, ui::EF_SHIFT_DOWN, CYCLE_BACKWARD_LINEAR },
   { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN,
-    CYCLE_BACKWARD_LINEAR },
+    CYCLE_BACKWARD_LINEAR_PRESSED },
+  { false, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN,
+    CYCLE_BACKWARD_LINEAR_RELEASED },
   { true, ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, RESTORE_TAB },
-  { true, ui::VKEY_F5, ui::EF_CONTROL_DOWN, TAKE_SCREENSHOT },
-  { true, ui::VKEY_F5, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    TAKE_PARTIAL_SCREENSHOT },
   { true, ui::VKEY_PRINT, ui::EF_NONE, TAKE_SCREENSHOT },
   // On Chrome OS, Search key is mapped to LWIN.
   { true, ui::VKEY_LWIN, ui::EF_NONE, TOGGLE_APP_LIST },
   { true, ui::VKEY_MEDIA_LAUNCH_APP2, ui::EF_NONE, TOGGLE_APP_LIST },
-  { true, ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, TOGGLE_APP_LIST },
   { true, ui::VKEY_LWIN, ui::EF_ALT_DOWN, TOGGLE_CAPS_LOCK },
-  { true, ui::VKEY_F6, ui::EF_NONE, BRIGHTNESS_DOWN },
-  { true, ui::VKEY_F6, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_DOWN },
-  { true, ui::VKEY_F7, ui::EF_NONE, BRIGHTNESS_UP },
-  { true, ui::VKEY_F7, ui::EF_ALT_DOWN, KEYBOARD_BRIGHTNESS_UP },
-  { true, ui::VKEY_F8, ui::EF_NONE, VOLUME_MUTE },
   { true, ui::VKEY_VOLUME_MUTE, ui::EF_NONE, VOLUME_MUTE },
-  { true, ui::VKEY_F9, ui::EF_NONE, VOLUME_DOWN },
   { true, ui::VKEY_VOLUME_DOWN, ui::EF_NONE, VOLUME_DOWN },
-  { true, ui::VKEY_F10, ui::EF_NONE, VOLUME_UP },
   { true, ui::VKEY_VOLUME_UP, ui::EF_NONE, VOLUME_UP },
   { true, ui::VKEY_L, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, FOCUS_LAUNCHER },
   { true, ui::VKEY_S, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, FOCUS_SYSTEM_TRAY },
-  { true, ui::VKEY_F7, ui::EF_CONTROL_DOWN, MAGNIFY_SCREEN_ZOOM_IN},
-  { true, ui::VKEY_F6, ui::EF_CONTROL_DOWN, MAGNIFY_SCREEN_ZOOM_OUT},
+  { true, ui::VKEY_HELP, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY },
   { true, ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SHOW_KEYBOARD_OVERLAY },
   { true, ui::VKEY_OEM_2,
     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SHOW_KEYBOARD_OVERLAY },
-  { true, ui::VKEY_F14, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY_BY_F14_KEY },
+  { true, ui::VKEY_F14, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY },
   { true, ui::VKEY_F1, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, SHOW_OAK },
   { true, ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN, SHOW_TASK_MANAGER },
   { true, ui::VKEY_1, ui::EF_ALT_DOWN, SELECT_WIN_0 },
@@ -125,7 +149,8 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_OEM_4, ui::EF_ALT_DOWN, WINDOW_SNAP_LEFT },
   { true, ui::VKEY_OEM_6, ui::EF_ALT_DOWN, WINDOW_SNAP_RIGHT },
   { true, ui::VKEY_OEM_MINUS, ui::EF_ALT_DOWN, WINDOW_MINIMIZE },
-  { true, ui::VKEY_OEM_PLUS, ui::EF_ALT_DOWN, TOGGLE_MAXIMIZED },
+  { true, ui::VKEY_OEM_PLUS, ui::EF_ALT_DOWN, TOGGLE_MAXIMIZED_PRESSED },
+  { false, ui::VKEY_OEM_PLUS, ui::EF_ALT_DOWN, TOGGLE_MAXIMIZED_RELEASED},
   { true, ui::VKEY_OEM_PLUS, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
     WINDOW_POSITION_CENTER },
   { true, ui::VKEY_F2, ui::EF_CONTROL_DOWN, FOCUS_NEXT_PANE },
@@ -149,8 +174,12 @@ const AcceleratorData kDebugAcceleratorData[] = {
   { true, ui::VKEY_F11, ui::EF_CONTROL_DOWN, TOGGLE_ROOT_WINDOW_FULL_SCREEN },
   { true, ui::VKEY_W, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, TOGGLE_WIFI },
   // For testing on systems where Alt-Tab is already mapped.
-  { true, ui::VKEY_W, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU },
-  { true, ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, CYCLE_BACKWARD_MRU },
+  { true, ui::VKEY_W, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU_PRESSED },
+  { false, ui::VKEY_W, ui::EF_ALT_DOWN, CYCLE_FORWARD_MRU_RELEASED },
+  { true, ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+      CYCLE_BACKWARD_MRU_PRESSED },
+  { false, ui::VKEY_W, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+      CYCLE_BACKWARD_MRU_RELEASED },
   { true, ui::VKEY_HOME, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     DISPLAY_TOGGLE_SCALE },
 #if !defined(NDEBUG)
@@ -167,11 +196,13 @@ const size_t kDebugAcceleratorDataLength = arraysize(kDebugAcceleratorData);
 
 const AcceleratorAction kReservedActions[] = {
   // Window cycling accelerators.
-  CYCLE_BACKWARD_MRU,  // Shift+Alt+Tab
-  CYCLE_FORWARD_MRU,  // Alt+Tab
-
+  CYCLE_BACKWARD_MRU_PRESSED,  // Shift+Alt+Tab
+  CYCLE_BACKWARD_MRU_RELEASED,
+  CYCLE_FORWARD_MRU_PRESSED,  // Alt+Tab
+  CYCLE_FORWARD_MRU_RELEASED,
 #if defined(OS_CHROMEOS)
-  SHOW_KEYBOARD_OVERLAY_BY_F14_KEY,  // F14
+  LOCK_PRESSED,
+  LOCK_RELEASED,
   POWER_PRESSED,
   POWER_RELEASED,
 #endif
@@ -188,6 +219,8 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   DISABLE_CAPS_LOCK,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
+  MAGNIFY_SCREEN_ZOOM_IN,  // Control+F7
+  MAGNIFY_SCREEN_ZOOM_OUT,  // Control+F6
   NEXT_IME,
   PREVIOUS_IME,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
@@ -206,6 +239,10 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   PRINT_WINDOW_HIERARCHY,
   ROTATE_SCREEN,
 #endif
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+  POWER_PRESSED,
+  POWER_RELEASED,
+#endif
 };
 
 const size_t kActionsAllowedAtLoginOrLockScreenLength =
@@ -217,5 +254,42 @@ const AcceleratorAction kActionsAllowedAtLockScreen[] = {
 
 const size_t kActionsAllowedAtLockScreenLength =
     arraysize(kActionsAllowedAtLockScreen);
+
+const AcceleratorAction kActionsAllowedAtModalWindow[] = {
+  BRIGHTNESS_DOWN,
+  BRIGHTNESS_UP,
+  DISABLE_CAPS_LOCK,
+  EXIT,
+  KEYBOARD_BRIGHTNESS_DOWN,
+  KEYBOARD_BRIGHTNESS_UP,
+  MAGNIFY_SCREEN_ZOOM_IN,
+  MAGNIFY_SCREEN_ZOOM_OUT,
+  MEDIA_NEXT_TRACK,
+  MEDIA_PLAY_PAUSE,
+  MEDIA_PREV_TRACK,
+  NEXT_IME,
+  OPEN_FEEDBACK_PAGE,
+  POWER_PRESSED,
+  POWER_RELEASED,
+  PREVIOUS_IME,
+  SHOW_KEYBOARD_OVERLAY,
+  SWAP_PRIMARY_DISPLAY,
+  SWITCH_IME,
+  TAKE_SCREENSHOT,
+  TAKE_PARTIAL_SCREENSHOT,
+  TOGGLE_CAPS_LOCK,
+  TOGGLE_SPOKEN_FEEDBACK,
+  TOGGLE_WIFI,
+  VOLUME_DOWN,
+  VOLUME_MUTE,
+  VOLUME_UP,
+#if defined(OS_CHROMEOS)
+  CYCLE_DISPLAY_MODE,
+  LOCK_SCREEN,
+#endif
+};
+
+const size_t kActionsAllowedAtModalWindowLength =
+    arraysize(kActionsAllowedAtModalWindow);
 
 }  // namespace ash

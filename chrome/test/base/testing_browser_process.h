@@ -54,7 +54,7 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
-  virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
+  virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
   virtual SafeBrowsingService* safe_browsing_service() OVERRIDE;
@@ -114,14 +114,18 @@ class TestingBrowserProcess : public BrowserProcess {
 
   // Weak pointer.
   PrefService* local_state_;
+#if defined(ENABLE_CONFIGURATION_POLICY)
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
+#else
   scoped_ptr<policy::PolicyService> policy_service_;
+#endif
   scoped_ptr<ProfileManager> profile_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
   scoped_refptr<printing::PrintPreviewTabController>
       print_preview_tab_controller_;
   scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
+  scoped_ptr<RenderWidgetSnapshotTaker> render_widget_snapshot_taker_;
   IOThread* io_thread_;
   scoped_refptr<SafeBrowsingService> sb_service_;
 

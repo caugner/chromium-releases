@@ -42,15 +42,6 @@ class AwBrowserDependencyFactory {
   // Constructs and returns ownership of a WebContents instance.
   virtual content::WebContents* CreateWebContents(bool incognito) = 0;
 
-  // Creates and returns ownership of a new content container instance. That
-  // instance will take ownership of the passed |contents|.
-  virtual AwContentsContainer* CreateContentsContainer(
-      content::WebContents* contents) = 0;
-
-  // As per the WebContentsDelegate method of the same name. Ownership is NOT
-  // returned; the instance must be long-lived.
-  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator() = 0;
-
  protected:
   AwBrowserDependencyFactory();
 
@@ -61,4 +52,3 @@ class AwBrowserDependencyFactory {
 }  // namespace android_webview
 
 #endif  // ANDROID_WEBVIEW_AW_BROWSER_DELEGATE_H_
-

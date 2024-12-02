@@ -8,6 +8,7 @@
 #include "chrome/browser/captive_portal/captive_portal_login_detector.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_reloader.h"
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -24,20 +25,25 @@
 #include "net/base/net_errors.h"
 #include "net/base/ssl_info.h"
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(captive_portal::CaptivePortalTabHelper)
+
 namespace captive_portal {
 
 CaptivePortalTabHelper::CaptivePortalTabHelper(
-    Profile* profile,
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
+      // web_contents is NULL in unit tests.
+      profile_(web_contents ? Profile::FromBrowserContext(
+                                  web_contents->GetBrowserContext())
+                            : NULL),
       tab_reloader_(
           new CaptivePortalTabReloader(
-              profile,
+              profile_,
               web_contents,
               base::Bind(&CaptivePortalTabHelper::OpenLoginTab,
                          base::Unretained(this)))),
-      login_detector_(new CaptivePortalLoginDetector(profile)),
-      profile_(profile),
+      login_detector_(new CaptivePortalLoginDetector(profile_)),
+      web_contents_(web_contents),
       pending_error_code_(net::OK),
       provisional_render_view_host_(NULL) {
   registrar_.Add(this,
@@ -56,6 +62,7 @@ CaptivePortalTabHelper::~CaptivePortalTabHelper() {
 
 void CaptivePortalTabHelper::DidStartProvisionalLoadForFrame(
     int64 frame_id,
+    int64 parent_frame_id,
     bool is_main_frame,
     const GURL& validated_url,
     bool is_error_page,
@@ -233,7 +240,8 @@ CaptivePortalTabReloader* CaptivePortalTabHelper::GetTabReloaderForTest() {
 }
 
 void CaptivePortalTabHelper::OpenLoginTab() {
-  Browser* browser = browser::FindTabbedBrowser(profile_, true);
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents_);
+
   // If the Profile doesn't have a tabbed browser window open, do nothing.
   if (!browser)
     return;
@@ -243,8 +251,10 @@ void CaptivePortalTabHelper::OpenLoginTab() {
   // TODO(mmenke):  Consider focusing that tab, at least if this is the tab
   //                helper for the currently active tab for the profile.
   for (int i = 0; i < browser->tab_count(); ++i) {
-    TabContents* tab_contents = chrome::GetTabContentsAt(browser, i);
-    if (tab_contents->captive_portal_tab_helper()->IsLoginTab())
+    content::WebContents* web_contents = chrome::GetWebContentsAt(browser, i);
+    captive_portal::CaptivePortalTabHelper* captive_portal_tab_helper =
+        captive_portal::CaptivePortalTabHelper::FromWebContents(web_contents);
+    if (captive_portal_tab_helper->IsLoginTab())
       return;
   }
 
@@ -254,7 +264,10 @@ void CaptivePortalTabHelper::OpenLoginTab() {
           browser,
           CaptivePortalServiceFactory::GetForProfile(profile_)->test_url(),
           content::PAGE_TRANSITION_TYPED);
-  tab_contents->captive_portal_tab_helper()->SetIsLoginTab();
+  captive_portal::CaptivePortalTabHelper* captive_portal_tab_helper =
+      captive_portal::CaptivePortalTabHelper::FromWebContents(
+          tab_contents->web_contents());
+  captive_portal_tab_helper->SetIsLoginTab();
 }
 
 }  // namespace captive_portal

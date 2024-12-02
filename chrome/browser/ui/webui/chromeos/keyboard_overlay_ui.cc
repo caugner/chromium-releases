@@ -108,6 +108,8 @@ struct I18nContentToMessage {
   { "keyboardOverlayCut", IDS_KEYBOARD_OVERLAY_CUT },
   { "keyboardOverlayCycleThroughInputMethods",
     IDS_KEYBOARD_OVERLAY_CYCLE_THROUGH_INPUT_METHODS },
+  { "keyboardOverlayDecreaseKeyBrightness",
+    IDS_KEYBOARD_OVERLAY_DECREASE_KEY_BRIGHTNESS },
   { "keyboardOverlayDelete", IDS_KEYBOARD_OVERLAY_DELETE },
   { "keyboardOverlayDeleteWord", IDS_KEYBOARD_OVERLAY_DELETE_WORD },
   { "keyboardOverlayDeveloperTools", IDS_KEYBOARD_OVERLAY_DEVELOPER_TOOLS },
@@ -130,29 +132,32 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_FOCUS_PREVIOUS_PANE },
   { "keyboardOverlayFocusStatusIcon", IDS_KEYBOARD_OVERLAY_FOCUS_STATUS_ICON },
   { "keyboardOverlayFocusToolbar", IDS_KEYBOARD_OVERLAY_FOCUS_TOOLBAR },
-  { "keyboardOverlayFullscreen", IDS_ACCNAME_FULLSCREEN },
+  { "keyboardOverlayFullScreen", IDS_KEYBOARD_OVERLAY_FULL_SCREEN },
   { "keyboardOverlayGoBack", IDS_KEYBOARD_OVERLAY_GO_BACK },
   { "keyboardOverlayGoForward", IDS_KEYBOARD_OVERLAY_GO_FORWARD },
   { "keyboardOverlayHelp", IDS_KEYBOARD_OVERLAY_HELP },
   { "keyboardOverlayHistory", IDS_KEYBOARD_OVERLAY_HISTORY },
   { "keyboardOverlayHome", IDS_KEYBOARD_OVERLAY_HOME },
+  { "keyboardOverlayIncreaseKeyBrightness",
+    IDS_KEYBOARD_OVERLAY_INCREASE_KEY_BRIGHTNESS },
   { "keyboardOverlayInputUnicodeCharacters",
     IDS_KEYBOARD_OVERLAY_INPUT_UNICODE_CHARACTERS },
   { "keyboardOverlayJavascriptConsole",
     IDS_KEYBOARD_OVERLAY_JAVASCRIPT_CONSOLE },
-  { "keyboardOverlayKeyboardBrightDown",
-    IDS_KEYBOARD_OVERLAY_KEYBOARD_BRIGHT_DOWN },
-  { "keyboardOverlayKeyboardBrightUp",
-    IDS_KEYBOARD_OVERLAY_KEYBOARD_BRIGHT_UP },
   { "keyboardOverlayLockScreen", IDS_KEYBOARD_OVERLAY_LOCK_SCREEN },
   { "keyboardOverlayLockScreenOrPowerOff",
     IDS_KEYBOARD_OVERLAY_LOCK_SCREEN_OR_POWER_OFF },
+  { "keyboardOverlayMagnifierDecreaseZoom",
+    IDS_KEYBOARD_OVERLAY_MAGNIFIER_DECREASE_ZOOM },
+  { "keyboardOverlayMagnifierIncreaseZoom",
+    IDS_KEYBOARD_OVERLAY_MAGNIFIER_INCREASE_ZOOM },
   { "keyboardOverlayMaximizeWindow", IDS_KEYBOARD_OVERLAY_MAXIMIZE_WINDOW },
   { "keyboardOverlayMinimizeWindow", IDS_KEYBOARD_OVERLAY_MINIMIZE_WINDOW },
   { "keyboardOverlayMirrorMonitors", IDS_KEYBOARD_OVERLAY_MIRROR_MONITORS },
   { "keyboardOverlayNewIncognitoWindow",
     IDS_KEYBOARD_OVERLAY_NEW_INCOGNITO_WINDOW },
   { "keyboardOverlayNewTab", IDS_KEYBOARD_OVERLAY_NEW_TAB },
+  { "keyboardOverlayNewTerminal", IDS_KEYBOARD_OVERLAY_NEW_TERMINAL },
   { "keyboardOverlayNewWindow", IDS_KEYBOARD_OVERLAY_NEW_WINDOW },
   { "keyboardOverlayNextWindow", IDS_KEYBOARD_OVERLAY_NEXT_WINDOW },
   { "keyboardOverlayNextWord", IDS_KEYBOARD_OVERLAY_NEXT_WORD },
@@ -188,6 +193,8 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME },
   { "keyboardOverlayShowWrenchMenu", IDS_KEYBOARD_OVERLAY_SHOW_WRENCH_MENU },
   { "keyboardOverlaySignOut", IDS_KEYBOARD_OVERLAY_SIGN_OUT },
+  { "keyboardOverlaySwapPrimaryMonitor",
+    IDS_KEYBOARD_OVERLAY_SWAP_PRIMARY_MONITOR },
   { "keyboardOverlayTakeScreenshot", IDS_KEYBOARD_OVERLAY_TAKE_SCREENSHOT },
   { "keyboardOverlayTaskManager", IDS_KEYBOARD_OVERLAY_TASK_MANAGER },
   { "keyboardOverlayToggleAccessibilityFeatures",
@@ -301,11 +308,11 @@ void KeyboardOverlayHandler::GetLabelMap(const ListValue* args) {
   typedef std::map<ModifierKey, ModifierKey> ModifierMap;
   ModifierMap modifier_map;
   modifier_map[chromeos::input_method::kSearchKey] = static_cast<ModifierKey>(
-      pref_service->GetInteger(prefs::kLanguageXkbRemapSearchKeyTo));
+      pref_service->GetInteger(prefs::kLanguageRemapSearchKeyTo));
   modifier_map[chromeos::input_method::kControlKey] = static_cast<ModifierKey>(
-      pref_service->GetInteger(prefs::kLanguageXkbRemapControlKeyTo));
+      pref_service->GetInteger(prefs::kLanguageRemapControlKeyTo));
   modifier_map[chromeos::input_method::kAltKey] = static_cast<ModifierKey>(
-      pref_service->GetInteger(prefs::kLanguageXkbRemapAltKeyTo));
+      pref_service->GetInteger(prefs::kLanguageRemapAltKeyTo));
 
   DictionaryValue dict;
   for (ModifierMap::const_iterator i = modifier_map.begin();

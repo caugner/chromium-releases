@@ -19,12 +19,6 @@
 #include "ui/base/win/hwnd_subclass.h"
 #include "ui/gfx/screen.h"
 
-using content::RenderViewHost;
-using content::RenderWidgetHostView;
-using content::RenderWidgetHostViewWin;
-using content::WebContents;
-using content::WebContentsViewDelegate;
-
 namespace content {
 WebContentsView* CreateWebContentsView(
     WebContentsImpl* web_contents,
@@ -33,7 +27,6 @@ WebContentsView* CreateWebContentsView(
   WebContentsViewWin* rv = new WebContentsViewWin(web_contents, delegate);
   *render_view_host_delegate_view = rv;
   return rv;
-}
 }
 
 namespace {
@@ -59,7 +52,7 @@ BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM lParam) {
   RenderWidgetHostViewWin* rwhv = static_cast<RenderWidgetHostViewWin*>(
       wcv->web_contents()->GetRenderWidgetHostView());
   if (rwhv)
-    rwhv->UpdateScreenInfo();
+    rwhv->UpdateScreenInfo(rwhv->GetNativeView());
 
   return TRUE;  // must return TRUE to continue enumeration.
 }
@@ -99,7 +92,6 @@ WebContentsViewWin::WebContentsViewWin(WebContentsImpl* web_contents,
     : web_contents_(web_contents),
       view_(NULL),
       delegate_(delegate),
-      close_tab_after_drag_ends_(false),
       hwnd_message_filter_(new PositionChangedMessageFilter) {
 }
 
@@ -121,14 +113,14 @@ void WebContentsViewWin::CreateView(const gfx::Size& initial_size) {
   RevokeDragDrop(GetNativeView());
   drag_dest_ = new WebDragDest(hwnd(), web_contents_);
   if (delegate_.get()) {
-    content::WebDragDestDelegate* delegate = delegate_->GetDragDestDelegate();
+    WebDragDestDelegate* delegate = delegate_->GetDragDestDelegate();
     if (delegate)
       drag_dest_->set_delegate(delegate);
   }
 }
 
 RenderWidgetHostView* WebContentsViewWin::CreateViewForWidget(
-    content::RenderWidgetHost* render_widget_host)  {
+    RenderWidgetHost* render_widget_host)  {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -233,19 +225,6 @@ void WebContentsViewWin::RestoreFocus() {
     delegate_->RestoreFocus();
 }
 
-bool WebContentsViewWin::IsDoingDrag() const {
-  return drag_handler_.get() != NULL;
-}
-
-void WebContentsViewWin::CancelDragAndCloseTab() {
-  DCHECK(IsDoingDrag());
-  // We can't close the tab while we're in the drag and
-  // |drag_handler_->CancelDrag()| is async.  Instead, set a flag to cancel
-  // the drag and when the drag nested message loop ends, close the tab.
-  drag_handler_->CancelDrag();
-  close_tab_after_drag_ends_ = true;
-}
-
 WebDropData* WebContentsViewWin::GetDropData() const {
   return drag_dest_->current_drop_data();
 }
@@ -264,8 +243,8 @@ gfx::Rect WebContentsViewWin::GetViewBounds() const {
 }
 
 void WebContentsViewWin::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const ContextMenuParams& params,
+    ContextMenuSourceType type) {
   if (delegate_.get())
     delegate_->ShowContextMenu(params, type);
 }
@@ -312,10 +291,6 @@ void WebContentsViewWin::TakeFocus(bool reverse) {
 
 void WebContentsViewWin::EndDragging() {
   drag_handler_ = NULL;
-  if (close_tab_after_drag_ends_) {
-    close_tab_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(0),
-                           this, &WebContentsViewWin::CloseTab);
-  }
   web_contents_->SystemDragEnded();
 }
 
@@ -336,6 +311,10 @@ LRESULT WebContentsViewWin::OnDestroy(
   if (drag_dest_.get()) {
     RevokeDragDrop(GetNativeView());
     drag_dest_ = NULL;
+  }
+  if (drag_handler_.get()) {
+    drag_handler_->CancelDrag();
+    drag_handler_ = NULL;
   }
   return 0;
 }
@@ -360,7 +339,7 @@ LRESULT WebContentsViewWin::OnWindowPosChanged(
   RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (rwhv) {
     RenderWidgetHostViewWin* view = static_cast<RenderWidgetHostViewWin*>(rwhv);
-    view->UpdateScreenInfo();
+    view->UpdateScreenInfo(view->GetNativeView());
   }
 
   // Unless we were specifically told not to size, cause the renderer to be
@@ -396,7 +375,9 @@ LRESULT WebContentsViewWin::OnMouseMove(
   // bubble state).
   if (web_contents_->GetDelegate()) {
     web_contents_->GetDelegate()->ContentsMouseEvent(
-        web_contents_, gfx::Screen::GetCursorScreenPoint(), true);
+        web_contents_,
+        gfx::Screen::GetNativeScreen()->GetCursorScreenPoint(),
+        true);
   }
   return 0;
 }
@@ -495,3 +476,5 @@ LRESULT WebContentsViewWin::OnSize(
 
   return 1;
 }
+
+}  // namespace content

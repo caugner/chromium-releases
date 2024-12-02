@@ -19,7 +19,7 @@ SIGTERM_EXIT_CODE=143
 
 # Range of exit codes returned by the host to indicate that a permanent error
 # has occurred and that the host should not be restarted. Please, keep these
-# constants in sync with remoting/host/constants.h.
+# constants in sync with remoting/host/host_exit_codes.h.
 MIN_PERMANENT_ERROR_EXIT_CODE=2
 MAX_PERMANENT_ERROR_EXIT_CODE=6
 
@@ -81,7 +81,12 @@ if [[ "$1" = "--disable" ]]; then
   rm -f "$ENABLED_FILE"
 elif [[ "$1" = "--enable" ]]; then
   echo $$
+  # Ensure the config file is private whilst being written.
+  rm -f "$CONFIG_FILE"
+  umask 0077
   cat > "$CONFIG_FILE"
+  # Ensure the config is readable by the user registering the host.
+  chmod +a "$USER:allow:read" "$CONFIG_FILE"
   touch "$ENABLED_FILE"
 elif [[ "$1" = "--save-config" ]]; then
   echo $$

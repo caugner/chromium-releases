@@ -250,7 +250,8 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
   // Therefore, Page 11 should be in the history in addition to Page 12.
   LoadAndWaitForFile("history_length_test_page_11.html");
 
-  content::SimulateMouseClick(chrome::GetActiveWebContents(browser()));
+  content::SimulateMouseClick(chrome::GetActiveWebContents(browser()), 0,
+      WebKit::WebMouseEvent::ButtonLeft);
   LoadAndWaitForFile("history_length_test_page_11.html");
 }
 
@@ -476,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SubmitFormAddsTargetPage) {
 // Verify history shortcut opens only one history tab per window.  Also, make
 // sure that existing history tab is activated.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, OneHistoryTabPerWindow) {
-  GURL history_url("chrome://chrome/history/");
+  GURL history_url(chrome::kChromeUIHistoryURL);
 
   // Even after navigate completes, the currently-active tab title is
   // 'Loading...' for a brief time while the history page loads.

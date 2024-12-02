@@ -310,11 +310,7 @@
    fun:+[QTCaptureDevice devicesWithIOType:]
    fun:+[QTCaptureDevice inputDevices]
    fun:+[QTCaptureDevice inputDevicesWithMediaType:]
-   fun:+[VideoCaptureDeviceQTKit deviceNames]
-   fun:_ZN5media18VideoCaptureDevice14GetDeviceNamesEPSt4listINS0_4NameESaIS2_EE
-   fun:_ZN5media21VideoCaptureDeviceMac4InitEv
-   fun:_ZN5media18VideoCaptureDevice6CreateERKNS0_4NameE
-   fun:_ZN5media45VideoCaptureDeviceTest_OpenInvalidDevice_Test8TestBodyEv
+   ...
 }
 {
    # See http://crbug.com/141293
@@ -355,20 +351,8 @@
    Mac_Sandbox_Intentional_Leak1
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN11sandboxtest8internal19RegisterSandboxTestIN12_GLOBAL__N_*
+   fun:_ZN7content8internal19RegisterSandboxTestINS_*
    ...
-   fun:_ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE
-   fun:_ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEj
-   fun:_ZN11ImageLoader15runInitializersERKNS_11LinkContextE
-   fun:_ZN4dyld24initializeMainExecutableEv
-}
-{
-   # With our tweaks to get Chromium to link on Mac 10.5, we sometimes get
-   # this suppression instead.
-   Mac_Sandbox_Intentional_Leak3
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_Z41__static_initialization_and_destruction_0ii
    fun:_ZN16ImageLoaderMachO18doModInitFunctionsERKN11ImageLoader11LinkContextE
    fun:_ZN11ImageLoader23recursiveInitializationERKNS_11LinkContextEj
    fun:_ZN11ImageLoader15runInitializersERKNS_11LinkContextE
@@ -733,8 +717,7 @@
    ...
    fun:_ZN9HALSystem15InitializeShellEv
    fun:_ZN9HALSystem16CheckOutInstanceEv
-   fun:AudioObjectGetPropertyData
-   fun:*16HasAudioHardware*
+   fun:AudioObjectGetPropertyData*
 }
 {
    bug_47949_a
@@ -2461,24 +2444,34 @@
    bug_148865
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN16RenderThreadImpl4InitEv
-   fun:_ZN16RenderThreadImplC2ERKSs
-   fun:_ZN16RenderThreadImplC1ERKSs
-   fun:_ZN21WebRTCAudioDeviceTest5SetUpEv
+   fun:_ZN7content16RenderThreadImpl4InitEv
+   fun:_ZN7content16RenderThreadImplC2ERKSs
+   fun:_ZN7content16RenderThreadImplC1ERKSs
+   fun:_ZN7content21WebRTCAudioDeviceTest5SetUpEv
 }
 {
-   bug_150705
-   Memcheck:Uninitialized
-   ...
-   fun:_ZN7testing12_GLOBAL__N_126PrintByteSegmentInObjectToEPKhmmPSo
-   fun:_ZN7testing12_GLOBAL__N_124PrintBytesInObjectToImplEPKhmPSo
-   fun:_ZN7testing9internal220PrintBytesInObjectToEPKhmPSo
-   fun:_ZN7testing9internal220TypeWithoutFormatterI18DownloadCreateInfoLNS0_8TypeKindE2EE10PrintValueERKS2_PSo
-   fun:_ZN7testing9internal2lsIcSt11char_traitsIcE18DownloadCreateInfoEERSt13basic_ostreamIT_T0_ES9_RKT1_
-   fun:_ZN16testing_internal26DefaultPrintNonContainerToI18DownloadCreateInfoEEvRKT_PSo
-   fun:_ZN7testing8internal14DefaultPrintToI18DownloadCreateInfoEEvcNS0_13bool_constantILb0EEERKT_PSo
-   fun:_ZN7testing8internal7PrintToI18DownloadCreateInfoEEvRKT_PSo
-   fun:_ZN7testing8internal16UniversalPrinterI18DownloadCreateInfoE5PrintERKS2_PSo
-   fun:_ZN7testing8internal14UniversalPrintI18DownloadCreateInfoEEvRKT_PSo
-   fun:_ZN7testing8internal20MatchPrintAndExplainI18DownloadCreateInfoRKS2_EEbRT_RKNS_7MatcherIT0_EEPNS_19MatchResultListenerE
+   bug_155053a
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
+   fun:_ZN9HALSystem15InitializeShellEv
+   fun:_ZN9HALSystem16CheckOutInstanceEv
+   fun:AudioObjectGetPropertyDataSize
+   fun:_ZN5mediaL18GetAudioDeviceInfoEbPSt4listINS_15AudioDeviceNameESaIS1_EE
+   fun:_ZN5media15AudioManagerMac24GetAudioInputDeviceNamesEPSt4listINS_15AudioDeviceNameESaIS2_EE
+   fun:_ZN12media_stream23AudioInputDeviceManager23EnumerateOnDeviceThreadEv
+}
+{
+   bug_155053b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN12HALCADClient19AddPropertyListenerEmPK26AudioObjectPropertyAddressPFlmmS2_PvES3_
+   fun:_ZN16HALDefaultDevice22InstallServerListenersEv
+   fun:_ZN16HALDefaultDevice10InitializeEv
+   fun:_ZN9HALSystem15InitializeShellEv
+   fun:_ZN9HALSystem16CheckOutInstanceEv
+   fun:AudioObjectGetPropertyDataSize
+   fun:_ZN5mediaL18GetAudioDeviceInfoEbPSt4listINS_15AudioDeviceNameESaIS1_EE
+   fun:_ZN5media15AudioManagerMac24GetAudioInputDeviceNamesEPSt4listINS_15AudioDeviceNameESaIS2_EE
+   fun:_ZN12media_stream23AudioInputDeviceManager23EnumerateOnDeviceThreadEv
 }

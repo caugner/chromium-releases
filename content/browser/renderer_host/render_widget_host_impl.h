@@ -17,6 +17,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "base/string16.h"
+#include "base/time.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "content/common/view_message_enums.h"
@@ -25,17 +26,17 @@
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/native_widget_types.h"
 
-class MockRenderWidgetHost;
 class WebCursor;
-struct EditCommand;
 struct ViewHostMsg_UpdateRect_Params;
 struct ViewHostMsg_TextInputState_Params;
+struct ViewHostMsg_BeginSmoothScroll_Params;
 
 namespace base {
 class TimeTicks;
 }
 
 namespace ui {
+class KeyEvent;
 class Range;
 }
 
@@ -55,9 +56,12 @@ class WebLayer;
 namespace content {
 class BackingStore;
 class GestureEventFilter;
+class MockRenderWidgetHost;
 class RenderWidgetHostDelegate;
 class RenderWidgetHostViewPort;
 class SmoothScrollGesture;
+class TouchEventQueue;
+struct EditCommand;
 
 // This implements the RenderWidgetHost interface that is exposed to
 // embedders of content, and adds things only visible to content.
@@ -95,7 +99,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
       const gfx::Rect& src_rect,
       const gfx::Size& accelerated_dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
 #if defined(TOOLKIT_GTK)
   virtual bool CopyFromBackingStoreToGtkWindow(const gfx::Rect& dest_rect,
                                                GdkWindow* target) OVERRIDE;
@@ -168,7 +172,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void GotFocus();
 
   // Tells the renderer it got/lost focus.
-  void Focus();
+  virtual void Focus();
   virtual void LostCapture();
 
   // Sets whether the renderer should show controls in an active state.  On all
@@ -237,6 +241,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
 
   // Forwards the given event immediately to the renderer.
+  void ForwardTouchEventImmediately(const WebKit::WebTouchEvent& touch_event);
   void ForwardGestureEventImmediately(
       const WebKit::WebGestureEvent& gesture_event);
 
@@ -245,6 +250,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // widgets that don't have focus to still handle key presses.
   bool KeyPressListenersHandleEvent(GdkEventKey* event);
 #endif  // defined(TOOLKIT_GTK)
+
+#if defined(TOOLKIT_VIEWS)
+  bool KeyPressListenersHandleEvent(ui::KeyEvent* event);
+#endif  // defined(TOOLKIT_VIEWS)
 
   void CancelUpdateTextDirection();
 
@@ -311,6 +320,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
 
   // Activate deferred plugin handles.
   void ActivateDeferredPluginHandles();
+
+  bool ShouldForwardTouchEvent() const;
 
   bool has_touch_handler() const { return has_touch_handler_; }
 
@@ -382,6 +393,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   static void AcknowledgeBufferPresent(
       int32 route_id,
       int gpu_host_id,
+      bool presented,
       uint32 sync_point);
 
   // Called by the view in response to AcceleratedSurfaceBuffersSwapped for
@@ -413,6 +425,13 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void AttachLayer(WebKit::WebLayer* layer) {}
   virtual void RemoveLayer(WebKit::WebLayer* layer) {}
 #endif
+
+  // Resets state variables related to tracking pending size and painting.
+  //
+  // We need to reset these flags when we want to repaint the contents of
+  // browser plugin in this RWH. Resetting these flags will ensure we ignore
+  // any previous pending acks that are not relevant upon repaint.
+  void ResetSizeAndRepaintPendingFlags();
 
   void DetachDelegate();
 
@@ -501,7 +520,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   std::queue<WebKit::WebInputEvent::Type> in_process_event_types_;
 
  private:
-  friend class ::MockRenderWidgetHost;
+  friend class MockRenderWidgetHost;
 
   // Tell this object to destroy itself.
   void Destroy();
@@ -532,9 +551,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnMsgUpdateIsDelayed();
   void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
                           bool processed);
-  void OnMsgBeginSmoothScroll(int gesture_id,
-                              bool scroll_down,
-                              bool scroll_far);
+  void OnMsgBeginSmoothScroll(
+      int gesture_id,
+      const ViewHostMsg_BeginSmoothScroll_Params &params);
   void OnMsgSelectRangeAck();
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
@@ -554,6 +573,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
                       bool last_unlocked_by_target,
                       bool privileged);
   void OnMsgUnlockMouse();
+
+  void OnMsgShowDisambiguationPopup(const gfx::Rect& rect,
+                                    const gfx::Size& size,
+                                    const TransportDIB::Id& id);
 
 #if defined(OS_POSIX) || defined(USE_AURA)
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
@@ -623,7 +646,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Called on OnMsgInputEventAck() to process a touch event ack message.
   // This can result in a gesture event being generated and sent back to the
   // renderer.
-  void ProcessTouchAck(WebKit::WebInputEvent::Type type, bool processed);
+  void ProcessTouchAck(bool processed);
 
   // Called when there is a new auto resize (using a post to avoid a stack
   // which may get in recursive loops).
@@ -811,7 +834,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   typedef std::map<int, scoped_refptr<SmoothScrollGesture> >
       SmoothScrollGestureMap;
   SmoothScrollGestureMap active_smooth_scroll_gestures_;
+  base::TimeTicks last_smooth_scroll_gestures_tick_time_;
+  bool tick_active_smooth_scroll_gestures_task_posted_;
 
+  scoped_ptr<TouchEventQueue> touch_event_queue_;
   scoped_ptr<GestureEventFilter> gesture_event_filter_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostImpl);

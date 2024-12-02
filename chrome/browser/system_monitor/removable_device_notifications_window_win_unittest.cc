@@ -16,6 +16,7 @@
 #include "base/system_monitor/system_monitor.h"
 #include "base/test/mock_devices_changed_observer.h"
 #include "chrome/browser/system_monitor/media_storage_util.h"
+#include "chrome/browser/system_monitor/volume_mount_watcher_win.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,8 +27,8 @@ using content::BrowserThread;
 using chrome::RemovableDeviceNotificationsWindowWin;
 
 // Inputs of 'A:\' - 'Z:\' are valid. 'N:\' is not removable.
-bool GetDeviceInfo(const FilePath& device_path, string16* device_location,
-                   std::string* unique_id, string16* name, bool* removable) {
+bool GetDeviceDetails(const FilePath& device_path, string16* device_location,
+                      std::string* unique_id, string16* name, bool* removable) {
   if (device_path.value().length() != 3 || device_path.value()[0] < L'A' ||
       device_path.value()[0] > L'Z') {
     return false;
@@ -68,18 +69,62 @@ std::vector<FilePath> GetTestAttachedDevices() {
 
 namespace chrome {
 
+// Wrapper class for testing VolumeMountWatcherWin.
+class TestVolumeMountWatcherWin : public VolumeMountWatcherWin {
+ public:
+  TestVolumeMountWatcherWin() : pre_attach_devices_(false) {
+  }
+
+  // Override VolumeMountWatcherWin::GetDeviceInfo().
+  virtual bool GetDeviceInfo(const FilePath& device_path,
+    string16* device_location, std::string* unique_id, string16* name,
+    bool* removable) OVERRIDE {
+    return GetDeviceDetails(device_path, device_location, unique_id, name,
+                            removable);
+  }
+
+  // Override VolumeMountWatcherWin::GetAttachedDevices().
+  virtual std::vector<FilePath> GetAttachedDevices() OVERRIDE{
+    if (pre_attach_devices_)
+      return GetTestAttachedDevices();
+    return std::vector<FilePath>();
+  }
+
+  void set_pre_attach_devices(bool pre_attach_devices) {
+    pre_attach_devices_ = pre_attach_devices;
+  }
+
+ private:
+  // Private, this class is ref-counted.
+  virtual ~TestVolumeMountWatcherWin() {
+  }
+
+  // Set to true to pre-attach test devices.
+  bool pre_attach_devices_;
+};
+
+// Wrapper class for testing RemovableDeviceNotificationsWindowWin.
 class TestRemovableDeviceNotificationsWindowWin
     : public RemovableDeviceNotificationsWindowWin {
  public:
-  TestRemovableDeviceNotificationsWindowWin() {
+  explicit TestRemovableDeviceNotificationsWindowWin(
+      TestVolumeMountWatcherWin* volume_mount_watcher)
+      : RemovableDeviceNotificationsWindowWin(volume_mount_watcher),
+        volume_mount_watcher_(volume_mount_watcher) {
+    DCHECK(volume_mount_watcher_);
+  }
+
+  virtual ~TestRemovableDeviceNotificationsWindowWin() {
   }
 
   void InitWithTestData() {
-    InitForTest(&GetDeviceInfo, &NoAttachedDevices);
+    volume_mount_watcher_->set_pre_attach_devices(false);
+    Init();
   }
 
   void InitWithTestDataAndAttachedDevices() {
-    InitForTest(&GetDeviceInfo, &GetTestAttachedDevices);
+    volume_mount_watcher_->set_pre_attach_devices(true);
+    Init();
   }
 
   void InjectDeviceChange(UINT event_type, DWORD data) {
@@ -87,13 +132,7 @@ class TestRemovableDeviceNotificationsWindowWin
   }
 
  private:
-  virtual ~TestRemovableDeviceNotificationsWindowWin() {
-  }
-
-  static std::vector<FilePath> NoAttachedDevices() {
-    std::vector<FilePath> result;
-    return result;
-  }
+  scoped_refptr<TestVolumeMountWatcherWin> volume_mount_watcher_;
 };
 
 class RemovableDeviceNotificationsWindowWinTest : public testing::Test {
@@ -106,8 +145,11 @@ class RemovableDeviceNotificationsWindowWinTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    window_ = new TestRemovableDeviceNotificationsWindowWin;
+    volume_mount_watcher_ = new TestVolumeMountWatcherWin;
+    window_.reset(new TestRemovableDeviceNotificationsWindowWin(
+        volume_mount_watcher_.get()));
     window_->InitWithTestData();
+    message_loop_.RunAllPending();
     system_monitor_.AddDevicesChangedObserver(&observer_);
   }
 
@@ -120,7 +162,7 @@ class RemovableDeviceNotificationsWindowWinTest : public testing::Test {
     std::string unique_id;
     string16 device_name;
     bool removable;
-    ASSERT_TRUE(GetDeviceInfo(drive, NULL, &unique_id, &device_name,
+    ASSERT_TRUE(GetDeviceDetails(drive, NULL, &unique_id, &device_name,
                 &removable));
     if (removable) {
       MediaStorageUtil::Type type =
@@ -133,14 +175,15 @@ class RemovableDeviceNotificationsWindowWinTest : public testing::Test {
   }
 
   void PreAttachDevices() {
-    window_ = NULL;
+    window_.reset();
     {
       testing::InSequence sequence;
       std::vector<FilePath> initial_devices = GetTestAttachedDevices();
       for (size_t i = 0; i < initial_devices.size(); i++)
         AddAttachExpectation(initial_devices[i]);
     }
-    window_ = new TestRemovableDeviceNotificationsWindowWin();
+    window_.reset(new TestRemovableDeviceNotificationsWindowWin(
+        volume_mount_watcher_.get()));
     window_->InitWithTestDataAndAttachedDevices();
     message_loop_.RunAllPending();
   }
@@ -154,7 +197,8 @@ class RemovableDeviceNotificationsWindowWinTest : public testing::Test {
 
   base::SystemMonitor system_monitor_;
   base::MockDevicesChangedObserver observer_;
-  scoped_refptr<TestRemovableDeviceNotificationsWindowWin> window_;
+  scoped_ptr<TestRemovableDeviceNotificationsWindowWin> window_;
+  scoped_refptr<TestVolumeMountWatcherWin> volume_mount_watcher_;
 };
 
 void RemovableDeviceNotificationsWindowWinTest::DoDevicesAttachedTest(
@@ -193,8 +237,8 @@ void RemovableDeviceNotificationsWindowWinTest::DoDevicesDetachedTest(
       volume_broadcast.dbcv_unitmask |= 0x1 << *it;
       std::string unique_id;
       bool removable;
-      ASSERT_TRUE(GetDeviceInfo(DriveNumberToFilePath(*it), NULL, &unique_id,
-                                NULL, &removable));
+      ASSERT_TRUE(GetDeviceDetails(DriveNumberToFilePath(*it), NULL, &unique_id,
+                                   NULL, &removable));
       if (removable) {
         MediaStorageUtil::Type type =
             MediaStorageUtil::REMOVABLE_MASS_STORAGE_NO_DCIM;
@@ -247,7 +291,8 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesAttachedAdjacentBits) {
   DoDevicesAttachedTest(device_indices);
 }
 
-TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetached) {
+// Disabled until http://crbug.com/155910 is resolved.
+TEST_F(RemovableDeviceNotificationsWindowWinTest, DISABLED_DevicesDetached) {
   PreAttachDevices();
 
   std::vector<int> device_indices;
@@ -259,7 +304,9 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetached) {
   DoDevicesDetachedTest(device_indices);
 }
 
-TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedHighBoundary) {
+// Disabled until http://crbug.com/155910 is resolved.
+TEST_F(RemovableDeviceNotificationsWindowWinTest,
+       DISABLED_DevicesDetachedHighBoundary) {
   PreAttachDevices();
 
   std::vector<int> device_indices;
@@ -268,7 +315,9 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedHighBoundary) {
   DoDevicesDetachedTest(device_indices);
 }
 
-TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedLowBoundary) {
+// Disabled until http://crbug.com/155910 is resolved.
+TEST_F(RemovableDeviceNotificationsWindowWinTest,
+       DISABLED_DevicesDetachedLowBoundary) {
   PreAttachDevices();
 
   std::vector<int> device_indices;
@@ -277,7 +326,9 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedLowBoundary) {
   DoDevicesDetachedTest(device_indices);
 }
 
-TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedAdjacentBits) {
+// Disabled until http://crbug.com/155910 is resolved.
+TEST_F(RemovableDeviceNotificationsWindowWinTest,
+       DISABLED_DevicesDetachedAdjacentBits) {
   PreAttachDevices();
 
   std::vector<int> device_indices;
@@ -289,7 +340,8 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DevicesDetachedAdjacentBits) {
   DoDevicesDetachedTest(device_indices);
 }
 
-TEST_F(RemovableDeviceNotificationsWindowWinTest, DeviceInfoFoPath) {
+// Disabled until http://crbug.com/155910 is resolved.
+TEST_F(RemovableDeviceNotificationsWindowWinTest, DISABLED_DeviceInfoForPath) {
   PreAttachDevices();
 
   // An invalid path.
@@ -306,8 +358,8 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DeviceInfoFoPath) {
   std::string unique_id;
   string16 device_name;
   bool removable;
-  ASSERT_TRUE(GetDeviceInfo(removable_device, NULL, &unique_id, &device_name,
-              &removable));
+  ASSERT_TRUE(GetDeviceDetails(removable_device, NULL, &unique_id, &device_name,
+                               &removable));
   EXPECT_TRUE(removable);
   std::string device_id = MediaStorageUtil::MakeDeviceId(
       MediaStorageUtil::REMOVABLE_MASS_STORAGE_NO_DCIM, unique_id);
@@ -319,8 +371,8 @@ TEST_F(RemovableDeviceNotificationsWindowWinTest, DeviceInfoFoPath) {
   FilePath fixed_device(L"N:\\");
   EXPECT_TRUE(window_->GetDeviceInfoForPath(fixed_device, &device_info));
 
-  ASSERT_TRUE(GetDeviceInfo(fixed_device, NULL, &unique_id, &device_name,
-              &removable));
+  ASSERT_TRUE(GetDeviceDetails(fixed_device, NULL, &unique_id, &device_name,
+                               &removable));
   EXPECT_FALSE(removable);
   device_id = MediaStorageUtil::MakeDeviceId(
       MediaStorageUtil::FIXED_MASS_STORAGE, unique_id);

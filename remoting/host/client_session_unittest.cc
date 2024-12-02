@@ -14,12 +14,12 @@
 
 namespace remoting {
 
-using protocol::MockClipboardStub;
 using protocol::MockConnectionToClient;
-using protocol::MockConnectionToClientEventHandler;
+using protocol::MockClientStub;
 using protocol::MockHostStub;
 using protocol::MockInputStub;
 using protocol::MockSession;
+using protocol::MockVideoStub;
 using protocol::SessionConfig;
 
 using testing::_;
@@ -32,7 +32,7 @@ using testing::ReturnRef;
 
 class ClientSessionTest : public testing::Test {
  public:
-  ClientSessionTest() {}
+  ClientSessionTest() : event_executor_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
     ui_task_runner_ = new AutoThreadTaskRunner(
@@ -40,57 +40,43 @@ class ClientSessionTest : public testing::Test {
         base::Bind(&ClientSessionTest::QuitMainMessageLoop,
                    base::Unretained(this)));
 
-    EXPECT_CALL(context_, ui_task_runner())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(ui_task_runner_.get()));
-    EXPECT_CALL(context_, capture_task_runner())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(ui_task_runner_.get()));
-    EXPECT_CALL(context_, encode_task_runner())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(ui_task_runner_.get()));
-    EXPECT_CALL(context_, network_task_runner())
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(ui_task_runner_.get()));
-
     client_jid_ = "user@domain/rest-of-jid";
 
-    event_executor_ = new MockEventExecutor();
-    capturer_ = new MockVideoFrameCapturer();
-    EXPECT_CALL(*capturer_, Start(_));
-    EXPECT_CALL(*capturer_, Stop());
-    EXPECT_CALL(*capturer_, InvalidateRegion(_)).Times(AnyNumber());
-    EXPECT_CALL(*capturer_, CaptureInvalidRegion(_)).Times(AnyNumber());
-
-    scoped_ptr<DesktopEnvironment> desktop_environment(new DesktopEnvironment(
-        scoped_ptr<AudioCapturer>(NULL),
-        scoped_ptr<EventExecutor>(event_executor_),
-        scoped_ptr<VideoFrameCapturer>(capturer_)));
+    desktop_environment_factory_.reset(new MockDesktopEnvironmentFactory());
+    EXPECT_CALL(*desktop_environment_factory_, CreatePtr(_))
+        .Times(AnyNumber())
+        .WillRepeatedly(Invoke(this,
+                               &ClientSessionTest::CreateDesktopEnvironment));
 
     // Set up a large default screen size that won't affect most tests.
     screen_size_.set(1000, 1000);
-    EXPECT_CALL(*capturer_, size_most_recent())
-        .WillRepeatedly(ReturnRef(screen_size_));
 
-    session_config_ = SessionConfig::GetDefault();
+    session_config_ = SessionConfig::ForTest();
 
+    // Mock protocol::Session APIs called directly by ClientSession.
     protocol::MockSession* session = new MockSession();
     EXPECT_CALL(*session, config()).WillRepeatedly(ReturnRef(session_config_));
     EXPECT_CALL(*session, jid()).WillRepeatedly(ReturnRef(client_jid_));
     EXPECT_CALL(*session, SetEventHandler(_));
-    EXPECT_CALL(*session, Close());
-    scoped_ptr<protocol::ConnectionToClient> connection(
-        new protocol::ConnectionToClient(session));
+
+    // Mock protocol::ConnectionToClient APIs called directly by ClientSession.
+    // HostStub is not touched by ClientSession, so we can safely pass NULL.
+    scoped_ptr<MockConnectionToClient> connection(
+        new MockConnectionToClient(session, NULL));
+    EXPECT_CALL(*connection, session()).WillRepeatedly(Return(session));
+    EXPECT_CALL(*connection, client_stub())
+        .WillRepeatedly(Return(&client_stub_));
+    EXPECT_CALL(*connection, video_stub()).WillRepeatedly(Return(&video_stub_));
+    EXPECT_CALL(*connection, Disconnect());
     connection_ = connection.get();
 
     client_session_ = new ClientSession(
         &session_event_handler_,
-        context_.audio_task_runner(),
-        context_.capture_task_runner(),
-        context_.encode_task_runner(),
-        context_.network_task_runner(),
-        connection.Pass(),
-        desktop_environment.Pass(),
+        ui_task_runner_, // Capture thread.
+        ui_task_runner_, // Encode thread.
+        ui_task_runner_, // Network thread.
+        connection.PassAs<protocol::ConnectionToClient>(),
+        desktop_environment_factory_.get(),
         base::TimeDelta());
   }
 
@@ -109,6 +95,22 @@ class ClientSessionTest : public testing::Test {
   }
 
  protected:
+  DesktopEnvironment* CreateDesktopEnvironment(ClientSession* client) {
+    MockVideoFrameCapturer* capturer = new MockVideoFrameCapturer();
+    EXPECT_CALL(*capturer, Start(_));
+    EXPECT_CALL(*capturer, Stop());
+    EXPECT_CALL(*capturer, InvalidateRegion(_)).Times(AnyNumber());
+    EXPECT_CALL(*capturer, CaptureInvalidRegion(_)).Times(AnyNumber());
+    EXPECT_CALL(*capturer, size_most_recent())
+        .WillRepeatedly(ReturnRef(screen_size_));
+
+    EXPECT_TRUE(!event_executor_);
+    event_executor_ = new MockEventExecutor();
+    return new DesktopEnvironment(scoped_ptr<AudioCapturer>(NULL),
+                                  scoped_ptr<EventExecutor>(event_executor_),
+                                  scoped_ptr<VideoFrameCapturer>(capturer));
+  }
+
   void DisconnectClientSession() {
     client_session_->Disconnect();
     // MockSession won't trigger OnConnectionClosed, so fake it.
@@ -124,20 +126,35 @@ class ClientSessionTest : public testing::Test {
     client_session_ = NULL;
   }
 
+  // Message loop passed to |client_session_| to perform all functions on.
   MessageLoop message_loop_;
   scoped_refptr<AutoThreadTaskRunner> ui_task_runner_;
-  MockChromotingHostContext context_;
-  SkISize screen_size_;
-  std::string client_jid_;
-  MockHostStub host_stub_;
-  MockEventExecutor* event_executor_;
-  MockVideoFrameCapturer* capturer_;
-  MockClientSessionEventHandler session_event_handler_;
+
+  // ClientSession instance under test.
   scoped_refptr<ClientSession> client_session_;
+
+  // ClientSession::EventHandler mock for use in tests.
+  MockClientSessionEventHandler session_event_handler_;
+
+  // Screen size that the fake VideoFrameCapturer should report.
+  SkISize screen_size_;
+
+  // Storage for values to be returned by the protocol::Session mock.
   SessionConfig session_config_;
+  std::string client_jid_;
+
+  // Stubs returned to |client_session_| components by |connection_|.
+  MockClientStub client_stub_;
+  MockVideoStub video_stub_;
+
+  // DesktopEnvironment owns |event_executor_|, but input injection tests need
+  // to express expectations on it.
+  MockEventExecutor* event_executor_;
 
   // ClientSession owns |connection_| but tests need it to inject fake events.
-  protocol::ConnectionToClient* connection_;
+  MockConnectionToClient* connection_;
+
+  scoped_ptr<MockDesktopEnvironmentFactory> desktop_environment_factory_;
 };
 
 MATCHER_P2(EqualsClipboardEvent, m, d, "") {

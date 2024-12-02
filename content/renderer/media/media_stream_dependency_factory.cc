@@ -8,9 +8,9 @@
 
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
-#include "content/renderer/media/media_stream_extra_data.h"
 #include "content/renderer/media/media_stream_source_extra_data.h"
 #include "content/renderer/media/peer_connection_handler_jsep.h"
+#include "content/renderer/media/rtc_media_constraints.h"
 #include "content/renderer/media/rtc_peer_connection_handler.h"
 #include "content/renderer/media/rtc_video_capturer.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
@@ -29,58 +29,137 @@
 #include "net/socket/nss_ssl_util.h"
 #endif
 
+namespace content {
+
 class P2PPortAllocatorFactory : public webrtc::PortAllocatorFactoryInterface {
  public:
   P2PPortAllocatorFactory(
-      content::P2PSocketDispatcher* socket_dispatcher,
+      P2PSocketDispatcher* socket_dispatcher,
       talk_base::NetworkManager* network_manager,
-      talk_base::PacketSocketFactory* socket_factory)
+      talk_base::PacketSocketFactory* socket_factory,
+      WebKit::WebFrame* web_frame)
       : socket_dispatcher_(socket_dispatcher),
         network_manager_(network_manager),
-        socket_factory_(socket_factory) {
+        socket_factory_(socket_factory),
+        web_frame_(web_frame) {
   }
 
   virtual cricket::PortAllocator* CreatePortAllocator(
       const std::vector<StunConfiguration>& stun_servers,
       const std::vector<TurnConfiguration>& turn_configurations) OVERRIDE {
-    WebKit::WebFrame* web_frame = WebKit::WebFrame::frameForCurrentContext();
-    if (!web_frame) {
-      LOG(ERROR) << "WebFrame is NULL.";
-      return NULL;
-    }
-    content::P2PPortAllocator::Config config;
+    CHECK(web_frame_);
+    P2PPortAllocator::Config config;
     if (stun_servers.size() > 0) {
       config.stun_server = stun_servers[0].server.hostname();
       config.stun_server_port = stun_servers[0].server.port();
     }
     if (turn_configurations.size() > 0) {
+      config.legacy_relay = false;
       config.relay_server = turn_configurations[0].server.hostname();
       config.relay_server_port = turn_configurations[0].server.port();
       config.relay_username = turn_configurations[0].username;
       config.relay_password = turn_configurations[0].password;
     }
 
-    return new content::P2PPortAllocator(web_frame,
-                                         socket_dispatcher_,
-                                         network_manager_,
-                                         socket_factory_,
-                                         config);
+    return new P2PPortAllocator(web_frame_,
+                                socket_dispatcher_,
+                                network_manager_,
+                                socket_factory_,
+                                config);
   }
 
  protected:
   virtual ~P2PPortAllocatorFactory() {}
 
  private:
-  scoped_refptr<content::P2PSocketDispatcher> socket_dispatcher_;
+  scoped_refptr<P2PSocketDispatcher> socket_dispatcher_;
   // |network_manager_| and |socket_factory_| are a weak references, owned by
   // MediaStreamDependencyFactory.
   talk_base::NetworkManager* network_manager_;
   talk_base::PacketSocketFactory* socket_factory_;
+  // Raw ptr to the WebFrame that created the P2PPortAllocatorFactory.
+  WebKit::WebFrame* web_frame_;
+};
+
+// SourceStateObserver is a help class used for observing the startup state
+// transition of webrtc media sources such as a camera or microphone.
+// An instance of the object deletes itself after use.
+// Usage:
+// 1. Create an instance of the object with the WebKit::WebMediaStreamDescriptor
+//    the observed sources belongs to a callback.
+// 2. Add the sources to the observer using AddSource.
+// 3. Call StartObserving()
+// 4. The callback will be triggered when all sources have transitioned from
+//    webrtc::MediaSourceInterface::kInitializing.
+class SourceStateObserver : public webrtc::ObserverInterface,
+                            public base::NonThreadSafe {
+ public:
+  SourceStateObserver(
+      WebKit::WebMediaStreamDescriptor* description,
+      const MediaStreamDependencyFactory::MediaSourcesCreatedCallback& callback)
+     : description_(description),
+       ready_callback_(callback),
+       live_(true) {
+  }
+
+  void AddSource(webrtc::MediaSourceInterface* source) {
+    DCHECK(CalledOnValidThread());
+    switch (source->state()) {
+      case webrtc::MediaSourceInterface::kInitializing:
+        sources_.push_back(source);
+        source->RegisterObserver(this);
+        break;
+      case webrtc::MediaSourceInterface::kLive:
+        // The source is already live so we don't need to wait for it.
+        break;
+      case webrtc::MediaSourceInterface::kEnded:
+        // The source have already failed.
+        live_ = false;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+
+  void StartObservering() {
+    DCHECK(CalledOnValidThread());
+    CheckIfSourcesAreLive();
+  }
+
+  virtual void OnChanged() {
+    DCHECK(CalledOnValidThread());
+    CheckIfSourcesAreLive();
+  }
+
+ private:
+  void CheckIfSourcesAreLive() {
+    ObservedSources::iterator it = sources_.begin();
+    while (it != sources_.end()) {
+      if ((*it)->state() != webrtc::MediaSourceInterface::kInitializing) {
+        live_ &=  (*it)->state() == webrtc::MediaSourceInterface::kLive;
+        (*it)->UnregisterObserver(this);
+        it = sources_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    if (sources_.empty()) {
+      ready_callback_.Run(description_, live_);
+      delete this;
+    }
+  }
+
+  WebKit::WebMediaStreamDescriptor* description_;
+  MediaStreamDependencyFactory::MediaSourcesCreatedCallback ready_callback_;
+  bool live_;
+  typedef std::vector<scoped_refptr<webrtc::MediaSourceInterface> >
+      ObservedSources;
+  ObservedSources sources_;
 };
 
 MediaStreamDependencyFactory::MediaStreamDependencyFactory(
     VideoCaptureImplManager* vc_manager,
-    content::P2PSocketDispatcher* p2p_socket_dispatcher)
+    P2PSocketDispatcher* p2p_socket_dispatcher)
     : network_manager_(NULL),
       vc_manager_(vc_manager),
       p2p_socket_dispatcher_(p2p_socket_dispatcher),
@@ -121,16 +200,50 @@ MediaStreamDependencyFactory::CreateRTCPeerConnectionHandler(
   return new RTCPeerConnectionHandler(client, this);
 }
 
-bool MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
+void MediaStreamDependencyFactory::CreateNativeMediaSources(
+    const WebKit::WebMediaConstraints& audio_constraints,
+    const WebKit::WebMediaConstraints& video_constraints,
+    WebKit::WebMediaStreamDescriptor* description,
+    const MediaSourcesCreatedCallback& sources_created) {
+  if (!EnsurePeerConnectionFactory()) {
+    sources_created.Run(description, false);
+    return;
+  }
+
+  // |source_observer| clean up itself when it has completed
+  // source_observer->StartObservering.
+  SourceStateObserver* source_observer =
+      new SourceStateObserver(description, sources_created);
+
+  // TODO(perkj): Implement local audio sources.
+
+  // Create local video sources.
+  RTCMediaConstraints native_video_constraints(video_constraints);
+  WebKit::WebVector<WebKit::WebMediaStreamComponent> video_components;
+  description->videoSources(video_components);
+  for (size_t i = 0; i < video_components.size(); ++i) {
+    const WebKit::WebMediaStreamSource& source = video_components[i].source();
+    MediaStreamSourceExtraData* source_data =
+        static_cast<MediaStreamSourceExtraData*>(source.extraData());
+    if (!source_data) {
+      // TODO(perkj): Implement support for sources from remote MediaStreams.
+      NOTIMPLEMENTED();
+      continue;
+    }
+    const bool is_screencast = (source_data->device_info().stream_type ==
+        content::MEDIA_TAB_VIDEO_CAPTURE);
+    source_data->SetVideoSource(
+        CreateVideoSource(source_data->device_info().session_id,
+                          is_screencast,
+                          &native_video_constraints));
+    source_observer->AddSource(source_data->video_source());
+  }
+  source_observer->StartObservering();
+}
+
+void MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
     WebKit::WebMediaStreamDescriptor* description) {
-  // Creating the peer connection factory can fail if for example the audio
-  // (input or output) or video device cannot be opened. Handling such cases
-  // better is a higher level design discussion which involves the media
-  // manager, webrtc and libjingle. We cannot create any native
-  // track objects however, so we'll just have to skip that. Furthermore,
-  // creating a peer connection later on will fail if we don't have a factory.
-  if (!EnsurePeerConnectionFactory())
-    return false;
+  DCHECK(PeerConnectionFactoryCreated());
 
   std::string label = UTF16ToUTF8(description->label());
   scoped_refptr<webrtc::LocalMediaStreamInterface> native_stream =
@@ -168,44 +281,46 @@ bool MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
     const WebKit::WebMediaStreamSource& source = video_components[i].source();
     MediaStreamSourceExtraData* source_data =
         static_cast<MediaStreamSourceExtraData*>(source.extraData());
-    if (!source_data) {
+    if (!source_data || !source_data->video_source()) {
       // TODO(perkj): Implement support for sources from remote MediaStreams.
       NOTIMPLEMENTED();
       continue;
     }
-    scoped_refptr<webrtc::LocalVideoTrackInterface> video_track(
+
+    scoped_refptr<webrtc::VideoTrackInterface> video_track(
         CreateLocalVideoTrack(UTF16ToUTF8(source.id()),
-                              source_data->device_info().session_id));
+                              source_data->video_source()));
+
     native_stream->AddTrack(video_track);
     video_track->set_enabled(video_components[i].isEnabled());
   }
 
-  description->setExtraData(new MediaStreamExtraData(native_stream));
-  return true;
+  MediaStreamExtraData* extra_data = new MediaStreamExtraData(native_stream);
+  description->setExtraData(extra_data);
 }
 
-bool MediaStreamDependencyFactory::CreatePeerConnectionFactory(
-    talk_base::Thread* worker_thread,
-    talk_base::Thread* signaling_thread,
-    content::P2PSocketDispatcher* socket_dispatcher,
-    talk_base::NetworkManager* network_manager,
-    talk_base::PacketSocketFactory* socket_factory) {
-  if (!pc_factory_.get()) {
-    scoped_refptr<P2PPortAllocatorFactory> pa_factory =
-        new talk_base::RefCountedObject<P2PPortAllocatorFactory>(
-            socket_dispatcher,
-            network_manager,
-            socket_factory);
+void MediaStreamDependencyFactory::CreateNativeLocalMediaStream(
+    WebKit::WebMediaStreamDescriptor* description,
+    const MediaStreamExtraData::StreamStopCallback& stream_stop) {
+  CreateNativeLocalMediaStream(description);
 
+  MediaStreamExtraData* extra_data =
+     static_cast<MediaStreamExtraData*>(description->extraData());
+  extra_data->SetLocalStreamStopCallback(stream_stop);
+}
+
+bool MediaStreamDependencyFactory::CreatePeerConnectionFactory() {
+  if (!pc_factory_.get()) {
     DCHECK(!audio_device_);
     audio_device_ = new WebRtcAudioDeviceImpl();
     scoped_refptr<webrtc::PeerConnectionFactoryInterface> factory(
-        webrtc::CreatePeerConnectionFactory(worker_thread,
-                                            signaling_thread,
-                                            pa_factory.release(),
+        webrtc::CreatePeerConnectionFactory(worker_thread_,
+                                            signaling_thread_,
                                             audio_device_));
     if (factory.get())
       pc_factory_ = factory.release();
+    else
+      audio_device_ = NULL;
   }
   return pc_factory_.get() != NULL;
 }
@@ -218,16 +333,31 @@ scoped_refptr<webrtc::PeerConnectionInterface>
 MediaStreamDependencyFactory::CreatePeerConnection(
     const std::string& config,
     webrtc::PeerConnectionObserver* observer) {
-  return pc_factory_->CreatePeerConnection(config, observer).get();
+  scoped_refptr<P2PPortAllocatorFactory> pa_factory =
+      new talk_base::RefCountedObject<P2PPortAllocatorFactory>(
+          p2p_socket_dispatcher_.get(),
+          network_manager_,
+          socket_factory_.get(),
+          WebKit::WebFrame::frameForCurrentContext());
+  return pc_factory_->CreatePeerConnection(config, pa_factory, observer).get();
 }
 
 scoped_refptr<webrtc::PeerConnectionInterface>
 MediaStreamDependencyFactory::CreatePeerConnection(
     const webrtc::JsepInterface::IceServers& ice_servers,
     const webrtc::MediaConstraintsInterface* constraints,
+    WebKit::WebFrame* web_frame,
     webrtc::PeerConnectionObserver* observer) {
+  CHECK(web_frame);
+  CHECK(observer);
+  scoped_refptr<P2PPortAllocatorFactory> pa_factory =
+        new talk_base::RefCountedObject<P2PPortAllocatorFactory>(
+            p2p_socket_dispatcher_.get(),
+            network_manager_,
+            socket_factory_.get(),
+            web_frame);
   return pc_factory_->CreatePeerConnection(
-      ice_servers, constraints, observer).get();
+      ice_servers, constraints, pa_factory, observer).get();
 }
 
 scoped_refptr<webrtc::LocalMediaStreamInterface>
@@ -236,15 +366,25 @@ MediaStreamDependencyFactory::CreateLocalMediaStream(
   return pc_factory_->CreateLocalMediaStream(label).get();
 }
 
-scoped_refptr<webrtc::LocalVideoTrackInterface>
+scoped_refptr<webrtc::VideoSourceInterface>
+MediaStreamDependencyFactory::CreateVideoSource(
+    int video_session_id,
+    bool is_screencast,
+    const webrtc::MediaConstraintsInterface* constraints) {
+  RtcVideoCapturer* capturer = new RtcVideoCapturer(
+      video_session_id, vc_manager_.get(), is_screencast);
+
+  // The video source takes ownership of |capturer|.
+  scoped_refptr<webrtc::VideoSourceInterface> source =
+      pc_factory_->CreateVideoSource(capturer, constraints).get();
+  return source;
+}
+
+scoped_refptr<webrtc::VideoTrackInterface>
 MediaStreamDependencyFactory::CreateLocalVideoTrack(
     const std::string& label,
-    int video_session_id) {
-  RtcVideoCapturer* capturer = new RtcVideoCapturer(video_session_id,
-                                                    vc_manager_.get());
-
-  // The video track takes ownership of |capturer|.
-  return pc_factory_->CreateLocalVideoTrack(label, capturer).get();
+    webrtc::VideoSourceInterface* source) {
+  return pc_factory_->CreateVideoTrack(label, source).get();
 }
 
 scoped_refptr<webrtc::LocalAudioTrackInterface>
@@ -272,6 +412,11 @@ webrtc::IceCandidateInterface* MediaStreamDependencyFactory::CreateIceCandidate(
   return webrtc::CreateIceCandidate(sdp_mid, sdp_mline_index, sdp);
 }
 
+WebRtcAudioDeviceImpl*
+MediaStreamDependencyFactory::GetWebRtcAudioDevice() {
+  return audio_device_;
+}
+
 void MediaStreamDependencyFactory::SetAudioDeviceSessionId(int session_id) {
   audio_device_->SetSessionId(session_id);
 }
@@ -288,7 +433,7 @@ void MediaStreamDependencyFactory::InitializeWorkerThread(
 void MediaStreamDependencyFactory::CreateIpcNetworkManagerOnWorkerThread(
     base::WaitableEvent* event) {
   DCHECK_EQ(MessageLoop::current(), chrome_worker_thread_.message_loop());
-  network_manager_ = new content::IpcNetworkManager(p2p_socket_dispatcher_);
+  network_manager_ = new IpcNetworkManager(p2p_socket_dispatcher_);
   event->Signal();
 }
 
@@ -300,7 +445,7 @@ void MediaStreamDependencyFactory::DeleteIpcNetworkManager() {
 
 bool MediaStreamDependencyFactory::EnsurePeerConnectionFactory() {
   DCHECK(CalledOnValidThread());
-  if(PeerConnectionFactoryCreated())
+  if (PeerConnectionFactoryCreated())
     return true;
 
   if (!signaling_thread_) {
@@ -339,7 +484,7 @@ bool MediaStreamDependencyFactory::EnsurePeerConnectionFactory() {
 
   if (!socket_factory_.get()) {
     socket_factory_.reset(
-        new content::IpcPacketSocketFactory(p2p_socket_dispatcher_));
+        new IpcPacketSocketFactory(p2p_socket_dispatcher_));
   }
 
 #if !defined(USE_OPENSSL)
@@ -347,12 +492,7 @@ bool MediaStreamDependencyFactory::EnsurePeerConnectionFactory() {
   net::EnsureNSSSSLInit();
 #endif
 
-  if (!CreatePeerConnectionFactory(
-      worker_thread_,
-      signaling_thread_,
-      p2p_socket_dispatcher_,
-      network_manager_,
-      socket_factory_.get())) {
+  if (!CreatePeerConnectionFactory()) {
     LOG(ERROR) << "Could not create PeerConnection factory";
     return false;
   }
@@ -377,3 +517,5 @@ void MediaStreamDependencyFactory::CleanupPeerConnectionFactory() {
     }
   }
 }
+
+}  // namespace content

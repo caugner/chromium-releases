@@ -261,7 +261,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
     output_queue_.pop_front();
 
     int fds[FileDescriptorSet::kMaxDescriptorsPerMessage];
-    const int num_fds = msg->file_descriptor_set()->size();
+    const size_t num_fds = msg->file_descriptor_set()->size();
     DCHECK(num_fds <= FileDescriptorSet::kMaxDescriptorsPerMessage);
     msg->file_descriptor_set()->GetDescriptors(fds);
 
@@ -302,7 +302,7 @@ Channel::ChannelImpl::ReadState Channel::ChannelImpl::ReadData(
     return READ_PENDING;
   while (!read_queue_.empty() && *bytes_read < buffer_len) {
     linked_ptr<std::vector<char> > vec(read_queue_.front());
-    int bytes_to_read = buffer_len - *bytes_read;
+    size_t bytes_to_read = buffer_len - *bytes_read;
     if (vec->size() <= bytes_to_read) {
       // We can read and discard the entire vector.
       std::copy(vec->begin(), vec->end(), buffer + *bytes_read);
@@ -381,17 +381,6 @@ base::ProcessId Channel::peer_pid() const {
 
 bool Channel::Send(Message* message) {
   return channel_impl_->Send(message);
-}
-
-// static
-std::string Channel::GenerateVerifiedChannelID(const std::string& prefix) {
-  // A random name is sufficient validation on posix systems, so we don't need
-  // an additional shared secret.
-  std::string id = prefix;
-  if (!id.empty())
-    id.append(".");
-
-  return id.append(GenerateUniqueRandomChannelID());
 }
 
 }  // namespace IPC

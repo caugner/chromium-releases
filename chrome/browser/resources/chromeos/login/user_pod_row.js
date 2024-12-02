@@ -426,6 +426,9 @@ cr.define('login', function() {
     // Activated pod, i.e. the pod of current login attempt.
     activatedPod_: undefined,
 
+    // Pod that was most recently focused, if any.
+    lastFocusedPod_: undefined,
+
     // When moving through users quickly at login screen, set a timeout to
     // prevent loading intermediate wallpapers.
     loadWallpaperTimeout_: null,
@@ -452,14 +455,6 @@ cr.define('login', function() {
      */
     get pods() {
       return this.children;
-    },
-
-    /**
-     * Return true if user pod row has only single user pod in it.
-     * @type {boolean}
-     */
-    get isSinglePod() {
-      return this.children.length == 1;
     },
 
     hideTitles: function() {
@@ -604,6 +599,7 @@ cr.define('login', function() {
       this.innerHTML = '';
       this.focusedPod_ = undefined;
       this.activatedPod_ = undefined;
+      this.lastFocusedPod_ = undefined;
 
       // Populate the pod row.
       for (var i = 0; i < users.length; ++i) {
@@ -616,10 +612,6 @@ cr.define('login', function() {
       setTimeout(function() {
         $('pod-row').classList.remove('images-loading');
       }, POD_ROW_IMAGES_LOAD_TIMEOUT_MS);
-
-      // loadPods is called after user list update (for ex. after deleting user)
-      // so make sure that tooltips are updated.
-      $('pod-row').updateTitles();
 
       this.focusPod(this.preselectedPod);
     },
@@ -679,16 +671,27 @@ cr.define('login', function() {
           this.loadWallpaper_();
         }
         this.firstShown_ = false;
-      } else {
-        chrome.send('userDeselected');
+        this.lastFocusedPod_ = podToFocus;
       }
       this.insideFocusPod_ = false;
       this.keyboardActivated_ = false;
     },
 
+    /**
+     * Loads wallpaper for the active user pod, if any.
+     * @private
+     */
     loadWallpaper_: function() {
       if (this.focusedPod_)
-        chrome.send('userSelectedDelayed', [this.focusedPod_.user.username]);
+        chrome.send('loadWallpaper', [this.focusedPod_.user.username]);
+    },
+
+    /**
+     * Resets wallpaper to the last active user's wallpaper, if any.
+     */
+    loadLastWallpaper: function() {
+      if (this.lastFocusedPod_)
+        chrome.send('loadWallpaper', [this.lastFocusedPod_.user.username]);
     },
 
     /**
@@ -744,6 +747,7 @@ cr.define('login', function() {
       // Clear any error messages that might still be around.
       Oobe.clearErrors();
       this.disabled = true;
+      this.lastFocusedPod_ = this.getPodWithUsername_(email);
       Oobe.showSigninUI(email);
     },
 
@@ -779,16 +783,10 @@ cr.define('login', function() {
     handleClick_: function(e) {
       if (this.disabled)
         return;
-      // Clears focus if not clicked on a pod and if there's more than one pod.
+      // Clears focus if not clicked on a pod.
       if (e.target.parentNode != this &&
-          e.target.parentNode.parentNode != this &&
-          !this.isSinglePod) {
+          e.target.parentNode.parentNode != this) {
         this.focusPod();
-      }
-
-      // Return focus back to single pod.
-      if (this.isSinglePod) {
-        this.focusPod(this.focusedPod_, true /* force */);
       }
     },
 
@@ -816,11 +814,7 @@ cr.define('login', function() {
       } else {
         // Clears pod focus when we reach here. It means new focus is neither
         // on a pod nor on a button/input for a pod.
-        // Do not "defocus" user pod when it is a single pod.
-        // That means that 'focused' class will not be removed and
-        // input field/button will always be visible.
-        if (!this.isSinglePod)
-          this.focusPod();
+        this.focusPod();
       }
     },
 
@@ -862,8 +856,7 @@ cr.define('login', function() {
           }
           break;
         case 'U+001B':  // Esc
-          if (!this.isSinglePod)
-            this.focusPod();
+          this.focusPod();
           break;
       }
     },

@@ -9,11 +9,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "content/public/browser/notification_observer.h"
 
 class PrefService;
-class PrefSetObserver;
 class Profile;
 
 namespace base {
@@ -91,9 +91,9 @@ class ProtectedPrefsWatcher : public content::NotificationObserver {
   std::string GetSignatureData(PrefService* prefs) const;
 
   // Cached set of extension IDs. They are not changed as frequently
-  extensions::ExtensionPrefs::ExtensionIds cached_extension_ids_;
+  extensions::ExtensionIdList cached_extension_ids_;
 
-  scoped_ptr<PrefSetObserver> pref_observer_;
+  PrefChangeRegistrar pref_observer_;
 
   // True if the backup was valid at the profile load time.
   bool is_backup_valid_;

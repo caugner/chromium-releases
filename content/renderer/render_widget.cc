@@ -35,8 +35,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/ui_base_switches.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/surface/transport_dib.h"
@@ -70,7 +70,8 @@ using WebKit::WebTextDirection;
 using WebKit::WebTouchEvent;
 using WebKit::WebVector;
 using WebKit::WebWidget;
-using content::RenderThread;
+
+namespace content {
 
 static const float kStandardDPI = 160;
 
@@ -110,7 +111,8 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
       screen_info_(screen_info),
       device_scale_factor_(1),
       throttle_input_events_(true),
-      next_smooth_scroll_gesture_id_(0) {
+      next_smooth_scroll_gesture_id_(0),
+      is_threaded_compositing_enabled_(false) {
   if (!swapped_out)
     RenderProcess::current()->AddRefProcess();
   DCHECK(RenderThread::Get());
@@ -125,6 +127,9 @@ RenderWidget::RenderWidget(WebKit::WebPopupType popup_type,
     device_scale_factor_ = static_cast<int>(device_scale_factor_);
   device_scale_factor_ = std::max(1.0f, device_scale_factor_);
 #endif
+  is_threaded_compositing_enabled_ =
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableThreadedCompositing);
 }
 
 RenderWidget::~RenderWidget() {
@@ -205,10 +210,11 @@ void RenderWidget::CompleteInit(gfx::NativeViewId parent_hwnd) {
   host_window_ = parent_hwnd;
   host_window_set_ = true;
 
-#if WEBWIDGET_HAS_SETCOMPOSITORSURFACEREADY
-  if (webwidget_)
-      webwidget_->setCompositorSurfaceReady();
-#endif
+  if (webwidget_) {
+    webwidget_->setCompositorSurfaceReady();
+    if (is_threaded_compositing_enabled_)
+      webwidget_->enterForceCompositingMode(true);
+  }
   DoDeferredUpdate();
 
   Send(new ViewHostMsg_RenderViewReady(routing_id_));
@@ -263,7 +269,7 @@ bool RenderWidget::Send(IPC::Message* message) {
   // Don't send any messages after the browser has told us to close, and filter
   // most outgoing messages while swapped out.
   if ((is_swapped_out_ &&
-       !content::SwappedOutMessages::CanSendWhileSwappedOut(message)) ||
+       !SwappedOutMessages::CanSendWhileSwappedOut(message)) ||
       closing_) {
     delete message;
     return false;
@@ -372,11 +378,11 @@ void RenderWidget::OnChangeResizeRect(const gfx::Rect& resizer_rect) {
   if (resizer_rect_ != resizer_rect) {
     gfx::Rect view_rect(size_);
 
-    gfx::Rect old_damage_rect = view_rect.Intersect(resizer_rect_);
+    gfx::Rect old_damage_rect = gfx::IntersectRects(view_rect, resizer_rect_);
     if (!old_damage_rect.IsEmpty())
       paint_aggregator_.InvalidateRect(old_damage_rect);
 
-    gfx::Rect new_damage_rect = view_rect.Intersect(resizer_rect);
+    gfx::Rect new_damage_rect = gfx::IntersectRects(view_rect, resizer_rect);
     if (!new_damage_rect.IsEmpty())
       paint_aggregator_.InvalidateRect(new_damage_rect);
 
@@ -463,6 +469,10 @@ bool RenderWidget::SupportsAsynchronousSwapBuffers() {
   return false;
 }
 
+bool RenderWidget::ForceCompositingModeEnabled() {
+  return false;
+}
+
 void RenderWidget::OnSwapBuffersAborted() {
   TRACE_EVENT0("renderer", "RenderWidget::OnSwapBuffersAborted");
   while (!updates_pending_swap_.empty()) {
@@ -530,6 +540,15 @@ void RenderWidget::OnSwapBuffersComplete() {
   // early out.
   if (!is_accelerated_compositing_active_ && invalidation_task_posted_) {
     TRACE_EVENT0("renderer", "EarlyOut_AcceleratedCompositingOff");
+    return;
+  }
+
+  // Do not call DoDeferredUpdate unless there's animation work to be done or
+  // a real invalidation. This prevents rendering in response to a swapbuffers
+  // callback coming back after we've navigated away from the page that
+  // generated it.
+  if (!animation_update_pending_ && !paint_aggregator_.HasPendingUpdate()) {
+    TRACE_EVENT0("renderer", "EarlyOut_NoPendingUpdate");
     return;
   }
 
@@ -604,6 +623,13 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
   } else {
     Send(response);
   }
+
+#if defined(OS_ANDROID)
+  // Allow the IME to be shown when the focus changes as a consequence
+  // of a processed touch end event.
+  if (input_event->type == WebInputEvent::TouchEnd && processed)
+    UpdateTextInputState(SHOW_IME_IF_NEEDED);
+#endif
 
   handling_input_event_ = false;
 
@@ -873,7 +899,7 @@ void RenderWidget::DoDeferredUpdate() {
   // The following two can result in further layout and possibly
   // enable GPU acceleration so they need to be called before any painting
   // is done.
-  UpdateTextInputState();
+  UpdateTextInputState(DO_NOT_SHOW_IME);
   UpdateSelectionBounds();
 
   // Suppress painting if nothing is dirty.  This has to be done after updating
@@ -882,6 +908,12 @@ void RenderWidget::DoDeferredUpdate() {
     TRACE_EVENT0("renderer", "EarlyOut_NoPendingUpdate");
     webwidget_->instrumentCancelFrame();
     return;
+  }
+
+  if (!is_accelerated_compositing_active_ &&
+      !is_threaded_compositing_enabled_ &&
+      ForceCompositingModeEnabled()) {
+    webwidget_->enterForceCompositingMode(true);
   }
 
   if (!last_do_deferred_update_time_.is_null()) {
@@ -918,7 +950,7 @@ void RenderWidget::DoDeferredUpdate() {
   paint_aggregator_.PopPendingUpdate(&update);
 
   gfx::Rect scroll_damage = update.GetScrollDamage();
-  gfx::Rect bounds = update.GetPaintBounds().Union(scroll_damage);
+  gfx::Rect bounds = gfx::UnionRects(update.GetPaintBounds(), scroll_damage);
 
   // Notify derived classes that we're about to initiate a paint.
   WillInitiatePaint();
@@ -957,14 +989,15 @@ void RenderWidget::DoDeferredUpdate() {
                                        &optimized_copy_rect,
                                        &dib_scale_factor)) {
     // Only update the part of the plugin that actually changed.
-    optimized_copy_rect = optimized_copy_rect.Intersect(bounds);
+    optimized_copy_rect.Intersect(bounds);
     pending_update_params_->bitmap = dib->id();
     pending_update_params_->bitmap_rect = optimized_copy_location;
     pending_update_params_->copy_rects.push_back(optimized_copy_rect);
     pending_update_params_->scale_factor = dib_scale_factor;
   } else if (!is_accelerated_compositing_active_) {
     // Compute a buffer for painting and cache it.
-    gfx::Rect pixel_bounds = bounds.Scale(device_scale_factor_);
+    gfx::Rect pixel_bounds = gfx::ToFlooredRectDeprecated(
+        gfx::ScaleRect(bounds, device_scale_factor_));
     scoped_ptr<skia::PlatformCanvas> canvas(
         RenderProcess::current()->GetDrawingCanvas(&current_paint_buf_,
                                                    pixel_bounds));
@@ -1040,9 +1073,11 @@ void RenderWidget::DoDeferredUpdate() {
 // WebWidgetClient
 
 void RenderWidget::didInvalidateRect(const WebRect& rect) {
+  TRACE_EVENT2("renderer", "RenderWidget::didInvalidateRect",
+               "width", rect.width, "height", rect.height);
   // The invalidated rect might be outside the bounds of the view.
   gfx::Rect view_rect(size_);
-  gfx::Rect damaged_rect = view_rect.Intersect(rect);
+  gfx::Rect damaged_rect = gfx::IntersectRects(view_rect, rect);
   if (damaged_rect.IsEmpty())
     return;
 
@@ -1082,7 +1117,7 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
 
   // The scrolled rect might be outside the bounds of the view.
   gfx::Rect view_rect(size_);
-  gfx::Rect damaged_rect = view_rect.Intersect(clip_rect);
+  gfx::Rect damaged_rect = gfx::IntersectRects(view_rect, clip_rect);
   if (damaged_rect.IsEmpty())
     return;
 
@@ -1153,6 +1188,13 @@ void RenderWidget::didDeactivateCompositor() {
 
   if (using_asynchronous_swapbuffers_)
     using_asynchronous_swapbuffers_ = false;
+
+  // In single-threaded mode, we exit force compositing mode and re-enter in
+  // DoDeferredUpdate() if appropriate. In threaded compositing mode,
+  // DoDeferredUpdate() is bypassed and WebKit is responsible for exiting and
+  // entering force compositing mode at the appropriate times.
+  if (!is_threaded_compositing_enabled_)
+    webwidget_->enterForceCompositingMode(false);
 }
 
 void RenderWidget::willBeginCompositorFrame() {
@@ -1163,7 +1205,7 @@ void RenderWidget::willBeginCompositorFrame() {
   // The following two can result in further layout and possibly
   // enable GPU acceleration so they need to be called before any painting
   // is done.
-  UpdateTextInputState();
+  UpdateTextInputState(DO_NOT_SHOW_IME);
   UpdateSelectionBounds();
 
   WillInitiatePaint();
@@ -1213,6 +1255,7 @@ void RenderWidget::didCompleteSwapBuffers() {
 }
 
 void RenderWidget::scheduleComposite() {
+  TRACE_EVENT0("gpu", "RenderWidget::scheduleComposite");
   if (WebWidgetHandlesCompositorScheduling()) {
     webwidget_->composite(false);
   } else {
@@ -1314,9 +1357,14 @@ WebRect RenderWidget::windowRect() {
   if (pending_window_rect_count_)
     return pending_window_rect_;
 
+#if defined(OS_ANDROID)
+  // Short circuit of the sync RPC call.
+  return gfx::Rect(size_);
+#else
   gfx::Rect rect;
   Send(new ViewHostMsg_GetWindowRect(routing_id_, host_window_, &rect));
   return rect;
+#endif
 }
 
 void RenderWidget::setToolTipText(const WebKit::WebString& text,
@@ -1348,9 +1396,14 @@ WebRect RenderWidget::rootWindowRect() {
     return pending_window_rect_;
   }
 
+#if defined(OS_ANDROID)
+  // Short circuit of the sync RPC call.
+  return gfx::Rect(size_);
+#else
   gfx::Rect rect;
   Send(new ViewHostMsg_GetRootWindowRect(routing_id_, host_window_, &rect));
   return rect;
+#endif
 }
 
 WebRect RenderWidget::windowResizerRect() {
@@ -1466,8 +1519,10 @@ void RenderWidget::OnMsgPaintAtSize(const TransportDIB::Handle& dib_handle,
   scoped_ptr<TransportDIB> paint_at_size_buffer(
       TransportDIB::CreateWithHandle(dib_handle));
 
-  gfx::Size page_size_in_pixel = page_size.Scale(device_scale_factor_);
-  gfx::Size desired_size_in_pixel = desired_size.Scale(device_scale_factor_);
+  gfx::Size page_size_in_pixel = gfx::ToFlooredSize(
+      page_size.Scale(device_scale_factor_));
+  gfx::Size desired_size_in_pixel = gfx::ToFlooredSize(
+      desired_size.Scale(device_scale_factor_));
   gfx::Size canvas_size = page_size_in_pixel;
   float x_scale = static_cast<float>(desired_size_in_pixel.width()) /
                   static_cast<float>(canvas_size.width());
@@ -1637,8 +1692,9 @@ void RenderWidget::set_next_paint_is_repaint_ack() {
   next_paint_flags_ |= ViewHostMsg_UpdateRect_Flags::IS_REPAINT_ACK;
 }
 
-void RenderWidget::UpdateTextInputState() {
-  if (!input_method_is_active_)
+void RenderWidget::UpdateTextInputState(ShowIme show_ime) {
+  bool show_ime_if_needed = (show_ime == SHOW_IME_IF_NEEDED);
+  if (!show_ime_if_needed && !input_method_is_active_)
     return;
   ui::TextInputType new_type = GetTextInputType();
   WebKit::WebTextInputInfo new_info;
@@ -1647,9 +1703,11 @@ void RenderWidget::UpdateTextInputState() {
 
   bool new_can_compose_inline = CanComposeInline();
 
-  // Only sends text input params if they are changed.
-  if (text_input_type_ != new_type || text_input_info_ != new_info
-      || can_compose_inline_ != new_can_compose_inline) {
+  // Only sends text input params if they are changed or if the ime should be
+  // shown.
+  if (show_ime_if_needed || (text_input_type_ != new_type
+      || text_input_info_ != new_info
+      || can_compose_inline_ != new_can_compose_inline)) {
     ViewHostMsg_TextInputState_Params p;
     p.type = new_type;
     p.value = new_info.value.utf8();
@@ -1658,6 +1716,7 @@ void RenderWidget::UpdateTextInputState() {
     p.composition_start = new_info.compositionStart;
     p.composition_end = new_info.compositionEnd;
     p.can_compose_inline = new_can_compose_inline;
+    p.show_ime_if_needed = show_ime_if_needed;
     Send(new ViewHostMsg_TextInputStateChanged(routing_id(), p));
 
     text_input_info_ = new_info;
@@ -1833,8 +1892,7 @@ void RenderWidget::GetRenderingStats(WebKit::WebRenderingStats& stats) const {
   stats.totalPaintTimeInSeconds += software_stats_.totalPaintTimeInSeconds;
 }
 
-bool RenderWidget::GetGpuRenderingStats(
-    content::GpuRenderingStats* stats) const {
+bool RenderWidget::GetGpuRenderingStats(GpuRenderingStats* stats) const {
   GpuChannelHost* gpu_channel = RenderThreadImpl::current()->GetGpuChannel();
   if (!gpu_channel)
     return false;
@@ -1844,11 +1902,20 @@ bool RenderWidget::GetGpuRenderingStats(
 
 void RenderWidget::BeginSmoothScroll(
     bool down,
-    bool scroll_far,
-    const SmoothScrollCompletionCallback& callback) {
+    const SmoothScrollCompletionCallback& callback,
+    int pixels_to_scroll,
+    int mouse_event_x,
+    int mouse_event_y) {
   DCHECK(!callback.is_null());
   int id = next_smooth_scroll_gesture_id_++;
-  Send(new ViewHostMsg_BeginSmoothScroll(routing_id_, id, down, scroll_far));
+
+  ViewHostMsg_BeginSmoothScroll_Params params;
+  params.scroll_down = down;
+  params.pixels_to_scroll = pixels_to_scroll;
+  params.mouse_event_x = mouse_event_x;
+  params.mouse_event_y = mouse_event_y;
+
+  Send(new ViewHostMsg_BeginSmoothScroll(routing_id_, id, params));
   pending_smooth_scroll_gestures_.insert(std::make_pair(id, callback));
 }
 
@@ -1859,3 +1926,5 @@ bool RenderWidget::WillHandleMouseEvent(const WebKit::WebMouseEvent& event) {
 bool RenderWidget::WebWidgetHandlesCompositorScheduling() const {
   return false;
 }
+
+}  // namespace content

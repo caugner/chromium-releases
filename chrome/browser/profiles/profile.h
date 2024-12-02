@@ -18,7 +18,6 @@
 
 class ChromeAppCacheService;
 class ChromeURLDataManager;
-class ExtensionProcessManager;
 class ExtensionService;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
@@ -29,7 +28,6 @@ class PrefService;
 class PromoCounter;
 class ProtocolHandlerRegistry;
 class TestingProfile;
-class VisitedLinkMaster;
 class WebDataService;
 
 namespace android {
@@ -53,11 +51,6 @@ namespace content {
 class WebUI;
 }
 
-namespace extensions {
-class EventRouter;
-class UserScriptMaster;
-}
-
 namespace fileapi {
 class FileSystemContext;
 }
@@ -72,6 +65,7 @@ class SSLConfigService;
 }
 
 namespace policy {
+class ManagedModePolicyProvider;
 class PolicyService;
 class UserCloudPolicyManager;
 }
@@ -115,6 +109,17 @@ class Profile : public content::BrowserContext {
   enum CreateMode {
     CREATE_MODE_SYNCHRONOUS,
     CREATE_MODE_ASYNCHRONOUS
+  };
+
+  enum ExitType {
+    // A normal shutdown. The user clicked exit/closed last window of the
+    // profile.
+    EXIT_NORMAL,
+
+    // The exit was the result of the system shutting down.
+    EXIT_SESSION_ENDED,
+
+    EXIT_CRASHED,
   };
 
   class Delegate {
@@ -182,34 +187,11 @@ class Profile : public content::BrowserContext {
   // Variant of GetTopSites that doesn't force creation.
   virtual history::TopSites* GetTopSitesWithoutCreating() = 0;
 
-  // Retrieves a pointer to the VisitedLinkMaster associated with this
-  // profile.  The VisitedLinkMaster is lazily created the first time
-  // that this method is called.
-  virtual VisitedLinkMaster* GetVisitedLinkMaster() = 0;
-
   // DEPRECATED. Instead, use ExtensionSystem::extension_service().
   // Retrieves a pointer to the ExtensionService associated with this
   // profile. The ExtensionService is created at startup.
   // TODO(yoz): remove this accessor (bug 104095).
   virtual ExtensionService* GetExtensionService() = 0;
-
-  // DEPRECATED. Instead, use ExtensionSystem::user_script_master().
-  // Retrieves a pointer to the extensions::UserScriptMaster associated with
-  // this profile.  The extensions::UserScriptMaster is lazily created the first
-  // time that this method is called.
-  // TODO(yoz): remove this accessor (bug 104095).
-  virtual extensions::UserScriptMaster* GetUserScriptMaster() = 0;
-
-  // DEPRECATED. Instead, use ExtensionSystem::process_manager().
-  // Retrieves a pointer to the ExtensionProcessManager associated with this
-  // profile.  The instance is created at startup.
-  // TODO(yoz): remove this accessor (bug 104095).
-  virtual ExtensionProcessManager* GetExtensionProcessManager() = 0;
-
-  // DEPRECATED. Instead, use ExtensionSystem::event_router().
-  // Accessor. The instance is created at startup.
-  // TODO(yoz): remove this accessor (bug 104095).
-  virtual extensions::EventRouter* GetExtensionEventRouter() = 0;
 
   // Accessor. The instance is created upon first access.
   virtual ExtensionSpecialStoragePolicy*
@@ -221,6 +203,9 @@ class Profile : public content::BrowserContext {
   // Returns the UserCloudPolicyManager (if any) that handles this profile's
   // connection to the cloud-based management service.
   virtual policy::UserCloudPolicyManager* GetUserCloudPolicyManager() = 0;
+
+  // Returns the ManagedModePolicyProvider for this profile, if it exists.
+  virtual policy::ManagedModePolicyProvider* GetManagedModePolicyProvider() = 0;
 
   // Returns the PolicyService that provides policies for this profile.
   virtual policy::PolicyService* GetPolicyService() = 0;
@@ -266,12 +251,6 @@ class Profile : public content::BrowserContext {
   // this profile. For the single profile case, this corresponds to the time
   // the user started chrome.
   virtual base::Time GetStartTime() const = 0;
-
-  // Marks the profile as cleanly shutdown.
-  //
-  // NOTE: this is invoked internally on a normal shutdown, but is public so
-  // that it can be invoked when the user logs out/powers down (WM_ENDSESSION).
-  virtual void MarkAsCleanShutdown() = 0;
 
   // Start up service that gathers data from a promo resource feed.
   virtual void InitPromoResources() = 0;
@@ -338,6 +317,19 @@ class Profile : public content::BrowserContext {
   bool restored_last_session() const {
     return restored_last_session_;
   }
+
+  // Sets the ExitType for the profile. This may be invoked multiple times
+  // during shutdown; only the first such change (the transition from
+  // EXIT_CRASHED to one of the other values) is written to prefs, any
+  // later calls are ignored.
+  //
+  // NOTE: this is invoked internally on a normal shutdown, but is public so
+  // that it can be invoked when the user logs out/powers down (WM_ENDSESSION),
+  // or to handle backgrounding/foregrounding on mobile.
+  virtual void SetExitType(ExitType exit_type) = 0;
+
+  // Returns how the last session was shutdown.
+  virtual ExitType GetLastSessionExitType() = 0;
 
   // Stop sending accessibility events until ResumeAccessibilityEvents().
   // Calls to Pause nest; no events will be sent until the number of

@@ -50,7 +50,7 @@ int64 SysInfo::AmountOfFreeDiskSpace(const FilePath& path) {
   return static_cast<int64>(stats.f_bavail) * stats.f_frsize;
 }
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 // static
 std::string SysInfo::OperatingSystemName() {
   struct utsname info;
@@ -60,7 +60,9 @@ std::string SysInfo::OperatingSystemName() {
   }
   return std::string(info.sysname);
 }
+#endif
 
+#if !defined(OS_MACOSX)
 // static
 std::string SysInfo::OperatingSystemVersion() {
   struct utsname info;
@@ -73,13 +75,19 @@ std::string SysInfo::OperatingSystemVersion() {
 #endif
 
 // static
-std::string SysInfo::CPUArchitecture() {
+std::string SysInfo::OperatingSystemArchitecture() {
   struct utsname info;
   if (uname(&info) < 0) {
     NOTREACHED();
     return "";
   }
-  return std::string(info.machine);
+  std::string arch(info.machine);
+  if (arch == "i386" || arch == "i486" || arch == "i586" || arch == "i686") {
+    arch = "x86";
+  } else if (arch == "amd64") {
+    arch = "x86_64";
+  }
+  return arch;
 }
 
 // static

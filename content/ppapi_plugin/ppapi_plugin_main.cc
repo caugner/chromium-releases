@@ -33,8 +33,10 @@ sandbox::TargetServices* g_target_services = NULL;
 void* g_target_services = 0;
 #endif
 
+namespace content {
+
 // Main function for starting the PPAPI plugin process.
-int PpapiPluginMain(const content::MainFunctionParams& parameters) {
+int PpapiPluginMain(const MainFunctionParams& parameters) {
   const CommandLine& command_line = parameters.command_line;
 
 #if defined(OS_WIN)
@@ -66,8 +68,8 @@ int PpapiPluginMain(const content::MainFunctionParams& parameters) {
     // http://crbug.com/155671
     //
     // ICU can accept "en-US" or "en_US", but POSIX wants "en_US".
+    // TODO(shess): "en_US.UTF-8" might be even better.
     std::replace(locale.begin(), locale.end(), '-', '_');
-    locale.append(".UTF-8");
     setlocale(LC_ALL, locale.c_str());
     setenv("LANG", locale.c_str(), 0);
 #endif
@@ -77,7 +79,7 @@ int PpapiPluginMain(const content::MainFunctionParams& parameters) {
   base::PlatformThread::SetName("CrPPAPIMain");
 
 #if defined(OS_LINUX)
-  content::InitializeSandbox();
+  InitializeSandbox();
 #endif
 
   ChildProcess ppapi_process;
@@ -87,3 +89,5 @@ int PpapiPluginMain(const content::MainFunctionParams& parameters) {
   main_message_loop.Run();
   return 0;
 }
+
+}  // namespace content

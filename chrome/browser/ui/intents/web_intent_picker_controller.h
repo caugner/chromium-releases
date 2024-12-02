@@ -13,13 +13,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/extensions/webstore_installer.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/intents/cws_intents_registry.h"
 #include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/intents/web_intents_reporting.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/download_id.h"
+#include "content/public/browser/web_contents_user_data.h"
 #include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/web_intent_reply_data.h"
 #include "webkit/glue/web_intent_service_data.h"
@@ -27,13 +26,18 @@
 class Browser;
 struct DefaultWebIntentService;
 class GURL;
-class TabContents;
+class Profile;
 class WebIntentPicker;
 class WebIntentPickerModel;
 
 namespace content {
 class WebContents;
 class WebIntentsDispatcher;
+}
+
+namespace web_intents {
+class NativeServiceFactory;
+class IconLoader;
 }
 
 namespace webkit_glue {
@@ -43,9 +47,9 @@ struct WebIntentServiceData;
 // Controls the creation of the WebIntentPicker UI and forwards the user's
 // intent handler choice back to the WebContents object.
 class WebIntentPickerController
-    : public content::NotificationObserver,
-      public WebIntentPickerDelegate,
-      public extensions::WebstoreInstaller::Delegate {
+    : public WebIntentPickerDelegate,
+      public extensions::WebstoreInstaller::Delegate,
+      public content::WebContentsUserData<WebIntentPickerController> {
  public:
 
   // The various states that the UI may be in. Public for testing.
@@ -66,7 +70,6 @@ class WebIntentPickerController
     kPickerEventAsyncDataComplete,  // Data from registry and CWS has arrived.
   };
 
-  explicit WebIntentPickerController(TabContents* tab_contents);
   virtual ~WebIntentPickerController();
 
   // Sets the intent data and return pathway handler object for which
@@ -78,30 +81,41 @@ class WebIntentPickerController
   void ShowDialog(const string16& action,
                   const string16& type);
 
+  // Called directly after SetIntentsDispatcher to handle the dispatch of the
+  // intent to the indicated service. The picker model may still be unloaded.
+  void InvokeServiceWithSelection(
+      const webkit_glue::WebIntentServiceData& service);
+
   // Called by the location bar to see whether the web intents picker button
   // should be shown.
-  bool ShowLocationBarPickerTool();
+  bool ShowLocationBarPickerButton();
+
+  // Record that the location bar button has been animated.
+  void SetLocationBarPickerButtonIndicated() {
+    location_bar_button_indicated_ = true;
+  }
+
+  // Check whether the location bar button has been animated.
+  bool location_bar_picker_button_indicated() const {
+    return location_bar_button_indicated_;
+  }
 
   // Called by the location bar to notify picker that the button was clicked.
   // Called in the controller of the tab which is displaying the service.
-  void LocationBarPickerToolClicked();
+  void LocationBarPickerButtonClicked();
 
   // Called to notify a controller for a page hosting a web intents service
   // that the source WebContents has been destroyed.
   void SourceWebContentsDestroyed(content::WebContents* source);
 
  protected:
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // WebIntentPickerDelegate implementation.
   virtual void OnServiceChosen(
       const GURL& url,
-      webkit_glue::WebIntentServiceData::Disposition disposition) OVERRIDE;
-  virtual void OnInlineDispositionWebContentsCreated(
-      content::WebContents* web_contents) OVERRIDE;
+      webkit_glue::WebIntentServiceData::Disposition disposition,
+      DefaultsUsage suppress_defaults) OVERRIDE;
+  virtual content::WebContents* CreateWebContentsForInlineDisposition(
+      Profile* profile, const GURL& url) OVERRIDE;
   virtual void OnExtensionInstallRequested(const std::string& id) OVERRIDE;
   virtual void OnExtensionLinkClicked(
       const std::string& id,
@@ -113,11 +127,22 @@ class WebIntentPickerController
   virtual void OnClosing() OVERRIDE;
 
   // extensions::WebstoreInstaller::Delegate implementation.
+  virtual void OnExtensionDownloadStarted(const std::string& id,
+                                          content::DownloadItem* item) OVERRIDE;
+  virtual void OnExtensionDownloadProgress(
+      const std::string& id,
+      content::DownloadItem* item) OVERRIDE;
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
-  virtual void OnExtensionInstallFailure(const std::string& id,
-                                         const std::string& error) OVERRIDE;
+  virtual void OnExtensionInstallFailure(
+      const std::string& id,
+      const std::string& error,
+      extensions::WebstoreInstaller::FailureReason reason) OVERRIDE;
 
  private:
+  explicit WebIntentPickerController(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<WebIntentPickerController>;
+
+  friend class WebIntentPickerBrowserTest;
   friend class WebIntentPickerControllerTest;
   friend class WebIntentPickerControllerBrowserTest;
   friend class WebIntentPickerControllerIncognitoBrowserTest;
@@ -183,17 +208,12 @@ class WebIntentPickerController
   void OnWebIntentServicesAvailableForExplicitIntent(
       const std::vector<webkit_glue::WebIntentServiceData>& services);
 
-  // Called when a favicon is returned from the FaviconService.
-  void OnFaviconDataAvailable(
-      FaviconService::Handle handle,
-      const history::FaviconImageResult& image_result);
-
   // Called when IntentExtensionInfo is returned from the CWSIntentsRegistry.
   void OnCWSIntentServicesAvailable(
       const CWSIntentsRegistry::IntentExtensionList& extensions);
 
   // Called when a suggested extension's icon is fetched.
-  void OnExtensionIconURLFetchComplete(const string16& extension_id,
+  void OnExtensionIconURLFetchComplete(const std::string& extension_id,
                                        const net::URLFetcher* source);
 
   // Called whenever intent data (both from registry and CWS) arrives.
@@ -211,11 +231,17 @@ class WebIntentPickerController
       const base::Closure& unavailable_callback);
 
   // Called when an extension's icon is successfully decoded and resized.
-  void OnExtensionIconAvailable(const string16& extension_id,
+  void OnExtensionIconAvailable(const std::string& extension_id,
                                 const gfx::Image& icon_image);
 
   // Called when an extension's icon failed to be decoded or resized.
-  void OnExtensionIconUnavailable(const string16& extension_id);
+  void OnExtensionIconUnavailable(const std::string& extension_id);
+
+  // Called to show a custom extension install dialog.
+  void OnShowExtensionInstallDialog(
+      content::WebContents* parent_web_contents,
+      ExtensionInstallPrompt::Delegate* delegate,
+      const ExtensionInstallPrompt::Prompt& prompt);
 
   // Signals that a picker event has occurred.
   void OnPickerEvent(WebIntentPickerEvent event);
@@ -242,16 +268,18 @@ class WebIntentPickerController
 
   // Delegate for ShowDialog and ReshowDialog. Starts all the data queries for
   // loading the picker model and showing the dialog.
-  void ShowDialog(bool suppress_defaults);
+  void ShowDialog(DefaultsUsage suppress_defaults);
+
+  // Cancel a pending download if any.
+  void CancelDownload();
 
   WebIntentPickerState dialog_state_;  // Current state of the dialog.
 
-  // A weak pointer to the tab contents that the picker is displayed on.
-  TabContents* tab_contents_;
+  // A weak pointer to the web contents that the picker is displayed on.
+  content::WebContents* web_contents_;
 
-  // A notification registrar, listening for notifications when the tab closes
-  // to close the picker ui.
-  content::NotificationRegistrar registrar_;
+  // A weak pointer to the profile for the web contents.
+  Profile* profile_;
 
   // A weak pointer to the picker this controller controls.
   WebIntentPicker* picker_;
@@ -300,12 +328,16 @@ class WebIntentPickerController
   // client page.
   content::WebIntentsDispatcher* intents_dispatcher_;
 
+  // Saves whether the use-another-service button has been
+  // animated on the location bar.
+  bool location_bar_button_indicated_;
+
   // Weak pointer to the tab servicing the intent. Remembered in order to
   // close it when a reply is sent.
   content::WebContents* service_tab_;
 
-  // Request consumer used when asynchronously loading favicons.
-  CancelableRequestConsumerTSimple<size_t> favicon_consumer_;
+  // Object managing the details of icon loading.
+  scoped_ptr<web_intents::IconLoader> icon_loader_;
 
   // Factory for weak pointers used in callbacks for async calls to load the
   // picker model.
@@ -323,6 +355,12 @@ class WebIntentPickerController
   // multiple UMA calls. Should be recalculated each time
   // |intents_dispatcher_| is set.
   web_intents::UMABucket uma_bucket_;
+
+  // Factory used to obtain instance of native services.
+  scoped_ptr<web_intents::NativeServiceFactory> native_services_;
+
+  // The ID of a pending extension download.
+  content::DownloadId download_id_;
 
   // Manager for a pending extension download and installation.
   scoped_refptr<extensions::WebstoreInstaller> webstore_installer_;

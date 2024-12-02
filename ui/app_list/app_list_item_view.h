@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/timer.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_item_model_observer.h"
 #include "ui/gfx/shadow_value.h"
@@ -19,6 +20,7 @@ class SkBitmap;
 
 namespace views {
 class ImageView;
+class Label;
 class MenuRunner;
 }
 
@@ -26,7 +28,6 @@ namespace app_list {
 
 class AppListItemModel;
 class AppsGridView;
-class DropShadowLabel;
 
 class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
                                         public views::ContextMenuController,
@@ -35,9 +36,7 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   // Internal class name.
   static const char kViewClassName[];
 
-  AppListItemView(AppsGridView* apps_grid_view,
-                  AppListItemModel* model,
-                  views::ButtonListener* listener);
+  AppListItemView(AppsGridView* apps_grid_view, AppListItemModel* model);
   virtual ~AppListItemView();
 
   void SetIconSize(const gfx::Size& size);
@@ -45,8 +44,21 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   AppListItemModel* model() const { return model_; }
 
  private:
+  enum UIState {
+    UI_STATE_NORMAL,    // Normal UI (icon + label)
+    UI_STATE_DRAGGING,  // Dragging UI (scaled icon only)
+  };
+
   // Get icon from model and schedule background processing.
   void UpdateIcon();
+
+  void SetUIState(UIState state);
+
+  // Sets |touch_dragging_| flag and updates UI.
+  void SetTouchDragging(bool touch_dragging);
+
+  // Invoked when |mouse_drag_timer_| fires to show dragging UI.
+  void OnMouseDragTimer();
 
   // AppListItemModelObserver overrides:
   virtual void ItemIconChanged() OVERRIDE;
@@ -67,16 +79,32 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   virtual void StateChanged() OVERRIDE;
   virtual bool ShouldEnterPushedState(const ui::Event& event) OVERRIDE;
 
+  // views::View overrides:
+  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  virtual ui::EventResult OnGestureEvent(
+      const ui::GestureEvent& event) OVERRIDE;
+
   AppListItemModel* model_;  // Owned by AppListModel::Apps.
 
   AppsGridView* apps_grid_view_;  // Owned by views hierarchy.
   views::ImageView* icon_;  // Owned by views hierarchy.
-  DropShadowLabel* title_;  // Owned by views hierarchy.
+  views::Label* title_;  // Owned by views hierarchy.
 
   scoped_ptr<views::MenuRunner> context_menu_runner_;
 
   gfx::Size icon_size_;
   gfx::ShadowValues icon_shadows_;
+
+  UIState ui_state_;
+
+  // True if scroll gestures should contribute to dragging.
+  bool touch_dragging_;
+
+  // A timer to defer showing drag UI when mouse is pressed.
+  base::OneShotTimer<AppListItemView> mouse_drag_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(AppListItemView);
 };

@@ -23,6 +23,8 @@ using content::RenderViewHost;
 using content::ResourceRequestInfo;
 using std::string;
 
+DEFINE_WEB_CONTENTS_USER_DATA_KEY(chrome_browser_net::LoadTimeStatsTabHelper)
+
 namespace {
 
 bool GetRenderView(const net::URLRequest& request,
@@ -254,8 +256,6 @@ class LoadTimeStats::URLRequestStats {
   base::TimeDelta status_times_[REQUEST_STATUS_MAX];
 };
 
-int LoadTimeStatsTabHelper::kUserDataKey;
-
 LoadTimeStatsTabHelper::LoadTimeStatsTabHelper(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents) {
@@ -267,6 +267,7 @@ LoadTimeStatsTabHelper::~LoadTimeStatsTabHelper() {
 
 void LoadTimeStatsTabHelper::DidStartProvisionalLoadForFrame(
     int64 frame_id,
+    int64 parent_frame_id,
     bool is_main_frame,
     const GURL& validated_url,
     bool is_error_page,

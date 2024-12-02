@@ -24,6 +24,7 @@ class AwResourceDispatcherHostDelegate
   virtual void RequestBeginning(
       net::URLRequest* request,
       content::ResourceContext* resource_context,
+      appcache::AppCacheService* appcache_service,
       ResourceType::Type resource_type,
       int child_id,
       int route_id,
@@ -37,11 +38,16 @@ class AwResourceDispatcherHostDelegate
       net::AuthChallengeInfo* auth_info,
       net::URLRequest* request) OVERRIDE;
 
+  virtual bool HandleExternalProtocol(const GURL& url,
+                                      int child_id,
+                                      int route_id) OVERRIDE;
+
  private:
   friend struct base::DefaultLazyInstanceTraits<
       AwResourceDispatcherHostDelegate>;
   AwResourceDispatcherHostDelegate();
   virtual ~AwResourceDispatcherHostDelegate();
+  void SetOnlyAllowLoadFromCache(net::URLRequest* request);
 
   DISALLOW_COPY_AND_ASSIGN(AwResourceDispatcherHostDelegate);
 };

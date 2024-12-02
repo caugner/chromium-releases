@@ -122,6 +122,7 @@ BEGIN
     VK_OEM_PLUS,    IDC_ZOOM_PLUS,              VIRTKEY, CONTROL
     VK_OEM_PLUS,    IDC_ZOOM_PLUS,              VIRTKEY, CONTROL, SHIFT
     VK_ADD,         IDC_ZOOM_PLUS,              VIRTKEY, CONTROL
+    "A",            IDC_TOGGLE_ASH_DESKTOP,     VIRTKEY, CONTROL, SHIFT
 END
 
 IDR_CHROMEFRAME ACCELERATORS
@@ -208,6 +209,10 @@ IDI_THROBBER_21     ICON                        "theme\vista_frame_throbber_21.i
 IDI_THROBBER_22     ICON                        "theme\vista_frame_throbber_22.ico"
 IDI_THROBBER_23     ICON                        "theme\vista_frame_throbber_23.ico"
 IDI_THROBBER_24     ICON                        "theme\vista_frame_throbber_24.ico"
+
+// Icon for the App Lancher
+IDI_APP_LIST        ICON                        "theme\\app_list.ico"
+
 
 /////////////////////////////////////////////////////////////////////////////
 //

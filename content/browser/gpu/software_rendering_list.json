@@ -33,19 +33,23 @@
 // 12. "perf_graphics" is a FLOAT structure (defined below).
 // 13. "perf_gaming" is a FLOAT structure (defined below).
 // 14. "perf_overall" is a FLOAT structure (defined below).
-// 15. "exceptions" is a list of entries.
-// 16. "blacklist" is a list of gpu feature strings, valid values include
+// 15. "machine_model" contais "name" and an optional "version".  "name" is a 
+//     STRING structure and "version" is a VERSION structure (defined below).
+// 16. "gpu_count" is a INT structure (defined below).
+// 17  "cpu_info" is a STRING structure (defined below).
+// 18. "exceptions" is a list of entries.
+// 19. "blacklist" is a list of gpu feature strings, valid values include
 //     "accelerated_2d_canvas", "accelerated_compositing", "webgl",
 //     "multisampling", "flash_3d", "flash_stage3d", "texture_sharing",
-//     "accelerated_video_decode", and "all".
+//     "accelerated_video_decode", "panel_fitting", and "all".
 //     This field is mandatory.
-// 17. "description" has the description of the entry.
-// 18. "webkit_bugs" is an array of associated webkit bug numbers.
-// 19. "cr_bugs" is an array of associated webkit bug numbers.
-// 20. "browser_version" is a VERSION structure (defined below).  If this
+// 20. "description" has the description of the entry.
+// 21. "webkit_bugs" is an array of associated webkit bug numbers.
+// 22. "cr_bugs" is an array of associated webkit bug numbers.
+// 23. "browser_version" is a VERSION structure (defined below).  If this
 //     condition is not satisfied, the entry will be ignored.  If it is not
 //     present, then the entry applies to all versions of the browser.
-// 21. "disabled" is a boolean. If it is present, the entry will be skipped.
+// 24. "disabled" is a boolean. If it is present, the entry will be skipped.
 //     This can not be used in exceptions.
 //
 // VERSION includes "op", "style", "number", and "number2".  "op" can be any of
@@ -65,11 +69,12 @@
 // following values: "=", "<", "<=", ">", ">=", "any", "between".  "value2" is
 // only used if "op" is "between".  "value" is used for all "op" values except
 // "any". "value" and "value2" are valid float numbers.
+// INT is very much like FLOAT, except that the values need to be integers.
 
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "4.3",
+  "version": "4.2",
   "entries": [
     {
       "id": 1,
@@ -469,6 +474,14 @@
         "op": "<",
         "value": "3.5"
       },
+      "exceptions": [
+        {
+          "cpu_info": {
+            "op": "contains",
+            "value": "Atom"
+          }
+        }
+      ],
       "blacklist": [
         "accelerated_2d_canvas"
       ]
@@ -708,6 +721,21 @@
       ]
     },
     {
+      "id": 50,
+      "description": "Disable VMware software renderer.",
+      "cr_bugs": [145531],
+      "os": {
+        "type": "linux"
+      },
+      "gl_vendor": {
+        "op": "beginwith",
+        "value": "VMware"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
       "id": 51,
       "description": "NVIDIA drivers 6.14.11.9621 is buggy on Windows XP.",
       "cr_bugs": [152096],
@@ -758,6 +786,33 @@
       ]
     },
     {
+      "id": 54,
+      "description": "Force to use discrete GPU on older MacBookPro models.",
+      "cr_bugs": [113703],
+      "os": {
+        "type": "macosx",
+        "version": {
+          "op": ">=",
+          "number": "10.7"
+        }
+      },
+      "machine_model": {
+        "name": {
+          "op": "=",
+          "value": "MacBookPro"
+        },
+        "version": {
+          "op": "<",
+          "number": "8"
+        }
+      },
+      "gpu_count": {
+        "op": "=",
+        "value": "2"
+      },
+      "gpu_switching": "force_discrete"
+    },
+    {
       "id": 55,
       "description": "Drivers older than 2007-01 on Windows are assumed to be buggy.",
       "cr_bugs": [72979, 89802],
@@ -802,13 +857,63 @@
       ]
     },
     {
-      "id": 61,
-      "description": "Multisampling is buggy on Mac with Intel gpu.",
+      "id": 57,
+      "description": "Enable panel fitting capability on ChromeOS only on Ivy Bridge Graphics Controller.",
+      "exceptions": [
+        {
+          "os": {
+            "type": "chromeos"
+          },
+          "vendor_id": "0x8086",
+          "device_id": ["0x0166"]
+        }
+      ],
+      "blacklist": [
+        "panel_fitting"
+      ]
+    },
+    {
+      "id": 58,
+      "description": "Optimus Intel driver version 8.15.10.* has problems sharing textures.",
+      "cr_bugs": [156849],
+      "os": {
+        "type": "win"
+      },
+      "multi_gpu_style": "optimus",
+      "vendor_id": "0x8086",
+      "driver_version": {
+        "op": "=",
+        "number": "8.15.10"
+      },
+      "blacklist": [
+        "texture_sharing"
+      ]
+    },
+    {
+      "id": 59,
+      "description": "NVidia driver 8.15.11.8593 is crashy on Windows.",
+      "cr_bugs": [155749],
+      "os": {
+        "type": "win"
+      },
+      "vendor_id": "0x10de",
+      "driver_version": {
+        "op": "=",
+        "number": "8.15.11.8593"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 60,
+      "description": "Multisampling is buggy on Mac with NVIDIA gpu.",
       "cr_bugs": [137303],
       "os": {
         "type": "macosx"
       },
-      "vendor_id": "0x8086",
+      "multi_gpu_category": "any",
+      "vendor_id": "0x10de",
       "blacklist": [
         "multisampling"
       ]

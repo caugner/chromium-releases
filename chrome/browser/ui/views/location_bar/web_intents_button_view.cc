@@ -23,10 +23,12 @@ WebIntentsButtonView::WebIntentsButtonView(LocationBarView* parent,
 }
 
 void WebIntentsButtonView::Update(TabContents* tab_contents) {
-  if (!tab_contents ||
-      !tab_contents->web_intent_picker_controller() ||
-      !tab_contents->web_intent_picker_controller()->
-          ShowLocationBarPickerTool()) {
+  WebIntentPickerController* web_intent_picker_controller =
+      tab_contents ? WebIntentPickerController::FromWebContents(
+                         tab_contents->web_contents())
+                   : NULL;
+  if (!web_intent_picker_controller ||
+      !web_intent_picker_controller->ShowLocationBarPickerButton()) {
     SetVisible(false);
     return;
   }
@@ -36,10 +38,14 @@ void WebIntentsButtonView::Update(TabContents* tab_contents) {
   SetTooltipText(animated_text);
   SetVisible(true);
 
-  // Set the flag to draw text before we start to draw the label, to avoid
-  // any possible race.
+  // Set the flag to always draw text before we start to draw the label,
+  // to avoid any possible race.
   AlwaysDrawText();
-  StartLabelAnimation(animated_text, kMoveTimeMs);
+
+  if (!web_intent_picker_controller->location_bar_picker_button_indicated()) {
+    StartLabelAnimation(animated_text, kMoveTimeMs);
+    web_intent_picker_controller->SetLocationBarPickerButtonIndicated();
+  }
 }
 
 void WebIntentsButtonView::OnClick(LocationBarView* parent) {
@@ -47,7 +53,8 @@ void WebIntentsButtonView::OnClick(LocationBarView* parent) {
   if (!tab_contents)
     return;
 
-  tab_contents->web_intent_picker_controller()->LocationBarPickerToolClicked();
+  WebIntentPickerController::FromWebContents(tab_contents->web_contents())->
+      LocationBarPickerButtonClicked();
 }
 
 int WebIntentsButtonView::GetTextAnimationSize(double state, int text_size) {

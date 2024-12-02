@@ -19,6 +19,7 @@
 #include "base/string16.h"
 #include "base/win/scoped_comptr.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/base/ime/win/tsf_event_router.h"
 #include "ui/gfx/insets.h"
 #include "ui/base/win/extra_sdk_defines.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
@@ -42,7 +43,8 @@ class NativeTextfieldWin
                          CWinTraits<kDefaultEditStyle> >,
       public CRichEditCommands<NativeTextfieldWin>,
       public NativeTextfieldWrapper,
-      public ui::SimpleMenuModel::Delegate {
+      public ui::SimpleMenuModel::Delegate,
+      public ui::TsfEventRouterObserver {
  public:
   DECLARE_WND_SUPERCLASS(L"ViewsTextfieldEdit", MSFTEDIT_CLASS);
 
@@ -68,6 +70,7 @@ class NativeTextfieldWin
   virtual string16 GetText() const OVERRIDE;
   virtual void UpdateText() OVERRIDE;
   virtual void AppendText(const string16& text) OVERRIDE;
+  virtual base::i18n::TextDirection GetTextDirection() const OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void ClearSelection() OVERRIDE;
@@ -109,6 +112,11 @@ class NativeTextfieldWin
       ui::Accelerator* accelerator) OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
+  // Overridden from ui::TsfEventRouterObserver:
+  virtual void OnTextUpdated(const ui::Range& composition_range) OVERRIDE;
+  virtual void OnTsfStartComposition() OVERRIDE;
+  virtual void OnTsfEndComposition() OVERRIDE;
+
   // Update accessibility information.
   void InitializeAccessibilityInfo();
   void UpdateAccessibleState(uint32 state_flag, bool set_value);
@@ -141,6 +149,7 @@ class NativeTextfieldWin
     MSG_WM_RBUTTONDOWN(OnNonLButtonDown)
     MSG_WM_PASTE(OnPaste)
     MSG_WM_SETFOCUS(OnSetFocus)
+    MSG_WM_KILLFOCUS(OnKillFocus)
     MSG_WM_SYSCHAR(OnSysChar)  // WM_SYSxxx == WM_xxx with ALT down
     MSG_WM_SYSKEYDOWN(OnKeyDown)
   END_MSG_MAP()
@@ -205,6 +214,7 @@ class NativeTextfieldWin
   void OnNonLButtonDown(UINT keys, const CPoint& point);
   void OnPaste();
   void OnSetFocus(HWND hwnd);
+  void OnKillFocus(HWND hwnd);
   void OnSysChar(TCHAR ch, UINT repeat_count, UINT flags);
 
   // Helper function for OnChar() and OnKeyDown() that handles keystrokes that
@@ -243,6 +253,10 @@ class NativeTextfieldWin
   // Sets whether the mouse is in the edit. As necessary this redraws the
   // edit.
   void SetContainsMouse(bool contains_mouse);
+
+  // Handles composition related works on both IMM32 and TSF implementation.
+  void OnImeStartCompositionInternal();
+  void OnImeEndCompositionInternal();
 
   // Getter for the text_object_model_, used by the ScopedFreeze class.  Note
   // that the pointer returned here is only valid as long as the Edit is still
@@ -300,6 +314,8 @@ class NativeTextfieldWin
 
   //  The accessibility state of this object.
   int accessibility_state_;
+
+  scoped_ptr<ui::TsfEventRouter> tsf_event_router_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTextfieldWin);
 };

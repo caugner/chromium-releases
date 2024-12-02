@@ -5,17 +5,26 @@
 #ifndef CHROME_BROWSER_UI_SEARCH_SEARCH_UI_H_
 #define CHROME_BROWSER_UI_SEARCH_SEARCH_UI_H_
 
+#include "chrome/browser/ui/search/search_types.h"
 #include "third_party/skia/include/core/SkColor.h"
+
+class Profile;
+
+namespace content {
+class BrowserContext;
+}
 
 namespace gfx {
 class Font;
+class ImageSkia;
+}
+
+namespace ui {
+class ThemeProvider;
 }
 
 namespace chrome {
 namespace search {
-
-// Background color of the NTP.
-extern const SkColor kNTPBackgroundColor;
 
 // Color for the placeholder text on NTP.
 extern const SkColor kNTPPlaceholderTextColor;
@@ -52,11 +61,36 @@ extern const int kOmniboxBottomGap;
 // Initial height of the search results, relative to top of the NTP overlay.
 extern const int kSearchResultsHeight;
 
+// The mininum height of content view to layout detached bookmark bar at bottom
+// for |NTP| search mode, calculated from chrome/browser/resources/ntp_search/
+// tile_page.js HEIGHT_FOR_BOTTOM_PANEL - TAB_BAR_HEIGHT - UPPER_SECTION_HEIGHT.
+// TODO(kuan): change this when tile_page.js changes to use non-const
+// UPPER_SECTION_HEIGHT,
+extern const int kMinContentHeightForBottomBookmarkBar;
+
 // Returns the derived |font| for NTP omnibox use.
 gfx::Font GetNTPOmniboxFont(const gfx::Font& font);
 
 // Returns the height of NTP given the |font| to be used.
 int GetNTPOmniboxHeight(const gfx::Font& font);
+
+// Returns the NTP content area's background color.  May return white if
+// set in chrome://instant.
+SkColor GetNTPBackgroundColor(content::BrowserContext* browser_context);
+
+// Returns the background color to use for toolbar.
+SkColor GetToolbarBackgroundColor(Profile* profile,
+                                  chrome::search::Mode::Type mode);
+
+// Returns the background image to use for top chrome i.e. toolbar and tab.
+// |use_ntp_background_theme| indicates if IDR_THEME_NTP_BACKGROUND is being
+// used.
+gfx::ImageSkia* GetTopChromeBackgroundImage(
+    const ui::ThemeProvider* theme_provider,
+    bool instant_extended_api_enabled,
+    chrome::search::Mode::Type mode,
+    bool should_show_white_ntp,
+    bool* use_ntp_background_theme);
 
 }  // namespace search
 }  // namespace chrome

@@ -84,9 +84,20 @@ bool IsEmpty(const gfx::Image& image) {
 PlatformImage CreatePlatformImage() {
   const SkBitmap bitmap(CreateBitmap(25, 25));
 #if defined(OS_IOS)
+  // iOS only supports one scale factor.
+  std::vector<ui::ScaleFactor> supported_scale_factors =
+      ui::GetSupportedScaleFactors();
+  DCHECK_EQ(1U, supported_scale_factors.size());
+  if (supported_scale_factors.size() < 1)
+    return nil;
+
+  ui::ScaleFactor scale_factor = supported_scale_factors[0];
+  float scale = ui::GetScaleFactorScale(scale_factor);
+
   base::mac::ScopedCFTypeRef<CGColorSpaceRef> color_space(
       CGColorSpaceCreateDeviceRGB());
-  UIImage* image = gfx::SkBitmapToUIImageWithColorSpace(bitmap, color_space);
+  UIImage* image =
+      gfx::SkBitmapToUIImageWithColorSpace(bitmap, scale, color_space);
   base::mac::NSObjectRetain(image);
   return image;
 #elif defined(OS_MACOSX)
@@ -139,29 +150,33 @@ PlatformImage CopyPlatformType(const gfx::Image& image) {
 #if defined(OS_MACOSX)
 // Defined in image_unittest_util_mac.mm.
 #elif defined(TOOLKIT_GTK)
-SkColor GetPlatformImageColor(PlatformImage image) {
+SkColor GetPlatformImageColor(PlatformImage image, int x, int y) {
+  int n_channels = gdk_pixbuf_get_n_channels(image);
+  int rowstride = gdk_pixbuf_get_rowstride(image);
   guchar* gdk_pixels = gdk_pixbuf_get_pixels(image);
-  guchar alpha = gdk_pixbuf_get_has_alpha(image) ? gdk_pixels[3] : 255;
-  return SkColorSetARGB(alpha, gdk_pixels[0], gdk_pixels[1], gdk_pixels[2]);
+
+  guchar* pixel = gdk_pixels + (y * rowstride) + (x * n_channels);
+  guchar alpha = gdk_pixbuf_get_has_alpha(image) ? pixel[3] : 255;
+  return SkColorSetARGB(alpha, pixel[0], pixel[1], pixel[2]);
 }
 #else
-SkColor GetPlatformImageColor(PlatformImage image) {
+SkColor GetPlatformImageColor(PlatformImage image, int x, int y) {
   SkAutoLockPixels auto_lock(image);
-  return image.getColor(10, 10);
+  return image.getColor(x, y);
 }
 #endif
 
 void CheckColor(SkColor color, bool is_red) {
   // Be tolerant of floating point rounding and lossy color space conversions.
   if (is_red) {
-    EXPECT_GT(SkColorGetR(color), 0.95);
-    EXPECT_LT(SkColorGetG(color), 0.05);
+    EXPECT_GT(SkColorGetR(color) / 255.0, 0.95);
+    EXPECT_LT(SkColorGetG(color) / 255.0, 0.05);
   } else {
-    EXPECT_GT(SkColorGetG(color), 0.95);
-    EXPECT_LT(SkColorGetR(color), 0.05);
+    EXPECT_GT(SkColorGetG(color) / 255.0, 0.95);
+    EXPECT_LT(SkColorGetR(color) / 255.0, 0.05);
   }
-  EXPECT_LT(SkColorGetB(color), 0.05);
-  EXPECT_GT(SkColorGetA(color), 0.95);
+  EXPECT_LT(SkColorGetB(color) / 255.0, 0.05);
+  EXPECT_GT(SkColorGetA(color) / 255.0, 0.95);
 }
 
 bool IsPlatformImageValid(PlatformImage image) {

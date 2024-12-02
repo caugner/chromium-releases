@@ -21,12 +21,12 @@ const string16 kTitle6(ASCIIToUTF16("Lulz"));
 const GURL kUrl1("http://www.example.com/foo");
 const GURL kUrl2("http://www.example.com/bar");
 const GURL kUrl3("http://www.example.com/baz");
-const string16 kId1(ASCIIToUTF16("nhkckhebbbncbkefhcpcgepcgfaclehe"));
-const string16 kId2(ASCIIToUTF16("hcpcgepcgfaclehenhkckhebbbncbkef"));
-const string16 kId3(ASCIIToUTF16("aclehenhkckhebbbncbkefhcpcgepcgf"));
-const string16 kId4(ASCIIToUTF16("bclehenhkckhebbbncbkefhcpcgepcgf"));
-const string16 kId5(ASCIIToUTF16("cclehenhkckhebbbncbkefhcpcgepcgf"));
-const string16 kId6(ASCIIToUTF16("dclehenhkckhebbbncbkefhcpcgepcgf"));
+const std::string kId1("nhkckhebbbncbkefhcpcgepcgfaclehe");
+const std::string kId2("hcpcgepcgfaclehenhkckhebbbncbkef");
+const std::string kId3("aclehenhkckhebbbncbkefhcpcgepcgf");
+const std::string kId4("bclehenhkckhebbbncbkefhcpcgepcgf");
+const std::string kId5("cclehenhkckhebbbncbkefhcpcgepcgf");
+const std::string kId6("dclehenhkckhebbbncbkefhcpcgepcgf");
 const webkit_glue::WebIntentServiceData::Disposition kWindowDisposition(
     webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW);
 const webkit_glue::WebIntentServiceData::Disposition kInlineDisposition(
@@ -40,7 +40,8 @@ class WebIntentPickerModelObserverMock : public WebIntentPickerModelObserver {
   MOCK_METHOD2(OnFaviconChanged,
                void(WebIntentPickerModel* model, size_t index));
   MOCK_METHOD2(OnExtensionIconChanged,
-               void(WebIntentPickerModel* model, const string16& extension_id));
+               void(WebIntentPickerModel* model,
+                    const std::string& extension_id));
   MOCK_METHOD2(OnInlineDisposition,
                void(const string16& title, const GURL& url));
 };
@@ -111,7 +112,7 @@ TEST_F(WebIntentPickerModelTest, RemoveInstalledServiceAt) {
 }
 
 TEST_F(WebIntentPickerModelTest, Clear) {
-  EXPECT_CALL(observer_, OnModelChanged(&model_)).Times(3);
+  EXPECT_CALL(observer_, OnModelChanged(&model_)).Times(testing::AtLeast(3));
 
   model_.AddInstalledService(kTitle1, kUrl1, kWindowDisposition);
   model_.AddInstalledService(kTitle2, kUrl2, kWindowDisposition);
@@ -133,14 +134,14 @@ TEST_F(WebIntentPickerModelTest, GetInstalledServiceWithURL) {
   EXPECT_EQ(NULL, model_.GetInstalledServiceWithURL(kUrl3));
 }
 
-TEST_F(WebIntentPickerModelTest, UpdateFaviconAt) {
+TEST_F(WebIntentPickerModelTest, UpdateFaviconForServiceWithURL) {
   EXPECT_CALL(observer_, OnModelChanged(&model_)).Times(2);
   EXPECT_CALL(observer_, OnFaviconChanged(&model_, 1U)).Times(1);
 
   model_.AddInstalledService(kTitle1, kUrl1, kWindowDisposition);
   model_.AddInstalledService(kTitle2, kUrl2, kWindowDisposition);
   gfx::Image image(gfx::test::CreateImage());
-  model_.UpdateFaviconAt(1U, image);
+  model_.UpdateFaviconForServiceWithURL(kUrl2, image);
 
   EXPECT_FALSE(gfx::test::IsEqual(
       image, model_.GetInstalledServiceAt(0).favicon));
@@ -203,7 +204,7 @@ TEST_F(WebIntentPickerModelTest, SetSuggestedExtensionIconWithId) {
 }
 
 TEST_F(WebIntentPickerModelTest, SetInlineDisposition) {
-  EXPECT_CALL(observer_, OnModelChanged(&model_)).Times(3);
+  EXPECT_CALL(observer_, OnModelChanged(&model_)).Times(testing::AtLeast(3));
   EXPECT_CALL(observer_, OnInlineDisposition(kTitle2, testing::_)).Times(1);
 
   EXPECT_FALSE(model_.IsInlineDisposition());

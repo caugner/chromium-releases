@@ -89,6 +89,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_OpenChannelToExtension,
                         OnOpenChannelToExtension)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_OpenChannelToTab, OnOpenChannelToTab)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_OpenChannelToNativeApp,
+                        OnOpenChannelToNativeApp)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ExtensionHostMsg_GetMessageBundle,
                                     OnGetExtensionMessageBundle)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddListener, OnExtensionAddListener)
@@ -297,6 +299,40 @@ void ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread(
           source_extension_id, target_extension_id, channel_name);
 }
 
+void ChromeRenderMessageFilter::OnOpenChannelToNativeApp(
+    int routing_id, const std::string& source_extension_id,
+    const std::string& native_app_name,
+    const std::string& channel_name,
+    const std::string& connect_message, int* port_id) {
+  int port2_id;
+  extensions::MessageService::AllocatePortIdPair(port_id, &port2_id);
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&ChromeRenderMessageFilter::OpenChannelToNativeAppOnUIThread,
+                 this,
+                 routing_id,
+                 port2_id,
+                 source_extension_id,
+                 native_app_name,
+                 channel_name,
+                 connect_message));
+}
+
+void ChromeRenderMessageFilter::OpenChannelToNativeAppOnUIThread(
+    int source_routing_id,
+    int receiver_port_id,
+    const std::string& source_extension_id,
+    const std::string& native_app_name,
+    const std::string& channel_name,
+    const std::string& connect_message) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  extensions::ExtensionSystem::Get(profile_)->message_service()->
+      OpenChannelToNativeApp(
+          render_process_id_, source_routing_id, receiver_port_id,
+          source_extension_id, native_app_name, channel_name, connect_message);
+}
+
 void ChromeRenderMessageFilter::OnOpenChannelToTab(
     int routing_id, int tab_id, const std::string& extension_id,
     const std::string& channel_name, int* port_id) {
@@ -364,11 +400,12 @@ void ChromeRenderMessageFilter::OnExtensionAddListener(
     const std::string& event_name) {
   content::RenderProcessHost* process =
       content::RenderProcessHost::FromID(render_process_id_);
-  if (!process || !profile_->GetExtensionEventRouter())
+  if (!process ||
+      !extensions::ExtensionSystem::Get(profile_)->event_router())
     return;
 
-  profile_->GetExtensionEventRouter()->AddEventListener(
-      event_name, process, extension_id);
+  extensions::ExtensionSystem::Get(profile_)->event_router()->
+      AddEventListener(event_name, process, extension_id);
 }
 
 void ChromeRenderMessageFilter::OnExtensionRemoveListener(
@@ -376,25 +413,28 @@ void ChromeRenderMessageFilter::OnExtensionRemoveListener(
     const std::string& event_name) {
   content::RenderProcessHost* process =
       content::RenderProcessHost::FromID(render_process_id_);
-  if (!process || !profile_->GetExtensionEventRouter())
+  if (!process ||
+      !extensions::ExtensionSystem::Get(profile_)->event_router())
     return;
 
-  profile_->GetExtensionEventRouter()->RemoveEventListener(
-      event_name, process, extension_id);
+  extensions::ExtensionSystem::Get(profile_)->event_router()->
+      RemoveEventListener(event_name, process, extension_id);
 }
 
 void ChromeRenderMessageFilter::OnExtensionAddLazyListener(
     const std::string& extension_id, const std::string& event_name) {
-  if (profile_->GetExtensionEventRouter())
-    profile_->GetExtensionEventRouter()->AddLazyEventListener(
-        event_name, extension_id);
+  if (extensions::ExtensionSystem::Get(profile_)->event_router()) {
+    extensions::ExtensionSystem::Get(profile_)->event_router()->
+        AddLazyEventListener(event_name, extension_id);
+  }
 }
 
 void ChromeRenderMessageFilter::OnExtensionRemoveLazyListener(
     const std::string& extension_id, const std::string& event_name) {
-  if (profile_->GetExtensionEventRouter())
-    profile_->GetExtensionEventRouter()->RemoveLazyEventListener(
-        event_name, extension_id);
+  if (extensions::ExtensionSystem::Get(profile_)->event_router()) {
+    extensions::ExtensionSystem::Get(profile_)->event_router()->
+        RemoveLazyEventListener(event_name, extension_id);
+  }
 }
 
 void ChromeRenderMessageFilter::OnExtensionAddFilteredListener(
@@ -404,11 +444,12 @@ void ChromeRenderMessageFilter::OnExtensionAddFilteredListener(
     bool lazy) {
   content::RenderProcessHost* process =
       content::RenderProcessHost::FromID(render_process_id_);
-  if (!process || !profile_->GetExtensionEventRouter())
+  if (!process ||
+      !extensions::ExtensionSystem::Get(profile_)->event_router())
     return;
 
-  profile_->GetExtensionEventRouter()->AddFilteredEventListener(
-      event_name, process, extension_id, filter, lazy);
+  extensions::ExtensionSystem::Get(profile_)->event_router()->
+      AddFilteredEventListener(event_name, process, extension_id, filter, lazy);
 }
 
 void ChromeRenderMessageFilter::OnExtensionRemoveFilteredListener(
@@ -418,11 +459,13 @@ void ChromeRenderMessageFilter::OnExtensionRemoveFilteredListener(
     bool lazy) {
   content::RenderProcessHost* process =
       content::RenderProcessHost::FromID(render_process_id_);
-  if (!process || !profile_->GetExtensionEventRouter())
+  if (!process ||
+      !extensions::ExtensionSystem::Get(profile_)->event_router())
     return;
 
-  profile_->GetExtensionEventRouter()->RemoveFilteredEventListener(
-      event_name, process, extension_id, filter, lazy);
+  extensions::ExtensionSystem::Get(profile_)->event_router()->
+      RemoveFilteredEventListener(event_name, process, extension_id, filter,
+                                  lazy);
 }
 
 void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id,
@@ -448,15 +491,18 @@ void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
 
 void ChromeRenderMessageFilter::OnExtensionShouldUnloadAck(
      const std::string& extension_id, int sequence_id) {
-  if (profile_->GetExtensionProcessManager())
-    profile_->GetExtensionProcessManager()->OnShouldUnloadAck(
-        extension_id, sequence_id);
+  if (extensions::ExtensionSystem::Get(profile_)->process_manager()) {
+    extensions::ExtensionSystem::Get(profile_)->process_manager()->
+        OnShouldUnloadAck(extension_id, sequence_id);
+  }
 }
 
 void ChromeRenderMessageFilter::OnExtensionUnloadAck(
      const std::string& extension_id) {
-  if (profile_->GetExtensionProcessManager())
-    profile_->GetExtensionProcessManager()->OnUnloadAck(extension_id);
+  if (extensions::ExtensionSystem::Get(profile_)->process_manager()) {
+    extensions::ExtensionSystem::Get(profile_)->process_manager()->
+        OnUnloadAck(extension_id);
+  }
 }
 
 void ChromeRenderMessageFilter::OnExtensionGenerateUniqueID(int* unique_id) {

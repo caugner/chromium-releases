@@ -33,7 +33,10 @@ extern const char kOAuthCodeValue[];
 extern const char kProxyTagPrefix[];
 extern const char kTagsHashTagName[];
 extern const char kTagDryRunFlag[];
-extern const char kDefaultCloudPrintServerUrl[];
+extern const char kChromeVersionTagName[];
+extern const char kSystemNameTagName[];
+extern const char kSystemVersionTagName[];
+
 extern const char kCloudPrintGaiaServiceId[];
 extern const char kProxyAuthUserAgent[];
 extern const char kCloudPrintPushNotificationsSource[];
@@ -60,6 +63,15 @@ const int kCloudPrintAuthMaxRetryCount = -1;
 // print jobs. We choose a random interval in seconds between these 2 values.
 const int kMinJobPollIntervalSecs = 5*60;  // 5 minutes in seconds
 const int kMaxJobPollIntervalSecs = 8*60;  // 8 minutes in seconds
+
+// When we have XMPP notifications available, we ping server to keep connection
+// alive or check connection status.
+const int kDefaultXmppPingTimeoutSecs = 5*60;  // 5 minutes in seconds
+const int kMinimumXmppPingTimeoutSecs = 2*60;  // 2 minutes in seconds
+const int kXmppPingCheckIntervalSecs = 60;
+
+// Number of failed pings before we try to reinstablish XMPP connection.
+const int kMaxFailedXmppPings = 2;
 
 // The number of seconds before the OAuth2 access token is due to expire that
 // we try and refresh it.

@@ -319,8 +319,10 @@ void ExistingUserController::CompleteLogin(const std::string& username,
     time_init_ = base::Time();  // Reset to null.
   }
 
-  host_->OnCompleteLogin();
+  // Disable UI while loading user profile.
+  login_display_->SetUIEnabled(false);
 
+  host_->OnCompleteLogin();
   // Auto-enrollment must have made a decision by now. It's too late to enroll
   // if the protocol isn't done at this point.
   if (do_auto_enrollment_) {
@@ -343,9 +345,6 @@ void ExistingUserController::CompleteLogin(const std::string& username,
 
 void ExistingUserController::CompleteLoginInternal(std::string username,
                                                    std::string password) {
-  // Disable UI while loading user profile.
-  login_display_->SetUIEnabled(false);
-
   resume_login_callback_.Reset();
 
   DeviceSettingsService::Get()->GetOwnershipStatusAsync(

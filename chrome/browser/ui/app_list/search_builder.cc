@@ -123,7 +123,7 @@ class SearchBuilderResult : public app_list::SearchResult {
   virtual void UpdateIcon() {
     int resource_id = match_.starred ?
         IDR_OMNIBOX_STAR : AutocompleteMatch::TypeToIcon(match_.type);
-    SetIcon(*ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    SetIcon(*ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
         resource_id));
   }
 
@@ -273,7 +273,7 @@ class ContactResult : public SearchBuilderResult,
   virtual void OnImageDecoded(const ImageDecoder* decoder,
                               const SkBitmap& decoded_image) OVERRIDE {
     DCHECK_EQ(decoder, photo_decoder_);
-    SetIcon(decoded_image);
+    SetIcon(gfx::ImageSkia(decoded_image));
   }
 
   virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE {
@@ -295,7 +295,7 @@ SearchBuilder::SearchBuilder(
     Profile* profile,
     app_list::SearchBoxModel* search_box,
     app_list::AppListModel::SearchResults* results,
-    AppListController* list_controller)
+    AppListControllerDelegate* list_controller)
     : profile_(profile),
       search_box_(search_box),
       results_(results),

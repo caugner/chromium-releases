@@ -21,6 +21,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
+#include "ui/gfx/size_conversions.h"
 #include "ui/gl/gpu_preference.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -41,6 +42,8 @@ using WebKit::WebTextInputType;
 using WebKit::WebVector;
 using WebKit::WebWidget;
 using WebKit::WGC3Dintptr;
+
+namespace content {
 
 namespace {
 
@@ -434,7 +437,7 @@ void RenderWidgetFullscreenPepper::DidChangeCursor(
 webkit::ppapi::PluginDelegate::PlatformContext3D*
 RenderWidgetFullscreenPepper::CreateContext3D() {
 #ifdef ENABLE_GPU
-  return new content::PlatformContext3DImpl(this);
+  return new PlatformContext3DImpl(this);
 #else
   return NULL;
 #endif
@@ -442,11 +445,7 @@ RenderWidgetFullscreenPepper::CreateContext3D() {
 
 void RenderWidgetFullscreenPepper::ReparentContext(
     webkit::ppapi::PluginDelegate::PlatformContext3D* context) {
-  static_cast<content::PlatformContext3DImpl*>(context)->SetParentContext(this);
-}
-
-MouseLockDispatcher* RenderWidgetFullscreenPepper::GetMouseLockDispatcher() {
-  return mouse_lock_dispatcher_.get();
+  static_cast<PlatformContext3DImpl*>(context)->SetParentContext(this);
 }
 
 bool RenderWidgetFullscreenPepper::OnMessageReceived(const IPC::Message& msg) {
@@ -509,7 +508,7 @@ void RenderWidgetFullscreenPepper::OnResize(const gfx::Size& size,
                                             const gfx::Rect& resizer_rect,
                                             bool is_fullscreen) {
   if (context_) {
-    gfx::Size pixel_size = size.Scale(deviceScaleFactor());
+    gfx::Size pixel_size = gfx::ToFlooredSize(size.Scale(deviceScaleFactor()));
     context_->reshape(pixel_size.width(), pixel_size.height());
     context_->viewport(0, 0, pixel_size.width(), pixel_size.height());
   }
@@ -541,7 +540,7 @@ void RenderWidgetFullscreenPepper::CreateContext() {
       attributes,
       true /* bind generates resources */,
       active_url_,
-      content::CAUSE_FOR_GPU_LAUNCH_RENDERWIDGETFULLSCREENPEPPER_CREATECONTEXT);
+      CAUSE_FOR_GPU_LAUNCH_RENDERWIDGETFULLSCREENPEPPER_CREATECONTEXT);
   if (!context_)
     return;
 
@@ -601,7 +600,7 @@ const float kTexCoords[] = {
 }  // anonymous namespace
 
 bool RenderWidgetFullscreenPepper::InitContext() {
-  gfx::Size pixel_size = size().Scale(deviceScaleFactor());
+  gfx::Size pixel_size = gfx::ToFlooredSize(size().Scale(deviceScaleFactor()));
   context_->reshape(pixel_size.width(), pixel_size.height());
   context_->viewport(0, 0, pixel_size.width(), pixel_size.height());
 
@@ -679,3 +678,5 @@ RenderWidgetFullscreenPepper::GetParentContextForPlatformContext3D() {
     return NULL;
   return context_;
 }
+
+}  // namespace content

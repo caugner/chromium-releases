@@ -17,10 +17,16 @@ class WebIDBKeyRange;
 class WebString;
 }
 
+namespace content {
+
 class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
  public:
   explicit RendererWebIDBObjectStoreImpl(int32 idb_object_store_id);
   virtual ~RendererWebIDBObjectStoreImpl();
+
+  // TODO(alecflett): Remove this when it is removed from webkit:
+  // https://bugs.webkit.org/show_bug.cgi?id=98085
+  static const long long AutogenerateIndexId = -1;
 
   // WebKit::WebIDBObjectStore
   virtual void get(const WebKit::WebIDBKeyRange& key_range,
@@ -51,12 +57,14 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
                      WebKit::WebExceptionCode& ec);
 
   virtual WebKit::WebIDBIndex* createIndex(
+      long long index_id,
       const WebKit::WebString& name,
       const WebKit::WebIDBKeyPath& key_path,
       bool unique,
       bool multi_entry,
       const WebKit::WebIDBTransaction& transaction,
       WebKit::WebExceptionCode& ec);
+
   // Transfers ownership of the WebIDBIndex to the caller.
   virtual WebKit::WebIDBIndex* index(const WebKit::WebString& name,
                                      WebKit::WebExceptionCode& ec);
@@ -79,5 +87,7 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
  private:
   int32 idb_object_store_id_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBOBJECTSTORE_IMPL_H_

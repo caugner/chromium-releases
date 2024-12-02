@@ -456,9 +456,10 @@ void SpeechInputExtensionManager::DispatchEventToExtension(
   if (state_ == kShutdown)
     return;
 
-  if (profile_ && profile_->GetExtensionEventRouter()) {
-    profile_->GetExtensionEventRouter()->DispatchEventToExtension(
-        extension_id, event, event_args.Pass(), profile_, GURL());
+  if (profile_ && extensions::ExtensionSystem::Get(profile_)->event_router()) {
+    extensions::ExtensionSystem::Get(profile_)->event_router()->
+        DispatchEventToExtension(extension_id, event, event_args.Pass(),
+                                 profile_, GURL());
   }
 }
 
@@ -645,7 +646,6 @@ void SpeechInputExtensionManager::StartRecording(
   context.context_name = extension_name;
 
   content::SpeechRecognitionSessionConfig config;
-  config.is_one_shot = true;
   config.language = language;
   config.grammars.push_back(content::SpeechRecognitionGrammar(grammar));
   config.initial_context = context;

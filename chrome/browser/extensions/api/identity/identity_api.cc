@@ -103,8 +103,7 @@ void IdentityGetAuthTokenFunction::OnIssueAdviceSuccess(
   // Existing grant was revoked and we used NO_FORCE, so we got info back
   // instead.
   if (interactive_) {
-    install_ui_.reset(
-        chrome::CreateExtensionInstallPromptWithBrowser(GetCurrentBrowser()));
+    install_ui_.reset(new ExtensionInstallPrompt(GetAssociatedWebContents()));
     ShowOAuthApprovalDialog(issue_advice);
   } else {
     error_ = identity_constants::kNoGrant;
@@ -174,24 +173,7 @@ void IdentityGetAuthTokenFunction::ShowLoginPopup() {
 
   LoginUIService* login_ui_service =
       LoginUIServiceFactory::GetForProfile(profile());
-  LoginUIService::LoginUI* login_ui = login_ui_service->current_login_ui();
-  if (login_ui) {
-    login_ui->FocusUI();
-  } else {
-    Browser* browser =
-        new Browser(Browser::CreateParams(Browser::TYPE_POPUP, profile()));
-    // TODO(munjal): Change the source from SOURCE_NTP_LINK to something else
-    // once we have added a new source for extension API.
-    GURL signin_url(SyncPromoUI::GetSyncPromoURL(GURL(),
-                                                 SyncPromoUI::SOURCE_NTP_LINK,
-                                                 true));
-    chrome::NavigateParams params(browser,
-                                  signin_url,
-                                  content::PAGE_TRANSITION_AUTO_TOPLEVEL);
-    params.disposition = CURRENT_TAB;
-    params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-    chrome::Navigate(&params);
-  }
+  login_ui_service->ShowLoginPopup();
 }
 
 void IdentityGetAuthTokenFunction::ShowOAuthApprovalDialog(
@@ -230,19 +212,19 @@ bool IdentityLaunchWebAuthFlowFunction::RunImpl() {
 
   GURL auth_url(details.url);
   WebAuthFlow::Mode mode =
-      details.interactive.get() && *details.interactive ?
+      details.interactive && *details.interactive ?
       WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
 
   // The bounds attributes are optional, but using 0 when they're not available
   // does the right thing.
   gfx::Rect initial_bounds;
-  if (details.width.get())
+  if (details.width)
     initial_bounds.set_width(*details.width);
-  if (details.height.get())
+  if (details.height)
     initial_bounds.set_height(*details.height);
-  if (details.left.get())
+  if (details.left)
     initial_bounds.set_x(*details.left);
-  if (details.top.get())
+  if (details.top)
     initial_bounds.set_y(*details.top);
 
   AddRef();  // Balanced in OnAuthFlowSuccess/Failure.

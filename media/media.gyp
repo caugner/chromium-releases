@@ -26,6 +26,7 @@
         '../base/base.gyp:base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         '../crypto/crypto.gyp:crypto',
+        '../skia/skia.gyp:skia',
         '../ui/ui.gyp:ui',
       ],
       'defines': [
@@ -133,22 +134,32 @@
         'audio/scoped_loop_observer.h',
         'audio/simple_sources.cc',
         'audio/simple_sources.h',
+        'audio/win/audio_device_listener_win.cc',
+        'audio/win/audio_device_listener_win.h',
         'audio/win/audio_low_latency_input_win.cc',
         'audio/win/audio_low_latency_input_win.h',
         'audio/win/audio_low_latency_output_win.cc',
         'audio/win/audio_low_latency_output_win.h',
         'audio/win/audio_manager_win.cc',
         'audio/win/audio_manager_win.h',
+        'audio/win/audio_unified_win.cc',
+        'audio/win/audio_unified_win.h',
         'audio/win/avrt_wrapper_win.cc',
         'audio/win/avrt_wrapper_win.h',
         'audio/win/device_enumeration_win.cc',
         'audio/win/device_enumeration_win.h',
+        'audio/win/core_audio_util_win.cc',
+        'audio/win/core_audio_util_win.h',
         'audio/win/wavein_input_win.cc',
         'audio/win/wavein_input_win.h',
         'audio/win/waveout_output_win.cc',
         'audio/win/waveout_output_win.h',
+        'base/android/cookie_getter.cc',
+        'base/android/cookie_getter.h',
         'base/android/media_jni_registrar.cc',
         'base/android/media_jni_registrar.h',
+        'base/android/media_player_bridge_manager.cc',
+        'base/android/media_player_bridge_manager.h',
         'base/audio_decoder.cc',
         'base/audio_decoder.h',
         'base/audio_decoder_config.cc',
@@ -171,6 +182,8 @@
         'base/buffers.h',
         'base/byte_queue.cc',
         'base/byte_queue.h',
+        'base/channel_mixer.cc',
+        'base/channel_mixer.h',
         'base/clock.cc',
         'base/clock.h',
         'base/data_buffer.cc',
@@ -179,6 +192,7 @@
         'base/data_source.h',
         'base/decoder_buffer.cc',
         'base/decoder_buffer.h',
+        'base/decryptor.cc',
         'base/decryptor.h',
         'base/decryptor_client.h',
         'base/decrypt_config.cc',
@@ -245,6 +259,10 @@
         'filters/audio_renderer_impl.h',
         'filters/chunk_demuxer.cc',
         'filters/chunk_demuxer.h',
+        'filters/decrypting_audio_decoder.cc',
+        'filters/decrypting_audio_decoder.h',
+        'filters/decrypting_video_decoder.cc',
+        'filters/decrypting_video_decoder.h',
         'filters/dummy_demuxer.cc',
         'filters/dummy_demuxer.h',
         'filters/ffmpeg_audio_decoder.cc',
@@ -265,6 +283,8 @@
         'filters/h264_to_annex_b_bitstream_converter.h',
         'filters/in_memory_url_protocol.cc',
         'filters/in_memory_url_protocol.h',
+        'filters/skcanvas_video_renderer.cc',
+        'filters/skcanvas_video_renderer.h',
         'filters/source_buffer_stream.cc',
         'filters/source_buffer_stream.h',
         'filters/video_frame_generator.cc',
@@ -323,6 +343,11 @@
         ],
       },
       'conditions': [
+        ['arm_neon == 1', {
+          'defines': [
+            'USE_NEON'
+          ],
+        }],
         ['OS != "ios"', {
           'dependencies': [
             '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -396,6 +421,7 @@
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
+              '$(SDKROOT)/System/Library/Frameworks/AVFoundation.framework',
               '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
             ],
           },
@@ -413,7 +439,6 @@
         # A simple WebM encoder for animated avatars on ChromeOS.
         ['chromeos==1', {
           'dependencies': [
-            '../skia/skia.gyp:skia',
             '../third_party/libvpx/libvpx.gyp:libvpx',
             '../third_party/libyuv/libyuv.gyp:libyuv',
           ],
@@ -568,6 +593,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
+        '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../ui/ui.gyp:ui',
@@ -585,14 +611,18 @@
         'audio/audio_parameters_unittest.cc',
         'audio/audio_util_unittest.cc',
         'audio/cross_process_notification_unittest.cc',
+        'audio/fake_audio_output_stream_unittest.cc',
         'audio/ios/audio_manager_ios_unittest.cc',
         'audio/linux/alsa_output_unittest.cc',
         'audio/mac/audio_low_latency_input_mac_unittest.cc',
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
+        'audio/win/audio_device_listener_win_unittest.cc',
         'audio/win/audio_low_latency_input_win_unittest.cc',
         'audio/win/audio_low_latency_output_win_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
+        'audio/win/audio_unified_win_unittest.cc',
+        'audio/win/core_audio_util_win_unittest.cc',
         'base/audio_bus_unittest.cc',
         'base/audio_fifo_unittest.cc',
         'base/audio_pull_fifo_unittest.cc',
@@ -601,6 +631,7 @@
         'base/bit_reader_unittest.cc',
         'base/bind_to_loop_unittest.cc',
         'base/buffers_unittest.cc',
+        'base/channel_mixer_unittest.cc',
         'base/clock_unittest.cc',
         'base/data_buffer_unittest.cc',
         'base/decoder_buffer_unittest.cc',
@@ -624,6 +655,8 @@
         'filters/audio_renderer_algorithm_unittest.cc',
         'filters/audio_renderer_impl_unittest.cc',
         'filters/chunk_demuxer_unittest.cc',
+        'filters/decrypting_audio_decoder_unittest.cc',
+        'filters/decrypting_video_decoder_unittest.cc',
         'filters/ffmpeg_audio_decoder_unittest.cc',
         'filters/ffmpeg_decoder_unittest.h',
         'filters/ffmpeg_demuxer_unittest.cc',
@@ -634,6 +667,7 @@
         'filters/h264_to_annex_b_bitstream_converter_unittest.cc',
         'filters/pipeline_integration_test.cc',
         'filters/pipeline_integration_test_base.cc',
+        'filters/skcanvas_video_renderer_unittest.cc',
         'filters/source_buffer_stream_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
         'video/capture/video_capture_device_unittest.cc',
@@ -644,6 +678,11 @@
         'webm/webm_parser_unittest.cc',
       ],
       'conditions': [
+        ['arm_neon == 1', {
+          'defines': [
+            'USE_NEON'
+          ],
+        }],
         ['OS != "ios"', {
           'dependencies': [
             'shared_memory_support',
@@ -792,21 +831,14 @@
             '..',
           ],
           'conditions': [
-            ['order_profiling != 0', {
-              'target_conditions' : [
-                ['_toolset=="target"', {
-                  'cflags!': [ '-finstrument-functions' ],
-                }],
-              ],
-            }],
             [ 'target_arch == "ia32" or target_arch == "x64"', {
               'dependencies': [
                 'yuv_convert_simd_x86',
               ],
             }],
-            [ 'target_arch == "arm"', {
+            [ 'target_arch == "arm" or target_arch == "mipsel"', {
               'dependencies': [
-                'yuv_convert_simd_arm',
+                'yuv_convert_simd_c',
               ],
             }],
           ],
@@ -846,13 +878,6 @@
             'base/simd/yuv_to_rgb_table.h',
           ],
           'conditions': [
-            ['order_profiling != 0', {
-              'target_conditions' : [
-                ['_toolset=="target"', {
-                  'cflags!': [ '-finstrument-functions' ],
-                }],
-              ],
-            }],
             [ 'target_arch == "x64"', {
               # Source files optimized for X64 systems.
               'sources': [
@@ -889,11 +914,23 @@
             }],
             [ 'OS=="mac"', {
               'variables': {
-                'yasm_flags': [
-                  '-DPREFIX',
-                  '-DMACHO',
-                  '-DCHROMIUM',
-                  '-Isimd',
+                'conditions': [
+                  [ 'target_arch=="ia32"', {
+                    'yasm_flags': [
+                      '-DPREFIX',
+                      '-DMACHO',
+                      '-DCHROMIUM',
+                      '-Isimd',
+                    ],
+                  }, {
+                    'yasm_flags': [
+                      '-DPREFIX',
+                      '-DARCH_X86_64',
+                      '-DMACHO',
+                      '-DCHROMIUM',
+                      '-Isimd',
+                    ],
+                  }],
                 ],
               },
             }],
@@ -929,7 +966,7 @@
           ],
         },
         {
-          'target_name': 'yuv_convert_simd_arm',
+          'target_name': 'yuv_convert_simd_c',
           'type': 'static_library',
           'include_dirs': [
             '..',
@@ -1017,7 +1054,7 @@
         },
       ],
     }],
-    ['OS == "win" or toolkit_uses_gtk == 1', {
+    ['(OS == "win" or toolkit_uses_gtk == 1) and use_aura != 1', {
       'targets': [
         {
           'target_name': 'shader_bench',
@@ -1064,7 +1101,7 @@
         },
       ],
     }],
-    ['OS == "linux" and target_arch != "arm"', {
+    ['OS == "linux" and target_arch != "arm" and target_arch != "mipsel"', {
       'targets': [
         {
           'target_name': 'tile_render_bench',
@@ -1136,10 +1173,24 @@
     }],
     ['OS == "android"', {
       'targets': [
+         {
+          'target_name': 'media_player_jni_headers',
+          'type': 'none',
+          'variables': {
+            'jni_gen_dir': 'media',
+            'input_java_class': 'android/media/MediaPlayer.class',
+            'input_jar_file': '<(android_sdk)/android.jar',
+          },
+          'includes': [ '../build/jar_file_jni_generator.gypi' ],
+        },
         {
           'target_name': 'player_android_jni_headers',
           'type': 'none',
+          'dependencies': [
+            'media_player_jni_headers',
+          ],
           'sources': [
+            'base/android/java/src/org/chromium/media/MediaPlayerBridge.java',
             'base/android/java/src/org/chromium/media/MediaPlayerListener.java',
           ],
           'variables': {
@@ -1153,6 +1204,8 @@
           'sources': [
             'base/android/media_player_bridge.cc',
             'base/android/media_player_bridge.h',
+            'base/android/media_player_listener.cc',
+            'base/android/media_player_listener.h',
           ],
           'dependencies': [
             '../base/base.gyp:base',

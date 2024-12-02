@@ -9,13 +9,17 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/version.h"
 #include "content/browser/gpu/gpu_blacklist.h"
 #include "content/public/common/gpu_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::GpuFeatureType;
-using content::GpuSwitchingOption;
+const char kOsVersion[] = "10.6.4";
+const uint32 kIntelVendorId = 0x8086;
+const uint32 kIntelDeviceId = 0x0166;  // 3rd Gen Core Graphics
+const uint32 kNvidiaVendorId = 0x10de;
+const uint32 kNvidiaDeviceId = 0x0fd5;  // GeForce GT 650M
+
+namespace content {
 
 class GpuBlacklistTest : public testing::Test {
  public:
@@ -23,21 +27,23 @@ class GpuBlacklistTest : public testing::Test {
 
   virtual ~GpuBlacklistTest() { }
 
-  const content::GPUInfo& gpu_info() const {
+  const GPUInfo& gpu_info() const {
     return gpu_info_;
   }
 
   GpuBlacklist* Create() {
-    return new GpuBlacklist();
+    GpuBlacklist* rt = new GpuBlacklist();
+    return rt;
   }
 
  protected:
   void SetUp() {
-    gpu_info_.gpu.vendor_id = 0x10de;
+    gpu_info_.gpu.vendor_id = kNvidiaVendorId;
     gpu_info_.gpu.device_id = 0x0640;
     gpu_info_.driver_vendor = "NVIDIA";
     gpu_info_.driver_version = "1.6.18";
     gpu_info_.driver_date = "7-14-2009";
+    gpu_info_.machine_model = "MacBookPro 7.1";
     gpu_info_.gl_vendor = "NVIDIA Corporation";
     gpu_info_.gl_renderer = "NVIDIA GeForce GT 120 OpenGL Engine";
     gpu_info_.performance_stats.graphics = 5.0;
@@ -49,7 +55,7 @@ class GpuBlacklistTest : public testing::Test {
   }
 
  private:
-  content::GPUInfo gpu_info_;
+  GPUInfo gpu_info_;
 };
 
 TEST_F(GpuBlacklistTest, CurrentBlacklistValidation) {
@@ -65,23 +71,21 @@ TEST_F(GpuBlacklistTest, CurrentBlacklistValidation) {
   ASSERT_TRUE(file_util::GetFileSize(data_file, &data_file_size64));
   int data_file_size = static_cast<int>(data_file_size64);
   scoped_array<char> data(new char[data_file_size]);
-  ASSERT_EQ(file_util::ReadFile(data_file, data.get(), data_file_size),
-            data_file_size);
+  ASSERT_EQ(data_file_size,
+            file_util::ReadFile(data_file, data.get(), data_file_size));
   std::string json_string(data.get(), data_file_size);
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      json_string, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(json_string, GpuBlacklist::kAllOs));
   EXPECT_FALSE(blacklist->contains_unknown_fields());
 }
 
 TEST_F(GpuBlacklistTest, DefaultBlacklistSettings) {
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
   // Default blacklist settings: all feature are allowed.
-  GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+  GpuBlacklist::Decision decision = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info());
+  EXPECT_EQ(0, decision.blacklisted_features);
+  EXPECT_EQ(GPU_SWITCHING_OPTION_UNKNOWN, decision.gpu_switching);
 }
 
 TEST_F(GpuBlacklistTest, EmptyBlacklist) {
@@ -93,16 +97,15 @@ TEST_F(GpuBlacklistTest, EmptyBlacklist) {
       "  \"entries\": [\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      empty_list_json, GpuBlacklist::kAllOs));
-  EXPECT_EQ(blacklist->GetVersion(), std::string("2.5"));
-  GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(empty_list_json,
+                                          GpuBlacklist::kAllOs));
+  EXPECT_EQ("2.5", blacklist->GetVersion());
+  GpuBlacklist::Decision decision = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info());
+  EXPECT_EQ(0, decision.blacklisted_features);
+  EXPECT_EQ(GPU_SWITCHING_OPTION_UNKNOWN, decision.gpu_switching);
 }
 
 TEST_F(GpuBlacklistTest, DetailedEntryAndInvalidJson) {
@@ -133,31 +136,26 @@ TEST_F(GpuBlacklistTest, DetailedEntryAndInvalidJson) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      exact_list_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(exact_list_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING, type);
 
   // Invalid json input should not change the current blacklist settings.
   const std::string invalid_json = "invalid";
 
-  EXPECT_FALSE(blacklist->LoadGpuBlacklist(
-      invalid_json, GpuBlacklist::kAllOs));
+  EXPECT_FALSE(blacklist->LoadGpuBlacklist(invalid_json, GpuBlacklist::kAllOs));
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING, type);
   std::vector<uint32> entries;
-  bool disabled = false;
-  blacklist->GetDecisionEntries(entries, disabled);
-  EXPECT_EQ(entries.size(), 1u);
-  EXPECT_EQ(entries[0], 5u);
-  EXPECT_EQ(blacklist->max_entry_id(), 5u);
+  blacklist->GetDecisionEntries(&entries, false);
+  ASSERT_EQ(1u, entries.size());
+  EXPECT_EQ(5u, entries[0]);
+  EXPECT_EQ(5u, blacklist->max_entry_id());
 }
 
 TEST_F(GpuBlacklistTest, VendorOnAllOsEntry) {
@@ -176,41 +174,33 @@ TEST_F(GpuBlacklistTest, VendorOnAllOsEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
   // Blacklist entries won't be filtered to the current OS only upon loading.
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      vendor_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(vendor_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 #if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX) || \
     defined(OS_OPENBSD)
   // Blacklist entries will be filtered to the current OS only upon loading.
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      vendor_json, GpuBlacklist::kCurrentOsOnly));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(vendor_json,
+                                          GpuBlacklist::kCurrentOsOnly));
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 #endif
 }
 
@@ -233,23 +223,19 @@ TEST_F(GpuBlacklistTest, VendorOnLinuxEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      vendor_linux_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(vendor_linux_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
 }
 
 TEST_F(GpuBlacklistTest, AllExceptNVidiaOnLinuxEntry) {
@@ -275,23 +261,19 @@ TEST_F(GpuBlacklistTest, AllExceptNVidiaOnLinuxEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      linux_except_nvidia_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(linux_except_nvidia_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
 }
 
 TEST_F(GpuBlacklistTest, AllExceptIntelOnLinuxEntry) {
@@ -317,27 +299,23 @@ TEST_F(GpuBlacklistTest, AllExceptIntelOnLinuxEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      linux_except_intel_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(linux_except_intel_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
 }
 
 TEST_F(GpuBlacklistTest, DateOnWindowsEntry) {
-  // Blacklist all drivers earlier than 2010-01 in Windows.
+  // Blacklist all drivers earlier than 2010-5-8 in Windows.
   const std::string date_windows_json =
       "{\n"
       "  \"name\": \"gpu blacklist\",\n"
@@ -350,7 +328,7 @@ TEST_F(GpuBlacklistTest, DateOnWindowsEntry) {
       "      },\n"
       "      \"driver_date\": {\n"
       "        \"op\": \"<\",\n"
-      "        \"number\": \"2010.1\"\n"
+      "        \"number\": \"2010.5.8\"\n"
       "      },\n"
       "      \"blacklist\": [\n"
       "        \"accelerated_2d_canvas\"\n"
@@ -358,23 +336,52 @@ TEST_F(GpuBlacklistTest, DateOnWindowsEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      date_windows_json, GpuBlacklist::kAllOs));
+  GPUInfo gpu_info;
+  gpu_info.driver_date = "7-14-2009";
+
+  EXPECT_TRUE(
+      blacklist->LoadGpuBlacklist(date_windows_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
+
+  gpu_info.driver_date = "07-14-2009";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
+
+  gpu_info.driver_date = "1-1-2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
+
+  gpu_info.driver_date = "05-07-2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS, type);
+
+  gpu_info.driver_date = "5-8-2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_date = "5-9-2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_date = "6-2-2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
 }
 
 TEST_F(GpuBlacklistTest, MultipleDevicesEntry) {
@@ -393,23 +400,18 @@ TEST_F(GpuBlacklistTest, MultipleDevicesEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      devices_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(devices_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_MULTISAMPLING);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_MULTISAMPLING, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_MULTISAMPLING);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_MULTISAMPLING, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_MULTISAMPLING);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_MULTISAMPLING, type);
 }
 
 TEST_F(GpuBlacklistTest, ChromeOSEntry) {
@@ -429,19 +431,15 @@ TEST_F(GpuBlacklistTest, ChromeOSEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      devices_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(devices_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsChromeOS, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsChromeOS, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
 }
 
 TEST_F(GpuBlacklistTest, ChromeVersionEntry) {
@@ -462,23 +460,20 @@ TEST_F(GpuBlacklistTest, ChromeVersionEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist9(Create());
-  EXPECT_TRUE(blacklist9->LoadGpuBlacklist(
-      "9.0", browser_version_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist9->LoadGpuBlacklist("9.0", browser_version_json,
+                                           GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist9->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
 
   scoped_ptr<GpuBlacklist> blacklist10(Create());
-  EXPECT_TRUE(blacklist10->LoadGpuBlacklist(
-      "10.0", browser_version_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist10->LoadGpuBlacklist("10.0", browser_version_json,
+                                            GpuBlacklist::kAllOs));
   type = blacklist10->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, MalformedVendor) {
@@ -499,8 +494,8 @@ TEST_F(GpuBlacklistTest, MalformedVendor) {
       "}";
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_FALSE(blacklist->LoadGpuBlacklist(
-      malformed_vendor_json, GpuBlacklist::kAllOs));
+  EXPECT_FALSE(blacklist->LoadGpuBlacklist(malformed_vendor_json,
+                                           GpuBlacklist::kAllOs));
 }
 
 TEST_F(GpuBlacklistTest, UnknownField) {
@@ -524,17 +519,15 @@ TEST_F(GpuBlacklistTest, UnknownField) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      unknown_field_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(unknown_field_json,
+                                          GpuBlacklist::kAllOs));
   EXPECT_EQ(1u, blacklist->num_entries());
   EXPECT_TRUE(blacklist->contains_unknown_fields());
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, UnknownExceptionField) {
@@ -569,17 +562,15 @@ TEST_F(GpuBlacklistTest, UnknownExceptionField) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      unknown_exception_field_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(unknown_exception_field_json,
+                                          GpuBlacklist::kAllOs));
   EXPECT_EQ(1u, blacklist->num_entries());
   EXPECT_TRUE(blacklist->contains_unknown_fields());
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, UnknownFeature) {
@@ -597,17 +588,15 @@ TEST_F(GpuBlacklistTest, UnknownFeature) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
   scoped_ptr<GpuBlacklist> blacklist(Create());
 
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      unknown_feature_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(unknown_feature_json,
+                                          GpuBlacklist::kAllOs));
   EXPECT_EQ(1u, blacklist->num_entries());
   EXPECT_TRUE(blacklist->contains_unknown_fields());
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, GlVendor) {
@@ -628,15 +617,13 @@ TEST_F(GpuBlacklistTest, GlVendor) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      gl_vendor_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(gl_vendor_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, GlRenderer) {
@@ -657,15 +644,13 @@ TEST_F(GpuBlacklistTest, GlRenderer) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      gl_renderer_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(gl_renderer_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, PerfGraphics) {
@@ -686,14 +671,12 @@ TEST_F(GpuBlacklistTest, PerfGraphics) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
   EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, PerfGaming) {
@@ -714,14 +697,12 @@ TEST_F(GpuBlacklistTest, PerfGaming) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
   EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(0, type);
 }
 
 TEST_F(GpuBlacklistTest, PerfOverall) {
@@ -743,14 +724,12 @@ TEST_F(GpuBlacklistTest, PerfOverall) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
   EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, DisabledEntry) {
@@ -768,22 +747,17 @@ TEST_F(GpuBlacklistTest, DisabledEntry) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      disabled_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(disabled_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).blacklisted_features;
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).blacklisted_features;
   EXPECT_EQ(type, 0);
   std::vector<uint32> flag_entries;
-  bool disabled = false;
-  blacklist->GetDecisionEntries(flag_entries, disabled);
-  EXPECT_EQ(flag_entries.size(), 0u);
-  disabled = true;
-  blacklist->GetDecisionEntries(flag_entries, disabled);
-  EXPECT_EQ(flag_entries.size(), 1u);
+  blacklist->GetDecisionEntries(&flag_entries, false);
+  EXPECT_EQ(0u, flag_entries.size());
+  blacklist->GetDecisionEntries(&flag_entries, true);
+  EXPECT_EQ(1u, flag_entries.size());
 }
 
 TEST_F(GpuBlacklistTest, Optimus) {
@@ -804,18 +778,15 @@ TEST_F(GpuBlacklistTest, Optimus) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   gpu_info.optimus = true;
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      optimus_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(optimus_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, AMDSwitchable) {
@@ -836,18 +807,16 @@ TEST_F(GpuBlacklistTest, AMDSwitchable) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   gpu_info.amd_switchable = true;
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      amd_switchable_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(amd_switchable_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, LexicalDriverVersion) {
@@ -873,38 +842,249 @@ TEST_F(GpuBlacklistTest, LexicalDriverVersion) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
-  content::GPUInfo gpu_info;
+  GPUInfo gpu_info;
   gpu_info.gpu.vendor_id = 0x1002;
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      lexical_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(lexical_json, GpuBlacklist::kAllOs));
+
+  gpu_info.driver_version = "8.001.100";
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 
   gpu_info.driver_version = "8.109";
-  GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.10900";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.109.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 
   gpu_info.driver_version = "8.2";
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 
-  gpu_info.driver_version = "8.21";
+  gpu_info.driver_version = "8.20";
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.200";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.20.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
 
   gpu_info.driver_version = "8.2010";
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "8.21";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "8.21.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "9.002";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "9.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "12";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "12.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+}
+
+TEST_F(GpuBlacklistTest, LexicalDriverVersion2) {
+  const std::string lexical_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x1002\",\n"
+      "      \"driver_version\": {\n"
+      "        \"op\": \"<\",\n"
+      "        \"style\": \"lexical\",\n"
+      "        \"number\": \"9.002\"\n"
+      "      },\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = 0x1002;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(lexical_json, GpuBlacklist::kAllOs));
+
+  gpu_info.driver_version = "8.001.100";
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.109";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.10900";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.109.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.2";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.20";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.200";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.20.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.2010";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.21";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.21.100";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "9.002";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "9.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "12";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+
+  gpu_info.driver_version = "12.201";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+}
+
+TEST_F(GpuBlacklistTest, LexicalDriverVersion3) {
+  const std::string lexical_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x1002\",\n"
+      "      \"driver_version\": {\n"
+      "        \"op\": \"=\",\n"
+      "        \"style\": \"lexical\",\n"
+      "        \"number\": \"8.76\"\n"
+      "      },\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = 0x1002;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(lexical_json, GpuBlacklist::kAllOs));
+
+  gpu_info.driver_version = "8.76";
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.768";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+
+  gpu_info.driver_version = "8.76.8";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, MultipleGPUsAny) {
@@ -927,28 +1107,25 @@ TEST_F(GpuBlacklistTest, MultipleGPUsAny) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
-  content::GPUInfo gpu_info;
-  gpu_info.gpu.vendor_id = 0x10de;
-  gpu_info.gpu.device_id = 0x0fd5;
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = kNvidiaVendorId;
+  gpu_info.gpu.device_id = kNvidiaDeviceId;
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      multi_gpu_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(multi_gpu_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
 
-  content::GPUInfo::GPUDevice gpu_device;
-  gpu_device.vendor_id = 0x8086;
-  gpu_device.device_id = 0x0166;
+  GPUInfo::GPUDevice gpu_device;
+  gpu_device.vendor_id = kIntelVendorId;
+  gpu_device.device_id = kIntelDeviceId;
   gpu_info.secondary_gpus.push_back(gpu_device);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, MultipleGPUsSecondary) {
@@ -971,28 +1148,25 @@ TEST_F(GpuBlacklistTest, MultipleGPUsSecondary) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
-  content::GPUInfo gpu_info;
-  gpu_info.gpu.vendor_id = 0x10de;
-  gpu_info.gpu.device_id = 0x0fd5;
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = kNvidiaVendorId;
+  gpu_info.gpu.device_id = kNvidiaDeviceId;
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      multi_gpu_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(multi_gpu_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, 0);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
 
-  content::GPUInfo::GPUDevice gpu_device;
-  gpu_device.vendor_id = 0x8086;
-  gpu_device.device_id = 0x0166;
+  GPUInfo::GPUDevice gpu_device;
+  gpu_device.vendor_id = kIntelVendorId;
+  gpu_device.device_id = kIntelDeviceId;
   gpu_info.secondary_gpus.push_back(gpu_device);
   type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_WEBGL);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
 }
 
 TEST_F(GpuBlacklistTest, GpuSwitching) {
@@ -1024,42 +1198,37 @@ TEST_F(GpuBlacklistTest, GpuSwitching) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      gpu_switching_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(gpu_switching_json,
+                                          GpuBlacklist::kAllOs));
   GpuSwitchingOption switching = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).gpu_switching;
-  EXPECT_EQ(switching, content::GPU_SWITCHING_FORCE_DISCRETE);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).gpu_switching;
+  EXPECT_EQ(GPU_SWITCHING_OPTION_FORCE_DISCRETE, switching);
   std::vector<uint32> entries;
-  bool disabled = false;
-  blacklist->GetDecisionEntries(entries, disabled);
-  EXPECT_EQ(entries.size(), 1u);
-  EXPECT_EQ(entries[0], 1u);
+  blacklist->GetDecisionEntries(&entries, false);
+  ASSERT_EQ(1u, entries.size());
+  EXPECT_EQ(1u, entries[0]);
 
   blacklist.reset(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      gpu_switching_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(gpu_switching_json,
+                                          GpuBlacklist::kAllOs));
   switching = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsWin, &os_version,
-      gpu_info()).gpu_switching;
-  EXPECT_EQ(switching, content::GPU_SWITCHING_FORCE_INTEGRATED);
-  blacklist->GetDecisionEntries(entries, disabled);
-  EXPECT_EQ(entries.size(), 1u);
-  EXPECT_EQ(entries[0], 2u);
+      GpuBlacklist::kOsWin, kOsVersion, gpu_info()).gpu_switching;
+  EXPECT_EQ(GPU_SWITCHING_OPTION_FORCE_INTEGRATED, switching);
+  blacklist->GetDecisionEntries(&entries, false);
+  ASSERT_EQ(1u, entries.size());
+  EXPECT_EQ(2u, entries[0]);
 
   blacklist.reset(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      gpu_switching_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(gpu_switching_json,
+                                          GpuBlacklist::kAllOs));
   switching = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsLinux, &os_version,
-      gpu_info()).gpu_switching;
-  EXPECT_EQ(switching, content::GPU_SWITCHING_AUTOMATIC);
-  blacklist->GetDecisionEntries(entries, disabled);
-  EXPECT_EQ(entries.size(), 1u);
-  EXPECT_EQ(entries[0], 3u);
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info()).gpu_switching;
+  EXPECT_EQ(GPU_SWITCHING_OPTION_AUTOMATIC, switching);
+  blacklist->GetDecisionEntries(&entries, false);
+  ASSERT_EQ(1u, entries.size());
+  EXPECT_EQ(3u, entries[0]);
 }
 
 TEST_F(GpuBlacklistTest, VideoDecode) {
@@ -1081,17 +1250,57 @@ TEST_F(GpuBlacklistTest, VideoDecode) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      video_decode_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(video_decode_json,
+                                          GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE, type);
 }
 
+TEST_F(GpuBlacklistTest, DualGpuModel) {
+  const std::string model_json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 5,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"macosx\",\n"
+      "        \"version\": {\n"
+      "          \"op\": \">=\",\n"
+      "          \"number\": \"10.7\"\n"
+      "        }\n"
+      "      },\n"
+      "      \"machine_model\": {\n"
+      "        \"name\": {\n"
+      "          \"op\": \"=\",\n"
+      "          \"value\": \"MacBookPro\"\n"
+      "        },\n"
+      "        \"version\": {\n"
+      "          \"op\": \"<\",\n"
+      "          \"number\": \"8\"\n"
+      "        }\n"
+      "      },\n"
+      "      \"gpu_count\": {\n"
+      "        \"op\": \"=\",\n"
+      "        \"value\": \"2\"\n"
+      "      },\n"
+      "      \"gpu_switching\": \"force_discrete\"\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(model_json, GpuBlacklist::kAllOs));
+  // Insert a second GPU.
+  GPUInfo gpu_info;
+  gpu_info.secondary_gpus.push_back(GPUInfo::GPUDevice());
+  GpuSwitchingOption switching = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsMacosx, "10.7.2", gpu_info).gpu_switching;
+  EXPECT_EQ(GPU_SWITCHING_OPTION_FORCE_DISCRETE, switching);
+}
 
 TEST_F(GpuBlacklistTest, Css3D) {
   const std::string css_3d_json =
@@ -1112,15 +1321,12 @@ TEST_F(GpuBlacklistTest, Css3D) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      css_3d_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(css_3d_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_3D_CSS);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_3D_CSS, type);
 }
 
 TEST_F(GpuBlacklistTest, Video) {
@@ -1142,13 +1348,175 @@ TEST_F(GpuBlacklistTest, Video) {
       "    }\n"
       "  ]\n"
       "}";
-  Version os_version("10.6.4");
 
   scoped_ptr<GpuBlacklist> blacklist(Create());
-  EXPECT_TRUE(blacklist->LoadGpuBlacklist(
-      video_json, GpuBlacklist::kAllOs));
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(video_json, GpuBlacklist::kAllOs));
   GpuFeatureType type = blacklist->MakeBlacklistDecision(
-      GpuBlacklist::kOsMacosx, &os_version,
-      gpu_info()).blacklisted_features;
-  EXPECT_EQ(type, content::GPU_FEATURE_TYPE_ACCELERATED_VIDEO);
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info()).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_ACCELERATED_VIDEO, type);
 }
+
+TEST_F(GpuBlacklistTest, NeedsMoreInfo) {
+  const std::string json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x8086\",\n"
+      "      \"driver_version\": {\n"
+      "        \"op\": \"<\",\n"
+      "        \"number\": \"10.7\"\n"
+      "      },\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = kIntelVendorId;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
+
+  // The case this entry does not apply.
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+
+  // The case this entry might apply, but need more info.
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_TRUE(blacklist->needs_more_info());
+
+  // The case we have full info, and this entry applies.
+  gpu_info.driver_version = "10.6";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+
+  // The case we have full info, and this entry does not apply.
+  gpu_info.driver_version = "10.8";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+}
+
+TEST_F(GpuBlacklistTest, NeedsMoreInfoForExceptions) {
+  const std::string json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x8086\",\n"
+      "      \"exceptions\": [\n"
+      "        {\n"
+      "          \"gl_renderer\": {\n"
+      "            \"op\": \"contains\",\n"
+      "            \"value\": \"mesa\"\n"
+      "          }\n"
+      "        }\n"
+      "      ],\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = kIntelVendorId;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
+
+  // The case this entry does not apply.
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsMacosx, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+
+  // The case this entry might apply, but need more info.
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_TRUE(blacklist->needs_more_info());
+
+  // The case we have full info, and the exception applies (so the entry
+  // does not apply).
+  gpu_info.gl_renderer = "mesa";
+  type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(0, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+
+  // The case we have full info, and this entry applies.
+  gpu_info.gl_renderer = "my renderer";
+  type = blacklist->MakeBlacklistDecision(GpuBlacklist::kOsLinux, kOsVersion,
+      gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+}
+
+TEST_F(GpuBlacklistTest, IgnorableEntries) {
+  // If an entry will not change the blacklist decisions, then it should not
+  // trigger the needs_more_info flag.
+  const std::string json =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"0.1\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x8086\",\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    },\n"
+      "    {\n"
+      "      \"id\": 2,\n"
+      "      \"os\": {\n"
+      "        \"type\": \"linux\"\n"
+      "      },\n"
+      "      \"vendor_id\": \"0x8086\",\n"
+      "      \"driver_version\": {\n"
+      "        \"op\": \"<\",\n"
+      "        \"number\": \"10.7\"\n"
+      "      },\n"
+      "      \"blacklist\": [\n"
+      "        \"webgl\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+
+  GPUInfo gpu_info;
+  gpu_info.gpu.vendor_id = kIntelVendorId;
+
+  scoped_ptr<GpuBlacklist> blacklist(Create());
+  EXPECT_TRUE(blacklist->LoadGpuBlacklist(json, GpuBlacklist::kAllOs));
+  GpuFeatureType type = blacklist->MakeBlacklistDecision(
+      GpuBlacklist::kOsLinux, kOsVersion, gpu_info).blacklisted_features;
+  EXPECT_EQ(GPU_FEATURE_TYPE_WEBGL, type);
+  EXPECT_FALSE(blacklist->needs_more_info());
+}
+
+}  // namespace content

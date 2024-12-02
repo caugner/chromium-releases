@@ -72,7 +72,7 @@ std::string ContentBrowserClient::GetCanonicalEncodingNameByAliasName(
 }
 
 std::string ContentBrowserClient::GetApplicationLocale() {
-  return std::string();
+  return "en-US";
 }
 
 std::string ContentBrowserClient::GetAcceptLangs(BrowserContext* context) {
@@ -239,6 +239,10 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
 
 bool ContentBrowserClient::AllowPepperPrivateFileAPI() {
   return false;
+}
+
+FilePath ContentBrowserClient::GetHyphenDictionaryDirectory() {
+  return FilePath();
 }
 
 #if defined(OS_WIN)

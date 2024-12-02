@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/cros/network_library.h"
 
-#include <dbus/dbus-glib.h>
-
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
@@ -185,6 +183,7 @@ NetworkDevice::NetworkDevice(const std::string& device_path)
       sim_lock_state_(SIM_UNKNOWN),
       sim_retries_left_(kDefaultSimUnlockRetriesCount),
       sim_pin_required_(SIM_PIN_REQUIRE_UNKNOWN),
+      sim_present_(false),
       prl_version_(0),
       data_roaming_allowed_(false),
       support_network_scan_(false),
@@ -297,10 +296,8 @@ void Network::SetState(ConnectionState new_state) {
   ConnectionState old_state = state_;
   VLOG(2) << "Entering new state: " << ConnectionStateString(new_state);
   state_ = new_state;
-  if (!IsConnectingState(new_state))
-    set_connection_started(false);
   if (new_state == STATE_FAILURE) {
-    VLOG(2) << "Detected Failure state.";
+    VLOG(1) << service_path() << ": Detected Failure state.";
     if (old_state != STATE_UNKNOWN && old_state != STATE_IDLE) {
       // New failure, the user needs to be notified.
       // Transition STATE_IDLE -> STATE_FAILURE sometimes happens on resume
@@ -313,6 +310,13 @@ void Network::SetState(ConnectionState new_state) {
         error_ = ERROR_UNKNOWN;
       }
     }
+  } else if (new_state == STATE_IDLE && IsConnectingState(old_state)
+             && connection_started()) {
+    // If we requested a connect and never went through a connected state,
+    // treat it as a failure.
+    VLOG(1) << service_path() << ": Inferring Failure state.";
+    notify_failure_ = true;
+    error_ = ERROR_UNKNOWN;
   } else if (new_state != STATE_UNKNOWN) {
     notify_failure_ = false;
     // State changed, so refresh IP address.
@@ -321,6 +325,8 @@ void Network::SetState(ConnectionState new_state) {
   }
   VLOG(1) << name() << ".State [" << service_path() << "]: " << GetStateString()
           << " (was: " << ConnectionStateString(old_state) << ")";
+  if (!IsConnectingState(new_state) && new_state != STATE_UNKNOWN)
+    set_connection_started(false);
 }
 
 void Network::SetError(ConnectionError error) {
@@ -734,7 +740,12 @@ void VirtualNetwork::MatchCertificatePattern(bool allow_enroll,
                                              const base::Closure& connect) {
   DCHECK(client_cert_type() == CLIENT_CERT_TYPE_PATTERN);
   DCHECK(!client_cert_pattern().Empty());
-  if (client_cert_pattern().Empty()) {
+
+  // We skip certificate patterns for device policy ONC so that an unmanaged
+  // user can't get to the place where a cert is presented for them
+  // involuntarily.
+  if (client_cert_pattern().Empty() ||
+      ui_data().onc_source() == NetworkUIData::ONC_SOURCE_DEVICE_POLICY) {
     connect.Run();
     return;
   }
@@ -761,8 +772,8 @@ void VirtualNetwork::MatchCertificatePattern(bool allow_enroll,
                      false,
                      connect);
 
-     enrollment_delegate()->Enroll(client_cert_pattern().enrollment_uri_list(),
-                                   wrapped_connect);
+      enrollment_delegate()->Enroll(client_cert_pattern().enrollment_uri_list(),
+                                    wrapped_connect);
       // Enrollment delegate will take care of running the closure at the
       // appropriate time, if the user doesn't cancel.
       return;
@@ -1219,9 +1230,11 @@ std::string WifiNetwork::GetEncryptionString() const {
 }
 
 bool WifiNetwork::IsPassphraseRequired() const {
-  // TODO(stevenjb): Remove error_ tests when fixed.
-  // (http://crosbug.com/10135).
-  if (error() == ERROR_BAD_PASSPHRASE || error() == ERROR_BAD_WEPKEY)
+  if (encryption_ == SECURITY_NONE)
+    return false;
+  // A connection failure might be due to a bad passphrase.
+  if (error() == ERROR_BAD_PASSPHRASE || error() == ERROR_BAD_WEPKEY ||
+      error() == ERROR_UNKNOWN)
     return true;
   // For 802.1x networks, configuration is required if connectable is false
   // unless we're using a certificate pattern.
@@ -1334,7 +1347,9 @@ NetworkLibrary::EAPConfigData::EAPConfigData()
 
 NetworkLibrary::EAPConfigData::~EAPConfigData() {}
 
-NetworkLibrary::VPNConfigData::VPNConfigData() {}
+NetworkLibrary::VPNConfigData::VPNConfigData()
+    : save_credentials(false) {
+}
 
 NetworkLibrary::VPNConfigData::~VPNConfigData() {}
 

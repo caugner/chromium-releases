@@ -7,6 +7,7 @@
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history.h"
@@ -88,23 +89,23 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
   // will be pending after we ask to navigate there).
   void NavigateToOffset(int offset) {
     controller().GoToOffset(offset);
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   // Same as NavigateToOffset but goes to an absolute index.
   void NavigateToIndex(int index) {
     controller().GoToIndex(index);
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   // Goes back/forward and commits the load.
   void GoBack() {
     controller().GoBack();
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
   void GoForward() {
     controller().GoForward();
-    WebContentsTester::For(contents())->CommitPendingNavigation();
+    WebContentsTester::For(web_contents())->CommitPendingNavigation();
   }
 
   content::TestBrowserThread ui_thread_;
@@ -113,11 +114,11 @@ class BackFwdMenuModelTest : public ChromeRenderViewHostTestHarness {
 TEST_F(BackFwdMenuModelTest, BasicCase) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_EQ(0, forward_model->GetItemCount());
@@ -181,11 +182,11 @@ TEST_F(BackFwdMenuModelTest, BasicCase) {
 TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   // Seed the controller with 32 URLs
   LoadURLAndUpdateState("http://www.a.com/1", "A1");
@@ -263,11 +264,11 @@ TEST_F(BackFwdMenuModelTest, MaxItemsTest) {
 TEST_F(BackFwdMenuModelTest, ChapterStops) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
     NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   scoped_ptr<BackForwardMenuModel> forward_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::FORWARD_MENU));
-  forward_model->set_test_web_contents(contents());
+  forward_model->set_test_web_contents(web_contents());
 
   // Seed the controller with 32 URLs.
   int i = 0;
@@ -474,7 +475,7 @@ TEST_F(BackFwdMenuModelTest, ChapterStops) {
 TEST_F(BackFwdMenuModelTest, EscapeLabel) {
   scoped_ptr<BackForwardMenuModel> back_model(new BackForwardMenuModel(
       NULL, BackForwardMenuModel::BACKWARD_MENU));
-  back_model->set_test_web_contents(contents());
+  back_model->set_test_web_contents(web_contents());
 
   EXPECT_EQ(0, back_model->GetItemCount());
   EXPECT_FALSE(back_model->ItemHasCommand(1));
@@ -527,7 +528,7 @@ TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
   // Set the desired favicon for url1.
   HistoryServiceFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS)->AddPage(
-          url1, history::SOURCE_BROWSED);
+          url1, base::Time::Now(), history::SOURCE_BROWSED);
   FaviconServiceFactory::GetForProfile(
       profile(), Profile::EXPLICIT_ACCESS)->SetFavicons(
           url1, url1_favicon, history::FAVICON, gfx::Image(new_icon_bitmap));

@@ -59,7 +59,6 @@
 #include "ui/gfx/color_profile.h"
 #include "webkit/glue/webcookie.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -84,6 +83,12 @@ const int kPluginsRefreshThresholdInSeconds = 3;
 // When two CPU usage queries arrive within this interval, we sample the CPU
 // usage only once and send it as a response for both queries.
 static const int64 kCPUUsageSampleIntervalMs = 900;
+
+// On Windows, |g_color_profile| can run on an arbitrary background thread.
+// We avoid races by using LazyInstance's constructor lock to initialize the
+// object.
+base::LazyInstance<gfx::ColorProfile>::Leaky g_color_profile =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Common functionality for converting a sync renderer message to a callback
 // function in the browser. Derive from this, create it on the heap when
@@ -406,13 +411,14 @@ void RenderMessageFilter::OnDestruct() const {
   BrowserThread::DeleteOnIOThread::Destruct(this);
 }
 
-void RenderMessageFilter::OverrideThreadForMessage(
-    const IPC::Message& message, BrowserThread::ID* thread) {
+base::TaskRunner* RenderMessageFilter::OverrideTaskRunnerForMessage(
+    const IPC::Message& message) {
 #if defined(OS_WIN)
   // Windows monitor profile must be read from a file.
   if (message.type() == ViewHostMsg_GetMonitorColorProfile::ID)
-    *thread = BrowserThread::FILE;
+    return BrowserThread::GetBlockingPool();
 #endif
+  return NULL;
 }
 
 bool RenderMessageFilter::OffTheRecord() const {
@@ -736,7 +742,7 @@ void RenderMessageFilter::OnGetHardwareSampleRate(int* sample_rate) {
 }
 
 void RenderMessageFilter::OnGetHardwareInputChannelLayout(
-    ChannelLayout* layout) {
+    media::ChannelLayout* layout) {
   // TODO(henrika): add support for all available input devices.
   *layout = media::GetAudioInputHardwareChannelLayout(
       media::AudioManagerBase::kDefaultDeviceId);
@@ -744,24 +750,25 @@ void RenderMessageFilter::OnGetHardwareInputChannelLayout(
 
 void RenderMessageFilter::OnGetMonitorColorProfile(std::vector<char>* profile) {
 #if defined(OS_WIN)
+  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (BackingStoreWin::ColorManagementEnabled())
     return;
 #endif
-  gfx::GetColorProfile(profile);
+  *profile = g_color_profile.Get().profile();
 }
 
 void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                         const GURL& url,
                                         const Referrer& referrer,
                                         const string16& suggested_name) {
-  DownloadSaveInfo save_info;
-  save_info.suggested_name = suggested_name;
+  scoped_ptr<DownloadSaveInfo> save_info(new DownloadSaveInfo());
+  save_info->suggested_name = suggested_name;
   scoped_ptr<net::URLRequest> request(
       resource_context_->GetRequestContext()->CreateRequest(url, NULL));
   request->set_referrer(referrer.url.spec());
   webkit_glue::ConfigureURLRequestForReferrerPolicy(
       request.get(), referrer.policy);
-  download_stats::RecordDownloadSource(download_stats::INITIATED_BY_RENDERER);
+  RecordDownloadSource(INITIATED_BY_RENDERER);
   resource_dispatcher_host_->BeginDownload(
       request.Pass(),
       true,  // is_content_initiated
@@ -769,7 +776,7 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
       render_process_id_,
       message.routing_id(),
       false,
-      save_info,
+      save_info.Pass(),
       ResourceDispatcherHostImpl::DownloadStartedCallback());
 }
 

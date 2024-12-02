@@ -10,6 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/file_version_info.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
@@ -76,7 +77,8 @@ InstallerState::InstallerState()
       state_type_(BrowserDistribution::CHROME_BROWSER),
       root_key_(NULL),
       msi_(false),
-      verbose_logging_(false) {
+      verbose_logging_(false),
+      ensure_google_update_present_(false) {
 }
 
 InstallerState::InstallerState(Level level)
@@ -87,7 +89,8 @@ InstallerState::InstallerState(Level level)
       state_type_(BrowserDistribution::CHROME_BROWSER),
       root_key_(NULL),
       msi_(false),
-      verbose_logging_(false) {
+      verbose_logging_(false),
+      ensure_google_update_present_(false) {
   // Use set_level() so that root_key_ is updated properly.
   set_level(level);
 }
@@ -109,6 +112,9 @@ void InstallerState::Initialize(const CommandLine& command_line,
 
   if (!prefs.GetBool(master_preferences::kMsi, &msi_))
     msi_ = false;
+
+  ensure_google_update_present_ =
+      command_line.HasSwitch(installer::switches::kEnsureGoogleUpdatePresent);
 
   const bool is_uninstall = command_line.HasSwitch(switches::kUninstall);
 
@@ -581,6 +587,28 @@ bool InstallerState::IsFileInUse(const FilePath& file) {
                                              OPEN_EXISTING, 0, 0)).IsValid();
 }
 
+
+void InstallerState::GetExistingExeVersions(
+    std::set<std::string>* existing_versions) const {
+
+  static const wchar_t* const kChromeFilenames[] = {
+    installer::kChromeExe,
+    installer::kChromeNewExe,
+    installer::kChromeOldExe,
+  };
+
+  for (int i = 0; i < arraysize(kChromeFilenames); ++i) {
+    FilePath chrome_exe(target_path().Append(kChromeFilenames[i]));
+    scoped_ptr<FileVersionInfo> file_version_info(
+        FileVersionInfo::CreateFileVersionInfo(chrome_exe));
+    if (file_version_info) {
+      string16 version_string = file_version_info->file_version();
+      if (!version_string.empty() && IsStringASCII(version_string))
+        existing_versions->insert(WideToASCII(version_string));
+    }
+  }
+}
+
 void InstallerState::RemoveOldVersionDirectories(
     const Version& new_version,
     Version* existing_version,
@@ -589,8 +617,16 @@ void InstallerState::RemoveOldVersionDirectories(
   std::vector<FilePath> key_files;
   scoped_ptr<WorkItem> item;
 
-  // Try to delete all directories whose versions are lower than latest_version
-  // and not equal to the existing version (opv).
+  std::set<std::string> existing_version_strings;
+  existing_version_strings.insert(new_version.GetString());
+  if (existing_version)
+    existing_version_strings.insert(existing_version->GetString());
+
+  // Make sure not to delete any version dir that is "referenced" by an existing
+  // Chrome executable.
+  GetExistingExeVersions(&existing_version_strings);
+
+  // Try to delete all directories that are not in the set we care to keep.
   file_util::FileEnumerator version_enum(target_path(), false,
       file_util::FileEnumerator::DIRECTORIES);
   for (FilePath next_version = version_enum.Next(); !next_version.empty();
@@ -600,26 +636,18 @@ void InstallerState::RemoveOldVersionDirectories(
     // Delete the version folder if it is less than the new version and not
     // equal to the old version (if we have an old version).
     if (version.IsValid() &&
-        version.CompareTo(new_version) < 0 &&
-        (existing_version == NULL || !version.Equals(*existing_version))) {
-      // Collect the key files (relative to the version dir) for all products.
-      key_files.clear();
-      std::for_each(products_.begin(), products_.end(),
-                    std::bind2nd(std::mem_fun(&Product::AddKeyFiles),
-                                 &key_files));
-      // Make the key_paths absolute.
-      const std::vector<FilePath>::iterator end = key_files.end();
-      for (std::vector<FilePath>::iterator scan = key_files.begin();
-           scan != end; ++scan) {
-        *scan = next_version.Append(*scan);
-      }
+        existing_version_strings.count(version.GetString()) == 0) {
+      // Note: temporarily log old version deletion at ERROR level to make it
+      // more likely we see this in the installer log.
+      LOG(ERROR) << "Deleting old version directory: " << next_version.value();
 
-      VLOG(1) << "Deleting old version directory: " << next_version.value();
+      // Attempt to recursively delete the old version dir.
+      bool delete_succeeded = file_util::Delete(next_version, true);
 
-      item.reset(WorkItem::CreateDeleteTreeWorkItem(next_version, temp_path,
-                                                    key_files));
-      item->set_ignore_failure(true);
-      item->Do();
+      // Note: temporarily log old version deletion at ERROR level to make it
+      // more likely we see this in the installer log.
+      LOG_IF(ERROR, !delete_succeeded)
+          << "Failed to delete old version directory: " << next_version.value();
     }
   }
 }

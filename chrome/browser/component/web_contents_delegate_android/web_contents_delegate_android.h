@@ -18,7 +18,6 @@
 #include "net/base/net_errors.h"
 
 namespace content {
-class DownloadItem;
 class JavaScriptDialogCreator;
 class RenderViewHost;
 class WebContents;
@@ -59,14 +58,6 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
       content::WebContents* source,
       const content::OpenURLParams& params) OVERRIDE;
 
-  // Don't merge back.
-  // TODO(mkosiba): Upstream base class's implementaion of this method.
-  virtual bool ShouldIgnoreNavigation(
-      content::WebContents* source,
-      const GURL& url,
-      const content::Referrer& referrer,
-      WindowOpenDisposition disposition,
-      content::PageTransition transition_type);
   virtual void NavigationStateChanged(const content::WebContents* source,
                                       unsigned changed_flags) OVERRIDE;
   virtual void AddNewContents(content::WebContents* source,
@@ -94,23 +85,13 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   virtual void UpdateTargetURL(content::WebContents* source,
                                int32 page_id,
                                const GURL& url) OVERRIDE;
-  virtual bool CanDownload(content::RenderViewHost* source,
-                           int request_id,
-                           const std::string& request_method) OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
-  virtual bool ShouldOverrideLoading(const GURL& url) OVERRIDE;
   virtual void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator()
-      OVERRIDE;
   virtual bool TakeFocus(content::WebContents* source, bool reverse) OVERRIDE;
 
-  void SetJavaScriptDialogCreator(
-      content::JavaScriptDialogCreator* javascript_dialog_creator) {
-    javascript_dialog_creator_ = javascript_dialog_creator;
-  }
+  virtual void ShowRepostFormWarningDialog(
+      content::WebContents* source) OVERRIDE;
 
  protected:
   base::android::ScopedJavaLocalRef<jobject> GetJavaDelegate(JNIEnv* env) const;
@@ -120,9 +101,6 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   // strong reference to that object as long as they want to receive callbacks
   // on it. Using a weak ref here allows it to be correctly GCed.
   JavaObjectWeakGlobalRef weak_java_delegate_;
-
-  // The object responsible for creating JavaScript dialogs.
-  content::JavaScriptDialogCreator* javascript_dialog_creator_;
 };
 
 bool RegisterWebContentsDelegateAndroid(JNIEnv* env);

@@ -40,49 +40,10 @@ DesktopScreenWin::~DesktopScreenWin() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DesktopScreenWin, gfx::ScreenImpl implementation:
+// DesktopScreenWin, gfx::ScreenWin implementation:
 
-gfx::Point DesktopScreenWin::GetCursorScreenPoint() {
-  POINT pt;
-  GetCursorPos(&pt);
-  return gfx::Point(pt);
-}
-
-gfx::NativeWindow DesktopScreenWin::GetWindowAtCursorScreenPoint() {
-  POINT location;
-  gfx::AcceleratedWidget accelerated_widget =
-      GetCursorPos(&location) ? WindowFromPoint(location) : NULL;
-  RootWindowHost* host = NULL;
-  if (::IsWindow(accelerated_widget))
-    host = RootWindowHost::GetForAcceleratedWidget(accelerated_widget);
-  return host ? host->GetRootWindow() : NULL;
-}
-
-int DesktopScreenWin::GetNumDisplays() {
-  return GetSystemMetrics(SM_CMONITORS);
-}
-
-gfx::Display DesktopScreenWin::GetDisplayNearestWindow(
-    gfx::NativeView window) const {
-  gfx::AcceleratedWidget accelerated_window =
-      window->GetRootWindow()->GetAcceleratedWidget();
-  MONITORINFO monitor_info;
-  monitor_info.cbSize = sizeof(monitor_info);
-  GetMonitorInfo(MonitorFromWindow(accelerated_window,
-                                   MONITOR_DEFAULTTONEAREST),
-                 &monitor_info);
-  return GetDisplay(monitor_info);
-}
-
-gfx::Display DesktopScreenWin::GetDisplayNearestPoint(
-    const gfx::Point& point) const {
-  POINT initial_loc = { point.x(), point.y() };
-  HMONITOR monitor = MonitorFromPoint(initial_loc, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO mi = {0};
-  mi.cbSize = sizeof(mi);
-  if (monitor && GetMonitorInfo(monitor, &mi))
-    return GetDisplay(mi);
-  return gfx::Display();
+bool DesktopScreenWin::IsDIPEnabled() {
+  return true;
 }
 
 gfx::Display DesktopScreenWin::GetDisplayMatching(
@@ -90,18 +51,18 @@ gfx::Display DesktopScreenWin::GetDisplayMatching(
   return GetDisplayNearestPoint(match_rect.CenterPoint());
 }
 
-gfx::Display DesktopScreenWin::GetPrimaryDisplay() const {
-  MONITORINFO mi = GetMonitorInfoForMonitor(
-      MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY));
-  gfx::Display display = GetDisplay(mi);
-  DCHECK_EQ(GetSystemMetrics(SM_CXSCREEN), display.size().width());
-  DCHECK_EQ(GetSystemMetrics(SM_CYSCREEN), display.size().height());
-  return display;
+HWND DesktopScreenWin::GetHWNDFromNativeView(gfx::NativeView window) const {
+  return window->GetRootWindow()->GetAcceleratedWidget();
+}
+
+gfx::NativeWindow DesktopScreenWin::GetNativeWindowFromHWND(HWND hwnd) const {
+  return (::IsWindow(hwnd)) ?
+      RootWindow::GetForAcceleratedWidget(hwnd) : NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-gfx::ScreenImpl* CreateDesktopScreen() {
+gfx::Screen* CreateDesktopScreen() {
   return new DesktopScreenWin;
 }
 

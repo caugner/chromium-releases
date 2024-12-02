@@ -687,13 +687,13 @@ std::string OncNetworkParser::GetUserExpandedValue(
   if (!UserManager::Get()->IsUserLoggedIn())
     return string_value;
 
-  const User& logged_in_user(UserManager::Get()->GetLoggedInUser());
+  const User* logged_in_user = UserManager::Get()->GetLoggedInUser();
   ReplaceSubstringsAfterOffset(&string_value, 0,
                                onc::substitutes::kLoginIDField,
-                               logged_in_user.GetAccountName(false));
+                               logged_in_user->GetAccountName(false));
   ReplaceSubstringsAfterOffset(&string_value, 0,
                                onc::substitutes::kEmailField,
-                               logged_in_user.email());
+                               logged_in_user->email());
   return string_value;
 }
 
@@ -1379,6 +1379,11 @@ bool OncNetworkParser::ParseClientCertPattern(OncNetworkParser* parser,
                                               PropertyIndex index,
                                               const base::Value& value,
                                               Network* network) {
+  // Ignore certificate patterns for device policy ONC so that an unmanaged user
+  // won't have a certificate presented for them involuntarily.
+  if (parser->onc_source() == NetworkUIData::ONC_SOURCE_DEVICE_POLICY)
+    return false;
+
   // Only WiFi and VPN have this type.
   if (network->type() != TYPE_WIFI &&
       network->type() != TYPE_VPN) {
@@ -1386,6 +1391,7 @@ bool OncNetworkParser::ParseClientCertPattern(OncNetworkParser* parser,
                  << "that wasn't a WiFi or VPN network.";
     return false;
   }
+
 
   switch (index) {
     case PROPERTY_INDEX_ONC_CERTIFICATE_PATTERN_ENROLLMENT_URI: {

@@ -229,7 +229,7 @@ class MediaGalleriesPreferencesTest : public testing::Test {
     }
 
     extension_service_->extension_prefs()->OnExtensionInstalled(
-        extension, extensions::Extension::ENABLED, false,
+        extension, extensions::Extension::ENABLED,
         syncer::StringOrdinal::CreateInitialOrdinal());
 
     return extension;
@@ -334,6 +334,47 @@ TEST_F(MediaGalleriesPreferencesTest, GalleryManagement) {
   gallery_prefs()->ForgetGalleryById(user_added_id);
   expected_galleries_.erase(user_added_id);
   expected_device_map[device_id].erase(user_added_id);
+  Verify();
+}
+
+// Whenever a gallery is added, its type is either set to "AutoDetected" or
+// "UserAdded". When the gallery is removed, user added galleries are actually
+// deleted and the auto detected galleries are moved to black listed state.
+// When the gallery is added again, the black listed state is updated back to
+// "AutoDetected" type.
+TEST_F(MediaGalleriesPreferencesTest, UpdateGalleryType) {
+  MediaGalleryPrefId auto_id, id;
+  FilePath path;
+  std::string device_id;
+  string16 device_name;
+  FilePath relative_path;
+  Verify();
+
+  // Add a new auto detect gallery to test with.
+  path = MakePath("new_auto");
+  MediaStorageUtil::GetDeviceInfoFromPath(path, &device_id, NULL,
+                                          &relative_path);
+  device_name = ASCIIToUTF16("NewAutoGallery");
+  id = gallery_prefs()->AddGallery(device_id, device_name, relative_path,
+                                   false /*auto*/);
+  EXPECT_EQ(default_galleries_count() + 1UL, id);
+  auto_id = id;
+  AddGalleryExpectation(id, device_name, device_id, relative_path,
+                        MediaGalleryPrefInfo::kAutoDetected);
+  Verify();
+
+  // Remove an auto added gallery (i.e. make it blacklisted).
+  gallery_prefs()->ForgetGalleryById(auto_id);
+  expected_galleries_[auto_id].type = MediaGalleryPrefInfo::kBlackListed;
+  expected_galleries_for_all.erase(auto_id);
+  Verify();
+
+  // Add the gallery again.
+  id = gallery_prefs()->AddGallery(device_id, device_name, relative_path,
+                                   false /*auto*/);
+  EXPECT_EQ(auto_id, id);
+  AddGalleryExpectation(id, device_name, device_id, relative_path,
+                        MediaGalleryPrefInfo::kAutoDetected);
   Verify();
 }
 
@@ -452,6 +493,41 @@ TEST_F(MediaGalleriesPreferencesTest, GalleryPermissions) {
   // Add permission for an invalid gallery id.
   gallery_prefs()->SetGalleryPermissionForExtension(
       *regular_permission_extension.get(), 9999L, true);
+  Verify();
+}
+
+// Whenever a gallery is added, check to see if there is any gallery info exists
+// for the added gallery. If so, verify the existing gallery information with
+// the new details. If there is a mismatch, update the gallery information
+// accordingly.
+TEST_F(MediaGalleriesPreferencesTest, UpdateGalleryDetails) {
+  MediaGalleryPrefId auto_id, id;
+  FilePath path;
+  std::string device_id;
+  string16 device_name;
+  FilePath relative_path;
+  Verify();
+
+  // Add a new auto detect gallery to test with.
+  path = MakePath("new_auto");
+  MediaStorageUtil::GetDeviceInfoFromPath(path, &device_id, NULL,
+                                          &relative_path);
+  device_name = ASCIIToUTF16("NewAutoGallery");
+  id = gallery_prefs()->AddGallery(device_id, device_name, relative_path,
+                                   false /*auto*/);
+  EXPECT_EQ(default_galleries_count() + 1UL, id);
+  auto_id = id;
+  AddGalleryExpectation(id, device_name, device_id, relative_path,
+                        MediaGalleryPrefInfo::kAutoDetected);
+  Verify();
+
+  // Update the device name and add the gallery again.
+  device_name = ASCIIToUTF16("AutoGallery2");
+  id = gallery_prefs()->AddGallery(device_id, device_name, relative_path,
+                                   false /*auto*/);
+  EXPECT_EQ(auto_id, id);
+  AddGalleryExpectation(id, device_name, device_id, relative_path,
+                        MediaGalleryPrefInfo::kAutoDetected);
   Verify();
 }
 

@@ -12,7 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/mru_cache.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -145,7 +145,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Navigation ----------------------------------------------------------------
 
-  void AddPage(scoped_refptr<HistoryAddPageArgs> request);
+  // |request.time| must be unique with high probability.
+  void AddPage(const HistoryAddPageArgs& request);
   virtual void SetPageTitle(const GURL& url, const string16& title);
   void AddPageNoVisitForBookmark(const GURL& url, const string16& title);
 
@@ -285,7 +286,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       const std::vector<ui::ScaleFactor>& desired_scale_factors);
 
   void MergeFavicon(const GURL& page_url,
-                    const GURL& icon_url,
                     IconType icon_type,
                     scoped_refptr<base::RefCountedMemory> bitmap_data,
                     const gfx::Size& pixel_size);
@@ -446,6 +446,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // for the specified url, it is deleted.
   void URLsNoLongerBookmarked(const std::set<GURL>& urls);
 
+  // Callbacks To Kill Database When It Gets Corrupted -------------------------
+
+  // Raze the history database. It will be recreated in a future run. Hopefully
+  // things go better then. Continue running but without reading or storing any
+  // state into the HistoryBackend databases. Close all of the databases managed
+  // HistoryBackend as there are no provisions for accessing the other databases
+  // managed by HistoryBackend when the history database cannot be accessed.
+  void KillHistoryDatabase();
+
   // Testing -------------------------------------------------------------------
 
   // Sets the task to run and the message loop to run it on when this object
@@ -501,9 +510,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconsReplaceBitmapData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            SetFaviconsSameFaviconURLForTwoPages);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           UpdateFaviconMappingsAndFetchNoChange);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconPageURLNotInDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconPageURLInDB);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconIconURLInDB);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MergeFaviconMaxFaviconsPerPage);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            MergeFaviconMaxFaviconBitmapsPerIconURL);
@@ -544,6 +554,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Does the work of Init.
   void InitImpl(const std::string& languages);
+
+  // Closes all databases managed by HistoryBackend. Commits any pending
+  // transactions.
+  void CloseAllDatabases();
 
   // Adds a single visit to the database, updating the URL information such
   // as visit and typed count. The visit ID of the added visit and the URL ID
@@ -649,12 +663,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // For each entry in |favicon_bitmap_data|, if a favicon bitmap already
   // exists at the entry's pixel size, replace the favicon bitmap's data with
   // the entry's bitmap data. Otherwise add a new favicon bitmap.
-  // |favicon_bitmap_added| is set to true if the function has added a favicon
-  // bitmap.
   void SetFaviconBitmaps(
       FaviconID icon_id,
-      const std::vector<FaviconBitmapData>& favicon_bitmap_data,
-      bool* favicon_bitmap_added);
+      const std::vector<FaviconBitmapData>& favicon_bitmap_data);
 
   // Returns true if |favicon_bitmap_data| and |icon_url_sizes| passed to
   // SetFavicons() are valid.
@@ -676,11 +687,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // detailed description of FaviconSizes.
   // Deletes any favicon bitmaps currently mapped to |icon_id| whose pixel
   // sizes are not contained in |favicon_sizes|.
-  // |favicon_bitmap_removed| is set to true if the function removed a favicon
-  // bitmap.
   void SetFaviconSizes(FaviconID icon_id,
-                       const FaviconSizes& favicon_sizes,
-                       bool* favicon_bitmap_removed);
+                       const FaviconSizes& favicon_sizes);
 
   // Returns true if there are favicons for |page_url| and one of the types in
   // |icon_types|.
@@ -846,19 +854,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // destination of the redirect (i.e., the key into recent_redirects_);
   typedef base::MRUCache<GURL, history::RedirectList> RedirectCache;
   RedirectCache recent_redirects_;
-
-  // Timestamp of the last page addition request. We use this to detect when
-  // multiple additions are requested at the same time (within the resolution
-  // of the timer), so we can try to ensure they're unique when they're added
-  // to the database by using the last_recorded_time_ (q.v.). We still can't
-  // enforce or guarantee uniqueness, since the user might set his clock back.
-  base::Time last_requested_time_;
-
-  // Timestamp of the last page addition, as it was recorded in the database.
-  // If two or more requests come in at the same time, we increment that time
-  // by 1 us between them so it's more likely to be unique in the database.
-  // This keeps track of that higher-resolution timestamp.
-  base::Time last_recorded_time_;
 
   // Timestamp of the first entry in our database.
   base::Time first_recorded_time_;

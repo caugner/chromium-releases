@@ -197,7 +197,7 @@ SSLClientCertificateSelector::~SSLClientCertificateSelector() {
 
 void SSLClientCertificateSelector::Show() {
   DCHECK(!window_);
-  window_ = new ConstrainedWindowGtk(tab_contents_, this);
+  window_ = new ConstrainedWindowGtk(tab_contents_->web_contents(), this);
 }
 
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
@@ -364,9 +364,9 @@ void SSLClientCertificateSelector::OnOkClicked(GtkWidget* button) {
   // ourself before the Unlocked callback gets called.
   StopObserving();
 
-  browser::UnlockCertSlotIfNecessary(
+  chrome::UnlockCertSlotIfNecessary(
       cert,
-      browser::kCryptoModulePasswordClientAuth,
+      chrome::kCryptoModulePasswordClientAuth,
       cert_request_info()->host_and_port,
       base::Bind(&SSLClientCertificateSelector::Unlocked,
                  base::Unretained(this)));

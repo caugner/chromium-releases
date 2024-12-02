@@ -120,6 +120,10 @@ void SyncPrefs::SetKeepEverythingSynced(bool keep_everything_synced) {
                             keep_everything_synced);
 }
 
+// TODO(akalin): If encryption is turned on for all data types,
+// history delete directives are useless and so we shouldn't bother
+// enabling them.
+
 syncer::ModelTypeSet SyncPrefs::GetPreferredDataTypes(
     syncer::ModelTypeSet registered_types) const {
   DCHECK(CalledOnValidThread());
@@ -222,6 +226,8 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
       return prefs::kSyncSessions;
     case syncer::APP_NOTIFICATIONS:
       return prefs::kSyncAppNotifications;
+    case syncer::HISTORY_DELETE_DIRECTIVES:
+      return prefs::kSyncHistoryDeleteDirectives;
     default:
       break;
   }
@@ -321,11 +327,11 @@ void SyncPrefs::RegisterPreferences() {
                                    0,
                                    PrefService::UNSYNCABLE_PREF);
 
-  // If you've never synced before, or if you're using Chrome OS, all datatypes
-  // are on by default.
+  // If you've never synced before, or if you're using Chrome OS or Android,
+  // all datatypes are on by default.
   // TODO(nick): Perhaps a better model would be to always default to false,
   // and explicitly call SetDataTypes() when the user shows the wizard.
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
   bool enable_by_default = true;
 #else
   bool enable_by_default =

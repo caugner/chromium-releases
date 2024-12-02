@@ -15,10 +15,21 @@
 #include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_content_renderer_client.h"
 #include "content/shell/shell_switches.h"
+#include "content/shell/webkit_test_platform_support.h"
 #include "net/cookies/cookie_monster.h"
-#include "net/http/http_stream_factory.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/gl/gl_switches.h"
+
+#include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
+
+#if defined(IPC_MESSAGE_LOG_ENABLED)
+#define IPC_MESSAGE_MACROS_LOG_ENABLED
+#include "content/public/common/content_ipc_logging.h"
+#define IPC_LOG_TABLE_ADD_ENTRY(msg_id, logger) \
+    content::RegisterIPCLogger(msg_id, logger)
+#include "content/shell/shell_messages.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "base/global_descriptors_posix.h"
@@ -91,8 +102,16 @@ bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
         switches::kAllowFileAccessFromFiles);
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kForceCompositingMode);
-    //net::HttpStreamFactory::set_ignore_certificate_errors(true);
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kUseGL, gfx::kGLImplementationOSMesaName);
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kIgnoreGpuBlacklist);
     net::CookieMonster::EnableFileScheme();
+    if (!WebKitTestPlatformInitialize()) {
+      if (exit_code)
+        *exit_code = 1;
+      return true;
+    }
   }
   SetContentClient(&content_client_);
   return false;

@@ -21,7 +21,7 @@
 #include "crypto/scoped_nss_types.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_test_util.h"
-#include "net/base/cert_verify_proc.h"
+#include "net/base/cert_verify_proc_nss.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/crypto_module.h"
 #include "net/base/net_errors.h"
@@ -38,20 +38,10 @@
 
 namespace net {
 
-// TODO(mattm): when https://bugzilla.mozilla.org/show_bug.cgi?id=588269 is
-// fixed, switch back to using a separate userdb for each test.
-// (When doing so, remember to add some standalone tests of DeleteCert since it
-// won't be tested by TearDown anymore.)
 class CertDatabaseNSSTest : public testing::Test {
  public:
-  static void SetUpTestCase() {
-    ASSERT_TRUE(crypto::OpenTestNSSDB());
-    // There is no matching TearDownTestCase call to close the test NSS DB
-    // because that would leave NSS in a potentially broken state for further
-    // tests, due to https://bugzilla.mozilla.org/show_bug.cgi?id=588269
-  }
-
   virtual void SetUp() {
+    ASSERT_TRUE(test_nssdb_.is_open());
     cert_db_ = NSSCertDatabase::GetInstance();
     slot_ = cert_db_->GetPublicModule();
 
@@ -129,6 +119,8 @@ class CertDatabaseNSSTest : public testing::Test {
     }
     return ok;
   }
+
+  crypto::ScopedTestNSSDB test_nssdb_;
 };
 
 TEST_F(CertDatabaseNSSTest, ListCerts) {
@@ -544,7 +536,7 @@ TEST_F(CertDatabaseNSSTest, DISABLED_ImportServerCert) {
 
   EXPECT_EQ(0U, goog_cert->os_cert_handle()->trust->sslFlags);
 
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(goog_cert, "www.google.com", flags,
@@ -571,7 +563,7 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned) {
             cert_db_->GetCertTrust(puny_cert.get(), SERVER_CERT));
   EXPECT_EQ(0U, puny_cert->os_cert_handle()->trust->sslFlags);
 
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(puny_cert, "xn--wgv71a119e.com", flags,
@@ -606,7 +598,7 @@ TEST_F(CertDatabaseNSSTest, ImportServerCert_SelfSigned_Trusted) {
   EXPECT_EQ(unsigned(CERTDB_TRUSTED | CERTDB_TERMINAL_RECORD),
             puny_cert->os_cert_handle()->trust->sslFlags);
 
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(puny_cert, "xn--wgv71a119e.com", flags,
@@ -638,7 +630,7 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert) {
   EXPECT_EQ(0U, failed.size());
 
   // Server cert should verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
@@ -682,7 +674,7 @@ TEST_F(CertDatabaseNSSTest, ImportCaAndServerCert_DistrustServer) {
             certs[0]->os_cert_handle()->trust->sslFlags);
 
   // Server cert should fail to verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
@@ -726,7 +718,7 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa) {
             cert_db_->GetCertTrust(certs[0], SERVER_CERT));
 
   // Server cert should verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
@@ -794,7 +786,7 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa2) {
             cert_db_->GetCertTrust(certs[0], SERVER_CERT));
 
   // Server cert should verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
@@ -850,7 +842,7 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa3) {
             cert_db_->GetCertTrust(certs[0], SERVER_CERT));
 
   // Server cert should verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,
@@ -912,7 +904,7 @@ TEST_F(CertDatabaseNSSTest, TrustIntermediateCa4) {
             cert_db_->GetCertTrust(certs[0], SERVER_CERT));
 
   // Server cert should not verify.
-  scoped_refptr<CertVerifyProc> verify_proc(CertVerifyProc::CreateDefault());
+  scoped_refptr<CertVerifyProc> verify_proc(new CertVerifyProcNSS());
   int flags = 0;
   CertVerifyResult verify_result;
   int error = verify_proc->Verify(certs[0], "127.0.0.1", flags,

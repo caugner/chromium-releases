@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "base/threading/platform_thread.h"
@@ -25,21 +26,23 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
 #include "net/base/net_util.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/layout.h"
+#include "ui/base/win/scoped_ole_initializer.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
 #include "webkit/glue/webdropdata.h"
 
-using content::BrowserThread;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebDragOperationCopy;
 using WebKit::WebDragOperationLink;
 using WebKit::WebDragOperationMove;
 
+namespace content {
 namespace {
 
 HHOOK msg_hook = NULL;
@@ -71,31 +74,59 @@ LRESULT CALLBACK MsgFilterProc(int code, WPARAM wparam, LPARAM lparam) {
   return CallNextHookEx(msg_hook, code, wparam, lparam);
 }
 
+void EnableBackgroundDraggingSupport(DWORD thread_id) {
+  // Install a hook procedure to monitor the messages so that we can forward
+  // the appropriate ones to the background thread.
+  drag_out_thread_id = thread_id;
+  mouse_up_received = false;
+  DCHECK(!msg_hook);
+  msg_hook = SetWindowsHookEx(WH_MSGFILTER,
+                              MsgFilterProc,
+                              NULL,
+                              GetCurrentThreadId());
+
+  // Attach the input state of the background thread to the UI thread so that
+  // SetCursor can work from the background thread.
+  AttachThreadInput(drag_out_thread_id, GetCurrentThreadId(), TRUE);
+}
+
+void DisableBackgroundDraggingSupport() {
+  DCHECK(msg_hook);
+  AttachThreadInput(drag_out_thread_id, GetCurrentThreadId(), FALSE);
+  UnhookWindowsHookEx(msg_hook);
+  msg_hook = NULL;
+}
+
+bool IsBackgroundDraggingSupportEnabled() {
+  return msg_hook != NULL;
+}
+
 }  // namespace
 
 class DragDropThread : public base::Thread {
  public:
   explicit DragDropThread(WebContentsDragWin* drag_handler)
-       : base::Thread("Chrome_DragDropThread"),
+       : Thread("Chrome_DragDropThread"),
          drag_handler_(drag_handler) {
   }
 
   virtual ~DragDropThread() {
-    Thread::Stop();
+    Stop();
   }
 
  protected:
   // base::Thread implementations:
   virtual void Init() {
-    int ole_result = OleInitialize(NULL);
-    DCHECK(ole_result == S_OK);
+    ole_initializer_.reset(new ui::ScopedOleInitializer());
   }
 
   virtual void CleanUp() {
-    OleUninitialize();
+    ole_initializer_.reset();
   }
 
  private:
+  scoped_ptr<ui::ScopedOleInitializer> ole_initializer_;
+
   // Hold a reference count to WebContentsDragWin to make sure that it is always
   // alive in the thread lifetime.
   scoped_refptr<WebContentsDragWin> drag_handler_;
@@ -105,7 +136,7 @@ class DragDropThread : public base::Thread {
 
 WebContentsDragWin::WebContentsDragWin(
     gfx::NativeWindow source_window,
-    content::WebContents* web_contents,
+    WebContents* web_contents,
     WebDragDest* drag_dest,
     const base::Callback<void()>& drag_end_callback)
     : drag_drop_thread_id_(0),
@@ -134,8 +165,9 @@ void WebContentsDragWin::StartDragging(const WebDropData& drop_data,
 
   // If it is not drag-out, do the drag-and-drop in the current UI thread.
   if (drop_data.download_metadata.empty()) {
-    DoDragging(drop_data, ops, page_url, page_encoding, image, image_offset);
-    EndDragging();
+    if (DoDragging(drop_data, ops, page_url, page_encoding,
+                   image, image_offset))
+      EndDragging();
     return;
   }
 
@@ -145,31 +177,14 @@ void WebContentsDragWin::StartDragging(const WebDropData& drop_data,
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_UI;
   if (drag_drop_thread_->StartWithOptions(options)) {
-    gfx::Display display =
-        gfx::Screen::GetDisplayNearestWindow(web_contents_->GetNativeView());
-    ui::ScaleFactor scale_factor = ui::GetScaleFactorFromScale(
-        display.device_scale_factor());
     drag_drop_thread_->message_loop()->PostTask(
         FROM_HERE,
         base::Bind(&WebContentsDragWin::StartBackgroundDragging, this,
                    drop_data, ops, page_url, page_encoding,
-                   image.GetRepresentation(scale_factor).sk_bitmap(),
-                   image_offset));
+                   image, image_offset));
   }
 
-  // Install a hook procedure to monitor the messages so that we can forward
-  // the appropriate ones to the background thread.
-  drag_out_thread_id = drag_drop_thread_->thread_id();
-  mouse_up_received = false;
-  DCHECK(!msg_hook);
-  msg_hook = SetWindowsHookEx(WH_MSGFILTER,
-                              MsgFilterProc,
-                              NULL,
-                              GetCurrentThreadId());
-
-  // Attach the input state of the background thread to the UI thread so that
-  // SetCursor can work from the background thread.
-  AttachThreadInput(drag_out_thread_id, GetCurrentThreadId(), TRUE);
+  EnableBackgroundDraggingSupport(drag_drop_thread_->thread_id());
 }
 
 void WebContentsDragWin::StartBackgroundDragging(
@@ -177,15 +192,30 @@ void WebContentsDragWin::StartBackgroundDragging(
     WebDragOperationsMask ops,
     const GURL& page_url,
     const std::string& page_encoding,
-    const SkBitmap& image,
+    const gfx::ImageSkia& image,
     const gfx::Point& image_offset) {
   drag_drop_thread_id_ = base::PlatformThread::CurrentId();
 
-  DoDragging(drop_data, ops, page_url, page_encoding, image, image_offset);
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&WebContentsDragWin::EndDragging, this));
+  if (DoDragging(drop_data, ops, page_url, page_encoding,
+                 image, image_offset)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&WebContentsDragWin::EndDragging, this));
+  } else {
+    // When DoDragging returns false, the contents view window is gone and thus
+    // WebContentsViewWin instance becomes invalid though WebContentsDragWin
+    // instance is still alive because the task holds a reference count to it.
+    // We should not do more than the following cleanup items:
+    // 1) Remove the background dragging support. This is safe since it does not
+    //    access the instance at all.
+    // 2) Stop the background thread. This is done in OnDataObjectDisposed.
+    //    Only drag_drop_thread_ member is accessed.
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&DisableBackgroundDraggingSupport));
+  }
 }
 
 void WebContentsDragWin::PrepareDragForDownload(
@@ -197,15 +227,15 @@ void WebContentsDragWin::PrepareDragForDownload(
   string16 mime_type;
   FilePath file_name;
   GURL download_url;
-  if (!drag_download_util::ParseDownloadMetadata(drop_data.download_metadata,
-                                                 &mime_type,
-                                                 &file_name,
-                                                 &download_url))
+  if (!ParseDownloadMetadata(drop_data.download_metadata,
+                             &mime_type,
+                             &file_name,
+                             &download_url))
     return;
 
   // Generate the file name based on both mime type and proposed file name.
   std::string default_name =
-      content::GetContentClient()->browser()->GetDefaultDownloadName();
+      GetContentClient()->browser()->GetDefaultDownloadName();
   FilePath generated_download_file_name =
       net::GenerateFileName(download_url,
                             std::string(),
@@ -213,16 +243,25 @@ void WebContentsDragWin::PrepareDragForDownload(
                             UTF16ToUTF8(file_name.value()),
                             UTF16ToUTF8(mime_type),
                             default_name);
+  FilePath temp_dir_path;
+  if (!file_util::CreateNewTempDirectory(
+          FILE_PATH_LITERAL("chrome_drag"), &temp_dir_path))
+    return;
+  FilePath download_path = temp_dir_path.Append(generated_download_file_name);
+
+  // We cannot know when the target application will be done using the temporary
+  // file, so schedule it to be deleted after rebooting.
+  file_util::DeleteAfterReboot(download_path);
+  file_util::DeleteAfterReboot(temp_dir_path);
 
   // Provide the data as file (CF_HDROP). A temporary download file with the
   // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
-  linked_ptr<net::FileStream> empty_file_stream;
   scoped_refptr<DragDownloadFile> download_file =
       new DragDownloadFile(
-          generated_download_file_name,
-          empty_file_stream,
+          download_path,
+          scoped_ptr<net::FileStream>(NULL),
           download_url,
-          content::Referrer(page_url, drop_data.referrer_policy),
+          Referrer(page_url, drop_data.referrer_policy),
           page_encoding,
           web_contents_);
   ui::OSExchangeData::DownloadFileInfo file_download(FilePath(),
@@ -264,7 +303,7 @@ void WebContentsDragWin::PrepareDragForUrl(const WebDropData& drop_data,
   data->SetURL(drop_data.url, drop_data.url_title);
 }
 
-void WebContentsDragWin::DoDragging(const WebDropData& drop_data,
+bool WebContentsDragWin::DoDragging(const WebDropData& drop_data,
                                     WebDragOperationsMask ops,
                                     const GURL& page_url,
                                     const std::string& page_encoding,
@@ -305,16 +344,30 @@ void WebContentsDragWin::DoDragging(const WebDropData& drop_data,
         gfx::Size(image.width(), image.height()), image_offset, &data);
   }
 
+  // Use a local variable to keep track of the contents view window handle.
+  // It might not be safe to access the instance after DoDragDrop returns
+  // because the window could be disposed in the nested message loop.
+  HWND native_window = web_contents_->GetNativeView();
+
   // We need to enable recursive tasks on the message loop so we can get
   // updates while in the system DoDragDrop loop.
   DWORD effect;
   {
+    // Keep a reference count such that |drag_source_| will not get deleted
+    // if the contents view window is gone in the nested message loop invoked
+    // from DoDragDrop.
+    scoped_refptr<WebDragSource> retain_this(drag_source_);
+
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
     DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
                drag_source_,
-               web_drag_utils_win::WebDragOpMaskToWinDragOpMask(ops),
+               WebDragOpMaskToWinDragOpMask(ops),
                &effect);
   }
+
+  // Bail out immediately if the contents view window is gone.
+  if (!IsWindow(native_window))
+    return false;
 
   // Normally, the drop and dragend events get dispatched in the system
   // DoDragDrop message loop so it'd be too late to set the effect to send back
@@ -323,6 +376,8 @@ void WebContentsDragWin::DoDragging(const WebDropData& drop_data,
   // callback to the renderer doesn't run until this has been set to the correct
   // value.
   drag_source_->set_effect(effect);
+
+  return true;
 }
 
 void WebContentsDragWin::EndDragging() {
@@ -332,11 +387,8 @@ void WebContentsDragWin::EndDragging() {
     return;
   drag_ended_ = true;
 
-  if (msg_hook) {
-    AttachThreadInput(drag_out_thread_id, GetCurrentThreadId(), FALSE);
-    UnhookWindowsHookEx(msg_hook);
-    msg_hook = NULL;
-  }
+  if (IsBackgroundDraggingSupportEnabled())
+    DisableBackgroundDraggingSupport();
 
   drag_end_callback_.Run();
 }
@@ -375,3 +427,5 @@ void WebContentsDragWin::OnDataObjectDisposed() {
       FROM_HERE,
       base::Bind(&WebContentsDragWin::CloseThread, this));
 }
+
+}  // namespace content

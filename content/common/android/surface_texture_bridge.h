@@ -9,15 +9,16 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
+#include "base/memory/ref_counted.h"
 
 namespace content {
 
 // This class serves as a bridge for native code to call java functions inside
 // android SurfaceTexture class.
-class SurfaceTextureBridge {
+class SurfaceTextureBridge
+    : public base::RefCountedThreadSafe<SurfaceTextureBridge>{
  public:
   explicit SurfaceTextureBridge(int texture_id);
-  ~SurfaceTextureBridge();
 
   // Set the listener callback, which will be invoked on the same thread that
   // is being called from here for registration.
@@ -45,10 +46,12 @@ class SurfaceTextureBridge {
   }
 
  private:
+  friend class base::RefCountedThreadSafe<SurfaceTextureBridge>;
+  ~SurfaceTextureBridge();
+
   const int texture_id_;
 
-  // Java SurfaceTexture class and instance.
-  base::android::ScopedJavaGlobalRef<jclass> j_class_;
+  // Java SurfaceTexture instance.
   base::android::ScopedJavaGlobalRef<jobject> j_surface_texture_;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceTextureBridge);

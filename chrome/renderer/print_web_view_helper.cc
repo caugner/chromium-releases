@@ -527,6 +527,11 @@ bool IsPrintPreviewEnabled() {
       switches::kRendererPrintPreview);
 }
 
+bool IsPrintThrottlingDisabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableScriptedPrintThrottling);
+}
+
 }  // namespace
 
 // static - Not anonymous so that platform implementations can use it.
@@ -717,26 +722,35 @@ PrintWebViewHelper::PrintWebViewHelper(content::RenderView* render_view)
       content::RenderViewObserverTracker<PrintWebViewHelper>(render_view),
       print_web_view_(NULL),
       is_preview_enabled_(IsPrintPreviewEnabled()),
+      is_scripted_print_throttling_disabled_(IsPrintThrottlingDisabled()),
       is_print_ready_metafile_sent_(false),
       ignore_css_margins_(false),
       user_cancelled_scripted_print_count_(0),
       is_scripted_printing_blocked_(false),
       notify_browser_of_print_failure_(true),
-      print_for_preview_(false),
-      print_node_in_progress_(false) {
+      print_for_preview_(false) {
 }
 
 PrintWebViewHelper::~PrintWebViewHelper() {}
 
 bool PrintWebViewHelper::IsScriptInitiatedPrintAllowed(
-    WebKit::WebFrame* frame) {
+    WebKit::WebFrame* frame, bool user_initiated) {
   if (is_scripted_printing_blocked_)
     return false;
-  return !IsScriptInitiatedPrintTooFrequent(frame);
+  // If preview is enabled, then the print dialog is tab modal, and the user
+  // can always close the tab on a mis-behaving page (the system print dialog
+  // is app modal). If the print was initiated through user action, don't
+  // throttle. Or, if the command line flag to skip throttling has been set.
+  if (!is_scripted_print_throttling_disabled_ &&
+      !is_preview_enabled_ &&
+      !user_initiated)
+    return !IsScriptInitiatedPrintTooFrequent(frame);
+  return true;
 }
 
 // Prints |frame| which called window.print().
-void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame) {
+void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame,
+                                   bool user_initiated) {
   DCHECK(frame);
 
   // Allow Prerendering to cancel this print request if necessary.
@@ -745,7 +759,7 @@ void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame) {
     return;
   }
 
-  if (!IsScriptInitiatedPrintAllowed(frame))
+  if (!IsScriptInitiatedPrintAllowed(frame, user_initiated))
     return;
   IncrementScriptedPrintCount();
 
@@ -1127,15 +1141,6 @@ void PrintWebViewHelper::PrintNode(const WebNode& node) {
     return;
   }
 
-  if (print_node_in_progress_) {
-    // This can happen as a result of processing sync messages when printing
-    // from ppapi plugins. It's a rare case, so its OK to just fail here.
-    // See http://crbug.com/159165.
-    return;
-  }
-
-  print_node_in_progress_ = true;
-
   // Make a copy of the node, in case RenderView::OnContextMenuClosed resets
   // its |context_menu_node_|.
   if (is_preview_enabled_) {
@@ -1145,8 +1150,6 @@ void PrintWebViewHelper::PrintNode(const WebNode& node) {
     WebNode duplicate_node(node);
     Print(duplicate_node.document().frame(), duplicate_node);
   }
-
-  print_node_in_progress_ = false;
 }
 
 void PrintWebViewHelper::Print(WebKit::WebFrame* frame,

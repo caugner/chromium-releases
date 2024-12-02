@@ -57,7 +57,7 @@ std::string GetExtensionID(RenderViewHost* render_view_host) {
   if (!render_view_host->GetSiteInstance())
     return "";
 
-  return render_view_host->GetSiteInstance()->GetSite().host();
+  return render_view_host->GetSiteInstance()->GetSiteURL().host();
 }
 
 // Incognito profiles use this process manager. It is mostly a shim that decides
@@ -726,8 +726,8 @@ void ExtensionProcessManager::ClearBackgroundPageData(
 IncognitoExtensionProcessManager::IncognitoExtensionProcessManager(
     Profile* profile)
     : ExtensionProcessManager(profile),
-      original_manager_(profile->GetOriginalProfile()->
-                            GetExtensionProcessManager()) {
+      original_manager_(extensions::ExtensionSystem::Get(
+          profile->GetOriginalProfile())->process_manager()) {
   DCHECK(profile->IsOffTheRecord());
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_WINDOW_READY,

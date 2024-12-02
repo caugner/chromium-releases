@@ -7,6 +7,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
+#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
@@ -35,6 +36,9 @@ const int kToolbarTabStripVerticalOverlap = 3;
 const int kSpacerBookmarkBarOverlap = 1;
 // The number of pixels the metro switcher is offset from the right edge.
 const int kWindowSwitcherOffsetX = 7;
+// The number of pixels the constrained window should overlap the bottom
+// of the omnibox.
+const int kConstrainedWindowOverlap = 3;
 
 // Combines View::ConvertPointToTarget and View::HitTest for a given |point|.
 // Converts |point| from |src| to |dst| and hit tests it against |dst|. The
@@ -65,6 +69,12 @@ BrowserViewLayout::BrowserViewLayout()
 }
 
 BrowserViewLayout::~BrowserViewLayout() {
+}
+
+bool BrowserViewLayout::GetConstrainedWindowTopY(int* top_y) {
+  DCHECK(top_y);
+  *top_y = constrained_window_top_y;
+  return (constrained_window_top_y >= 0);
 }
 
 gfx::Size BrowserViewLayout::GetMinimumSize() {
@@ -281,6 +291,9 @@ void BrowserViewLayout::Layout(views::View* host) {
   }
   // NTP needs to layout the search box now that we have the contents bounds.
   toolbar_->LayoutForSearch();
+  // Set NTP background size now that we have the contents bounds.
+  tabstrip_->SetNTPBackgroundFillSize(
+      browser_view_->GetNTPBackgroundFillSize());
 }
 
 // Return the preferred size which is the size required to give each
@@ -368,13 +381,21 @@ int BrowserViewLayout::LayoutToolbar(int top) {
 }
 
 int BrowserViewLayout::LayoutBookmarkAndInfoBars(int top) {
+  constrained_window_top_y =
+      top + browser_view_->y() - kConstrainedWindowOverlap;
   find_bar_y_ = top + browser_view_->y() - 1;
   if (active_bookmark_bar_) {
-    // If we're showing the Bookmark bar in detached style, then we
-    // need to show any Info bar _above_ the Bookmark bar, since the
-    // Bookmark bar is styled to look like it's part of the page.
-    if (active_bookmark_bar_->IsDetached())
-      return LayoutBookmarkBar(LayoutInfoBar(top));
+    // If the bookmark bar is showing in detached style:
+    // - for non-NTP mode, show any Info bar _above_ the bookmark bar, since the
+    //   bookmark bar is styled to look like it's part of the page.
+    // - otherwise, show the bookmark bar at the bottom of content view, so just
+    //   lay out infobar here; bottom bookmark bar is laid out in
+    //   |SearchNTPContainerView::Layout| where content view is also laid out.
+    if (active_bookmark_bar_->IsDetached()) {
+      int infobar_top = LayoutInfoBar(top);
+      return browser_view_->browser()->search_model()->mode().is_ntp() ?
+          infobar_top : LayoutBookmarkBar(infobar_top);
+    }
     // Otherwise, Bookmark bar first, Info bar second.
     top = std::max(toolbar_->bounds().bottom(), LayoutBookmarkBar(top));
   }
@@ -457,7 +478,11 @@ void BrowserViewLayout::LayoutTabContents(int top, int bottom) {
 
 int BrowserViewLayout::GetTopMarginForActiveContent() {
   if (!active_bookmark_bar_ || !browser_view_->IsBookmarkBarVisible() ||
-      !active_bookmark_bar_->IsDetached()) {
+      !active_bookmark_bar_->IsDetached() ||
+      // For |NTP| mode, bookmark bar does NOT overlap with top of content view;
+      // instead, it "overlaps" with bottom of content view, which is handled
+      // in |SearchNTPContainerView::Layout|.
+      browser()->search_model()->mode().is_ntp()) {
     return 0;
   }
 

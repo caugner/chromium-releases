@@ -54,10 +54,10 @@ class SessionEventExecutorWin : public EventExecutor {
   // the current one.
   void SwitchToInputDesktop();
 
+  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
+
   // Pointer to the next event executor.
   scoped_ptr<EventExecutor> nested_executor_;
-
-  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
 
   scoped_refptr<base::SingleThreadTaskRunner> inject_sas_task_runner_;
 

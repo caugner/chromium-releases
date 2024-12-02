@@ -69,6 +69,10 @@ class CONTENT_EXPORT NavigationEntryImpl
   virtual const GURL& GetOriginalRequestURL() const OVERRIDE;
   virtual void SetIsOverridingUserAgent(bool override) OVERRIDE;
   virtual bool GetIsOverridingUserAgent() const OVERRIDE;
+  virtual void SetTimestamp(base::Time timestamp) OVERRIDE;
+  virtual base::Time GetTimestamp() const OVERRIDE;
+  virtual void SetCanLoadLocalResources(bool allow) OVERRIDE;
+  virtual bool GetCanLoadLocalResources() const OVERRIDE;
 
   void set_unique_id(int unique_id) {
     unique_id_ = unique_id;
@@ -123,8 +127,9 @@ class CONTENT_EXPORT NavigationEntryImpl
 
   // Enumerations of the possible restore types.
   enum RestoreType {
-    // The entry has been restored is from the last session.
-    RESTORE_LAST_SESSION,
+    // Restore from the previous session.
+    RESTORE_LAST_SESSION_EXITED_CLEANLY,
+    RESTORE_LAST_SESSION_CRASHED,
 
     // The entry has been restored from the current session. This is used when
     // the user issues 'reopen closed tab'.
@@ -188,6 +193,7 @@ class CONTENT_EXPORT NavigationEntryImpl
   RestoreType restore_type_;
   GURL original_request_url_;
   bool is_overriding_user_agent_;
+  base::Time timestamp_;
 
   // This member is not persisted with session restore because it is transient.
   // If the post request succeeds, this field is cleared since the same
@@ -227,6 +233,10 @@ class CONTENT_EXPORT NavigationEntryImpl
   // instance, instead of a new navigation. This value should not be persisted
   // and is not needed after the entry commits.
   bool is_cross_site_reload_;
+
+  // Set when this entry should be able to access local file:// resources. This
+  // value is not needed after the entry commits and is not persisted.
+  bool can_load_local_resources_;
 
   // Copy and assignment is explicitly allowed for this class.
 };

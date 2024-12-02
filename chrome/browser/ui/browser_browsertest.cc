@@ -7,9 +7,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -63,11 +60,18 @@
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
+#include "chrome/browser/ui/cocoa/run_loop_testing.h"
+#endif
 
 #if defined(OS_WIN)
 #include "base/i18n/rtl.h"
@@ -429,6 +433,85 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_BeforeUnloadVsBeforeReload) {
   alert->native_dialog()->AcceptAppModalDialog();
 }
 
+// BeforeUnloadAtQuitWithTwoWindows is a regression test for
+// http://crbug.com/11842. It opens two windows, one of which has a
+// beforeunload handler and attempts to exit cleanly.
+class BeforeUnloadAtQuitWithTwoWindows : public InProcessBrowserTest {
+ public:
+  // This test is for testing a specific shutdown behavior. This mimics what
+  // happens in InProcessBrowserTest::RunTestOnMainThread and QuitBrowsers, but
+  // ensures that it happens through the single IDC_EXIT of the test.
+  virtual void CleanUpOnMainThread() OVERRIDE {
+    // Cycle both the MessageLoop and the Cocoa runloop twice to flush out any
+    // Chrome work that generates Cocoa work. Do this twice since there are two
+    // Browsers that must be closed.
+    CycleRunLoops();
+    CycleRunLoops();
+
+    // Run the application event loop to completion, which will cycle the
+    // native MessagePump on all platforms.
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    MessageLoop::current()->Run();
+
+    // Take care of any remaining Cocoa work.
+    CycleRunLoops();
+
+    // At this point, quit should be for real now.
+    ASSERT_EQ(0u, BrowserList::size());
+  }
+
+  // A helper function that cycles the MessageLoop, and on Mac, the Cocoa run
+  // loop. It also drains the NSAutoreleasePool.
+  void CycleRunLoops() {
+    content::RunAllPendingInMessageLoop();
+#if defined(OS_MACOSX)
+    chrome::testing::NSRunLoopRunAllPending();
+    AutoreleasePool()->Recycle();
+#endif
+  }
+};
+
+// This test passes on the trybots but fails on the main waterfall.
+#if defined(OS_WIN)
+#define MAYBE_IfThisTestTimesOutItIndicatesFAILURE DISABLED_IfThisTestTimesOutItIndicatesFAILURE
+#else
+#define MAYBE_IfThisTestTimesOutItIndicatesFAILURE IfThisTestTimesOutItIndicatesFAILURE
+#endif
+IN_PROC_BROWSER_TEST_F(BeforeUnloadAtQuitWithTwoWindows,
+                       MAYBE_IfThisTestTimesOutItIndicatesFAILURE) {
+  // In the first browser, set up a page that has a beforeunload handler.
+  GURL url(std::string("data:text/html,") + kBeforeUnloadHTML);
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  // Open a second browser window at about:blank.
+  ui_test_utils::BrowserAddedObserver browser_added_observer;
+  chrome::NewEmptyWindow(browser()->profile());
+  Browser* second_window = browser_added_observer.WaitForSingleNewBrowser();
+  ui_test_utils::NavigateToURL(second_window, GURL("about:blank"));
+
+  // Tell the application to quit. IDC_EXIT calls AttemptUserExit, which on
+  // everything but ChromeOS allows unload handlers to block exit. On that
+  // platform, though, it exits unconditionally. See the comment and bug ID
+  // in AttemptUserExit() in application_lifetime.cc.
+#if defined(OS_CHROMEOS)
+  browser::AttemptExit();
+#else
+  chrome::ExecuteCommand(second_window, IDC_EXIT);
+#endif
+
+  // The beforeunload handler will run at exit, ensure it does, and then accept
+  // it to allow shutdown to proceed.
+  AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
+  ASSERT_TRUE(alert);
+  EXPECT_TRUE(
+      static_cast<JavaScriptAppModalDialog*>(alert)->is_before_unload_dialog());
+  alert->native_dialog()->AcceptAppModalDialog();
+
+  // But wait there's more! If this test times out, it likely means that the
+  // browser has not been able to quit correctly, indicating there's a
+  // regression of the bug noted above.
+}
+
 // Test that scripts can fork a new renderer process for a cross-site popup,
 // based on http://www.google.com/chrome/intl/en/webmasters-faq.html#newtab.
 // The script must open a new tab, set its window.opener to null, and navigate
@@ -700,7 +783,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   WebContents* app_tab = chrome::AddSelectedTabWithURL(
       browser(), http_url, content::PAGE_TRANSITION_TYPED)->web_contents();
   ASSERT_EQ(2, browser()->tab_count());
-  ASSERT_EQ(1u, browser::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(1u, chrome::GetBrowserCount(browser()->profile()));
 
   // Normal tabs should accept load drops.
   EXPECT_TRUE(initial_tab->GetMutableRendererPrefs()->can_accept_load_drops);
@@ -710,7 +793,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_ConvertTabToAppShortcut) {
   chrome::ConvertTabToAppWindow(browser(), app_tab);
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, browser::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browser.
   Browser* app_browser = NULL;
@@ -838,7 +921,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 
   // Check that the new browser has an app name.
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, browser::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -868,19 +951,19 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
                 content::PAGE_TRANSITION_TYPED);
 
   WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
-  TabContents* current_tab_contents = chrome::GetActiveTabContents(browser());
-  TranslateTabHelper* helper = current_tab_contents->translate_tab_helper();
+  TranslateTabHelper* translate_tab_helper =
+      TranslateTabHelper::FromWebContents(current_web_contents);
   content::Source<WebContents> source(current_web_contents);
 
   ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
       en_language_detected_signal(chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                                   source);
-  EXPECT_EQ("", helper->language_state().original_language());
+  EXPECT_EQ("", translate_tab_helper->language_state().original_language());
   en_language_detected_signal.Wait();
   EXPECT_TRUE(en_language_detected_signal.GetDetailsFor(
         source.map_key(), &lang));
   EXPECT_EQ("en", lang);
-  EXPECT_EQ("en", helper->language_state().original_language());
+  EXPECT_EQ("en", translate_tab_helper->language_state().original_language());
 
   // Now navigate to a page in French.
   ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
@@ -893,7 +976,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
   EXPECT_TRUE(fr_language_detected_signal.GetDetailsFor(
         source.map_key(), &lang));
   EXPECT_EQ("fr", lang);
-  EXPECT_EQ("fr", helper->language_state().original_language());
+  EXPECT_EQ("fr", translate_tab_helper->language_state().original_language());
 }
 
 // Chromeos defaults to restoring the last session, so this test isn't
@@ -944,7 +1027,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
   launch.ProcessStartupURLs(std::vector<GURL>());
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, browser::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -1015,7 +1098,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   EXPECT_EQ(extension_app->GetFullLaunchURL(), app_window->GetURL());
 
   // The launch should have created a new browser.
-  ASSERT_EQ(2u, browser::GetBrowserCount(browser()->profile()));
+  ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile()));
 
   // Find the new browser.
   Browser* new_browser = NULL;
@@ -1586,7 +1669,7 @@ IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, NoStartupWindowBasicTest) {
   EXPECT_EQ(1u, BrowserList::size());
 }
 
-// This test needs to be placed outside the anonymouse namespace because we
+// This test needs to be placed outside the anonymous namespace because we
 // need to access private type of Browser.
 class AppModeTest : public BrowserTest {
  public:
@@ -1603,7 +1686,7 @@ IN_PROC_BROWSER_TEST_F(AppModeTest, EnableAppModeTest) {
   // Test that an application browser window loads correctly.
 
   // Verify the browser is in application mode.
-  EXPECT_TRUE(browser()->IsApplication());
+  EXPECT_TRUE(browser()->is_app());
 }
 
 // Confirm about:version contains some expected content.
@@ -1619,4 +1702,223 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AboutVersion) {
   ASSERT_GT(ui_test_utils::FindInPage(tab, ASCIIToUTF16("JavaScript"), true,
                                       true, NULL, NULL),
             0);
+}
+
+static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("click_modifier");
+static const char kFirstPageTitle[] = "First window";
+static const char kSecondPageTitle[] = "New window!";
+
+class ClickModifierTest : public InProcessBrowserTest {
+ public:
+  ClickModifierTest() {
+  }
+
+  // Returns a url that opens a new window or tab when clicked, via javascript.
+  GURL GetWindowOpenURL() {
+    return ui_test_utils::GetTestUrl(
+      FilePath(kTestDir),
+      FilePath(FILE_PATH_LITERAL("window_open.html")));
+  }
+
+  // Returns a url that follows a simple link when clicked, unless affected by
+  // modifiers.
+  GURL GetHrefURL() {
+    return ui_test_utils::GetTestUrl(
+      FilePath(kTestDir),
+      FilePath(FILE_PATH_LITERAL("href.html")));
+  }
+
+  string16 getFirstPageTitle() {
+    return ASCIIToUTF16(kFirstPageTitle);
+  }
+
+  string16 getSecondPageTitle() {
+    return ASCIIToUTF16(kSecondPageTitle);
+  }
+
+  // Loads our test page and simulates a single click using the supplied button
+  // and modifiers.  The click will cause either a navigation or the creation of
+  // a new window or foreground or background tab.  We verify that the expected
+  // disposition occurs.
+  void RunTest(Browser* browser,
+               const GURL& url,
+               int modifiers,
+               WebKit::WebMouseEvent::Button button,
+               WindowOpenDisposition disposition) {
+    ui_test_utils::NavigateToURL(browser, url);
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(1, browser->tab_count());
+    content::WebContents* web_contents = chrome::GetActiveWebContents(browser);
+    EXPECT_EQ(url, web_contents->GetURL());
+
+    if (disposition == CURRENT_TAB) {
+      NavigationController* controller =
+          chrome::GetActiveWebContents(browser) ?
+          &chrome::GetActiveWebContents(browser)->GetController() : NULL;
+      content::TestNavigationObserver same_tab_observer(
+          content::Source<NavigationController>(controller),
+          NULL,
+          1);
+      SimulateMouseClick(web_contents, modifiers, button);
+      base::RunLoop run_loop;
+      same_tab_observer.WaitForObservation(
+          base::Bind(&content::RunThisRunLoop, base::Unretained(&run_loop)),
+          content::GetQuitTaskForRunLoop(&run_loop));
+      EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+      EXPECT_EQ(1, browser->tab_count());
+      EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
+      return;
+    }
+
+    content::WindowedNotificationObserver observer(
+        chrome::NOTIFICATION_TAB_ADDED,
+        content::NotificationService::AllSources());
+    SimulateMouseClick(web_contents, modifiers, button);
+    observer.Wait();
+
+    if (disposition == NEW_WINDOW) {
+      EXPECT_EQ(2u, chrome::GetBrowserCount(browser->profile()));
+      return;
+    }
+
+    EXPECT_EQ(1u, chrome::GetBrowserCount(browser->profile()));
+    EXPECT_EQ(2, browser->tab_count());
+    web_contents = chrome::GetActiveWebContents(browser);
+    WaitForLoadStop(web_contents);
+    if (disposition == NEW_FOREGROUND_TAB) {
+      EXPECT_EQ(getSecondPageTitle(), web_contents->GetTitle());
+    } else {
+      ASSERT_EQ(NEW_BACKGROUND_TAB, disposition);
+      EXPECT_EQ(getFirstPageTitle(), web_contents->GetTitle());
+    }
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ClickModifierTest);
+};
+
+// Tests for clicking on elements with handlers that run window.open.
+
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenBasicClickTest) {
+  int modifiers = 0;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_FOREGROUND_TAB;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// TODO(ericu): Alt-click behavior on window.open is platform-dependent and not
+// well defined.  Should we add tests so we know if it changes?
+
+// Shift-clicks open in a new window.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenShiftClickTest) {
+  int modifiers = WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_WINDOW;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// Control-clicks open in a background tab.
+// On OSX meta [the command key] takes the place of control.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenControlClickTest) {
+#if defined(OS_MACOSX)
+  int modifiers = WebKit::WebInputEvent::MetaKey;
+#else
+  int modifiers = WebKit::WebInputEvent::ControlKey;
+#endif
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_BACKGROUND_TAB;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// Control-shift-clicks open in a foreground tab.
+// On OSX meta [the command key] takes the place of control.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenControlShiftClickTest) {
+#if defined(OS_MACOSX)
+  int modifiers = WebKit::WebInputEvent::MetaKey;
+#else
+  int modifiers = WebKit::WebInputEvent::ControlKey;
+#endif
+  modifiers |= WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_FOREGROUND_TAB;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// Middle-clicks open in a background tab.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenMiddleClickTest) {
+  int modifiers = 0;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonMiddle;
+  WindowOpenDisposition disposition = NEW_BACKGROUND_TAB;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// Shift-middle-clicks open in a foreground tab.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, WindowOpenShiftMiddleClickTest) {
+  int modifiers = WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonMiddle;
+  WindowOpenDisposition disposition = NEW_FOREGROUND_TAB;
+  RunTest(browser(), GetWindowOpenURL(), modifiers, button, disposition);
+}
+
+// Tests for clicking on normal links.
+
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefBasicClickTest) {
+  int modifiers = 0;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = CURRENT_TAB;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
+}
+
+// TODO(ericu): Alt-click behavior on links is platform-dependent and not well
+// defined.  Should we add tests so we know if it changes?
+
+// Shift-clicks open in a new window.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefShiftClickTest) {
+  int modifiers = WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_WINDOW;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
+}
+
+// Control-clicks open in a background tab.
+// On OSX meta [the command key] takes the place of control.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefControlClickTest) {
+#if defined(OS_MACOSX)
+  int modifiers = WebKit::WebInputEvent::MetaKey;
+#else
+  int modifiers = WebKit::WebInputEvent::ControlKey;
+#endif
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_BACKGROUND_TAB;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
+}
+
+// Control-shift-clicks open in a foreground tab.
+// On OSX meta [the command key] takes the place of control.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefControlShiftClickTest) {
+#if defined(OS_MACOSX)
+  int modifiers = WebKit::WebInputEvent::MetaKey;
+#else
+  int modifiers = WebKit::WebInputEvent::ControlKey;
+#endif
+  modifiers |= WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonLeft;
+  WindowOpenDisposition disposition = NEW_FOREGROUND_TAB;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
+}
+
+// Middle-clicks open in a background tab.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefMiddleClickTest) {
+  int modifiers = 0;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonMiddle;
+  WindowOpenDisposition disposition = NEW_BACKGROUND_TAB;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
+}
+
+// Shift-middle-clicks open in a foreground tab.
+IN_PROC_BROWSER_TEST_F(ClickModifierTest, HrefShiftMiddleClickTest) {
+  int modifiers = WebKit::WebInputEvent::ShiftKey;
+  WebKit::WebMouseEvent::Button button = WebKit::WebMouseEvent::ButtonMiddle;
+  WindowOpenDisposition disposition = NEW_FOREGROUND_TAB;
+  RunTest(browser(), GetHrefURL(), modifiers, button, disposition);
 }

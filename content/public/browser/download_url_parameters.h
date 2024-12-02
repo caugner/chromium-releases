@@ -10,7 +10,6 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "content/public/browser/download_id.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/common/referrer.h"
 #include "googleurl/src/gurl.h"
@@ -18,6 +17,7 @@
 
 namespace content {
 
+class DownloadItem;
 class ResourceContext;
 class ResourceDispatcherHost;
 class WebContents;
@@ -38,8 +38,8 @@ class WebContents;
 
 class CONTENT_EXPORT DownloadUrlParameters {
  public:
-  // If there is an error, the DownloadId will be invalid.
-  typedef base::Callback<void(DownloadId, net::Error)> OnStartedCallback;
+  // If there is an error, then |item| will be NULL.
+  typedef base::Callback<void(DownloadItem*, net::Error)> OnStartedCallback;
 
   typedef std::pair<std::string, std::string> RequestHeadersNameValuePair;
   typedef std::vector<RequestHeadersNameValuePair> RequestHeadersType;
@@ -47,14 +47,14 @@ class CONTENT_EXPORT DownloadUrlParameters {
   static DownloadUrlParameters* FromWebContents(
       WebContents* web_contents,
       const GURL& url,
-      const DownloadSaveInfo& save_info);
+      scoped_ptr<DownloadSaveInfo> save_info);
 
   DownloadUrlParameters(
       const GURL& url,
       int render_process_host_id,
       int render_view_host_routing_id,
       content::ResourceContext* resource_context,
-      const DownloadSaveInfo& save_info);
+      scoped_ptr<DownloadSaveInfo> save_info);
 
   ~DownloadUrlParameters();
 
@@ -83,6 +83,9 @@ class CONTENT_EXPORT DownloadUrlParameters {
     callback_ = callback;
   }
 
+  // Note that this nulls the internal copy of the DownloadSaveInfo!
+  scoped_ptr<DownloadSaveInfo> GetSaveInfo();
+
   const OnStartedCallback& callback() const { return callback_; }
   bool content_initiated() const { return content_initiated_; }
   int load_flags() const { return load_flags_; }
@@ -108,7 +111,6 @@ class CONTENT_EXPORT DownloadUrlParameters {
   ResourceDispatcherHost* resource_dispatcher_host() const {
     return resource_dispatcher_host_;
   }
-  const DownloadSaveInfo& save_info() const { return save_info_; }
   const GURL& url() const { return url_; }
 
  private:
@@ -126,7 +128,7 @@ class CONTENT_EXPORT DownloadUrlParameters {
   int render_view_host_routing_id_;
   ResourceContext* resource_context_;
   ResourceDispatcherHost* resource_dispatcher_host_;
-  DownloadSaveInfo save_info_;
+  scoped_ptr<DownloadSaveInfo> save_info_;
   GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadUrlParameters);

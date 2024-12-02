@@ -139,7 +139,7 @@ void SpeechRecognitionTrayIconController::SetVUMeterVolume(float volume) {
   canvas.drawBitmap(*g_images.Get().mic_empty()->bitmap(), 0, 0);
   DrawVolume(&canvas, *g_images.Get().mic_full(), volume);
 
-  tray_icon_->SetImage(*mic_image_.get());
+  tray_icon_->SetImage(gfx::ImageSkia(*mic_image_.get()));
 }
 
 void SpeechRecognitionTrayIconController::Initialize() {
@@ -190,9 +190,7 @@ void SpeechRecognitionTrayIconController::ShowNotificationBalloon(
   string16 title = l10n_util::GetStringUTF16(
       IDS_SPEECH_INPUT_TRAY_BALLOON_TITLE);
   string16 message = l10n_util::GetStringFUTF16(
-          IDS_SPEECH_INPUT_TRAY_BALLOON_BODY,
-          text);
+      IDS_SPEECH_INPUT_TRAY_BALLOON_BODY, text);
 
-  tray_icon_->DisplayBalloon(*g_images.Get().balloon_icon()->bitmap(), title,
-      message);
+  tray_icon_->DisplayBalloon(*g_images.Get().balloon_icon(), title, message);
 }

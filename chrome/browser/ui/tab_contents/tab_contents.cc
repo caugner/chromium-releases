@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "chrome/browser/autofill/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_tab_helper.h"
@@ -22,7 +21,7 @@
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/pepper_broker_observer.h"
-#include "chrome/browser/plugin_observer.h"
+#include "chrome/browser/plugins/plugin_observer.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
@@ -30,7 +29,7 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/tab_contents/navigation_metrics_recorder.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
@@ -40,11 +39,9 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/hung_plugin_tab_helper.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
-#include "chrome/browser/ui/metro_pin_tab_helper.h"
 #include "chrome/browser/ui/pdf/pdf_tab_helper.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
-#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/snapshot_tab_helper.h"
@@ -55,12 +52,15 @@
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/thumbnail_support.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/browser/ui/metro_pin_tab_helper_win.h"
 #endif
 
 using content::WebContents;
@@ -115,82 +115,68 @@ TabContents::TabContents(WebContents* contents)
   SessionTabHelper::CreateForWebContents(contents);
 
   AlternateErrorPageTabObserver::CreateForWebContents(contents);
-  autocomplete_history_manager_.reset(new AutocompleteHistoryManager(contents));
-  autofill_delegate_.reset(new TabAutofillManagerDelegate(this));
-  autofill_manager_ = new AutofillManager(autofill_delegate_.get(), this);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kExternalAutofillPopup)) {
-    autofill_external_delegate_.reset(
-        AutofillExternalDelegate::Create(this, autofill_manager_.get()));
-    autofill_manager_->SetExternalDelegate(autofill_external_delegate_.get());
-    autocomplete_history_manager_->SetExternalDelegate(
-        autofill_external_delegate_.get());
-  }
-  blocked_content_tab_helper_.reset(new BlockedContentTabHelper(this));
+  TabAutofillManagerDelegate::CreateForWebContents(contents);
+  AutofillManager::CreateForWebContentsAndDelegate(
+      contents, TabAutofillManagerDelegate::FromWebContents(contents));
+#if defined(OS_ANDROID)
+  // Not ready on non-Android yet, http://crbug.com/51644
+  AutofillExternalDelegate::CreateForWebContentsAndManager(
+      contents, AutofillManager::FromWebContents(contents));
+  AutofillManager::FromWebContents(contents)->SetExternalDelegate(
+      AutofillExternalDelegate::FromWebContents(contents));
+#endif
+  BlockedContentTabHelper::CreateForWebContents(contents);
   BookmarkTabHelper::CreateForWebContents(contents);
   chrome_browser_net::LoadTimeStatsTabHelper::CreateForWebContents(contents);
-  constrained_window_tab_helper_.reset(new ConstrainedWindowTabHelper(this));
-  content_settings_.reset(new TabSpecificContentSettings(contents));
-  core_tab_helper_.reset(new CoreTabHelper(contents));
+  ConstrainedWindowTabHelper::CreateForWebContents(contents);
+  CoreTabHelper::CreateForWebContents(contents);
   extensions::TabHelper::CreateForWebContents(contents);
-  favicon_tab_helper_.reset(new FaviconTabHelper(contents));
-  find_tab_helper_.reset(new FindTabHelper(contents));
-  history_tab_helper_.reset(new HistoryTabHelper(contents));
-  hung_plugin_tab_helper_.reset(new HungPluginTabHelper(contents));
-  infobar_tab_helper_.reset(new InfoBarTabHelper(contents));
-  MetroPinTabHelper::CreateForWebContents(contents);
-  password_manager_delegate_.reset(new PasswordManagerDelegateImpl(this));
-  password_manager_.reset(
-      new PasswordManager(contents, password_manager_delegate_.get()));
-  prefs_tab_helper_.reset(new PrefsTabHelper(contents));
-  prerender_tab_helper_.reset(new prerender::PrerenderTabHelper(this));
-  search_engine_tab_helper_.reset(new SearchEngineTabHelper(contents));
-  bool is_search_enabled =
-      chrome::search::IsInstantExtendedAPIEnabled(profile());
-  search_tab_helper_.reset(
-      new chrome::search::SearchTabHelper(this, is_search_enabled));
+  extensions::WebNavigationTabObserver::CreateForWebContents(contents);
+  ExternalProtocolObserver::CreateForWebContents(contents);
+  FaviconTabHelper::CreateForWebContents(contents);
+  FindTabHelper::CreateForWebContents(contents);
+  HistoryTabHelper::CreateForWebContents(contents);
+  HungPluginTabHelper::CreateForWebContents(contents);
+  InfoBarTabHelper::CreateForWebContents(contents);
+  NavigationMetricsRecorder::CreateForWebContents(contents);
+  PasswordManagerDelegateImpl::CreateForWebContents(contents);
+  PasswordManager::CreateForWebContentsAndDelegate(
+      contents, PasswordManagerDelegateImpl::FromWebContents(contents));
+  PepperBrokerObserver::CreateForWebContents(contents);
+  PluginObserver::CreateForWebContents(contents);
+  PrefsTabHelper::CreateForWebContents(contents);
+  prerender::PrerenderTabHelper::CreateForWebContents(contents);
+  safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(contents);
+  SearchEngineTabHelper::CreateForWebContents(contents);
+  chrome::search::SearchTabHelper::CreateForWebContents(contents);
   SnapshotTabHelper::CreateForWebContents(contents);
   SSLTabHelper::CreateForWebContents(contents);
-  synced_tab_delegate_.reset(new TabContentsSyncedTabDelegate(this));
-  translate_tab_helper_.reset(new TranslateTabHelper(contents));
-  zoom_controller_.reset(new ZoomController(this));
+  TabContentsSyncedTabDelegate::CreateForWebContents(contents);
+  TabSpecificContentSettings::CreateForWebContents(contents);
+  ThumbnailTabHelper::CreateForWebContents(contents);
+  TranslateTabHelper::CreateForWebContents(contents);
+  ZoomController::CreateForWebContents(contents);
 
 #if defined(ENABLE_AUTOMATION)
-  automation_tab_helper_.reset(new AutomationTabHelper(contents));
+  AutomationTabHelper::CreateForWebContents(contents);
 #endif
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  captive_portal_tab_helper_.reset(
-      new captive_portal::CaptivePortalTabHelper(profile(), web_contents()));
+  captive_portal::CaptivePortalTabHelper::CreateForWebContents(contents);
 #endif
 
 #if !defined(OS_ANDROID)
   if (OmniboxSearchHint::IsEnabled(profile()))
     OmniboxSearchHint::CreateForWebContents(contents);
   PDFTabHelper::CreateForWebContents(contents);
-  sad_tab_helper_.reset(new SadTabHelper(contents));
-  web_intent_picker_controller_.reset(new WebIntentPickerController(this));
+  SadTabHelper::CreateForWebContents(contents);
+  WebIntentPickerController::CreateForWebContents(contents);
 #endif
-
-  external_protocol_observer_.reset(new ExternalProtocolObserver(contents));
-  navigation_metrics_recorder_.reset(new NavigationMetricsRecorder(contents));
-  pepper_broker_observer_.reset(new PepperBrokerObserver(contents));
-  plugin_observer_.reset(new PluginObserver(this));
-  safe_browsing_tab_observer_.reset(
-      new safe_browsing::SafeBrowsingTabObserver(this));
-    webnavigation_observer_.reset(
-        new extensions::WebNavigationTabObserver(contents));
 
 #if defined(ENABLE_PRINTING)
   printing::PrintPreviewMessageHandler::CreateForWebContents(contents);
   printing::PrintViewManager::CreateForWebContents(contents);
 #endif
-
-  // Start the in-browser thumbnailing if the feature is enabled.
-  if (ShouldEnableInBrowserThumbnailing()) {
-    thumbnail_generator_.reset(new ThumbnailGenerator);
-    thumbnail_generator_->StartThumbnailing(web_contents_.get());
-  }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   // If this is not an incognito window, setup to handle one-click login.
@@ -201,19 +187,14 @@ TabContents::TabContents(WebContents* contents)
   if (OneClickSigninHelper::CanOffer(contents, "", false))
       OneClickSigninHelper::CreateForWebContents(contents);
 #endif
+
+#if defined(OS_WIN)
+  MetroPinTabHelper::CreateForWebContents(contents);
+#endif
 }
 
 TabContents::~TabContents() {
   in_destructor_ = true;
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-      content::Source<TabContents>(this),
-      content::NotificationService::NoDetails());
-
-  // Need to tear down infobars before the WebContents goes away.
-  // TODO(avi): Can we get this handled by the tab helper itself?
-  infobar_tab_helper_.reset();
 }
 
 TabContents* TabContents::Clone() {

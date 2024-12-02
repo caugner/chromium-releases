@@ -2,21 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/active_tab_permission_granter.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 
 using content::WebContents;
+
+namespace extensions {
 
 class CommandsApiTest : public ExtensionApiTest {
  public:
@@ -34,8 +39,8 @@ class ScriptBadgesCommandsApiTest : public ExtensionApiTest {
   ScriptBadgesCommandsApiTest() {
     // We cannot add this to CommandsApiTest because then PageActions get
     // treated like BrowserActions and the PageAction test starts failing.
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableScriptBadges);
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kScriptBadges, "1");
     CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableExperimentalExtensionApis);
   }
@@ -51,7 +56,7 @@ class ScriptBadgesCommandsApiTest : public ExtensionApiTest {
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("keybinding/basics")) << message_;
-  const extensions::Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   // Load this extension, which uses the same keybindings but sets the page
@@ -66,15 +71,26 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
   ui_test_utils::NavigateToURL(browser(),
       test_server()->GetURL("files/extensions/test_file.txt"));
 
+  // activeTab shouldn't have been granted yet.
+  TabContents* tab = chrome::GetActiveTabContents(browser());
+  ASSERT_TRUE(tab);
+
+  ActiveTabPermissionGranter* granter =
+      TabHelper::FromWebContents(tab->web_contents())->
+          active_tab_permission_granter();
+  EXPECT_FALSE(granter->IsGranted(extension));
+
   // Activate the shortcut (Ctrl+Shift+F).
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
       browser(), ui::VKEY_F, true, true, false, false));
 
+  // activeTab should now be granted.
+  EXPECT_TRUE(granter->IsGranted(extension));
+
   // Verify the command worked.
-  WebContents* tab = chrome::GetActiveWebContents(browser());
   bool result = false;
   ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      tab->GetRenderViewHost(), L"",
+      tab->web_contents()->GetRenderViewHost(), L"",
       L"setInterval(function(){"
       L"  if(document.body.bgColor == 'red'){"
       L"    window.domAutomationController.send(true)}}, 100)",
@@ -87,7 +103,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
 
   result = false;
   ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
-      tab->GetRenderViewHost(), L"",
+      tab->web_contents()->GetRenderViewHost(), L"",
       L"setInterval(function(){"
       L"  if(document.body.bgColor == 'blue'){"
       L"    window.domAutomationController.send(true)}}, 100)",
@@ -98,7 +114,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, PageAction) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("keybinding/page_action")) << message_;
-  const extensions::Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   {
@@ -114,7 +130,9 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, PageAction) {
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
   int tab_id = SessionTabHelper::FromWebContents(
       chrome::GetActiveWebContents(browser()))->session_id().id();
-  ExtensionAction* action = extension->page_action();
+  ExtensionAction* action =
+      ExtensionActionManager::Get(browser()->profile())->
+      GetPageAction(*extension);
   ASSERT_TRUE(action);
   EXPECT_EQ("Make this page red", action->GetTitle(tab_id));
 
@@ -144,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, PageAction) {
 IN_PROC_BROWSER_TEST_F(ScriptBadgesCommandsApiTest, ScriptBadge_DISABLED) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("keybinding/script_badge")) << message_;
-  const extensions::Extension* extension = GetSingleLoadedExtension();
+  const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
   {
@@ -164,3 +182,12 @@ IN_PROC_BROWSER_TEST_F(ScriptBadgesCommandsApiTest, ScriptBadge_DISABLED) {
   }
 }
 
+// This test validates that the getAll query API function returns registered
+// commands as well as synthesized ones and that inactive commands (like the
+// synthesized ones are in nature) have no shortcuts.
+IN_PROC_BROWSER_TEST_F(CommandsApiTest, SynthesizedCommand) {
+  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(RunExtensionTest("keybinding/synthesized")) << message_;
+}
+
+}  // extensions

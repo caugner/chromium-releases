@@ -32,8 +32,14 @@ const int kDefaultAdbPort = 3000;
 forwarder2::PipeNotifier* g_notifier;
 
 void KillHandler(int /* unused */) {
+  static int s_kill_handler_count = 0;
   CHECK(g_notifier);
-  g_notifier->Notify();
+  // If for some reason the forwarder get stuck in any socket waiting forever,
+  // we can send a SIGKILL or SIGINT three times to force it die
+  // (non-nicely). This is useful when debugging.
+  ++s_kill_handler_count;
+  if (!g_notifier->Notify() || s_kill_handler_count > 2)
+    exit(1);
 }
 
 // Format of arg: <Device port>[:<Forward to port>:<Forward to address>]
@@ -46,14 +52,6 @@ bool ParseForwardArg(const std::string& arg,
   if (arg_pieces.size() == 0 || !StringToInt(arg_pieces[0], device_port))
     return false;
 
-  if (*device_port == 0) {
-    // TODO(felipeg): handle the case where we want to dynamically allocate the
-    // port. Althogh the Socket already supports it, we have to
-    // communicate the port from one forwarder to the other.
-    LOG(ERROR) << "Dynamically allocate the port is not yet implemented.";
-    return false;
-  }
-
   if (arg_pieces.size() > 1) {
     if (!StringToInt(arg_pieces[1], forward_to_port))
       return false;
@@ -62,9 +60,6 @@ bool ParseForwardArg(const std::string& arg,
   } else {
     *forward_to_port = *device_port;
   }
-
-  printf("Forwarding device port %d to host %d:%s\n",
-         *device_port, *forward_to_port, forward_to_host->c_str());
   return true;
 }
 
@@ -82,6 +77,11 @@ int main(int argc, char** argv) {
     printf("Could not parse adb port number: %s\n", adb_port_str.c_str());
     show_help = true;
   }
+  if (adb_port <= 0) {
+    printf("Invalid adb port number: %s. Adb port must be a "
+           "postivie integer.\n", adb_port_str.c_str());
+    show_help = true;
+  }
   CommandLine::StringVector forward_args = command_line.GetArgs();
   if (show_help || forward_args.empty()) {
     tools::ShowHelp(
@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
             "  <Forward to port> default is <Device port>\n"
             "  <Forward to address> default is 127.0.0.1.",
             kDefaultAdbPort).c_str());
-    return 0;
+    return 1;
   }
 
   g_notifier = new forwarder2::PipeNotifier();
@@ -108,14 +108,21 @@ int main(int argc, char** argv) {
                         &device_port,
                         &forward_to_host,
                         &forward_to_port)) {
-      HostController* host_controller(
+      scoped_ptr<HostController> host_controller(
           new HostController(device_port,
                              forward_to_host,
                              forward_to_port,
                              adb_port,
                              g_notifier->receiver_fd()));
+      if (!host_controller->Connect())
+        continue;
       host_controller->Start();
-      controllers.push_back(host_controller);
+      // Get the current allocated port.
+      device_port = host_controller->device_port();
+      printf("Forwarding device port %d to host %d:%s\n",
+             device_port, forward_to_port, forward_to_host.c_str());
+
+      controllers.push_back(host_controller.release());
     } else {
       printf("Couldn't start forwarder server for port spec: %s\n",
              forward_args[i].c_str());

@@ -21,13 +21,12 @@
 #include "content/public/common/javascript_message_type.h"
 #include "content/public/common/window_container_type.h"
 #include "net/base/load_states.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class ChildProcessSecurityPolicyImpl;
-class SessionStorageNamespaceImpl;
 class SkBitmap;
 class ViewMsg_Navigate;
 struct AccessibilityHostMsg_NotificationParams;
@@ -50,15 +49,21 @@ struct SelectedFileInfo;
 
 namespace content {
 
+class ChildProcessSecurityPolicyImpl;
 class PowerSaveBlocker;
 class RenderViewHostObserver;
 class RenderWidgetHostDelegate;
 class SessionStorageNamespace;
+class SessionStorageNamespaceImpl;
 class TestRenderViewHost;
 struct ContextMenuParams;
 struct FileChooserParams;
 struct Referrer;
 struct ShowDesktopNotificationHostMsgParams;
+
+#if defined(OS_ANDROID)
+class MediaPlayerManagerAndroid;
+#endif
 
 // NotificationObserver used to listen for EXECUTE_JAVASCRIPT_RESULT
 // notifications.
@@ -219,12 +224,18 @@ class CONTENT_EXPORT RenderViewHostImpl
   virtual webkit_glue::WebPreferences GetWebkitPreferences() OVERRIDE;
   virtual void UpdateWebkitPreferences(
       const webkit_glue::WebPreferences& prefs) OVERRIDE;
+  virtual void NotifyTimezoneChange() OVERRIDE;
 
 #if defined(OS_ANDROID)
   virtual void ActivateNearestFindResult(int request_id,
                                          float x,
                                          float y) OVERRIDE;
   virtual void RequestFindMatchRects(int current_version) OVERRIDE;
+  virtual void SynchronousFind(int request_id,
+                               const string16& search_text,
+                               const WebKit::WebFindOptions& options,
+                               int* match_count,
+                               int* active_ordinal) OVERRIDE;
 #endif
 
   void set_delegate(RenderViewHostDelegate* d) {
@@ -238,14 +249,9 @@ class CONTENT_EXPORT RenderViewHostImpl
   // The |opener_route_id| parameter indicates which RenderView created this
   // (MSG_ROUTING_NONE if none). If |max_page_id| is larger than -1, the
   // RenderView is told to start issuing page IDs at |max_page_id| + 1.
-  // If this RenderView is a guest, the embedder's process ID is also passed in
-  // so that the RenderView's process can establish a channel with its embedder
-  // if it's not already established.
   virtual bool CreateRenderView(const string16& frame_name,
                                 int opener_route_id,
-                                int32 max_page_id,
-                                const std::string& embedder_channel_name,
-                                int embedder_container_id);
+                                int32 max_page_id);
 
   base::TerminationStatus render_view_termination_status() const {
     return render_view_termination_status_;
@@ -302,8 +308,9 @@ class CONTENT_EXPORT RenderViewHostImpl
   // of the parameters.
   void SwapOut(int new_render_process_host_id, int new_request_id);
 
-  // Called by ResourceDispatcherHost after the SwapOutACK is received.
-  void OnSwapOutACK();
+  // Called by ResourceDispatcherHost after the SwapOutACK is received or the
+  // response times out.
+  void OnSwapOutACK(bool timed_out);
 
   // Called to notify the renderer that it has been visibly swapped out and
   // replaced by another RenderViewHost, after an earlier call to SwapOut.
@@ -398,6 +405,10 @@ class CONTENT_EXPORT RenderViewHostImpl
 #endif
 
 #if defined(OS_ANDROID)
+  MediaPlayerManagerAndroid* media_player_manager() {
+    return media_player_manager_;
+  }
+
   void DidSelectPopupMenuItems(const std::vector<int>& selected_indices);
   void DidCancelPopupMenu();
 #endif
@@ -432,7 +443,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   // about:blank.
   // empty_allowed must be set to false for navigations for security reasons.
   static void FilterURL(ChildProcessSecurityPolicyImpl* policy,
-                        int renderer_id,
+                        const RenderProcessHost* process,
                         bool empty_allowed,
                         GURL* url);
 
@@ -471,6 +482,7 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnMsgRenderViewReady();
   void OnMsgRenderViewGone(int status, int error_code);
   void OnMsgDidStartProvisionalLoadForFrame(int64 frame_id,
+                                            int64 parent_frame_id,
                                             bool main_frame,
                                             const GURL& opener_url,
                                             const GURL& url);
@@ -568,6 +580,7 @@ class CONTENT_EXPORT RenderViewHostImpl
 #endif
 
 #if defined(OS_ANDROID)
+  void OnMsgDidChangeBodyBackgroundColor(SkColor color);
   void OnStartContentIntent(const GURL& content_url);
 #endif
 
@@ -636,6 +649,9 @@ class CONTENT_EXPORT RenderViewHostImpl
   // is_waiting_for_beforeunload_ack_, unload_ack_is_for_cross_site_transition_.
   bool is_waiting_for_unload_ack_;
 
+  // Set to true when waiting for ViewHostMsg_SwapOut_ACK has timed out.
+  bool has_timed_out_on_unload_;
+
   // Valid only when is_waiting_for_beforeunload_ack_ or
   // is_waiting_for_unload_ack_ is true.  This tells us if the unload request
   // is for closing the entire tab ( = false), or only this RenderViewHost in
@@ -674,6 +690,12 @@ class CONTENT_EXPORT RenderViewHostImpl
 
   // When the last ShouldClose message was sent.
   base::TimeTicks send_should_close_start_time_;
+
+#if defined(OS_ANDROID)
+  // Manages all the android mediaplayer objects and handling IPCs for video.
+  // This class inherits from RenderViewHostObserver.
+  MediaPlayerManagerAndroid* media_player_manager_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostImpl);
 };

@@ -54,8 +54,8 @@ bool PPB_ImageData_Impl::Init(PP_ImageDataFormat format,
     return false;  // Only support this one format for now.
   if (width <= 0 || height <= 0)
     return false;
-  if (static_cast<int64>(width) * static_cast<int64>(height) >=
-      std::numeric_limits<int32>::max() / 4)
+  if (static_cast<int64>(width) * static_cast<int64>(height) * 4 >=
+      std::numeric_limits<int32>::max())
     return false;  // Prevent overflow of signed 32-bit ints.
 
   format_ = format;
@@ -243,7 +243,7 @@ void* ImageDataNaClBackend::Map() {
     skia_bitmap_.setPixels(shared_memory_->memory());
     // Our platform bitmaps are set to opaque by default, which we don't want.
     skia_bitmap_.setIsOpaque(false);
-    skia_canvas_.setBitmapDevice(skia_bitmap_);
+    skia_canvas_.reset(new SkCanvas(skia_bitmap_));
     return skia_bitmap_.getAddr32(0, 0);
   }
   return shared_memory_->memory();
@@ -274,7 +274,7 @@ skia::PlatformCanvas* ImageDataNaClBackend::GetPlatformCanvas() {
 SkCanvas* ImageDataNaClBackend::GetCanvas() {
   if (!IsMapped())
     return NULL;
-  return &skia_canvas_;
+  return skia_canvas_.get();
 }
 
 const SkBitmap* ImageDataNaClBackend::GetMappedBitmap() const {
@@ -285,3 +285,4 @@ const SkBitmap* ImageDataNaClBackend::GetMappedBitmap() const {
 
 }  // namespace ppapi
 }  // namespace webkit
+

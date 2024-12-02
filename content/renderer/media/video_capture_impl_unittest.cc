@@ -18,6 +18,8 @@ using ::testing::Return;
 #define CAPABILITY_LARGE {320, 240, 30, media::VideoCaptureCapability::kI420, \
     0, false }
 
+namespace content {
+
 class MockVideoCaptureMessageFilter : public VideoCaptureMessageFilter {
  public:
   MockVideoCaptureMessageFilter() : VideoCaptureMessageFilter() {}
@@ -88,13 +90,13 @@ class VideoCaptureImplTest : public ::testing::Test {
                             const media::VideoCaptureParams& params) {
       media::VideoCaptureParams device_info = params;
       OnDeviceInfoReceived(device_info);
-      OnStateChanged(video_capture::kStarted);
+      OnStateChanged(VIDEO_CAPTURE_STATE_STARTED);
     }
 
     void DevicePauseCapture(int device_id) {}
 
     void DeviceStopCapture(int device_id) {
-      OnStateChanged(video_capture::kStopped);
+      OnStateChanged(VIDEO_CAPTURE_STATE_STOPPED);
     }
 
     void DeviceReceiveEmptyBuffer(int device_id, int buffer_id) {}
@@ -296,3 +298,5 @@ TEST_F(VideoCaptureImplTest, TwoClientsWithSameSize) {
   video_capture_impl_->StopCapture(client2.get());
   message_loop_->RunAllPending();
 }
+
+}  // namespace content

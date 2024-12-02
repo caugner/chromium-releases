@@ -5,10 +5,12 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_H_
 
+#include <list>
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
+#include "ui/base/layout.h"
 #include "ui/gfx/point.h"
 
 namespace ui {
@@ -66,6 +68,23 @@ class Tab : public BaseTab {
   virtual bool ShouldShowCloseBox() const;
 
  private:
+  // Contains a cached image and the values used to generate it.
+  struct ImageCacheEntry {
+    ImageCacheEntry();
+    ~ImageCacheEntry();
+
+    // ID of the resource used.
+    int resource_id;
+
+    // Scale factor we're drawing it.
+    ui::ScaleFactor scale_factor;
+
+    // The image.
+    gfx::ImageSkia image;
+  };
+
+  typedef std::list<ImageCacheEntry> ImageCache;
+
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void Layout() OVERRIDE;
@@ -78,12 +97,13 @@ class Tab : public BaseTab {
   virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
 
   // Paint various portions of the Tab
-  gfx::ImageSkia* GetTabBackgroundImage(chrome::search::Mode::Type mode) const;
   void PaintTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
+  void PaintInactiveTabBackgroundUsingResourceId(gfx::Canvas* canvas,
+                                                 int tab_id);
   void PaintActiveTabBackground(gfx::Canvas* canvas,
-                                gfx::ImageSkia* tab_background);
+                                chrome::search::Mode::Type mode);
 
   // Returns the number of favicon-size elements that can fit in the tab's
   // current size.
@@ -107,6 +127,17 @@ class Tab : public BaseTab {
   // Loads the images to be used for the tab background.
   static void LoadTabImages();
 
+  // Returns the cached image for the specified arguments, or an empty image if
+  // there isn't one cached.
+  static gfx::ImageSkia GetCachedImage(int resource_id,
+                                       const gfx::Size& size,
+                                       ui::ScaleFactor scale_factor);
+
+  // Caches the specified image.
+  static void SetCachedImage(int resource_id,
+                             ui::ScaleFactor scale_factor,
+                             const gfx::ImageSkia& image);
+
   // The bounds of various sections of the display.
   gfx::Rect favicon_bounds_;
   gfx::Rect title_bounds_;
@@ -126,7 +157,6 @@ class Tab : public BaseTab {
     int y_offset;
   };
   static TabImage tab_active_;
-  static TabImage tab_active_search_;
   static TabImage tab_inactive_;
   static TabImage tab_alpha_;
 
@@ -140,6 +170,10 @@ class Tab : public BaseTab {
 
   // The current color of the close button.
   SkColor close_button_color_;
+
+  // As the majority of the tabs are inactive, and painting tabs is slowish,
+  // we cache a handful of the inactive tab backgrounds here.
+  static ImageCache* image_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(Tab);
 };

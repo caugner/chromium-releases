@@ -96,7 +96,6 @@ void RegisterComponentsForUpdate(const CommandLine& command_line) {
   // file IO to know you existing component version.
   RegisterRecoveryComponent(cus, g_browser_process->local_state());
   RegisterPepperFlashComponent(cus);
-  RegisterNPAPIFlashComponent(cus);
   RegisterSwiftShaderComponent(cus);
 
   // CRLSetFetcher attempts to load a CRL set from either the local disk or
@@ -574,6 +573,6 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
 }
 
 bool HasPendingUncleanExit(Profile* profile) {
-  return !profile->DidLastSessionExitCleanly() &&
-    !profile_launch_observer.Get().HasBeenLaunched(profile);
+  return profile->GetLastSessionExitType() == Profile::EXIT_CRASHED &&
+      !profile_launch_observer.Get().HasBeenLaunched(profile);
 }

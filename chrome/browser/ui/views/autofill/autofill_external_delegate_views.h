@@ -16,7 +16,7 @@ class AutofillPopupViewViews;
 // selection and the popup that shows the values.
 class AutofillExternalDelegateViews : public AutofillExternalDelegate {
  public:
-  AutofillExternalDelegateViews(TabContents* tab_contents,
+  AutofillExternalDelegateViews(content::WebContents* web_contents,
                                 AutofillManager* autofill_manager);
 
   virtual ~AutofillExternalDelegateViews();
@@ -33,11 +33,6 @@ class AutofillExternalDelegateViews : public AutofillExternalDelegate {
 
  private:
   // AutofillExternalDelegate implementation.
-  virtual void OnQueryPlatformSpecific(
-      int query_id,
-      const webkit::forms::FormData& form,
-      const webkit::forms::FormField& field,
-      const gfx::Rect& bounds) OVERRIDE;
   virtual void ApplyAutofillSuggestions(
       const std::vector<string16>& autofill_values,
       const std::vector<string16>& autofill_labels,

@@ -27,13 +27,12 @@
 #include "webkit/glue/webcursor.h"
 #include "webkit/plugins/npapi/gtk_plugin_container_manager.h"
 
-class GtkKeyBindingsHandler;
-
 typedef struct _GtkClipboard GtkClipboard;
 typedef struct _GtkSelectionData GtkSelectionData;
 
 namespace content {
 class GtkIMContextWrapper;
+class GtkKeyBindingsHandler;
 class RenderWidgetHost;
 class RenderWidgetHostImpl;
 struct NativeWebKeyboardEvent;
@@ -104,7 +103,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -116,8 +115,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
-  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
-                               bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(

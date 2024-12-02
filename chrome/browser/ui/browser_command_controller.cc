@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -35,6 +36,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/url_constants.h"
@@ -42,6 +44,10 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
+#endif
+
+#if defined(USE_ASH)
+#include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
 using content::WebContents;
@@ -186,8 +192,10 @@ BrowserCommandController::~BrowserCommandController() {
   if (service)
     service->RemoveObserver(this);
 
+  // TabRestoreService may have been shutdown by the time we get here. Don't
+  // trigger creating it.
   TabRestoreService* tab_restore_service =
-      TabRestoreServiceFactory::GetForProfile(profile());
+      TabRestoreServiceFactory::GetForProfileIfExisting(profile());
   if (tab_restore_service)
     tab_restore_service->RemoveObserver(this);
   profile_pref_registrar_.RemoveAll();
@@ -203,18 +211,14 @@ bool BrowserCommandController::IsReservedCommandOrKey(
     return false;
 
 #if defined(OS_CHROMEOS)
-  // Chrome OS's top row of keys produces F1-10.  Make sure that web pages
-  // aren't able to block Chrome from performing the standard actions for F1-F4.
-  // We should not handle F5-10 here since they are processed by Ash. See also:
-  // crbug.com/127333#c8
+  // On Chrome OS, the top row of keys are mapped to F1-F10.  We don't want web
+  // pages to be able to change the behavior of these keys.  Ash handles F4 and
+  // up; this leaves us needing to reserve F1-F3 here.
   ui::KeyboardCode key_code =
-      static_cast<ui::KeyboardCode>(event.windowsKeyCode);
-  if ((key_code == ui::VKEY_F1 ||
-       key_code == ui::VKEY_F2 ||
-       key_code == ui::VKEY_F3 ||
-       key_code == ui::VKEY_F4) &&
-      // Make sure it's a browser shortcut (i.e. not an Ash one like Alt+F4).
-      command_id != -1) {
+    static_cast<ui::KeyboardCode>(event.windowsKeyCode);
+  if ((key_code == ui::VKEY_F1 && command_id == IDC_BACK) ||
+      (key_code == ui::VKEY_F2 && command_id == IDC_FORWARD) ||
+      (key_code == ui::VKEY_F3 && command_id == IDC_RELOAD)) {
     return true;
   }
 #endif
@@ -230,8 +234,7 @@ bool BrowserCommandController::IsReservedCommandOrKey(
          command_id == IDC_SELECT_NEXT_TAB ||
          command_id == IDC_SELECT_PREVIOUS_TAB ||
          command_id == IDC_TABPOSE ||
-         command_id == IDC_EXIT ||
-         command_id == IDC_SEARCH;
+         command_id == IDC_EXIT;
 }
 
 void BrowserCommandController::SetBlockCommandExecution(bool block) {
@@ -277,12 +280,6 @@ void BrowserCommandController::PrintingStateChanged() {
 void BrowserCommandController::LoadingStateChanged(bool is_loading,
                                                    bool force) {
   UpdateReloadStopState(is_loading, force);
-}
-
-void BrowserCommandController::SendToMobileStateChanged(
-    bool send_to_mobile_available) {
-  command_updater_.UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE,
-                                        send_to_mobile_available);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -400,6 +397,12 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       chrome::ToggleFullscreenMode(browser_);
       break;
 
+#if defined(USE_ASH)
+    case IDC_TOGGLE_ASH_DESKTOP:
+      chrome::ToggleAshDesktop();
+      break;
+#endif
+
 #if defined(OS_WIN)
     // Windows 8 specific commands.
     case IDC_METRO_SNAP_ENABLE:
@@ -410,9 +413,11 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_WIN8_DESKTOP_RESTART:
       browser::AttemptRestartWithModeSwitch();
+      content::RecordAction(content::UserMetricsAction("Win8DesktopRestart"));
       break;
     case IDC_WIN8_METRO_RESTART:
       new SwichToMetroUIHandler;
+      content::RecordAction(content::UserMetricsAction("Win8MetroRestart"));
       break;
 #endif
 
@@ -431,9 +436,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_BOOKMARK_PAGE:
       BookmarkCurrentPage(browser_);
-      break;
-    case IDC_SHARE_PAGE:
-      ShareCurrentPage(browser_);
       break;
     case IDC_PIN_TO_START_SCREEN:
       TogglePagePinnedToStartScreen(browser_);
@@ -780,6 +782,10 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_RESTORE_TAB, false);
   command_updater_.UpdateCommandEnabled(IDC_EXIT, true);
   command_updater_.UpdateCommandEnabled(IDC_DEBUG_FRAME_TOGGLE, true);
+#if defined(USE_ASH)
+  if (chrome::HOST_DESKTOP_TYPE_NATIVE != chrome::HOST_DESKTOP_TYPE_ASH)
+    command_updater_.UpdateCommandEnabled(IDC_TOGGLE_ASH_DESKTOP, true);
+#endif
 
   // Page-related commands
   command_updater_.UpdateCommandEnabled(IDC_EMAIL_PAGE_LOCATION, true);
@@ -821,7 +827,6 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_ISO88598I, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_WINDOWS1255, true);
   command_updater_.UpdateCommandEnabled(IDC_ENCODING_WINDOWS1258, true);
-  command_updater_.UpdateCommandEnabled(IDC_SHARE_PAGE, true);
 
   // Zoom
   command_updater_.UpdateCommandEnabled(IDC_ZOOM_MENU, true);
@@ -834,11 +839,13 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_CREATE_SHORTCUTS, false);
   UpdateCommandsForDevTools();
   command_updater_.UpdateCommandEnabled(IDC_TASK_MANAGER, CanOpenTaskManager());
-  command_updater_.UpdateCommandEnabled(IDC_SHOW_HISTORY, true);
+  command_updater_.UpdateCommandEnabled(IDC_SHOW_HISTORY,
+                                        !Profile::IsGuestSession());
   command_updater_.UpdateCommandEnabled(IDC_SHOW_DOWNLOADS, true);
   command_updater_.UpdateCommandEnabled(IDC_HELP_PAGE_VIA_KEYBOARD, true);
   command_updater_.UpdateCommandEnabled(IDC_HELP_PAGE_VIA_MENU, true);
-  command_updater_.UpdateCommandEnabled(IDC_BOOKMARKS_MENU, true);
+  command_updater_.UpdateCommandEnabled(IDC_BOOKMARKS_MENU,
+                                        !Profile::IsGuestSession());
 
   command_updater_.UpdateCommandEnabled(
       IDC_SHOW_SYNC_SETUP, profile()->GetOriginalProfile()->IsSyncAccessible());
@@ -850,9 +857,6 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_HOME, normal_window);
 
   // Window management commands
-  // TODO(rohitrao): Disable fullscreen on non-Lion?
-  command_updater_.UpdateCommandEnabled(IDC_FULLSCREEN,
-      !(browser_->is_type_panel() && browser_->is_app()));
   command_updater_.UpdateCommandEnabled(IDC_SELECT_NEXT_TAB, normal_window);
   command_updater_.UpdateCommandEnabled(IDC_SELECT_PREVIOUS_TAB,
                                         normal_window);
@@ -875,11 +879,7 @@ void BrowserCommandController::InitCommandState() {
       IDC_WIN8_DESKTOP_RESTART : IDC_WIN8_METRO_RESTART;
   command_updater_.UpdateCommandEnabled(restart_mode, normal_window);
 #endif
-#if defined(OS_MACOSX)
   command_updater_.UpdateCommandEnabled(IDC_TABPOSE, normal_window);
-  command_updater_.UpdateCommandEnabled(IDC_PRESENTATION_MODE,
-      !(browser_->is_type_panel() && browser_->is_app()));
-#endif
 
   // Find-in-page
   command_updater_.UpdateCommandEnabled(IDC_FIND, !browser_->is_devtools());
@@ -1093,9 +1093,20 @@ void BrowserCommandController::UpdateCommandsForFullscreenMode(
 #endif
 
   // Disable explicit fullscreen toggling when in metro snap mode.
-  command_updater_.UpdateCommandEnabled(
-      IDC_FULLSCREEN,
-      fullscreen_mode != FULLSCREEN_METRO_SNAP);
+  bool fullscreen_enabled = !browser_->is_type_panel() &&
+                            !browser_->is_app() &&
+                            fullscreen_mode != FULLSCREEN_METRO_SNAP;
+#if defined(OS_MACOSX)
+  // The Mac implementation doesn't support switching to fullscreen while
+  // a tab modal dialog is displayed.
+  int tabIndex = chrome::IndexOfFirstBlockedTab(browser_->tab_strip_model());
+  bool has_blocked_tab = tabIndex != browser_->tab_strip_model()->count();
+  fullscreen_enabled &= !has_blocked_tab;
+#endif
+
+  command_updater_.UpdateCommandEnabled(IDC_FULLSCREEN, fullscreen_enabled);
+  command_updater_.UpdateCommandEnabled(IDC_PRESENTATION_MODE,
+                                        fullscreen_enabled);
 
   UpdateCommandsForBookmarkBar();
   UpdateCommandsForMultipleProfiles();

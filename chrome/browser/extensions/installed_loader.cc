@@ -10,6 +10,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -191,7 +192,7 @@ void InstalledLoader::LoadAllExtensions() {
   int app_user_count = 0;
   int app_external_count = 0;
   int hosted_app_count = 0;
-  int packaged_app_count = 0;
+  int legacy_packaged_app_count = 0;
   int user_script_count = 0;
   int extension_user_count = 0;
   int extension_external_count = 0;
@@ -242,8 +243,8 @@ void InstalledLoader::LoadAllExtensions() {
           ++app_user_count;
         }
         break;
-      case Extension::TYPE_PACKAGED_APP:
-        ++packaged_app_count;
+      case Extension::TYPE_LEGACY_PACKAGED_APP:
+        ++legacy_packaged_app_count;
         if (Extension::IsExternalLocation(location)) {
           ++app_external_count;
         } else {
@@ -261,9 +262,11 @@ void InstalledLoader::LoadAllExtensions() {
     }
     if (!Extension::IsExternalLocation((*ex)->location()))
       ++item_user_count;
-    if ((*ex)->page_action() != NULL)
+    ExtensionActionManager* extension_action_manager =
+        ExtensionActionManager::Get(extension_service_->profile());
+    if (extension_action_manager->GetPageAction(**ex))
       ++page_action_count;
-    if ((*ex)->browser_action() != NULL)
+    if (extension_action_manager->GetBrowserAction(**ex))
       ++browser_action_count;
 
     extension_service_->RecordPermissionMessagesHistogram(
@@ -285,7 +288,8 @@ void InstalledLoader::LoadAllExtensions() {
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAppUser", app_user_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAppExternal", app_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadHostedApp", hosted_app_count);
-  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPackagedApp", packaged_app_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadPackagedApp",
+                           legacy_packaged_app_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadExtension",
                            extension_user_count + extension_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadExtensionUser",
@@ -302,18 +306,11 @@ void InstalledLoader::LoadAllExtensions() {
 }
 
 int InstalledLoader::GetCreationFlags(const ExtensionInfo* info) {
-  int flags = Extension::NO_FLAGS;
+  int flags = extension_prefs_->GetCreationFlags(info->extension_id);
   if (info->extension_location != Extension::LOAD)
     flags |= Extension::REQUIRE_KEY;
   if (extension_prefs_->AllowFileAccess(info->extension_id))
     flags |= Extension::ALLOW_FILE_ACCESS;
-  if (extension_prefs_->IsFromWebStore(info->extension_id))
-    flags |= Extension::FROM_WEBSTORE;
-  if (extension_prefs_->IsFromBookmark(info->extension_id))
-    flags |= Extension::FROM_BOOKMARK;
-  if (extension_prefs_->WasInstalledByDefault(info->extension_id)) {
-    flags |= Extension::WAS_INSTALLED_BY_DEFAULT;
-  }
   return flags;
 }
 

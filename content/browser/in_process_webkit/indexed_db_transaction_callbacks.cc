@@ -7,6 +7,8 @@
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
 
+namespace content {
+
 IndexedDBTransactionCallbacks::IndexedDBTransactionCallbacks(
     IndexedDBDispatcherHost* dispatcher_host,
     int thread_id,
@@ -19,9 +21,11 @@ IndexedDBTransactionCallbacks::IndexedDBTransactionCallbacks(
 IndexedDBTransactionCallbacks::~IndexedDBTransactionCallbacks() {
 }
 
-void IndexedDBTransactionCallbacks::onAbort() {
+void IndexedDBTransactionCallbacks::onAbort(
+    const WebKit::WebIDBDatabaseError& error) {
   dispatcher_host_->Send(
-      new IndexedDBMsg_TransactionCallbacksAbort(thread_id_, transaction_id_));
+      new IndexedDBMsg_TransactionCallbacksAbort(
+          thread_id_, transaction_id_, error.code(), error.message()));
 }
 
 void IndexedDBTransactionCallbacks::onComplete() {
@@ -30,3 +34,5 @@ void IndexedDBTransactionCallbacks::onComplete() {
       new IndexedDBMsg_TransactionCallbacksComplete(thread_id_,
                                                     transaction_id_));
 }
+
+}  // namespace content

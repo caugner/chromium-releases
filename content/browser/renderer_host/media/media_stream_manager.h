@@ -6,18 +6,19 @@
 // supported now). Call flow:
 // 1. GenerateStream is called when a render process wants to use a capture
 //    device.
-// 2. MediaStreamManager will ask MediaStreamDeviceSettings for permission to
+// 2. MediaStreamManager will ask MediaStreamUIController for permission to
 //    use devices and for which device to use.
 // 3. MediaStreamManager will request the corresponding media device manager(s)
 //    to enumerate available devices. The result will be given to
-//    MediaStreamDeviceSettings.
-// 4. MediaStreamDeviceSettings will, by using user settings, pick devices which
-//    devices to use and let MediaStreamManager know the result.
+//    MediaStreamUIController.
+// 4. MediaStreamUIController will, by posting the request to UI, let the
+//    users to select which devices to use and send callback to
+//    MediaStreamManager with the result.
 // 5. MediaStreamManager will call the proper media device manager to open the
 //    device and let the MediaStreamRequester know it has been done.
 
 // When enumeration and open are done in separate operations,
-// MediaStreamDeviceSettings is not involved as in steps.
+// MediaStreamUIController is not involved as in steps.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_MANAGER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_MANAGER_H_
@@ -30,7 +31,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/system_monitor/system_monitor.h"
-#include "base/threading/thread.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/media_stream_settings_requester.h"
 #include "content/common/media/media_stream_options.h"
@@ -38,36 +38,19 @@
 #include "content/public/browser/browser_thread.h"
 
 namespace base {
-namespace win {
-class ScopedCOMInitializer;
-}
+class Thread;
 }
 
 namespace media {
 class AudioManager;
 }
 
-namespace media_stream {
-
+namespace content {
 class AudioInputDeviceManager;
 class MediaStreamDeviceSettings;
 class MediaStreamRequester;
+class MediaStreamUIController;
 class VideoCaptureManager;
-
-// Thread that enters MTA on windows, and is base::Thread on linux and mac.
-class DeviceThread : public base::Thread {
- public:
-  explicit DeviceThread(const char* name);
-  virtual ~DeviceThread();
-
- protected:
-  virtual void Init() OVERRIDE;
-  virtual void CleanUp() OVERRIDE;
-
- private:
-  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
-  DISALLOW_COPY_AND_ASSIGN(DeviceThread);
-};
 
 // MediaStreamManager is used to generate and close new media devices, not to
 // start the media flow.
@@ -88,6 +71,20 @@ class CONTENT_EXPORT MediaStreamManager
   // Used to access AudioInputDeviceManager.
   AudioInputDeviceManager* audio_input_device_manager();
 
+  // Creates a new media access request which is identified by a unique |label|
+  // that's returned to the caller. This will trigger the infobar and ask users
+  // for access to the device. |render_process_id| and |render_view_id| refer
+  // to the view where the infobar will appear to the user. |callback| is
+  // used to send the selected device to the clients. An empty list of device
+  // will be returned if the users deny the access.
+  void MakeMediaAccessRequest(
+      int render_process_id,
+      int render_view_id,
+      const StreamOptions& components,
+      const GURL& security_origin,
+      const MediaRequestResponseCallback& callback,
+      std::string* label);
+
   // GenerateStream opens new media devices according to |components|.  It
   // creates a new request which is identified by a unique |label| that's
   // returned to the caller.  |render_process_id| and |render_view_id| refer to
@@ -104,8 +101,7 @@ class CONTENT_EXPORT MediaStreamManager
                                const std::string& device_id,
                                const GURL& security_origin, std::string* label);
 
-  // Cancel generate stream.
-  void CancelGenerateStream(const std::string& label);
+  void CancelRequest(const std::string& label);
 
   // Closes generated stream.
   void StopGeneratedStream(const std::string& label);
@@ -136,6 +132,18 @@ class CONTENT_EXPORT MediaStreamManager
                   const GURL& security_origin,
                   std::string* label);
 
+  // Signals the UI that the devices are opened.
+  // Users are responsible for calling NotifyUIDevicesClosed when the devices
+  // are not used anymore, otherwise UI will leak.
+  void NotifyUIDevicesOpened(int render_process_id,
+                             int render_view_id,
+                             const MediaStreamDevices& devices);
+
+  // Signals the UI that the devices are being closed.
+  void NotifyUIDevicesClosed(int render_process_id,
+                             int render_view_id,
+                             const MediaStreamDevices& devices);
+
   // Implements MediaStreamProviderListener.
   virtual void Opened(MediaStreamType stream_type,
                       int capture_session_id) OVERRIDE;
@@ -160,10 +168,6 @@ class CONTENT_EXPORT MediaStreamManager
   // devices, which is needed for server based testing.
   void UseFakeDevice();
 
-  // Call to have all GenerateStream calls from now on use fake devices instead
-  // of real ones. This should NOT be used in production versions of Chrome.
-  static void AlwaysUseFakeDevice();
-
   // This object gets deleted on the UI thread after the IO thread has been
   // destroyed. So we need to know when IO thread is being destroyed so that
   // we can delete VideoCaptureManager and AudioInputDeviceManager.
@@ -171,7 +175,7 @@ class CONTENT_EXPORT MediaStreamManager
 
  private:
   // Contains all data needed to keep track of requests.
-  struct DeviceRequest;
+  class DeviceRequest;
 
   // Cache enumerated device list.
   struct EnumerationCache {
@@ -184,10 +188,10 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Helpers for signaling the media observer that new capture devices are
   // opened/closed.
-  void NotifyObserverDevicesOpened(DeviceRequest* request);
-  void NotifyObserverDevicesClosed(DeviceRequest* request);
-  void DevicesFromRequest(DeviceRequest* request,
-                          content::MediaStreamDevices* devices);
+  void NotifyDevicesOpened(const DeviceRequest& request);
+  void NotifyDevicesClosed(const DeviceRequest& request);
+  void DevicesFromRequest(const DeviceRequest& request,
+                          MediaStreamDevices* devices);
 
   // Helpers.
   bool RequestDone(const MediaStreamManager::DeviceRequest& request) const;
@@ -198,6 +202,7 @@ class CONTENT_EXPORT MediaStreamManager
   bool HasEnumerationRequest(MediaStreamType type);
   bool HasEnumerationRequest();
   void ClearEnumerationCache(EnumerationCache* cache);
+  void PostRequestToUI(const std::string& label);
 
   // Helper to create the device managers, if needed.  Auto-starts the device
   // thread and registers this as a listener with the device managers.
@@ -217,7 +222,7 @@ class CONTENT_EXPORT MediaStreamManager
   // Device thread shared by VideoCaptureManager and AudioInputDeviceManager.
   scoped_ptr<base::Thread> device_thread_;
 
-  scoped_ptr<MediaStreamDeviceSettings> device_settings_;
+  scoped_ptr<MediaStreamUIController> ui_controller_;
 
   media::AudioManager* const audio_manager_;  // not owned
   scoped_refptr<AudioInputDeviceManager> audio_input_device_manager_;
@@ -233,7 +238,7 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Keeps track of live enumeration commands sent to VideoCaptureManager or
   // AudioInputDeviceManager, in order to only enumerate when necessary.
-  int active_enumeration_ref_count_[content::NUM_MEDIA_TYPES];
+  int active_enumeration_ref_count_[NUM_MEDIA_TYPES];
 
   // All non-closed request.
   typedef std::map<std::string, DeviceRequest> DeviceRequests;
@@ -249,6 +254,6 @@ class CONTENT_EXPORT MediaStreamManager
   DISALLOW_COPY_AND_ASSIGN(MediaStreamManager);
 };
 
-}  // namespace media_stream
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_MANAGER_H_

@@ -10,7 +10,7 @@
       {
         "id": "HeaderFilter",
         "type": "object",
-        "description": "Filters request headers for various criteria.",
+        "description": "Filters request headers for various criteria. Multiple criteria are evaluated as a conjunction.",
         "properties": {
           "namePrefix": {
             "description" : "Matches if the header name starts with the specified string.",
@@ -88,6 +88,18 @@
             "description": "Matches if the MIME media type of a response (from the HTTP Content-Type header) is <em>not</em> contained in the list.",
             "items": { "type": "string" }
           },
+          "requestHeaders": {
+            "type": "array",
+            "optional": true,
+            "description": "Matches if some of the request headers is matched by one of the HeaderFilters.",
+            "items": { "$ref": "HeaderFilter" }
+          },
+          "excludeRequestHeaders": {
+            "type": "array",
+            "optional": true,
+            "description": "Matches if none of the request headers is matched by any of the HeaderFilters.",
+            "items": { "$ref": "HeaderFilter" }
+          },
           "responseHeaders": {
             "type": "array",
             "optional": true,
@@ -97,8 +109,13 @@
           "excludeResponseHeaders": {
             "type": "array",
             "optional": true,
-            "description": "Matches if none of the response headers is matched by one of the HeaderFilters.",
+            "description": "Matches if none of the response headers is matched by any of the HeaderFilters.",
             "items": { "$ref": "HeaderFilter" }
+          },
+          "thirdPartyForCookies": {
+            "type": "boolean",
+            "optional": true,
+            "description": "If set to true, matches requests that are subject to third-party cookie policies. If set to false, matches all other requests."
           },
           "instanceType": {
             "type": "string", "enum": ["declarativeWebRequest.RequestMatcher"],
@@ -277,7 +294,7 @@
       },
       {
         "id": "declarativeWebRequest.ResponseCookie",
-        "description": "A filter or specification of a cookie in HTTP Responses.",
+        "description": "A specification of a cookie in HTTP Responses.",
         "type": "object",
         "properties": {
           "name": {
@@ -318,6 +335,70 @@
           "httpOnly": {
             "type": "string",
             "description": "Existence of the HttpOnly cookie attribute.",
+            "optional": true
+          }
+        }
+      },
+      {
+        "id": "declarativeWebRequest.FilterResponseCookie",
+        "description": "A filter of a cookie in HTTP Responses.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of a cookie.",
+            "optional": true
+          },
+          "value": {
+            "type": "string",
+            "description": "Value of a cookie, may be padded in double-quotes.",
+            "optional": true
+          },
+          "expires": {
+            "type": "string",
+            "description": "Value of the Expires cookie attribute.",
+            "optional": true
+          },
+          "maxAge": {
+            "type": "number",
+            "description": "Value of the Max-Age cookie attribute",
+            "optional": true
+          },
+          "domain": {
+            "type": "string",
+            "description": "Value of the Domain cookie attribute.",
+            "optional": true
+          },
+          "path": {
+            "type": "string",
+            "description": "Value of the Path cookie attribute.",
+            "optional": true
+          },
+          "secure": {
+            "type": "string",
+            "description": "Existence of the Secure cookie attribute.",
+            "optional": true
+          },
+          "httpOnly": {
+            "type": "string",
+            "description": "Existence of the HttpOnly cookie attribute.",
+            "optional": true
+          },
+          "ageUpperBound": {
+            "type": "integer",
+            "description": "Inclusive upper bound on the cookie lifetime (specified in seconds after current time). Only cookies whose expiration date-time is in the interval [now, now + ageUpperBound] fulfill this criterion. Session cookies and cookies whose expiration date-time is in the past do not meet the criterion of this filter. The cookie lifetime is calculated from either 'max-age' or 'expires' cookie attributes. If both are specified, 'max-age' is used to calculate the cookie lifetime.",
+            "minimum": 0,
+            "optional": true
+          },
+          "ageLowerBound": {
+            "type": "integer",
+            "description": "Inclusive lower bound on the cookie lifetime (specified in seconds after current time). Only cookies whose expiration date-time is set to 'now + ageLowerBound' or later fulfill this criterion. Session cookies do not meet the criterion of this filter. The cookie lifetime is calculated from either 'max-age' or 'expires' cookie attributes. If both are specified, 'max-age' is used to calculate the cookie lifetime.",
+            "minimum": 0,
+            "optional": true
+          },
+          "sessionCookie": {
+            "type": "boolean",
+            "description": "Filters session cookies. Session cookies have no lifetime specified in any of 'max-age' or 'expires' attributes.",
             "optional": true
           }
         }
@@ -381,7 +462,7 @@
             "nodoc": true
           },
           "filter": {
-            "$ref": "declarativeWebRequest.ResponseCookie",
+            "$ref": "declarativeWebRequest.FilterResponseCookie",
             "description": "Filter for cookies that will be modified. All empty entries are ignored."
           },
           "modification": {
@@ -415,7 +496,7 @@
             "nodoc": true
           },
           "filter": {
-            "$ref": "declarativeWebRequest.ResponseCookie",
+            "$ref": "declarativeWebRequest.FilterResponseCookie",
             "description": "Filter for cookies that will be removed. All empty entries are ignored."
           }
         }

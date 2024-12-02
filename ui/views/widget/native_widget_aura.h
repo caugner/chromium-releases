@@ -25,7 +25,7 @@ class Font;
 namespace views {
 
 class DropHelper;
-class NativeWidgetHelperAura;
+class NativeWidgetAuraWindowObserver;
 class TooltipManagerAura;
 
 class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
@@ -118,7 +118,6 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
-  virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
   virtual Widget::MoveLoopResult RunMoveLoop(
@@ -154,7 +153,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   // Overridden from ui::EventHandler:
   virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
   virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from aura::client::ActivationDelegate:
@@ -180,8 +179,6 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
 
   internal::NativeWidgetDelegate* delegate_;
 
-  scoped_ptr<NativeWidgetHelperAura> desktop_helper_;
-
   aura::Window* window_;
 
   // See class documentation for Widget in widget.h for a note about ownership.
@@ -204,7 +201,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
 
   scoped_ptr<TooltipManagerAura> tooltip_manager_;
 
-  scoped_ptr<ActiveWindowObserver> active_window_observer_;
+  scoped_ptr<NativeWidgetAuraWindowObserver> active_window_observer_;
 
   scoped_ptr<DropHelper> drop_helper_;
   int last_drop_operation_;

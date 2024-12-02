@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -28,8 +27,8 @@ TEST_F(ExtensionManifestTest, BrowserActionManifestIcons_NoDefaultIcons) {
       .Build();
 
   ASSERT_TRUE(extension.get());
-  ASSERT_TRUE(extension->browser_action());
-  EXPECT_FALSE(extension->browser_action()->default_icon());
+  ASSERT_TRUE(extension->browser_action_info());
+  EXPECT_TRUE(extension->browser_action_info()->default_icon.empty());
 }
 
 
@@ -45,13 +44,14 @@ TEST_F(ExtensionManifestTest, BrowserActionManifestIcons_StringDefaultIcon) {
       .Build();
 
   ASSERT_TRUE(extension.get());
-  ASSERT_TRUE(extension->browser_action());
-  ASSERT_TRUE(extension->browser_action()->default_icon());
+  ASSERT_TRUE(extension->browser_action_info());
+  ASSERT_FALSE(extension->browser_action_info()->default_icon.empty());
 
-  const ExtensionIconSet* icons = extension->browser_action()->default_icon();
+  const ExtensionIconSet& icons =
+      extension->browser_action_info()->default_icon;
 
-  EXPECT_EQ(1u, icons->map().size());
-  EXPECT_EQ("icon.png", icons->Get(19, ExtensionIconSet::MATCH_EXACTLY));
+  EXPECT_EQ(1u, icons.map().size());
+  EXPECT_EQ("icon.png", icons.Get(19, ExtensionIconSet::MATCH_EXACTLY));
 }
 
 TEST_F(ExtensionManifestTest, BrowserActionManifestIcons_DictDefaultIcon) {
@@ -69,15 +69,16 @@ TEST_F(ExtensionManifestTest, BrowserActionManifestIcons_DictDefaultIcon) {
       .Build();
 
   ASSERT_TRUE(extension.get());
-  ASSERT_TRUE(extension->browser_action());
-  ASSERT_TRUE(extension->browser_action()->default_icon());
+  ASSERT_TRUE(extension->browser_action_info());
+  ASSERT_FALSE(extension->browser_action_info()->default_icon.empty());
 
-  const ExtensionIconSet* icons = extension->browser_action()->default_icon();
+  const ExtensionIconSet& icons =
+      extension->browser_action_info()->default_icon;
 
   // 24px icon should be ignored.
-  EXPECT_EQ(2u, icons->map().size());
-  EXPECT_EQ("icon19.png", icons->Get(19, ExtensionIconSet::MATCH_EXACTLY));
-  EXPECT_EQ("icon38.png", icons->Get(38, ExtensionIconSet::MATCH_EXACTLY));
+  EXPECT_EQ(2u, icons.map().size());
+  EXPECT_EQ("icon19.png", icons.Get(19, ExtensionIconSet::MATCH_EXACTLY));
+  EXPECT_EQ("icon38.png", icons.Get(38, ExtensionIconSet::MATCH_EXACTLY));
 }
 
 TEST_F(ExtensionManifestTest, BrowserActionManifestIcons_InvalidDefaultIcon) {

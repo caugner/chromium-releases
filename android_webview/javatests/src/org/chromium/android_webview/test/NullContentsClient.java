@@ -4,11 +4,16 @@
 
 package org.chromium.android_webview.test;
 
+import android.content.Context;
+import android.os.Message;
 import android.view.KeyEvent;
 import android.webkit.ConsoleMessage;
 
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwHttpAuthHandler;
+import org.chromium.android_webview.InterceptedRequestData;
+import org.chromium.android_webview.JsPromptResultReceiver;
+import org.chromium.android_webview.JsResultReceiver;
 
 /**
  * As a convience for tests that only care about specefic callbacks, this class provides
@@ -16,7 +21,7 @@ import org.chromium.android_webview.AwHttpAuthHandler;
  */
 class NullContentsClient extends AwContentsClient {
     @Override
-    public boolean shouldOverrideUrlLoading(String url) {
+    public boolean shouldIgnoreNavigation(String url) {
         return false;
     }
 
@@ -29,6 +34,15 @@ class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public InterceptedRequestData shouldInterceptRequest(String url) {
+        return null;
+    }
+
+    @Override
+    public void onLoadResource(String url) {
+    }
+
+    @Override
     public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
         return false;
     }
@@ -37,4 +51,43 @@ class NullContentsClient extends AwContentsClient {
     public void onReceivedHttpAuthRequest(AwHttpAuthHandler handler, String host, String realm) {
         handler.cancel();
     }
-};
+
+    @Override
+    public void handleJsAlert(String url, String message, JsResultReceiver receiver) {
+    }
+
+    @Override
+    public void handleJsBeforeUnload(String url, String message, JsResultReceiver receiver) {
+    }
+
+    @Override
+    public void handleJsConfirm(String url, String message, JsResultReceiver receiver) {
+    }
+
+    @Override
+    public void handleJsPrompt(
+            String url, String message, String defaultValue, JsPromptResultReceiver receiver) {
+    }
+
+    @Override
+    public void onFindResultReceived(int activeMatchOrdinal, int numberOfMatches,
+            boolean isDoneCounting) {
+    }
+
+    @Override
+    public void onPageStarted(String url) {
+    }
+
+    @Override
+    public void onPageFinished(String url) {
+    }
+
+    @Override
+    public void onReceivedError(int errorCode, String description, String failingUrl) {
+    }
+
+    @Override
+    public void onFormResubmission(Message dontResend, Message resend) {
+        dontResend.sendToTarget();
+    }
+}

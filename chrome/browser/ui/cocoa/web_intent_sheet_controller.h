@@ -17,6 +17,10 @@ class WebIntentPickerModel;
 @class IntentView;
 @class WaitingView;
 
+namespace content {
+class WebContents;
+}
+
 // Controller for intent picker constrained dialog. This dialog pops up
 // whenever a web page invokes ActivateIntent and lets the user choose which
 // service should be used to handle this action.
@@ -25,8 +29,8 @@ class WebIntentPickerModel;
   // C++ <-> ObjectiveC bridge. Weak reference.
   WebIntentPickerCocoa* picker_;
 
-  // Inline disposition tab contents. Weak reference.
-  TabContents* contents_;
+  // Inline disposition web contents. Weak reference.
+  content::WebContents* webContents_;
 
   // The intent picker data to be rendered. Weak reference.
   WebIntentPickerModel* model_;
@@ -44,7 +48,7 @@ class WebIntentPickerModel;
 - (id)initWithPicker:(WebIntentPickerCocoa*)picker;
 
 // Set the contents for inline disposition intents.
-- (void)setInlineDispositionTabContents:(TabContents*)tabContents;
+- (void)setInlineDispositionWebContents:(content::WebContents*)webContents;
 
 // Set the size of the inline disposition view.
 - (void)setInlineDispositionFrameSize:(NSSize)size;

@@ -33,8 +33,6 @@ using content::WebContents;
 @implementation TestTabStripControllerDelegate
 - (void)onActivateTabWithContents:(WebContents*)contents {
 }
-- (void)onReplaceTabWithContents:(WebContents*)contents {
-}
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
         withContents:(WebContents*)contents {
 }

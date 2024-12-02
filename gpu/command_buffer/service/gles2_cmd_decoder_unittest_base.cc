@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/program_manager.h"
+#include "gpu/command_buffer/service/vertex_attrib_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_implementation.h"
@@ -47,7 +48,8 @@ GLES2DecoderTestBase::GLES2DecoderTestBase()
       client_element_buffer_id_(107),
       client_vertex_shader_id_(121),
       client_fragment_shader_id_(122),
-      client_query_id_(123) {
+      client_query_id_(123),
+      client_vertexarray_id_(124) {
   memset(immediate_buffer_, 0xEE, sizeof(immediate_buffer_));
 }
 
@@ -86,6 +88,7 @@ void GLES2DecoderTestBase::InitDecoder(
   ::gfx::GLInterface::SetGLInterface(gl_.get());
   group_ = ContextGroup::Ref(new ContextGroup(NULL,
                                               NULL,
+                                              NULL,
                                               bind_generates_resource));
 
   InSequence sequence;
@@ -96,6 +99,8 @@ void GLES2DecoderTestBase::InitDecoder(
   EXPECT_TRUE(group_->Initialize(DisallowedFeatures(), NULL));
 
   AddExpectationsForVertexAttribManager();
+
+  AddExpectationsForBindVertexArrayOES();
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
@@ -179,11 +184,6 @@ void GLES2DecoderTestBase::InitDecoder(
       .Times(1)
       .RetiresOnSaturation();
 
-  EXPECT_CALL(*gl_, Viewport(
-      kViewportX, kViewportY, kViewportWidth, kViewportHeight))
-      .Times(1)
-      .RetiresOnSaturation();
-
   static GLint max_viewport_dims[] = {
     kMaxViewportWidth,
     kMaxViewportHeight
@@ -193,98 +193,16 @@ void GLES2DecoderTestBase::InitDecoder(
           max_viewport_dims, max_viewport_dims + arraysize(max_viewport_dims)))
       .RetiresOnSaturation();
 
+  SetupInitCapabilitiesExpectations();
+  SetupInitStateExpectations();
+
   EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE0))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, LineWidth(1.0))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_BLEND))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BlendColor(0.0f, 0.0, 0.0f, 0.0f))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BlendFunc(GL_ONE, GL_ZERO))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BlendEquation(GL_FUNC_ADD))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, BlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearColor(0.0f, 0.0, 0.0f, 0.0f))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ColorMask(true, true, true, true))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_CULL_FACE))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, CullFace(GL_BACK))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearDepth(1.0f))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, DepthFunc(GL_LESS))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, DepthRange(0.0f, 1.0f))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_DEPTH_TEST))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Enable(GL_DITHER))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, FrontFace(GL_CCW))
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, Hint(GL_GENERATE_MIPMAP_HINT, GL_DONT_CARE))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, LineWidth(1.0f))
-      .Times(1)
-      .RetiresOnSaturation();
   EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ALIGNMENT, 4))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, PolygonOffset(0.0f, 0.0f))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_POLYGON_OFFSET_FILL))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, SampleCoverage(1.0, false))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Scissor(
-      kViewportX, kViewportY, kViewportWidth, kViewportHeight))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_SCISSOR_TEST))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, Disable(GL_STENCIL_TEST))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, ClearStencil(0))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, StencilFunc(GL_ALWAYS, 0, 0xFFFFFFFFU))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, StencilOp(GL_KEEP, GL_KEEP, GL_KEEP))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_FRONT, 0xFFFFFFFFU))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_BACK, 0xFFFFFFFFU))
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ALIGNMENT, 4))
@@ -367,8 +285,6 @@ void GLES2DecoderTestBase::InitDecoder(
 }
 
 void GLES2DecoderTestBase::TearDown() {
-  InSequence sequence;
-
   // All Tests should have read all their GLErrors before getting here.
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
@@ -383,6 +299,19 @@ void GLES2DecoderTestBase::TearDown() {
   ::gfx::GLInterface::SetGLInterface(NULL);
   gl_.reset();
 }
+
+void GLES2DecoderTestBase::ExpectEnableDisable(GLenum cap, bool enable) {
+  if (enable) {
+    EXPECT_CALL(*gl_, Enable(cap))
+        .Times(1)
+        .RetiresOnSaturation();
+  } else {
+    EXPECT_CALL(*gl_, Disable(cap))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+}
+
 
 GLint GLES2DecoderTestBase::GetGLError() {
   EXPECT_CALL(*gl_, GetError())
@@ -982,6 +911,69 @@ void GLES2DecoderTestBase::DoVertexAttribDivisorANGLE(
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
+void GLES2DecoderTestBase::AddExpectationsForGenVertexArraysOES(){
+  if (group_->feature_info()->feature_flags().native_vertex_array_object) {
+      EXPECT_CALL(*gl_, GenVertexArraysOES(1, _))
+          .WillOnce(SetArgumentPointee<1>(kServiceVertexArrayId))
+          .RetiresOnSaturation();
+  }
+}
+
+void GLES2DecoderTestBase::AddExpectationsForDeleteVertexArraysOES(){
+  if (group_->feature_info()->feature_flags().native_vertex_array_object) {
+      EXPECT_CALL(*gl_, DeleteVertexArraysOES(1, _))
+          .Times(1)
+          .RetiresOnSaturation();
+  }
+}
+
+void GLES2DecoderTestBase::AddExpectationsForBindVertexArrayOES() {
+  if (group_->feature_info()->feature_flags().native_vertex_array_object) {
+    EXPECT_CALL(*gl_, BindVertexArrayOES(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  } else {
+    for (uint32 vv = 0; vv < group_->max_vertex_attribs(); ++vv) {
+      AddExpectationsForRestoreAttribState(vv);
+    }
+
+    EXPECT_CALL(*gl_, BindBuffer(GL_ELEMENT_ARRAY_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  }
+}
+
+void GLES2DecoderTestBase::AddExpectationsForRestoreAttribState(GLuint attrib) {
+  EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, VertexAttribPointer(attrib, _, _, _, _, _))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, VertexAttribDivisorANGLE(attrib, _))
+        .Times(testing::AtMost(1))
+        .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, _))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  if (attrib != 0 ||
+      gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2) {
+
+      // TODO(bajones): Not sure if I can tell which of these will be called
+      EXPECT_CALL(*gl_, EnableVertexAttribArray(attrib))
+          .Times(testing::AtMost(1))
+          .RetiresOnSaturation();
+
+      EXPECT_CALL(*gl_, DisableVertexAttribArray(attrib))
+          .Times(testing::AtMost(1))
+          .RetiresOnSaturation();
+  }
+}
+
 // GCC requires these declarations, but MSVC requires they not be present
 #ifndef COMPILER_MSVC
 const int GLES2DecoderTestBase::kBackBufferWidth;
@@ -1015,6 +1007,7 @@ const GLuint GLES2DecoderTestBase::kServiceProgramId;
 const GLuint GLES2DecoderTestBase::kServiceShaderId;
 const GLuint GLES2DecoderTestBase::kServiceElementBufferId;
 const GLuint GLES2DecoderTestBase::kServiceQueryId;
+const GLuint GLES2DecoderTestBase::kServiceVertexArrayId;
 
 const int32 GLES2DecoderTestBase::kSharedMemoryId;
 const size_t GLES2DecoderTestBase::kSharedBufferSize;
@@ -1379,6 +1372,11 @@ void GLES2DecoderWithShaderTestBase::SetUp() {
   GLES2DecoderTestBase::SetUp();
   SetupDefaultProgram();
 }
+
+// Include the auto-generated part of this file. We split this because it means
+// we can easily edit the non-auto generated parts right here in this file
+// instead of having to edit some template or the code generator.
+#include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_0_autogen.h"
 
 }  // namespace gles2
 }  // namespace gpu

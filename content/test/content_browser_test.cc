@@ -41,7 +41,7 @@ ContentBrowserTest::ContentBrowserTest() {
       FILE_PATH_LITERAL("Content Shell.app/Contents/MacOS/Content Shell"));
   CHECK(PathService::Override(base::FILE_EXE, content_shell_path));
 #endif
-  CreateTestServer("content/test/data");
+  CreateTestServer(FilePath(FILE_PATH_LITERAL("content/test/data")));
 }
 
 ContentBrowserTest::~ContentBrowserTest() {
@@ -59,9 +59,8 @@ void ContentBrowserTest::SetUp() {
   // Single-process mode is not set in BrowserMain, so process it explicitly,
   // and set up renderer.
   if (command_line->HasSwitch(switches::kSingleProcess)) {
-    RenderProcessHost::set_run_renderer_in_process(true);
     single_process_renderer_client_.reset(new ShellContentRendererClient);
-    content::GetContentClient()->set_renderer_for_testing(
+    GetContentClient()->set_renderer_for_testing(
         single_process_renderer_client_.get());
   }
 
@@ -93,8 +92,10 @@ void ContentBrowserTest::TearDown() {
 }
 
 void ContentBrowserTest::RunTestOnMainThreadLoop() {
-  CHECK_EQ(Shell::windows().size(), 1u);
-  shell_ = Shell::windows()[0];
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
+    CHECK_EQ(Shell::windows().size(), 1u);
+    shell_ = Shell::windows()[0];
+  }
 
 #if defined(OS_MACOSX)
   // On Mac, without the following autorelease pool, code which is directly

@@ -13,6 +13,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/common/favicon_url.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 namespace gfx {
 class Image;
@@ -33,9 +34,9 @@ class SkBitmap;
 // callback.
 //
 class FaviconTabHelper : public content::WebContentsObserver,
-                         public FaviconHandlerDelegate {
+                         public FaviconHandlerDelegate,
+                         public content::WebContentsUserData<FaviconTabHelper> {
  public:
-  explicit FaviconTabHelper(content::WebContents* web_contents);
   virtual ~FaviconTabHelper();
 
   // Initiates loading the favicon for the specified url.
@@ -82,6 +83,9 @@ class FaviconTabHelper : public content::WebContentsObserver,
   virtual void NotifyFaviconUpdated() OVERRIDE;
 
  private:
+  explicit FaviconTabHelper(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<FaviconTabHelper>;
+
   // content::WebContentsObserver overrides.
   virtual void NavigateToPendingEntry(
       const GURL& url,

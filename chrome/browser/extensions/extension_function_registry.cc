@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/api/app/app_api.h"
 #include "chrome/browser/extensions/api/browsing_data/browsing_data_api.h"
 #include "chrome/browser/extensions/api/cloud_print_private/cloud_print_private_api.h"
+#include "chrome/browser/extensions/api/commands/commands.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
 #include "chrome/browser/extensions/api/context_menu/context_menu_api.h"
 #include "chrome/browser/extensions/api/cookies/cookies_api.h"
@@ -29,6 +30,7 @@
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
+#include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/record/record_api.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
@@ -42,7 +44,6 @@
 #include "chrome/browser/extensions/api/web_socket_proxy_private/web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/extension_module.h"
-#include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/system/system_api.h"
 #include "chrome/browser/history/history_extension_api.h"
@@ -155,7 +156,6 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RemoveHistoryFunction>();
   RegisterFunction<RemoveIndexedDBFunction>();
   RegisterFunction<RemoveLocalStorageFunction>();
-  RegisterFunction<RemoveServerBoundCertsFunction>();
   RegisterFunction<RemovePluginDataFunction>();
   RegisterFunction<RemovePasswordsFunction>();
   RegisterFunction<RemoveWebSQLFunction>();
@@ -196,6 +196,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<DeleteAllHistoryFunction>();
   RegisterFunction<DeleteRangeHistoryFunction>();
   RegisterFunction<DeleteUrlHistoryFunction>();
+  RegisterFunction<GetMostVisitedHistoryFunction>();
   RegisterFunction<GetVisitsHistoryFunction>();
   RegisterFunction<SearchHistoryFunction>();
 
@@ -222,7 +223,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::MetricsRecordLongTimeFunction>();
 
   // RLZ.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(ENABLE_RLZ)
   RegisterFunction<RlzRecordProductEventFunction>();
   RegisterFunction<RlzGetAccessPointRlzFunction>();
   RegisterFunction<RlzSendFinancialPingFunction>();
@@ -260,6 +261,9 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<ExtensionTtsIsSpeakingFunction>();
   RegisterFunction<ExtensionTtsSpeakFunction>();
   RegisterFunction<ExtensionTtsStopSpeakingFunction>();
+
+  // Commands.
+  RegisterFunction<GetAllCommandsFunction>();
 
   // Context Menus.
   RegisterFunction<extensions::CreateContextMenuFunction>();
@@ -340,9 +344,9 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<WebRequestHandlerBehaviorChanged>();
 
   // Preferences.
-  RegisterFunction<GetPreferenceFunction>();
-  RegisterFunction<SetPreferenceFunction>();
-  RegisterFunction<ClearPreferenceFunction>();
+  RegisterFunction<extensions::GetPreferenceFunction>();
+  RegisterFunction<extensions::SetPreferenceFunction>();
+  RegisterFunction<extensions::ClearPreferenceFunction>();
 
   // ChromeOS-specific part of the API.
 #if defined(OS_CHROMEOS)
@@ -378,12 +382,13 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetFileTransfersFunction>();
   RegisterFunction<CancelFileTransfersFunction>();
   RegisterFunction<TransferFileFunction>();
-  RegisterFunction<GetDrivePreferencesFunction>();
-  RegisterFunction<SetDrivePreferencesFunction>();
+  RegisterFunction<GetPreferencesFunction>();
+  RegisterFunction<SetPreferencesFunction>();
   RegisterFunction<SearchDriveFunction>();
   RegisterFunction<ClearDriveCacheFunction>();
   RegisterFunction<GetNetworkConnectionStateFunction>();
   RegisterFunction<RequestDirectoryRefreshFunction>();
+  RegisterFunction<SetLastModifiedFunction>();
 
   // FileBrowserHandler.
   RegisterFunction<FileHandlerSelectFileFunction>();
@@ -451,7 +456,9 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::SetMinimumFontSizeFunction>();
 
   // CloudPrint settings.
-  RegisterFunction<extensions::CloudPrintSetCredentialsFunction>();
+  RegisterFunction<extensions::CloudPrintSetupConnectorFunction>();
+  RegisterFunction<extensions::CloudPrintGetHostNameFunction>();
+  RegisterFunction<extensions::CloudPrintGetPrintersFunction>();
 
   // Experimental App API.
   RegisterFunction<extensions::AppNotifyFunction>();

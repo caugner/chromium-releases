@@ -17,12 +17,15 @@ var recordMockData = false;
 
   // Only messages registered in the callback map will be intercepted.
   var callbackMap = {
+    'blacklistURLFromMostVisited': NO_CALLBACK,
+    'clearMostVisitedURLsBlacklist': NO_CALLBACK,
     'getApps': 'ntp.getAppsCallback',
     'getForeignSessions': 'ntp.setForeignSessions',
     'getMostVisited': 'ntp.setMostVisitedPages',
     'getRecentlyClosedTabs': 'ntp.setRecentlyClosedTabs',
     'metricsHandler:logEventTime': NO_CALLBACK,
-    'metricsHandler:recordInHistogram': NO_CALLBACK
+    'metricsHandler:recordInHistogram': NO_CALLBACK,
+    'removeURLsFromMostVisitedBlacklist': NO_CALLBACK,
   };
 
   // TODO(pedrosimonetti): include automatically in the recorded data
@@ -38,9 +41,8 @@ var recordMockData = false;
     'http---cnn.com-',
     'http---ebay.com-',
     'http---www.google.com-chrome-intl-en-welcome.html',
-    'https---chrome.google.com-webstore-hl-en'
+    'https---chrome.google.com-webstore-hl-en',
   ];
-
 
   //----------------------------------------------------------------------------
   // Internals
@@ -49,12 +51,11 @@ var recordMockData = false;
   var dataMap = {};
   var recordedDataMap = {};
   var isInitialized = false;
-  var thumbnailUrlList = [];
 
   function initialize() {
-    if (shouldRegisterData || !namespace('ntp')) {
+    if (shouldRegisterData || !namespace('ntp'))
       return;
-    }
+
     isInitialized = true;
     namespace('ntp.getThumbnailUrl', mockGetThumbnailUrl);
 
@@ -67,11 +68,10 @@ var recordMockData = false;
     var ns = str.split('.'), name, object = window;
     for (var i = 0, l = ns.length; i < l; i++) {
       name = ns[i];
-      if (data && i == (l - 1)) {
+      if (data && i == (l - 1))
         object = object[name] = data;
-      } else {
+      else
         object = object[name];
-      }
     }
     return object == window ? null : object;
   }
@@ -90,6 +90,13 @@ var recordMockData = false;
     });
   }
 
+  function dispatchCallbackForMessage(message) {
+    var callbackNamespace = callbackMap[message];
+    var callback = namespace(callbackNamespace);
+    var data = filterMap[message](dataMap[message]);
+    callback.apply(window, data);
+  }
+
   function interceptLoadData() {
     window.addEventListener('load', function() {
       recordedDataMap['__loadTimeData__'] = loadTimeData.data_;
@@ -97,78 +104,77 @@ var recordMockData = false;
   }
 
   function mockGetThumbnailUrl(url) {
-    url = url.replace(/[\:\/\?\=]/g, '-');
+    url = url.replace(/[:\/\?=]/g, '-');
 
-    if (thumbnailUrlList.length == 0) {
-      thumbnailUrlList = copyArray(mockedThumbnailUrls);
-    }
     var mockUrl;
-    var index = thumbnailUrlList.indexOf(url);
-    if (index != -1) {
-      // Remove an element from a particular index.
-      mockUrl = thumbnailUrlList.splice(index, 1);
-    } else {
-      // Remove the first element.
-      mockUrl = thumbnailUrlList.shift();
-    }
+    var index = mockedThumbnailUrls.indexOf(url);
+    if (index != -1)
+      mockUrl = mockedThumbnailUrls[index];
+    else
+      mockUrl = 'non-existent-file-name';
 
     mockUrl = 'mock/images/' + mockUrl + '.jpg';
     return mockUrl;
   }
 
   function mockLoadData() {
-    if (loadTimeData) {
+    if (loadTimeData)
       loadTimeData.data = dataMap['__loadTimeData__'];
-    }
   }
 
+  function getAnimationDuration(duration) {
+    var slownessFactor = debugArgs.slownessFactor || 1;
+    return Math.round(duration * slownessFactor);
+  }
 
   //----------------------------------------------------------------------------
   // ChromeMock implementation
   //----------------------------------------------------------------------------
 
-  ChromeMock = {
+  var ChromeMock = {
+    get debugArgs() {
+      return debugArgs;
+    },
+
     mock: function(newDataMap) {
       if (newDataMap) {
         dataMap = newDataMap;
-        if (!shouldRegisterData) {
+        if (!shouldRegisterData)
           mockLoadData();
-        }
       } else {
         return recordedDataMap;
       }
     },
 
     send: function() {
-      if (!isInitialized) {
+      if (!isInitialized)
         initialize();
-      }
 
       var message = arguments[0];
       var shouldCallChromeSend = false;
 
-      var data;
-      var callback;
-      var callbackNamespace;
-
       if (callbackMap.hasOwnProperty(message)) {
-        callbackNamespace = callbackMap[message];
+        var callbackNamespace = callbackMap[message];
 
         if (shouldRegisterData) {
-          if (callbackNamespace !== NO_CALLBACK) {
+          if (callbackNamespace !== NO_CALLBACK)
             interceptCallback(message, callbackNamespace);
-          }
         } else {
           if (dataMap.hasOwnProperty(message)) {
-            data = dataMap[message];
-            callback = namespace(callbackNamespace);
+            var data = dataMap[message];
+            var callback = namespace(callbackNamespace);
+
+            if (filterMap.hasOwnProperty(message))
+              data = filterMap[message](data);
+
             setTimeout(function() {
               callback.apply(window, data);
             }, 0);
           } else {
-            if (callbackNamespace !== NO_CALLBACK) {
+            if (callbackNamespace !== NO_CALLBACK)
               console.warn('No mock registered for message "%s".', message);
-            }
+            else if (serverCallbackMap.hasOwnProperty(message))
+              serverCallbackMap[message](arguments[1]);
           }
         }
       } else {
@@ -178,46 +184,110 @@ var recordMockData = false;
 
       shouldCallChromeSend = shouldCallChromeSend || shouldRegisterData;
       if (shouldCallChromeSend) {
-        if (__chrome__ && __chrome__.send) {
+        if (__chrome__ && __chrome__.send)
           __chrome__.send(message);
-        }
       }
+    },
+  };
+
+  //----------------------------------------------------------------------------
+  // C++ mock implementation
+  //----------------------------------------------------------------------------
+
+  var mostVisitedBlackList = {};
+
+  var filterMap = {
+    getMostVisited: function(data) {
+      var filtered = [];
+      var list = data[0];
+      var hasBlacklistedUrls = false;
+      for (var i = 0, length = list.length; i < length; i++) {
+        if (mostVisitedBlackList.hasOwnProperty('' + i))
+          hasBlacklistedUrls = true;
+        else
+          filtered.push(list[i]);
+      }
+      return [filtered, hasBlacklistedUrls];
     }
+  };
+
+  var serverCallbackMap = {
+    blacklistURLFromMostVisited: function(urls) {
+      var url = urls[0];
+      var data = dataMap['getMostVisited'][0];
+      for (var i = 0, length = data.length; i < length; i++) {
+        if (data[i].url == url)
+          mostVisitedBlackList['' + i] = 1;
+      }
+      dispatchCallbackForMessage('getMostVisited');
+    },
+
+    removeURLsFromMostVisitedBlacklist: function(urls) {
+      var url = urls[0];
+      var data = dataMap['getMostVisited'][0];
+      for (var i = 0, length = data.length; i < length; i++) {
+        if (data[i].url == url)
+          delete mostVisitedBlackList['' + i];
+      }
+      dispatchCallbackForMessage('getMostVisited');
+    },
+
+    clearMostVisitedURLsBlacklist: function() {
+      mostVisitedBlackList = {};
+      dispatchCallbackForMessage('getMostVisited');
+    },
   };
 
   //----------------------------------------------------------------------------
   // Debug
   //----------------------------------------------------------------------------
 
-  var debugArgs = {};
-  var debugStylesheet = null;
-  var animationSelectorSpeedMap = {
-    '#card-slider-frame': 250,
-    '.dot': 200,
-    '.animate-page-height': 200,
-    '.animate-grid-width': 200,
-    '.tile-grid-content': 200,
-    '.tile-row': 200,
-    '.animate-grid-width .tile-cell': 200
+  var debugArgs = {
+    debug: false,
+    slownessFactor: null,
   };
 
-  function adjustAnimationSpeed(slownessFactor) {
-    slownessFactor = slownessFactor || 1;
+  var debugStylesheet = null;
+  var selectorDurationMap = {
+    '.animate-grid-width': 200,
+    '.animate-grid-width .tile-cell': 200,
+    '.animate-frame-height': 200,
+    '.animate-tile-repositioning .tile': 200,
+    '.animate-tile-repositioning .tile:not(.target-tile)': 400,
+    '#bottom-panel': 250,
+    '.dot': 200,
+    '#page-list': 200,
+    '.tile-grid-content': 200,
+    '.tile-row': 200,
+  };
 
+  var selectorDelayMap = {
+    '.animate-tile-repositioning.undo-removal .target-tile': 200,
+  };
+
+  function adjustAnimationSpeed() {
     var animationRules = [];
-    for (var selector in animationSelectorSpeedMap) {
-      if (animationSelectorSpeedMap.hasOwnProperty(selector)) {
+    for (var selector in selectorDurationMap) {
+      if (selectorDurationMap.hasOwnProperty(selector)) {
         animationRules.push(selector + ' { -webkit-transition-duration: ' +
-            Math.round(animationSelectorSpeedMap[selector] * slownessFactor) +
+            getAnimationDuration(selectorDurationMap[selector]) +
+            'ms !important; }\n');
+      }
+    }
+
+    for (var selector in selectorDelayMap) {
+      if (selectorDelayMap.hasOwnProperty(selector)) {
+        animationRules.push(selector + ' { -webkit-transition-delay: ' +
+            getAnimationDuration(selectorDelayMap[selector]) +
             'ms !important; }\n');
       }
     }
 
     var doc = document;
     debugStylesheet = doc.getElementById('debugStylesheet');
-    if (debugStylesheet) {
+    if (debugStylesheet)
       debugStylesheet.parentElement.removeChild(debugStylesheet);
-    }
+
     debugStylesheet = doc.createElement('style');
     debugStylesheet.id = 'debugStylesheet';
     debugStylesheet.textContent = animationRules.join('');
@@ -236,7 +306,7 @@ var recordMockData = false;
         var key = data[0];
         var value = data[1];
         debugArgs[key] = typeof value == 'undefined' ? true :
-            parseInt(value) ? parseInt(value) : value;
+            parseFloat(value) ? parseFloat(value) : value;
       }
     }
   }
@@ -247,17 +317,20 @@ var recordMockData = false;
     if (debugArgs.debug)
       document.body.classList.add('debug');
 
-    if (debugArgs.slownessFactor)
-      adjustAnimationSpeed(debugArgs.slownessFactor);
+    if (debugArgs.background)
+      document.body.style.background = debugArgs.background;
+
+    var slownessFactor = debugArgs.slownessFactor;
+    if (slownessFactor)
+      adjustAnimationSpeed();
   });
 
   //----------------------------------------------------------------------------
   // ChromeMock initialization
   //----------------------------------------------------------------------------
 
-  if (shouldRegisterData) {
+  if (shouldRegisterData)
     interceptLoadData();
-  }
 
   window.chrome = ChromeMock;
 })();

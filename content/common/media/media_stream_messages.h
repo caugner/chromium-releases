@@ -16,14 +16,16 @@
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 #define IPC_MESSAGE_START MediaStreamMsgStart
 
-IPC_ENUM_TRAITS(media_stream::MediaStreamType)
+IPC_ENUM_TRAITS(content::MediaStreamType)
 
-IPC_STRUCT_TRAITS_BEGIN(media_stream::StreamOptions)
+IPC_STRUCT_TRAITS_BEGIN(content::StreamOptions)
   IPC_STRUCT_TRAITS_MEMBER(audio_type)
+  IPC_STRUCT_TRAITS_MEMBER(audio_device_id)
   IPC_STRUCT_TRAITS_MEMBER(video_type)
+  IPC_STRUCT_TRAITS_MEMBER(video_device_id)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(media_stream::StreamDeviceInfo)
+IPC_STRUCT_TRAITS_BEGIN(content::StreamDeviceInfo)
   IPC_STRUCT_TRAITS_MEMBER(stream_type)
   IPC_STRUCT_TRAITS_MEMBER(name)
   IPC_STRUCT_TRAITS_MEMBER(device_id)
@@ -37,28 +39,18 @@ IPC_STRUCT_TRAITS_END()
 IPC_MESSAGE_ROUTED4(MediaStreamMsg_StreamGenerated,
                     int /* request id */,
                     std::string /* label */,
-                    media_stream::StreamDeviceInfoArray /* audio_device_list */,
-                    media_stream::StreamDeviceInfoArray /* video_device_list */)
+                    content::StreamDeviceInfoArray /* audio_device_list */,
+                    content::StreamDeviceInfoArray /* video_device_list */)
 
 // The browser has failed to generate a stream.
 IPC_MESSAGE_ROUTED1(MediaStreamMsg_StreamGenerationFailed,
                     int /* request id */)
 
-// Report of a failure of a video device.
-IPC_MESSAGE_ROUTED2(MediaStreamHostMsg_VideoDeviceFailed,
-                    std::string /* label */,
-                    int /* index */)
-
-// Report of a failure of an audio device.
-IPC_MESSAGE_ROUTED2(MediaStreamHostMsg_AudioDeviceFailed,
-                    std::string /* label */,
-                    int /* index */)
-
 // The browser has enumerated devices successfully.
 IPC_MESSAGE_ROUTED3(MediaStreamMsg_DevicesEnumerated,
                     int /* request id */,
                     std::string /* label */,
-                    media_stream::StreamDeviceInfoArray /* device_list */)
+                    content::StreamDeviceInfoArray /* device_list */)
 
 // The browser has failed to enumerate devices.
 IPC_MESSAGE_ROUTED1(MediaStreamMsg_DevicesEnumerationFailed,
@@ -70,7 +62,7 @@ IPC_MESSAGE_ROUTED1(MediaStreamMsg_DevicesEnumerationFailed,
 IPC_MESSAGE_ROUTED3(MediaStreamMsg_DeviceOpened,
                     int /* request id */,
                     std::string /* label */,
-                    media_stream::StreamDeviceInfo /* the device */)
+                    content::StreamDeviceInfo /* the device */)
 
 // The browser has failed to open a device.
 IPC_MESSAGE_ROUTED1(MediaStreamMsg_DeviceOpenFailed,
@@ -82,15 +74,7 @@ IPC_MESSAGE_ROUTED1(MediaStreamMsg_DeviceOpenFailed,
 IPC_MESSAGE_CONTROL4(MediaStreamHostMsg_GenerateStream,
                      int /* render view id */,
                      int /* request id */,
-                     media_stream::StreamOptions /* components */,
-                     GURL /* security origin */)
-
-// Request a new media stream for a specific device.
-IPC_MESSAGE_CONTROL5(MediaStreamHostMsg_GenerateStreamForDevice,
-                     int /* render view id */,
-                     int /* request id */,
-                     media_stream::StreamOptions /* components */,
-                     std::string /* device_id */,
+                     content::StreamOptions /* components */,
                      GURL /* security origin */)
 
 // Request to cancel the request for a new media stream.
@@ -107,7 +91,7 @@ IPC_MESSAGE_CONTROL2(MediaStreamHostMsg_StopGeneratedStream,
 IPC_MESSAGE_CONTROL4(MediaStreamHostMsg_EnumerateDevices,
                      int /* render view id */,
                      int /* request id */,
-                     media_stream::MediaStreamType /* type */,
+                     content::MediaStreamType /* type */,
                      GURL /* security origin */)
 
 // Request to open the device.
@@ -115,5 +99,5 @@ IPC_MESSAGE_CONTROL5(MediaStreamHostMsg_OpenDevice,
                      int /* render view id */,
                      int /* request id */,
                      std::string /* device_id */,
-                     media_stream::MediaStreamType /* type */,
+                     content::MediaStreamType /* type */,
                      GURL /* security origin */)

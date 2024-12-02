@@ -15,10 +15,14 @@ namespace ash {
 enum AcceleratorAction {
   BRIGHTNESS_DOWN,
   BRIGHTNESS_UP,
-  CYCLE_BACKWARD_LINEAR,
-  CYCLE_BACKWARD_MRU,
-  CYCLE_FORWARD_LINEAR,
-  CYCLE_FORWARD_MRU,
+  CYCLE_BACKWARD_LINEAR_PRESSED,
+  CYCLE_BACKWARD_LINEAR_RELEASED,
+  CYCLE_BACKWARD_MRU_PRESSED,
+  CYCLE_BACKWARD_MRU_RELEASED,
+  CYCLE_FORWARD_LINEAR_PRESSED,
+  CYCLE_FORWARD_LINEAR_RELEASED,
+  CYCLE_FORWARD_MRU_PRESSED,
+  CYCLE_FORWARD_MRU_RELEASED,
   DISABLE_CAPS_LOCK,
   DISPLAY_TOGGLE_SCALE,
   EXIT,
@@ -28,6 +32,8 @@ enum AcceleratorAction {
   FOCUS_SYSTEM_TRAY,
   KEYBOARD_BRIGHTNESS_DOWN,
   KEYBOARD_BRIGHTNESS_UP,
+  LOCK_PRESSED,
+  LOCK_RELEASED,
   MAGNIFY_SCREEN_ZOOM_IN,
   MAGNIFY_SCREEN_ZOOM_OUT,
   MEDIA_NEXT_TRACK,
@@ -53,24 +59,19 @@ enum AcceleratorAction {
   SELECT_WIN_5,
   SELECT_WIN_6,
   SELECT_WIN_7,
-  // This one is for Control+Alt+/ and Control+Alt+Shift+/, and is not included
-  // in kReservedActions[]. A windowed app should be able to handle these
-  // accelerators.
   SHOW_KEYBOARD_OVERLAY,
-  // This one is for the help key. This is included in kReservedActions[] since
-  // sending VKEY_F14 to a windowed app when the key is pressed does not make
-  // much sense. See crosbug.com/p/14330 for more details.
-  // TODO(yusukes): Reserve F15 as well.
-  SHOW_KEYBOARD_OVERLAY_BY_F14_KEY,
   SHOW_OAK,
   SHOW_TASK_MANAGER,
+  SWAP_PRIMARY_DISPLAY,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TAKE_PARTIAL_SCREENSHOT,
   TAKE_SCREENSHOT,
   TOGGLE_APP_LIST,
   TOGGLE_CAPS_LOCK,
+  TOGGLE_CAPS_LOCK_BY_ALT_LWIN,
   TOGGLE_DESKTOP_BACKGROUND_MODE,
-  TOGGLE_MAXIMIZED,
+  TOGGLE_MAXIMIZED_PRESSED,
+  TOGGLE_MAXIMIZED_RELEASED,
   TOGGLE_ROOT_WINDOW_FULL_SCREEN,
   TOGGLE_SPOKEN_FEEDBACK,
   TOGGLE_WIFI,
@@ -134,6 +135,12 @@ ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtLockScreen[];
 
 // The number of elements in kActionsAllowedAtLockScreen.
 ASH_EXPORT extern const size_t kActionsAllowedAtLockScreenLength;
+
+// Actions allowed while a modal window is up.
+ASH_EXPORT extern const AcceleratorAction kActionsAllowedAtModalWindow[];
+
+// The number of elements in kActionsAllowedAtModalWindow.
+ASH_EXPORT extern const size_t kActionsAllowedAtModalWindowLength;
 
 }  // namespace ash
 

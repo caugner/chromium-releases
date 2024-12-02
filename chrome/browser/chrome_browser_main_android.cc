@@ -4,9 +4,9 @@
 
 #include "chrome/browser/chrome_browser_main_android.h"
 
-#include "chrome/common/chrome_switches.h"
+#include "chrome/app/breakpad_linux.h"
 #include "content/public/common/main_function_params.h"
-#include "net/android/network_change_notifier_factory.h"
+#include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
 
 ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
@@ -17,9 +17,20 @@ ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
 ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {
 }
 
+void ChromeBrowserMainPartsAndroid::PreProfileInit() {
+#if defined(USE_LINUX_BREAKPAD)
+  // TODO(jcivelli): we should not initialize the crash-reporter when it was not
+  // enabled. Right now if it is disabled we still generate the minidumps but we
+  // do not upload them.
+  InitCrashReporter();
+#endif
+
+  ChromeBrowserMainParts::PreProfileInit();
+}
+
 void ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
   net::NetworkChangeNotifier::SetFactory(
-      new net::android::NetworkChangeNotifierFactory());
+      new net::NetworkChangeNotifierFactoryAndroid());
 
   // Chrome on Android does not use default MessageLoop. It has its own
   // Android specific MessageLoop.

@@ -11,9 +11,6 @@ const FilePath::CharType kPepperDataDirname[] =
     FILE_PATH_LITERAL("Pepper Data");
 
 const char kBrowserPluginMimeType[] = "application/browser-plugin";
-// TODO(fsamuel): Remove this once upstreaming of the new browser plugin is
-// complete.
-const char kBrowserPluginNewMimeType[] = "application/new-browser-plugin";
 
 // This number used to be limited to 32 in the past (see b/535234).
 const size_t kMaxRendererProcessCount = 82;
@@ -38,9 +35,5 @@ const int kHistogramSynchronizerReservedSequenceNumber = 0;
 const char kGpuCompositingFieldTrialName[] = "ForceCompositingMode";
 const char kGpuCompositingFieldTrialForceCompositingEnabledName[] = "enabled";
 const char kGpuCompositingFieldTrialThreadEnabledName[] = "thread";
-
-const char kStage3DFieldTrialName[] = "EnableStage3D";
-const char kStage3DFieldTrialBlacklistedName[] = "blacklisted";
-const char kStage3DFieldTrialEnabledName[] = "enabled";
 
 }  // namespace content

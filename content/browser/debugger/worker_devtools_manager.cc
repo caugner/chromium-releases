@@ -16,16 +16,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/common/process_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-
-using content::BrowserThread;
 
 namespace content {
 
@@ -39,8 +33,7 @@ DevToolsAgentHost* DevToolsAgentHostRegistry::GetDevToolsAgentHostForWorker(
       worker_route_id);
 }
 
-class WorkerDevToolsManager::AgentHosts
-    : private content::NotificationObserver {
+class WorkerDevToolsManager::AgentHosts {
 public:
   static void Add(WorkerId id, WorkerDevToolsAgentHost* host) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -72,20 +65,12 @@ public:
 
 private:
   AgentHosts() {
-    registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                   content::NotificationService::AllSources());
   }
   ~AgentHosts() {}
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource&,
-                       const content::NotificationDetails&) OVERRIDE;
 
   static AgentHosts* instance_;
   typedef std::map<WorkerId, WorkerDevToolsAgentHost*> Instances;
   Instances map_;
-  content::NotificationRegistrar registrar_;
 };
 
 WorkerDevToolsManager::AgentHosts*
@@ -183,6 +168,7 @@ class WorkerDevToolsManager::DetachedClientHosts {
         agent,
         WebKit::WebDevToolsAgent::disconnectEventAsText().utf8());
     int cookie = DevToolsManagerImpl::GetInstance()->DetachClientHost(agent);
+    agent->WorkerDestroyed();
     if (cookie == -1) {
       RemovePendingWorkerData(id);
       return;
@@ -234,18 +220,6 @@ class WorkerDevToolsManager::DetachedClientHosts {
 
 WorkerDevToolsManager::DetachedClientHosts*
     WorkerDevToolsManager::DetachedClientHosts::instance_ = NULL;
-
-
-void WorkerDevToolsManager::AgentHosts::Observe(
-    int type,
-    const content::NotificationSource&,
-    const content::NotificationDetails&) {
-  DCHECK(type == content::NOTIFICATION_APP_TERMINATING);
-  Instances copy(map_);
-  for (Instances::iterator it = copy.begin(); it != copy.end(); ++it)
-    it->second->WorkerDestroyed();
-  DCHECK(!instance_);
-}
 
 struct WorkerDevToolsManager::InspectedWorker {
   InspectedWorker(WorkerProcessHost* host, int route_id, const GURL& url,
@@ -495,4 +469,4 @@ void WorkerDevToolsManager::SendResumeToWorker(const WorkerId& id) {
     process->Send(new DevToolsAgentMsg_ResumeWorkerContext(id.second));
 }
 
-}  // namespace
+}  // namespace content

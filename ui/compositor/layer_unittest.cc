@@ -11,7 +11,6 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_setup.h"
 #include "ui/compositor/layer.h"
@@ -324,13 +323,12 @@ class NullLayerDelegate : public LayerDelegate {
 class TestCompositorObserver : public CompositorObserver {
  public:
   TestCompositorObserver()
-      : will_start_(false), started_(false), ended_(false), aborted_(false) {}
+      : started_(false), ended_(false), aborted_(false) {}
 
-  bool notified() const { return will_start_ && started_ && ended_; }
+  bool notified() const { return started_ && ended_; }
   bool aborted() const { return aborted_; }
 
   void Reset() {
-    will_start_ = false;
     started_ = false;
     ended_ = false;
     aborted_ = false;
@@ -338,10 +336,6 @@ class TestCompositorObserver : public CompositorObserver {
 
  private:
   virtual void OnCompositingDidCommit(Compositor* compositor) OVERRIDE {
-  }
-
-  virtual void OnCompositingWillStart(Compositor* compositor) OVERRIDE {
-    will_start_ = true;
   }
 
   virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {
@@ -356,7 +350,9 @@ class TestCompositorObserver : public CompositorObserver {
     aborted_ = true;
   }
 
-  bool will_start_;
+  virtual void OnCompositingLockStateChanged(Compositor* compositor) OVERRIDE {
+  }
+
   bool started_;
   bool ended_;
   bool aborted_;
@@ -910,7 +906,7 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_CompositorObservers) {
 
   // Setting the transform of a layer should alert the observers.
   observer.Reset();
-  Transform transform;
+  gfx::Transform transform;
   transform.ConcatTranslate(-200, -200);
   transform.ConcatRotate(90.0f);
   transform.ConcatTranslate(200, 200);

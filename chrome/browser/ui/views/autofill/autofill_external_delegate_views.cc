@@ -6,16 +6,21 @@
 
 #include "chrome/browser/ui/views/autofill/autofill_popup_view_views.h"
 
-AutofillExternalDelegate* AutofillExternalDelegate::Create(
-    TabContents* tab_contents,
+void AutofillExternalDelegate::CreateForWebContentsAndManager(
+    content::WebContents* web_contents,
     AutofillManager* autofill_manager) {
-  return new AutofillExternalDelegateViews(tab_contents, autofill_manager);
+  if (FromWebContents(web_contents))
+    return;
+
+  web_contents->SetUserData(
+      UserDataKey(),
+      new AutofillExternalDelegateViews(web_contents, autofill_manager));
 }
 
 AutofillExternalDelegateViews::AutofillExternalDelegateViews(
-    TabContents* tab_contents,
+    content::WebContents* web_contents,
     AutofillManager* autofill_manager)
-    : AutofillExternalDelegate(tab_contents, autofill_manager),
+    : AutofillExternalDelegate(web_contents, autofill_manager),
       popup_view_(NULL) {
 }
 
@@ -37,15 +42,6 @@ void AutofillExternalDelegateViews::HideAutofillPopupInternal() {
   popup_view_ = NULL;
 }
 
-void AutofillExternalDelegateViews::OnQueryPlatformSpecific(
-    int query_id,
-    const webkit::forms::FormData& form,
-    const webkit::forms::FormField& field,
-    const gfx::Rect& bounds) {
-  CreateViewIfNeeded();
-  popup_view_->set_element_bounds(bounds);
-}
-
 void AutofillExternalDelegateViews::ApplyAutofillSuggestions(
     const std::vector<string16>& autofill_values,
     const std::vector<string16>& autofill_labels,
@@ -60,6 +56,7 @@ void AutofillExternalDelegateViews::ApplyAutofillSuggestions(
 }
 
 void AutofillExternalDelegateViews::SetBounds(const gfx::Rect& bounds) {
+  CreateViewIfNeeded();
   popup_view_->SetBoundsRect(bounds);
 }
 

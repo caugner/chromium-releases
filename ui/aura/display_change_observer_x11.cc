@@ -130,12 +130,6 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
       LOG(WARNING) << "Crtc not found for output: output=" << o;
       continue;
     }
-    // TODO(oshima): Temporarily ignore all displays other than
-    // primary, which has y = 0 to disable extended desktop.
-    // crbug.com/152003.
-    if (crtc_info->y != 0)
-      continue;
-
     XRRModeInfo* mode = FindMode(screen_resources, crtc_info->mode);
     if (!mode) {
       LOG(WARNING) << "Could not find a mode for the output: output=" << o;
@@ -144,10 +138,7 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
     // Mirrored monitors have the same y coordinates.
     if (y_coords.find(crtc_info->y) != y_coords.end())
       continue;
-    // TODO(oshima): Create unique ID for the display.
-    displays.push_back(gfx::Display(
-        0,
-        gfx::Rect(crtc_info->x, crtc_info->y, mode->width, mode->height)));
+    displays.push_back(gfx::Display());
 
     float device_scale_factor = 1.0f;
     if (!ShouldIgnoreSize(output_info) &&
@@ -155,6 +146,9 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
         kHighDensityDIPThreshold) {
       device_scale_factor = 2.0f;
     }
+    displays.back().SetScaleAndBounds(
+        device_scale_factor,
+        gfx::Rect(crtc_info->x, crtc_info->y, mode->width, mode->height));
 
     uint16 manufacturer_id = 0;
     uint32 serial_number = 0;
@@ -169,13 +163,8 @@ void DisplayChangeObserverX11::NotifyDisplayChange() {
       }
     }
 
-    displays.back().set_device_scale_factor(device_scale_factor);
     y_coords.insert(crtc_info->y);
     XRRFreeOutputInfo(output_info);
-
-    // TODO(oshima): There is only one display in m23.
-    // Set the id to 0. crbug.com/152003.
-    displays.back().set_id(0);
   }
 
   // Free all allocated resources.

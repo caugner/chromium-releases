@@ -13,7 +13,10 @@
 #include "chrome/browser/ui/tabs/tab_strip_layout_type.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_container.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/animation/bounds_animator.h"
@@ -24,6 +27,7 @@
 
 class BaseTab;
 class NewTabButton;
+class Profile;
 class Tab;
 class TabDragController;
 class TabStripController;
@@ -50,12 +54,12 @@ class ImageView;
 class TabStrip : public views::View,
                  public views::ButtonListener,
                  public views::MouseWatcherListener,
-                 public TabController {
+                 public TabController,
+                 public content::NotificationObserver {
  public:
   static const char kViewClassName[];
 
-  TabStrip(TabStripController* controller,
-           bool instant_extended_api_enabled);
+  TabStrip(TabStripController* controller, Profile* profile);
   virtual ~TabStrip();
 
   // Sets the layout type. If |adjust_layout| is true the layout type changes
@@ -158,6 +162,9 @@ class TabStrip : public views::View,
   // Set the background offset used by inactive tabs to match the frame image.
   void SetBackgroundOffset(const gfx::Point& offset);
 
+  // Set the size to fill for NTP theme background image.
+  void SetNTPBackgroundFillSize(const gfx::Size& new_size);
+
   // Returns the new tab button. This is never NULL.
   views::View* newtab_button();
 
@@ -188,6 +195,9 @@ class TabStrip : public views::View,
                                  const ui::MouseEvent& event) OVERRIDE;
   virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) OVERRIDE;
   virtual bool IsInstantExtendedAPIEnabled() OVERRIDE;
+  virtual bool ShouldShowWhiteNTP() OVERRIDE;
+  virtual const gfx::ImageSkiaRep& GetNTPBackgroundTheme(
+      ui::ScaleFactor scale_factor) OVERRIDE;
 
   // MouseWatcherListener overrides:
   virtual void MouseMovedOutOfHost() OVERRIDE;
@@ -267,6 +277,11 @@ class TabStrip : public views::View,
     DISALLOW_COPY_AND_ASSIGN(DropInfo);
   };
 
+  // content::NotificationObserver implementation
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   void Init();
 
   // Creates and returns a new tab. The caller owners the returned tab.
@@ -305,6 +320,17 @@ class TabStrip : public views::View,
   // of the tabs when the drag started.
   void DragActiveTab(const std::vector<int>& initial_positions, int delta);
 
+  // Sets the ideal bounds x-coordinates to |positions|.
+  void SetIdealBoundsFromPositions(const std::vector<int>& positions);
+
+  // Stacks the dragged tabs. This is used if the drag operation is
+  // MOVE_VISIBILE_TABS and the tabs don't fill the tabstrip. When this happens
+  // the active tab follows the mouse and the other tabs stack around it.
+  void StackDraggedTabs(int delta);
+
+  // Returns true if dragging has resulted in temporarily stacking the tabs.
+  bool IsStackingDraggedTabs() const;
+
   // Invoked during drag to layout the tabs being dragged in |tabs| at
   // |location|. If |initial_drag| is true, this is the initial layout after the
   // user moved the mouse far enough to trigger a drag.
@@ -341,8 +367,14 @@ class TabStrip : public views::View,
   // Invoked when TabDragController detaches a set of tabs.
   void DraggedTabsDetached();
 
-  // Used by TabDragController when the user stops dragging tabs.
-  void StoppedDraggingTabs(const std::vector<BaseTab*>& tabs);
+  // Used by TabDragController when the user stops dragging tabs. |move_only| is
+  // true if the move behavior is TabDragController::MOVE_VISIBILE_TABS.
+  // |completed| is true if the drag operation completed successfully, false if
+  // it was reverted.
+  void StoppedDraggingTabs(const std::vector<BaseTab*>& tabs,
+                           const std::vector<int>& initial_positions,
+                           bool move_only,
+                           bool completed);
 
   // Invoked from StoppedDraggingTabs to cleanup |tab|. If |tab| is known
   // |is_first_tab| is set to true.
@@ -482,6 +514,10 @@ class TabStrip : public views::View,
   // Should the layout dynamically adjust?
   bool GetAdjustLayout() const;
 
+  // Extracts the NTP background theme for the tabstrip area to use for the
+  // active tab when Instant Extended API is enabled and theme is used.
+  void ExtractNTPBackgroundTheme(ui::ScaleFactor scale_factor);
+
   // -- Member Variables ------------------------------------------------------
 
   // There is a one-to-one mapping between each of the tabs in the
@@ -496,7 +532,7 @@ class TabStrip : public views::View,
 
   scoped_ptr<TabStripController> controller_;
 
-  const bool instant_extended_api_enabled_;
+  Profile* profile_;  // Weak.
 
   // The "New Tab" button.
   NewTabButton* newtab_button_;
@@ -570,6 +606,14 @@ class TabStrip : public views::View,
   // Timer used when a tab is closed and we need to relayout. Only used when a
   // tab close comes from a touch device.
   base::OneShotTimer<TabStrip> resize_layout_timer_;
+
+  // NTP background iamge extracted for use in active tab.
+  gfx::ImageSkia ntp_background_theme_;
+
+  // Size that the entire NTP background image should fill up.
+  gfx::Size ntp_background_fill_size_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TabStrip);
 };

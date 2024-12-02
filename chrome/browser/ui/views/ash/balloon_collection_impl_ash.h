@@ -7,14 +7,15 @@
 
 #include <set>
 
-#include "ash/system/web_notification/web_notification_tray.h"
 #include "chrome/browser/chromeos/notifications/balloon_view_host_chromeos.h"  // MessageCallback
 #include "chrome/browser/notifications/balloon_collection_impl.h"
+#include "ui/message_center/message_center.h"
 
-// Wrapper on top of ::BalloonCollectionImpl to provide an interface for
-// chromeos::SystemNotification.
-class BalloonCollectionImplAsh : public BalloonCollectionImpl,
-                                 public ash::WebNotificationTray::Delegate {
+// Wrapper on top of ::BalloonCollectionImpl to provide integration between
+// the Chrome notification UI and Ash notifications (ash::WebNotificationTray).
+class BalloonCollectionImplAsh
+    : public BalloonCollectionImpl,
+      public message_center::MessageCenter::Delegate {
  public:
   BalloonCollectionImplAsh();
   virtual ~BalloonCollectionImplAsh();
@@ -24,7 +25,7 @@ class BalloonCollectionImplAsh : public BalloonCollectionImpl,
                    Profile* profile) OVERRIDE;
   virtual bool HasSpace() const OVERRIDE;
 
-  // Overridden from WebNotificationTray::Delegate.
+  // Overridden from MessageCenter::Delegate.
   virtual void NotificationRemoved(const std::string& notifcation_id) OVERRIDE;
   virtual void DisableExtension(const std::string& notifcation_id) OVERRIDE;
   virtual void DisableNotificationsFromSource(
@@ -41,13 +42,6 @@ class BalloonCollectionImplAsh : public BalloonCollectionImpl,
       const Notification& notification,
       const std::string& message,
       const chromeos::BalloonViewHost::MessageCallback& callback);
-
-  // Adds a new system notification.
-  // |sticky| is ignored in the Ash implementation; desktop notifications
-  // are always sticky (i.e. they need to be dismissed explicitly).
-  void AddSystemNotification(const Notification& notification,
-                             Profile* profile,
-                             bool sticky);
 
   // Updates the notification's content. It uses
   // NotificationDelegate::id() to check the equality of notifications.
@@ -68,10 +62,6 @@ class BalloonCollectionImplAsh : public BalloonCollectionImpl,
   const extensions::Extension* GetBalloonExtension(Balloon* balloon);
 
  private:
-  // Set of unique ids associated with system notifications, used by
-  // MakeBalloon to determine whether or not to enable Web UI.
-  std::set<std::string> system_notifications_;
-
   DISALLOW_COPY_AND_ASSIGN(BalloonCollectionImplAsh);
 };
 

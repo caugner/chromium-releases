@@ -7,8 +7,9 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
@@ -21,6 +22,7 @@ class Browser;
 @class NSWindow;
 
 namespace extensions {
+class ActiveTabPermissionGranter;
 class Extension;
 }
 
@@ -28,8 +30,10 @@ class Extension;
 // the Cocoa NSWindow. Cross-platform code will interact with this object when
 // it needs to manipulate the window.
 
-class BrowserWindowCocoa : public BrowserWindow,
-                           public content::NotificationObserver {
+class BrowserWindowCocoa :
+    public BrowserWindow,
+    public content::NotificationObserver,
+    public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   BrowserWindowCocoa(Browser* browser,
                      BrowserWindowController* controller);
@@ -38,6 +42,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   // Overridden from BrowserWindow
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
+  virtual void Hide() OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Activate() OVERRIDE;
@@ -52,7 +57,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void BookmarkBarStateChanged(
       BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
@@ -132,13 +136,12 @@ class BrowserWindowCocoa : public BrowserWindow,
       FullscreenExitBubbleType bubble_type) OVERRIDE;
   virtual void ExitPresentationMode() OVERRIDE;
   virtual bool InPresentationMode() OVERRIDE;
-  virtual void ShowInstant(TabContents* preview) OVERRIDE;
-  virtual void HideInstant() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual bool IsInstantTabShowing() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual bool GetConstrainedWindowTopY(int* top_y) OVERRIDE;
   virtual void ShowAvatarBubble(content::WebContents* web_contents,
                                 const gfx::Rect& rect) OVERRIDE;
   virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
@@ -147,6 +150,10 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // Overridden from ExtensionKeybindingRegistry::Delegate:
+  virtual extensions::ActiveTabPermissionGranter*
+      GetActiveTabPermissionGranter() OVERRIDE;
 
   // Adds the given FindBar cocoa controller to this browser window.
   void AddFindBar(FindBarCocoaController* find_bar_cocoa_controller);

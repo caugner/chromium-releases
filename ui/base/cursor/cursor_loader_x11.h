@@ -11,11 +11,12 @@
 #include "base/compiler_specific.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/cursor_loader.h"
+#include "ui/base/ui_export.h"
 #include "ui/base/x/x11_util.h"
 
 namespace ui {
 
-class CursorLoaderX11 : public CursorLoader {
+class UI_EXPORT CursorLoaderX11 : public CursorLoader {
  public:
   CursorLoaderX11();
   virtual ~CursorLoaderX11();

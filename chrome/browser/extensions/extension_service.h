@@ -14,13 +14,10 @@
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/string16.h"
-#include "base/time.h"
-#include "base/tuple.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/app_sync_bundle.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
@@ -37,7 +34,6 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sync/api/string_ordinal.h"
@@ -47,9 +43,7 @@
 class BookmarkExtensionEventRouter;
 class CommandLine;
 class ExtensionErrorUI;
-class ExtensionFontSettingsEventRouter;
 class ExtensionManagementEventRouter;
-class ExtensionPreferenceEventRouter;
 class ExtensionSyncData;
 class ExtensionToolbarModel;
 class HistoryExtensionEventRouter;
@@ -58,7 +52,6 @@ class Profile;
 class Version;
 
 namespace chromeos {
-class ExtensionBluetoothEventRouter;
 class ExtensionInputMethodEventRouter;
 }
 
@@ -71,6 +64,7 @@ class ContentSettingsStore;
 class CrxInstaller;
 class Extension;
 class ExtensionActionStorageManager;
+class ExtensionBluetoothEventRouter;
 class ExtensionCookiesEventRouter;
 class ExtensionManagedModeEventRouter;
 class ExtensionSyncData;
@@ -79,6 +73,7 @@ class ExtensionUpdater;
 class FontSettingsEventRouter;
 class MediaGalleriesPrivateEventRouter;
 class PendingExtensionManager;
+class PreferenceEventRouter;
 class PushMessagingEventRouter;
 class SettingsFrontend;
 class WebNavigationEventRouter;
@@ -180,13 +175,9 @@ class ExtensionService
   // Returns whether the URL is from either a hosted or packaged app.
   bool IsInstalledApp(const GURL& url) const;
 
-  // Associates a renderer process with the given installed app.
-  void SetInstalledAppForRenderer(int renderer_child_id,
-      const extensions::Extension* app);
-
-  // If the renderer is hosting an installed app, returns it, otherwise returns
-  // NULL.
-  const extensions::Extension* GetInstalledAppForRenderer(
+  // If the renderer is hosting an installed app with isolated storage,
+  // returns it, otherwise returns NULL.
+  const extensions::Extension* GetIsolatedAppForRenderer(
       int renderer_child_id) const;
 
   // Attempts to uninstall an extension from a given ExtensionService. Returns
@@ -210,9 +201,13 @@ class ExtensionService
   virtual const ExtensionSet* disabled_extensions() const OVERRIDE;
   const ExtensionSet* terminated_extensions() const;
 
-  // Retuns a set of all installed, disabled, and terminated extensions and
+  // Returns a set of all installed, disabled, and terminated extensions and
   // transfers ownership to caller.
   const ExtensionSet* GenerateInstalledExtensionsSet() const;
+
+  // Returns a set of all extensions disabled by the sideload wipeout
+  // initiative.
+  const ExtensionSet* GetWipedOutExtensions() const;
 
   // Gets the object managing the set of pending extensions.
   virtual extensions::PendingExtensionManager*
@@ -289,6 +284,13 @@ class ExtensionService
   // Start up the extension event routers.
   void InitEventRouters();
 
+  // Called when the ProfileSyncService for the associated Profile is
+  // going to be destroyed.  This is guaranteed to be called exactly
+  // once before Shutdown() is called.
+  //
+  // TODO(akalin): Remove this once http://crbug.com/153827 is fixed.
+  void OnProfileSyncServiceShutdown();
+
   // Called when the associated Profile is going to be destroyed.
   void Shutdown();
 
@@ -318,6 +320,9 @@ class ExtensionService
 
   // Reloads the specified extension.
   void ReloadExtension(const std::string& extension_id);
+
+  // Restarts the specified extension.
+  void RestartExtension(const std::string& extension_id);
 
   // Uninstalls the specified extension. Callers should only call this method
   // with extensions that exist. |external_uninstall| is a magical parameter
@@ -389,6 +394,10 @@ class ExtensionService
   // permissions the given extension has been granted.
   bool ExtensionBindingsAllowed(const GURL& url);
 
+  // Returns true if a normal browser window should avoid showing |url| in a
+  // tab. In this case, |url| is also rewritten to an error URL.
+  bool ShouldBlockUrlInBrowserTab(GURL* url);
+
   // Returns the icon to display in the omnibox for the given extension.
   gfx::Image GetOmniboxIcon(const std::string& extension_id);
 
@@ -407,13 +416,16 @@ class ExtensionService
   // Called by the backend when an extension has been installed.
   void OnExtensionInstalled(
       const extensions::Extension* extension,
-      bool from_webstore,
       const syncer::StringOrdinal& page_ordinal,
       bool has_requirement_errors);
 
   // Initializes the |extension|'s active permission set and disables the
   // extension if the privilege level has increased (e.g., due to an upgrade).
   void InitializePermissions(const extensions::Extension* extension);
+
+  // Check to see if this extension needs to be disabled, as per the sideload
+  // wipeout initiative.
+  void MaybeWipeout(const extensions::Extension* extension);
 
   // Go through each extensions in pref, unload blacklisted extensions
   // and update the blacklist state in pref.
@@ -514,10 +526,11 @@ class ExtensionService
     return window_event_router_.get();
   }
 
-#if defined(OS_CHROMEOS)
-  chromeos::ExtensionBluetoothEventRouter* bluetooth_event_router() {
+  extensions::ExtensionBluetoothEventRouter* bluetooth_event_router() {
     return bluetooth_event_router_.get();
   }
+
+#if defined(OS_CHROMEOS)
   chromeos::ExtensionInputMethodEventRouter* input_method_event_router() {
     return input_method_event_router_.get();
   }
@@ -585,9 +598,8 @@ class ExtensionService
   // the member variable to make it easier to test the method in isolation.
   bool PopulateExtensionErrorUI(ExtensionErrorUI* extension_error_ui);
 
-  // Marks alertable extensions as acknowledged, after the user presses the
-  // accept button.
-  void HandleExtensionAlertAccept();
+  // Checks if there are any new external extensions to notify the user about.
+  void UpdateExternalExtensionAlert();
 
   // Given a (presumably just-installed) extension id, mark that extension as
   // acknowledged.
@@ -599,6 +611,10 @@ class ExtensionService
 
   // Called when the extension alert is closed.
   void HandleExtensionAlertClosed();
+
+  // Marks alertable extensions as acknowledged, after the user presses the
+  // accept button.
+  void HandleExtensionAlertAccept();
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -617,6 +633,10 @@ class ExtensionService
   // need to be made more efficient.
   static void RecordPermissionMessagesHistogram(
       const extensions::Extension* e, const char* histogram);
+
+  // Open a dev tools window for the background page for the given extension,
+  // starting the background page first if necesary.
+  void InspectBackgroundPage(const extensions::Extension* extension);
 
 #if defined(UNIT_TEST)
   void TrackTerminatedExtensionForTest(const extensions::Extension* extension) {
@@ -692,6 +712,13 @@ class ExtensionService
     INCLUDE_TERMINATED = 1 << 2
   };
 
+  // Events to be fired after an extension is reloaded.
+  enum PostReloadEvents {
+    EVENT_NONE = 0,
+    EVENT_LAUNCHED = 1 << 0,
+    EVENT_RESTARTED = 1 << 1,
+  };
+
   // Look up an extension by ID, optionally including either or both of enabled
   // and disabled extensions.
   const extensions::Extension* GetExtensionByIdInternal(
@@ -713,6 +740,14 @@ class ExtensionService
   void NotifyExtensionUnloaded(const extensions::Extension* extension,
                                extension_misc::UnloadedExtensionReason reason);
 
+  // Reloads |extension_id| and then dispatches to it the PostReloadEvents
+  // indicated by |events|.
+  void ReloadExtensionWithEvents(const std::string& extension_id,
+                                int events);
+
+  // Returns true if the app with id |extension_id| has any shell windows open.
+  bool HasShellWindows(const std::string& extension_id);
+
   // Helper that updates the active extension list used for crash reporting.
   void UpdateActiveExtensionsInCrashReporter();
 
@@ -731,10 +766,22 @@ class ExtensionService
 
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
 
-  // Enqueues a launch task in the lazy background page queue.
-  void QueueRestoreAppWindow(const extensions::Extension* extension);
+  // Performs tasks requested to occur after |extension| loads.
+  void DoPostLoadTasks(const extensions::Extension* extension);
+
   // Launches the platform app associated with |extension_host|.
   static void LaunchApplication(extensions::ExtensionHost* extension_host);
+
+  // Dispatches a restart event to the platform app associated with
+  // |extension_host|.
+  static void RestartApplication(extensions::ExtensionHost* extension_host);
+
+  // Helper to inspect an ExtensionHost after it has been loaded.
+  void InspectExtensionHost(extensions::ExtensionHost* host);
+
+  // Helper to determine whether we should initially enable an installed
+  // (or upgraded) extension.
+  bool ShouldEnableOnInstall(const extensions::Extension* extension);
 
   // The normal profile associated with this ExtensionService.
   Profile* profile_;
@@ -762,12 +809,6 @@ class ExtensionService
 
   // The map of extension IDs to their runtime data.
   ExtensionRuntimeDataMap extension_runtime_data_;
-
-  // Holds a map between renderer process IDs that are associated with an
-  // installed app and their app.
-  typedef std::map<int, scoped_refptr<const extensions::Extension> >
-      InstalledAppMap;
-  InstalledAppMap installed_app_hosts_;
 
   // The full path to the directory where extensions are installed.
   FilePath install_directory_;
@@ -808,9 +849,9 @@ class ExtensionService
   typedef std::map<std::string, int> OrphanedDevTools;
   OrphanedDevTools orphaned_dev_tools_;
 
-  // A set of apps that had an open window the last time they were reloaded.
-  // A new window will be launched when the app is succesfully reloaded.
-  std::set<std::string> relaunch_app_ids_;
+  // Maps extension ids to a bitmask that indicates which events should be
+  // dispatched to the extension when it is loaded.
+  std::map<std::string, int> on_load_events_;
 
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
@@ -837,7 +878,7 @@ class ExtensionService
 
   scoped_ptr<extensions::WindowEventRouter> window_event_router_;
 
-  scoped_ptr<ExtensionPreferenceEventRouter> preference_event_router_;
+  scoped_ptr<extensions::PreferenceEventRouter> preference_event_router_;
 
   scoped_ptr<BookmarkExtensionEventRouter> bookmark_event_router_;
 
@@ -858,8 +899,9 @@ class ExtensionService
   scoped_ptr<extensions::ExtensionManagedModeEventRouter>
       managed_mode_event_router_;
 
+  scoped_ptr<extensions::ExtensionBluetoothEventRouter> bluetooth_event_router_;
+
 #if defined(OS_CHROMEOS)
-  scoped_ptr<chromeos::ExtensionBluetoothEventRouter> bluetooth_event_router_;
   scoped_ptr<chromeos::ExtensionInputMethodEventRouter>
       input_method_event_router_;
 #endif

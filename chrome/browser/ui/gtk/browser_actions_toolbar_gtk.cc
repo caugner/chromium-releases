@@ -15,7 +15,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/commands/command_service_factory.h"
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,6 +25,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
+#include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
@@ -34,7 +37,6 @@
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_details.h"
@@ -47,8 +49,10 @@
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 
 using extensions::Extension;
+using extensions::ExtensionActionManager;
 
 namespace {
 
@@ -101,7 +105,7 @@ class BrowserActionButton : public content::NotificationObserver,
       : toolbar_(toolbar),
         extension_(extension),
         image_(NULL),
-        icon_factory_(extension, extension->browser_action(), this),
+        icon_factory_(extension, browser_action(), this),
         accel_group_(NULL) {
     button_.reset(new CustomDrawButton(
         theme_provider,
@@ -115,7 +119,7 @@ class BrowserActionButton : public content::NotificationObserver,
     gtk_container_add(GTK_CONTAINER(alignment_.get()), button());
     gtk_widget_show(button());
 
-    DCHECK(extension_->browser_action());
+    DCHECK(browser_action());
 
     UpdateState();
 
@@ -124,7 +128,7 @@ class BrowserActionButton : public content::NotificationObserver,
     signals_.Connect(button(), "clicked",
                      G_CALLBACK(OnClicked), this);
     signals_.Connect(button(), "drag-begin",
-                     G_CALLBACK(&OnDragBegin), this);
+                     G_CALLBACK(OnDragBegin), this);
     signals_.ConnectAfter(widget(), "expose-event",
                      G_CALLBACK(OnExposeEvent), this);
     if (toolbar_->browser()->window()) {
@@ -140,7 +144,7 @@ class BrowserActionButton : public content::NotificationObserver,
 
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-        content::Source<ExtensionAction>(extension->browser_action()));
+        content::Source<ExtensionAction>(browser_action()));
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
         content::Source<Profile>(
@@ -212,17 +216,27 @@ class BrowserActionButton : public content::NotificationObserver,
     if (tab_id < 0)
       return;
 
-    std::string tooltip = extension_->browser_action()->GetTitle(tab_id);
+    std::string tooltip = browser_action()->GetTitle(tab_id);
     if (tooltip.empty())
       gtk_widget_set_has_tooltip(button(), FALSE);
     else
       gtk_widget_set_tooltip_text(button(), tooltip.c_str());
 
+    enabled_ = browser_action()->GetIsVisible(tab_id);
+    if (!enabled_)
+      button_->SetPaintOverride(GTK_STATE_INSENSITIVE);
+    else
+      button_->UnsetPaintOverride();
+
     gfx::Image image = icon_factory_.GetIcon(tab_id);
-    if (!image.IsEmpty())
-      SetImage(image.ToGdkPixbuf());
-    bool enabled = extension_->browser_action()->GetIsVisible(tab_id);
-    gtk_widget_set_sensitive(button(), enabled);
+    if (!image.IsEmpty()) {
+      if (enabled_) {
+        SetImage(image);
+      } else {
+        SetImage(gfx::Image(gfx::ImageSkiaOperations::CreateTransparentImage(
+            image.AsImageSkia(), .25)));
+      }
+    }
 
     gtk_widget_queue_draw(button());
   }
@@ -262,7 +276,10 @@ class BrowserActionButton : public content::NotificationObserver,
 
   // MenuGtk::Delegate implementation.
   virtual void StoppedShowing() {
-    button_->UnsetPaintOverride();
+    if (enabled_)
+      button_->UnsetPaintOverride();
+    else
+      button_->SetPaintOverride(GTK_STATE_INSENSITIVE);
 
     // If the context menu was showing for the overflow menu, re-assert the
     // grab that was shadowed.
@@ -284,33 +301,34 @@ class BrowserActionButton : public content::NotificationObserver,
                             ExtensionPopupGtk::SHOW_AND_INSPECT);
   }
 
-  void SetImage(GdkPixbuf* image) {
+  void SetImage(const gfx::Image& image) {
     if (!image_) {
-      image_ = gtk_image_new_from_pixbuf(image);
+      image_ = gtk_image_new_from_pixbuf(image.ToGdkPixbuf());
       gtk_button_set_image(GTK_BUTTON(button()), image_);
     } else {
-      gtk_image_set_from_pixbuf(GTK_IMAGE(image_), image);
+      gtk_image_set_from_pixbuf(GTK_IMAGE(image_), image.ToGdkPixbuf());
     }
   }
 
   static gboolean OnButtonPress(GtkWidget* widget,
                                 GdkEventButton* event,
-                                BrowserActionButton* action) {
+                                BrowserActionButton* button) {
     if (event->button != 3)
       return FALSE;
 
-    MenuGtk* menu = action->GetContextMenu();
+    MenuGtk* menu = button->GetContextMenu();
     if (!menu)
       return FALSE;
 
-    action->button_->SetPaintOverride(GTK_STATE_ACTIVE);
+    button->button_->SetPaintOverride(GTK_STATE_ACTIVE);
     menu->PopupForWidget(widget, event->button, event->time);
 
     return TRUE;
   }
 
-  static void OnClicked(GtkWidget* widget, BrowserActionButton* action) {
-    action->Activate(widget);
+  static void OnClicked(GtkWidget* widget, BrowserActionButton* button) {
+    if (button->enabled_)
+      button->Activate(widget);
   }
 
   static gboolean OnExposeEvent(GtkWidget* widget,
@@ -320,7 +338,7 @@ class BrowserActionButton : public content::NotificationObserver,
     if (tab_id < 0)
       return FALSE;
 
-    ExtensionAction* action = button->extension_->browser_action();
+    ExtensionAction* action = button->browser_action();
     if (action->GetBadgeText(tab_id).empty())
       return FALSE;
 
@@ -421,6 +439,11 @@ class BrowserActionButton : public content::NotificationObserver,
     }
   }
 
+  ExtensionAction* browser_action() const {
+    return ExtensionActionManager::Get(toolbar_->browser()->profile())->
+        GetBrowserAction(*extension_);
+  }
+
   // The toolbar containing this button.
   BrowserActionsToolbarGtk* toolbar_;
 
@@ -429,6 +452,10 @@ class BrowserActionButton : public content::NotificationObserver,
 
   // The button for this browser action.
   scoped_ptr<CustomDrawButton> button_;
+
+  // Whether the browser action is enabled (equivalent to whether a page action
+  // is visible).
+  bool enabled_;
 
   // The top level widget (parent of |button_|).
   ui::OwnedWidgetGtk alignment_;
@@ -773,7 +800,8 @@ bool BrowserActionsToolbarGtk::IsCommandIdChecked(int command_id) const {
 
 bool BrowserActionsToolbarGtk::IsCommandIdEnabled(int command_id) const {
   const Extension* extension = model_->toolbar_items()[command_id];
-  return extension->browser_action()->GetIsVisible(GetCurrentTabId());
+  return ExtensionActionManager::Get(profile_)->
+      GetBrowserAction(*extension)->GetIsVisible(GetCurrentTabId());
 }
 
 bool BrowserActionsToolbarGtk::GetAcceleratorForCommandId(

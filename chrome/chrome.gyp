@@ -5,17 +5,6 @@
   'variables': {
     'chromium_code': 1,
 
-    'variables': {
-      'version_py_path': 'tools/build/version.py',
-      'version_path': 'VERSION',
-    },
-    'version_py_path': '<(version_py_path)',
-    'version_path': '<(version_path)',
-    'version_full':
-        '<!(python <(version_py_path) -f <(version_path) -t "@MAJOR@.@MINOR@.@BUILD@.@PATCH@")',
-    'version_mac_dylib':
-        '<!(python <(version_py_path) -f <(version_path) -t "@BUILD@.@PATCH_HI@.@PATCH_LO@" -e "PATCH_HI=int(PATCH)/256" -e "PATCH_LO=int(PATCH)%256")',
-
     # Define the common dependencies that contain all the actual
     # Chromium functionality.  This list gets pulled in below by
     # the link of the actual chrome (or chromium) executable on
@@ -67,8 +56,7 @@
           ['chromeos==1', {
             'platform_locale_settings_grd':
                 'app/resources/locale_settings_cros.grd',
-          }],
-          ['chromeos!=1', {
+          }, {  # chromeos==0
             'platform_locale_settings_grd':
                 'app/resources/locale_settings_linux.grd',
           }],
@@ -147,8 +135,8 @@
     'chrome_installer_util.gypi',
     'chrome_renderer.gypi',
     'chrome_tests.gypi',
-    'common_constants.gypi',
     'nacl.gypi',
+    'version.gypi',
   ],
   'targets': [
     {
@@ -221,6 +209,11 @@
             'browser/debugger/devtools_window.cc',
             'browser/debugger/remote_debugging_server.cc',
           ],
+        }],
+        ['debug_devtools==1', {
+          'defines': [
+            'DEBUG_DEVTOOLS=1',
+           ],
         }],
       ],
     },
@@ -319,6 +312,8 @@
         'service/cloud_print/cloud_print_url_fetcher.h',
         'service/cloud_print/cloud_print_wipeout.cc',
         'service/cloud_print/cloud_print_wipeout.h',
+        'service/cloud_print/connector_settings.cc',
+        'service/cloud_print/connector_settings.h',
         'service/cloud_print/job_status_updater.cc',
         'service/cloud_print/job_status_updater.h',
         'service/cloud_print/print_system_dummy.cc',
@@ -867,9 +862,24 @@
         {
           'target_name': 'chrome_version_resources',
           'type': 'none',
+          'conditions': [
+            ['branding == "Chrome"', {
+              'variables': {
+                 'branding_path': 'app/theme/google_chrome/BRANDING',
+              },
+            }, { # else branding!="Chrome"
+              'variables': {
+                 'branding_path': 'app/theme/chromium/BRANDING',
+              },
+            }],
+          ],
+          'variables': {
+            'output_dir': 'chrome_version',
+            'template_input_path': 'app/chrome_version.rc.version',
+          },
           'direct_dependent_settings': {
             'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/chrome_version',
+              '<(SHARED_INTERMEDIATE_DIR)/<(output_dir)',
             ],
           },
           'sources': [
@@ -879,47 +889,8 @@
             'app/nacl64_exe.ver',
             'app/other.ver',
           ],
-          'rules': [
-            {
-              'rule_name': 'version',
-              'extension': 'ver',
-              'variables': {
-                'lastchange_path':
-                  '<(DEPTH)/build/util/LASTCHANGE',
-                'template_input_path': 'app/chrome_version.rc.version',
-              },
-              'conditions': [
-                ['branding == "Chrome"', {
-                  'variables': {
-                     'branding_path': 'app/theme/google_chrome/BRANDING',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_path': 'app/theme/chromium/BRANDING',
-                  },
-                }],
-              ],
-              'inputs': [
-                '<(template_input_path)',
-                '<(version_path)',
-                '<(branding_path)',
-                '<(lastchange_path)',
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/chrome_version/<(RULE_INPUT_ROOT)_version.rc',
-              ],
-              'action': [
-                'python',
-                '<(version_py_path)',
-                '-f', '<(RULE_INPUT_PATH)',
-                '-f', '<(version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                '<(template_input_path)',
-                '<@(_outputs)',
-              ],
-              'message': 'Generating version information in <(_outputs)'
-            },
+          'includes': [
+            'version_resource_rules.gypi',
           ],
         },
         {
@@ -999,11 +970,11 @@
           'type': 'executable',
           'dependencies': [
             'app/policy/cloud_policy_codegen.gyp:policy',
-            'common_constants',
             'installer_util',
             '../base/base.gyp:base',
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
+            '../chrome/common_constants.gyp:common_constants',
           ],
           'include_dirs': [
             '..',
@@ -1024,11 +995,11 @@
           'type': 'executable',
           'product_name': 'crash_service64',
           'dependencies': [
-            'common_constants_win64',
             'installer_util_nacl_win64',
             '../base/base.gyp:base_static_win64',
             '../breakpad/breakpad.gyp:breakpad_handler_win64',
             '../breakpad/breakpad.gyp:breakpad_sender_win64',
+            '../chrome/common_constants.gyp:common_constants_win64',
           ],
           'include_dirs': [
             '..',
@@ -1079,12 +1050,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base',
-            '../chrome/browser/component/components.gyp:web_contents_delegate_android_java',
-            '../content/content.gyp:content_java',
-            '../ui/ui.gyp:ui_java',
-          ],
-          'export_dependent_settings': [
-            '../base/base.gyp:base',
+            '../chrome/browser/component/components.gyp:navigation_interception_java',
             '../chrome/browser/component/components.gyp:web_contents_delegate_android_java',
             '../content/content.gyp:content_java',
             '../ui/ui.gyp:ui_java',

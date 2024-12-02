@@ -13,6 +13,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/env.h"
+#include "ui/aura/focus_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/single_display_manager.h"
 #include "ui/aura/shared/root_window_capture_client.h"
@@ -94,8 +95,6 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {}
 
-  virtual void OnCompositingWillStart(Compositor* compositor) OVERRIDE {}
-
   virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {}
 
   virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
@@ -119,6 +118,9 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 
   virtual void OnCompositingAborted(Compositor* compositor) OVERRIDE {}
 
+  virtual void OnCompositingLockStateChanged(
+      Compositor* compositor) OVERRIDE {}
+
   virtual void Draw() {}
 
   int frames() const { return frames_; }
@@ -134,10 +136,10 @@ class BenchCompositorObserver : public ui::CompositorObserver {
 class WebGLTexture : public ui::Texture {
  public:
   WebGLTexture(WebGraphicsContext3D* context, const gfx::Size& size)
-      : ui::Texture(false, size),
-        context_(context) {
-    set_texture_id(context_->createTexture());
-    context_->bindTexture(GL_TEXTURE_2D, texture_id());
+      : ui::Texture(false, size, 1.0f),
+        context_(context),
+        texture_id_(context_->createTexture()) {
+    context_->bindTexture(GL_TEXTURE_2D, texture_id_);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     context_->texParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -147,16 +149,21 @@ class WebGLTexture : public ui::Texture {
                          GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   }
 
+  virtual unsigned int PrepareTexture() OVERRIDE {
+    return texture_id_;
+  }
+
   virtual WebGraphicsContext3D* HostContext3D() OVERRIDE {
     return context_;
   }
 
  private:
   virtual ~WebGLTexture() {
-    context_->deleteTexture(texture_id());
+    context_->deleteTexture(texture_id_);
   }
 
   WebGraphicsContext3D* context_;
+  unsigned texture_id_;
 
   DISALLOW_COPY_AND_ASSIGN(WebGLTexture);
 };
@@ -204,7 +211,7 @@ class WebGLBench : public BenchCompositorObserver {
     context_->bindFramebuffer(GL_FRAMEBUFFER, fbo_);
     context_->framebufferTexture2D(
         GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, texture_->texture_id(), 0);
+        GL_TEXTURE_2D, texture_->PrepareTexture(), 0);
     context_->clearColor(0.f, 1.f, 0.f, 1.f);
     context_->clear(GL_COLOR_BUFFER_BIT);
     context_->flush();
@@ -299,6 +306,9 @@ int main(int argc, char** argv) {
       root_window.get(),
       new aura::shared::RootWindowCaptureClient(root_window.get()));
 
+  scoped_ptr<aura::FocusManager> focus_manager(new aura::FocusManager);
+  root_window->set_focus_manager(focus_manager.get());
+
   // add layers
   ColoredLayer background(SK_ColorRED);
   background.SetBounds(root_window->bounds());
@@ -341,6 +351,7 @@ int main(int argc, char** argv) {
 
   root_window->ShowRootWindow();
   MessageLoopForUI::current()->Run();
+  focus_manager.reset();
   root_window.reset();
 
   ui::CompositorTestSupport::Terminate();

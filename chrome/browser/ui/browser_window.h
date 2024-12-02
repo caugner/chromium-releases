@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/common/content_settings_types.h"
+#include "chrome/common/instant_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -35,6 +36,7 @@ class PasswordGenerator;
 namespace content {
 class WebContents;
 struct NativeWebKeyboardEvent;
+struct PasswordForm;
 struct SSLStatus;
 }
 
@@ -46,17 +48,6 @@ namespace gfx {
 class Rect;
 class Size;
 }
-
-namespace webkit {
-namespace forms {
-struct PasswordForm;
-}
-}
-
-enum DevToolsDockSide {
-  DEVTOOLS_DOCK_SIDE_BOTTOM = 0,
-  DEVTOOLS_DOCK_SIDE_RIGHT = 1
-};
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserWindow interface
@@ -107,9 +98,6 @@ class BrowserWindow : public BaseWindow {
   // Inform the frame that the dev tools window for the selected tab has
   // changed.
   virtual void UpdateDevTools() = 0;
-
-  // Requests that the docked dev tools window changes its dock mode.
-  virtual void SetDevToolsDockSide(DevToolsDockSide side) = 0;
 
   // Update any loading animations running in the window. |should_animate| is
   // true if there are tabs loading and the animations should continue, false
@@ -304,7 +292,6 @@ class BrowserWindow : public BaseWindow {
   virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
       const extensions::Extension* app) = 0;
 
-
   // Clipboard commands applied to the whole browser window.
   virtual void Cut() = 0;
   virtual void Copy() = 0;
@@ -323,12 +310,6 @@ class BrowserWindow : public BaseWindow {
   virtual bool InPresentationMode() = 0;
 #endif
 
-  // Invoked when instant's tab contents should be shown.
-  virtual void ShowInstant(TabContents* preview) = 0;
-
-  // Invoked when the instant's tab contents should be hidden.
-  virtual void HideInstant() = 0;
-
   // Returns the desired bounds for instant in screen coordinates. Note that if
   // instant isn't currently visible this returns the bounds instant would be
   // placed at.
@@ -343,6 +324,12 @@ class BrowserWindow : public BaseWindow {
 
   // Construct a FindBar implementation for the |browser|.
   virtual FindBar* CreateFindBar() = 0;
+
+  // Updates the |top_y| where the top of the constrained window should be
+  // positioned. When implemented, the method returns true and the value of
+  // |top_y| is non-negative. When not implemented, the method returns false and
+  // the value of |top_y| is not defined.
+  virtual bool GetConstrainedWindowTopY(int* top_y) = 0;
 
   // Invoked when the preferred size of the contents in current tab has been
   // changed. We might choose to update the window size to accomodate this
@@ -375,7 +362,7 @@ class BrowserWindow : public BaseWindow {
   // available on mac.
   virtual void ShowPasswordGenerationBubble(
       const gfx::Rect& rect,
-      const webkit::forms::PasswordForm& form,
+      const content::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) {}
 
  protected:

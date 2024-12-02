@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
@@ -22,12 +23,6 @@
 #if defined(USE_SKIA)
 #define FLIP_FRAMEBUFFER_VERTICALLY
 #endif
-
-class CommandBufferProxy;
-class GpuChannelHost;
-class GpuChannelHostFactory;
-struct GpuMemoryAllocationForRenderer;
-
 
 namespace gpu {
 
@@ -53,6 +48,11 @@ using WebKit::WGC3Dfloat;
 using WebKit::WGC3Dclampf;
 using WebKit::WGC3Dintptr;
 using WebKit::WGC3Dsizeiptr;
+
+namespace content {
+class GpuChannelHost;
+class GpuChannelHostFactory;
+struct GpuMemoryAllocationForRenderer;
 
 // TODO(piman): move this logic to the compositor and remove it from the
 // context...
@@ -81,13 +81,13 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual ~WebGraphicsContext3DCommandBufferImpl();
 
   void InitializeWithCommandBuffer(
-      CommandBufferProxy* command_buffer,
+      CommandBufferProxyImpl* command_buffer,
       const Attributes& attributes,
       bool bind_generates_resources);
 
   bool Initialize(const Attributes& attributes,
                   bool bind_generates_resources,
-                  content::CauseForGpuLaunch cause);
+                  CauseForGpuLaunch cause);
 
   // The following 3 IDs let one uniquely identify this context.
   // Gets the GPU process ID for this context.
@@ -99,7 +99,7 @@ class WebGraphicsContext3DCommandBufferImpl
   // Gets the context ID (relative to the channel).
   int GetContextID();
 
-  CommandBufferProxy* GetCommandBufferProxy() { return command_buffer_; }
+  CommandBufferProxyImpl* GetCommandBufferProxy() { return command_buffer_; }
 
   gpu::gles2::GLES2Implementation* GetImplementation() { return gl_; }
 
@@ -127,7 +127,7 @@ class WebGraphicsContext3DCommandBufferImpl
       const WebGraphicsContext3D::Attributes& attributes,
       bool bind_generates_resources,
       const GURL& active_url,
-      content::CauseForGpuLaunch cause);
+      CauseForGpuLaunch cause);
 
   // Create & initialize a WebGraphicsContext3DCommandBufferImpl.  Return NULL
   // on any failure.
@@ -586,6 +586,15 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void pushGroupMarkerEXT(const WGC3Dchar* marker);
   virtual void popGroupMarkerEXT();
 
+  // GL_OES_vertex_array_object
+  virtual WebGLId createVertexArrayOES();
+  virtual void deleteVertexArrayOES(WebGLId array);
+  virtual WGC3Dboolean isVertexArrayOES(WebGLId array);
+  virtual void bindVertexArrayOES(WebGLId array);
+
+  virtual void bindTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint image_id);
+  virtual void releaseTexImage2DCHROMIUM(WGC3Denum target, WGC3Dint image_id);
+
  protected:
   virtual GrGLInterface* onCreateGrGLInterface();
 
@@ -710,7 +719,7 @@ class WebGraphicsContext3DCommandBufferImpl
   bool initialized_;
   WebGraphicsContext3DCommandBufferImpl* parent_;
   uint32 parent_texture_id_;
-  CommandBufferProxy* command_buffer_;
+  CommandBufferProxyImpl* command_buffer_;
   gpu::gles2::GLES2CmdHelper* gles2_helper_;
   gpu::TransferBuffer* transfer_buffer_;
   gpu::gles2::GLES2Implementation* gl_;
@@ -719,5 +728,7 @@ class WebGraphicsContext3DCommandBufferImpl
   bool bind_generates_resources_;
   bool use_echo_for_swap_ack_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_CLIENT_WEBGRAPHICSCONTEXT3D_COMMAND_BUFFER_IMPL_H_

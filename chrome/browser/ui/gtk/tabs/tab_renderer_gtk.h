@@ -248,6 +248,7 @@ class TabRendererGtk : public ui::AnimationDelegate,
 
     SkBitmap favicon;
     gfx::CairoCachedSurface cairo_favicon;
+    gfx::CairoCachedSurface cairo_overlay;
     bool is_default_favicon;
     string16 title;
     bool loading;
@@ -278,6 +279,11 @@ class TabRendererGtk : public ui::AnimationDelegate,
   void DisplayCrashedFavicon();
   void ResetCrashedFavicon();
 
+  // Checks whether a recording is in progress, and updates resources
+  // accordingly (e.g. sets up an overlay for the favicon, starts a throbbing
+  // animation).
+  void UpdateForRecordingState(content::WebContents* contents);
+
   // Generates the bounds for the interior items of the tab.
   void Layout();
 
@@ -305,7 +311,7 @@ class TabRendererGtk : public ui::AnimationDelegate,
   // sides for the rounded tab shape.
   void DrawTabBackground(cairo_t* cr,
                          GtkWidget* widget,
-                         const gfx::Image* tab_bg,
+                         const gfx::Image& tab_bg,
                          int offset_x,
                          int offset_y);
 
@@ -400,6 +406,9 @@ class TabRendererGtk : public ui::AnimationDelegate,
 
   // Animation used when the title of an inactive mini-tab changes.
   scoped_ptr<ui::ThrobAnimation> mini_title_animation_;
+
+  // Animation used when the favicon has an overlay (e.g. for recording).
+  scoped_ptr<ui::ThrobAnimation> favicon_overlay_animation_;
 
   // Contains the loading animation state.
   LoadingAnimation loading_animation_;

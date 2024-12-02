@@ -152,6 +152,11 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   function->set_include_incognito(
       extension_info_map->IsIncognitoEnabled(extension->id()));
 
+  if (!CheckPermissions(function, extension, params, ipc_sender, routing_id)) {
+    LogFailure(extension, params.name, kAccessDenied);
+    return;
+  }
+
   ExtensionsQuotaService* quota = extension_info_map->GetQuotaService();
   std::string violation_error = quota->Assess(extension->id(),
                                               function,
@@ -214,6 +219,12 @@ void ExtensionFunctionDispatcher::Dispatch(
   function_ui->set_profile(profile_);
   function->set_include_incognito(service->CanCrossIncognito(extension));
 
+  if (!CheckPermissions(function, extension, params, render_view_host,
+                        render_view_host->GetRoutingID())) {
+    LogFailure(extension, params.name, kAccessDenied);
+    return;
+  }
+
   ExtensionsQuotaService* quota = service->quota_service();
   std::string violation_error = quota->Assess(extension->id(),
                                               function,
@@ -246,8 +257,24 @@ void ExtensionFunctionDispatcher::Dispatch(
 
 void ExtensionFunctionDispatcher::OnExtensionFunctionCompleted(
     const Extension* extension) {
-  profile()->GetExtensionProcessManager()->DecrementLazyKeepaliveCount(
-      extension);
+  extensions::ExtensionSystem::Get(profile())->process_manager()->
+      DecrementLazyKeepaliveCount(extension);
+}
+
+// static
+bool ExtensionFunctionDispatcher::CheckPermissions(
+    ExtensionFunction* function,
+    const Extension* extension,
+    const ExtensionHostMsg_Request_Params& params,
+    IPC::Sender* ipc_sender,
+    int routing_id) {
+  if (!function->HasPermission()) {
+    LOG(ERROR) << "Extension " << extension->id() << " does not have "
+               << "permission to function: " << params.name;
+    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    return false;
+  }
+  return true;
 }
 
 // static
@@ -290,13 +317,6 @@ ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
       function->AsUIThreadExtensionFunction();
   if (function_ui) {
     function_ui->SetRenderViewHost(render_view_host);
-  }
-
-  if (!function->HasPermission()) {
-    LOG(ERROR) << "Extension " << extension->id() << " does not have "
-               << "permission to function: " << params.name;
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
-    return NULL;
   }
 
   return function;

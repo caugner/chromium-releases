@@ -8,6 +8,7 @@
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
+#include "ash/system/tray/tray_bubble_wrapper.h"
 #include "ash/system/tray/tray_constants.h"
 #include "base/message_loop.h"
 #include "ui/aura/window.h"
@@ -18,6 +19,8 @@
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+using views::TrayBubbleView;
 
 namespace ash {
 
@@ -30,62 +33,6 @@ namespace {
 // detailed view.
 const int kDetailedBubbleMaxHeight = kTrayPopupItemHeight * 5;
 
-// TODO(stevenjb/jennyz): Remove this when TrayBubbleBorder is integrated with
-// BubbleBorder. See crbug.com/132772, crbug.com/139813.
-class TrayPopupItemBorder : public views::Border {
- public:
-  explicit TrayPopupItemBorder(views::View* owner, ShelfAlignment alignment)
-      : owner_(owner),
-        alignment_(alignment) {
-  }
-  virtual ~TrayPopupItemBorder() {}
-
- private:
-  // Overridden from views::Border.
-  virtual void Paint(const views::View& view,
-                     gfx::Canvas* canvas) const OVERRIDE {
-    const views::View* parent = view.parent();
-    int index = parent->GetIndexOf(&view);
-
-    // Draw a dark top-border for the first item.
-    if (index == 0)
-      canvas->FillRect(gfx::Rect(0, 0, view.width(), 1), kBorderDarkColor);
-
-    // Bottom border.
-    if ((index != parent->child_count() - 1) ||
-        (alignment_ != SHELF_ALIGNMENT_BOTTOM)) {
-      canvas->FillRect(gfx::Rect(0, view.height() - 1, view.width(), 1),
-                       kBorderLightColor);
-    }
-
-    // Left and right borders.
-    if (alignment_ != SHELF_ALIGNMENT_LEFT) {
-      canvas->FillRect(gfx::Rect(0, 0, 1, view.height()),
-                       kBorderDarkColor);
-    }
-    if (alignment_ != SHELF_ALIGNMENT_RIGHT) {
-      canvas->FillRect(gfx::Rect(view.width() - 1, 0, 1, view.height()),
-                       kBorderDarkColor);
-    }
-  }
-
-  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE {
-    const views::View* parent = owner_->parent();
-    int index = parent->GetIndexOf(owner_);
-    int left = (alignment_ == SHELF_ALIGNMENT_LEFT) ? 0 : 1;
-    int right = (alignment_ == SHELF_ALIGNMENT_RIGHT) ? 0 : 1;
-    insets->Set(index == 0 ? 1 : 0,
-                left,
-                (index != parent->child_count() - 1) ? 1 : 0,
-                right);
-  }
-
-  views::View* owner_;
-  ShelfAlignment alignment_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrayPopupItemBorder);
-};
-
 // A view with some special behaviour for tray items in the popup:
 // - optionally changes background color on hover.
 class TrayPopupItemContainer : public views::View {
@@ -96,7 +43,6 @@ class TrayPopupItemContainer : public views::View {
       : hover_(false),
         change_background_(change_background) {
     set_notify_enter_exit_on_child(true);
-    set_border(new TrayPopupItemBorder(this, alignment));
     views::BoxLayout* layout = new views::BoxLayout(
         views::BoxLayout::kVertical, 0, 0, 0);
     layout->set_spread_blank_space(true);
@@ -183,7 +129,6 @@ SystemTrayBubble::SystemTrayBubble(
     BubbleType bubble_type)
     : tray_(tray),
       bubble_view_(NULL),
-      bubble_widget_(NULL),
       items_(items),
       bubble_type_(bubble_type),
       autoclose_delay_(0) {
@@ -193,12 +138,7 @@ SystemTrayBubble::~SystemTrayBubble() {
   DestroyItemViews();
   // Reset the host pointer in bubble_view_ in case its destruction is deferred.
   if (bubble_view_)
-    bubble_view_->reset_host();
-  if (bubble_widget_) {
-    bubble_widget_->RemoveObserver(this);
-    // This triggers the destruction of bubble_view_.
-    bubble_widget_->Close();
-  }
+    bubble_view_->reset_delegate();
 }
 
 void SystemTrayBubble::UpdateView(
@@ -224,7 +164,7 @@ void SystemTrayBubble::UpdateView(
     settings.AddObserver(new AnimationObserverDeleteLayer(layer));
     settings.SetTransitionDuration(swipe_duration);
     settings.SetTweenType(ui::Tween::EASE_OUT);
-    ui::Transform transform;
+    gfx::Transform transform;
     transform.SetTranslateX(layer->bounds().width());
     layer->SetTransform(transform);
   }
@@ -266,7 +206,7 @@ void SystemTrayBubble::UpdateView(
     return;
   }
 
-  bubble_widget_->GetContentsView()->Layout();
+  bubble_view_->GetWidget()->GetContentsView()->Layout();
   // Make sure that the bubble is large enough for the default view.
   if (bubble_type_ == BUBBLE_TYPE_DEFAULT) {
     bubble_view_->SetMaxHeight(0);  // Clear max height limit.
@@ -277,7 +217,7 @@ void SystemTrayBubble::UpdateView(
   if (bubble_type == BUBBLE_TYPE_DETAILED) {
     ui::Layer* new_layer = bubble_view_->layer();
     gfx::Rect bounds = new_layer->bounds();
-    ui::Transform transform;
+    gfx::Transform transform;
     transform.SetTranslateX(bounds.width());
     new_layer->SetTransform(transform);
     {
@@ -285,53 +225,26 @@ void SystemTrayBubble::UpdateView(
       settings.AddObserver(new AnimationObserverDeleteLayer(layer));
       settings.SetTransitionDuration(swipe_duration);
       settings.SetTweenType(ui::Tween::EASE_OUT);
-      new_layer->SetTransform(ui::Transform());
+      new_layer->SetTransform(gfx::Transform());
     }
   }
 }
 
 void SystemTrayBubble::InitView(views::View* anchor,
-                                TrayBubbleView::InitParams init_params,
-                                user::LoginStatus login_status) {
+                                user::LoginStatus login_status,
+                                TrayBubbleView::InitParams* init_params) {
   DCHECK(bubble_view_ == NULL);
 
   if (bubble_type_ == BUBBLE_TYPE_DETAILED &&
-      init_params.max_height < kDetailedBubbleMaxHeight) {
-    init_params.max_height = kDetailedBubbleMaxHeight;
+      init_params->max_height < kDetailedBubbleMaxHeight) {
+    init_params->max_height = kDetailedBubbleMaxHeight;
   } else if (bubble_type_ == BUBBLE_TYPE_NOTIFICATION) {
-    init_params.close_on_deactivate = false;
+    init_params->close_on_deactivate = false;
   }
-  bubble_view_ = TrayBubbleView::Create(anchor, this, init_params);
+  bubble_view_ = TrayBubbleView::Create(
+      tray_->GetBubbleWindowContainer(), anchor, tray_, init_params);
 
   CreateItemViews(login_status);
-
-  DCHECK(bubble_widget_ == NULL);
-  bubble_widget_ = views::BubbleDelegateView::CreateBubble(bubble_view_);
-  bubble_widget_->AddObserver(this);
-
-  InitializeAndShowBubble(bubble_widget_, bubble_view_, tray_);
-}
-
-void SystemTrayBubble::BubbleViewDestroyed() {
-  DestroyItemViews();
-  bubble_view_ = NULL;
-}
-
-void SystemTrayBubble::OnMouseEnteredView() {
-  StopAutoCloseTimer();
-}
-
-void SystemTrayBubble::OnMouseExitedView() {
-  RestartAutoCloseTimer();
-}
-
-void SystemTrayBubble::OnClickedOutsideView() {
-  if (bubble_type_ != BUBBLE_TYPE_NOTIFICATION)
-    bubble_widget_->Close();
-}
-
-string16 SystemTrayBubble::GetAccessibleName() {
-  return tray_->GetAccessibleName();
 }
 
 void SystemTrayBubble::DestroyItemViews() {
@@ -350,6 +263,10 @@ void SystemTrayBubble::DestroyItemViews() {
         break;
     }
   }
+}
+
+void SystemTrayBubble::BubbleViewDestroyed() {
+  bubble_view_ = NULL;
 }
 
 void SystemTrayBubble::StartAutoCloseTimer(int seconds) {
@@ -372,21 +289,31 @@ void SystemTrayBubble::RestartAutoCloseTimer() {
 }
 
 void SystemTrayBubble::Close() {
-  if (bubble_widget_)
-    bubble_widget_->Close();
+  tray_->HideBubbleWithView(bubble_view());
 }
 
 void SystemTrayBubble::SetVisible(bool is_visible) {
-  if (!bubble_widget_)
+  if (!bubble_view_)
     return;
+  views::Widget* bubble_widget = bubble_view_->GetWidget();
   if (is_visible)
-    bubble_widget_->Show();
+    bubble_widget->Show();
   else
-    bubble_widget_->Hide();
+    bubble_widget->Hide();
 }
 
 bool SystemTrayBubble::IsVisible() {
-  return bubble_widget_ && bubble_widget_->IsVisible();
+  return bubble_view() && bubble_view()->GetWidget()->IsVisible();
+}
+
+bool SystemTrayBubble::ShouldShowLauncher() const {
+  for (std::vector<ash::SystemTrayItem*>::const_iterator it = items_.begin();
+       it != items_.end();
+       ++it) {
+    if ((*it)->ShouldShowLauncher())
+      return true;
+  }
+  return false;
 }
 
 void SystemTrayBubble::CreateItemViews(user::LoginStatus login_status) {
@@ -410,12 +337,6 @@ void SystemTrayBubble::CreateItemViews(user::LoginStatus login_status) {
           view, tray_->shelf_alignment(), bubble_type_ == BUBBLE_TYPE_DEFAULT));
     }
   }
-}
-
-void SystemTrayBubble::OnWidgetClosing(views::Widget* widget) {
-  CHECK_EQ(bubble_widget_, widget);
-  bubble_widget_ = NULL;
-  tray_->RemoveBubble(this);
 }
 
 }  // namespace internal

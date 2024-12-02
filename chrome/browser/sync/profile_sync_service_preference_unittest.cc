@@ -105,6 +105,7 @@ class ProfileSyncServicePreferenceTest
   }
 
   virtual void TearDown() {
+    service_->Shutdown();
     service_.reset();
     profile_.reset();
     AbstractProfileSyncServiceTest::TearDown();
@@ -397,7 +398,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeActionUpdate) {
   {
     syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_UPDATE));
   }
@@ -418,7 +419,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeActionAdd) {
   {
     syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_ADD));
   }
@@ -441,7 +442,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeUnknownPreference) {
   {
     syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_UPDATE));
   }
@@ -476,7 +477,7 @@ TEST_F(ProfileSyncServicePreferenceTest, ManagedPreferences) {
   {
     syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_UPDATE));
   }
@@ -539,7 +540,7 @@ TEST_F(ProfileSyncServicePreferenceTest,
   {
     syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_ADD));
   }

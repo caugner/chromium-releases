@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <deque>
 #include <string>
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/message_loop.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
@@ -26,6 +26,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 using ::testing::_;
+using ::testing::AtMost;
+using ::testing::Invoke;
 using ::testing::IsNull;
 using ::testing::Return;
 using ::testing::ReturnRef;
@@ -61,7 +63,7 @@ ACTION_P(ReturnBuffer, buffer) {
 }
 
 ACTION_P2(RunDecryptCB, status, buffer) {
-  arg1.Run(status, buffer);
+  arg2.Run(status, buffer);
 }
 
 class FFmpegVideoDecoderTest : public testing::Test {
@@ -87,7 +89,9 @@ class FFmpegVideoDecoderTest : public testing::Test {
     encrypted_i_frame_buffer_ = CreateFakeEncryptedBuffer();
   }
 
-  virtual ~FFmpegVideoDecoderTest() {}
+  virtual ~FFmpegVideoDecoderTest() {
+    Stop();
+  }
 
   void Initialize() {
     config_.Initialize(kCodecVP8, VIDEO_CODEC_PROFILE_UNKNOWN, kVideoFormat,
@@ -119,12 +123,27 @@ class FFmpegVideoDecoderTest : public testing::Test {
     InitializeWithConfigAndStatus(config, PIPELINE_OK);
   }
 
+  void CancelDecrypt(Decryptor::StreamType stream_type) {
+    if (!decrypt_cb_.is_null()) {
+       base::ResetAndReturn(&decrypt_cb_).Run(
+           Decryptor::kError, scoped_refptr<DecoderBuffer>(NULL));
+    }
+  }
+
   void Reset() {
+    EXPECT_CALL(*decryptor_, CancelDecrypt(Decryptor::kVideo))
+        .WillOnce(Invoke(this, &FFmpegVideoDecoderTest::CancelDecrypt));
     decoder_->Reset(NewExpectedClosure());
     message_loop_.RunAllPending();
   }
 
   void Stop() {
+    // Use AtMost(1) here because CancelDecrypt() will be called once if the
+    // decoder was initialized and has not been stopped, and will not be
+    // called otherwise.
+    EXPECT_CALL(*decryptor_, CancelDecrypt(Decryptor::kVideo))
+        .Times(AtMost(1))
+        .WillRepeatedly(Invoke(this, &FFmpegVideoDecoderTest::CancelDecrypt));
     decoder_->Stop(NewExpectedClosure());
     message_loop_.RunAllPending();
   }
@@ -226,6 +245,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
   VideoDecoderConfig config_;
 
   VideoDecoder::ReadCB read_cb_;
+  Decryptor::DecryptCB decrypt_cb_;
 
   // Various buffers for testing.
   scoped_array<uint8_t> frame_buffer_;
@@ -233,9 +253,6 @@ class FFmpegVideoDecoderTest : public testing::Test {
   scoped_refptr<DecoderBuffer> i_frame_buffer_;
   scoped_refptr<DecoderBuffer> corrupt_i_frame_buffer_;
   scoped_refptr<DecoderBuffer> encrypted_i_frame_buffer_;
-
-  // Used for generating timestamped buffers.
-  std::deque<int64> timestamps_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FFmpegVideoDecoderTest);
@@ -450,7 +467,8 @@ TEST_F(FFmpegVideoDecoderTest, DecodeEncryptedFrame_Normal) {
   InitializeWithEncryptedConfig();
 
   // Simulate decoding a single encrypted frame.
-  EXPECT_CALL(*decryptor_, Decrypt(encrypted_i_frame_buffer_, _))
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
       .WillRepeatedly(RunDecryptCB(Decryptor::kSuccess, i_frame_buffer_));
 
   VideoDecoder::Status status;
@@ -469,7 +487,8 @@ TEST_F(FFmpegVideoDecoderTest, DecodeEncryptedFrame_DecryptError) {
   // Simulate decoding a single encrypted frame.
   EXPECT_CALL(*demuxer_, Read(_))
       .WillRepeatedly(ReturnBuffer(encrypted_i_frame_buffer_));
-  EXPECT_CALL(*decryptor_, Decrypt(encrypted_i_frame_buffer_, _))
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
       .WillRepeatedly(RunDecryptCB(Decryptor::kError,
                                    scoped_refptr<media::DecoderBuffer>()));
 
@@ -491,7 +510,8 @@ TEST_F(FFmpegVideoDecoderTest, DecodeEncryptedFrame_NoDecryptionKey) {
   // Simulate decoding a single encrypted frame.
   EXPECT_CALL(*demuxer_, Read(_))
       .WillRepeatedly(ReturnBuffer(encrypted_i_frame_buffer_));
-  EXPECT_CALL(*decryptor_, Decrypt(encrypted_i_frame_buffer_, _))
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
       .WillRepeatedly(RunDecryptCB(Decryptor::kNoKey,
                                    scoped_refptr<media::DecoderBuffer>()));
 
@@ -514,9 +534,13 @@ TEST_F(FFmpegVideoDecoderTest, DecodeEncryptedFrame_CorruptedBufferReturned) {
   // Simulate decoding a single encrypted frame.
   EXPECT_CALL(*demuxer_, Read(_))
       .WillRepeatedly(ReturnBuffer(encrypted_i_frame_buffer_));
-  EXPECT_CALL(*decryptor_, Decrypt(encrypted_i_frame_buffer_, _))
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
       .WillRepeatedly(RunDecryptCB(Decryptor::kSuccess,
                                    corrupt_i_frame_buffer_));
+  // The decoder only detects the error at the second decoding call. So
+  // |statistics_cb_| still gets called once.
+  EXPECT_CALL(statistics_cb_, OnStatistics(_));
 
   // Our read should still get satisfied with end of stream frame during an
   // error.
@@ -574,6 +598,26 @@ TEST_F(FFmpegVideoDecoderTest, Reset_DuringPendingRead) {
   message_loop_.RunAllPending();
 }
 
+// Test resetting when there is a pending decrypt on the decryptor.
+TEST_F(FFmpegVideoDecoderTest, Reset_DuringPendingDecrypt) {
+  InitializeWithEncryptedConfig();
+
+  EXPECT_CALL(*demuxer_, Read(_))
+      .WillRepeatedly(ReturnBuffer(encrypted_i_frame_buffer_));
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
+      .WillOnce(SaveArg<2>(&decrypt_cb_));
+
+  decoder_->Read(read_cb_);
+  message_loop_.RunAllPending();
+  // Make sure the Read() on the decoder triggers a Decrypt() on the decryptor.
+  EXPECT_FALSE(decrypt_cb_.is_null());
+
+  EXPECT_CALL(*this, FrameReady(VideoDecoder::kOk, IsNull()));
+  Reset();
+  message_loop_.RunAllPending();
+}
+
 // Test stopping when decoder has initialized but not decoded.
 TEST_F(FFmpegVideoDecoderTest, Stop_Initialized) {
   Initialize();
@@ -606,18 +650,36 @@ TEST_F(FFmpegVideoDecoderTest, Stop_DuringPendingRead) {
   decoder_->Read(read_cb_);
   message_loop_.RunAllPending();
 
-  // Make sure the Read() on the decoder triggers a Read() on
-  // the demuxer.
+  // Make sure the Read() on the decoder triggers a Read() on the demuxer.
   EXPECT_FALSE(read_cb.is_null());
 
-  Stop();
-
   EXPECT_CALL(*this, FrameReady(VideoDecoder::kOk, IsNull()));
+
+  Stop();
 
   read_cb.Run(DemuxerStream::kOk, i_frame_buffer_);
   message_loop_.RunAllPending();
 }
 
+// Test stopping when there is a pending decrypt on the decryptor.
+TEST_F(FFmpegVideoDecoderTest, Stop_DuringPendingDecrypt) {
+  InitializeWithEncryptedConfig();
+
+  EXPECT_CALL(*demuxer_, Read(_))
+      .WillRepeatedly(ReturnBuffer(encrypted_i_frame_buffer_));
+  EXPECT_CALL(*decryptor_,
+              Decrypt(Decryptor::kVideo, encrypted_i_frame_buffer_, _))
+      .WillOnce(SaveArg<2>(&decrypt_cb_));
+
+  decoder_->Read(read_cb_);
+  message_loop_.RunAllPending();
+  // Make sure the Read() on the decoder triggers a Decrypt() on the decryptor.
+  EXPECT_FALSE(decrypt_cb_.is_null());
+
+  EXPECT_CALL(*this, FrameReady(VideoDecoder::kOk, IsNull()));
+  Stop();
+  message_loop_.RunAllPending();
+}
 
 // Test aborted read on the demuxer stream.
 TEST_F(FFmpegVideoDecoderTest, AbortPendingRead) {
@@ -636,7 +698,7 @@ TEST_F(FFmpegVideoDecoderTest, AbortPendingRead) {
 }
 
 // Test aborted read on the demuxer stream.
-TEST_F(FFmpegVideoDecoderTest, AbortPendingReadDuringFlush) {
+TEST_F(FFmpegVideoDecoderTest, AbortPendingReadDuringReset) {
   Initialize();
 
   DemuxerStream::ReadCB read_cb;
@@ -649,9 +711,8 @@ TEST_F(FFmpegVideoDecoderTest, AbortPendingReadDuringFlush) {
   message_loop_.RunAllPending();
   ASSERT_FALSE(read_cb.is_null());
 
-  // Flush while there is still an outstanding read on the demuxer.
-  decoder_->Reset(NewExpectedClosure());
-  message_loop_.RunAllPending();
+  // Reset while there is still an outstanding read on the demuxer.
+  Reset();
 
   // Signal an aborted demuxer read.
   read_cb.Run(DemuxerStream::kAborted, NULL);

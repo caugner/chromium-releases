@@ -23,11 +23,11 @@
 #include "chrome/common/icon_messages.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -104,14 +104,6 @@ class PrerenderContents::TabContentsDelegateImpl
     return NULL;
   }
 
-  virtual bool ShouldAddNavigationToHistory(
-      const history::HistoryAddPageArgs& add_page_args,
-      content::NavigationType navigation_type) OVERRIDE {
-    add_page_vector_.push_back(
-        scoped_refptr<history::HistoryAddPageArgs>(add_page_args.Clone()));
-    return false;
-  }
-
   virtual bool CanDownload(RenderViewHost* render_view_host,
                            int request_id,
                            const std::string& request_method) OVERRIDE {
@@ -171,30 +163,18 @@ class PrerenderContents::TabContentsDelegateImpl
     prerender_contents_->Destroy(FINAL_STATUS_REGISTER_PROTOCOL_HANDLER);
   }
 
-  // Commits the History of Pages to the given TabContents.
-  void CommitHistory(TabContents* tab) {
-    for (size_t i = 0; i < add_page_vector_.size(); ++i)
-      tab->history_tab_helper()->UpdateHistoryForNavigation(
-          add_page_vector_[i].get());
-  }
-
  private:
-  typedef std::vector<scoped_refptr<history::HistoryAddPageArgs> >
-      AddPageVector;
-
-  // Caches pages to be added to the history.
-  AddPageVector add_page_vector_;
-
   PrerenderContents* prerender_contents_;
 };
 
 void PrerenderContents::AddPendingPrerender(
     const base::WeakPtr<PrerenderHandle> weak_prerender_handle,
+    const Origin origin,
     const GURL& url,
     const content::Referrer& referrer,
     const gfx::Size& size) {
   pending_prerenders_.push_back(
-      PendingPrerenderInfo(weak_prerender_handle, url, referrer, size));
+      PendingPrerenderInfo(weak_prerender_handle, origin, url, referrer, size));
 }
 
 bool PrerenderContents::IsPendingEntry(
@@ -227,7 +207,7 @@ void PrerenderContents::StartPendingPrerenders() {
        ++it) {
     if (it->weak_prerender_handle && it->weak_prerender_handle->IsValid()) {
       prerender_manager_->StartPendingPrerender(
-          it->weak_prerender_handle.get(), ORIGIN_LINK_REL_PRERENDER, child_id_,
+          it->weak_prerender_handle.get(), it->origin, child_id_,
           it->url, it->referrer, it->size, session_storage_namespace);
     }
   }
@@ -235,10 +215,12 @@ void PrerenderContents::StartPendingPrerenders() {
 
 PrerenderContents::PendingPrerenderInfo::PendingPrerenderInfo(
     const base::WeakPtr<PrerenderHandle> weak_prerender_handle,
+    const Origin origin,
     const GURL& url,
     const content::Referrer& referrer,
     const gfx::Size& size)
     : weak_prerender_handle(weak_prerender_handle),
+      origin(origin),
       url(url),
       referrer(referrer),
       size(size) {
@@ -351,7 +333,7 @@ void PrerenderContents::StartPrerendering(
       prerender_manager_);
 
   // Close ourselves when the application is shutting down.
-  notification_registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
+  notification_registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                               content::NotificationService::AllSources());
 
   // Register for our parent profile to shutdown, so we can shut ourselves down
@@ -443,7 +425,7 @@ void PrerenderContents::Observe(int type,
       Destroy(FINAL_STATUS_PROFILE_DESTROYED);
       return;
 
-    case content::NOTIFICATION_APP_TERMINATING:
+    case chrome::NOTIFICATION_APP_TERMINATING:
       Destroy(FINAL_STATUS_APP_TERMINATING);
       return;
 
@@ -543,7 +525,7 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
     return false;
   }
   if (match_complete_status_ != MATCH_COMPLETE_REPLACEMENT_PENDING &&
-      prerender_manager_->HasRecentlyBeenNavigatedTo(url)) {
+      prerender_manager_->HasRecentlyBeenNavigatedTo(origin(), url)) {
     Destroy(FINAL_STATUS_RECENTLY_VISITED);
     return false;
   }
@@ -584,6 +566,7 @@ void PrerenderContents::DidStopLoading(
 
 void PrerenderContents::DidStartProvisionalLoadForFrame(
     int64 frame_id,
+    int64 parent_frame_id,
     bool is_main_frame,
     const GURL& validated_url,
     bool is_error_page,
@@ -699,9 +682,16 @@ const RenderViewHost* PrerenderContents::GetRenderViewHost() const {
   return prerender_contents_->web_contents()->GetRenderViewHost();
 }
 
+void PrerenderContents::DidNavigate(
+    const history::HistoryAddPageArgs& add_page_args) {
+  add_page_vector_.push_back(add_page_args);
+}
+
 void PrerenderContents::CommitHistory(TabContents* tab) {
-  if (tab_contents_delegate_.get())
-    tab_contents_delegate_->CommitHistory(tab);
+  HistoryTabHelper* history_tab_helper =
+    HistoryTabHelper::FromWebContents(tab->web_contents());
+  for (size_t i = 0; i < add_page_vector_.size(); ++i)
+    history_tab_helper->UpdateHistoryForNavigation(add_page_vector_[i]);
 }
 
 Value* PrerenderContents::GetAsValue() const {

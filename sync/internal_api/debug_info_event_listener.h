@@ -16,7 +16,6 @@
 #include "sync/js/js_backend.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/sessions/debug_info_getter.h"
-#include "sync/sessions/session_state.h"
 
 namespace syncer {
 
@@ -58,11 +57,14 @@ class DebugInfoEventListener : public SyncManager::Observer,
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnCryptographerStateChanged(
       Cryptographer* cryptographer) OVERRIDE;
-  virtual void OnPassphraseTypeChanged(PassphraseType type) OVERRIDE;
+  virtual void OnPassphraseTypeChanged(
+      PassphraseType type,
+      base::Time explicit_passphrase_time) OVERRIDE;
 
   // Sync manager events.
   void OnNudgeFromDatatype(ModelType datatype);
-  void OnIncomingNotification(const ModelTypeStateMap& type_state_map);
+  void OnIncomingNotification(
+      const ModelTypeInvalidationMap& invalidation_map);
 
   // DebugInfoGetter Implementation.
   virtual void GetAndClearDebugInfo(sync_pb::DebugInfo* debug_info) OVERRIDE;

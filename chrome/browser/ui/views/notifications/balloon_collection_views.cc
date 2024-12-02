@@ -80,7 +80,8 @@ bool BalloonCollectionImpl::IsCursorInBalloonCollection() const {
 #else
   // TODO(saintlou): Not sure if this is correct because on Windows at least
   // the following call is GetCursorPos() not GetMessagePos().
-  gfx::Point cursor(gfx::Screen::GetCursorScreenPoint());
+  // TODO(scottmg): NativeScreen might be wrong. http://crbug.com/133312
+  gfx::Point cursor(gfx::Screen::GetNativeScreen()->GetCursorScreenPoint());
 #endif
   return GetBalloonsBoundingBox().Contains(cursor);
 }
@@ -107,7 +108,7 @@ void BalloonCollectionImpl::SetPositionPreference(
   PositionBalloons(true);
 }
 
-#if !(defined(USE_ASH) && defined(OS_CHROMEOS))
+#if !defined(OS_CHROMEOS)
 // static
 BalloonCollection* BalloonCollection::Create() {
   return new BalloonCollectionImpl();

@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/requirements_checker.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "sync/api/string_ordinal.h"
 
 using content::BrowserThread;
@@ -61,7 +62,8 @@ SimpleExtensionLoadPrompt::~SimpleExtensionLoadPrompt() {
 }
 
 void SimpleExtensionLoadPrompt::ShowPrompt() {
-  install_ui_->ConfirmInstall(this, extension_);
+  install_ui_->ConfirmInstall(
+      this, extension_, ExtensionInstallPrompt::GetDefaultShowDialogCallback());
 }
 
 void SimpleExtensionLoadPrompt::InstallUIProceed() {
@@ -70,7 +72,6 @@ void SimpleExtensionLoadPrompt::InstallUIProceed() {
     perms_updater.GrantActivePermissions(extension_, false);
     service_weak_->OnExtensionInstalled(
         extension_,
-        false,  // Not from web store.
         syncer::StringOrdinal(),
         false /* no requirement errors */);
   }
@@ -262,7 +263,6 @@ void UnpackedInstaller::OnLoaded() {
   PermissionsUpdater perms_updater(service_weak_->profile());
   perms_updater.GrantActivePermissions(extension_, false);
   service_weak_->OnExtensionInstalled(extension_,
-                                      false,  // Not from web store.
                                       syncer::StringOrdinal(),
                                       false /* no requirement errors */);
 }

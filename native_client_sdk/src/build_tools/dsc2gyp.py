@@ -34,7 +34,8 @@ NEXE_TARGET = """\
       'libraries': %(LIBS)s,
       'include_dirs': %(INCLUDES)s,
       'cflags': ['-m32'] + %(CFLAGS)s,
-      'make_valid_configurations': ['newlib-debug', 'newlib-release', 'glibc-debug', 'glibc-release'],
+      'make_valid_configurations': ['newlib-debug', 'newlib-release',
+                                    'glibc-debug', 'glibc-release'],
       'ldflags': ['-m32'],
       'toolset': 'target',
       %(CONFIGS)s
@@ -46,7 +47,8 @@ NEXE_TARGET = """\
       'sources': %(SOURCES)s,
       'libraries': %(LIBS)s,
       'include_dirs': %(INCLUDES)s,
-      'make_valid_configurations': ['newlib-debug', 'newlib-release', 'glibc-debug', 'glibc-release'],
+      'make_valid_configurations': ['newlib-debug', 'newlib-release',
+                                    'glibc-debug', 'glibc-release'],
       'cflags': ['-m64'] + %(CFLAGS)s,
       'ldflags': ['-m64'],
       'toolset': 'target',
@@ -84,7 +86,8 @@ HOST_EXE_TARGET = """\
       'make_valid_configurations': ['host-debug', 'host-release'],
       'msvs_settings': {
         'VCLinkerTool': {
-          'AdditionalLibraryDirectories': ['../../lib/%(HOST)s_%(ARCH)s_host/<(CONFIGURATION_NAME)'],
+          'AdditionalLibraryDirectories':
+            ['../../lib/%(HOST)s_%(ARCH)s_host/<(CONFIGURATION_NAME)'],
          }
        },
        %(CONFIGS)s
@@ -97,13 +100,15 @@ NMF_TARGET = """\
       'product_name': '%(NAME)s.nmf',
       'product_dir': '<(PRODUCT_DIR)/%(TOOLCHAIN)s',
       'type': 'none',
-      'make_valid_configurations': ['newlib-debug', 'newlib-release', 'glibc-debug', 'glibc-release'],
+      'make_valid_configurations': ['%(TOOLCHAIN)s-debug', '%(TOOLCHAIN)s-release'],
       'actions': [
         {
           'action_name': 'nmf',
-          'inputs': ['<(PRODUCT_DIR)/%(NAME)s_x86_32.nexe', '<(PRODUCT_DIR)/%(NAME)s_x86_64.nexe'] + %(SODEPS)s,
+          'inputs': ['<(PRODUCT_DIR)/%(NAME)s_x86_32.nexe',
+                     '<(PRODUCT_DIR)/%(NAME)s_x86_64.nexe'] + %(SODEPS)s,
           'outputs': ['<(PRODUCT_DIR)/%(NAME)s.nmf'],
-          'action': ['../../tools/create_nmf.py', '-t', '%(TOOLCHAIN)s', '-s', '<(PRODUCT_DIR)'] + %(NMFACTION)s,
+          'action': ['../../tools/create_nmf.py', '-t', '%(TOOLCHAIN)s', '-s',
+                     '<(PRODUCT_DIR)'] + %(NMFACTION)s,
         },
       ]
     },
@@ -120,12 +125,14 @@ TOOLCHAIN_CONFIG = """\
 
 NEXE_CONFIG = """\
           '%(toolchain)s-release' : {
-            'cflags' : ['--%(toolchain)s', '-O2', '-idirafter', '../../include'],
+            'cflags' : ['--%(toolchain)s', '-O2',
+                        '-idirafter', '../../include'],
             'ldflags' : ['--%(toolchain)s'],
             'arflags' : ['--%(toolchain)s'],
           },
           '%(toolchain)s-debug' : {
-            'cflags' : ['--%(toolchain)s', '-g', '-O0', '-idirafter', '../../include'],
+            'cflags' : ['--%(toolchain)s', '-g', '-O0',
+                        '-idirafter', '../../include'],
             'ldflags' : ['--%(toolchain)s'],
             'arflags' : ['--%(toolchain)s'],
           },
@@ -134,26 +141,34 @@ NEXE_CONFIG = """\
 WIN32_CONFIGS = """\
   'target_defaults': {
     'default_configuration': 'Debug_PPAPI',
-    'configurations' : {
+    'configurations': {
       'Debug_PPAPI': {
         'msvs_configuration_platform': 'PPAPI',
-        'msbuild_configuration_attributes': {'ConfigurationType': 'DynamicLibrary'},
+        'msbuild_configuration_attributes': {
+          'ConfigurationType': 'DynamicLibrary'
+        },
         'include_dirs': ['../../include/win'],
         'defines': ['_WINDOWS', '_DEBUG', 'WIN32'],
       },
       'Release_PPAPI': {
         'msvs_configuration_platform': 'PPAPI',
-        'msbuild_configuration_attributes': {'ConfigurationType': 'DynamicLibrary'},
+        'msbuild_configuration_attributes': {
+          'ConfigurationType': 'DynamicLibrary'
+        },
         'include_dirs': ['../../include/win'],
         'defines': ['_WINDOWS', 'NDEBUG', 'WIN32'],
       },
       'Debug_NaCl': {
         'msvs_configuration_platform': 'NaCl',
-        'msbuild_configuration_attributes': {'ConfigurationType': 'Application'},
+        'msbuild_configuration_attributes': {
+          'ConfigurationType': 'Application'
+        },
       },
       'Release_NaCl': {
         'msvs_configuration_platform': 'NaCl',
-        'msbuild_configuration_attributes': {'ConfigurationType': 'Application'},
+        'msbuild_configuration_attributes': {
+          'ConfigurationType': 'Application'
+        },
       },
     },
   },
@@ -290,9 +305,9 @@ def ProcessDSC(filename, outfile=None):
       else:
         target['CONFIGS'] = ''
         target['HOST'] = 'linux'
-        target['CFLAGS'] = ['-fPIC']
+        target['CFLAGS'].append('-fPIC')
       if target['TYPE'] == 'main':
-        target['GYP_TYPE'] = 'executable'
+        target['GYP_TYPE'] = 'shared_library'
         if win32:
           target['EXT'] = ''
         else:

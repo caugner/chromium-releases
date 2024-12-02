@@ -10,6 +10,8 @@
 using dom_storage::DomStorageContext;
 using dom_storage::DomStorageSession;
 
+namespace content {
+
 SessionStorageNamespaceImpl::SessionStorageNamespaceImpl(
     DOMStorageContextImpl* context)
     : session_(new DomStorageSession(context->context())) {
@@ -38,6 +40,10 @@ void SessionStorageNamespaceImpl::SetShouldPersist(bool should_persist) {
   session_->SetShouldPersist(should_persist);
 }
 
+bool SessionStorageNamespaceImpl::should_persist() const {
+  return session_->should_persist();
+}
+
 SessionStorageNamespaceImpl* SessionStorageNamespaceImpl::Clone() {
   return new SessionStorageNamespaceImpl(session_->Clone());
 }
@@ -54,3 +60,5 @@ SessionStorageNamespaceImpl::SessionStorageNamespaceImpl(
 
 SessionStorageNamespaceImpl::~SessionStorageNamespaceImpl() {
 }
+
+}  // namespace content

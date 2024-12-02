@@ -7,6 +7,7 @@
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/workspace/workspace_event_handler.h"
 #include "ash/wm/workspace/workspace_window_resizer.h"
@@ -34,7 +35,7 @@ namespace internal {
 namespace {
 
 // Delay before showing.
-const int kShowDelayMS = 100;
+const int kShowDelayMS = 400;
 
 // Delay before hiding.
 const int kHideDelayMS = 500;
@@ -183,9 +184,9 @@ void MultiWindowResizeController::Show(Window* window,
       window, window->parent(), &show_location_in_parent_);
   if (show_timer_.IsRunning())
     return;
-  show_timer_.Start(FROM_HERE,
-                    base::TimeDelta::FromMilliseconds(kShowDelayMS),
-                    this, &MultiWindowResizeController::ShowNow);
+  show_timer_.Start(
+      FROM_HERE, base::TimeDelta::FromMilliseconds(kShowDelayMS),
+      this, &MultiWindowResizeController::ShowIfValidMouseLocation);
 }
 
 void MultiWindowResizeController::Hide() {
@@ -193,11 +194,20 @@ void MultiWindowResizeController::Hide() {
   if (window_resizer_.get())
     return;  // Ignore hides while actively resizing.
 
+  if (windows_.window1) {
+    windows_.window1->RemoveObserver(this);
+    windows_.window1 = NULL;
+  }
+  if (windows_.window2) {
+    windows_.window2->RemoveObserver(this);
+    windows_.window2 = NULL;
+  }
+
   show_timer_.Stop();
+
   if (!resize_widget_.get())
     return;
-  windows_.window1->RemoveObserver(this);
-  windows_.window2->RemoveObserver(this);
+
   for (size_t i = 0; i < windows_.other_windows.size(); ++i)
     windows_.other_windows[i]->RemoveObserver(this);
   mouse_watcher_.reset();
@@ -214,6 +224,17 @@ void MultiWindowResizeController::OnWindowDestroying(
   // Have to explicitly reset the WindowResizer, otherwise Hide() does nothing.
   window_resizer_.reset();
   Hide();
+}
+
+MultiWindowResizeController::ResizeWindows
+MultiWindowResizeController::DetermineWindowsFromScreenPoint(
+    aura::Window* window) const {
+  gfx::Point mouse_location(
+      gfx::Screen::GetScreenFor(window)->GetCursorScreenPoint());
+  wm::ConvertPointFromScreen(window, &mouse_location);
+  const int component =
+      window->delegate()->GetNonClientComponent(mouse_location);
+  return DetermineWindows(window, component, mouse_location);
 }
 
 MultiWindowResizeController::ResizeWindows
@@ -349,6 +370,15 @@ void MultiWindowResizeController::DelayedHide() {
                     this, &MultiWindowResizeController::Hide);
 }
 
+void MultiWindowResizeController::ShowIfValidMouseLocation() {
+  if (DetermineWindowsFromScreenPoint(windows_.window1).Equals(windows_) ||
+      DetermineWindowsFromScreenPoint(windows_.window2).Equals(windows_)) {
+    ShowNow();
+  } else {
+    Hide();
+  }
+}
+
 void MultiWindowResizeController::ShowNow() {
   DCHECK(!resize_widget_.get());
   DCHECK(windows_.is_valid());
@@ -430,7 +460,7 @@ void MultiWindowResizeController::CompleteResize(int event_flags) {
   window_resizer_.reset();
 
   // Mouse may still be over resizer, if not hide.
-  gfx::Point screen_loc = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point screen_loc = Shell::GetScreen()->GetCursorScreenPoint();
   if (!resize_widget_->GetWindowBoundsInScreen().Contains(screen_loc)) {
     Hide();
   } else {

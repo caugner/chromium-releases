@@ -6,9 +6,11 @@
 
 #import "base/logging.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_button.h"
+#import "chrome/browser/ui/cocoa/constrained_window/constrained_window_control_utils.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/hover_close_button.h"
 #import "chrome/browser/ui/constrained_window.h"
+#import "chrome/browser/ui/constrained_window_constants.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/cocoa/window_size_constants.h"
@@ -17,36 +19,6 @@ namespace {
 
 const CGFloat kWindowMinWidth = 500;
 const CGFloat kButtonGap = 6;
-const CGFloat kButtonMinWidth = 72;
-const CGFloat kCloseButtonSize = 16;
-
-// Creates a label control.
-scoped_nsobject<NSTextField> CreateLabel() {
-  scoped_nsobject<NSTextField> label(
-      [[NSTextField alloc] initWithFrame:NSZeroRect]);
-  [label setEditable:NO];
-  [label setSelectable:NO];
-  [label setBezeled:NO];
-  [label setDrawsBackground:NO];
-  return label;
-}
-
-// Helper function to create constrained window label string with the given
-// font.
-NSAttributedString* GetAttributedLabelString(
-    NSString* string,
-    ui::ResourceBundle::FontStyle font_style) {
-  const gfx::Font& font =
-      ui::ResourceBundle::GetSharedInstance().GetFont(font_style);
-  NSColor* color =
-      gfx::SkColorToCalibratedNSColor(ConstrainedWindow::GetTextColor());
-  NSDictionary* attributes = [NSDictionary dictionaryWithObjectsAndKeys:
-      font.GetNativeFont(), NSFontAttributeName,
-      color, NSForegroundColorAttributeName,
-      nil];
-  return [[[NSAttributedString alloc] initWithString:string
-                                          attributes:attributes] autorelease];
-}
 
 }  // namespace
 
@@ -70,15 +42,15 @@ NSAttributedString* GetAttributedLabelString(
   if ((self = [super init])) {
     window_.reset([[ConstrainedWindowCustomWindow alloc]
         initWithContentRect:ui::kWindowSizeDeterminedLater]);
-    [window_ setReleasedWhenClosed:NO];
     NSView* contentView = [window_ contentView];
 
-    informativeTextField_ = CreateLabel();
+    informativeTextField_.reset([constrained_window::CreateLabel() retain]);
     [contentView addSubview:informativeTextField_];
-    messageTextField_ = CreateLabel();
+    messageTextField_.reset([constrained_window::CreateLabel() retain]);
     [contentView addSubview:messageTextField_];
 
-    closeButton_.reset([[HoverCloseButton alloc] initWithFrame:NSZeroRect]);
+    closeButton_.reset(
+        [[WebUIHoverCloseButton alloc] initWithFrame:NSZeroRect]);
     [contentView addSubview:closeButton_];
   }
   return self;
@@ -90,7 +62,11 @@ NSAttributedString* GetAttributedLabelString(
 
 - (void)setInformativeText:(NSString*)string {
   [informativeTextField_ setAttributedStringValue:
-      GetAttributedLabelString(string, ConstrainedWindow::kTextFontStyle)];
+      constrained_window::GetAttributedLabelString(
+          string,
+          ConstrainedWindowConstants::kTextFontStyle,
+          NSNaturalTextAlignment,
+          NSLineBreakByWordWrapping)];
 }
 
 - (NSString*)messageText {
@@ -99,7 +75,11 @@ NSAttributedString* GetAttributedLabelString(
 
 - (void)setMessageText:(NSString*)string {
   [messageTextField_ setAttributedStringValue:
-      GetAttributedLabelString(string, ConstrainedWindow::kTitleFontStyle)];
+      constrained_window::GetAttributedLabelString(
+          string,
+          ConstrainedWindowConstants::kTitleFontStyle,
+          NSNaturalTextAlignment,
+          NSLineBreakByWordWrapping)];
 }
 
 - (NSView*)accessoryView {
@@ -146,10 +126,6 @@ NSAttributedString* GetAttributedLabelString(
   for (NSButton* button in buttons_.get()) {
     [button sizeToFit];
     NSSize size = [button frame].size;
-    if (size.width < kButtonMinWidth) {
-      size.width = kButtonMinWidth;
-      [button setFrameSize:size];
-    }
     buttonWidth += size.width;
   }
   if ([buttons_ count])
@@ -159,47 +135,49 @@ NSAttributedString* GetAttributedLabelString(
   CGFloat windowWidth = buttonWidth;
   if (accessoryView_.get())
     windowWidth = std::max(windowWidth, NSWidth([accessoryView_ frame]));
-  windowWidth += ConstrainedWindow::kHorizontalPadding * 2;
+  windowWidth += ConstrainedWindowConstants::kHorizontalPadding * 2;
   windowWidth = std::max(windowWidth, kWindowMinWidth);
 
   // Layout controls.
   [self layoutButtonsWithWindowWidth:windowWidth];
   CGFloat curY = [buttons_ count] ? NSMaxY([[buttons_ lastObject] frame])
-                                  : ConstrainedWindow::kVerticalPadding;
+      : ConstrainedWindowConstants::kClientBottomPadding;
   curY = [self layoutAccessoryViewAtYPos:curY];
   curY = [self layoutTextField:informativeTextField_
                           yPos:curY
                    windowWidth:windowWidth];
+  CGFloat availableMessageWidth =
+      windowWidth - ConstrainedWindow::GetCloseButtonSize() - kButtonGap;
   curY = [self layoutTextField:messageTextField_
                           yPos:curY
-                   windowWidth:windowWidth - kCloseButtonSize - kButtonGap];
+                   windowWidth:availableMessageWidth];
   [self layoutCloseButtonWithWindowWidth:windowWidth];
 
   // Update window frame.
-  curY += ConstrainedWindow::kVerticalPadding;
+  curY += ConstrainedWindowConstants::kTitleTopPadding;
   [window_ setFrame:NSMakeRect(0, 0, windowWidth, curY)
             display:NO];
 }
 
 - (void)layoutButtonsWithWindowWidth:(CGFloat)windowWidth {
   // Layout first 2 button right to left.
-  CGFloat curX = windowWidth - ConstrainedWindow::kHorizontalPadding;
+  CGFloat curX = windowWidth - ConstrainedWindowConstants::kHorizontalPadding;
   const int buttonCount = [buttons_ count];
   for (int i = 0; i < std::min(2, buttonCount); ++i) {
     NSButton* button = [buttons_ objectAtIndex:i];
     NSRect rect = [button frame];
     rect.origin.x = curX - NSWidth(rect);
-    rect.origin.y = ConstrainedWindow::kVerticalPadding;
+    rect.origin.y = ConstrainedWindowConstants::kClientBottomPadding;
     [button setFrameOrigin:rect.origin];
     curX = NSMinX(rect) - kButtonGap;
   }
 
   // Layout remaining buttons left to right.
-  curX = ConstrainedWindow::kHorizontalPadding;
+  curX = ConstrainedWindowConstants::kHorizontalPadding;
   for (int i = buttonCount - 1; i >= 2; --i) {
     NSButton* button = [buttons_ objectAtIndex:i];
     [button setFrameOrigin:
-        NSMakePoint(curX, ConstrainedWindow::kVerticalPadding)];
+        NSMakePoint(curX, ConstrainedWindowConstants::kClientBottomPadding)];
     curX += NSMaxX([button frame]) + kButtonGap;
   }
 }
@@ -214,9 +192,10 @@ NSAttributedString* GetAttributedLabelString(
 
   [textField setHidden:NO];
   NSRect rect;
-  rect.origin.y = yPos + ConstrainedWindow::kRowPadding;
-  rect.origin.x = ConstrainedWindow::kHorizontalPadding;
-  rect.size.width = windowWidth - ConstrainedWindow::kHorizontalPadding * 2;
+  rect.origin.y = yPos + ConstrainedWindowConstants::kRowPadding;
+  rect.origin.x = ConstrainedWindowConstants::kHorizontalPadding;
+  rect.size.width = windowWidth -
+      ConstrainedWindowConstants::kHorizontalPadding * 2;
   rect.size.height = 1;
   [textField setFrame:rect];
   [GTMUILocalizerAndLayoutTweaker sizeToFitFixedWidthTextField:textField];
@@ -227,18 +206,18 @@ NSAttributedString* GetAttributedLabelString(
   if (!accessoryView_.get())
     return yPos;
   NSRect frame = [accessoryView_ frame];
-  frame.origin.y = yPos + ConstrainedWindow::kRowPadding;
-  frame.origin.x = ConstrainedWindow::kHorizontalPadding;
+  frame.origin.y = yPos + ConstrainedWindowConstants::kRowPadding;
+  frame.origin.x = ConstrainedWindowConstants::kHorizontalPadding;
   [accessoryView_ setFrameOrigin:frame.origin];
   return NSMaxY(frame);
 }
 
 - (void)layoutCloseButtonWithWindowWidth:(CGFloat)windowWidth {
   NSRect frame;
-  frame.size.width = kCloseButtonSize;
-  frame.size.height = kCloseButtonSize;
-  frame.origin.x =
-      windowWidth - ConstrainedWindow::kHorizontalPadding - NSWidth(frame);
+  frame.size.width = ConstrainedWindow::GetCloseButtonSize();
+  frame.size.height = ConstrainedWindow::GetCloseButtonSize();
+  frame.origin.x = windowWidth -
+      ConstrainedWindowConstants::kHorizontalPadding - NSWidth(frame);
   frame.origin.y = NSMaxY([messageTextField_ frame]) - NSHeight(frame);
   [closeButton_ setFrame:frame];
 }

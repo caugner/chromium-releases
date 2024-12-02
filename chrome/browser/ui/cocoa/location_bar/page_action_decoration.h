@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_PAGE_ACTION_DECORATION_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_PAGE_ACTION_DECORATION_H_
 
+#include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #import "chrome/browser/ui/cocoa/location_bar/image_decoration.h"
-#include "chrome/common/extensions/extension_action.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -56,6 +56,9 @@ class PageActionDecoration : public ImageDecoration,
 
   // Overridden from |LocationBarDecoration|
   virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
+  virtual void DrawWithBackgroundInFrame(NSRect background_frame,
+                                         NSRect frame,
+                                         NSView* control_view) OVERRIDE;
   virtual bool AcceptsMousePress() OVERRIDE;
   virtual bool OnMousePressed(NSRect frame) OVERRIDE;
   virtual NSString* GetToolTip() OVERRIDE;

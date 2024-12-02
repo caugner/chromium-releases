@@ -27,13 +27,9 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 
-using content::BrowserThread;
-using content::SpeechRecognitionError;
-using content::SpeechRecognitionErrorCode;
-using content::SpeechRecognitionHypothesis;
-using content::SpeechRecognitionResult;
 using net::URLFetcher;
 
+namespace content {
 namespace {
 
 const char kWebServiceBaseUrl[] =
@@ -41,13 +37,15 @@ const char kWebServiceBaseUrl[] =
 const char kDownstreamUrl[] = "/down?";
 const char kUpstreamUrl[] = "/up?";
 const int kAudioPacketIntervalMs = 100;
-const speech::AudioEncoder::Codec kDefaultAudioCodec =
-    speech::AudioEncoder::CODEC_FLAC;
+const AudioEncoder::Codec kDefaultAudioCodec = AudioEncoder::CODEC_FLAC;
+
+// This mathces the maximum maxAlternatives value supported by the server.
+const uint32 kMaxMaxAlternatives = 30;
 
 // TODO(hans): Remove this and other logging when we don't need it anymore.
 void DumpResponse(const std::string& response) {
   DVLOG(1) << "------------";
-  speech::proto::SpeechRecognitionEvent event;
+  proto::SpeechRecognitionEvent event;
   if (!event.ParseFromString(response)) {
     DVLOG(1) << "Parse failed!";
     return;
@@ -56,13 +54,13 @@ void DumpResponse(const std::string& response) {
     DVLOG(1) << "STATUS\t" << event.status();
   for (int i = 0; i < event.result_size(); ++i) {
     DVLOG(1) << "RESULT #" << i << ":";
-    const speech::proto::SpeechRecognitionResult& res = event.result(i);
+    const proto::SpeechRecognitionResult& res = event.result(i);
     if (res.has_final())
       DVLOG(1) << "  FINAL:\t" << res.final();
     if (res.has_stability())
       DVLOG(1) << "  STABILITY:\t" << res.stability();
     for (int j = 0; j < res.alternative_size(); ++j) {
-      const speech::proto::SpeechRecognitionAlternative& alt =
+      const proto::SpeechRecognitionAlternative& alt =
           res.alternative(j);
       if (alt.has_confidence())
         DVLOG(1) << "    CONFIDENCE:\t" << alt.confidence();
@@ -88,8 +86,6 @@ std::string GetAPIKey() {
 }
 
 }  // namespace
-
-namespace speech {
 
 const int GoogleStreamingRemoteEngine::kUpstreamUrlFetcherIdForTests = 0;
 const int GoogleStreamingRemoteEngine::kDownstreamUrlFetcherIdForTests = 1;
@@ -350,18 +346,20 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
   upstream_args.push_back(
       config_.filter_profanities ? "pFilter=2" : "pFilter=0");
   if (config_.max_hypotheses > 0U) {
+    int max_alternatives = std::min(kMaxMaxAlternatives,
+                                    config_.max_hypotheses);
     upstream_args.push_back("maxAlternatives=" +
-                            base::UintToString(config_.max_hypotheses));
+                            base::UintToString(max_alternatives));
   }
   upstream_args.push_back("client=chromium");
   if (!config_.hardware_info.empty()) {
     upstream_args.push_back(
         "xhw=" + net::EscapeQueryParamValue(config_.hardware_info, true));
   }
-  upstream_args.push_back("continuous");
-  upstream_args.push_back("interim");
-  // TODO(hans): Set 'continuous', 'interim', and 'confidence' based on user
-  // input.
+  if (config_.continuous)
+    upstream_args.push_back("continuous");
+  if (config_.interim_results)
+    upstream_args.push_back("interim");
 
   GURL upstream_url(std::string(kWebServiceBaseUrl) +
                     std::string(kUpstreamUrl) +
@@ -417,24 +415,24 @@ GoogleStreamingRemoteEngine::ProcessDownstreamResponse(
       case proto::SpeechRecognitionEvent::STATUS_SUCCESS:
         break;
       case proto::SpeechRecognitionEvent::STATUS_NO_SPEECH:
-        return Abort(content::SPEECH_RECOGNITION_ERROR_NO_SPEECH);
+        return Abort(SPEECH_RECOGNITION_ERROR_NO_SPEECH);
       case proto::SpeechRecognitionEvent::STATUS_ABORTED:
-        return Abort(content::SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
       case proto::SpeechRecognitionEvent::STATUS_AUDIO_CAPTURE:
-        return Abort(content::SPEECH_RECOGNITION_ERROR_AUDIO);
+        return Abort(SPEECH_RECOGNITION_ERROR_AUDIO);
       case proto::SpeechRecognitionEvent::STATUS_NETWORK:
-        return Abort(content::SPEECH_RECOGNITION_ERROR_NETWORK);
+        return Abort(SPEECH_RECOGNITION_ERROR_NETWORK);
       case proto::SpeechRecognitionEvent::STATUS_NOT_ALLOWED:
         // TODO(hans): We need a better error code for this.
-        return Abort(content::SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
       case proto::SpeechRecognitionEvent::STATUS_SERVICE_NOT_ALLOWED:
         // TODO(hans): We need a better error code for this.
-        return Abort(content::SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
       case proto::SpeechRecognitionEvent::STATUS_BAD_GRAMMAR:
-        return Abort(content::SPEECH_RECOGNITION_ERROR_BAD_GRAMMAR);
+        return Abort(SPEECH_RECOGNITION_ERROR_BAD_GRAMMAR);
       case proto::SpeechRecognitionEvent::STATUS_LANGUAGE_NOT_SUPPORTED:
         // TODO(hans): We need a better error code for this.
-        return Abort(content::SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
     }
   }
 
@@ -452,6 +450,8 @@ GoogleStreamingRemoteEngine::ProcessDownstreamResponse(
       SpeechRecognitionHypothesis hypothesis;
       if (ws_alternative.has_confidence())
         hypothesis.confidence = ws_alternative.confidence();
+      else if (ws_result.has_stability())
+        hypothesis.confidence = ws_result.stability();
       DCHECK(ws_alternative.has_transcript());
       // TODO(hans): Perhaps the transcript should be required in the proto?
       if (ws_alternative.has_transcript())
@@ -517,19 +517,19 @@ GoogleStreamingRemoteEngine::CloseDownstream(const FSMEventArgs&) {
 
 GoogleStreamingRemoteEngine::FSMState
 GoogleStreamingRemoteEngine::AbortSilently(const FSMEventArgs&) {
-  return Abort(content::SPEECH_RECOGNITION_ERROR_NONE);
+  return Abort(SPEECH_RECOGNITION_ERROR_NONE);
 }
 
 GoogleStreamingRemoteEngine::FSMState
 GoogleStreamingRemoteEngine::AbortWithError(const FSMEventArgs&) {
-  return Abort(content::SPEECH_RECOGNITION_ERROR_NETWORK);
+  return Abort(SPEECH_RECOGNITION_ERROR_NETWORK);
 }
 
 GoogleStreamingRemoteEngine::FSMState GoogleStreamingRemoteEngine::Abort(
     SpeechRecognitionErrorCode error_code) {
   DVLOG(1) << "Aborting with error " << error_code;
 
-  if (error_code != content::SPEECH_RECOGNITION_ERROR_NONE) {
+  if (error_code != SPEECH_RECOGNITION_ERROR_NONE) {
     delegate()->OnSpeechRecognitionEngineError(
         SpeechRecognitionError(error_code));
   }
@@ -589,4 +589,4 @@ GoogleStreamingRemoteEngine::FSMEventArgs::FSMEventArgs(FSMEvent event_value)
 GoogleStreamingRemoteEngine::FSMEventArgs::~FSMEventArgs() {
 }
 
-}  // namespace speech
+}  // namespace content

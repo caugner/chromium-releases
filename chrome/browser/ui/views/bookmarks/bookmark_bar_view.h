@@ -26,9 +26,16 @@
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/drag_controller.h"
 
+class BookmarkBarInstructionsView;
 class BookmarkContextMenu;
 class Browser;
 class BrowserView;
+
+namespace chrome {
+namespace search {
+struct Mode;
+}
+}
 
 namespace content {
 class PageNavigator;
@@ -93,7 +100,8 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Changes the state of the bookmark bar.
   void SetBookmarkBarState(BookmarkBar::State state,
-                           BookmarkBar::AnimateChangeType animate_type);
+                           BookmarkBar::AnimateChangeType animate_type,
+                           const chrome::search::Mode& search_mode);
 
   // How much we want the bookmark bar to overlap the toolbar.  If |return_max|
   // is true, we return the maximum overlap rather than the current overlap.
@@ -142,14 +150,21 @@ class BookmarkBarView : public DetachableToolbarView,
   void StopThrobbing(bool immediate);
 
   // Returns the tooltip text for the specified url and title. The returned
-  // text is clipped to fit within the bounds of the monitor.
+  // text is clipped to fit within the bounds of the monitor. |context| is
+  // used to determine which gfx::Screen is used to retrieve bounds.
   //
   // Note that we adjust the direction of both the URL and the title based on
   // the locale so that pure LTR strings are displayed properly in RTL locales.
   static string16 CreateToolTipForURLAndTitle(const gfx::Point& screen_loc,
                                               const GURL& url,
                                               const string16& title,
-                                              Profile* profile);
+                                              Profile* profile,
+                                              gfx::NativeView context);
+
+  // For instant extended API, if search mode is |MODE_NTP|, stack bookmark bar
+  // on top, so that it floats on top of the content view (in z-order) and below
+  // the "Most Visited" thumbnails (in the y-direction).
+  void MaybeStackAtTop();
 
   // DetachableToolbarView methods:
   virtual bool IsDetached() const OVERRIDE;
@@ -387,7 +402,7 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // BookmarkBarInstructionsView that is visible if there are no bookmarks on
   // the bookmark bar.
-  views::View* instructions_;
+  BookmarkBarInstructionsView* instructions_;
 
   ButtonSeparatorView* bookmarks_separator_view_;
 
