@@ -36,6 +36,7 @@ function test()
         WebInspector.scriptSnippetModel._snippetStorage._lastSnippetIdentifierSetting.set(0);
         WebInspector.scriptSnippetModel._snippetStorage._snippetsSetting.set([]);
         WebInspector.scriptSnippetModel._lastSnippetEvaluationIndexSetting.set(0);
+        WebInspector.scriptSnippetModel._project.removeProject();
         WebInspector.scriptSnippetModel = new WebInspector.ScriptSnippetModel(WebInspector.workspace);
     }
 
@@ -163,7 +164,7 @@ function test()
         {
             var uiSourceCode1;
             var uiSourceCode2;
-            var uiSoruceCode3;
+            var uiSourceCode3;
             var context = WebInspector.context.flavor(WebInspector.ExecutionContext);
 
             resetSnippetsSettings();

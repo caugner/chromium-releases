@@ -9,6 +9,7 @@
 # * Change [ Skip ] to [ Pass ]
 # * Add a leading comment: ## Owners: user@example.com
 
+imported/csswg-test/WOFF2-UserAgent [ Skip ]
 imported/csswg-test/compositing-1 [ Skip ]
 imported/csswg-test/css-align-3 [ Skip ]
 imported/csswg-test/css-animations-1 [ Skip ]
@@ -165,6 +166,7 @@ imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/masking [ Sk
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/multicol3 [ Skip ]
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/reftest.list [ Skip ]
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/ruby [ Skip ]
+imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/selectors4 [ Skip ]
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/sync-tests-filter [ Skip ]
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/sync-tests.sh [ Skip ]
 imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/text-decor-3 [ Skip ]
@@ -198,6 +200,7 @@ imported/wpt/XMLHttpRequest [ Skip ]
 imported/wpt/ambient-light [ Skip ]
 imported/wpt/animation-timing [ Skip ]
 imported/wpt/annotation-model [ Skip ]
+imported/wpt/annotation-protocol [ Skip ]
 imported/wpt/app-uri [ Skip ]
 imported/wpt/battery-status [ Skip ]
 ## Owners: none; No tests in the directory.
@@ -226,6 +229,8 @@ imported/wpt/eventsource [ Skip ]
 imported/wpt/ext-xhtml-pubid [ Skip ]
 imported/wpt/fetch [ Skip ]
 imported/wpt/fonts [ Skip ]
+## Owners: foolip@chromium.org
+# imported/wpt/fullscreen [ Pass ]
 ## Owners: bajones@chromium.org
 # imported/wpt/gamepad [ Pass ]
 imported/wpt/generic-sensor [ Skip ]
@@ -292,13 +297,15 @@ imported/wpt/service-workers [ Skip ]
 ## Owners: jww@chromium.org
 imported/wpt/streams [ Skip ]
 imported/wpt/subresource-integrity [ Skip ]
-imported/wpt/svg [ Skip ]
+## Owners: foolip@chromium.org
+imported/wpt/svg [ Pass ]
+imported/wpt/svg/import [ Skip ]
 imported/wpt/tools [ Skip ]
 ## Owners: chongz@chromium.org
 # imported/wpt/touch-events [ Pass ]
 imported/wpt/typedarrays [ Skip ]
 ## Owners: dtapuska@chromium.org
-# imported/wpt/uievents [ Pass ]
+imported/wpt/uievents [ Pass ]
 imported/wpt/url [ Skip ]
 ## Owners: jsbell@chromium.org
 # imported/wpt/user-timing [ Pass ]
@@ -338,21 +345,8 @@ imported/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-037.html [
 imported/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-038.html [ Skip ]
 
 # crbug.com/490939: The following tests are too large.  They cause time out frequently.
-imported/wpt/dom/ranges/Range-compareBoundaryPoints.html [ Skip ]
-imported/wpt/dom/ranges/Range-comparePoint.html [ Skip ]
-imported/wpt/dom/ranges/Range-isPointInRange.html [ Skip ]
-imported/wpt/dom/ranges/Range-mutations.html [ Skip ]
-imported/wpt/dom/ranges/Range-set.html [ Skip ]
+# Also, html/dom/interfaces.html is flaky.
 imported/wpt/html/dom/interfaces.html [ Skip ]
-imported/wpt/html/dom/reflection-embedded.html [ Skip ]
-imported/wpt/html/dom/reflection-forms.html [ Skip ]
-imported/wpt/html/dom/reflection-grouping.html [ Skip ]
-imported/wpt/html/dom/reflection-metadata.html [ Skip ]
-imported/wpt/html/dom/reflection-misc.html [ Skip ]
-imported/wpt/html/dom/reflection-obsolete.html [ Skip ]
-imported/wpt/html/dom/reflection-sections.html [ Skip ]
-imported/wpt/html/dom/reflection-tabular.html [ Skip ]
-imported/wpt/html/dom/reflection-text.html [ Skip ]
 
 # Depends on unimported directories of web-platform-tests/.
 imported/wpt/html/browsers/browsing-the-web/read-text/load-text-plain.html [ Skip ]
@@ -444,6 +438,7 @@ imported/wpt/html/semantics/text-level-semantics/the-a-element/a-stringifier.htm
 imported/wpt/html/webappapis/system-state-and-capabilities/the-navigator-object/NavigatorID.html [ Skip ]
 
 # crbug.com/490940: Needs to load extra HTML resources.
+imported/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html [ Skip ]
 imported/wpt/dom/nodes/Document-createElement-namespace.html [ Skip ]
 imported/wpt/dom/nodes/Element-getElementsByTagName-change-document-HTMLNess.html [ Skip ]
 imported/wpt/dom/nodes/Node-isEqualNode-xhtml.xhtml [ Skip ]
@@ -501,6 +496,7 @@ imported/wpt/html/browsers/history/the-location-interface/scripted_click_locatio
 imported/wpt/html/browsers/history/the-location-interface/scripted_form_submit_assign_during_load.html [ Skip ]
 imported/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects.html [ Skip ]
 imported/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects.sub.html [ Skip ]
+imported/wpt/html/browsers/origin/origin-of-data-document.html [ Skip ]
 imported/wpt/html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-01.html [ Skip ]
 imported/wpt/html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-02.html [ Skip ]
 imported/wpt/html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-03.html [ Skip ]
@@ -660,6 +656,8 @@ imported/wpt/html/semantics/scripting-1/the-script-element/async_007.htm [ Skip 
 imported/wpt/html/semantics/scripting-1/the-script-element/async_008.htm [ Skip ]
 imported/wpt/html/semantics/scripting-1/the-script-element/async_009.htm [ Skip ]
 imported/wpt/html/semantics/scripting-1/the-script-element/async_010.htm [ Skip ]
+imported/wpt/html/semantics/scripting-1/the-script-element/script-crossorigin-network.html [ Skip ]
+imported/wpt/html/semantics/scripting-1/the-script-element/resources/cross-origin.py [ Skip ]
 
 # This test requires manual interventions.
 imported/wpt/pointerevents/pointerevent_pointermove-on-chorded-mouse-button.html [ Skip ]

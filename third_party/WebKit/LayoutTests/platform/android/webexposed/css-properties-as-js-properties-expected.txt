@@ -187,11 +187,14 @@ minWidth
 minZoom
 mixBlendMode
 motion
-motionOffset
-motionPath
-motionRotation
 objectFit
 objectPosition
+offset
+offsetAnchor
+offsetDistance
+offsetPath
+offsetPosition
+offsetRotation
 opacity
 order
 orientation

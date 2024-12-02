@@ -10,6 +10,7 @@ Loaded modules:
     extensions
     host
     main
+    persistence
     platform
     sdk
     ui
@@ -25,6 +26,7 @@ Loaded modules:
     extensions
     host
     main
+    persistence
     platform
     sdk
     ui
@@ -44,11 +46,13 @@ Loaded modules:
     host
     main
     network
+    persistence
     platform
     sdk
     snippets
     source_frame
     sources
+    text_editor
     ui
     ui_lazy
     workspace
@@ -67,11 +71,13 @@ Loaded modules:
     host
     main
     network
+    persistence
     platform
     sdk
     snippets
     source_frame
     sources
+    text_editor
     ui
     ui_lazy
     workspace
@@ -90,11 +96,13 @@ Loaded modules:
     host
     main
     network
+    persistence
     platform
     sdk
     snippets
     source_frame
     sources
+    text_editor
     ui
     ui_lazy
     workspace

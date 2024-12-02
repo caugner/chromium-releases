@@ -75,6 +75,7 @@ namespace http://www.w3.org/1999/xhtml
     property hasAttributeNS
     property hasAttributes
     property hasChildNodes
+    property hasPointerCapture
     property hidden
     property id
     property innerHTML
@@ -108,6 +109,7 @@ namespace http://www.w3.org/1999/xhtml
     property offsetTop
     property offsetWidth
     property onabort
+    property onauxclick
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -135,6 +137,7 @@ namespace http://www.w3.org/1999/xhtml
     property onended
     property onerror
     property onfocus
+    property ongotpointercapture
     property oninput
     property oninvalid
     property onkeydown
@@ -144,6 +147,7 @@ namespace http://www.w3.org/1999/xhtml
     property onloadeddata
     property onloadedmetadata
     property onloadstart
+    property onlostpointercapture
     property onmousedown
     property onmouseenter
     property onmouseleave
@@ -156,6 +160,14 @@ namespace http://www.w3.org/1999/xhtml
     property onpause
     property onplay
     property onplaying
+    property onpointercancel
+    property onpointerdown
+    property onpointerenter
+    property onpointerleave
+    property onpointermove
+    property onpointerout
+    property onpointerover
+    property onpointerup
     property onprogress
     property onratechange
     property onreset
@@ -192,6 +204,7 @@ namespace http://www.w3.org/1999/xhtml
     property previousSibling
     property querySelector
     property querySelectorAll
+    property releasePointerCapture
     property remove
     property removeAttribute
     property removeAttributeNS
@@ -211,6 +224,7 @@ namespace http://www.w3.org/1999/xhtml
     property setAttributeNS
     property setAttributeNode
     property setAttributeNodeNS
+    property setPointerCapture
     property shadowRoot
     property slot
     property spellcheck
@@ -307,6 +321,7 @@ html element audio
     property muted
     property networkState
     property onencrypted
+    property onwaitingforkey
     property pause
     property paused
     property play
@@ -1034,6 +1049,7 @@ html element video
     property muted
     property networkState
     property onencrypted
+    property onwaitingforkey
     property pause
     property paused
     property play
@@ -1138,6 +1154,7 @@ namespace http://www.w3.org/2000/svg
     property hasAttributeNS
     property hasAttributes
     property hasChildNodes
+    property hasPointerCapture
     property hidden
     property id
     property innerHTML
@@ -1171,6 +1188,7 @@ namespace http://www.w3.org/2000/svg
     property offsetTop
     property offsetWidth
     property onabort
+    property onauxclick
     property onbeforecopy
     property onbeforecut
     property onbeforepaste
@@ -1198,6 +1216,7 @@ namespace http://www.w3.org/2000/svg
     property onended
     property onerror
     property onfocus
+    property ongotpointercapture
     property oninput
     property oninvalid
     property onkeydown
@@ -1207,6 +1226,7 @@ namespace http://www.w3.org/2000/svg
     property onloadeddata
     property onloadedmetadata
     property onloadstart
+    property onlostpointercapture
     property onmousedown
     property onmouseenter
     property onmouseleave
@@ -1219,6 +1239,14 @@ namespace http://www.w3.org/2000/svg
     property onpause
     property onplay
     property onplaying
+    property onpointercancel
+    property onpointerdown
+    property onpointerenter
+    property onpointerleave
+    property onpointermove
+    property onpointerout
+    property onpointerover
+    property onpointerup
     property onprogress
     property onratechange
     property onreset
@@ -1255,6 +1283,7 @@ namespace http://www.w3.org/2000/svg
     property previousSibling
     property querySelector
     property querySelectorAll
+    property releasePointerCapture
     property remove
     property removeAttribute
     property removeAttributeNS
@@ -1274,6 +1303,7 @@ namespace http://www.w3.org/2000/svg
     property setAttributeNS
     property setAttributeNode
     property setAttributeNodeNS
+    property setPointerCapture
     property shadowRoot
     property slot
     property spellcheck

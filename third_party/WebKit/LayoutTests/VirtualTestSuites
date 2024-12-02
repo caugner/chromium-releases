@@ -22,6 +22,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "http/tests/worklet",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "compositing/webgl",
     "args": ["--enable-threaded-compositing"]
   },
@@ -231,11 +236,6 @@
   },
   {
     "prefix": "spv2",
-    "base": "fast/repaint",
-    "args": ["--enable-slimming-paint-v2"]
-  },
-  {
-    "prefix": "spv2",
     "base": "svg",
     "args": ["--enable-slimming-paint-v2"]
   },
@@ -283,5 +283,30 @@
     "prefix": "mojo-loading",
     "base": "webexposed",
     "args": ["--enable-blink-features=LoadingWithMojo"]
+  },
+  {
+    "prefix": "scalefactor150",
+    "base": "fast/events/synthetic-events",
+    "args": ["--force-device-scale-factor=1.5"]
+  },
+  {
+    "prefix": "enable_wasm",
+    "base": "http/tests/wasm",
+    "args": ["--enable-wasm"]
+  },
+  {
+    "prefix": "mojo-service-worker",
+    "base": "http/tests/serviceworker",
+    "args": ["--mojo-service-worker"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "fast/block/basic",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
+    "prefix": "layout_ng",
+    "base": "fast/block/margin-collapse",
+    "args": ["--enable-blink-features=LayoutNG"]
   }
 ]

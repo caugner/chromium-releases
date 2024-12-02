@@ -48,7 +48,7 @@ crbug.com/629058 plugins/fullscreen-plugins-dont-reload.html [ Leak ]
 # Untriaged but known leaks which may be false positives.
 # -----------------------------------------------------------------
 
-crbug.com/364417 fast/repaint/japanese-rl-selection-clear.html [ Leak ]
+crbug.com/364417 paint/invalidation/japanese-rl-selection-clear.html [ Leak ]
 
 crbug.com/455369 fast/html/marquee-destroyed-without-removed-from-crash.html [ Leak Pass ]
 
@@ -81,6 +81,8 @@ crbug.com/506754 http/tests/inspector/service-workers/service-worker-agents.html
 crbug.com/506754 http/tests/security/cross-origin-indexeddb-allowed.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
+crbug.com/506754 virtual/mojo-service-worker/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
+crbug.com/506754 virtual/mojo-service-worker/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 
 # -----------------------------------------------------------------
 # Untriaged but known leaks of ActiveDOMObject (Web Audio).
@@ -109,15 +111,10 @@ crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-ce
 crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/variables/variable-font-face-02.html [ Pass Leak ]
 crbug.com/594309 [ Linux ] imported/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/writing-modes-3/text-combine-upright-compression-007.html [ Leak ]
 
-# These fail in the leak detector: http://crbug.com/612924#c4
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_change-touch-action-onpointerdown_touch-manual.html [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_pointerout_after_pointercancel_touch-manual.html [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_touch-action-auto-css_touch-manual.html  [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_releasepointercapture_onpointercancel_touch-manual.html [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_touch-action-pan-x-pan-y_touch-manual.html  [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_touch-action-inherit_highest-parent-none_touch-manual.html  [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_pointercancel_touch-manual.html  [ Leak ]
-crbug.com/619060 [ Linux ] imported/wpt/pointerevents/pointerevent_pointerleave_after_pointercancel_touch-manual.html  [ Leak ]
+# -----------------------------------------------------------------
+# Leaks in virtual/threaded/http/tests/worklet/*
+# -----------------------------------------------------------------
+crbug.com/652535 [ Linux ] virtual/threaded/http/tests/worklet/animation-worklet-import.html [ Leak ]
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #

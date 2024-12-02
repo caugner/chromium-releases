@@ -123,6 +123,7 @@ webkit.org/b/84735 [ Win ] http/tests/inspector/change-iframe-src.html [ Slow ]
 crbug.com/504565 [ Mac ] http/tests/inspector/search/sources-search-scope.html [ Slow ]
 crbug.com/451577 http/tests/inspector/resource-tree/resource-tree-crafted-frame-add.html [ Slow ]
 crbug.com/451577 http/tests/inspector/resource-tree/resource-tree-frame-in-crafted-frame.html [ Slow ]
+crbug.com/642023 [ Debug Win7 ] media/video-autoplay-experiment-modes.html [ Slow ]
 
 crbug.com/510337 cssom/cssvalue-comparison.html [ Slow ]
 crbug.com/510337 inspector/elements/styles-1/edit-value-url-with-color.html [ Slow ]
@@ -176,11 +177,11 @@ crbug.com/453312 html5lib/generated/run-tests20-data.html [ Slow ]
 crbug.com/453312 html5lib/generated/run-webkit01-data.html [ Slow ]
 crbug.com/453312 html5lib/webkit-resumer.html [ Slow ]
 
-crbug.com/577381 [ Linux Debug ] imported/wpt/encoding/api-invalid-label.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_tests10.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_tests21.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_webkit01.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_domjs-unsafe.html [ Slow ]
+crbug.com/577381 imported/wpt/encoding/api-invalid-label.html [ Slow ]
+crbug.com/577381 imported/wpt/html/syntax/parsing/html5lib_tests10.html [ Slow ]
+crbug.com/577381 imported/wpt/html/syntax/parsing/html5lib_tests21.html [ Slow ]
+crbug.com/577381 imported/wpt/html/syntax/parsing/html5lib_webkit01.html [ Slow ]
+crbug.com/577381 imported/wpt/html/syntax/parsing/html5lib_domjs-unsafe.html [ Slow ]
 
 crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_entities01.html [ Slow ]
 crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_template.html [ Slow ]
@@ -188,6 +189,23 @@ crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests1.html [ Slow ]
 crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests16.html [ Slow ]
 crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests19.html [ Slow ]
 crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests2.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests20.html [ Slow ]
+
+crbug.com/490939 imported/wpt/dom/ranges/Range-compareBoundaryPoints.html [ Slow ]
+crbug.com/490939 imported/wpt/dom/ranges/Range-comparePoint.html [ Slow ]
+crbug.com/490939 imported/wpt/dom/ranges/Range-isPointInRange.html [ Slow ]
+crbug.com/490939 [ Release ] imported/wpt/dom/ranges/Range-mutations.html [ Slow ]
+crbug.com/490939 imported/wpt/dom/ranges/Range-set.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-embedded.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-forms.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-grouping.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-metadata.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-misc.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-obsolete.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-sections.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-tabular.html [ Slow ]
+crbug.com/490939 imported/wpt/html/dom/reflection-text.html [ Slow ]
+crbug.com/490939 imported/wpt/svg/interfaces.html [ Slow ]
 
 # FIXME: These tests might still be buggy and time out. They were marked as Slow on 9/20/2013.
 # Double-check the data after they've been running another week or so.
@@ -298,3 +316,12 @@ crbug.com/614910 virtual/gpu-rasterization/fast/images/color-profile-filter.html
 crbug.com/623798 paint/images/animated-gif-last-frame-crash.html [ Slow ]
 
 crbug.com/606649 fast/dom/gc-dom-tree-lifetime.html [ Slow ]
+
+crbug.com/647192 fast/css3-text/css3-word-break/word-break-all-ascii.html [ Slow ]
+crbug.com/647192 virtual/mojo-loading/webexposed/global-interface-listing.html [ Slow ]
+
+# These tests are slow with our MESA backend. They may be less slow when we have
+# bots running tests on real hardware or maybe when using SwiftShader.
+crbug.com/646528 compositing/lots-of-img-layers.html [ Slow ]
+crbug.com/646528 compositing/lots-of-img-layers-with-opacity.html [ Slow ]
+
