@@ -70,16 +70,8 @@ void CartHandler::GetCartDataCallback(GetMerchantCartsCallback callback,
   for (CartDB::KeyAndValue proto_pair : res) {
     auto cart = chrome_cart::mojom::MerchantCart::New();
     cart->merchant = std::move(proto_pair.second.merchant());
-
-    if (commerce::IsRuleDiscountPartnerMerchant(
-            GURL(proto_pair.second.merchant_cart_url()))) {
-      cart->cart_url = CartService::AppendUTM(
-          GURL(std::move(proto_pair.second.merchant_cart_url())),
-          show_discount);
-    } else {
-      cart->cart_url = GURL(std::move(proto_pair.second.merchant_cart_url()));
-    }
-
+    cart->cart_url =
+        cart_service_->AppendUTM(GURL(proto_pair.second.merchant_cart_url()));
     std::vector<std::string> image_urls;
     // Not show product images when showing welcome surface.
     if (!cart_service_->ShouldShowWelcomeSurface()) {
@@ -116,6 +108,11 @@ void CartHandler::GetDiscountConsentCardVisible(
   cart_service_->ShouldShowDiscountConsent(std::move(callback));
 }
 
+void CartHandler::GetDiscountToggleVisible(
+    GetDiscountToggleVisibleCallback callback) {
+  std::move(callback).Run(cart_service_->ShouldShowDiscountToggle());
+}
+
 void CartHandler::OnDiscountConsentAcknowledged(bool accept) {
   cart_service_->AcknowledgeDiscountConsent(accept);
 }
@@ -126,6 +123,12 @@ void CartHandler::OnDiscountConsentDismissed() {
 
 void CartHandler::OnDiscountConsentContinued() {
   cart_service_->InterestedInDiscountConsent();
+}
+
+void CartHandler::ShowNativeConsentDialog(
+    ShowNativeConsentDialogCallback callback) {
+  cart_service_->InterestedInDiscountConsent();
+  cart_service_->ShowNativeConsentDialog(std::move(callback));
 }
 
 void CartHandler::GetDiscountEnabled(GetDiscountEnabledCallback callback) {

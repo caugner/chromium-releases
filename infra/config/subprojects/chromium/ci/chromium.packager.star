@@ -11,7 +11,7 @@ ci.defaults.set(
     builder_group = "chromium.packager",
     cores = 8,
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    os = os.LINUX_BIONIC_SWITCH_TO_DEFAULT,
+    os = os.LINUX_DEFAULT,
     pool = ci.DEFAULT_POOL,
     service_account = "chromium-cipd-builder@chops-service-accounts.iam.gserviceaccount.com",
 )
@@ -95,6 +95,8 @@ ci.builder(
             "tools/android/avd/proto/creation/generic_android19.textpb",
             "tools/android/avd/proto/creation/generic_android22.textpb",
             "tools/android/avd/proto/creation/generic_android23.textpb",
+            "tools/android/avd/proto/creation/generic_android24.textpb",
+            "tools/android/avd/proto/creation/generic_playstore_android24.textpb",
             "tools/android/avd/proto/creation/generic_android25.textpb",
             "tools/android/avd/proto/creation/generic_playstore_android25.textpb",
             "tools/android/avd/proto/creation/generic_android27.textpb",
@@ -106,9 +108,10 @@ ci.builder(
             "tools/android/avd/proto/creation/generic_playstore_android30.textpb",
             "tools/android/avd/proto/creation/generic_android31.textpb",
             "tools/android/avd/proto/creation/generic_playstore_android31.textpb",
+            "tools/android/avd/proto/creation/generic_android32_foldable.textpb",
+            "tools/android/avd/proto/creation/generic_playstore_android32_foldable.textpb",
         ],
     },
-    os = os.LINUX_BIONIC_REMOVE,
     # Triggered manually through the scheduler UI
     # https://luci-scheduler.appspot.com/jobs/chromium/android-avd-packager
     schedule = "triggered",
@@ -193,6 +196,14 @@ ci.builder(
             {
                 "sdk_package_name": "system-images;android-23;google_apis;x86",
                 "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-23/google_apis/x86.yaml",
+            },
+            {
+                "sdk_package_name": "system-images;android-24;google_apis;x86",
+                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-24/google_apis/x86.yaml",
+            },
+            {
+                "sdk_package_name": "system-images;android-24;google_apis_playstore;x86",
+                "cipd_yaml": "third_party/android_sdk/cipd/system_images/android-24/google_apis_playstore/x86.yaml",
             },
             {
                 "sdk_package_name": "system-images;android-25;google_apis;x86",

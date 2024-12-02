@@ -33,7 +33,6 @@
 #import "ios/chrome/browser/net/crurl.h"
 #import "ios/chrome/browser/signin/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/chrome_account_manager_service_observer_bridge.h"
-#include "ios/chrome/browser/sync/sync_service_factory.h"
 #include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/elements/home_waiting_view.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_check_cell.h"
@@ -62,7 +61,6 @@
 #import "ios/chrome/browser/ui/table_view/table_view_favicon_data_source.h"
 #import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
 #import "ios/chrome/browser/ui/table_view/table_view_utils.h"
-#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/elements/popover_label_view_controller.h"
@@ -120,27 +118,6 @@ typedef NS_ENUM(NSInteger, ItemType) {
   ItemTypeOnDeviceEncryptionSetUp,
   ItemTypeOnDeviceEncryptionOptedInDescription,
   ItemTypeOnDeviceEncryptionOptedInLearnMore,
-};
-
-// State of on-device encryption used for
-// ItemTypeOnDeviceEncryptionOptInDescription, ItemTypeOnDeviceEncryptionSetUp
-// and ItemTypeOnDeviceEncryptionSetUp.
-typedef NS_ENUM(NSInteger, OnDeviceEncryptionState) {
-  // On device encryption is on.
-  // ItemTypeOnDeviceEncryptionOptInDescription is shown.
-  OnDeviceEncryptionStateOptedIn,
-  // User can opt-in on device encryption.
-  // ItemTypeOnDeviceEncryptionOptInDescription and
-  // ItemTypeOnDeviceEncryptionSetUp are shown.
-  OnDeviceEncryptionStateOfferOptIn,
-  // User can not opt-in in their current state.
-  // Currently it is either because:
-  // * User is not signed-in,
-  // * User hasn’t opted in to or disabled Sync for passwords (or equivalent
-  // enterprise policies),
-  // * User has a custom passphrase.
-  // SectionIdentifierOnDeviceEncryption is hidden.
-  OnDeviceEncryptionStateNotShown,
 };
 
 std::vector<std::unique_ptr<password_manager::PasswordForm>> CopyOf(
@@ -580,14 +557,12 @@ bool IsFaviconEnabled() {
   }
 
   // Passwords in other apps.
-  if (base::FeatureList::IsEnabled(kCredentialProviderExtensionPromo)) {
-    [model addSectionWithIdentifier:SectionIdentifierPasswordsInOtherApps];
-    if (!_passwordsInOtherAppsItem) {
-      _passwordsInOtherAppsItem = [self passwordsInOtherAppsItem];
-    }
-    [model addItem:_passwordsInOtherAppsItem
-        toSectionWithIdentifier:SectionIdentifierPasswordsInOtherApps];
+  [model addSectionWithIdentifier:SectionIdentifierPasswordsInOtherApps];
+  if (!_passwordsInOtherAppsItem) {
+    _passwordsInOtherAppsItem = [self passwordsInOtherAppsItem];
   }
+  [model addItem:_passwordsInOtherAppsItem
+      toSectionWithIdentifier:SectionIdentifierPasswordsInOtherApps];
 
   // Password check.
   [model addSectionWithIdentifier:SectionIdentifierPasswordCheck];
@@ -660,36 +635,42 @@ bool IsFaviconEnabled() {
 - (void)updateOnDeviceEncryptionSessionWithUpdateTableView:
     (BOOL)updateTableView {
   OnDeviceEncryptionState oldState = self.onDeviceEncryptionStateInModel;
-  OnDeviceEncryptionState newState = [self onDeviceEncryptionState];
+  OnDeviceEncryptionState newState =
+      self.navigationItem.searchController.active
+          ? OnDeviceEncryptionStateNotShown
+          : [self.delegate onDeviceEncryptionState];
   if (newState == oldState) {
     return;
   }
   self.onDeviceEncryptionStateInModel = newState;
   TableViewModel* model = self.tableViewModel;
 
-  // Index of the OnDeviceEncryption section if it exists.
-  // Index where it should be added if it does not exists.
-  NSInteger sectionIdentifierOnDeviceEncryptionIndex =
-      [model sectionForSectionIdentifier:SectionIdentifierPasswordCheck] + 1;
-  NSIndexSet* sectionIdentifierOnDeviceEncryptionIndexSet =
-      [NSIndexSet indexSetWithIndex:sectionIdentifierOnDeviceEncryptionIndex];
-
   if (newState == OnDeviceEncryptionStateNotShown) {
-    // Previous state was not `OnDeviceEncryptionStateNotShown`, wich mean the
+    // Previous state was not `OnDeviceEncryptionStateNotShown`, which means the
     // section `SectionIdentifierOnDeviceEncryption` exists and must be removed.
     // It also mean the table view is not yet shown and thus should not be
     // updated.
-    DCHECK(!updateTableView);
+    DCHECK(updateTableView);
     [self clearSectionWithIdentifier:SectionIdentifierOnDeviceEncryption
                     withRowAnimation:UITableViewRowAnimationAutomatic];
     return;
   }
+  NSInteger onDeviceEncryptionSectionIndex = NSNotFound;
 
   if (oldState == OnDeviceEncryptionStateNotShown) {
-    [model
-        insertSectionWithIdentifier:SectionIdentifierOnDeviceEncryption
-                            atIndex:sectionIdentifierOnDeviceEncryptionIndex];
+    NSInteger passwordCheckSectionIndex =
+        [model sectionForSectionIdentifier:SectionIdentifierPasswordCheck];
+    DCHECK_NE(NSNotFound, passwordCheckSectionIndex);
+    onDeviceEncryptionSectionIndex = passwordCheckSectionIndex + 1;
+    [model insertSectionWithIdentifier:SectionIdentifierOnDeviceEncryption
+                               atIndex:onDeviceEncryptionSectionIndex];
+  } else {
+    onDeviceEncryptionSectionIndex =
+        [model sectionForSectionIdentifier:SectionIdentifierOnDeviceEncryption];
   }
+  DCHECK_NE(NSNotFound, onDeviceEncryptionSectionIndex);
+  NSIndexSet* sectionIdentifierOnDeviceEncryptionIndexSet =
+      [NSIndexSet indexSetWithIndex:onDeviceEncryptionSectionIndex];
 
   [model deleteAllItemsFromSectionWithIdentifier:
              SectionIdentifierOnDeviceEncryption];
@@ -1005,12 +986,10 @@ bool IsFaviconEnabled() {
   return passwordItem;
 }
 
-- (PasswordFormContentItem*)
-    blockedFormItemWithText:(NSString*)text
-                    forForm:(const password_manager::PasswordForm&)form {
+- (PasswordFormContentItem*)blockedFormItemForForm:
+    (const password_manager::PasswordForm&)form {
   PasswordFormContentItem* passwordItem =
       [[PasswordFormContentItem alloc] initWithType:ItemTypeBlocked];
-  passwordItem.title = text;
   passwordItem.form = form;
   passwordItem.URL = [[CrURL alloc] initWithGURL:GURL(form.url)];
   passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
@@ -1018,12 +997,11 @@ bool IsFaviconEnabled() {
   return passwordItem;
 }
 
-// TODO(crbug.com/1300569): Remove this when kEnableFaviconForPasswords flag is
-// removed.
 - (LegacyPasswordFormContentItem*)
     legacySavedFormItemWithText:(NSString*)text
                   andDetailText:(NSString*)detailText
                         forForm:(const password_manager::PasswordForm&)form {
+  DCHECK(!IsFaviconEnabled());
   LegacyPasswordFormContentItem* passwordItem =
       [[LegacyPasswordFormContentItem alloc]
           initWithType:ItemTypeSavedPassword];
@@ -1043,11 +1021,10 @@ bool IsFaviconEnabled() {
   return passwordItem;
 }
 
-// TODO(crbug.com/1300569): Remove this when kEnableFaviconForPasswords flag is
-// removed.
 - (LegacyPasswordFormContentItem*)
     legacyBlockedFormItemWithText:(NSString*)text
                           forForm:(const password_manager::PasswordForm&)form {
+  DCHECK(!IsFaviconEnabled());
   LegacyPasswordFormContentItem* passwordItem =
       [[LegacyPasswordFormContentItem alloc] initWithType:ItemTypeBlocked];
   passwordItem.text = text;
@@ -1514,7 +1491,7 @@ bool IsFaviconEnabled() {
       if (hidden)
         continue;
       [model addItem:(IsFaviconEnabled()
-                          ? [self blockedFormItemWithText:text forForm:form]
+                          ? [self blockedFormItemForForm:form]
                           : [self legacyBlockedFormItemWithText:text
                                                         forForm:form])
           toSectionWithIdentifier:SectionIdentifierBlocked];
@@ -1778,8 +1755,6 @@ bool IsFaviconEnabled() {
   std::vector<password_manager::PasswordForm> blockedToDelete;
 
   for (NSIndexPath* indexPath in indexPaths) {
-    // TODO(crbug.com/1300569): Remove this when kEnableFaviconForPasswords flag
-    // is removed.
     password_manager::PasswordForm form =
         IsFaviconEnabled()
             ? base::mac::ObjCCastStrict<PasswordFormContentItem>(
@@ -1862,8 +1837,7 @@ bool IsFaviconEnabled() {
                                   animated:NO];
     self.mostRecentlyUpdatedItem = nil;
   } else if (self.legacyMostRecentlyUpdatedItem) {
-    // TODO(crbug.com/1300569): Remove this when kEnableFaviconForPasswords flag
-    // is removed.
+    DCHECK(!IsFaviconEnabled());
     NSIndexPath* indexPath = [self.tableViewModel
         indexPathForItem:self.legacyMostRecentlyUpdatedItem];
     [self.tableView scrollToRowAtIndexPath:indexPath
@@ -1871,21 +1845,6 @@ bool IsFaviconEnabled() {
                                   animated:NO];
     self.legacyMostRecentlyUpdatedItem = nil;
   }
-}
-
-// Returns the on-device encryption state according to the sync service.
-- (OnDeviceEncryptionState)onDeviceEncryptionState {
-  syncer::SyncService* syncService =
-      SyncServiceFactory::GetForBrowserState(_browserState);
-  if (ShouldOfferTrustedVaultOptIn(syncService)) {
-    return OnDeviceEncryptionStateOfferOptIn;
-  }
-  syncer::SyncUserSettings* syncUserSettings = syncService->GetUserSettings();
-  if (syncUserSettings->GetPassphraseType() ==
-      syncer::PassphraseType::kTrustedVaultPassphrase) {
-    return OnDeviceEncryptionStateOptedIn;
-  }
-  return OnDeviceEncryptionStateNotShown;
 }
 
 // Notifies accessibility to focus on the Password Check Status cell when its

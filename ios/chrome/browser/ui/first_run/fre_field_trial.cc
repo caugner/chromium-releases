@@ -75,7 +75,6 @@ constexpr base::FeatureParam<SigninSyncScreenUIStringSet> kStringSetParam{
 namespace {
 // String local state preference with the name of the assigned trial group.
 // Empty if no group has been assigned yet.
-const char kTrialGroupPrefName[] = "fre_refactoring.trial_group";
 const char kTrialGroupV3PrefName[] = "fre_refactoringV3.trial_group";
 
 // Group names for the default browser promo trial.
@@ -142,8 +141,9 @@ void AssociateFieldTrialParamsForFRESecondTrialGroup(
   base::FieldTrialParams params;
   params[kFREUIIdentitySwitcherPositionParam] = position;
   params[kFREUIStringsSetParam] = stringsSet;
-  DCHECK(base::AssociateFieldTrialParams(kEnableFREUIModuleIOS.name, group_name,
-                                         params));
+  bool association_result = base::AssociateFieldTrialParams(
+      kEnableFREUIModuleIOS.name, group_name, params);
+  DCHECK(association_result);
 }
 
 // Sets the parameter value of the new MICE FRE parameter.
@@ -151,8 +151,9 @@ void AssociateFieldTrialParamsForNewMICEFREGroup(const std::string& group_name,
                                                  const std::string& value) {
   base::FieldTrialParams params;
   params[kNewMobileIdentityConsistencyFREParam] = value;
-  DCHECK(base::AssociateFieldTrialParams(
-      signin::kNewMobileIdentityConsistencyFRE.name, group_name, params));
+  bool association_result = base::AssociateFieldTrialParams(
+      signin::kNewMobileIdentityConsistencyFRE.name, group_name, params);
+  DCHECK(association_result);
 }
 
 }  // namespace
@@ -470,7 +471,6 @@ int CreateNewMobileIdentityConsistencyFRETrial(
 }
 
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
-  registry->RegisterIntegerPref(kTrialGroupPrefName, kDefaultPrefValue);
   registry->RegisterIntegerPref(kTrialGroupV3PrefName, kDefaultPrefValue);
 }
 
@@ -486,8 +486,7 @@ void Create(const base::FieldTrial::EntropyProvider& low_entropy_provider,
   if (base::FieldTrialList::TrialExists(kFREThirdUITrialName) ||
       base::FieldTrialList::TrialExists(kEnableFREUIModuleIOS.name) ||
       base::FieldTrialList::TrialExists(
-          signin::kNewMobileIdentityConsistencyFRE.name) ||
-      base::FieldTrialList::TrialExists("EnableFREUIModuleIOS")) {
+          signin::kNewMobileIdentityConsistencyFRE.name)) {
     return;
   }
 
