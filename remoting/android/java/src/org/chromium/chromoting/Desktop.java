@@ -51,7 +51,11 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
         mOverlayButton = (ImageButton) findViewById(R.id.desktop_overlay_button);
         mRemoteHostDesktop.setDesktop(this);
 
-        // Ensure the button is initially hidden.
+        // For this Activity, the home button in the action bar acts as a Disconnect button, so
+        // set the description for accessibility/screen readers.
+        getSupportActionBar().setHomeActionContentDescription(R.string.disconnect_myself_button);
+
+        // Ensure the overlay button is initially hidden.
         showActionBar();
 
         View decorView = getWindow().getDecorView();
@@ -66,24 +70,28 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
     protected void onStart() {
         super.onStart();
         mActivityLifecycleListener.onActivityStarted(this);
+        JniInterface.enableVideoChannel(true);
     }
 
     @Override
     protected void onPause() {
         if (isFinishing()) mActivityLifecycleListener.onActivityPaused(this);
         super.onPause();
+        JniInterface.enableVideoChannel(false);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         mActivityLifecycleListener.onActivityResumed(this);
+        JniInterface.enableVideoChannel(true);
     }
 
     @Override
     protected void onStop() {
         mActivityLifecycleListener.onActivityStopped(this);
         super.onStop();
+        JniInterface.enableVideoChannel(false);
     }
 
     /** Called when the activity is finally finished. */
@@ -189,7 +197,7 @@ public class Desktop extends ActionBarActivity implements View.OnSystemUiVisibil
             hideActionBar();
             return true;
         }
-        if (id == R.id.actionbar_disconnect) {
+        if (id == R.id.actionbar_disconnect || id == android.R.id.home) {
             JniInterface.disconnectFromHost();
             return true;
         }

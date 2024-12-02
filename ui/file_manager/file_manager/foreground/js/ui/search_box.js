@@ -45,12 +45,6 @@ function SearchBox(element, searchButton, noResultMessage) {
   this.inputElement = /** @type {!HTMLInputElement} */ (
       element.querySelector('input'));
 
-  /**
-   * Clear button of the search box.
-   * @type {Element}
-   */
-  this.clearButton = element.querySelector('.clear');
-
   // Register events.
   this.inputElement.addEventListener('input', this.onInput_.bind(this));
   this.inputElement.addEventListener('keydown', this.onKeyDown_.bind(this));
@@ -66,9 +60,6 @@ function SearchBox(element, searchButton, noResultMessage) {
   this.searchButton.addEventListener(
       'click',
       this.onSearchButtonClick_.bind(this));
-  this.clearButton.addEventListener(
-      'click',
-      this.onClearButtonClick_.bind(this));
   var dispatchItemSelect =
       cr.dispatchSimpleEvent.bind(cr, this, SearchBox.EventType.ITEM_SELECT);
   this.autocompleteList.handleEnterKeydown = dispatchItemSelect;
@@ -181,6 +172,15 @@ SearchBox.prototype.clear = function() {
 };
 
 /**
+ * Sets hidden attribute for components of search box.
+ * @param {boolean} hidden True when the search box need to be hidden.
+ */
+SearchBox.prototype.setHidden = function(hidden) {
+  this.element.hidden = hidden;
+  this.searchButton.hidden = hidden;
+}
+
+/**
  * @private
  */
 SearchBox.prototype.onInput_ = function() {
@@ -257,12 +257,4 @@ SearchBox.prototype.updateStyles_ = function() {
  */
 SearchBox.prototype.onSearchButtonClick_ = function() {
   this.inputElement.focus();
-};
-
-/**
- * @private
- */
-SearchBox.prototype.onClearButtonClick_ = function() {
-  this.inputElement.value = '';
-  this.onInput_();
 };

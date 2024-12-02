@@ -32,6 +32,7 @@
           '../ppapi/ppapi_internal.gyp:ppapi_host',
         ],
         'chromium_child_dependencies': [
+          'child',
           'plugin',
           'renderer',
           'utility',
@@ -48,7 +49,7 @@
           }],
           ['enable_plugins==1 and disable_nacl==0', {
             'chromium_child_dependencies': [
-              '<(DEPTH)/ppapi/native_client/src/trusted/plugin/plugin.gyp:nacl_trusted_plugin',
+              '<(DEPTH)/components/nacl/renderer/plugin/plugin.gyp:nacl_trusted_plugin',
             ],
           }],
           ['remoting==1', {
@@ -115,13 +116,13 @@
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_installer_util.gypi',
-    '../components/nacl/nacl_defines.gypi',
   ],
   'conditions': [
     ['OS!="ios"', {
       'includes': [
         '../apps/apps.gypi',
         'app_installer/app_installer.gypi',
+        'chrome_child.gypi',
         'chrome_debugger.gypi',
         'chrome_dll.gypi',
         'chrome_exe.gypi',
@@ -567,8 +568,8 @@
             '..',
           ],
           'sources': [
-            'tools/crash_service/main.cc',
             '../content/public/common/content_switches.cc',
+            'tools/crash_service/main.cc',
           ],
           'defines': [
             'COMPILE_CONTENT_STATICALLY',
@@ -598,7 +599,6 @@
           'type': 'none',
           'dependencies': [
             'activity_type_ids_java',
-            'app_banner_metrics_ids_java',
             'chrome_resources.gyp:chrome_strings',
             'chrome_strings_grd',
             'chrome_version_java',
@@ -623,9 +623,10 @@
             '../content/content.gyp:content_java',
             '../printing/printing.gyp:printing_java',
             '../sync/sync.gyp:sync_java',
+            '../third_party/android_data_chart/android_data_chart.gyp:android_data_chart_java',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
-            '../third_party/libaddressinput/libaddressinput.gyp:android_addressinput_widget',
+            '../third_party/android_tools/android_tools.gyp:google_play_services_javalib',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
@@ -779,6 +780,42 @@
               ],
             }],
           ],
+        },
+      ],
+    }],
+    ['syzyasan==1', {
+      'variables': {
+        'kasko_exe_dir': '<(DEPTH)/third_party/kasko',
+      },
+      'targets': [
+        {
+          'target_name': 'kasko_dll',
+          'type': 'none',
+          'outputs': [
+            '<(PRODUCT_DIR)/kasko.dll',
+            '<(PRODUCT_DIR)/kasko.dll.pdb',
+          ],
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)',
+              'files': [
+                '<(kasko_exe_dir)/kasko.dll',
+                '<(kasko_exe_dir)/kasko.dll.pdb',
+              ],
+            },
+          ],
+          'direct_dependent_settings': {
+            'msvs_settings': {
+              'VCLinkerTool': {
+                'AdditionalDependencies': [
+                  'kasko.dll.lib',
+                ],
+                'AdditionalLibraryDirectories': [
+                  '<(DEPTH)/third_party/kasko'
+                ],
+              },
+            },
+          },
         },
       ],
     }],

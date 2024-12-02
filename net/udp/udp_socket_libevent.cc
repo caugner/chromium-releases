@@ -16,7 +16,6 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/metrics/stats_counters.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
 #include "net/base/io_buffer.h"
@@ -127,8 +126,7 @@ void UDPSocketLibevent::Close() {
   ok = write_socket_watcher_.StopWatchingFileDescriptor();
   DCHECK(ok);
 
-  if (IGNORE_EINTR(close(socket_)) < 0)
-    PLOG(ERROR) << "close";
+  PCHECK(0 == IGNORE_EINTR(close(socket_)));
 
   socket_ = kInvalidSocket;
   addr_family_ = 0;
@@ -428,8 +426,6 @@ void UDPSocketLibevent::LogRead(int result,
             is_address_valid ? &address : NULL));
   }
 
-  base::StatsCounter read_bytes("udp.read_bytes");
-  read_bytes.Add(result);
   NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(result);
 }
 
@@ -460,8 +456,6 @@ void UDPSocketLibevent::LogWrite(int result,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));
   }
 
-  base::StatsCounter write_bytes("udp.write_bytes");
-  write_bytes.Add(result);
   NetworkActivityMonitor::GetInstance()->IncrementBytesSent(result);
 }
 

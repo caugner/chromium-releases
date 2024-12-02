@@ -315,6 +315,14 @@ class StubClient : public media::VideoCaptureDevice::Client {
   }
   ~StubClient() override {}
 
+  void OnIncomingCapturedData(const uint8* data,
+                              int length,
+                              const media::VideoCaptureFormat& frame_format,
+                              int rotation,
+                              const base::TimeTicks& timestamp) override {
+    FAIL();
+  }
+
   scoped_refptr<media::VideoCaptureDevice::Client::Buffer> ReserveOutputBuffer(
       media::VideoFrame::Format format,
       const gfx::Size& dimensions) override {
@@ -330,22 +338,14 @@ class StubClient : public media::VideoCaptureDevice::Client {
     size_t size;
     buffer_pool_->GetBufferInfo(buffer_id, &data, &size);
     return scoped_refptr<media::VideoCaptureDevice::Client::Buffer>(
-        new PoolBuffer(buffer_pool_, buffer_id, data, size));
-  }
-
-  void OnIncomingCapturedData(const uint8* data,
-                              int length,
-                              const media::VideoCaptureFormat& frame_format,
-                              int rotation,
-                              base::TimeTicks timestamp) override {
-    FAIL();
+        new AutoReleaseBuffer(buffer_pool_, buffer_id, data, size));
   }
 
   void OnIncomingCapturedVideoFrame(
       const scoped_refptr<Buffer>& buffer,
       const media::VideoCaptureFormat& buffer_format,
       const scoped_refptr<media::VideoFrame>& frame,
-      base::TimeTicks timestamp) override {
+      const base::TimeTicks& timestamp) override {
     EXPECT_EQ(gfx::Size(kTestWidth, kTestHeight), buffer_format.frame_size);
     EXPECT_EQ(media::PIXEL_FORMAT_I420, buffer_format.pixel_format);
     EXPECT_EQ(media::VideoFrame::I420, frame->format());
@@ -361,17 +361,29 @@ class StubClient : public media::VideoCaptureDevice::Client {
   void OnError(const std::string& reason) override { error_callback_.Run(); }
 
  private:
-  class PoolBuffer : public media::VideoCaptureDevice::Client::Buffer {
+  class AutoReleaseBuffer : public media::VideoCaptureDevice::Client::Buffer {
    public:
-    PoolBuffer(const scoped_refptr<VideoCaptureBufferPool>& pool,
+    AutoReleaseBuffer(const scoped_refptr<VideoCaptureBufferPool>& pool,
                int buffer_id,
                void* data,
                size_t size)
-        : Buffer(buffer_id, data, size), pool_(pool) {}
+        : pool_(pool),
+          id_(buffer_id),
+          data_(data),
+          size_(size) {
+      DCHECK(pool_.get());
+    }
+    int id() const override { return id_; }
+    void* data() const override { return data_; }
+    size_t size() const override { return size_; }
 
    private:
-    ~PoolBuffer() override { pool_->RelinquishProducerReservation(id()); }
+    ~AutoReleaseBuffer() override { pool_->RelinquishProducerReservation(id_); }
+
     const scoped_refptr<VideoCaptureBufferPool> pool_;
+    const int id_;
+    void* const data_;
+    const size_t size_;
   };
 
   scoped_refptr<VideoCaptureBufferPool> buffer_pool_;

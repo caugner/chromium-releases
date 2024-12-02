@@ -10,12 +10,15 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
-#include "base/threading/thread.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/dri/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/dri/scoped_drm_types.h"
 
@@ -24,6 +27,10 @@ typedef struct _drmModeModeInfo drmModeModeInfo;
 
 struct SkImageInfo;
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace ui {
 
 class HardwareDisplayPlaneManager;
@@ -31,17 +38,21 @@ class HardwareDisplayPlaneManager;
 // Wraps DRM calls into a nice interface. Used to provide different
 // implementations of the DRM calls. For the actual implementation the DRM API
 // would be called. In unit tests this interface would be stubbed.
-class DriWrapper {
+class OZONE_EXPORT DriWrapper : public base::RefCountedThreadSafe<DriWrapper> {
  public:
   typedef base::Callback<void(unsigned int /* frame */,
                               unsigned int /* seconds */,
                               unsigned int /* useconds */)> PageFlipCallback;
 
-  DriWrapper(const char* device_path, bool use_sync_flips);
-  virtual ~DriWrapper();
+  DriWrapper(const base::FilePath& device_path);
+  DriWrapper(const base::FilePath& device_path, base::File file);
 
   // Open device.
-  virtual void Initialize();
+  virtual bool Initialize();
+
+  // |task_runner| will be used to asynchronously page flip.
+  virtual void InitializeTaskRunner(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
 
   // Get the CRTC state. This is generally used to save state before using the
   // CRTC. When the user finishes using the CRTC, the user should restore the
@@ -89,6 +100,7 @@ class DriWrapper {
   // queued on |fd_|.
   virtual bool PageFlip(uint32_t crtc_id,
                         uint32_t framebuffer,
+                        bool is_sync,
                         const PageFlipCallback& callback);
 
   // Schedule an overlay to be show during the page flip for CRTC |crtc_id|.
@@ -147,35 +159,30 @@ class DriWrapper {
   virtual bool SetMaster();
   virtual bool DropMaster();
 
-  int get_fd() const { return fd_; }
+  int get_fd() const { return file_.GetPlatformFile(); }
+
+  base::FilePath device_path() const { return device_path_; }
 
   HardwareDisplayPlaneManager* plane_manager() { return plane_manager_.get(); }
 
  protected:
-  // Responsible for late initialization of the IO thread. This needs to happen
-  // after the sandbox is up, thus the late initialization.
-  virtual void InitializeIOWatcher();
+  friend class base::RefCountedThreadSafe<DriWrapper>;
 
-  // The file descriptor associated with this wrapper. All DRM operations will
-  // be performed using this FD.
-  // TODO(dnicoara) Make this a base::File
-  int fd_;
+  virtual ~DriWrapper();
 
   scoped_ptr<HardwareDisplayPlaneManager> plane_manager_;
-
-  // If we need to block when performing page flips this is set to true.
-  bool use_sync_flips_;
 
  private:
   class IOWatcher;
 
   // Path to DRM device.
-  const char* device_path_;
+  const base::FilePath device_path_;
+
+  // DRM device.
+  base::File file_;
 
   // Helper thread to perform IO listener operations.
-  // TODO(dnicoara) This should really be supported by the main thread.
-  // Alternatively we should have a way to access the IO thread's task runner.
-  base::Thread io_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Watcher for |fd_| listening for page flip events.
   scoped_refptr<IOWatcher> watcher_;

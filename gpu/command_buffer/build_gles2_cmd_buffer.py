@@ -598,6 +598,44 @@ _NAMED_TYPE_INFO = {
       'GL_RENDERBUFFER',
     ],
   },
+  'Bufferiv': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_COLOR',
+      'GL_STENCIL',
+    ],
+    'invalid': [
+      'GL_RENDERBUFFER',
+    ],
+  },
+  'Bufferuiv': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_COLOR',
+    ],
+    'invalid': [
+      'GL_RENDERBUFFER',
+    ],
+  },
+  'Bufferfv': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_COLOR',
+      'GL_DEPTH',
+    ],
+    'invalid': [
+      'GL_RENDERBUFFER',
+    ],
+  },
+  'Bufferfi': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_DEPTH_STENCIL',
+    ],
+    'invalid': [
+      'GL_RENDERBUFFER',
+    ],
+  },
   'BufferUsage': {
     'type': 'GLenum',
     'valid': [
@@ -896,6 +934,16 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_BUFFER_SIZE',
       'GL_BUFFER_USAGE',
+    ],
+    'invalid': [
+      'GL_PIXEL_PACK_BUFFER',
+    ],
+  },
+  'BufferMode': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_INTERLEAVED_ATTRIBS',
+      'GL_SEPARATE_ATTRIBS',
     ],
     'invalid': [
       'GL_PIXEL_PACK_BUFFER',
@@ -1265,6 +1313,37 @@ _NAMED_TYPE_INFO = {
       'GL_MOUSE_POSITION_CHROMIUM',
     ],
   },
+  'UniformParameter': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_UNIFORM_SIZE',
+      'GL_UNIFORM_TYPE',
+      'GL_UNIFORM_NAME_LENGTH',
+      'GL_UNIFORM_BLOCK_INDEX',
+      'GL_UNIFORM_OFFSET',
+      'GL_UNIFORM_ARRAY_STRIDE',
+      'GL_UNIFORM_MATRIX_STRIDE',
+      'GL_UNIFORM_IS_ROW_MAJOR',
+    ],
+    'invalid': [
+      'GL_UNIFORM_BLOCK_NAME_LENGTH',
+    ],
+  },
+  'UniformBlockParameter': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_UNIFORM_BLOCK_BINDING',
+      'GL_UNIFORM_BLOCK_DATA_SIZE',
+      'GL_UNIFORM_BLOCK_NAME_LENGTH',
+      'GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS',
+      'GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES',
+      'GL_UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER',
+      'GL_UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER',
+    ],
+    'invalid': [
+      'GL_NEAREST',
+    ],
+  },
   'VertexAttribType': {
     'type': 'GLenum',
     'valid': [
@@ -1330,6 +1409,37 @@ _NAMED_TYPE_INFO = {
       'GL_UNKNOWN_CONTEXT_RESET_ARB',
     ],
   },
+  'SyncCondition': {
+    'type': 'GLenum',
+    'is_complete': True,
+    'valid': [
+      'GL_SYNC_GPU_COMMANDS_COMPLETE',
+    ],
+    'invalid': [
+      '0',
+    ],
+  },
+  'SyncFlags': {
+    'type': 'GLbitfield',
+    'is_complete': True,
+    'valid': [
+      '0',
+    ],
+    'invalid': [
+      '1',
+    ],
+  },
+  'SyncFlushFlags': {
+    'type': 'GLbitfield',
+    'is_complete': True,
+    'valid': [
+      'GL_SYNC_FLUSH_COMMANDS_BIT',
+      '0',
+    ],
+    'invalid': [
+      '0xFFFFFFFF',
+    ],
+  },
 }
 
 # This table specifies the different pepper interfaces that are supported for
@@ -1377,6 +1487,8 @@ _PEPPER_INTERFACES = [
 #               for this command.
 # needs_size:   If True a data_size field is added to the command.
 # count:        The number of units per element. For PUTn or PUT types.
+# use_count_func: If True the actual data count needs to be computed; the count
+#               argument specifies the maximum count.
 # unit_test:    If False no service side unit test will be generated.
 # client_test:  If False no client side unit test will be generated.
 # expectation:  If False the unit test will have no expected calls.
@@ -1431,6 +1543,17 @@ _FUNCTION_INFO = {
   'BindBufferBase': {
     'type': 'Bind',
     'id_mapping': [ 'Buffer' ],
+    'gen_func': 'GenBuffersARB',
+    'unsafe': True,
+  },
+  'BindBufferRange': {
+    'type': 'Bind',
+    'id_mapping': [ 'Buffer' ],
+    'gen_func': 'GenBuffersARB',
+    'valid_args': {
+      '3': '4',
+      '4': '4'
+    },
     'unsafe': True,
   },
   'BindFramebuffer': {
@@ -1497,6 +1620,26 @@ _FUNCTION_INFO = {
     'defer_draws': True,
     'trace_level': 1,
   },
+  'ClearBufferiv': {
+    'type': 'PUT',
+    'use_count_func': True,
+    'count': 4,
+    'unsafe': True,
+  },
+  'ClearBufferuiv': {
+    'type': 'PUT',
+    'count': 4,
+    'unsafe': True,
+  },
+  'ClearBufferfv': {
+    'type': 'PUT',
+    'use_count_func': True,
+    'count': 4,
+    'unsafe': True,
+  },
+  'ClearBufferfi': {
+    'unsafe': True,
+  },
   'ClearColor': {
     'type': 'StateSet',
     'state': 'ClearColor',
@@ -1509,6 +1652,14 @@ _FUNCTION_INFO = {
     'valid_args': {
       '0': '0.5f'
     },
+  },
+  'ClientWaitSync': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args': 'GLuint sync, GLbitfieldSyncFlushFlags flags, '
+                'GLuint timeout_0, GLuint timeout_1, GLenum* result',
+    'unsafe': True,
+    'result': ['GLenum'],
   },
   'ColorMask': {
     'type': 'StateSet',
@@ -1624,6 +1775,10 @@ _FUNCTION_INFO = {
   'CopyTexSubImage2D': {
     'decoder_func': 'DoCopyTexSubImage2D',
     'defer_reads': True,
+  },
+  'CopyTexSubImage3D': {
+    'defer_reads': True,
+    'unsafe': True,
   },
   'CreateImageCHROMIUM': {
     'type': 'Manual',
@@ -1748,7 +1903,7 @@ _FUNCTION_INFO = {
     'resource_type': 'Framebuffer',
     'resource_types': 'Framebuffers',
   },
-  'DeleteProgram': {'type': 'Delete', 'decoder_func': 'DoDeleteProgram'},
+  'DeleteProgram': { 'type': 'Delete' },
   'DeleteRenderbuffers': {
     'type': 'DELn',
     'gl_test_func': 'glDeleteRenderbuffersEXT',
@@ -1761,7 +1916,13 @@ _FUNCTION_INFO = {
     'resource_types': 'Samplers',
     'unsafe': True,
   },
-  'DeleteShader': {'type': 'Delete', 'decoder_func': 'DoDeleteShader'},
+  'DeleteShader': { 'type': 'Delete' },
+  'DeleteSync': {
+    'type': 'Delete',
+    'cmd_args': 'GLuint sync',
+    'resource_type': 'Sync',
+    'unsafe': True,
+  },
   'DeleteTextures': {
     'type': 'DELn',
     'resource_type': 'Texture',
@@ -1815,6 +1976,11 @@ _FUNCTION_INFO = {
   'EnableVertexAttribArray': {
     'decoder_func': 'DoEnableVertexAttribArray',
     'impl_decl': False,
+  },
+  'FenceSync': {
+    'type': 'Create',
+    'client_test': False,
+    'unsafe': True,
   },
   'Finish': {
     'impl_func': False,
@@ -1918,6 +2084,30 @@ _FUNCTION_INFO = {
       'uint32_t type',
     ],
   },
+  'GetActiveUniformBlockiv': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'result': ['SizedResult<GLint>'],
+    'unsafe': True,
+  },
+  'GetActiveUniformBlockName': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args':
+        'GLidProgram program, GLuint index, uint32_t name_bucket_id, '
+        'void* result',
+    'result': ['int32_t'],
+    'unsafe': True,
+  },
+  'GetActiveUniformsiv': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args':
+        'GLidProgram program, uint32_t indices_bucket_id, GLenum pname, '
+        'GLint* params',
+    'result': ['SizedResult<GLint>'],
+    'unsafe': True,
+  },
   'GetAttachedShaders': {
     'type': 'Custom',
     'data_transfer_methods': ['shm'],
@@ -1930,7 +2120,16 @@ _FUNCTION_INFO = {
     'cmd_args':
         'GLidProgram program, uint32_t name_bucket_id, GLint* location',
     'result': ['GLint'],
-    'error_return': -1, # http://www.opengl.org/sdk/docs/man/xhtml/glGetAttribLocation.xml
+    'error_return': -1,
+  },
+  'GetFragDataLocation': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args':
+        'GLidProgram program, uint32_t name_bucket_id, GLint* location',
+    'result': ['GLint'],
+    'error_return': -1,
+    'unsafe': True,
   },
   'GetBooleanv': {
     'type': 'GETn',
@@ -2079,7 +2278,62 @@ _FUNCTION_INFO = {
     'get_len_enum': 'GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE',
     'unit_test': False,
     'extension': True,
-    },
+  },
+  'GetUniformBlockIndex': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args':
+        'GLidProgram program, uint32_t name_bucket_id, GLuint* index',
+    'result': ['GLuint'],
+    'error_return': 'GL_INVALID_INDEX',
+    'unsafe': True,
+  },
+  'GetUniformBlocksCHROMIUM': {
+    'type': 'Custom',
+    'expectation': False,
+    'impl_func': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+    'cmd_args': 'GLidProgram program, uint32_t bucket_id',
+    'result': ['uint32_t'],
+    'unsafe': True,
+  },
+  'GetUniformsES3CHROMIUM': {
+    'type': 'Custom',
+    'expectation': False,
+    'impl_func': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+    'cmd_args': 'GLidProgram program, uint32_t bucket_id',
+    'result': ['uint32_t'],
+    'unsafe': True,
+  },
+  'GetTransformFeedbackVarying': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'cmd_args':
+        'GLidProgram program, GLuint index, uint32_t name_bucket_id, '
+        'void* result',
+    'result': [
+      'int32_t success',
+      'int32_t size',
+      'uint32_t type',
+    ],
+    'unsafe': True,
+  },
+  'GetTransformFeedbackVaryingsCHROMIUM': {
+    'type': 'Custom',
+    'expectation': False,
+    'impl_func': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+    'cmd_args': 'GLidProgram program, uint32_t bucket_id',
+    'result': ['uint32_t'],
+    'unsafe': True,
+  },
   'GetUniformfv': {
     'type': 'Custom',
     'data_transfer_methods': ['shm'],
@@ -2089,6 +2343,14 @@ _FUNCTION_INFO = {
     'type': 'Custom',
     'data_transfer_methods': ['shm'],
     'result': ['SizedResult<GLint>'],
+  },
+  'GetUniformIndices': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'result': ['SizedResult<GLuint>'],
+    'cmd_args': 'GLidProgram program, uint32_t names_bucket_id, '
+                'GLuint* indices',
+    'unsafe': True,
   },
   'GetUniformLocation': {
     'type': 'Custom',
@@ -2142,6 +2404,7 @@ _FUNCTION_INFO = {
   'IsEnabled': {
     'type': 'Is',
     'decoder_func': 'DoIsEnabled',
+    'client_test': False,
     'impl_func': False,
     'expectation': False,
   },
@@ -2168,6 +2431,14 @@ _FUNCTION_INFO = {
   'IsSampler': {
     'type': 'Is',
     'id_mapping': [ 'Sampler' ],
+    'expectation': False,
+    'unsafe': True,
+  },
+  'IsSync': {
+    'type': 'Is',
+    'id_mapping': [ 'Sync' ],
+    'cmd_args': 'GLuint sync',
+    'expectation': False,
     'unsafe': True,
   },
   'IsTexture': {
@@ -2178,6 +2449,7 @@ _FUNCTION_INFO = {
   'IsTransformFeedback': {
     'type': 'Is',
     'id_mapping': [ 'TransformFeedback' ],
+    'expectation': False,
     'unsafe': True,
   },
   'LinkProgram': {
@@ -2329,12 +2601,12 @@ _FUNCTION_INFO = {
     'client_test': False,
   },
   'ShaderSource': {
-    'type': 'Manual',
+    'type': 'PUTSTR',
+    'decoder_func': 'DoShaderSource',
+    'expectation': False,
     'data_transfer_methods': ['bucket'],
-    'needs_size': True,
-    'client_test': False,
     'cmd_args':
-        'GLuint shader, const char* data',
+        'GLuint shader, const char** str',
     'pepper_args':
         'GLuint shader, GLsizei count, const char** str, const GLint* length',
   },
@@ -2427,6 +2699,14 @@ _FUNCTION_INFO = {
                 'GLsizei width, GLsizei height, GLsizei depth, '
                 'GLenumTextureFormat format, GLenumPixelType type, '
                 'const void* pixels, GLboolean internal',
+    'unsafe': True,
+  },
+  'TransformFeedbackVaryings': {
+    'type': 'PUTSTR',
+    'data_transfer_methods': ['bucket'],
+    'decoder_func': 'DoTransformFeedbackVaryings',
+    'cmd_args':
+        'GLuint program, const char** varyings, GLenum buffermode',
     'unsafe': True,
   },
   'Uniform1f': {'type': 'PUTXn', 'count': 1},
@@ -2563,6 +2843,11 @@ _FUNCTION_INFO = {
     'count': 12,
     'unsafe': True,
   },
+  'UniformBlockBinding': {
+    'type': 'Custom',
+    'impl_func': False,
+    'unsafe': True,
+  },
   'UnmapBufferCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -2642,6 +2927,14 @@ _FUNCTION_INFO = {
                 'GLenumVertexAttribType type, GLboolean normalized, '
                 'GLsizei stride, GLuint offset',
     'client_test': False,
+  },
+  'WaitSync': {
+    'type': 'Custom',
+    'cmd_args': 'GLuint sync, GLbitfieldSyncFlushFlags flags, '
+                'GLuint timeout_0, GLuint timeout_1',
+    'impl_func': False,
+    'client_test': False,
+    'unsafe': True,
   },
   'Scissor': {
     'type': 'StateSet',
@@ -2876,6 +3169,13 @@ _FUNCTION_INFO = {
     'client_test': False,
   },
   'ShallowFlushCHROMIUM': {
+    'impl_func': False,
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+  },
+  'OrderingBarrierCHROMIUM': {
     'impl_func': False,
     'gen_cmd': False,
     'extension': True,
@@ -3240,9 +3540,33 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
   def WriteHandlerImplementation(self, func, file):
     """Writes the handler implementation for this command."""
     if func.IsUnsafe() and func.GetInfo('id_mapping'):
+      code_no_gen = """  if (!group_->Get%(type)sServiceId(%(var)s, &%(var)s)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "%(func)s", "invalid %(var)s id");
+    return error::kNoError;
+  }
+"""
+      code_gen = """  if (!group_->Get%(type)sServiceId(%(var)s, &%(var)s)) {
+    if (!group_->bind_generates_resource()) {
+      LOCAL_SET_GL_ERROR(
+          GL_INVALID_OPERATION, "%(func)s", "invalid %(var)s id");
+      return error::kNoError;
+    }
+    GLuint client_id = %(var)s;
+    gl%(gen_func)s(1, &%(var)s);
+    Create%(type)s(client_id, %(var)s);
+  }
+"""
+      gen_func = func.GetInfo('gen_func')
       for id_type in func.GetInfo('id_mapping'):
-        file.Write("  group_->Get%sServiceId(%s, &%s);\n" %
-                   (id_type, id_type.lower(), id_type.lower()))
+        if gen_func and id_type in gen_func:
+          file.Write(code_gen % { 'type': id_type,
+                                  'var': id_type.lower(),
+                                  'func': func.GetGLFunctionName(),
+                                  'gen_func': gen_func })
+        else:
+          file.Write(code_no_gen % { 'type': id_type,
+                                     'var': id_type.lower(),
+                                     'func': func.GetGLFunctionName() })
     file.Write("  %s(%s);\n" %
                (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
 
@@ -3290,17 +3614,23 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     file.Write("  // TODO(gman): Compute correct size.\n")
     file.Write("  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);\n")
 
+  def __WriteIdMapping(self, func, file):
+    """Writes client side / service side ID mapping."""
+    if not func.IsUnsafe() or not func.GetInfo('id_mapping'):
+      return
+    for id_type in func.GetInfo('id_mapping'):
+      file.Write("  group_->Get%sServiceId(%s, &%s);\n" %
+                 (id_type, id_type.lower(), id_type.lower()))
+
   def WriteImmediateHandlerImplementation (self, func, file):
     """Writes the handler impl for the immediate version of a command."""
-    if func.IsUnsafe() and func.GetInfo('id_mapping'):
-      for id_type in func.GetInfo('id_mapping'):
-        file.Write("  group_->Get%sServiceId(%s, &%s);\n" %
-                   (id_type, id_type.lower(), id_type.lower()))
+    self.__WriteIdMapping(func, file)
     file.Write("  %s(%s);\n" %
                (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
 
   def WriteBucketHandlerImplementation (self, func, file):
     """Writes the handler impl for the bucket version of a command."""
+    self.__WriteIdMapping(func, file)
     file.Write("  %s(%s);\n" %
                (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
 
@@ -3356,9 +3686,7 @@ static_assert(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
     self.WriteServiceHandlerFunctionHeader(func, file)
     self.WriteHandlerExtensionCheck(func, file)
     self.WriteHandlerDeferReadWrite(func, file);
-    for arg in func.GetOriginalArgs():
-      if arg.IsPointer():
-        self.WriteGetDataSizeCode(func, file)
+    for arg in func.GetCmdArgs():
       arg.WriteGetCode(file)
     func.WriteHandlerValidation(file)
     func.WriteHandlerImplementation(file)
@@ -3703,7 +4031,7 @@ TEST_F(GLES2ImplementationTest, %(name)sInvalidConstantArg%(invalid_index)d) {
           })
     else:
       if client_test != False:
-        file.Write("// TODO: Implement unit test for %s\n" % func.name)
+        file.Write("// TODO(zmo): Implement unit test for %s\n" % func.name)
 
   def WriteDestinationInitalizationValidation(self, func, file):
     """Writes the client side destintion initialization validation."""
@@ -4159,10 +4487,6 @@ class HandWrittenHandler(CustomHandler):
     """Overrriden from TypeHandler."""
     pass
 
-  def WriteBucketCmdHelper(self, func, file):
-    """Overrriden from TypeHandler."""
-    pass
-
   def WriteCmdHelper(self, func, file):
     """Overrriden from TypeHandler."""
     pass
@@ -4399,23 +4723,46 @@ TEST_P(%(test_name)s, %(name)sValidArgs) {
 }
 """
       if func.GetInfo("gen_func"):
-          valid_test += """
+        valid_test += """
 TEST_P(%(test_name)s, %(name)sValidArgsNewId) {
-  EXPECT_CALL(*gl_, %(gl_func_name)s(%(first_gl_arg)s, kNewServiceId));
+  EXPECT_CALL(*gl_,
+              %(gl_func_name)s(%(gl_args_with_new_id)s));
   EXPECT_CALL(*gl_, %(gl_gen_func_name)s(1, _))
      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
   SpecializedSetup<cmds::%(name)s, 0>(true);
   cmds::%(name)s cmd;
-  cmd.Init(%(first_arg)s, kNewClientId);
+  cmd.Init(%(args_with_new_id)s);"""
+        if func.IsUnsafe():
+          valid_test += """
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(Get%(resource_type)s(kNewClientId) != NULL);
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+"""
+        else:
+          valid_test += """
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(Get%(resource_type)s(kNewClientId) != NULL);
 }
 """
+
+      gl_args_with_new_id = []
+      args_with_new_id = []
+      for arg in func.GetOriginalArgs():
+        if hasattr(arg, 'resource_type'):
+          gl_args_with_new_id.append('kNewServiceId')
+          args_with_new_id.append('kNewClientId')
+        else:
+          gl_args_with_new_id.append(arg.GetValidGLArg(func))
+          args_with_new_id.append(arg.GetValidArg(func))
       self.WriteValidUnitTest(func, file, valid_test, {
-          'first_arg': func.GetOriginalArgs()[0].GetValidArg(func),
-          'first_gl_arg': func.GetOriginalArgs()[0].GetValidGLArg(func),
-          'resource_type': func.GetOriginalArgs()[-1].resource_type,
+          'args_with_new_id': ", ".join(args_with_new_id),
+          'gl_args_with_new_id': ", ".join(gl_args_with_new_id),
+          'resource_type': func.GetResourceIdArg().resource_type,
           'gl_gen_func_name': func.GetInfo("gen_func"),
       }, *extras)
 
@@ -4449,14 +4796,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
 
-      if func.IsUnsafe():
-        code = """  helper_->%(name)s(%(arg_string)s);
-  CheckGLError();
-}
-
-"""
-      else:
-        code = """  if (Is%(type)sReservedId(%(id)s)) {
+      code = """  if (Is%(type)sReservedId(%(id)s)) {
     SetGLError(GL_INVALID_OPERATION, "%(name)s\", \"%(id)s reserved id");
     return;
   }
@@ -4465,14 +4805,7 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 }
 
 """
-      name_arg = None
-      if len(func.GetOriginalArgs()) == 1:
-        # Bind functions that have no target (like BindVertexArrayOES)
-        name_arg = func.GetOriginalArgs()[0]
-      else:
-        # Bind functions that have both a target and a name (like BindTexture)
-        name_arg = func.GetOriginalArgs()[-1]
-
+      name_arg = func.GetResourceIdArg()
       file.Write(code % {
           'name': func.name,
           'arg_string': func.MakeOriginalArgString(""),
@@ -4840,26 +5173,61 @@ class CreateHandler(TypeHandler):
     """Overrriden from TypeHandler."""
     func.AddCmdArg(Argument("client_id", 'uint32_t'))
 
+  def __GetResourceType(self, func):
+    if func.return_type == "GLsync":
+      return "Sync"
+    else:
+      return func.name[6:]  # Create*
+
   def WriteServiceUnitTest(self, func, file, *extras):
     """Overrriden from TypeHandler."""
     valid_test = """
 TEST_P(%(test_name)s, %(name)sValidArgs) {
-  EXPECT_CALL(*gl_, %(gl_func_name)s(%(gl_args)s))
-      .WillOnce(Return(kNewServiceId));
+  %(id_type_cast)sEXPECT_CALL(*gl_, %(gl_func_name)s(%(gl_args)s))
+      .WillOnce(Return(%(const_service_id)s));
   SpecializedSetup<cmds::%(name)s, 0>(true);
   cmds::%(name)s cmd;
-  cmd.Init(%(args)s%(comma)skNewClientId);
+  cmd.Init(%(args)s%(comma)skNewClientId);"""
+    if func.IsUnsafe():
+      valid_test += """
+  decoder_->set_unsafe_es3_apis_enabled(true);"""
+    valid_test += """
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-  EXPECT_TRUE(Get%(resource_type)s(kNewClientId) != NULL);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());"""
+    if func.IsUnsafe():
+      valid_test += """
+  %(return_type)s service_id = 0;
+  EXPECT_TRUE(Get%(resource_type)sServiceId(kNewClientId, &service_id));
+  EXPECT_EQ(%(const_service_id)s, service_id);
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+"""
+    else:
+      valid_test += """
+  EXPECT_TRUE(Get%(resource_type)s(kNewClientId));
 }
 """
     comma = ""
-    if len(func.GetOriginalArgs()):
-      comma =", "
+    cmd_arg_count = 0
+    for arg in func.GetOriginalArgs():
+      if not arg.IsConstant():
+        cmd_arg_count += 1
+    if cmd_arg_count:
+      comma = ", "
+    if func.return_type == 'GLsync':
+      id_type_cast = ("const GLsync kNewServiceIdGLuint = reinterpret_cast"
+                      "<GLsync>(kNewServiceId);\n  ")
+      const_service_id = "kNewServiceIdGLuint"
+    else:
+      id_type_cast = ""
+      const_service_id = "kNewServiceId"
     self.WriteValidUnitTest(func, file, valid_test, {
           'comma': comma,
-          'resource_type': func.name[6:],
+          'resource_type': self.__GetResourceType(func),
+          'return_type': func.return_type,
+          'id_type_cast': id_type_cast,
+          'const_service_id': const_service_id,
         }, *extras)
     invalid_test = """
 TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
@@ -4876,11 +5244,33 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
 
   def WriteHandlerImplementation (self, func, file):
     """Overrriden from TypeHandler."""
-    file.Write("  uint32_t client_id = c.client_id;\n")
-    file.Write("  if (!%sHelper(%s)) {\n" %
-               (func.name, func.MakeCmdArgString("")))
-    file.Write("    return error::kInvalidArguments;\n")
-    file.Write("  }\n")
+    if func.IsUnsafe():
+      code = """  uint32_t client_id = c.client_id;
+  %(return_type)s service_id = 0;
+  if (group_->Get%(resource_name)sServiceId(client_id, &service_id)) {
+    return error::kInvalidArguments;
+  }
+  service_id = %(gl_func_name)s(%(gl_args)s);
+  if (service_id) {
+    group_->Add%(resource_name)sId(client_id, service_id);
+  }
+"""
+    else:
+      code = """  uint32_t client_id = c.client_id;
+  if (Get%(resource_name)s(client_id)) {
+    return error::kInvalidArguments;
+  }
+  %(return_type)s service_id = %(gl_func_name)s(%(gl_args)s);
+  if (service_id) {
+    Create%(resource_name)s(client_id, service_id%(gl_args_with_comma)s);
+  }
+"""
+    file.Write(code % {
+        'resource_name': self.__GetResourceType(func),
+        'return_type': func.return_type,
+        'gl_func_name': func.GetGLFunctionName(),
+        'gl_args': func.MakeOriginalArgString(""),
+        'gl_args_with_comma': func.MakeOriginalArgString("", True) })
 
   def WriteGLES2Implementation(self, func, file):
     """Overrriden from TypeHandler."""
@@ -4893,14 +5283,21 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  GLuint client_id;\n")
-    file.Write(
-        "  GetIdHandler(id_namespaces::kProgramsAndShaders)->\n")
+    if func.return_type == "GLsync":
+      file.Write(
+          "  GetIdHandler(id_namespaces::kSyncs)->\n")
+    else:
+      file.Write(
+          "  GetIdHandler(id_namespaces::kProgramsAndShaders)->\n")
     file.Write("      MakeIds(this, 0, 1, &client_id);\n")
     file.Write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
     file.Write('  GPU_CLIENT_LOG("returned " << client_id);\n')
     file.Write("  CheckGLError();\n")
-    file.Write("  return client_id;\n")
+    if func.return_type == "GLsync":
+      file.Write("  return reinterpret_cast<GLsync>(client_id);\n")
+    else:
+      file.Write("  return client_id;\n")
     file.Write("}\n")
     file.Write("\n")
 
@@ -4913,6 +5310,9 @@ class DeleteHandler(TypeHandler):
 
   def WriteServiceImplementation(self, func, file):
     """Overrriden from TypeHandler."""
+    if func.IsUnsafe():
+      TypeHandler.WriteServiceImplementation(self, func, file)
+    # HandleDeleteShader and HandleDeleteProgram are manually written.
     pass
 
   def WriteGLES2Implementation(self, func, file):
@@ -4933,6 +5333,25 @@ class DeleteHandler(TypeHandler):
     file.Write("}\n")
     file.Write("\n")
 
+  def WriteHandlerImplementation (self, func, file):
+    """Overrriden from TypeHandler."""
+    assert len(func.GetOriginalArgs()) == 1
+    arg = func.GetOriginalArgs()[0]
+    if func.IsUnsafe():
+      file.Write("""  %(arg_type)s service_id = 0;
+  if (group_->Get%(resource_type)sServiceId(%(arg_name)s, &service_id)) {
+    glDelete%(resource_type)s(service_id);
+    group_->Remove%(resource_type)sId(%(arg_name)s);
+  } else {
+     LOCAL_SET_GL_ERROR(
+         GL_INVALID_VALUE, "gl%(func_name)s", "unknown %(arg_name)s");
+  }
+""" % { 'resource_type': func.GetInfo('resource_type'),
+        'arg_name': arg.name,
+        'arg_type': arg.type,
+        'func_name': func.original_name })
+    else:
+      file.Write("  %sHelper(%s);\n" % (func.original_name, arg.name))
 
 class DELnHandler(TypeHandler):
   """Handler for glDelete___ type functions."""
@@ -5582,6 +6001,10 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       file.Write("    return error::kOutOfBounds;\n")
       file.Write("  }\n")
 
+  def __NeedsToCalcDataCount(self, func):
+    use_count_func = func.GetInfo('use_count_func')
+    return use_count_func != None and use_count_func != False
+
   def WriteGLES2Implementation(self, func, file):
     """Overrriden from TypeHandler."""
     impl_func = func.GetInfo('impl_func')
@@ -5593,11 +6016,16 @@ TEST_P(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("  GPU_CLIENT_SINGLE_THREAD_CHECK();\n")
     func.WriteDestinationInitalizationValidation(file)
     self.WriteClientGLCallLog(func, file)
-    last_arg_name = func.GetLastOriginalArg().name
-    values_str = ' << ", " << '.join(
-        ["%s[%d]" % (last_arg_name, ndx) \
-         for ndx in range(0, self.GetArrayCount(func))])
-    file.Write('  GPU_CLIENT_LOG("values: " << %s);\n' % values_str)
+
+    if self.__NeedsToCalcDataCount(func):
+      file.Write("  size_t count = GLES2Util::Calc%sDataCount(%s);\n" %
+                 (func.name, func.GetOriginalArgs()[0].name))
+      file.Write("  DCHECK_LE(count, %du);\n" % self.GetArrayCount(func))
+    else:
+      file.Write("  size_t count = %d;" % self.GetArrayCount(func))
+    file.Write("  for (size_t ii = 0; ii < count; ++ii)\n")
+    file.Write('    GPU_CLIENT_LOG("value[" << ii << "]: " << %s[ii]);\n' %
+               func.GetLastOriginalArg().name)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
@@ -5647,14 +6075,24 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
     """Overrriden from TypeHandler."""
     file.Write("  static uint32_t ComputeDataSize() {\n")
     file.Write("    return static_cast<uint32_t>(\n")
-    file.Write("        sizeof(%s) * %d);  // NOLINT\n" %
+    file.Write("        sizeof(%s) * %d);\n" %
                (self.GetArrayType(func), self.GetArrayCount(func)))
     file.Write("  }\n")
     file.Write("\n")
+    if self.__NeedsToCalcDataCount(func):
+      file.Write("  static uint32_t ComputeEffectiveDataSize(%s %s) {\n" %
+                 (func.GetOriginalArgs()[0].type,
+                  func.GetOriginalArgs()[0].name))
+      file.Write("    return static_cast<uint32_t>(\n")
+      file.Write("        sizeof(%s) * GLES2Util::Calc%sDataCount(%s));\n" %
+                 (self.GetArrayType(func), func.original_name,
+                  func.GetOriginalArgs()[0].name))
+      file.Write("  }\n")
+      file.Write("\n")
     file.Write("  static uint32_t ComputeSize() {\n")
     file.Write("    return static_cast<uint32_t>(\n")
     file.Write(
-        "        sizeof(ValueType) + ComputeDataSize());  // NOLINT\n")
+        "        sizeof(ValueType) + ComputeDataSize());\n")
     file.Write("  }\n")
     file.Write("\n")
 
@@ -5677,7 +6115,17 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
     for arg in args:
       file.Write("    %s = _%s;\n" % (arg.name, arg.name))
     file.Write("    memcpy(ImmediateDataAddress(this),\n")
-    file.Write("           _%s, ComputeDataSize());\n" % last_arg.name)
+    if self.__NeedsToCalcDataCount(func):
+      file.Write("           _%s, ComputeEffectiveDataSize(%s));" %
+                 (last_arg.name, func.GetOriginalArgs()[0].name))
+      file.Write("""
+    DCHECK_GE(ComputeDataSize(), ComputeEffectiveDataSize(%(arg)s));
+    char* pointer = reinterpret_cast<char*>(ImmediateDataAddress(this)) +
+        ComputeEffectiveDataSize(%(arg)s);
+    memset(pointer, 0, ComputeDataSize() - ComputeEffectiveDataSize(%(arg)s));
+""" % { 'arg': func.GetOriginalArgs()[0].name, })
+    else:
+      file.Write("           _%s, ComputeDataSize());\n" % last_arg.name)
     file.Write("  }\n")
     file.Write("\n")
 
@@ -6096,6 +6544,332 @@ TEST_F(GLES2ImplementationTest, %(name)sInvalidConstantArg%(invalid_index)d) {
     file.Write("}\n")
     file.Write("\n")
 
+class PUTSTRHandler(ArrayArgTypeHandler):
+  """Handler for functions that pass a string array."""
+
+  def __init__(self):
+    ArrayArgTypeHandler.__init__(self)
+
+  def __GetDataArg(self, func):
+    """Return the argument that points to the 2D char arrays"""
+    for arg in func.GetOriginalArgs():
+      if arg.IsPointer2D():
+        return arg
+    return None
+
+  def __GetLengthArg(self, func):
+    """Return the argument that holds length for each char array"""
+    for arg in func.GetOriginalArgs():
+      if arg.IsPointer() and not arg.IsPointer2D():
+        return arg
+    return None
+
+  def WriteGLES2Implementation(self, func, file):
+    """Overrriden from TypeHandler."""
+    file.Write("%s GLES2Implementation::%s(%s) {\n" %
+               (func.return_type, func.original_name,
+                func.MakeTypedOriginalArgString("")))
+    file.Write("  GPU_CLIENT_SINGLE_THREAD_CHECK();\n")
+    func.WriteDestinationInitalizationValidation(file)
+    self.WriteClientGLCallLog(func, file)
+    data_arg = self.__GetDataArg(func)
+    length_arg = self.__GetLengthArg(func)
+    log_code_block = """  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (GLsizei ii = 0; ii < count; ++ii) {
+      if (%(data)s[ii]) {"""
+    if length_arg == None:
+      log_code_block += """
+        GPU_CLIENT_LOG("  " << ii << ": ---\\n" << %(data)s[ii] << "\\n---");"""
+    else:
+      log_code_block += """
+        if (%(length)s && %(length)s[ii] >= 0) {
+          const std::string my_str(%(data)s[ii], %(length)s[ii]);
+          GPU_CLIENT_LOG("  " << ii << ": ---\\n" << my_str << "\\n---");
+        } else {
+          GPU_CLIENT_LOG("  " << ii << ": ---\\n" << %(data)s[ii] << "\\n---");
+        }"""
+    log_code_block += """
+      } else {
+        GPU_CLIENT_LOG("  " << ii << ": NULL");
+      }
+    }
+  });
+"""
+    file.Write(log_code_block % {
+          'data': data_arg.name,
+          'length': length_arg.name if not length_arg == None else ''
+      })
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
+
+    bucket_args = []
+    for arg in func.GetOriginalArgs():
+      if arg.name == 'count' or arg == self.__GetLengthArg(func):
+        continue
+      if arg == self.__GetDataArg(func):
+        bucket_args.append('kResultBucketId')
+      else:
+        bucket_args.append(arg.name)
+    code_block = """
+  if (!PackStringsToBucket(count, %(data)s, %(length)s, "gl%(func_name)s")) {
+    return;
+  }
+  helper_->%(func_name)sBucket(%(bucket_args)s);
+  helper_->SetBucketSize(kResultBucketId, 0);
+  CheckGLError();
+}
+
+"""
+    file.Write(code_block % {
+        'data': data_arg.name,
+        'length': length_arg.name if not length_arg == None else 'NULL',
+        'func_name': func.name,
+        'bucket_args': ', '.join(bucket_args),
+      })
+
+  def WriteGLES2ImplementationUnitTest(self, func, file):
+    """Overrriden from TypeHandler."""
+    code = """
+TEST_F(GLES2ImplementationTest, %(name)s) {
+  const uint32 kBucketId = GLES2Implementation::kResultBucketId;
+  const char* kString1 = "happy";
+  const char* kString2 = "ending";
+  const size_t kString1Size = ::strlen(kString1) + 1;
+  const size_t kString2Size = ::strlen(kString2) + 1;
+  const size_t kHeaderSize = sizeof(GLint) * 3;
+  const size_t kSourceSize = kHeaderSize + kString1Size + kString2Size;
+  const size_t kPaddedHeaderSize =
+      transfer_buffer_->RoundToAlignment(kHeaderSize);
+  const size_t kPaddedString1Size =
+      transfer_buffer_->RoundToAlignment(kString1Size);
+  const size_t kPaddedString2Size =
+      transfer_buffer_->RoundToAlignment(kString2Size);
+  struct Cmds {
+    cmd::SetBucketSize set_bucket_size;
+    cmd::SetBucketData set_bucket_header;
+    cmd::SetToken set_token1;
+    cmd::SetBucketData set_bucket_data1;
+    cmd::SetToken set_token2;
+    cmd::SetBucketData set_bucket_data2;
+    cmd::SetToken set_token3;
+    cmds::%(name)sBucket cmd_bucket;
+    cmd::SetBucketSize clear_bucket_size;
+  };
+
+  ExpectedMemoryInfo mem0 = GetExpectedMemory(kPaddedHeaderSize);
+  ExpectedMemoryInfo mem1 = GetExpectedMemory(kPaddedString1Size);
+  ExpectedMemoryInfo mem2 = GetExpectedMemory(kPaddedString2Size);
+
+  Cmds expected;
+  expected.set_bucket_size.Init(kBucketId, kSourceSize);
+  expected.set_bucket_header.Init(
+      kBucketId, 0, kHeaderSize, mem0.id, mem0.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_bucket_data1.Init(
+      kBucketId, kHeaderSize, kString1Size, mem1.id, mem1.offset);
+  expected.set_token2.Init(GetNextToken());
+  expected.set_bucket_data2.Init(
+      kBucketId, kHeaderSize + kString1Size, kString2Size, mem2.id,
+      mem2.offset);
+  expected.set_token3.Init(GetNextToken());
+  expected.cmd_bucket.Init(%(bucket_args)s);
+  expected.clear_bucket_size.Init(kBucketId, 0);
+  const char* kStrings[] = { kString1, kString2 };
+  gl_->%(name)s(%(gl_args)s);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+"""
+    gl_args = []
+    bucket_args = []
+    for arg in func.GetOriginalArgs():
+      if arg == self.__GetDataArg(func):
+        gl_args.append('kStrings')
+        bucket_args.append('kBucketId')
+      elif arg == self.__GetLengthArg(func):
+        gl_args.append('NULL')
+      elif arg.name == 'count':
+        gl_args.append('2')
+      else:
+        gl_args.append(arg.GetValidClientSideArg(func))
+        bucket_args.append(arg.GetValidClientSideArg(func))
+    file.Write(code % {
+        'name': func.name,
+        'gl_args': ", ".join(gl_args),
+        'bucket_args': ", ".join(bucket_args),
+      })
+
+    if self.__GetLengthArg(func) == None:
+      return
+    code = """
+TEST_F(GLES2ImplementationTest, %(name)sWithLength) {
+  const uint32 kBucketId = GLES2Implementation::kResultBucketId;
+  const char* kString = "foobar******";
+  const size_t kStringSize = 6;  // We only need "foobar".
+  const size_t kHeaderSize = sizeof(GLint) * 2;
+  const size_t kSourceSize = kHeaderSize + kStringSize + 1;
+  const size_t kPaddedHeaderSize =
+      transfer_buffer_->RoundToAlignment(kHeaderSize);
+  const size_t kPaddedStringSize =
+      transfer_buffer_->RoundToAlignment(kStringSize + 1);
+  struct Cmds {
+    cmd::SetBucketSize set_bucket_size;
+    cmd::SetBucketData set_bucket_header;
+    cmd::SetToken set_token1;
+    cmd::SetBucketData set_bucket_data;
+    cmd::SetToken set_token2;
+    cmds::ShaderSourceBucket shader_source_bucket;
+    cmd::SetBucketSize clear_bucket_size;
+  };
+
+  ExpectedMemoryInfo mem0 = GetExpectedMemory(kPaddedHeaderSize);
+  ExpectedMemoryInfo mem1 = GetExpectedMemory(kPaddedStringSize);
+
+  Cmds expected;
+  expected.set_bucket_size.Init(kBucketId, kSourceSize);
+  expected.set_bucket_header.Init(
+      kBucketId, 0, kHeaderSize, mem0.id, mem0.offset);
+  expected.set_token1.Init(GetNextToken());
+  expected.set_bucket_data.Init(
+      kBucketId, kHeaderSize, kStringSize + 1, mem1.id, mem1.offset);
+  expected.set_token2.Init(GetNextToken());
+  expected.shader_source_bucket.Init(%(bucket_args)s);
+  expected.clear_bucket_size.Init(kBucketId, 0);
+  const char* kStrings[] = { kString };
+  const GLint kLength[] = { kStringSize };
+  gl_->%(name)s(%(gl_args)s);
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+}
+"""
+    gl_args = []
+    for arg in func.GetOriginalArgs():
+      if arg == self.__GetDataArg(func):
+        gl_args.append('kStrings')
+      elif arg == self.__GetLengthArg(func):
+        gl_args.append('kLength')
+      elif arg.name == 'count':
+        gl_args.append('1')
+      else:
+        gl_args.append(arg.GetValidClientSideArg(func))
+    file.Write(code % {
+        'name': func.name,
+        'gl_args': ", ".join(gl_args),
+        'bucket_args': ", ".join(bucket_args),
+      })
+
+  def WriteBucketServiceUnitTest(self, func, file, *extras):
+    """Overrriden from TypeHandler."""
+    cmd_args = []
+    cmd_args_with_invalid_id = []
+    gl_args = []
+    for index, arg in enumerate(func.GetOriginalArgs()):
+      if arg == self.__GetLengthArg(func):
+        gl_args.append('_')
+      elif arg.name == 'count':
+        gl_args.append('1')
+      elif arg == self.__GetDataArg(func):
+        cmd_args.append('kBucketId')
+        cmd_args_with_invalid_id.append('kBucketId')
+        gl_args.append('_')
+      elif index == 0:  # Resource ID arg
+        cmd_args.append(arg.GetValidArg(func))
+        cmd_args_with_invalid_id.append('kInvalidClientId')
+        gl_args.append(arg.GetValidGLArg(func))
+      else:
+        cmd_args.append(arg.GetValidArg(func))
+        cmd_args_with_invalid_id.append(arg.GetValidArg(func))
+        gl_args.append(arg.GetValidGLArg(func))
+
+    test = """
+TEST_P(%(test_name)s, %(name)sValidArgs) {
+  EXPECT_CALL(*gl_, %(gl_func_name)s(%(gl_args)s));
+  const uint32 kBucketId = 123;
+  const char kSource0[] = "hello";
+  const char* kSource[] = { kSource0 };
+  const char kValidStrEnd = 0;
+  SetBucketAsCStrings(kBucketId, 1, kSource, 1, kValidStrEnd);
+  cmds::%(name)s cmd;
+  cmd.Init(%(cmd_args)s);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));"""
+    if func.IsUnsafe():
+      test += """
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+"""
+    test += """
+}
+"""
+    self.WriteValidUnitTest(func, file, test, {
+        'cmd_args': ", ".join(cmd_args),
+        'gl_args': ", ".join(gl_args),
+      }, *extras)
+
+    test = """
+TEST_P(%(test_name)s, %(name)sInvalidArgs) {
+  const uint32 kBucketId = 123;
+  const char kSource0[] = "hello";
+  const char* kSource[] = { kSource0 };
+  const char kValidStrEnd = 0;
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  cmds::%(name)s cmd;
+  // Test no bucket.
+  cmd.Init(%(cmd_args)s);
+  EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
+  // Test invalid client.
+  SetBucketAsCStrings(kBucketId, 1, kSource, 1, kValidStrEnd);
+  cmd.Init(%(cmd_args_with_invalid_id)s);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+"""
+    self.WriteValidUnitTest(func, file, test, {
+        'cmd_args': ", ".join(cmd_args),
+        'cmd_args_with_invalid_id': ", ".join(cmd_args_with_invalid_id),
+      }, *extras)
+
+    test = """
+TEST_P(%(test_name)s, %(name)sInvalidHeader) {
+  const uint32 kBucketId = 123;
+  const char kSource0[] = "hello";
+  const char* kSource[] = { kSource0 };
+  const char kValidStrEnd = 0;
+  const GLsizei kCount = static_cast<GLsizei>(arraysize(kSource));
+  const GLsizei kTests[] = {
+      kCount + 1,
+      0,
+      std::numeric_limits<GLsizei>::max(),
+      -1,
+  };
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  for (size_t ii = 0; ii < arraysize(kTests); ++ii) {
+    SetBucketAsCStrings(kBucketId, 1, kSource, kTests[ii], kValidStrEnd);
+    cmds::%(name)s cmd;
+    cmd.Init(%(cmd_args)s);
+    EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
+  }
+}
+"""
+    self.WriteValidUnitTest(func, file, test, {
+        'cmd_args': ", ".join(cmd_args),
+      }, *extras)
+
+    test = """
+TEST_P(%(test_name)s, %(name)sInvalidStringEnding) {
+  const uint32 kBucketId = 123;
+  const char kSource0[] = "hello";
+  const char* kSource[] = { kSource0 };
+  const char kInvalidStrEnd = '*';
+  SetBucketAsCStrings(kBucketId, 1, kSource, 1, kInvalidStrEnd);
+  cmds::%(name)s cmd;
+  cmd.Init(%(cmd_args)s);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
+}
+"""
+    self.WriteValidUnitTest(func, file, test, {
+        'cmd_args': ", ".join(cmd_args),
+      }, *extras)
+
 
 class PUTXnHandler(ArrayArgTypeHandler):
   """Handler for glUniform?f functions."""
@@ -6427,12 +7201,17 @@ TEST_P(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
 """
     file.Write(code % {'func_name': func.name})
     func.WriteHandlerValidation(file)
-    if func.IsUnsafe() and func.GetInfo('id_mapping'):
-      for id_type in func.GetInfo('id_mapping'):
-        file.Write("  group_->Get%sServiceId(%s, &%s);\n" %
-                   (id_type, id_type.lower(), id_type.lower()))
-    file.Write("  *result_dst = %s(%s);\n" %
-               (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+    if func.IsUnsafe():
+      assert func.GetInfo('id_mapping')
+      assert len(func.GetInfo('id_mapping')) == 1
+      assert len(args) == 1
+      id_type = func.GetInfo('id_mapping')[0]
+      file.Write("  %s service_%s = 0;\n" % (args[0].type, id_type.lower()))
+      file.Write("  *result_dst = group_->Get%sServiceId(%s, &service_%s);\n" %
+                 (id_type, id_type.lower(), id_type.lower()))
+    else:
+      file.Write("  *result_dst = %s(%s);\n" %
+                 (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
     file.Write("  return error::kNoError;\n")
     file.Write("}\n")
     file.Write("\n")
@@ -6455,13 +7234,15 @@ TEST_P(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
       file.Write("    return %s;\n" % error_value)
       file.Write("  }\n")
       file.Write("  *result = 0;\n")
-      arg_string = func.MakeOriginalArgString("")
-      comma = ""
-      if len(arg_string) > 0:
-        comma = ", "
+      assert len(func.GetOriginalArgs()) == 1
+      id_arg = func.GetOriginalArgs()[0]
+      if id_arg.type == 'GLsync':
+        arg_string = "ToGLuint(%s)" % func.MakeOriginalArgString("")
+      else:
+        arg_string = func.MakeOriginalArgString("")
       file.Write(
-          "  helper_->%s(%s%sGetResultShmId(), GetResultShmOffset());\n" %
-                 (func.name, arg_string, comma))
+          "  helper_->%s(%s, GetResultShmId(), GetResultShmOffset());\n" %
+              (func.name, arg_string))
       file.Write("  WaitForCmd();\n")
       file.Write("  %s result_value = *result" % func.return_type)
       if func.return_type == "GLboolean":
@@ -6485,20 +7266,23 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
   Cmds expected;
   ExpectedMemoryInfo result1 =
       GetExpectedResultMemory(sizeof(cmds::%(name)s::Result));
-  expected.cmd.Init(1, result1.id, result1.offset);
+  expected.cmd.Init(%(cmd_id_value)s, result1.id, result1.offset);
 
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, uint32_t(1)))
+      .WillOnce(SetMemory(result1.ptr, uint32_t(GL_TRUE)))
       .RetiresOnSaturation();
 
-  GLboolean result = gl_->%(name)s(1);
+  GLboolean result = gl_->%(name)s(%(gl_id_value)s);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
   EXPECT_TRUE(result);
 }
 """
+      args = func.GetOriginalArgs()
+      assert len(args) == 1
       file.Write(code % {
-            'name': func.name,
-          })
+          'name': func.name,
+          'cmd_id_value': args[0].GetValidClientSideCmdArg(func),
+          'gl_id_value': args[0].GetValidClientSideArg(func) })
 
 
 class STRnHandler(TypeHandler):
@@ -6689,6 +7473,10 @@ class Argument(object):
     """Returns true if argument is a pointer."""
     return False
 
+  def IsPointer2D(self):
+    """Returns true if argument is a 2D pointer."""
+    return False
+
   def IsConstant(self):
     """Returns true if the argument has only one valid value."""
     return False
@@ -6719,6 +7507,8 @@ class Argument(object):
       return valid_arg
 
     index = func.GetOriginalArgs().index(self)
+    if self.type == 'GLsync':
+      return ("reinterpret_cast<GLsync>(%d)" % (index + 1))
     return str(index + 1)
 
   def GetValidClientSideCmdArg(self, func):
@@ -6736,7 +7526,10 @@ class Argument(object):
 
   def GetValidGLArg(self, func):
     """Gets a valid GL value for this argument."""
-    return self.GetValidArg(func)
+    value = self.GetValidArg(func)
+    if self.type == 'GLsync':
+      return ("reinterpret_cast<GLsync>(%s)" % value)
+    return value
 
   def GetValidNonCachedClientSideArg(self, func):
     """Returns a valid value for this argument in a GL call.
@@ -6769,8 +7562,12 @@ class Argument(object):
 
   def WriteGetCode(self, file):
     """Writes the code to get an argument from a command structure."""
+    if self.type == 'GLsync':
+      my_type = 'GLuint'
+    else:
+      my_type = self.type
     file.Write("  %s %s = static_cast<%s>(c.%s);\n" %
-               (self.type, self.name, self.type, self.name))
+               (my_type, self.name, my_type, self.name))
 
   def WriteValidationCode(self, file, func):
     """Writes the validation code for an argument."""
@@ -6871,21 +7668,29 @@ class SizeArgument(Argument):
 
   def WriteValidationCode(self, file, func):
     """overridden from Argument."""
-    file.Write("  if (%s < 0) {\n" % self.name)
-    file.Write(
-        "    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, \"gl%s\", \"%s < 0\");\n" %
-        (func.original_name, self.name))
-    file.Write("    return error::kNoError;\n")
-    file.Write("  }\n")
+    if func.IsUnsafe():
+      return
+    code = """  if (%(var_name)s < 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "gl%(func_name)s", "%(var_name)s < 0");
+    return error::kNoError;
+  }
+"""
+    file.Write(code % {
+        "var_name": self.name,
+        "func_name": func.original_name,
+      })
 
   def WriteClientSideValidationCode(self, file, func):
     """overridden from Argument."""
-    file.Write("  if (%s < 0) {\n" % self.name)
-    file.Write(
-        "    SetGLError(GL_INVALID_VALUE, \"gl%s\", \"%s < 0\");\n" %
-        (func.original_name, self.name))
-    file.Write("    return;\n")
-    file.Write("  }\n")
+    code = """  if (%(var_name)s < 0) {
+    SetGLError(GL_INVALID_VALUE, "gl%(func_name)s", "%(var_name)s < 0");
+    return;
+  }
+"""
+    file.Write(code % {
+        "var_name": self.name,
+        "func_name": func.original_name,
+      })
 
 
 class SizeNotNegativeArgument(SizeArgument):
@@ -6904,7 +7709,8 @@ class SizeNotNegativeArgument(SizeArgument):
 
 
 class EnumBaseArgument(Argument):
-  """Base class for EnumArgument, IntArgument and ValidatedBoolArgument"""
+  """Base class for EnumArgument, IntArgument, BitfieldArgument, and
+  ValidatedBoolArgument."""
 
   def __init__(self, name, gl_type, type, gl_error):
     Argument.__init__(self, name, gl_type)
@@ -7020,7 +7826,7 @@ class EnumArgument(EnumBaseArgument):
 
 
 class IntArgument(EnumBaseArgument):
-  """A class for a GLint argument that can only except specific values.
+  """A class for a GLint argument that can only accept specific values.
 
   For example glTexImage2D takes a GLint for its internalformat
   argument instead of a GLenum.
@@ -7031,7 +7837,7 @@ class IntArgument(EnumBaseArgument):
 
 
 class ValidatedBoolArgument(EnumBaseArgument):
-  """A class for a GLboolean argument that can only except specific values.
+  """A class for a GLboolean argument that can only accept specific values.
 
   For example glUniformMatrix takes a GLboolean for it's transpose but it
   must be false.
@@ -7043,6 +7849,18 @@ class ValidatedBoolArgument(EnumBaseArgument):
   def GetLogArg(self):
     """Overridden from Argument."""
     return 'GLES2Util::GetStringBool(%s)' % self.name
+
+
+class BitFieldArgument(EnumBaseArgument):
+  """A class for a GLbitfield argument that can only accept specific values.
+
+  For example glFenceSync takes a GLbitfield for its flags argument bit it
+  must be 0.
+  """
+
+  def __init__(self, name, type):
+    EnumBaseArgument.__init__(self, name, "GLbitfield", type,
+                              "GL_INVALID_VALUE")
 
 
 class ImmediatePointerArgument(Argument):
@@ -7092,39 +7910,6 @@ class ImmediatePointerArgument(Argument):
     return "static_cast<const void*>(%s)" % self.name
 
 
-class BucketPointerArgument(Argument):
-  """A class that represents an bucket argument to a function."""
-
-  def __init__(self, name, type):
-    Argument.__init__(self, name, type)
-
-  def AddCmdArgs(self, args):
-    """Overridden from Argument."""
-    pass
-
-  def WriteGetCode(self, file):
-    """Overridden from Argument."""
-    file.Write(
-      "  %s %s = bucket->GetData(0, data_size);\n" %
-      (self.type, self.name))
-
-  def WriteValidationCode(self, file, func):
-    """Overridden from Argument."""
-    pass
-
-  def GetImmediateVersion(self):
-    """Overridden from Argument."""
-    return None
-
-  def WriteDestinationInitalizationValidation(self, file, func):
-    """Overridden from Argument."""
-    self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
-
-  def GetLogArg(self):
-    """Overridden from Argument."""
-    return "static_cast<const void*>(%s)" % self.name
-
-
 class PointerArgument(Argument):
   """A class that represents a pointer argument to a function."""
 
@@ -7132,8 +7917,12 @@ class PointerArgument(Argument):
     Argument.__init__(self, name, type)
 
   def IsPointer(self):
-    """Returns true if argument is a pointer."""
+    """Overridden from Argument."""
     return True
+
+  def IsPointer2D(self):
+    """Overridden from Argument."""
+    return self.type.count('*') == 2
 
   def GetPointedType(self):
     match = re.match('(const\s+)?(?P<element_type>[\w]+)\s*\*', self.type)
@@ -7199,7 +7988,9 @@ class PointerArgument(Argument):
 
   def GetBucketVersion(self):
     """Overridden from Argument."""
-    if self.type == "const char*":
+    if self.type.find('char') >= 0:
+      if self.IsPointer2D():
+        return InputStringArrayBucketArgument(self.name, self.type)
       return InputStringBucketArgument(self.name, self.type)
     return BucketPointerArgument(self.name, self.type)
 
@@ -7208,27 +7999,83 @@ class PointerArgument(Argument):
     self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
 
 
+class BucketPointerArgument(PointerArgument):
+  """A class that represents an bucket argument to a function."""
+
+  def __init__(self, name, type):
+    Argument.__init__(self, name, type)
+
+  def AddCmdArgs(self, args):
+    """Overridden from Argument."""
+    pass
+
+  def WriteGetCode(self, file):
+    """Overridden from Argument."""
+    file.Write(
+      "  %s %s = bucket->GetData(0, data_size);\n" %
+      (self.type, self.name))
+
+  def WriteValidationCode(self, file, func):
+    """Overridden from Argument."""
+    pass
+
+  def GetImmediateVersion(self):
+    """Overridden from Argument."""
+    return None
+
+  def WriteDestinationInitalizationValidation(self, file, func):
+    """Overridden from Argument."""
+    self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
+
+  def GetLogArg(self):
+    """Overridden from Argument."""
+    return "static_cast<const void*>(%s)" % self.name
+
+
 class InputStringBucketArgument(Argument):
-  """An string input argument where the string is passed in a bucket."""
+  """A string input argument where the string is passed in a bucket."""
 
   def __init__(self, name, type):
     Argument.__init__(self, name + "_bucket_id", "uint32_t")
 
+  def IsPointer(self):
+    """Overridden from Argument."""
+    return True
+
+  def IsPointer2D(self):
+    """Overridden from Argument."""
+    return False
+
+
+class InputStringArrayBucketArgument(Argument):
+  """A string array input argument where the strings are passed in a bucket."""
+
+  def __init__(self, name, type):
+    Argument.__init__(self, name + "_bucket_id", "uint32_t")
+    self._original_name = name
+
   def WriteGetCode(self, file):
     """Overridden from Argument."""
     code = """
-  Bucket* %(name)s_bucket = GetBucket(c.%(name)s);
-  if (!%(name)s_bucket) {
+  Bucket* bucket = GetBucket(c.%(name)s);
+  if (!bucket) {
     return error::kInvalidArguments;
   }
-  std::string %(name)s_str;
-  if (!%(name)s_bucket->GetAsString(&%(name)s_str)) {
+  GLsizei count = 0;
+  std::vector<char*> strs;
+  std::vector<GLint> len;
+  if (!bucket->GetAsStrings(&count, &strs, &len)) {
     return error::kInvalidArguments;
   }
-  const char* %(name)s = %(name)s_str.c_str();
+  const char** %(original_name)s =
+      strs.size() > 0 ? const_cast<const char**>(&strs[0]) : NULL;
+  const GLint* length =
+      len.size() > 0 ? const_cast<const GLint*>(&len[0]) : NULL;
+  (void)length;
 """
     file.Write(code % {
         'name': self.name,
+        'original_name': self._original_name,
       })
 
   def GetValidArg(self, func):
@@ -7237,6 +8084,14 @@ class InputStringBucketArgument(Argument):
   def GetValidGLArg(self, func):
     return "_"
 
+  def IsPointer(self):
+    """Overridden from Argument."""
+    return True
+
+  def IsPointer2D(self):
+    """Overridden from Argument."""
+    return True
+
 
 class ResourceIdArgument(Argument):
   """A class that represents a resource id argument to a function."""
@@ -7244,17 +8099,26 @@ class ResourceIdArgument(Argument):
   def __init__(self, name, type):
     match = re.match("(GLid\w+)", type)
     self.resource_type = match.group(1)[4:]
-    type = type.replace(match.group(1), "GLuint")
+    if self.resource_type == "Sync":
+      type = type.replace(match.group(1), "GLsync")
+    else:
+      type = type.replace(match.group(1), "GLuint")
     Argument.__init__(self, name, type)
 
   def WriteGetCode(self, file):
     """Overridden from Argument."""
-    file.Write("  %s %s = c.%s;\n" % (self.type, self.name, self.name))
+    if self.type == "GLsync":
+      my_type = "GLuint"
+    else:
+      my_type = self.type
+    file.Write("  %s %s = c.%s;\n" % (my_type, self.name, self.name))
 
   def GetValidArg(self, func):
     return "client_%s_id_" % self.resource_type.lower()
 
   def GetValidGLArg(self, func):
+    if self.resource_type == "Sync":
+      return "reinterpret_cast<GLsync>(kService%sId)" % self.resource_type
     return "kService%sId" % self.resource_type
 
 
@@ -7328,6 +8192,7 @@ class Function(object):
     'Manual': ManualHandler(),
     'PUT': PUTHandler(),
     'PUTn': PUTnHandler(),
+    'PUTSTR': PUTSTRHandler(),
     'PUTXn': PUTXnHandler(),
     'StateSet': StateSetHandler(),
     'StateSetRGBAlpha': StateSetRGBAlphaHandler(),
@@ -7513,7 +8378,13 @@ class Function(object):
   def GetLastOriginalPointerArg(self):
     return self.last_original_pointer_arg
 
-  def __MaybePrependComma(self, arg_string, add_comma):
+  def GetResourceIdArg(self):
+    for arg in self.original_args:
+      if hasattr(arg, 'resource_type'):
+        return arg
+    return None
+
+  def _MaybePrependComma(self, arg_string, add_comma):
     """Adds a comma if arg_string is not empty and add_comma is true."""
     comma = ""
     if add_comma and len(arg_string):
@@ -7525,14 +8396,14 @@ class Function(object):
     args = self.GetOriginalArgs()
     arg_string = ", ".join(
         ["%s %s%s" % (arg.type, prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeOriginalArgString(self, prefix, add_comma = False, separator = ", "):
     """Gets the list of arguments as they are in GL."""
     args = self.GetOriginalArgs()
     arg_string = separator.join(
         ["%s%s" % (prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeTypedHelperArgString(self, prefix, add_comma = False):
     """Gets a list of typed GL arguments after removing unneeded arguments."""
@@ -7543,7 +8414,7 @@ class Function(object):
           prefix,
           arg.name,
         ) for arg in args if not arg.IsConstant()])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeHelperArgString(self, prefix, add_comma = False, separator = ", "):
     """Gets a list of GL arguments after removing unneeded arguments."""
@@ -7551,7 +8422,7 @@ class Function(object):
     arg_string = separator.join(
         ["%s%s" % (prefix, arg.name)
          for arg in args if not arg.IsConstant()])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeTypedPepperArgString(self, prefix):
     """Gets a list of arguments as they need to be for Pepper."""
@@ -7600,28 +8471,28 @@ class Function(object):
     args = self.GetCmdArgs()
     arg_string = ", ".join(
         ["%s %s%s" % (arg.type, prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeCmdArgString(self, prefix, add_comma = False):
     """Gets the list of arguments as they need to be for command buffers."""
     args = self.GetCmdArgs()
     arg_string = ", ".join(
         ["%s%s" % (prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeTypedInitString(self, prefix, add_comma = False):
     """Gets a typed list of arguments as they need to be for cmd Init/Set."""
     args = self.GetInitArgs()
     arg_string = ", ".join(
         ["%s %s%s" % (arg.type, prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeInitString(self, prefix, add_comma = False):
     """Gets the list of arguments as they need to be for cmd Init/Set."""
     args = self.GetInitArgs()
     arg_string = ", ".join(
         ["%s%s" % (prefix, arg.name) for arg in args])
-    return self.__MaybePrependComma(arg_string, add_comma)
+    return self._MaybePrependComma(arg_string, add_comma)
 
   def MakeLogArgString(self):
     """Makes a string of the arguments for the LOG macros"""
@@ -7929,8 +8800,16 @@ class BucketFunction(Function):
     self.type_handler.WriteBucketHandlerImplementation(self, file)
 
   def WriteServiceUnitTest(self, file, *extras):
-    """Writes the service implementation for a command."""
+    """Overridden from Function"""
     self.type_handler.WriteBucketServiceUnitTest(self, file, *extras)
+
+  def MakeOriginalArgString(self, prefix, add_comma = False, separator = ", "):
+    """Overridden from Function"""
+    args = self.GetOriginalArgs()
+    arg_string = separator.join(
+        ["%s%s" % (prefix, arg.name[0:-10] if arg.name.endswith("_bucket_id")
+                           else arg.name) for arg in args])
+    return super(BucketFunction, self)._MaybePrependComma(arg_string, add_comma)
 
 
 def CreateArg(arg_string):
@@ -7952,6 +8831,8 @@ def CreateArg(arg_string):
     return ResourceIdArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif arg_parts[0].startswith('GLenum') and len(arg_parts[0]) > 6:
     return EnumArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+  elif arg_parts[0].startswith('GLbitfield') and len(arg_parts[0]) > 10:
+    return BitFieldArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif arg_parts[0].startswith('GLboolean') and len(arg_parts[0]) > 9:
     return ValidatedBoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif arg_parts[0].startswith('GLboolean'):
@@ -8114,6 +8995,16 @@ class GLGenerator(object):
   def WriteFormat(self, filename):
     """Writes the command buffer format"""
     file = CHeaderWriter(filename)
+    # Forward declaration of a few enums used in constant argument
+    # to avoid including GL header files.
+    enum_defines = {
+        'GL_SYNC_GPU_COMMANDS_COMPLETE': '0x9117',
+        'GL_SYNC_FLUSH_COMMANDS_BIT': '0x00000001',
+      }
+    file.Write('\n')
+    for enum in enum_defines:
+      file.Write("#define %s %s\n" % (enum, enum_defines[enum]))
+    file.Write('\n')
     for func in self.functions:
       if True:
       #gen_cmd = func.GetInfo('gen_cmd')
@@ -9256,7 +10147,8 @@ def main(argv):
   gen.WriteCommonUtilsImpl(
     "gpu/command_buffer/common/gles2_cmd_utils_implementation_autogen.h")
   gen.WriteGLES2Header("gpu/GLES2/gl2chromium_autogen.h")
-  mojo_gles2_prefix = "mojo/public/c/gles2/gles2_call_visitor"
+  mojo_gles2_prefix = ("third_party/mojo/src/mojo/public/c/gles2/"
+                       "gles2_call_visitor")
   gen.WriteMojoGLCallVisitor(mojo_gles2_prefix + "_autogen.h")
   gen.WriteMojoGLCallVisitorForExtension(
       mojo_gles2_prefix + "_chromium_texture_mailbox_autogen.h",

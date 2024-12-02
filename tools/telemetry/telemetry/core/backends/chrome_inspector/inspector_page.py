@@ -5,6 +5,7 @@ import sys
 import time
 
 from telemetry.core import util
+from telemetry.image_processing import image_util
 
 
 class InspectorPage(object):
@@ -121,7 +122,7 @@ class InspectorPage(object):
       # Modern backends are returning frameId from Page.navigate.
       # Use it here to unblock upon precise navigation.
       frame_id = res['result']['frameId']
-      if frame_id in self._navigated_frame_ids:
+      if self._navigated_frame_ids and frame_id in self._navigated_frame_ids:
         self._navigated_frame_ids = None
         return
       self._navigation_frame_id = frame_id
@@ -143,8 +144,18 @@ class InspectorPage(object):
         return cookie['value']
     return None
 
+  def CaptureScreenshot(self, timeout=60):
+    request = {
+        'method': 'Page.captureScreenshot'
+        }
+    res = self._inspector_websocket.SyncRequest(request, timeout)
+    if res and ('result' in res) and ('data' in res['result']):
+      return image_util.FromBase64Png(res['result']['data'])
+    return None
+
   def CollectGarbage(self, timeout=60):
     request = {
-        'method': 'HeapProfiler.CollectGarbage'
+        'method': 'HeapProfiler.collectGarbage'
         }
-    self._inspector_websocket.SyncRequest(request, timeout)
+    res = self._inspector_websocket.SyncRequest(request, timeout)
+    assert 'result' in res

@@ -197,9 +197,7 @@ void ChromeBrowserMainPartsWin::ToolkitInitialized() {
   ChromeBrowserMainParts::ToolkitInitialized();
   gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
   gfx::PlatformFontWin::get_minimum_font_size_callback = &GetMinimumFontSize;
-#if defined(USE_AURA)
   ui::CursorLoaderWin::SetCursorResourceModule(chrome::kBrowserResourcesDll);
-#endif
 }
 
 void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
@@ -228,20 +226,6 @@ int ChromeBrowserMainPartsWin::PreCreateThreads() {
         chrome::MESSAGE_BOX_TYPE_WARNING);
   }
 
-  // Windows 8+ provides a mode where by a process cannot call Win32K/GDI
-  // functions in the kernel (win32k.sys). If we are on Windows 8+ and if
-  // we are launched with the kEnableWin32kRendererLockDown switch then we
-  // force the PDF pepper plugin to run out of process. This is because the
-  // PDF plugin uses GDI for text rendering which does not work in the
-  // Win32K lockdown mode. Running it out of process ensures that the process
-  // launched for the plugin does not have the Win32K lockdown mode enabled.
-  // TODO(ananta)
-  // Revisit this when the pdf plugin uses skia and stops using GDI.
-  if (switches::IsWin32kRendererLockdownEnabled() &&
-      base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableOutOfProcessPdf);
-  }
   return rv;
 }
 
@@ -274,8 +258,6 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
   UMA_HISTOGRAM_BOOLEAN("Windows.Tablet", base::win::IsTabletDevice());
-  UMA_HISTOGRAM_BOOLEAN("Windows.Win32kRendererLockdown",
-                        switches::IsWin32kRendererLockdownEnabled());
 
   // Set up a task to verify installed modules in the current process. Use a
   // delay to reduce the impact on startup time.
@@ -310,7 +292,6 @@ void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
   // If the known command-line test options are used we don't create the
   // environment block which means we don't get the restart dialog.
   if (parsed_command_line.HasSwitch(switches::kBrowserCrashTest) ||
-      parsed_command_line.HasSwitch(switches::kBrowserAssertTest) ||
       parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
     return;
 

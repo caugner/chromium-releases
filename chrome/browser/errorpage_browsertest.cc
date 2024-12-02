@@ -15,9 +15,9 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
-#include "chrome/browser/google/google_profile_helper.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -279,10 +279,11 @@ void InstallMockInterceptors(
   // Add a mock for the search engine the error page will use.
   base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
-  net::URLRequestMockHTTPJob::AddHostnameToFileHandler(
-      search_url.host(),
-      root_http.AppendASCII("title3.html"),
-      BrowserThread::GetBlockingPool());
+  net::URLRequestFilter::GetInstance()->AddHostnameInterceptor(
+      search_url.scheme(), search_url.host(),
+      net::URLRequestMockHTTPJob::CreateInterceptorForSingleFile(
+          root_http.AppendASCII("title3.html"),
+          BrowserThread::GetBlockingPool()));
 }
 
 class ErrorPageTest : public InProcessBrowserTest {
@@ -412,12 +413,11 @@ class ErrorPageTest : public InProcessBrowserTest {
     // Ownership of the |interceptor_| is passed to an object the IO thread, but
     // a pointer is kept in the test fixture.  As soon as anything calls
     // URLRequestFilter::ClearHandlers(), |interceptor_| can become invalid.
+    UIThreadSearchTermsData search_terms_data(browser()->profile());
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&InstallMockInterceptors,
-                   google_util::GetGoogleSearchURL(
-                       google_profile_helper::GetGoogleHomePageURL(
-                           browser()->profile())),
+                   GURL(search_terms_data.GoogleBaseURLValue()),
                    base::Passed(&owned_interceptor)));
   }
 
@@ -941,7 +941,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
   EXPECT_EQ(2, interceptor()->requests());
 
   ToggleHelpBox(browser());
-  EXPECT_TRUE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
+  EXPECT_TRUE(IsDisplayingText(browser(), "error.page.auto.reload"));
 
   content::WebContents* web_contents =
     browser()->tab_strip_model()->GetActiveWebContents();
@@ -949,7 +949,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
   web_contents->GetMainFrame()->ExecuteJavaScript(
       base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
   nav_observer.Wait();
-  EXPECT_FALSE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
+  EXPECT_FALSE(IsDisplayingText(browser(), "error.page.auto.reload"));
 }
 
 // Interceptor that fails all requests with net::ERR_ADDRESS_UNREACHABLE.

@@ -93,6 +93,9 @@ class KeyboardWindowDelegate : public aura::WindowDelegate {
                        const gfx::Rect& new_bounds) override {
     bounds_ = new_bounds;
   }
+  ui::TextInputClient* GetFocusedTextInputClient() override {
+    return nullptr;
+  }
   gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
@@ -141,7 +144,7 @@ void ToggleTouchEventLogging(bool enable) {
   VLOG(1) << "Running " << command.GetCommandLineString();
   base::LaunchOptions options;
   options.wait = true;
-  base::LaunchProcess(command, options, NULL);
+  base::LaunchProcess(command, options);
 #endif
 }
 

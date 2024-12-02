@@ -34,7 +34,6 @@ class RenderFrameHost;
 class RenderWidgetHostViewAndroid;
 struct MenuItem;
 
-// TODO(jrg): this is a shell.  Upstream the rest.
 class ContentViewCoreImpl : public ContentViewCore,
                             public WebContentsObserver {
  public:
@@ -47,20 +46,20 @@ class ContentViewCoreImpl : public ContentViewCore,
                       jobject java_bridge_retained_object_set);
 
   // ContentViewCore implementation.
-  virtual base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
-  virtual WebContents* GetWebContents() const override;
-  virtual ui::ViewAndroid* GetViewAndroid() const override;
-  virtual ui::WindowAndroid* GetWindowAndroid() const override;
-  virtual const scoped_refptr<cc::Layer>& GetLayer() const override;
-  virtual void ShowPastePopup(int x, int y) override;
-  virtual void GetScaledContentBitmap(
+  base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
+  WebContents* GetWebContents() const override;
+  ui::ViewAndroid* GetViewAndroid() const override;
+  ui::WindowAndroid* GetWindowAndroid() const override;
+  const scoped_refptr<cc::Layer>& GetLayer() const override;
+  void ShowPastePopup(int x, int y) override;
+  void GetScaledContentBitmap(
       float scale,
       SkColorType color_type,
       gfx::Rect src_subrect,
       ReadbackRequestCallback& result_callback) override;
-  virtual float GetDpiScale() const override;
-  virtual void PauseOrResumeGeolocation(bool should_pause) override;
-  virtual void RequestTextSurroundingSelection(
+  float GetDpiScale() const override;
+  void PauseOrResumeGeolocation(bool should_pause) override;
+  void RequestTextSurroundingSelection(
       int max_length,
       const base::Callback<void(const base::string16& content,
                                 int start_offset,
@@ -180,6 +179,7 @@ class ContentViewCoreImpl : public ContentViewCore,
                             jint height);
 
   void SetBackgroundOpaque(JNIEnv* env, jobject jobj, jboolean opaque);
+  void SetDrawsContent(JNIEnv* env, jobject jobj, jboolean draws);
 
   jint GetCurrentRenderProcessId(JNIEnv* env, jobject obj);
 
@@ -210,7 +210,8 @@ class ContentViewCoreImpl : public ContentViewCore,
                        const gfx::SizeF& content_size,
                        const gfx::SizeF& viewport_size,
                        const gfx::Vector2dF& controls_offset,
-                       const gfx::Vector2dF& content_offset);
+                       const gfx::Vector2dF& content_offset,
+                       bool is_mobile_optimized_hint);
 
   void UpdateImeAdapter(long native_ime_adapter,
                         int text_input_type,
@@ -285,13 +286,13 @@ class ContentViewCoreImpl : public ContentViewCore,
   class ContentViewUserData;
 
   friend class ContentViewUserData;
-  virtual ~ContentViewCoreImpl();
+  ~ContentViewCoreImpl() override;
 
   // WebContentsObserver implementation.
-  virtual void RenderViewReady() override;
-  virtual void RenderViewHostChanged(RenderViewHost* old_host,
-                                     RenderViewHost* new_host) override;
-  virtual void WebContentsDestroyed() override;
+  void RenderViewReady() override;
+  void RenderViewHostChanged(RenderViewHost* old_host,
+                             RenderViewHost* new_host) override;
+  void WebContentsDestroyed() override;
 
   // --------------------------------------------------------------------------
   // Other private methods and data

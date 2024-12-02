@@ -502,7 +502,7 @@ web_app::ShortcutInfo RecordAppShimErrorAndBuildShortcutInfo(
   NSDictionary* plist = ReadPlist(GetPlistPath(bundle_path));
   base::Version full_version(base::SysNSStringToUTF8(
       [plist valueForKey:app_mode::kCFBundleShortVersionStringKey]));
-  int major_version = 0;
+  uint32_t major_version = 0;
   if (full_version.IsValid())
     major_version = full_version.components()[0];
   UMA_HISTOGRAM_SPARSE_SLOWLY("Apps.AppShimErrorVersion", major_version);
@@ -1103,8 +1103,10 @@ void UpdateShortcutsForAllApps(Profile* profile,
       registry->GenerateInstalledExtensionsSet();
   for (extensions::ExtensionSet::const_iterator it = everything->begin();
        it != everything->end(); ++it) {
-    if (web_app::ShouldCreateShortcutFor(profile, it->get()))
+    if (web_app::ShouldCreateShortcutFor(SHORTCUT_CREATION_AUTOMATED, profile,
+                                         it->get())) {
       web_app::UpdateAllShortcuts(base::string16(), profile, it->get());
+    }
   }
 
   callback.Run();

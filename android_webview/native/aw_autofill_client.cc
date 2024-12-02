@@ -66,8 +66,12 @@ PrefService* AwAutofillClient::GetPrefs() {
       AwContentBrowserClient::GetAwBrowserContext());
 }
 
+IdentityProvider* AwAutofillClient::GetIdentityProvider() {
+  return nullptr;
+}
+
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
-  return NULL;
+  return nullptr;
 }
 
 scoped_refptr<autofill::AutofillWebDataService>
@@ -164,6 +168,11 @@ void AwAutofillClient::DidFillOrPreviewField(
 }
 
 void AwAutofillClient::OnFirstUserGestureObserved() {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::LinkClicked(const GURL& url,
+                                   WindowOpenDisposition disposition) {
   NOTIMPLEMENTED();
 }
 

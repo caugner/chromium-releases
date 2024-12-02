@@ -70,8 +70,8 @@ namespace tools {
 namespace test {
 namespace {
 
-const char* kFooResponseBody = "Artichoke hearts make me happy.";
-const char* kBarResponseBody = "Palm hearts are pretty delicious, also.";
+const char kFooResponseBody[] = "Artichoke hearts make me happy.";
+const char kBarResponseBody[] = "Palm hearts are pretty delicious, also.";
 
 // Run all tests with the cross products of all versions.
 struct TestParams {
@@ -117,6 +117,15 @@ vector<TestParams> GetTestParams() {
   // TODO(rtenneti): Add kTBBR after BBR code is checked in.
   // QuicTag congestion_control_tags[] = {kRENO, kTBBR, kQBIC};
   QuicTag congestion_control_tags[] = {kRENO, kQBIC};
+  QuicVersionVector spdy3_versions;
+  QuicVersionVector spdy4_versions;
+  for (QuicVersion version : all_supported_versions) {
+    if (version > QUIC_VERSION_23) {
+      spdy4_versions.push_back(version);
+    } else {
+      spdy3_versions.push_back(version);
+    }
+  }
   for (size_t congestion_control_index = 0;
        congestion_control_index < arraysize(congestion_control_tags);
        congestion_control_index++) {
@@ -124,27 +133,26 @@ vector<TestParams> GetTestParams() {
         congestion_control_tags[congestion_control_index];
     for (int use_fec = 0; use_fec < 2; ++use_fec) {
       for (int use_pacing = 0; use_pacing < 2; ++use_pacing) {
-        // Add an entry for server and client supporting all versions.
-        params.push_back(TestParams(all_supported_versions,
-                                    all_supported_versions,
-                                    all_supported_versions[0],
-                                    use_pacing != 0,
-                                    use_fec != 0,
-                                    congestion_control_tag));
+        for (int spdy_version = 3; spdy_version <= 4; ++spdy_version) {
+          const QuicVersionVector* client_versions =
+              spdy_version == 3 ? &spdy3_versions : &spdy4_versions;
+          // Add an entry for server and client supporting all versions.
+          params.push_back(TestParams(*client_versions, all_supported_versions,
+                                      (*client_versions)[0], use_pacing != 0,
+                                      use_fec != 0, congestion_control_tag));
 
-        // Test client supporting all versions and server supporting 1 version.
-        // Simulate an old server and exercise version downgrade in the client.
-        // Protocol negotiation should occur. Skip the i = 0 case because it is
-        // essentially the same as the default case.
-        for (size_t i = 1; i < all_supported_versions.size(); ++i) {
-          QuicVersionVector server_supported_versions;
-          server_supported_versions.push_back(all_supported_versions[i]);
-          params.push_back(TestParams(all_supported_versions,
-                                      server_supported_versions,
-                                      server_supported_versions[0],
-                                      use_pacing != 0,
-                                      use_fec != 0,
-                                      congestion_control_tag));
+          // Test client supporting all versions and server supporting 1
+          // version. Simulate an old server and exercise version downgrade in
+          // the client. Protocol negotiation should occur. Skip the i = 0 case
+          // because it is essentially the same as the default case.
+          for (QuicVersion version : *client_versions) {
+            QuicVersionVector server_supported_versions;
+            server_supported_versions.push_back(version);
+            params.push_back(
+                TestParams(*client_versions, server_supported_versions,
+                           server_supported_versions[0], use_pacing != 0,
+                           use_fec != 0, congestion_control_tag));
+          }
         }
       }
     }
@@ -311,6 +319,8 @@ class EndToEndTest : public ::testing::TestWithParam<TestParams> {
     // and TestWriterFactory when Initialize() is executed.
     client_writer_ = new PacketDroppingTestWriter();
     server_writer_ = new PacketDroppingTestWriter();
+    // TODO(ianswett): Remove this once it's fully rolled out.
+    FLAGS_quic_enable_pacing = false;
   }
 
   void TearDown() override { StopServer(); }
@@ -1002,8 +1012,6 @@ TEST_P(EndToEndTest, MinInitialRTT) {
 }
 
 TEST_P(EndToEndTest, 0ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(0);
   ASSERT_TRUE(Initialize());
 
@@ -1017,8 +1025,6 @@ TEST_P(EndToEndTest, 0ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 1ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(1);
   ASSERT_TRUE(Initialize());
 
@@ -1031,8 +1037,6 @@ TEST_P(EndToEndTest, 1ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 4ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(4);
   ASSERT_TRUE(Initialize());
 
@@ -1045,8 +1049,6 @@ TEST_P(EndToEndTest, 4ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 8ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(8);
   ASSERT_TRUE(Initialize());
 
@@ -1059,8 +1061,6 @@ TEST_P(EndToEndTest, 8ByteConnectionId) {
 }
 
 TEST_P(EndToEndTest, 15ByteConnectionId) {
-  ValueRestore<bool> old_flag(&FLAGS_allow_truncated_connection_ids_for_quic,
-                              true);
   client_config_.SetBytesForConnectionIdToSend(15);
   ASSERT_TRUE(Initialize());
 
@@ -1376,6 +1376,77 @@ TEST_P(EndToEndTest, EnablePacingViaFlag) {
       *GetSentPacketManagerFromFirstServerSession();
   EXPECT_TRUE(server_sent_packet_manager.using_pacing());
   EXPECT_TRUE(client_sent_packet_manager.using_pacing());
+}
+
+// A TestAckNotifierDelegate verifies that its OnAckNotification method has been
+// called exactly once on destruction.
+class TestAckNotifierDelegate : public QuicAckNotifier::DelegateInterface {
+ public:
+  TestAckNotifierDelegate() {}
+
+  void OnAckNotification(int /*num_retransmitted_packets*/,
+                         int /*num_retransmitted_bytes*/,
+                         QuicTime::Delta /*delta_largest_observed*/) override {
+    ASSERT_FALSE(has_been_notified_);
+    has_been_notified_ = true;
+  }
+
+  bool has_been_notified() const { return has_been_notified_; }
+
+ protected:
+  // Object is ref counted.
+  ~TestAckNotifierDelegate() override { EXPECT_TRUE(has_been_notified_); }
+
+ private:
+  bool has_been_notified_ = false;
+};
+
+TEST_P(EndToEndTest, AckNotifierWithPacketLossAndBlockedSocket) {
+  // Verify that even in the presence of packet loss and occasionally blocked
+  // socket,  an AckNotifierDelegate will get informed that the data it is
+  // interested in has been ACKed. This tests end-to-end ACK notification, and
+  // demonstrates that retransmissions do not break this functionality.
+  ValueRestore<bool> old_flag(&FLAGS_quic_attach_ack_notifiers_to_packets,
+                              true);
+
+  SetPacketLossPercentage(5);
+  ASSERT_TRUE(Initialize());
+
+  // Wait for the server SHLO before upping the packet loss.
+  client_->client()->WaitForCryptoHandshakeConfirmed();
+  SetPacketLossPercentage(30);
+  client_writer_->set_fake_blocked_socket_percentage(10);
+
+  // Create a POST request and send the headers only.
+  HTTPMessage request(HttpConstants::HTTP_1_1, HttpConstants::POST, "/foo");
+  request.set_has_complete_message(false);
+  client_->SendMessage(request);
+
+  // The TestAckNotifierDelegate will cause a failure if not notified.
+  scoped_refptr<TestAckNotifierDelegate> delegate(new TestAckNotifierDelegate);
+
+  // Test the AckNotifier's ability to track multiple packets by making the
+  // request body exceed the size of a single packet.
+  string request_string =
+      "a request body bigger than one packet" + string(kMaxPacketSize, '.');
+
+  // Send the request, and register the delegate for ACKs.
+  client_->SendData(request_string, true, delegate.get());
+  client_->WaitForResponse();
+  EXPECT_EQ(kFooResponseBody, client_->response_body());
+  EXPECT_EQ(200u, client_->response_headers()->parsed_response_code());
+
+  // Send another request to flush out any pending ACKs on the server.
+  client_->SendSynchronousRequest(request_string);
+
+  // Pause the server to avoid races.
+  server_thread_->Pause();
+  // Make sure the delegate does get the notification it expects.
+  while (!delegate->has_been_notified()) {
+    // Waits for up to 50 ms.
+    client_->client()->WaitForEvents();
+  }
+  server_thread_->Resume();
 }
 
 }  // namespace

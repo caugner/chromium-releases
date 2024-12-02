@@ -8,8 +8,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
-#include "mojo/public/cpp/system/message_pipe.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/message_pipe.h"
 
 namespace IPC {
 namespace internal {
@@ -33,7 +33,7 @@ class AsyncHandleWaiterTest : public testing::Test {
   }
 
   void SetUp() override {
-    message_loop_.reset(new base::MessageLoop());
+    message_loop_.reset(new base::MessageLoopForIO());
     ResetSignaledStates();
     mojo::CreateMessagePipe(nullptr, &pipe_to_write_, &pipe_to_read_);
     target_.reset(new AsyncHandleWaiter(base::Bind(
@@ -73,7 +73,8 @@ class AsyncHandleWaiterTest : public testing::Test {
   void WaitAndAssertNotSignaled() {
     run_loop_->RunUntilIdle();
     EXPECT_EQ(MOJO_RESULT_OK, MojoWait(pipe_to_read_.get().value(),
-                                       MOJO_HANDLE_SIGNAL_READABLE, 0));
+                                       MOJO_HANDLE_SIGNAL_READABLE, 0,
+                                       nullptr));
     EXPECT_EQ(MOJO_RESULT_UNKNOWN, signaled_result_);
   }
 

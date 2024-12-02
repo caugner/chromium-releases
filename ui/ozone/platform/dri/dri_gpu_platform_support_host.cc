@@ -4,14 +4,16 @@
 
 #include "ui/ozone/platform/dri/dri_gpu_platform_support_host.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/common/gpu/ozone_gpu_messages.h"
 #include "ui/ozone/platform/dri/channel_observer.h"
+#include "ui/ozone/platform/dri/dri_cursor.h"
 
 namespace ui {
 
-DriGpuPlatformSupportHost::DriGpuPlatformSupportHost() : host_id_(-1) {
+DriGpuPlatformSupportHost::DriGpuPlatformSupportHost(DriCursor* cursor)
+    : host_id_(-1), cursor_(cursor) {
 }
 
 DriGpuPlatformSupportHost::~DriGpuPlatformSupportHost() {
@@ -64,11 +66,20 @@ void DriGpuPlatformSupportHost::OnChannelEstablished(
 
   FOR_EACH_OBSERVER(ChannelObserver, channel_observers_,
                     OnChannelEstablished());
+
+  // The cursor is special since it will process input events on the IO thread
+  // and can by-pass the UI thread. This means that we need to special case it
+  // and notify it after all other observers/handlers are notified such that the
+  // (windowing) state on the GPU can be initialized before the cursor is
+  // allowed to IPC messages (which are targeted to a specific window).
+  cursor_->OnChannelEstablished(host_id, send_runner_, send_callback_);
 }
 
 void DriGpuPlatformSupportHost::OnChannelDestroyed(int host_id) {
   TRACE_EVENT1("dri", "DriGpuPlatformSupportHost::OnChannelDestroyed",
                "host_id", host_id);
+  cursor_->OnChannelDestroyed(host_id);
+
   if (host_id_ == host_id) {
     host_id_ = -1;
     send_runner_ = nullptr;
@@ -96,20 +107,6 @@ bool DriGpuPlatformSupportHost::Send(IPC::Message* message) {
 
   delete message;
   return false;
-}
-
-void DriGpuPlatformSupportHost::SetHardwareCursor(
-    gfx::AcceleratedWidget widget,
-    const std::vector<SkBitmap>& bitmaps,
-    const gfx::Point& location,
-    int frame_delay_ms) {
-  Send(new OzoneGpuMsg_CursorSet(widget, bitmaps, location, frame_delay_ms));
-}
-
-void DriGpuPlatformSupportHost::MoveHardwareCursor(
-    gfx::AcceleratedWidget widget,
-    const gfx::Point& location) {
-  Send(new OzoneGpuMsg_CursorMove(widget, location));
 }
 
 }  // namespace ui

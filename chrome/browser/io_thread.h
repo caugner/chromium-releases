@@ -38,12 +38,6 @@ namespace chrome_browser_net {
 class DnsProbeService;
 }
 
-namespace data_reduction_proxy {
-class DataReductionProxyAuthRequestHandler;
-class DataReductionProxyDelegate;
-class DataReductionProxyParams;
-}
-
 namespace extensions {
 class EventRouterForwarder;
 }
@@ -188,13 +182,15 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<double> alternate_protocol_probability_threshold;
 
     Optional<bool> enable_quic;
+    Optional<bool> enable_quic_for_proxies;
     Optional<bool> enable_quic_port_selection;
     Optional<bool> quic_always_require_handshake_confirmation;
     Optional<bool> quic_disable_connection_pooling;
     Optional<int> quic_load_server_info_timeout_ms;
-    Optional<bool> quic_disable_loading_server_info_for_new_servers;
     Optional<float> quic_load_server_info_timeout_srtt_multiplier;
     Optional<bool> quic_enable_truncated_connection_ids;
+    Optional<bool> quic_enable_connection_racing;
+    Optional<bool> quic_disable_disk_cache;
     Optional<size_t> quic_max_packet_length;
     net::QuicTagVector quic_connection_options;
     Optional<std::string> quic_user_agent_id;
@@ -205,12 +201,6 @@ class IOThread : public content::BrowserThreadDelegate {
     // main frame load fails with a DNS error in order to provide more useful
     // information to the renderer so it can show a more specific error page.
     scoped_ptr<chrome_browser_net::DnsProbeService> dns_probe_service;
-    scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-        data_reduction_proxy_params;
-    scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
-        data_reduction_proxy_auth_request_handler;
-    scoped_ptr<data_reduction_proxy::DataReductionProxyDelegate>
-        data_reduction_proxy_delegate;
   };
 
   // |net_log| must either outlive the IOThread or be NULL.
@@ -247,6 +237,10 @@ class IOThread : public content::BrowserThreadDelegate {
   void InitializeNetworkSessionParams(net::HttpNetworkSession::Params* params);
 
   base::TimeTicks creation_time() const;
+
+  // Returns true if QUIC should be enabled for data reduction proxy, either as
+  // a result of a field trial or a command line flag.
+  static bool ShouldEnableQuicForDataReductionProxy();
 
  private:
   // Map from name to value for all parameters associate with a field trial.
@@ -321,9 +315,6 @@ class IOThread : public content::BrowserThreadDelegate {
   // well as the QUIC field trial group.
   void ConfigureQuic(const base::CommandLine& command_line);
 
-  // Set up data reduction proxy related objects on IO thread globals.
-  void SetupDataReductionProxy();
-
   extensions::EventRouterForwarder* extension_event_router_forwarder() {
 #if defined(ENABLE_EXTENSIONS)
     return extension_event_router_forwarder_;
@@ -345,6 +336,12 @@ class IOThread : public content::BrowserThreadDelegate {
       const base::CommandLine& command_line,
       base::StringPiece quic_trial_group);
 
+  // Returns true if QUIC should be enabled for proxies, either as a result
+  // of a field trial or a command line flag.
+  static bool ShouldEnableQuicForProxies(
+      const base::CommandLine& command_line,
+      base::StringPiece quic_trial_group);
+
   // Returns true if the selection of the ephemeral port in bind() should be
   // performed by Chromium, and false if the OS should select the port.  The OS
   // option is used to prevent Windows from posting a security security warning
@@ -356,7 +353,6 @@ class IOThread : public content::BrowserThreadDelegate {
   // QUIC handshake.
   static bool ShouldEnableQuicPacing(
       const base::CommandLine& command_line,
-      base::StringPiece quic_trial_group,
       const VariationParameters& quic_trial_params);
 
   // Returns true if QUIC should always require handshake confirmation during
@@ -374,10 +370,6 @@ class IOThread : public content::BrowserThreadDelegate {
   static int GetQuicLoadServerInfoTimeout(
       const VariationParameters& quic_trial_params);
 
-  // Returns true if QUIC sever information shouldn't be loaded for new servers.
-  static bool ShouldDisableLoadingServerInfoForNewServers(
-      const VariationParameters& quic_trial_params);
-
   // Returns the ratio of time to load QUIC sever information from disk cache to
   // 'smoothed RTT' based on field trial. Returns 0 if there is an error parsing
   // the field trial params, or if the default value should be used.
@@ -388,12 +380,20 @@ class IOThread : public content::BrowserThreadDelegate {
   static bool ShouldQuicEnableTruncatedConnectionIds(
       const VariationParameters& quic_trial_params);
 
+  // Returns true if QUIC's connection racing should be enabled.
+  static bool ShouldQuicEnableConnectionRacing(
+      const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC shouldn't load QUIC server information from the disk
+  // cache.
+  static bool ShouldQuicDisableDiskCache(
+      const VariationParameters& quic_trial_params);
+
   // Returns the maximum length for QUIC packets, based on any flags in
   // |command_line| or the field trial.  Returns 0 if there is an error
   // parsing any of the options, or if the default value should be used.
   static size_t GetQuicMaxPacketLength(
       const base::CommandLine& command_line,
-      base::StringPiece quic_trial_group,
       const VariationParameters& quic_trial_params);
 
   // Returns the QUIC versions specified by any flags in |command_line|

@@ -38,7 +38,6 @@
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
@@ -60,7 +59,7 @@
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -107,6 +106,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/exclusive_access/mouse_lock_controller.h"
 #include "chrome/browser/ui/fast_unload_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -154,6 +154,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/search/search.h"
 #include "components/sessions/session_types.h"
@@ -447,7 +448,7 @@ Browser::Browser(const CreateParams& params)
 #endif  // defined(OS_WIN)
   }
 
-  fullscreen_controller_.reset(new FullscreenController(this));
+  exclusive_access_manager_.reset(new ExclusiveAccessManager(this));
 
   // Must be initialized after window_.
   // Also: surprise! a modal dialog host is not necessary to host modal dialogs
@@ -802,7 +803,8 @@ Browser::DownloadClosePreventionType Browser::OkToCloseWithInProgressDownloads(
 // Browser, Tab adding/showing functions:
 
 void Browser::WindowFullscreenStateChanged() {
-  fullscreen_controller_->WindowFullscreenStateChanged();
+  exclusive_access_manager_->fullscreen_controller()
+      ->WindowFullscreenStateChanged();
   command_controller_->FullscreenStateChanged();
   UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_TOGGLE_FULLSCREEN);
 }
@@ -811,8 +813,8 @@ void Browser::WindowFullscreenStateChanged() {
 // Browser, Assorted browser commands:
 
 void Browser::ToggleFullscreenModeWithExtension(const GURL& extension_url) {
-  fullscreen_controller_->
-      ToggleBrowserFullscreenModeWithExtension(extension_url);
+  exclusive_access_manager_->fullscreen_controller()
+      ->ToggleBrowserFullscreenModeWithExtension(extension_url);
 }
 
 bool Browser::SupportsWindowFeature(WindowFeature feature) const {
@@ -962,7 +964,7 @@ void Browser::TabInsertedAt(WebContents* contents,
 void Browser::TabClosingAt(TabStripModel* tab_strip_model,
                            WebContents* contents,
                            int index) {
-  fullscreen_controller_->OnTabClosing(contents);
+  exclusive_access_manager_->OnTabClosing(contents);
   SessionService* session_service =
       SessionServiceFactory::GetForProfile(profile_);
   if (session_service)
@@ -998,7 +1000,7 @@ void Browser::TabDetachedAt(WebContents* contents, int index) {
 }
 
 void Browser::TabDeactivated(WebContents* contents) {
-  fullscreen_controller_->OnTabDeactivated(contents);
+  exclusive_access_manager_->OnTabDeactivated(contents);
   search_delegate_->OnTabDeactivated(contents);
   SearchTabHelper::FromWebContents(contents)->OnTabDeactivated();
 
@@ -1026,7 +1028,7 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   // is updated.
   window_->OnActiveTabChanged(old_contents, new_contents, index, reason);
 
-  fullscreen_controller_->OnTabDetachedFromView(old_contents);
+  exclusive_access_manager_->OnTabDetachedFromView(old_contents);
 
   // Discarded tabs always get reloaded.
   if (tab_strip_model_->IsTabDiscarded(index)) {
@@ -1098,7 +1100,7 @@ void Browser::TabReplacedAt(TabStripModel* tab_strip_model,
                             WebContents* new_contents,
                             int index) {
   TabDetachedAtImpl(old_contents, index, DETACH_TYPE_REPLACE);
-  fullscreen_controller_->OnTabClosing(old_contents);
+  exclusive_access_manager_->OnTabClosing(old_contents);
   SessionService* session_service =
       SessionServiceFactory::GetForProfile(profile_);
   if (session_service)
@@ -1198,10 +1200,10 @@ bool Browser::ShouldPreserveAbortedURLs(WebContents* source) {
 bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
                                      const NativeWebKeyboardEvent& event,
                                      bool* is_keyboard_shortcut) {
-  // Escape exits tabbed fullscreen mode.
+  // Escape exits tabbed fullscreen mode and mouse lock, and possibly others.
   // TODO(koz): Write a test for this http://crbug.com/100441.
   if (event.windowsKeyCode == 27 &&
-      fullscreen_controller_->HandleUserPressedEscape()) {
+      exclusive_access_manager_->HandleUserPressedEscape()) {
     return true;
   }
   return window()->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
@@ -1229,15 +1231,9 @@ void Browser::ShowValidationMessage(content::WebContents* web_contents,
                                     const gfx::Rect& anchor_in_root_view,
                                     const base::string16& main_text,
                                     const base::string16& sub_text) {
-  RenderWidgetHostView* rwhv = web_contents->GetRenderWidgetHostView();
-  if (rwhv) {
-    validation_message_bubble_ =
-        chrome::ValidationMessageBubble::CreateAndShow(
-            rwhv->GetRenderWidgetHost(),
-            anchor_in_root_view,
-            main_text,
-            sub_text);
-  }
+  validation_message_bubble_ =
+      TabDialogs::FromWebContents(web_contents)
+          ->ShowValidationMessage(anchor_in_root_view, main_text, sub_text);
 }
 
 void Browser::HideValidationMessage(content::WebContents* web_contents) {
@@ -1279,7 +1275,7 @@ bool Browser::CanDragEnter(content::WebContents* source,
 }
 
 bool Browser::IsMouseLocked() const {
-  return fullscreen_controller_->IsMouseLocked();
+  return exclusive_access_manager_->mouse_lock_controller()->IsMouseLocked();
 }
 
 void Browser::OnWindowDidShow() {
@@ -1412,10 +1408,10 @@ void Browser::VisibleSSLStateChanged(const WebContents* source) {
 void Browser::AddNewContents(WebContents* source,
                              WebContents* new_contents,
                              WindowOpenDisposition disposition,
-                             const gfx::Rect& initial_pos,
+                             const gfx::Rect& initial_rect,
                              bool user_gesture,
                              bool* was_blocked) {
-  chrome::AddWebContents(this, source, new_contents, disposition, initial_pos,
+  chrome::AddWebContents(this, source, new_contents, disposition, initial_rect,
                          user_gesture, was_blocked);
 }
 
@@ -1681,15 +1677,21 @@ bool Browser::EmbedsFullscreenWidget() const {
   return true;
 }
 
-void Browser::ToggleFullscreenModeForTab(WebContents* web_contents,
-                                         bool enter_fullscreen) {
-  fullscreen_controller_->ToggleFullscreenModeForTab(web_contents,
-                                                     enter_fullscreen);
+void Browser::EnterFullscreenModeForTab(WebContents* web_contents,
+                                        const GURL& origin) {
+  exclusive_access_manager_->fullscreen_controller()->EnterFullscreenModeForTab(
+      web_contents, origin);
+}
+
+void Browser::ExitFullscreenModeForTab(WebContents* web_contents) {
+  exclusive_access_manager_->fullscreen_controller()->ExitFullscreenModeForTab(
+      web_contents);
 }
 
 bool Browser::IsFullscreenForTabOrPending(
     const WebContents* web_contents) const {
-  return fullscreen_controller_->IsFullscreenForTabOrPending(web_contents);
+  return exclusive_access_manager_->fullscreen_controller()
+      ->IsFullscreenForTabOrPending(web_contents);
 }
 
 void Browser::RegisterProtocolHandler(WebContents* web_contents,
@@ -1785,13 +1787,12 @@ void Browser::FindReply(WebContents* web_contents,
 void Browser::RequestToLockMouse(WebContents* web_contents,
                                  bool user_gesture,
                                  bool last_unlocked_by_target) {
-  fullscreen_controller_->RequestToLockMouse(web_contents,
-                                             user_gesture,
-                                             last_unlocked_by_target);
+  exclusive_access_manager_->mouse_lock_controller()->RequestToLockMouse(
+      web_contents, user_gesture, last_unlocked_by_target);
 }
 
 void Browser::LostMouseLock() {
-  fullscreen_controller_->LostMouseLock();
+  exclusive_access_manager_->mouse_lock_controller()->LostMouseLock();
 }
 
 void Browser::RequestMediaAccessPermission(
@@ -1899,7 +1900,8 @@ OmniboxView* Browser::GetOmniboxView() {
 }
 
 std::set<std::string> Browser::GetOpenUrls() {
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)  // NULL for Incognito profiles.
     return std::set<std::string>();
 
@@ -2356,8 +2358,8 @@ bool Browser::ShouldShowLocationBar() const {
 }
 
 bool Browser::ShouldUseWebAppFrame() const {
-  // Only use the web app frame for apps in ash, and only if streamlined hosted
-  // apps are enabled.
+  // Only use the web app frame for apps in ash, and only if bookmark apps are
+  // enabled.
   if (!is_app() || host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH ||
       !IsWebAppFrameEnabled()) {
     return false;

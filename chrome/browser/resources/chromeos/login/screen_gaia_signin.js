@@ -6,8 +6,6 @@
  * @fileoverview Oobe signin screen implementation.
  */
 
-<include src="../../gaia_auth_host/gaia_auth_host.js">
-
 login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
   // Gaia loading time after which error message must be displayed and
   // lazy portal check should be fired.
@@ -50,6 +48,12 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     isLocal_: false,
 
     /**
+     * Whether MinuteMaid flow is active.
+     * @type {boolean}
+     */
+    isMinuteMaid: false,
+
+    /**
      * Email of the user, which is logging in using offline mode.
      * @type {string}
      */
@@ -89,9 +93,35 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     samlPasswordConfirmAttempt_: 0,
 
+    /**
+     * Whether we should show webview based signin.
+     * @type {boolean}
+     * @private
+     */
+    isWebviewSignin: false,
+
+    /**
+     * Whether screen is shown.
+     * @type {boolean}
+     * @private
+     */
+    isShown_: false,
+
     /** @override */
     decorate: function() {
-      this.gaiaAuthHost_ = new cr.login.GaiaAuthHost($('signin-frame'));
+      this.isWebviewSignin = loadTimeData.getValue('isWebviewSignin');
+      if (this.isWebviewSignin) {
+        // Replace iframe with webview.
+        var webview = this.ownerDocument.createElement('webview');
+        webview.id = 'signin-frame';
+        webview.name = 'signin-frame';
+        // TODO(dpolukhin): webview doesn't load page in hidden state,
+        // use curtain instead.
+        $('signin-frame').parentNode.replaceChild(webview, $('signin-frame'));
+        this.gaiaAuthHost_ = new cr.login.GaiaAuthHost(webview);
+      } else {
+        this.gaiaAuthHost_ = new cr.login.GaiaAuthHost($('signin-frame'));
+      }
       this.gaiaAuthHost_.addEventListener(
           'ready', this.onAuthReady_.bind(this));
       this.gaiaAuthHost_.confirmPasswordCallback =
@@ -106,12 +136,18 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
           this.samlApiUsed_.bind(this);
       this.gaiaAuthHost_.addEventListener('authFlowChange',
           this.onAuthFlowChange_.bind(this));
+      this.gaiaAuthHost_.addEventListener('authCompleted',
+          this.onAuthCompletedMessage_.bind(this));
 
       $('enterprise-info-hint-link').addEventListener('click', function(e) {
         chrome.send('launchHelpApp', [HELP_TOPIC_ENTERPRISE_REPORTING]);
         e.preventDefault();
       });
 
+      $('close-button-item').addEventListener('click', function(e) {
+        this.cancel();
+        e.preventDefault();
+      }.bind(this));
 
       this.updateLocalizedContent();
     },
@@ -148,7 +184,10 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     showLoadingUI_: function(show) {
       $('gaia-loading').hidden = !show;
-      this.gaiaAuthHost_.frame.hidden = show;
+      if (!this.isWebviewSignin) {
+        // TODO(dpolukhin): proper implement curtain for webview signin.
+        this.gaiaAuthHost_.frame.hidden = show;
+      }
       $('signin-right').hidden = show;
       $('enterprise-info-container').hidden = show;
       $('gaia-signin-divider').hidden = show;
@@ -233,6 +272,9 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       // Button header is always visible when sign in is presented.
       // Header is hidden once GAIA reports on successful sign in.
       Oobe.getInstance().headerHidden = false;
+      this.isShown_ = true;
+      if (this.isWebviewSignin && !this.loading)
+        this.gaiaAuthHost_.setFocus();
     },
 
     /**
@@ -241,6 +283,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     onBeforeHide: function() {
       chrome.send('loginUIStateChanged', ['gaia-signin', false]);
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
+      this.isShown_ = false;
     },
 
     /**
@@ -267,6 +310,20 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
 
       if (data.localizedStrings)
         params.localizedStrings = data.localizedStrings;
+
+      if (data.useMinuteMaid) {
+        this.isMinuteMaid = true;
+        $('inner-container').classList.add('minute-maid');
+        $('progress-dots').hidden = true;
+        data.useEmbedded = false;
+        $('login-header-bar').showGuestButton = true;
+      }
+
+      if (data.gaiaEndpoint)
+        params.gaiaPath = data.gaiaEndpoint;
+
+      $('login-header-bar').minuteMaid = this.isMinuteMaid;
+
 
       if (data.useEmbedded)
         params.gaiaPath = 'EmbeddedSignIn';
@@ -309,16 +366,21 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
         reasonLabel.hidden = true;
       }
 
-      $('createAccount').hidden = !data.createAccount;
-      $('guestSignin').hidden = !data.guestSignin;
-      $('createSupervisedUserPane').hidden = !data.supervisedUsersEnabled;
+      if (this.isMinuteMaid) {
+        $('login-header-bar').showCreateSupervisedButton =
+            data.supervisedUsersCanCreate;
+      } else {
+        $('createAccount').hidden = !data.createAccount;
+        $('guestSignin').hidden = !data.guestSignin;
+        $('createSupervisedUserPane').hidden = !data.supervisedUsersEnabled;
 
-      $('createSupervisedUserLinkPlaceholder').hidden =
-          !data.supervisedUsersCanCreate;
-      $('createSupervisedUserNoManagerText').hidden =
-          data.supervisedUsersCanCreate;
-      $('createSupervisedUserNoManagerText').textContent =
-          data.supervisedUsersRestrictionReason;
+        $('createSupervisedUserLinkPlaceholder').hidden =
+            !data.supervisedUsersCanCreate;
+        $('createSupervisedUserNoManagerText').hidden =
+            data.supervisedUsersCanCreate;
+        $('createSupervisedUserNoManagerText').textContent =
+            data.supervisedUsersRestrictionReason;
+      }
 
       var isEnrollingConsumerManagement = data.isEnrollingConsumerManagement;
       $('consumerManagementEnrollment').hidden = !isEnrollingConsumerManagement;
@@ -347,6 +409,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
     updateCancelButtonState: function() {
       this.cancelAllowed_ = this.isShowUsers_ && $('pod-row').pods.length;
       $('login-header-bar').allowCancel = this.cancelAllowed_;
+      $('close-button-item').hidden = !this.cancelAllowed_;
     },
 
     switchToFullTab: function() {
@@ -382,6 +445,7 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       if (Oobe.getInstance().currentScreen === this) {
         Oobe.getInstance().updateScreenSize(this);
         $('login-header-bar').allowCancel = isSAML || this.cancelAllowed_;
+        $('close-button-item').hidden = !(isSAML || this.cancelAllowed_);
       }
     },
 
@@ -391,6 +455,8 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
      */
     onAuthReady_: function() {
       this.loading = false;
+      if (this.isWebviewSignin && this.isShown_)
+        this.gaiaAuthHost_.setFocus();
       this.clearLoadingTimer_();
 
       // Show deferred error bubble.
@@ -520,6 +586,15 @@ login.createScreen('GaiaSigninScreen', 'gaia-signin', function() {
       Oobe.getInstance().headerHidden = true;
       // Clear any error messages that were shown before login.
       Oobe.clearErrors();
+    },
+
+    /**
+     * Invoked when onAuthCompleted message received.
+     * @param {!Object} e Payload of the received HTML5 message.
+     * @private
+     */
+    onAuthCompletedMessage_: function(e) {
+      this.onAuthCompleted_(e.detail);
     },
 
     /**

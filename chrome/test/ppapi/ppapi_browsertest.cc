@@ -295,15 +295,15 @@ TEST_PPAPI_NACL(ImageData)
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, TCPSocket) {
   RUN_TCPSOCKET_SUBTESTS;
 }
-IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, TCPSocket) {
-  RUN_TCPSOCKET_SUBTESTS;
-}
 #if defined(OS_MACOSX) && defined(ADDRESS_SANITIZER)
-// Flaky on Mac ASAN: http://crbug.com/437408.
+// Flaky on Mac ASAN: http://crbug.com/437408 and http://crbug.com/457501.
 #define MAYBE_TCPSocket DISABLED_TCPSocket
 #else
 #define MAYBE_TCPSocket TCPSocket
 #endif
+IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_TCPSocket) {
+  RUN_TCPSOCKET_SUBTESTS;
+}
 IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(MAYBE_TCPSocket)) {
   RUN_TCPSOCKET_SUBTESTS;
 }
@@ -349,7 +349,7 @@ TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
       LIST_TEST(UDPSocket_ReadWrite) \
       LIST_TEST(UDPSocket_SetOption) \
       LIST_TEST(MAYBE_UDPSocket_Broadcast) \
-  )
+      LIST_TEST(UDPSocket_ParallelSend))
 
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, UDPSocket) {
   RUN_UDPSOCKET_SUBTESTS;
@@ -1455,6 +1455,7 @@ TEST_PPAPI_OUT_OF_PROCESS(TalkPrivate)
 TEST_PPAPI_OUT_OF_PROCESS(OutputProtectionPrivate)
 #endif
 
+#if !defined(DISABLE_NACL)
 class PackagedAppTest : public ExtensionBrowserTest {
  public:
   explicit PackagedAppTest(const std::string& toolchain)
@@ -1498,10 +1499,8 @@ class NonSfiPackagedAppTest : public PackagedAppTest {
   NonSfiPackagedAppTest() : PackagedAppTest("nonsfi") { }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-#if !defined(DISABLE_NACL)
     PackagedAppTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableNaClNonSfiMode);
-#endif
   }
 };
 
@@ -1511,10 +1510,8 @@ class NonSfiPackagedAppTest : public PackagedAppTest {
 class TransitionalNonSfiPackagedAppTest : public NonSfiPackagedAppTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-#if !defined(DISABLE_NACL)
     NonSfiPackagedAppTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kUseNaClHelperNonSfi);
-#endif
   }
 };
 
@@ -1534,7 +1531,6 @@ IN_PROC_BROWSER_TEST_F(TransitionalNonSfiPackagedAppTest,
   RunTests();
 }
 
-#if !defined(DISABLE_NACL)
 class MojoPPAPITest : public InProcessBrowserTest {
  public:
   MojoPPAPITest() : InProcessBrowserTest() { }

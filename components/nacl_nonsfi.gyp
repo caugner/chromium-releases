@@ -39,6 +39,7 @@
             # Rename the output binary file to nacl_helper_nonsfi and put it
             # directly under out/{Debug,Release}/.
             'out_newlib32_nonsfi': '<(PRODUCT_DIR)/nacl_helper_nonsfi',
+            'out_newlib_arm_nonsfi': '<(PRODUCT_DIR)/nacl_helper_nonsfi',
 
             'build_glibc': 0,
             'build_newlib': 0,
@@ -57,7 +58,6 @@
             ],
 
             'link_flags': [
-              '-Wl,--start-group',
               '-lbase_nacl_nonsfi',
               '-lcommand_buffer_client_nacl',
               '-lcommand_buffer_common_nacl',
@@ -77,7 +77,6 @@
               '-lppapi_shared_nacl',
               '-lshared_memory_support_nacl',
               '-ltracing_nacl',
-              '-Wl,--end-group',
             ],
 
             'conditions': [

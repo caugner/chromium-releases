@@ -30,6 +30,7 @@
 #include "chrome/browser/sync/protocol_event_observer.h"
 #include "chrome/browser/sync/sessions/sessions_sync_manager.h"
 #include "chrome/browser/sync/startup_controller.h"
+#include "chrome/browser/sync/sync_stopped_reporter.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync_driver/data_type_controller.h"
@@ -377,8 +378,7 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Returns DeviceInfo provider for the local device.
   virtual sync_driver::LocalDeviceInfoProvider* GetLocalDeviceInfoProvider();
 
-  // Returns synced devices tracker. If DEVICE_INFO model type isn't yet
-  // enabled or syncing, returns NULL.
+  // Returns synced devices tracker.
   virtual sync_driver::DeviceInfoTracker* GetDeviceInfoTracker() const;
 
   // Fills state_map with a map of current data types that are possible to
@@ -981,6 +981,9 @@ class ProfileSyncService : public ProfileSyncServiceBase,
   // Clean up prefs and backup DB when rollback is not needed.
   void CleanUpBackup();
 
+  // Tell the sync server that this client has disabled sync.
+  void RemoveClientFromServer() const;
+
   // Factory used to create various dependent objects.
   scoped_ptr<ProfileSyncComponentsFactory> factory_;
 
@@ -1157,6 +1160,8 @@ class ProfileSyncService : public ProfileSyncServiceBase,
 
   // The full path to the sync data directory.
   base::FilePath directory_path_;
+
+  scoped_ptr<browser_sync::SyncStoppedReporter> sync_stopped_reporter_;
 
   base::WeakPtrFactory<ProfileSyncService> weak_factory_;
 

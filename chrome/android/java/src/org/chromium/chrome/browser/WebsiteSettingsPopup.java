@@ -32,8 +32,6 @@ import android.widget.Spinner;
 import android.widget.TextView;
 
 import org.chromium.base.CalledByNative;
-import org.chromium.base.CommandLine;
-import org.chromium.chrome.ChromeSwitches;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -204,6 +202,9 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     // The security level of the page (a valid ToolbarModelSecurityLevel).
     private int mSecurityLevel;
 
+    // Whether the security level of the page was deprecated due to SHA-1.
+    private boolean mDeprecatedSHA1Present;
+
     /**
      * Creates the WebsiteSettingsPopup, but does not display it. Also initializes the corresponding
      * C++ object and saves a pointer to it.
@@ -290,6 +291,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             mIsInternalPage = false;
         }
         mSecurityLevel = ToolbarModel.getSecurityLevelForWebContents(mWebContents);
+        mDeprecatedSHA1Present = ToolbarModel.isDeprecatedSHA1Present(mWebContents);
 
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
         OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mProfile,
@@ -327,9 +329,11 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
                 return R.drawable.permission_javascript;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION:
                 return R.drawable.permission_location;
-            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
                 return R.drawable.permission_media;
-            case ContentSettingsType.CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+                return R.drawable.permission_mic;
+            case ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
                 return R.drawable.permission_push_notification;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS:
                 return R.drawable.permission_popups;
@@ -373,7 +377,10 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     private Spannable getUrlConnectionMessage() {
         // Display the appropriate connection message.
         SpannableStringBuilder messageBuilder = new SpannableStringBuilder();
-        if (mSecurityLevel != ToolbarModelSecurityLevel.SECURITY_ERROR) {
+        if (mDeprecatedSHA1Present) {
+            messageBuilder.append(
+                    mContext.getResources().getString(R.string.page_info_connection_sha1));
+        } else if (mSecurityLevel != ToolbarModelSecurityLevel.SECURITY_ERROR) {
             messageBuilder.append(mContext.getResources().getString(
                     getConnectionMessageId(mSecurityLevel, mIsInternalPage)));
         } else {
@@ -533,11 +540,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      */
     @SuppressWarnings("unused")
     public static void show(Context context, Profile profile, WebContents webContents) {
-        if (!CommandLine.getInstance().hasSwitch(ChromeSwitches.DISABLE_NEW_WEBSITE_SETTINGS)) {
-            new WebsiteSettingsPopup(context, profile, webContents);
-        } else {
-            WebsiteSettingsPopupLegacy.show(context, webContents);
-        }
+        new WebsiteSettingsPopup(context, profile, webContents);
     }
 
     private static native long nativeInit(WebsiteSettingsPopup popup, WebContents webContents);

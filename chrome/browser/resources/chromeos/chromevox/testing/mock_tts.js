@@ -8,12 +8,17 @@
  * @extends {cvox.TtsInterface}
  */
 var MockTts = function() {
+  /**
+   * The event handler for the most recent call to |speak|.
+   * @private
+   */
+  this.onEvent_;
 };
 
 MockTts.prototype = {
   /**
    * A list of predicate, start, and end callbacks for a pending expectation.
-   * @type {!Array.<{{predicate: function(string) : boolean,
+   * @type {!Array<{{predicate: function(string) : boolean,
    *     startCallback: function() : void,
    *     endCallback: function() : void}>}
    * @private
@@ -22,13 +27,16 @@ MockTts.prototype = {
 
   /**
    * A list of strings stored whenever there are no expectations.
-   * @type {!Array.<string}
+   * @type {!Array<string}
    * @private
    */
   idleUtterances_: [],
 
   /** @override */
   speak: function(textString, queueMode, properties) {
+    if (properties)
+      this.onEvent_ = properties['onEvent'];
+
     this.process_(textString);
   },
 
@@ -69,6 +77,22 @@ MockTts.prototype = {
   },
 
   /**
+   * Fakes an event to |onEvent|.
+   */
+  sendStartEvent: function() {
+    if (this.onEvent_)
+      this.onEvent_({type: 'start'});
+  },
+
+  /**
+   * Fakes an event to |onEvent|.
+   */
+  sendEndEvent: function() {
+    if (this.onEvent_)
+      this.onEvent_({type: 'end'});
+  },
+
+  /**
    * @private
    * @param {string} expectedText Text expected spoken.
    * @param {{startCallback: function() : void,
@@ -89,7 +113,7 @@ MockTts.prototype = {
     // Process any idleUtterances.
     this.idleUtterances_.forEach(function(utterance) {
       this.process_(utterance, true);
-    });
+    }.bind(this));
   },
 
   /**

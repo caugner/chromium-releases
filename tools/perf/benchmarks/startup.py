@@ -11,6 +11,10 @@ class _StartupCold(benchmark.Benchmark):
   """Measures cold startup time with a clean profile."""
   options = {'pageset_repeat': 5}
 
+  @classmethod
+  def Name(cls):
+    return 'startup'
+
   def CreatePageTest(self, options):
     return startup.Startup(cold=True)
 
@@ -18,6 +22,10 @@ class _StartupCold(benchmark.Benchmark):
 class _StartupWarm(benchmark.Benchmark):
   """Measures warm startup time with a clean profile."""
   options = {'pageset_repeat': 20}
+
+  @classmethod
+  def Name(cls):
+    return 'startup'
 
   def CreatePageTest(self, options):
     return startup.Startup(cold=False)
@@ -30,6 +38,10 @@ class StartupColdBlankPage(_StartupCold):
   tag = 'cold'
   page_set = page_sets.BlankPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'startup.cold.blank_page'
+
 
 @benchmark.Enabled('has tabs')
 class StartupWarmBlankPage(_StartupWarm):
@@ -37,30 +49,6 @@ class StartupWarmBlankPage(_StartupWarm):
   tag = 'warm'
   page_set = page_sets.BlankPageSet
 
-
-@benchmark.Disabled  # crbug.com/336913
-class StartupColdTheme(_StartupCold):
-  tag = 'theme_cold'
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'theme_profile.zip'
-
-
-@benchmark.Disabled
-class StartupWarmTheme(_StartupWarm):
-  tag = 'theme_warm'
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'theme_profile.zip'
-
-
-@benchmark.Disabled  # crbug.com/336913
-class StartupColdManyExtensions(_StartupCold):
-  tag = 'many_extensions_cold'
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'many_extensions_profile.zip'
-
-
-@benchmark.Disabled
-class StartupWarmManyExtensions(_StartupWarm):
-  tag = 'many_extensions_warm'
-  page_set = page_sets.BlankPageSet
-  generated_profile_archive = 'many_extensions_profile.zip'
+  @classmethod
+  def Name(cls):
+    return 'startup.warm.blank_page'

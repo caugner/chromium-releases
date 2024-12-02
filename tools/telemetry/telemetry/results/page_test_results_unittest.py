@@ -15,7 +15,6 @@ from telemetry.value import scalar
 from telemetry.value import skip
 from telemetry.value import trace
 
-
 class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
   def setUp(self):
     ps = page_set.PageSet(file_path=os.path.dirname(__file__))
@@ -45,6 +44,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
     self.assertTrue(results.all_page_runs[0].failed)
     self.assertTrue(results.all_page_runs[1].ok)
 
+
   def testSkips(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
@@ -63,7 +63,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
     self.assertTrue(results.all_page_runs[0].skipped)
     self.assertTrue(results.all_page_runs[1].ok)
 
-  def test_basic(self):
+  def testBasic(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
@@ -84,7 +84,39 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
     values = results.FindAllPageSpecificValuesNamed('a')
     assert len(values) == 2
 
-  def test_url_is_invalid_value(self):
+  def testResultsFiltering(self):
+    def AcceptValueNamed_a(value):
+      return value.name == 'a'
+    results = page_test_results.PageTestResults(
+        value_can_be_added_predicate=AcceptValueNamed_a)
+    results.WillRunPage(self.pages[0])
+    results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
+    results.AddValue(scalar.ScalarValue(self.pages[0], 'b', 'seconds', 3))
+    results.DidRunPage(self.pages[0])
+
+    results.WillRunPage(self.pages[1])
+    results.AddValue(scalar.ScalarValue(self.pages[1], 'a', 'seconds', 3))
+    results.AddValue(scalar.ScalarValue(self.pages[1], 'd', 'seconds', 3))
+    results.DidRunPage(self.pages[1])
+
+    results.PrintSummary()
+
+    values = results.FindPageSpecificValuesForPage(self.pages[0], 'a')
+    self.assertEquals(1, len(values))
+    v = values[0]
+    self.assertEquals(v.name, 'a')
+    self.assertEquals(v.page, self.pages[0])
+
+    values = results.FindPageSpecificValuesForPage(self.pages[0], 'b')
+    self.assertEquals(0, len(values))
+
+    values = results.FindAllPageSpecificValuesNamed('a')
+    self.assertEquals(len(values), 2)
+
+    values = results.all_page_specific_values
+    self.assertEquals(len(values), 2)
+
+  def testUrlIsInvalidValue(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     self.assertRaises(
@@ -92,7 +124,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
       lambda: results.AddValue(scalar.ScalarValue(
           self.pages[0], 'url', 'string', 'foo')))
 
-  def test_add_summary_value_with_page_specified(self):
+  def testAddSummaryValueWithPageSpecified(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     self.assertRaises(
@@ -100,7 +132,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
       lambda: results.AddSummaryValue(scalar.ScalarValue(self.pages[0],
                                                          'a', 'units', 3)))
 
-  def test_unit_change(self):
+  def testUnitChange(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
@@ -112,7 +144,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
       lambda: results.AddValue(scalar.ScalarValue(
           self.pages[1], 'a', 'foobgrobbers', 3)))
 
-  def test_type_change(self):
+  def testTypeChange(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
@@ -125,7 +157,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
           self.pages[1], 'a', 'seconds',
           raw_value_json='{"buckets": [{"low": 1, "high": 2, "count": 1}]}')))
 
-  def test_get_pages_that_succeeded_all_pages_fail(self):
+  def testGetPagesThatSucceededAllPagesFail(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
@@ -140,14 +172,14 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
     results.PrintSummary()
     self.assertEquals(0, len(results.pages_that_succeeded))
 
-  def test_get_successful_page_values_merged_no_failures(self):
+  def testGetSuccessfulPageValuesMergedNoFailures(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     results.AddValue(scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3))
     self.assertEquals(1, len(results.all_page_specific_values))
     results.DidRunPage(self.pages[0])
 
-  def test_get_all_values_for_successful_pages(self):
+  def testGetAllValuesForSuccessfulPages(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     value1 = scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3)
@@ -167,7 +199,7 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
     self.assertEquals(
         [value1, value2, value3], results.all_page_specific_values)
 
-  def test_get_all_values_for_successful_pages_one_page_fails(self):
+  def testGetAllValuesForSuccessfulPagesOnePageFails(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
     value1 = scalar.ScalarValue(self.pages[0], 'a', 'seconds', 3)
@@ -201,3 +233,36 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
 
     values = results.FindAllTraceValues()
     self.assertEquals(2, len(values))
+
+  def testCleanUpCleansUpTraceValues(self):
+    results = page_test_results.PageTestResults()
+    v0 = trace.TraceValue(None, trace_data.TraceData({'test': 1}))
+    v1 = trace.TraceValue(None, trace_data.TraceData({'test': 2}))
+
+    results.WillRunPage(self.pages[0])
+    results.AddValue(v0)
+    results.DidRunPage(self.pages[0])
+
+    results.WillRunPage(self.pages[1])
+    results.AddValue(v1)
+    results.DidRunPage(self.pages[1])
+
+    results.CleanUp()
+    self.assertTrue(v0.cleaned_up)
+    self.assertTrue(v1.cleaned_up)
+
+  def testNoTracesLeftAfterCleanUp(self):
+    results = page_test_results.PageTestResults()
+    v0 = trace.TraceValue(None, trace_data.TraceData({'test': 1}))
+    v1 = trace.TraceValue(None, trace_data.TraceData({'test': 2}))
+
+    results.WillRunPage(self.pages[0])
+    results.AddValue(v0)
+    results.DidRunPage(self.pages[0])
+
+    results.WillRunPage(self.pages[1])
+    results.AddValue(v1)
+    results.DidRunPage(self.pages[1])
+
+    results.CleanUp()
+    self.assertFalse(results.FindAllTraceValues())

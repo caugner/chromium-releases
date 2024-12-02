@@ -646,11 +646,12 @@ void OwnerSettingsServiceChromeOS::UpdateDeviceSettings(
     //   kReleaseChannelDelegated
     //   kReportDeviceActivityTimes
     //   kReportDeviceBootMode
-    //   kReportDeviceLocation
-    //   kReportDeviceVersionInfo
-    //   kReportDeviceNetworkInterfaces
-    //   kReportDeviceUsers
     //   kReportDeviceHardwareStatus
+    //   kReportDeviceLocation
+    //   kReportDeviceNetworkInterfaces
+    //   kReportDeviceSessionStatus
+    //   kReportDeviceVersionInfo
+    //   kReportDeviceUsers
     //   kServiceAccountIdentity
     //   kSystemTimezonePolicy
     //   kVariationsRestrictParameter
@@ -719,8 +720,16 @@ void OwnerSettingsServiceChromeOS::StorePendingChanges() {
   if (has_pending_management_settings_) {
     policy::SetManagementMode(*policy,
                               pending_management_settings_.management_mode);
-    policy->set_request_token(pending_management_settings_.request_token);
-    policy->set_device_id(pending_management_settings_.device_id);
+
+    if (pending_management_settings_.request_token.empty())
+      policy->clear_request_token();
+    else
+      policy->set_request_token(pending_management_settings_.request_token);
+
+    if (pending_management_settings_.device_id.empty())
+      policy->clear_device_id();
+    else
+      policy->set_device_id(pending_management_settings_.device_id);
   }
   has_pending_management_settings_ = false;
 

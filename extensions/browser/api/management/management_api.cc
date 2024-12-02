@@ -82,7 +82,7 @@ std::vector<management::LaunchType> GetAvailableLaunchTypes(
   launch_type_list.push_back(management::LAUNCH_TYPE_OPEN_AS_REGULAR_TAB);
   launch_type_list.push_back(management::LAUNCH_TYPE_OPEN_AS_WINDOW);
 
-  if (!delegate->IsStreamlinedHostedAppsEnabled()) {
+  if (!delegate->IsNewBookmarkAppsEnabled()) {
     launch_type_list.push_back(management::LAUNCH_TYPE_OPEN_AS_PINNED_TAB);
     launch_type_list.push_back(management::LAUNCH_TYPE_OPEN_FULL_SCREEN);
   }
@@ -514,9 +514,10 @@ bool ManagementUninstallFunctionBase::Uninstall(
     return false;
   }
 
-  if (!ExtensionSystem::Get(browser_context())
-           ->management_policy()
-           ->UserMayModifySettings(target_extension, NULL)) {
+  ManagementPolicy* policy =
+      ExtensionSystem::Get(browser_context())->management_policy();
+  if (!policy->UserMayModifySettings(target_extension, nullptr) ||
+      policy->MustRemainInstalled(target_extension, nullptr)) {
     error_ = ErrorUtils::FormatErrorMessage(keys::kUserCantModifyError,
                                             extension_id_);
     return false;

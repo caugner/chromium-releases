@@ -11,7 +11,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
-#include "chrome/browser/sync/sessions/sessions_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -58,8 +57,8 @@ NotificationServiceSessionsRouter::NotificationServiceSessionsRouter(
   registrar_.Add(this,
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
       content::NotificationService::AllBrowserContextsAndSources());
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
   if (history_service) {
     favicon_changed_subscription_ = history_service->AddFaviconChangedCallback(
         base::Bind(&NotificationServiceSessionsRouter::OnFaviconChanged,
@@ -94,7 +93,7 @@ void NotificationServiceSessionsRouter::Observe(
         return;
       if (handler_)
         handler_->OnLocalTabModified(tab);
-      if (!sessions_util::ShouldSyncTab(*tab))
+      if (!tab->ShouldSync())
         return;
       break;
     }
@@ -109,7 +108,7 @@ void NotificationServiceSessionsRouter::Observe(
         return;
       if (handler_)
         handler_->OnLocalTabModified(tab);
-      if (!sessions_util::ShouldSyncTab(*tab))
+      if (!tab->ShouldSync())
         return;
       break;
     }

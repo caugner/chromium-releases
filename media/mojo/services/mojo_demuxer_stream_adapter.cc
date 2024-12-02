@@ -8,7 +8,7 @@
 #include "base/callback_helpers.h"
 #include "media/base/decoder_buffer.h"
 #include "media/mojo/services/media_type_converters.h"
-#include "mojo/public/cpp/system/data_pipe.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
 
 namespace media {
 
@@ -16,11 +16,16 @@ MojoDemuxerStreamAdapter::MojoDemuxerStreamAdapter(
     mojo::DemuxerStreamPtr demuxer_stream,
     const base::Closure& stream_ready_cb)
     : demuxer_stream_(demuxer_stream.Pass()),
+      binding_(this),
       stream_ready_cb_(stream_ready_cb),
       type_(DemuxerStream::UNKNOWN),
       weak_factory_(this) {
   DVLOG(1) << __FUNCTION__;
-  demuxer_stream_.set_client(this);
+  mojo::DemuxerStreamObserverPtr observer_ptr;
+  binding_.Bind(GetProxy(&observer_ptr));
+  demuxer_stream_->Initialize(
+      observer_ptr.Pass(), base::Bind(&MojoDemuxerStreamAdapter::OnStreamReady,
+                                      weak_factory_.GetWeakPtr()));
 }
 
 MojoDemuxerStreamAdapter::~MojoDemuxerStreamAdapter() {

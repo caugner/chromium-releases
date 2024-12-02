@@ -8,6 +8,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/chromeos_utils.h"
+#include "chrome/browser/signin/easy_unlock_metrics.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -25,6 +26,11 @@ ScreenlockBridge::UserPodCustomIcon GetIconForState(
     case EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW:
       return ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED;
     case EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH:
+    case EasyUnlockScreenlockStateHandler::
+             STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
+      // TODO(isherman): This icon is currently identical to the regular locked
+      // icon.  Once the reduced proximity range flag is removed, consider
+      // deleting the redundant icon.
       return ScreenlockBridge::USER_POD_CUSTOM_ICON_LOCKED_WITH_PROXIMITY_HINT;
     case EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING:
       return ScreenlockBridge::USER_POD_CUSTOM_ICON_SPINNER;
@@ -55,6 +61,10 @@ size_t GetTooltipResourceId(EasyUnlockScreenlockStateHandler::State state) {
       return IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_RSSI_TOO_LOW;
     case EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH:
       return IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_TX_POWER_TOO_HIGH;
+    case EasyUnlockScreenlockStateHandler::
+             STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
+      return
+          IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
     case EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED:
       return IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_HARDLOCK_INSTRUCTIONS;
     case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNSUPPORTED:
@@ -69,8 +79,9 @@ bool TooltipContainsDeviceType(EasyUnlockScreenlockStateHandler::State state) {
          state == EasyUnlockScreenlockStateHandler::STATE_PHONE_UNLOCKABLE ||
          state == EasyUnlockScreenlockStateHandler::STATE_NO_BLUETOOTH ||
          state == EasyUnlockScreenlockStateHandler::STATE_PHONE_UNSUPPORTED ||
-         state == EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW ||
-         state == EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH;
+         state == EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH ||
+         state == EasyUnlockScreenlockStateHandler::
+                      STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
 }
 
 }  // namespace
@@ -144,10 +155,12 @@ void EasyUnlockScreenlockStateHandler::ChangeState(State new_state) {
   icon_options.SetIcon(icon);
 
   // Don't hardlock on trial run.
-  if (!is_trial_run_ && HardlockOnClick(state_))
+  if (is_trial_run_)
+    icon_options.SetTrialRun();
+  else if (HardlockOnClick(state_))
     icon_options.SetHardlockOnClick();
 
-  UpdateTooltipOptions(is_trial_run_, &icon_options);
+  UpdateTooltipOptions(&icon_options);
 
   // For states without tooltips, we still need to set an accessibility label.
   if (state_ == EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING) {
@@ -188,13 +201,22 @@ void EasyUnlockScreenlockStateHandler::SetTrialRun() {
     return;
   is_trial_run_ = true;
   RefreshScreenlockState();
+  RecordEasyUnlockTrialRunEvent(EASY_UNLOCK_TRIAL_RUN_EVENT_LAUNCHED);
 }
 
-void EasyUnlockScreenlockStateHandler::OnScreenDidLock() {
+void EasyUnlockScreenlockStateHandler::RecordClickOnLockIcon() {
+  if (!is_trial_run_)
+    return;
+  RecordEasyUnlockTrialRunEvent(EASY_UNLOCK_TRIAL_RUN_EVENT_CLICKED_LOCK_ICON);
+}
+
+void EasyUnlockScreenlockStateHandler::OnScreenDidLock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
   RefreshScreenlockState();
 }
 
-void EasyUnlockScreenlockStateHandler::OnScreenDidUnlock() {
+void EasyUnlockScreenlockStateHandler::OnScreenDidUnlock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
   if (hardlock_state_ == LOGIN_FAILED)
     hardlock_state_ = NO_HARDLOCK;
   hardlock_ui_shown_ = false;
@@ -277,11 +299,10 @@ void EasyUnlockScreenlockStateHandler::ShowHardlockUI() {
 }
 
 void EasyUnlockScreenlockStateHandler::UpdateTooltipOptions(
-    bool trial_run,
     ScreenlockBridge::UserPodCustomIconOptions* icon_options) {
   size_t resource_id = 0;
   base::string16 device_name;
-  if (trial_run && state_ == STATE_AUTHENTICATED) {
+  if (is_trial_run_ && state_ == STATE_AUTHENTICATED) {
     resource_id = IDS_EASY_UNLOCK_SCREENLOCK_TOOLTIP_INITIAL_AUTHENTICATED;
   } else {
     resource_id = GetTooltipResourceId(state_);
@@ -304,7 +325,7 @@ void EasyUnlockScreenlockStateHandler::UpdateTooltipOptions(
 
   icon_options->SetTooltip(
       tooltip,
-      trial_run || (state_ != STATE_AUTHENTICATED) /* autoshow tooltip */);
+      is_trial_run_ || (state_ != STATE_AUTHENTICATED) /* autoshow tooltip */);
 }
 
 base::string16 EasyUnlockScreenlockStateHandler::GetDeviceName() {

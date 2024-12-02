@@ -254,10 +254,8 @@ void AppWindow::Init(const GURL& url,
   // Initialize the render interface and web contents
   app_window_contents_.reset(app_window_contents);
   app_window_contents_->Initialize(browser_context(), url);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableAppsShowOnFirstPaint)) {
-    content::WebContentsObserver::Observe(web_contents());
-  }
+
+  content::WebContentsObserver::Observe(web_contents());
   app_delegate_->InitWebContents(web_contents());
 
   WebContentsModalDialogManager::CreateForWebContents(web_contents());
@@ -375,14 +373,14 @@ WebContents* AppWindow::OpenURLFromTab(WebContents* source,
 void AppWindow::AddNewContents(WebContents* source,
                                WebContents* new_contents,
                                WindowOpenDisposition disposition,
-                               const gfx::Rect& initial_pos,
+                               const gfx::Rect& initial_rect,
                                bool user_gesture,
                                bool* was_blocked) {
   DCHECK(new_contents->GetBrowserContext() == browser_context_);
   app_delegate_->AddNewContents(browser_context_,
                                 new_contents,
                                 disposition,
-                                initial_pos,
+                                initial_rect,
                                 user_gesture,
                                 was_blocked);
 }
@@ -439,6 +437,10 @@ void AppWindow::RequestToLockMouse(WebContents* web_contents,
 bool AppWindow::PreHandleGestureEvent(WebContents* source,
                                       const blink::WebGestureEvent& event) {
   return AppWebContentsHelper::ShouldSuppressGestureEvent(event);
+}
+
+void AppWindow::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  app_delegate_->RenderViewCreated(render_view_host);
 }
 
 void AppWindow::DidFirstVisuallyNonEmptyPaint() {
@@ -932,6 +934,15 @@ void AppWindow::NavigationStateChanged(content::WebContents* source,
     native_app_window_->UpdateWindowTitle();
   else if (changed_flags & content::INVALIDATE_TYPE_TAB)
     native_app_window_->UpdateWindowIcon();
+}
+
+void AppWindow::EnterFullscreenModeForTab(content::WebContents* source,
+                                          const GURL& origin) {
+  ToggleFullscreenModeForTab(source, true);
+}
+
+void AppWindow::ExitFullscreenModeForTab(content::WebContents* source) {
+  ToggleFullscreenModeForTab(source, false);
 }
 
 void AppWindow::ToggleFullscreenModeForTab(content::WebContents* source,

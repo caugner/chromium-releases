@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//testing/test.gni")
+
 # GYP version: //cc/blink/cc_blink.gyp:cc_blink
 component("blink") {
   output_name = "cc_blink"
@@ -69,7 +71,7 @@ component("blink") {
 
 # GYP version: //cc/blink/cc_blink_tests.gyp:cc_blink_unittests
 # TODO(GYP): make linking work on the mac.
-if (!is_mac) {
+if (!is_mac && (!is_win || link_chrome_on_windows)) {
   test("cc_blink_unittests") {
     sources = [
       "web_animation_unittest.cc",

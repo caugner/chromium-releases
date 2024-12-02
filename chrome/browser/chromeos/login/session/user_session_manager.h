@@ -29,12 +29,14 @@ class PrefService;
 class Profile;
 
 namespace user_manager {
-
 class User;
-
 }  // namespace user_manager
 
 namespace chromeos {
+
+namespace test {
+class UserSessionManagerTestApi;
+}  // namespace test
 
 class EasyUnlockKeyManager;
 class InputEventsBlocker;
@@ -104,14 +106,23 @@ class UserSessionManager
   // |start_url| is an optional URL to be opened in Guest session browser.
   void CompleteGuestSessionLogin(const GURL& start_url);
 
-  // Start user session given |user_context| and |authenticator| which holds
-  // authentication context (profile).
+  // Creates and returns the authenticator to use.
+  // Single Authenticator instance is used for entire login process,
+  // even for multiple retries. Authenticator instance holds reference to
+  // login profile and is later used during fetching of OAuth tokens.
+  scoped_refptr<Authenticator> CreateAuthenticator(
+      AuthStatusConsumer* consumer);
+
+  // Start user session given |user_context|.
+  // OnProfilePrepared() will be called on |delegate| once Profile is ready.
   void StartSession(const UserContext& user_context,
                     StartSessionType start_session_type,
-                    scoped_refptr<Authenticator> authenticator,
                     bool has_auth_cookies,
                     bool has_active_session,
                     UserSessionManagerDelegate* delegate);
+
+  // Invalidates |delegate|, which was passed to StartSession method call.
+  void DelegateDeleted(UserSessionManagerDelegate* delegate);
 
   // Perform additional actions once system wide notification
   // "UserLoggedIn" has been sent.
@@ -197,8 +208,7 @@ class UserSessionManager
   void AddSessionStateObserver(chromeos::UserSessionStateObserver* observer);
   void RemoveSessionStateObserver(chromeos::UserSessionStateObserver* observer);
 
-  virtual void ActiveUserChanged(
-      const user_manager::User* active_user) override;
+  void ActiveUserChanged(const user_manager::User* active_user) override;
 
   // Returns default IME state for user session.
   scoped_refptr<input_method::InputMethodManager::State> GetDefaultIMEState(
@@ -214,26 +224,26 @@ class UserSessionManager
   void RemoveProfileForTesting(Profile* profile);
 
  private:
+  friend class test::UserSessionManagerTestApi;
   friend struct DefaultSingletonTraits<UserSessionManager>;
 
   typedef std::set<std::string> SigninSessionRestoreStateSet;
 
   UserSessionManager();
-  virtual ~UserSessionManager();
+  ~UserSessionManager() override;
 
   // OAuth2LoginManager::Observer overrides:
-  virtual void OnSessionRestoreStateChanged(
+  void OnSessionRestoreStateChanged(
       Profile* user_profile,
       OAuth2LoginManager::SessionRestoreState state) override;
 
   // net::NetworkChangeNotifier::ConnectionTypeObserver overrides:
-  virtual void OnConnectionTypeChanged(
+  void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
   // UserSessionManagerDelegate overrides:
   // Used when restoring user sessions after crash.
-  virtual void OnProfilePrepared(Profile* profile,
-                                 bool browser_launched) override;
+  void OnProfilePrepared(Profile* profile, bool browser_launched) override;
 
   void CreateUserSession(const UserContext& user_context,
                          bool has_auth_cookies);
@@ -330,12 +340,27 @@ class UserSessionManager
       InputEventsBlocker* input_events_blocker,
       const locale_util::LanguageSwitchResult& result);
 
+  // Test API methods.
+
+  // Injects |user_context| that will be used to create StubAuthenticator
+  // instance when CreateAuthenticator() is called.
+  void InjectStubUserContext(const UserContext& user_context);
+
+  // Controls whether browser instance should be launched after sign in
+  // (used in tests).
+  void set_should_launch_browser_in_tests(bool should_launch_browser) {
+    should_launch_browser_ = should_launch_browser;
+  }
+
   UserSessionManagerDelegate* delegate_;
 
   // Authentication/user context.
   UserContext user_context_;
   scoped_refptr<Authenticator> authenticator_;
   StartSessionType start_session_type_;
+
+  // Injected user context for stub authenticator.
+  scoped_ptr<UserContext> injected_user_context_;
 
   // True if the authentication context's cookie jar contains authentication
   // cookies from the authentication extension login flow.
@@ -384,6 +409,9 @@ class UserSessionManager
   scoped_ptr<EasyUnlockKeyManager> easy_unlock_key_manager_;
   bool running_easy_unlock_key_ops_;
   base::Closure easy_unlock_key_ops_finished_callback_;
+
+  // Whether should launch browser, tests may override this value.
+  bool should_launch_browser_;
 
   DISALLOW_COPY_AND_ASSIGN(UserSessionManager);
 };

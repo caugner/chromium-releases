@@ -45,8 +45,6 @@ CloudPolicyClient::Observer::~Observer() {}
 void CloudPolicyClient::Observer::OnRobotAuthCodesFetched(
     CloudPolicyClient* client) {}
 
-CloudPolicyClient::StatusProvider::~StatusProvider() {}
-
 CloudPolicyClient::CloudPolicyClient(
     const std::string& machine_id,
     const std::string& machine_model,
@@ -81,7 +79,8 @@ void CloudPolicyClient::SetupRegistration(const std::string& dm_token,
 
   dm_token_ = dm_token;
   client_id_ = client_id;
-  request_job_.reset();
+  request_jobs_.clear();
+  policy_fetch_request_job_.reset();
   STLDeleteValues(&responses_);
 
   NotifyRegistrationStateChanged();
@@ -106,14 +105,14 @@ void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
     client_id_ = client_id;
   }
 
-  request_job_.reset(
+  policy_fetch_request_job_.reset(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
                           GetRequestContext()));
-  request_job_->SetOAuthToken(auth_token);
-  request_job_->SetClientID(client_id_);
+  policy_fetch_request_job_->SetOAuthToken(auth_token);
+  policy_fetch_request_job_->SetClientID(client_id_);
 
   em::DeviceRegisterRequest* request =
-      request_job_->GetRequest()->mutable_register_request();
+      policy_fetch_request_job_->GetRequest()->mutable_register_request();
   if (!client_id.empty())
     request->set_reregister(true);
   request->set_type(type);
@@ -127,11 +126,12 @@ void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
     request->set_server_backed_state_key(current_state_key);
   request->set_flavor(flavor);
 
-  request_job_->SetRetryCallback(
+  policy_fetch_request_job_->SetRetryCallback(
       base::Bind(&CloudPolicyClient::OnRetryRegister, base::Unretained(this)));
 
-  request_job_->Start(base::Bind(&CloudPolicyClient::OnRegisterCompleted,
-                                 base::Unretained(this)));
+  policy_fetch_request_job_->Start(
+      base::Bind(&CloudPolicyClient::OnRegisterCompleted,
+                 base::Unretained(this)));
 }
 
 void CloudPolicyClient::SetInvalidationInfo(
@@ -145,14 +145,15 @@ void CloudPolicyClient::FetchPolicy() {
   CHECK(is_registered());
   CHECK(!types_to_fetch_.empty());
 
-  request_job_.reset(
+  policy_fetch_request_job_.reset(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
                           GetRequestContext()));
-  request_job_->SetDMToken(dm_token_);
-  request_job_->SetClientID(client_id_);
-  request_job_->SetUserAffiliation(user_affiliation_);
+  policy_fetch_request_job_->SetDMToken(dm_token_);
+  policy_fetch_request_job_->SetClientID(client_id_);
+  policy_fetch_request_job_->SetUserAffiliation(user_affiliation_);
 
-  em::DeviceManagementRequest* request = request_job_->GetRequest();
+  em::DeviceManagementRequest* request =
+      policy_fetch_request_job_->GetRequest();
 
   // Build policy fetch requests.
   em::DevicePolicyRequest* policy_request = request->mutable_policy_request();
@@ -186,18 +187,6 @@ void CloudPolicyClient::FetchPolicy() {
     }
   }
 
-  // Add status data.
-  if (status_provider_) {
-    if (!status_provider_->GetDeviceStatus(
-            request->mutable_device_status_report_request())) {
-      request->clear_device_status_report_request();
-    }
-    if (!status_provider_->GetSessionStatus(
-            request->mutable_session_status_report_request())) {
-      request->clear_session_status_report_request();
-    }
-  }
-
   // Add device state keys.
   if (!state_keys_to_upload_.empty()) {
     em::DeviceStateKeyUpdateRequest* key_update_request =
@@ -215,65 +204,99 @@ void CloudPolicyClient::FetchPolicy() {
   fetched_invalidation_version_ = invalidation_version_;
 
   // Fire the job.
-  request_job_->Start(base::Bind(&CloudPolicyClient::OnPolicyFetchCompleted,
-                                 base::Unretained(this)));
+  policy_fetch_request_job_->Start(
+      base::Bind(&CloudPolicyClient::OnPolicyFetchCompleted,
+                 base::Unretained(this)));
 }
 
 void CloudPolicyClient::FetchRobotAuthCodes(const std::string& auth_token) {
   CHECK(is_registered());
   DCHECK(!auth_token.empty());
 
-  request_job_.reset(service_->CreateJob(
+  policy_fetch_request_job_.reset(service_->CreateJob(
       DeviceManagementRequestJob::TYPE_API_AUTH_CODE_FETCH,
       GetRequestContext()));
   // The credentials of a domain user are needed in order to mint a new OAuth2
   // authorization token for the robot account.
-  request_job_->SetOAuthToken(auth_token);
-  request_job_->SetDMToken(dm_token_);
-  request_job_->SetClientID(client_id_);
+  policy_fetch_request_job_->SetOAuthToken(auth_token);
+  policy_fetch_request_job_->SetDMToken(dm_token_);
+  policy_fetch_request_job_->SetClientID(client_id_);
 
   em::DeviceServiceApiAccessRequest* request =
-      request_job_->GetRequest()->mutable_service_api_access_request();
+      policy_fetch_request_job_->GetRequest()->
+      mutable_service_api_access_request();
   request->set_oauth2_client_id(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id());
   request->add_auth_scope(GaiaConstants::kAnyApiOAuth2Scope);
 
-  request_job_->Start(
+  policy_fetch_request_job_->Start(
       base::Bind(&CloudPolicyClient::OnFetchRobotAuthCodesCompleted,
                  base::Unretained(this)));
 }
 
 void CloudPolicyClient::Unregister() {
   DCHECK(service_);
-  request_job_.reset(
+  policy_fetch_request_job_.reset(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION,
                           GetRequestContext()));
-  request_job_->SetDMToken(dm_token_);
-  request_job_->SetClientID(client_id_);
-  request_job_->GetRequest()->mutable_unregister_request();
-  request_job_->Start(base::Bind(&CloudPolicyClient::OnUnregisterCompleted,
-                                 base::Unretained(this)));
+  policy_fetch_request_job_->SetDMToken(dm_token_);
+  policy_fetch_request_job_->SetClientID(client_id_);
+  policy_fetch_request_job_->GetRequest()->mutable_unregister_request();
+  policy_fetch_request_job_->Start(
+      base::Bind(&CloudPolicyClient::OnUnregisterCompleted,
+                 base::Unretained(this)));
 }
 
 void CloudPolicyClient::UploadCertificate(
     const std::string& certificate_data,
     const CloudPolicyClient::StatusCallback& callback) {
   CHECK(is_registered());
-  request_job_.reset(
+  scoped_ptr<DeviceManagementRequestJob> request_job(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_CERTIFICATE,
                           GetRequestContext()));
-  request_job_->SetDMToken(dm_token_);
-  request_job_->SetClientID(client_id_);
+  request_job->SetDMToken(dm_token_);
+  request_job->SetClientID(client_id_);
 
-  em::DeviceManagementRequest* request = request_job_->GetRequest();
+  em::DeviceManagementRequest* request = request_job->GetRequest();
   request->mutable_cert_upload_request()->set_device_certificate(
       certificate_data);
 
   DeviceManagementRequestJob::Callback job_callback = base::Bind(
       &CloudPolicyClient::OnCertificateUploadCompleted,
       base::Unretained(this),
+      request_job.get(),
       callback);
-  request_job_->Start(job_callback);
+  request_jobs_.push_back(request_job.Pass());
+  request_jobs_.back()->Start(job_callback);
+}
+
+void CloudPolicyClient::UploadDeviceStatus(
+    const em::DeviceStatusReportRequest* device_status,
+    const em::SessionStatusReportRequest* session_status,
+    const CloudPolicyClient::StatusCallback& callback) {
+  CHECK(is_registered());
+  // Should pass in at least one type of status.
+  DCHECK(device_status || session_status);
+  scoped_ptr<DeviceManagementRequestJob> request_job(
+      service_->CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
+                          GetRequestContext()));
+  request_job->SetDMToken(dm_token_);
+  request_job->SetClientID(client_id_);
+
+  em::DeviceManagementRequest* request = request_job->GetRequest();
+  if (device_status)
+    *request->mutable_device_status_report_request() = *device_status;
+  if (session_status)
+    *request->mutable_session_status_report_request() = *session_status;
+
+  DeviceManagementRequestJob::Callback job_callback = base::Bind(
+      &CloudPolicyClient::OnStatusUploadCompleted,
+      base::Unretained(this),
+      request_job.get(),
+      callback);
+
+  request_jobs_.push_back(request_job.Pass());
+  request_jobs_.back()->Start(job_callback);
 }
 
 void CloudPolicyClient::AddObserver(Observer* observer) {
@@ -282,14 +305,6 @@ void CloudPolicyClient::AddObserver(Observer* observer) {
 
 void CloudPolicyClient::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void CloudPolicyClient::SetStatusProvider(scoped_ptr<StatusProvider> provider) {
-  status_provider_ = provider.Pass();
-}
-
-bool CloudPolicyClient::HasStatusProviderForTest() {
-  return status_provider_;
 }
 
 void CloudPolicyClient::AddPolicyTypeToFetch(
@@ -322,8 +337,12 @@ CloudPolicyClient::GetRequestContext() {
   return request_context_;
 }
 
+int CloudPolicyClient::GetActiveRequestCountForTest() const {
+  return request_jobs_.size();
+}
+
 void CloudPolicyClient::OnRetryRegister(DeviceManagementRequestJob* job) {
-  DCHECK_EQ(request_job_.get(), job);
+  DCHECK_EQ(policy_fetch_request_job_.get(), job);
   // If the initial request managed to get to the server but the response didn't
   // arrive at the client then retrying with the same client ID will fail.
   // Set the re-registration flag so that the server accepts it.
@@ -423,8 +442,6 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
       }
       responses_[key] = new em::PolicyFetchResponse(response);
     }
-    if (status_provider_)
-      status_provider_->OnSubmittedSuccessfully();
     state_keys_to_upload_.clear();
     NotifyPolicyFetched();
   } else {
@@ -444,6 +461,8 @@ void CloudPolicyClient::OnUnregisterCompleted(
   status_ = status;
   if (status == DM_STATUS_SUCCESS) {
     dm_token_.clear();
+    // Cancel all outstanding jobs.
+    request_jobs_.clear();
     NotifyRegistrationStateChanged();
   } else {
     NotifyClientError();
@@ -451,23 +470,50 @@ void CloudPolicyClient::OnUnregisterCompleted(
 }
 
 void CloudPolicyClient::OnCertificateUploadCompleted(
+    const DeviceManagementRequestJob* job,
     const CloudPolicyClient::StatusCallback& callback,
     DeviceManagementStatus status,
     int net_error,
     const enterprise_management::DeviceManagementResponse& response) {
-  if (status == DM_STATUS_SUCCESS && !response.has_cert_upload_response()) {
-    LOG(WARNING) << "Empty upload certificate response.";
-    callback.Run(false);
-    return;
-  }
-
+  bool success = true;
   status_ = status;
   if (status != DM_STATUS_SUCCESS) {
+    success = false;
     NotifyClientError();
-    callback.Run(false);
-    return;
+  } else if (!response.has_cert_upload_response()) {
+    LOG(WARNING) << "Empty upload certificate response.";
+    success = false;
   }
-  callback.Run(true);
+  callback.Run(success);
+  // Must call RemoveJob() last, because it frees |callback|.
+  RemoveJob(job);
+}
+
+void CloudPolicyClient::RemoveJob(const DeviceManagementRequestJob* job) {
+  for (auto it = request_jobs_.begin(); it != request_jobs_.end(); ++it) {
+    if (*it == job) {
+      request_jobs_.erase(it);
+      return;
+    }
+  }
+  // This job was already deleted from our list, somehow. This shouldn't
+  // happen since deleting the job should cancel the callback.
+  NOTREACHED();
+}
+
+void CloudPolicyClient::OnStatusUploadCompleted(
+    const DeviceManagementRequestJob* job,
+    const CloudPolicyClient::StatusCallback& callback,
+    DeviceManagementStatus status,
+    int net_error,
+    const enterprise_management::DeviceManagementResponse& response) {
+  status_ = status;
+  if (status != DM_STATUS_SUCCESS)
+    NotifyClientError();
+
+  callback.Run(status == DM_STATUS_SUCCESS);
+  // Must call RemoveJob() last, because it frees |callback|.
+  RemoveJob(job);
 }
 
 void CloudPolicyClient::NotifyPolicyFetched() {

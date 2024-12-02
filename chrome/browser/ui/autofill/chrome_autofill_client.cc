@@ -6,11 +6,13 @@
 
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/profile_identity_provider.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/browser/ui/autofill/card_unmask_prompt_view.h"
@@ -24,6 +26,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/common/autofill_messages.h"
+#include "components/autofill/core/browser/autofill_cc_infobar_delegate.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "content/public/browser/render_frame_host.h"
@@ -33,6 +36,7 @@
 #include "chrome/browser/android/chromium_application.h"
 #include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #else
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "components/ui/zoom/zoom_controller.h"
 #endif
 
@@ -91,12 +95,29 @@ scoped_refptr<AutofillWebDataService> ChromeAutofillClient::GetDatabase() {
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   return WebDataServiceFactory::GetAutofillWebDataForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
 }
 
 PrefService* ChromeAutofillClient::GetPrefs() {
   return Profile::FromBrowserContext(web_contents()->GetBrowserContext())
       ->GetPrefs();
+}
+
+IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
+  if (!identity_provider_) {
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+    LoginUIService* login_service = nullptr;
+#if !defined(OS_ANDROID)
+    login_service = LoginUIServiceFactory::GetForProfile(profile);
+#endif
+    identity_provider_.reset(new ProfileIdentityProvider(
+        SigninManagerFactory::GetForProfile(profile),
+        ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
+        login_service));
+  }
+
+  return identity_provider_.get();
 }
 
 void ChromeAutofillClient::ShowAutofillSettings() {
@@ -121,9 +142,9 @@ void ChromeAutofillClient::OnUnmaskVerificationResult(bool success) {
 
 void ChromeAutofillClient::ConfirmSaveCreditCard(
     const base::Closure& save_card_callback) {
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents());
-  AutofillCCInfoBarDelegate::Create(infobar_service, save_card_callback);
+  AutofillCCInfoBarDelegate::Create(
+      InfoBarService::FromWebContents(web_contents()), this,
+      save_card_callback);
 }
 
 bool ChromeAutofillClient::HasCreditCardScanFeature() {
@@ -219,6 +240,16 @@ void ChromeAutofillClient::DidNavigateAnyFrame(
     HideRequestAutocompleteDialog();
 }
 
+void ChromeAutofillClient::MainFrameWasResized(bool width_changed) {
+#if defined(OS_ANDROID)
+  // Ignore virtual keyboard showing and hiding a strip of suggestions.
+  if (!width_changed)
+    return;
+#endif
+
+  HideAutofillPopup();
+}
+
 void ChromeAutofillClient::WebContentsDestroyed() {
   HideAutofillPopup();
 }
@@ -250,6 +281,12 @@ void ChromeAutofillClient::DidFillOrPreviewField(
 void ChromeAutofillClient::OnFirstUserGestureObserved() {
   web_contents()->SendToAllFrames(
       new AutofillMsg_FirstUserGestureObservedInTab(routing_id()));
+}
+
+void ChromeAutofillClient::LinkClicked(const GURL& url,
+                                       WindowOpenDisposition disposition) {
+  web_contents()->OpenURL(content::OpenURLParams(
+      url, content::Referrer(), disposition, ui::PAGE_TRANSITION_LINK, false));
 }
 
 }  // namespace autofill

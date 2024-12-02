@@ -66,11 +66,11 @@ remoting.WindowActivationMenu.prototype.makeMenuId_ = function(windowId) {
 /**
  * Handle a click on the application's context menu.
  *
- * @param {OnClickData} info
+ * @param {OnClickData=} info
  * @private
  */
 remoting.WindowActivationMenu.prototype.onContextMenu_ = function(info) {
-  /** @type {Array.<string>} */
+  /** @type {Array<string>} */
   var components = info.menuItemId.split('-');
   if (components.length == 2 &&
       this.makeMenuId_(parseInt(components[1], 10)) == info.menuItemId) {

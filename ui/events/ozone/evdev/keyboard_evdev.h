@@ -18,6 +18,7 @@
 namespace ui {
 
 class EventModifiersEvdev;
+enum class DomCode;
 
 // Keyboard for evdev.
 //
@@ -25,8 +26,6 @@ class EventModifiersEvdev;
 // one logical keyboard, applying modifiers & implementing key repeat.
 //
 // It also currently also applies the layout.
-//
-// TODO(spang): Implement key repeat & turn off kernel repeat.
 class EVENTS_OZONE_EVDEV_EXPORT KeyboardEvdev {
  public:
   KeyboardEvdev(EventModifiersEvdev* modifiers,
@@ -34,10 +33,8 @@ class EVENTS_OZONE_EVDEV_EXPORT KeyboardEvdev {
                 const EventDispatchCallback& callback);
   ~KeyboardEvdev();
 
-  static int NativeCodeToEvdevCode(int native_code);
-
   // Handlers for raw key presses & releases.
-  void OnKeyChange(unsigned int code, bool down);
+  void OnKeyChange(unsigned int code, bool down, base::TimeDelta timestamp);
 
   // Handle Caps Lock modifier.
   void SetCapsLockEnabled(bool enabled);
@@ -52,12 +49,16 @@ class EVENTS_OZONE_EVDEV_EXPORT KeyboardEvdev {
 
  private:
   void UpdateModifier(int modifier_flag, bool down);
+  void UpdateCapsLockLed();
   void UpdateKeyRepeat(unsigned int key, bool down);
   void StartKeyRepeat(unsigned int key);
   void StopKeyRepeat();
   void OnRepeatDelayTimeout();
   void OnRepeatIntervalTimeout();
-  void DispatchKey(unsigned int key, bool down, bool repeat);
+  void DispatchKey(unsigned int key,
+                   bool down,
+                   bool repeat,
+                   base::TimeDelta timestamp);
 
   // Aggregated key state. There is only one bit of state per key; we do not
   // attempt to count presses of the same key on multiple keyboards.

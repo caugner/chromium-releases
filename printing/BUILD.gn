@@ -4,6 +4,7 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 if (is_mac) {
   import("//build/config/mac/mac_sdk.gni")
 }
@@ -199,6 +200,8 @@ test("printing_unittests") {
     "printing_utils_unittest.cc",
     "units_unittest.cc",
   ]
+
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   if (use_cups) {
     configs += [ ":cups" ]

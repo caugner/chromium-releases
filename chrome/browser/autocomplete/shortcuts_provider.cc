@@ -20,7 +20,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/autocomplete/shortcuts_backend_factory.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -109,8 +108,8 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
 
   // Delete the match from the history DB. This will eventually result in a
   // second call to DeleteShortcutsWithURL(), which is harmless.
-  HistoryService* const history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  HistoryService* const history_service = HistoryServiceFactory::GetForProfile(
+      profile_, ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   history_service->DeleteURL(url);
 }

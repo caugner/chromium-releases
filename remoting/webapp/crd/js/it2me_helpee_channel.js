@@ -161,7 +161,7 @@ remoting.It2MeHelpeeChannel.prototype.dispose = function() {
 /**
  * Message Handler for incoming runtime messages from Hangouts.
  *
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelpeeChannel.prototype.onHangoutMessage_ = function(message) {
@@ -188,8 +188,7 @@ remoting.It2MeHelpeeChannel.prototype.onHangoutMessage_ = function(message) {
         return true;
     }
     throw new Error('Unsupported message method=' + message.method);
-  } catch(e) {
-    var error = /** @type {Error} */ e;
+  } catch(/** @type {Error} */ error) {
     this.sendErrorResponse_(message, error.message);
   }
   return false;
@@ -198,7 +197,7 @@ remoting.It2MeHelpeeChannel.prototype.onHangoutMessage_ = function(message) {
 /**
  * Queries the |hostInstaller| for the installation status.
  *
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelpeeChannel.prototype.handleIsHostInstalled_ =
@@ -215,21 +214,21 @@ remoting.It2MeHelpeeChannel.prototype.handleIsHostInstalled_ =
     });
   }
 
-  this.hostInstaller_.isInstalled().then(
+  remoting.HostInstaller.isInstalled().then(
     sendResponse,
-    this.sendErrorResponse_.bind(this, message)
+    /** @type {function(*):void} */(this.sendErrorResponse_.bind(this, message))
   );
 };
 
 /**
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelpeeChannel.prototype.handleDownloadHost_ = function(message) {
   try {
     this.hostInstaller_.download();
-  } catch (e) {
-    var error = /** @type {Error} */ e;
+  } catch (/** @type {*} */ e) {
+    var error = /** @type {Error} */ (e);
     this.sendErrorResponse_(message, error.message);
   }
 };
@@ -245,29 +244,31 @@ remoting.It2MeHelpeeChannel.prototype.onHangoutDisconnect_ = function() {
 /**
  * Connects to the It2Me Native messaging Host and retrieves the access code.
  *
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelpeeChannel.prototype.handleConnect_ =
     function(message) {
-  var email = getStringAttr(message, 'email');
-
-  if (!email) {
-    throw new Error('Missing required parameter: email');
-  }
+  var bounds =
+      /** @type {Bounds} */ (getObjectAttr(message, 'hangoutBounds', null));
 
   if (this.hostState_ !== remoting.HostSession.State.UNKNOWN) {
     throw new Error('An existing connection is in progress.');
   }
 
-  this.showConfirmDialog_().then(
-    this.initializeHost_.bind(this)
-  ).then(
-    this.fetchOAuthToken_.bind(this)
-  ).then(
-    this.connectToHost_.bind(this, email),
-    this.sendErrorResponse_.bind(this, message)
-  );
+  var that = this;
+  this.showConfirmDialog_(bounds)
+      .then(this.initializeHost_.bind(this))
+      .then(this.fetchOAuthToken_.bind(this))
+      .then(this.fetchEmail_.bind(this))
+      /** @param {{email:string, token:string}|Promise} result */
+      .then(function(result) {
+        that.connectToHost_(result.email, result.token);
+      /** @param {*} reason */
+      }).catch(function(reason) {
+        that.sendErrorResponse_(message, /** @type {Error} */ (reason));
+        that.dispose();
+      });
 };
 
 /**
@@ -275,21 +276,22 @@ remoting.It2MeHelpeeChannel.prototype.handleConnect_ =
  * ensures that even if Hangouts is compromised, an attacker cannot start the
  * host without explicit user confirmation.
  *
- * @return {Promise} A promise that resolves to a boolean value, indicating
- *     whether the user accepts the remote assistance or not.
+ * @param {Bounds} bounds Bounds of the hangout window
+ * @return {Promise} A promise that will resolve if the user accepts remote
+ *   assistance or reject otherwise.
  * @private
  */
-remoting.It2MeHelpeeChannel.prototype.showConfirmDialog_ = function() {
+remoting.It2MeHelpeeChannel.prototype.showConfirmDialog_ = function(bounds) {
   if (base.isAppsV2()) {
-    return this.showConfirmDialogV2_();
+    return this.showConfirmDialogV2_(bounds);
   } else {
     return this.showConfirmDialogV1_();
   }
 };
 
 /**
- * @return {Promise} A promise that resolves to a boolean value, indicating
- *     whether the user accepts the remote assistance or not.
+ * @return {Promise}  A promise that will resolve if the user accepts remote
+ *   assistance or reject otherwise.
  * @private
  */
 remoting.It2MeHelpeeChannel.prototype.showConfirmDialogV1_ = function() {
@@ -311,45 +313,22 @@ remoting.It2MeHelpeeChannel.prototype.showConfirmDialogV1_ = function() {
 };
 
 /**
- * @return {Promise} A promise that resolves to a boolean value, indicating
- *     whether the user accepts the remote assistance or not.
+ * @param {Bounds} bounds the bounds of the Hangouts Window.  If set, the
+ *   confirm dialog will be centered within |bounds|.
+ * @return {Promise} A promise that will resolve if the user accepts remote
+ *   assistance or reject otherwise.
  * @private
  */
-remoting.It2MeHelpeeChannel.prototype.showConfirmDialogV2_ = function() {
-  var messageHeader = l10n.getTranslationOrError(
-      /*i18n-content*/'HANGOUTS_CONFIRM_DIALOG_MESSAGE_1');
-  var message1 = l10n.getTranslationOrError(
-      /*i18n-content*/'HANGOUTS_CONFIRM_DIALOG_MESSAGE_2');
-  var message2 = l10n.getTranslationOrError(
-      /*i18n-content*/'HANGOUTS_CONFIRM_DIALOG_MESSAGE_3');
-  var message = '<div>' + base.escapeHTML(messageHeader) + '</div>' +
-                '<ul class="insetList">' +
-                  '<li>' + base.escapeHTML(message1) + '</li>' +
-                  '<li>' + base.escapeHTML(message2) + '</li>' +
-                '</ul>';
-  /**
-   * @param {function(*=):void} resolve
-   * @param {function(*=):void} reject
-   */
-  return new Promise(function(resolve, reject) {
-    /** @param {number} result */
-    function confirmDialogCallback(result) {
-      if (result === 1) {
-        resolve();
-      } else {
-        reject(new Error(remoting.Error.CANCELLED));
-      }
-    }
-    remoting.MessageWindow.showConfirmWindow(
-        '', // Empty string to use the package name as the dialog title.
-        message,
-        l10n.getTranslationOrError(
-            /*i18n-content*/'HANGOUTS_CONFIRM_DIALOG_ACCEPT'),
-        l10n.getTranslationOrError(
-            /*i18n-content*/'HANGOUTS_CONFIRM_DIALOG_DECLINE'),
-        confirmDialogCallback
-    );
-  });
+remoting.It2MeHelpeeChannel.prototype.showConfirmDialogV2_ = function(bounds) {
+  var getToken =
+      base.Promise.as(chrome.identity.getAuthToken, [{interactive: false}]);
+
+  return getToken.then(
+    /** @param {string} token */
+    function(token) {
+      return remoting.HangoutConsentDialog.getInstance().show(Boolean(token),
+                                                              bounds);
+    });
 };
 
 /**
@@ -366,47 +345,65 @@ remoting.It2MeHelpeeChannel.prototype.initializeHost_ = function() {
    */
   return new Promise(function(resolve, reject) {
     if (host.initialized()) {
-      resolve();
+      resolve(true);
     } else {
-      host.initialize(resolve, reject);
+      host.initialize(/** @type {function(*=):void} */ (resolve),
+                      /** @type {function(*=):void} */ (reject));
     }
   });
 };
 
 /**
- * @return {Promise} Promise that resolves with the OAuth token as the value.
+ * @return {Promise<string>} Promise that resolves with the OAuth token as the
+ * value.
  */
 remoting.It2MeHelpeeChannel.prototype.fetchOAuthToken_ = function() {
   if (base.isAppsV2()) {
     /**
      * @param {function(*=):void} resolve
+     * @param {function(*=):void} reject
      */
-    return new Promise(function(resolve){
-      // TODO(jamiewalch): Make this work with {interactive: true} as well.
-      chrome.identity.getAuthToken({ 'interactive': false }, resolve);
+    return new Promise(function(resolve, reject){
+      remoting.identity.callWithToken(resolve, reject);
     });
   } else {
     /**
      * @param {function(*=):void} resolve
+     * @param {function(*=):void} reject
      */
-    return new Promise(function(resolve) {
-      /** @type {remoting.OAuth2} */
-      var oauth2 = new remoting.OAuth2();
-      var onAuthenticated = function() {
-        oauth2.callWithToken(
-            resolve,
-            function() { throw new Error('Authentication failed.'); });
-      };
+    return new Promise(function(resolve, reject) {
       /** @param {remoting.Error} error */
       var onError = function(error) {
-        if (error != remoting.Error.NOT_AUTHENTICATED) {
-          throw new Error('Unexpected error fetch auth token: ' + error);
+        if (error === remoting.Error.NOT_AUTHENTICATED) {
+          remoting.oauth2.doAuthRedirect(function() {
+            remoting.identity.callWithToken(resolve, reject);
+          });
+          return;
         }
-        oauth2.doAuthRedirect(onAuthenticated);
+        reject(new Error(remoting.Error.NOT_AUTHENTICATED));
       };
-      oauth2.callWithToken(resolve, onError);
+      remoting.identity.callWithToken(resolve, onError);
     });
   }
+};
+
+/**
+ * @param {string|Promise} token
+ * @return {Promise} Promise that resolves with the access token and the email
+ *   of the user.
+ */
+remoting.It2MeHelpeeChannel.prototype.fetchEmail_ = function(token) {
+  /**
+   * @param {function(*=):void} resolve
+   * @param {function(*=):void} reject
+   */
+  return new Promise(function(resolve, reject){
+    /** @param {string} email */
+    function onEmail (email) {
+      resolve({ email: email, token: token });
+    }
+    remoting.identity.getEmail(onEmail, reject);
+  });
 };
 
 /**
@@ -476,7 +473,7 @@ remoting.It2MeHelpeeChannel.prototype.onHostStateChanged_ = function(state) {
 };
 
 /**
- * @param {?{method:string, data:Object.<string,*>}} incomingMessage
+ * @param {?{method:string, data:Object<string,*>}} incomingMessage
  * @param {string|Error} error
  * @private
  */

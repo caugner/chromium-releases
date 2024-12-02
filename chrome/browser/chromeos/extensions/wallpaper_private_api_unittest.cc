@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
@@ -27,17 +27,14 @@ const char kTestAccount2[] = "user2@test.com";
 class WallpaperPrivateApiUnittest : public ash::test::AshTestBase {
  public:
   WallpaperPrivateApiUnittest()
-      : fake_user_manager_(new FakeUserManager()),
-        scoped_user_manager_(fake_user_manager_) {
-  }
+      : fake_user_manager_(new FakeChromeUserManager()),
+        scoped_user_manager_(fake_user_manager_) {}
 
  protected:
-  FakeUserManager* fake_user_manager() {
-    return fake_user_manager_;
-  }
+  FakeChromeUserManager* fake_user_manager() { return fake_user_manager_; }
 
  private:
-  FakeUserManager* fake_user_manager_;
+  FakeChromeUserManager* fake_user_manager_;
   ScopedUserManagerEnabler scoped_user_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateApiUnittest);
@@ -48,12 +45,12 @@ class TestMinimizeFunction
  public:
   TestMinimizeFunction() {}
 
-  virtual bool RunAsync() override {
+  bool RunAsync() override {
     return WallpaperPrivateMinimizeInactiveWindowsFunction::RunAsync();
   }
 
  protected:
-  virtual ~TestMinimizeFunction() {}
+  ~TestMinimizeFunction() override {}
 };
 
 class TestRestoreFunction
@@ -61,11 +58,11 @@ class TestRestoreFunction
  public:
   TestRestoreFunction() {}
 
-  virtual bool RunAsync() override {
+  bool RunAsync() override {
     return WallpaperPrivateRestoreMinimizedWindowsFunction::RunAsync();
   }
  protected:
-  virtual ~TestRestoreFunction() {}
+  ~TestRestoreFunction() override {}
 };
 
 }  // namespace
@@ -183,8 +180,8 @@ class WallpaperPrivateApiMultiUserUnittest
       : multi_user_window_manager_(NULL),
         session_state_delegate_(NULL) {}
 
-  virtual void SetUp() override;
-  virtual void TearDown() override;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   void SetUpMultiUserWindowManager(

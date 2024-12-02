@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/shell/renderer/test_runner/web_task.h"
+#include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -44,7 +45,6 @@ class WebDataSource;
 class WebDragData;
 class WebFileChooserCompletion;
 class WebFrame;
-class WebImage;
 class WebLocalFrame;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
@@ -76,6 +76,7 @@ typedef unsigned WebColor;
 namespace content {
 
 class MockCredentialManagerClient;
+class MockPresentationService;
 class MockScreenOrientationClient;
 class MockWebSpeechRecognizer;
 class MockWebUserMediaClient;
@@ -131,6 +132,7 @@ class WebTestProxyBase {
   blink::WebMIDIClientMock* GetMIDIClientMock();
   MockWebSpeechRecognizer* GetSpeechRecognizerMock();
   MockCredentialManagerClient* GetCredentialManagerClientMock();
+  MockPresentationService* GetPresentationServiceMock();
 
   WebTaskList* mutable_task_list() { return &task_list_; }
 
@@ -254,6 +256,8 @@ class WebTestProxyBase {
 
   WebTaskList task_list_;
 
+  blink::WebImage drag_image_;
+
   scoped_ptr<SpellCheckClient> spellcheck_;
   scoped_ptr<MockWebUserMediaClient> user_media_client_;
 
@@ -267,6 +271,7 @@ class WebTestProxyBase {
   scoped_ptr<blink::WebMIDIClientMock> midi_client_;
   scoped_ptr<MockWebSpeechRecognizer> speech_recognizer_;
   scoped_ptr<MockScreenOrientationClient> screen_orientation_client_;
+  scoped_ptr<MockPresentationService> presentation_service_;
 
   std::string accept_languages_;
 

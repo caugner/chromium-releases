@@ -18,6 +18,16 @@ cr.ui.Command.prototype.setHidden = function(value) {
 var Command = function() {};
 
 /**
+ * Metadata property names used by Command.
+ * These metadata is expected to be cached.
+ * @const {!Array<string>}
+ */
+Command.METADATA_PREFETCH_PROPERTY_NAMES = [
+  'hosted',
+  'pinned'
+];
+
+/**
  * Handles the execute event.
  * @param {!Event} event Command event.
  * @param {!FileManager} fileManager FileManager.
@@ -47,7 +57,6 @@ CommandUtil.getCommandEntry = function(element) {
     // element is a DirectoryTree.
     return element.selectedItem ? element.selectedItem.entry : null;
   } else if (element instanceof DirectoryItem ||
-             element instanceof VolumeItem ||
              element instanceof ShortcutItem) {
     // element are sub items in DirectoryTree.
     return element.entry;
@@ -112,16 +121,21 @@ CommandUtil.canExecuteAlways = function(event) {
  * array to avoid confusing because pinning directory is not supported
  * currently.
  *
- * @return {Array.<Entry>} Target entries.
+ * @return {!Array<!Entry>} Target entries.
  */
 CommandUtil.getPinTargetEntries = function() {
+  // If current directory is not on drive, no entry can be pinned.
+  if (!fileManager.isOnDrive())
+    return [];
+
   var hasDirectory = false;
   var results = fileManager.getSelection().entries.filter(function(entry) {
     hasDirectory = hasDirectory || entry.isDirectory;
     if (!entry || hasDirectory)
       return false;
-    var metadata = fileManager.metadataCache_.getCached(entry, 'external');
-    if (!metadata || metadata.hosted)
+    var metadata = fileManager.getFileSystemMetadata().getCache(
+        [entry], ['hosted', 'pinned'])[0];
+    if (metadata.hosted)
       return false;
     entry.pinned = metadata.pinned;
     return true;
@@ -193,7 +207,7 @@ CommandUtil.createVolumeSwitchCommand = function(index) {
      * @param {!FileManager} fileManager FileManager to use.
      */
     execute: function(event, fileManager) {
-      fileManager.directoryTree.selectByIndex(index - 1);
+      fileManager.directoryTree.activateByIndex(index - 1);
     },
     /**
      * @param {!Event} event Command event.
@@ -277,8 +291,11 @@ CommandHandler.prototype.updateAvailability = function() {
  * @private
  */
 CommandHandler.prototype.shouldIgnoreEvents_ = function() {
-  // Do not handle commands, when a dialog is shown.
-  if (this.fileManager_.document.querySelector('.cr-dialog-container.shown'))
+  // Do not handle commands, when a dialog is shown. Do not use querySelector
+  // as it's much slower, and this method is executed often.
+  var dialogs = this.fileManager_.document.getElementsByClassName(
+      'cr-dialog-container');
+  if (dialogs.length !== 0 && dialogs[0].classList.contains('shown'))
     return true;
 
   return false;  // Do not ignore.
@@ -519,14 +536,10 @@ CommandHandler.COMMANDS_['new-window'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
-    chrome.fileManagerPrivate.getProfiles(
-        function(profiles, currentId, displayedId) {
-          fileManager.backgroundPage.launchFileManager({
-            currentDirectoryURL: fileManager.getCurrentDirectoryEntry() &&
-                fileManager.getCurrentDirectoryEntry().toURL(),
-            displayedId: currentId !== displayedId ? displayedId : undefined
-          });
-        });
+    fileManager.backgroundPage.launchFileManager({
+      currentDirectoryURL: fileManager.getCurrentDirectoryEntry() &&
+          fileManager.getCurrentDirectoryEntry().toURL()
+    });
   },
   /**
    * @param {!Event} event Command event.
@@ -822,6 +835,10 @@ CommandHandler.COMMANDS_['search'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   execute: function(event, fileManager) {
+    // Cancel item selection.
+    fileManager.directoryModel.clearSelection();
+
+    // Focus the search box.
     var element = fileManager.document.querySelector('#search-box input');
     element.focus();
     element.select();
@@ -875,6 +892,7 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
       return;
     var currentEntry;
     var error = false;
+    var fileSystemMetadata = fileManager.getFileSystemMetadata();
     var steps = {
       // Pick an entry and pin it.
       start: function() {
@@ -893,16 +911,18 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
         // Convert to boolean.
         error = !!chrome.runtime.lastError;
         if (error && pin) {
-          fileManager.metadataCache_.getOne(
-              currentEntry, 'filesystem', steps.showError);
+          fileSystemMetadata.get([currentEntry], ['size']).then(
+              function(results) {
+                steps.showError(results[0].size);
+              });
+          return;
         }
-        fileManager.metadataCache_.clear(currentEntry, 'external');
-        fileManager.metadataCache_.getOne(
-            currentEntry, 'external', steps.updateUI.bind(this));
+        fileSystemMetadata.notifyEntriesChanged([currentEntry]);
+        fileSystemMetadata.get([currentEntry], ['pinned']).then(steps.updateUI);
       },
 
       // Update the user interface according to the cache state.
-      updateUI: function(drive /* not used */) {
+      updateUI: function() {
         fileManager.ui.listContainer.currentView.updateListItemsMetadata(
             'external', [currentEntry]);
         if (!error)
@@ -910,12 +930,12 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
       },
 
       // Show the error
-      showError: function(filesystem) {
+      showError: function(size) {
         fileManager.ui.alertDialog.showHtml(
             str('DRIVE_OUT_OF_SPACE_HEADER'),
             strf('DRIVE_OUT_OF_SPACE_MESSAGE',
                  unescape(currentEntry.name),
-                 util.bytesToString(filesystem.size)),
+                 util.bytesToString(size)),
             null, null, null);
       }
     };
@@ -1015,36 +1035,6 @@ CommandHandler.COMMANDS_['share'] = /** @type {Command} */ ({
         !isDriveOffline &&
         selection && selection.totalCount == 1;
     event.command.setHidden(!fileManager.isOnDrive());
-  }
-});
-
-/**
- * Initiates cloud import.
- * @type {Command}
- */
-CommandHandler.COMMANDS_['cloud-import'] = /** @type {Command} */ ({
-  /**
-   * @param {!Event} event Command event.
-   * @param {!FileManager} fileManager
-   */
-  execute: function(event, fileManager) {
-    console.assert(fileManager.importController !== null);
-      fileManager.importController.execute();
-  },
-  /**
-   * @param {!Event} event Command event.
-   * @param {!FileManager} fileManager
-   */
-  canExecute: function(event, fileManager) {
-    if (fileManager.importController) {
-      var response = fileManager.importController.update();
-      event.command.label = str(response.label_id);
-      event.canExecute = response.executable;
-      event.command.setHidden(!response.visible);
-    } else {
-      event.canExecute = false;
-      event.command.setHidden(true);
-    }
   }
 });
 

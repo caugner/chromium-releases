@@ -19,6 +19,7 @@
 #include "ash/shell_window_ids.h"
 #include "ash/system/bluetooth/bluetooth_observer.h"
 #include "ash/system/chromeos/session/logout_button_observer.h"
+#include "ash/system/chromeos/shutdown_policy_observer.h"
 #include "ash/system/date/clock_observer.h"
 #include "ash/system/ime/ime_observer.h"
 #include "ash/system/tray/system_tray.h"
@@ -68,6 +69,7 @@
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
+#include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/system_tray_delegate_utils.h"
 #include "chrome/browser/ui/ash/user_accounts_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/volume_controller_chromeos.h"
@@ -196,6 +198,7 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
       have_session_length_limit_(false),
       should_run_bluetooth_discovery_(false),
       session_started_(false),
+      networking_config_delegate_(new NetworkingConfigDelegateChromeos()),
       volume_control_delegate_(new VolumeController()),
       device_settings_observer_(CrosSettings::Get()->AddSettingsObserver(
           kSystemUse24HourClock,
@@ -232,6 +235,8 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
                  base::Unretained(this)));
 
   user_manager::UserManager::Get()->AddSessionStateObserver(this);
+  shutdown_policy_handler_.reset(
+      new ShutdownPolicyHandler(CrosSettings::Get(), this));
 }
 
 void SystemTrayDelegateChromeOS::Initialize() {
@@ -775,6 +780,11 @@ void SystemTrayDelegateChromeOS::ChangeProxySettings() {
   LoginDisplayHostImpl::default_host()->OpenProxySettings();
 }
 
+ash::NetworkingConfigDelegate*
+SystemTrayDelegateChromeOS::GetNetworkingConfigDelegate() const {
+  return networking_config_delegate_.get();
+}
+
 ash::VolumeControlDelegate*
 SystemTrayDelegateChromeOS::GetVolumeControlDelegate() const {
   return volume_control_delegate_.get();
@@ -835,6 +845,21 @@ void SystemTrayDelegateChromeOS::AddCustodianInfoTrayObserver(
 void SystemTrayDelegateChromeOS::RemoveCustodianInfoTrayObserver(
     ash::CustodianInfoTrayObserver* observer) {
   custodian_info_changed_observers_.RemoveObserver(observer);
+}
+
+void SystemTrayDelegateChromeOS::AddShutdownPolicyObserver(
+    ash::ShutdownPolicyObserver* observer) {
+  shutdown_policy_observers_.AddObserver(observer);
+}
+
+void SystemTrayDelegateChromeOS::RemoveShutdownPolicyObserver(
+    ash::ShutdownPolicyObserver* observer) {
+  shutdown_policy_observers_.RemoveObserver(observer);
+}
+
+void SystemTrayDelegateChromeOS::ShouldRebootOnShutdown(
+    const ash::RebootOnShutdownCallback& callback) {
+  shutdown_policy_handler_->CheckIfRebootOnShutdown(callback);
 }
 
 void SystemTrayDelegateChromeOS::UserAddedToSession(
@@ -1320,6 +1345,13 @@ void SystemTrayDelegateChromeOS::OnAccessibilityStatusChanged(
     accessibility_subscription_.reset();
   else
     OnAccessibilityModeChanged(details.notify);
+}
+
+void SystemTrayDelegateChromeOS::OnShutdownPolicyChanged(
+    bool reboot_on_shutdown) {
+  // Notify all observers.
+  FOR_EACH_OBSERVER(ash::ShutdownPolicyObserver, shutdown_policy_observers_,
+                    OnShutdownPolicyChanged(reboot_on_shutdown));
 }
 
 const base::string16

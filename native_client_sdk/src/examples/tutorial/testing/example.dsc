@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['glibc', 'newlib', 'pnacl', 'linux'],
+  'TOOLS': ['glibc', 'newlib', 'pnacl', 'linux', 'mac', 'clang-newlib'],
   'SEL_LDR': True,
   'TARGETS': [
     {

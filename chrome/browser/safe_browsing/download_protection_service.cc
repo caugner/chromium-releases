@@ -23,6 +23,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/binary_feature_extractor.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -484,14 +485,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
       *reason = REASON_INVALID_URL;
       return false;
     }
+    if (!download_protection_util::IsBinaryFile(target_path)) {
+      *reason = REASON_NOT_BINARY_FILE;
+      return false;
+    }
     if ((!final_url.IsStandard() && !final_url.SchemeIsBlob() &&
          !final_url.SchemeIs(url::kDataScheme)) ||
         final_url.SchemeIsFile()) {
       *reason = REASON_UNSUPPORTED_URL_SCHEME;
-      return false;
-    }
-    if (!download_protection_util::IsBinaryFile(target_path)) {
-      *reason = REASON_NOT_BINARY_FILE;
       return false;
     }
     *type = download_protection_util::GetDownloadType(target_path);
@@ -676,8 +677,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     }
 
     Profile* profile = Profile::FromBrowserContext(item_->GetBrowserContext());
-    HistoryService* history =
-        HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+    HistoryService* history = HistoryServiceFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (!history) {
       SendRequest();
       return;

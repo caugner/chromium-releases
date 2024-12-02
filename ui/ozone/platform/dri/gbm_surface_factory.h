@@ -7,22 +7,20 @@
 
 #include "ui/ozone/platform/dri/dri_surface_factory.h"
 
-struct gbm_device;
-
 namespace ui {
 
 class DriWindowDelegate;
 class DriWindowDelegateManager;
-class ScreenManager;
+class DrmDeviceManager;
+class GbmWrapper;
 
 class GbmSurfaceFactory : public DriSurfaceFactory {
  public:
   GbmSurfaceFactory(bool allow_surfaceless);
   ~GbmSurfaceFactory() override;
 
-  void InitializeGpu(DriWrapper* dri,
-                     gbm_device* device,
-                     ScreenManager* screen_manager,
+  void InitializeGpu(const scoped_refptr<GbmWrapper>& gbm,
+                     DrmDeviceManager* drm_device_manager,
                      DriWindowDelegateManager* window_manager);
 
   // DriSurfaceFactory:
@@ -32,6 +30,8 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
   bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
       SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
+  scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+      gfx::AcceleratedWidget widget) override;
   scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
       gfx::AcceleratedWidget w) override;
   scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
@@ -53,11 +53,12 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
   bool CanCreateNativePixmap(BufferUsage usage) override;
 
  private:
-  DriWindowDelegate* GetOrCreateWindowDelegate(gfx::AcceleratedWidget widget);
+  scoped_refptr<GbmWrapper> GetGbmDevice(gfx::AcceleratedWidget widget);
 
-  ScreenManager* screen_manager_;  // Not owned.
-  gbm_device* device_;  // Not owned.
+  scoped_refptr<GbmWrapper> gbm_;
   bool allow_surfaceless_;
+
+  DrmDeviceManager* drm_device_manager_;  // Not owned.
 
   DISALLOW_COPY_AND_ASSIGN(GbmSurfaceFactory);
 };

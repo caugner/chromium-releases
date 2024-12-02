@@ -66,19 +66,47 @@ remoting.DesktopRemoting.prototype.init = function() {
   remoting.initIdentity(remoting.onUserInfoAvailable);
 
   remoting.initElementEventHandlers();
-  remoting.initGlobalEventHandlers();
 
   if (base.isAppsV2()) {
-    remoting.fullscreen = new remoting.FullscreenAppsV2();
     remoting.windowFrame = new remoting.WindowFrame(
         document.getElementById('title-bar'));
     remoting.optionsMenu = remoting.windowFrame.createOptionsMenu();
+
+    var START_FULLSCREEN = 'start-fullscreen';
+    remoting.fullscreen = new remoting.FullscreenAppsV2();
+    remoting.fullscreen.addListener(function(isFullscreen) {
+      chrome.storage.local.set({START_FULLSCREEN: isFullscreen});
+    });
+    // TODO(jamiewalch): This should be handled by the background page when the
+    // window is created, but due to crbug.com/51587 it needs to be done here.
+    // Remove this hack once that bug is fixed.
+    chrome.storage.local.get(
+        START_FULLSCREEN,
+        /** @param {Object} values */
+        function(values) {
+          if (values[START_FULLSCREEN]) {
+            remoting.fullscreen.activate(true);
+          }
+        }
+    );
+
   } else {
     remoting.fullscreen = new remoting.FullscreenAppsV1();
     remoting.toolbar = new remoting.Toolbar(
         document.getElementById('session-toolbar'));
     remoting.optionsMenu = remoting.toolbar.createOptionsMenu();
+
+    window.addEventListener('beforeunload', remoting.promptClose, false);
+    window.addEventListener('unload', remoting.disconnect, false);
   }
+
+  // When a window goes full-screen, a resize event is triggered, but the
+  // Fullscreen.isActive call is not guaranteed to return true until the
+  // full-screen event is triggered. In apps v2, the size of the window's
+  // client area is calculated differently in full-screen mode, so register
+  // for both events.
+  window.addEventListener('resize', remoting.onResize, false);
+  remoting.fullscreen.addListener(remoting.onResize);
 
   remoting.initHostlist_();
 
@@ -115,6 +143,13 @@ remoting.DesktopRemoting.prototype.init = function() {
 }
 
 /**
+ * @return {string} Application product name to be used in UI.
+ */
+remoting.DesktopRemoting.prototype.getApplicationName = function() {
+  return chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
+};
+
+/**
  * @return {string} The default remap keys for the current platform.
  */
 remoting.DesktopRemoting.prototype.getDefaultRemapKeys = function() {
@@ -125,21 +160,6 @@ remoting.DesktopRemoting.prototype.getDefaultRemapKeys = function() {
     remapKeys = '0x0700e4>0x0700e7';
   }
   return remapKeys;
-};
-
-/**
- * @return {Array.<string>} A list of |ClientSession.Capability|s required
- *     by this application.
- */
-remoting.DesktopRemoting.prototype.getRequiredCapabilities = function() {
-  return [
-    remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION,
-    remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS,
-    remoting.ClientSession.Capability.VIDEO_RECORDER,
-    // TODO(aiguha): Add this capability based on a gyp/command-line flag,
-    // rather than by default.
-    remoting.ClientSession.Capability.CAST
-  ];
 };
 
 /**
@@ -278,15 +298,21 @@ remoting.DesktopRemoting.prototype.handleError = function(errorTag) {
   console.error('Connection failed: ' + errorTag);
   remoting.accessCode = '';
 
+  if (errorTag === remoting.Error.AUTHENTICATION_FAILED) {
+    remoting.setMode(remoting.AppMode.HOME);
+    remoting.handleAuthFailureAndRelaunch();
+    return;
+  }
+
   // Reset the refresh flag so that the next connection will retry if needed.
   this.refreshHostJidIfOffline_ = true;
 
   var errorDiv = document.getElementById('connect-error-message');
   l10n.localizeElementFromTag(errorDiv, /** @type {string} */ (errorTag));
 
-  var mode = remoting.clientSession ? remoting.clientSession.getMode()
+  var mode = remoting.clientSession ? remoting.desktopConnectedView.getMode()
       : this.app_.getSessionConnector().getConnectionMode();
-  if (mode == remoting.ClientSession.Mode.IT2ME) {
+  if (mode == remoting.DesktopConnectedView.Mode.IT2ME) {
     remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED_IT2ME);
     remoting.hangoutSessionEvents.raiseEvent(
         remoting.hangoutSessionEvents.sessionStateChanged,

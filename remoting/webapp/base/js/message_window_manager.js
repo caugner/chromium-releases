@@ -16,7 +16,7 @@ remoting.MessageWindowManager = {};
 /**
  * Mapping from window id to corresponding MessageWindow.
  *
- * @type {Object.<number, remoting.MessageWindow>}
+ * @type {Object<number, remoting.MessageWindow>}
  * @private
  */
 remoting.MessageWindowManager.messageWindows_ = {};
@@ -58,7 +58,7 @@ remoting.MessageWindowManager.deleteMessageWindow = function(id) {
  * Close all of the registered MessageWindows
  */
 remoting.MessageWindowManager.closeAllMessageWindows = function() {
-  /** @type {Array.<remoting.MessageWindow>} */
+  /** @type {Array<remoting.MessageWindow>} */
   var windows = [];
   // Make a list of the windows to close.
   // We don't delete the window directly in this loop because close() can
@@ -66,7 +66,7 @@ remoting.MessageWindowManager.closeAllMessageWindows = function() {
   for (var win_id in remoting.MessageWindowManager.messageWindows_) {
     /** @type {remoting.MessageWindow} */
     var win = remoting.MessageWindowManager.getMessageWindow(
-        /** @type {number} */(win_id));
+        parseInt(win_id, 10));
     base.debug.assert(win != null);
     windows.push(win);
   }

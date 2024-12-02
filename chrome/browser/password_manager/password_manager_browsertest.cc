@@ -17,6 +17,7 @@
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/password_manager/test_password_store_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/login/login_prompt_test_utils.h"
@@ -970,7 +971,14 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, DeleteFrameBeforeSubmit) {
   // The only thing we check here is that there is no use-after-free reported.
 }
 
-IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, PasswordValueAccessible) {
+// Disabled on Windows due to flakiness: http://crbug.com/346297
+#if defined(OS_WIN)
+#define MAYBE_PasswordValueAccessible DISABLED_PasswordValueAccessible
+#else
+#define MAYBE_PasswordValueAccessible PasswordValueAccessible
+#endif
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       MAYBE_PasswordValueAccessible) {
   NavigateToFile("/password/form_and_link.html");
 
   // Click on a link to open a new tab, then switch back to the first one.
@@ -1017,9 +1025,10 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, PasswordValueAccessible) {
 // RenderWidgetHostViewGuest::ProcessAckedTouchEvent is, and
 // ProcessAckedTouchEvent is what triggers the translation of touch events to
 // gesture events.
+// Disabled: http://crbug.com/346297
 #if defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
-                       PasswordValueAccessibleOnSubmit) {
+                       DISABLED_PasswordValueAccessibleOnSubmit) {
   NavigateToFile("/password/form_and_link.html");
 
   // Fill in the credentials, and make sure they are saved.
@@ -1086,8 +1095,8 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
                        DontPromptWhenEnableAutomaticPasswordSavingSwitchIsSet) {
   password_manager::TestPasswordStore* password_store =
       static_cast<password_manager::TestPasswordStore*>(
-          PasswordStoreFactory::GetForProfile(browser()->profile(),
-                                              Profile::IMPLICIT_ACCESS).get());
+          PasswordStoreFactory::GetForProfile(
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS).get());
 
   EXPECT_TRUE(password_store->IsEmpty());
 
@@ -1177,8 +1186,8 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, NoLastLoadGoodLastLoad) {
 
   password_manager::TestPasswordStore* password_store =
       static_cast<password_manager::TestPasswordStore*>(
-          PasswordStoreFactory::GetForProfile(browser()->profile(),
-                                              Profile::IMPLICIT_ACCESS).get());
+          PasswordStoreFactory::GetForProfile(
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS).get());
   EXPECT_TRUE(password_store->IsEmpty());
 
   // Navigate to a page requiring HTTP auth. Wait for the tab to get the correct
@@ -1303,8 +1312,8 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
                        PromptWhenPasswordFormWithoutUsernameFieldSubmitted) {
   password_manager::TestPasswordStore* password_store =
       static_cast<password_manager::TestPasswordStore*>(
-          PasswordStoreFactory::GetForProfile(browser()->profile(),
-                                              Profile::IMPLICIT_ACCESS).get());
+          PasswordStoreFactory::GetForProfile(
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS).get());
 
   EXPECT_TRUE(password_store->IsEmpty());
 
@@ -1333,8 +1342,8 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
                        AutofillSuggetionsForPasswordFormWithoutUsernameField) {
   password_manager::TestPasswordStore* password_store =
       static_cast<password_manager::TestPasswordStore*>(
-          PasswordStoreFactory::GetForProfile(browser()->profile(),
-                                              Profile::IMPLICIT_ACCESS).get());
+          PasswordStoreFactory::GetForProfile(
+              browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS).get());
 
   EXPECT_TRUE(password_store->IsEmpty());
 
@@ -1573,4 +1582,49 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
   observer.Wait();
   EXPECT_FALSE(prompt_observer->IsShowingPrompt());
+}
+
+// Regression test for http://crbug.com/452306
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       ChangingTextToPasswordFieldOnSignupForm) {
+  NavigateToFile("/password/signup_form.html");
+
+  // In this case, pretend that username_field is actually a password field
+  // that starts as a text field to simulate placeholder.
+  NavigationObserver observer(WebContents());
+  scoped_ptr<PromptObserver> prompt_observer(
+      PromptObserver::Create(WebContents()));
+  std::string change_and_submit =
+      "document.getElementById('other_info').value = 'username';"
+      "document.getElementById('username_field').type = 'password';"
+      "document.getElementById('username_field').value = 'mypass';"
+      "document.getElementById('password_field').value = 'mypass';"
+      "document.getElementById('testform').submit();";
+  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), change_and_submit));
+  observer.Wait();
+  EXPECT_TRUE(prompt_observer->IsShowingPrompt());
+}
+
+// Regression test for http://crbug.com/451631
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       SavingOnManyPasswordFieldsTest) {
+  // Simulate Macy's registration page, which contains the normal 2 password
+  // fields for confirming the new password plus 2 more fields for security
+  // questions and credit card. Make sure that saving works correctly for such
+  // sites.
+  NavigateToFile("/password/many_password_signup_form.html");
+
+  NavigationObserver observer(WebContents());
+  scoped_ptr<PromptObserver> prompt_observer(
+      PromptObserver::Create(WebContents()));
+  std::string fill_and_submit =
+      "document.getElementById('username_field').value = 'username';"
+      "document.getElementById('password_field').value = 'mypass';"
+      "document.getElementById('confirm_field').value = 'mypass';"
+      "document.getElementById('security_answer').value = 'hometown';"
+      "document.getElementById('SSN').value = '1234';"
+      "document.getElementById('testform').submit();";
+  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
+  observer.Wait();
+  EXPECT_TRUE(prompt_observer->IsShowingPrompt());
 }

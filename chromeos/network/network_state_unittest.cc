@@ -24,21 +24,20 @@ class TestStringValue : public base::Value {
         value_(in_value) {
   }
 
-  virtual ~TestStringValue() {
-  }
+  ~TestStringValue() override {}
 
   // Overridden from Value:
-  virtual bool GetAsString(std::string* out_value) const override {
+  bool GetAsString(std::string* out_value) const override {
     if (out_value)
       *out_value = value_;
     return true;
   }
 
-  virtual TestStringValue* DeepCopy() const override {
+  TestStringValue* DeepCopy() const override {
     return new TestStringValue(value_);
   }
 
-  virtual bool Equals(const base::Value* other) const override {
+  bool Equals(const base::Value* other) const override {
     if (other->GetType() != GetType())
       return false;
     std::string lhs, rhs;
@@ -170,6 +169,48 @@ TEST_F(NetworkStateTest, SsidHexMultipleUpdates) {
       base::HexEncode(wifi_hex_result.c_str(), wifi_hex_result.length());
   EXPECT_TRUE(SetStringProperty(shill::kWifiHexSsid, wifi_hex));
   EXPECT_TRUE(SetStringProperty(shill::kWifiHexSsid, wifi_hex));
+}
+
+TEST_F(NetworkStateTest, CaptivePortalState) {
+  std::string network_name = "test";
+  EXPECT_TRUE(SetStringProperty(shill::kTypeProperty, shill::kTypeWifi));
+  EXPECT_TRUE(SetStringProperty(shill::kNameProperty, network_name));
+  std::string hex_ssid =
+      base::HexEncode(network_name.c_str(), network_name.length());
+  EXPECT_TRUE(SetStringProperty(shill::kWifiHexSsid, hex_ssid));
+
+  // State != portal -> is_captive_portal == false
+  EXPECT_TRUE(SetStringProperty(shill::kStateProperty, shill::kStateReady));
+  SignalInitialPropertiesReceived();
+  EXPECT_FALSE(network_state_.is_captive_portal());
+
+  // State == portal, kPortalDetection* not set -> is_captive_portal = true
+  EXPECT_TRUE(SetStringProperty(shill::kStateProperty, shill::kStatePortal));
+  SignalInitialPropertiesReceived();
+  EXPECT_TRUE(network_state_.is_captive_portal());
+
+  // Set kPortalDetectionFailed* properties to states that should not trigger
+  // is_captive_portal.
+  SetStringProperty(shill::kPortalDetectionFailedPhaseProperty,
+                    shill::kPortalDetectionPhaseUnknown);
+  SetStringProperty(shill::kPortalDetectionFailedStatusProperty,
+                    shill::kPortalDetectionStatusTimeout);
+  SignalInitialPropertiesReceived();
+  EXPECT_FALSE(network_state_.is_captive_portal());
+
+  // Set just the phase property to the expected captive portal state.
+  // is_captive_portal should still be false.
+  SetStringProperty(shill::kPortalDetectionFailedPhaseProperty,
+                    shill::kPortalDetectionPhaseContent);
+  SignalInitialPropertiesReceived();
+  EXPECT_FALSE(network_state_.is_captive_portal());
+
+  // Set the status property to the expected captive portal state property.
+  // is_captive_portal should now be true.
+  SetStringProperty(shill::kPortalDetectionFailedStatusProperty,
+                    shill::kPortalDetectionStatusFailure);
+  SignalInitialPropertiesReceived();
+  EXPECT_TRUE(network_state_.is_captive_portal());
 }
 
 }  // namespace chromeos

@@ -10,10 +10,8 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
-#include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permission_message.h"
@@ -22,17 +20,11 @@
 class GURL;
 
 namespace extensions {
-
-class PermissionSet;
 class Extension;
 class URLPatternSet;
-class UserScript;
 
-// A container for the active permissions of an extension.
-// TODO(rdevlin.cronin): For the love of everything good, rename this class to
-// ActivePermissions. We do *not* need PermissionsParser, PermissionSet,
-// PermissionInfo, and PermissionsData. No one will be able to keep them
-// straight.
+// A container for the permissions state of an extension, including active,
+// withheld, and tab-specific permissions.
 class PermissionsData {
  public:
   // The possible types of access for a given frame.
@@ -42,6 +34,8 @@ class PermissionsData {
     ACCESS_WITHHELD  // The browser must determine if the extension can access
                      // the given page.
   };
+
+  using TabPermissionsMap = std::map<int, scoped_refptr<const PermissionSet>>;
 
   // Delegate class to allow different contexts (e.g. browser vs renderer) to
   // have control over policy decisions.
@@ -67,6 +61,14 @@ class PermissionsData {
   // Returns true if the extension is a COMPONENT extension or is on the
   // whitelist of extensions that can script all pages.
   static bool CanExecuteScriptEverywhere(const Extension* extension);
+
+  // Returns true if the --scripts-require-action flag would possibly affect
+  // the given |extension| and |permissions|. We pass in the |permissions|
+  // explicitly, as we may need to check with permissions other than the ones
+  // that are currently on the extension's PermissionsData.
+  static bool ScriptsMayRequireActionForExtension(
+      const Extension* extension,
+      const PermissionSet* permissions);
 
   // Returns true if we should skip the permisisons warning for the extension
   // with the given |extension_id|.
@@ -107,14 +109,16 @@ class PermissionsData {
       APIPermission::ID permission,
       const APIPermission::CheckParam* param) const;
 
-  // TODO(rdevlin.cronin): GetEffectiveHostPermissions(), HasHostPermission(),
-  // and HasEffectiveAccessToAllHosts() are just forwards for the active
+  // Returns the hosts this extension effectively has access to, including
+  // explicit and scriptable hosts, and any hosts on tabs the extension has
+  // active tab permissions for.
+  URLPatternSet GetEffectiveHostPermissions() const;
+
+  // TODO(rdevlin.cronin): HasHostPermission() and
+  // HasEffectiveAccessToAllHosts() are just forwards for the active
   // permissions. We should either get rid of these, and have callers use
   // active_permissions(), or should get rid of active_permissions(), and make
   // callers use PermissionsData for everything. We should not do both.
-
-  // Returns the effective hosts associated with the active permissions.
-  const URLPatternSet& GetEffectiveHostPermissions() const;
 
   // Whether the extension has access to the given |url|.
   bool HasHostPermission(const GURL& url) const;
@@ -193,14 +197,21 @@ class PermissionsData {
   bool CanCaptureVisiblePage(int tab_id, std::string* error) const;
 
   const scoped_refptr<const PermissionSet>& active_permissions() const {
-    // TODO(dcheng): What is the point of this lock?
+    // We lock so that we can't also be setting the permissions while returning.
     base::AutoLock auto_lock(runtime_lock_);
     return active_permissions_unsafe_;
   }
 
   const scoped_refptr<const PermissionSet>& withheld_permissions() const {
-    // TODO(dcheng): What is the point of this lock?
+    // We lock so that we can't also be setting the permissions while returning.
+    base::AutoLock auto_lock(runtime_lock_);
     return withheld_permissions_unsafe_;
+  }
+
+  const TabPermissionsMap& tab_specific_permissions() const {
+    // We lock so that we can't also be setting the permissions while returning.
+    base::AutoLock auto_lock(runtime_lock_);
+    return tab_specific_permissions_;
   }
 
 #if defined(UNIT_TEST)
@@ -211,8 +222,6 @@ class PermissionsData {
 #endif
 
  private:
-  typedef std::map<int, scoped_refptr<const PermissionSet> > TabPermissionsMap;
-
   // Gets the tab-specific host permissions of |tab_id|, or NULL if there
   // aren't any.
   scoped_refptr<const PermissionSet> GetTabSpecificPermissions(

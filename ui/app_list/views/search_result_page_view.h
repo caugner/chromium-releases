@@ -26,17 +26,24 @@ class APP_LIST_EXPORT SearchResultPageView : public views::View {
   ~SearchResultPageView() override;
 
   int selected_index() { return selected_index_; }
+  void SetSelection(bool select);  // Set or unset result selection.
 
   void AddSearchResultContainerView(
       AppListModel::SearchResults* result_model,
       SearchResultContainerView* result_container);
+
+  const std::vector<SearchResultContainerView*>& result_container_views() {
+    return result_container_views_;
+  }
 
   // Overridden from views::View:
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   void ChildPreferredSizeChanged(views::View* child) override;
 
  private:
-  void SetSelectedIndex(int index);
+  // |directional_movement| is true if the navigation was caused by directional
+  // controls (eg, arrow keys), as opposed to linear controls (eg, Tab).
+  void SetSelectedIndex(int index, bool directional_movement);
   bool IsValidSelectionIndex(int index);
 
   // The SearchResultContainerViews that compose the search page. All owned by

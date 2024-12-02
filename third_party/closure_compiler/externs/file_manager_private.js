@@ -6,14 +6,6 @@
 
 /**
  * @typedef {{
- *   scale1xUrl: string,
- *   scale2xUrl: string
- * }}
- */
-var ImageSet;
-
-/**
- * @typedef {{
  *   taskId: string,
  *   title: string,
  *   iconUrl: string,
@@ -24,19 +16,19 @@ var FileTask;
 
 /**
  * @typedef {{
- *   fileSize: (number|undefined),
- *   lastModifiedTime: (number|undefined),
+ *   size: (number|undefined),
+ *   modificationTime: (number|undefined),
  *   thumbnailUrl: (string|undefined),
  *   externalFileUrl: (string|undefined),
  *   imageWidth: (number|undefined),
  *   imageHeight: (number|undefined),
  *   imageRotation: (number|undefined),
- *   isPinned: (boolean|undefined),
- *   isPresent: (boolean|undefined),
- *   isHosted: (boolean|undefined),
- *   isDirty: (boolean|undefined),
- *   isAvailableOffline: (boolean|undefined),
- *   isAvailableWhenMetered: (boolean|undefined),
+ *   pinned: (boolean|undefined),
+ *   present: (boolean|undefined),
+ *   hosted: (boolean|undefined),
+ *   dirty: (boolean|undefined),
+ *   availableOffline: (boolean|undefined),
+ *   availableWhenMetered: (boolean|undefined),
  *   customIconUrl: (string|undefined),
  *   contentMimeType: (string|undefined),
  *   sharedWithMe: (boolean|undefined),
@@ -76,7 +68,8 @@ var ProfileInfo;
  *   isParentDevice: (boolean|undefined),
  *   isReadOnly: boolean,
  *   hasMedia: boolean,
- *   mountCondition: (string|undefined)
+ *   mountCondition: (string|undefined),
+ *   mountContext: (string|undefined)
  * }}
  */
 var VolumeMetadata;
@@ -319,11 +312,12 @@ chrome.fileManagerPrivate.selectFile = function(selectedPath, index, forOpening,
 /**
  * Requests additional properties for files. |fileUrls| list of URLs of files
  * |callback|
- * @param {Array} fileUrls
- * @param {Function} callback |entryProperties| A dictionary containing
+ * @param {!Array<string>} fileUrls
+ * @param {!Array<string>} names
+ * @param {!Function} callback |entryProperties| A dictionary containing
  * properties of the requested entries.
  */
-chrome.fileManagerPrivate.getEntryProperties = function(fileUrls, callback) {};
+chrome.fileManagerPrivate.getEntryProperties = function(fileUrls, names, callback) {};
 
 /**
  * Pins/unpins a Drive file in the cache. |fileUrl| URL of a file to pin/unpin.
@@ -442,6 +436,15 @@ chrome.fileManagerPrivate.searchDrive = function(searchParams, callback) {};
 chrome.fileManagerPrivate.searchDriveMetadata = function(searchParams, callback) {};
 
 /**
+ * Search for files in the given volume, whose content hash matches the list of
+ * given hashes.
+ * @param {string} volumeId
+ * @param {!Array<string>} hashes
+ * @param {function(!Object<string, !Array<string>>)} callback
+ */
+chrome.fileManagerPrivate.searchFilesByHashes = function(volumeId, hashes, callback) {};
+
+/**
  * Create a zip file for the selected files. |dirURL| URL of the directory
  * containing the selected files. |selectionUrls| URLs of the selected files.
  * The files must be under the     directory specified by dirURL. |destName|
@@ -537,18 +540,32 @@ chrome.fileManagerPrivate.installWebstoreItem = function(itemId, silentInstallat
 chrome.fileManagerPrivate.getProfiles = function(callback) {};
 
 /**
- * Moves the window to other user's desktop.
- * @param {string} profileId
- * @param {Function=} callback Callback that does not take arguments.
- */
-chrome.fileManagerPrivate.visitDesktop = function(profileId, callback) {};
-
-/**
  * Opens inspector window. |type| InspectionType which specifies how to open
  * inspector.
  * @param {string} type
  */
 chrome.fileManagerPrivate.openInspector = function(type) {};
+
+/**
+ * Computes an MD5 checksum for the given file.
+ * @param {string} fileUrl
+ * @param {function(string)} callback
+ */
+chrome.fileManagerPrivate.computeChecksum = function(fileUrl, callback) {};
+
+/**
+ * Gets the MIME type of a file.
+ * @param {string} fileUrl File url.
+ * @param {function(string)} callback Callback that MIME type of the file is
+ *     passed.
+ */
+chrome.fileManagerPrivate.getMimeType = function(fileUrl, callback) {};
+
+/**
+ * Gets a flag indicating whether user metrics reporting is enabled.
+ * @param {function(boolean)} callback
+ */
+chrome.fileManagerPrivate.isUMAEnabled = function(callback) {};
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onMountCompleted;

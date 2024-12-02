@@ -21,10 +21,12 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/local_auth.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
@@ -56,9 +58,8 @@ const char kKeyDisplayName[]= "displayName";
 const char kKeyEmailAddress[] = "emailAddress";
 const char kKeyProfilePath[] = "profilePath";
 const char kKeyPublicAccount[] = "publicAccount";
-const char kKeySupervisedUser[] = "supervisedUser";
+const char kKeyLegacySupervisedUser[] = "legacySupervisedUser";
 const char kKeyChildUser[] = "childUser";
-const char kKeySignedIn[] = "signedIn";
 const char kKeyCanRemove[] = "canRemove";
 const char kKeyIsOwner[] = "isOwner";
 const char kKeyIsDesktop[] = "isDesktopUser";
@@ -146,6 +147,68 @@ bool IsAddPersonEnabled() {
   PrefService* service = g_browser_process->local_state();
   DCHECK(service);
   return service->GetBoolean(prefs::kBrowserAddPersonEnabled);
+}
+
+// Executes the action specified by the URL's Hash parameter, if any. Deletes
+// itself after the action would be performed.
+class UrlHashHelper : public chrome::BrowserListObserver {
+ public:
+  UrlHashHelper(Browser* browser, const std::string& hash);
+  ~UrlHashHelper() override;
+
+  void ExecuteUrlHash();
+
+  // chrome::BrowserListObserver overrides:
+  void OnBrowserRemoved(Browser* browser) override;
+
+ private:
+  Browser* browser_;
+  Profile* profile_;
+  chrome::HostDesktopType desktop_type_;
+  std::string hash_;
+
+  DISALLOW_COPY_AND_ASSIGN(UrlHashHelper);
+};
+
+UrlHashHelper::UrlHashHelper(Browser* browser, const std::string& hash)
+    : browser_(browser),
+      profile_(browser->profile()),
+      desktop_type_(browser->host_desktop_type()),
+      hash_(hash) {
+  BrowserList::AddObserver(this);
+}
+
+UrlHashHelper::~UrlHashHelper() {
+  BrowserList::RemoveObserver(this);
+}
+
+void UrlHashHelper::OnBrowserRemoved(Browser* browser) {
+  if (browser == browser_)
+    browser_ = nullptr;
+}
+
+void UrlHashHelper::ExecuteUrlHash() {
+  if (hash_ == profiles::kUserManagerSelectProfileAppLauncher) {
+    AppListService* app_list_service = AppListService::Get(desktop_type_);
+    app_list_service->ShowForProfile(profile_);
+    return;
+  }
+
+  Browser* target_browser = browser_;
+  if (!target_browser) {
+    target_browser = chrome::FindLastActiveWithProfile(profile_, desktop_type_);
+    if (!target_browser)
+      return;
+  }
+
+  if (hash_ == profiles::kUserManagerSelectProfileTaskManager)
+    chrome::OpenTaskManager(target_browser);
+  else if (hash_ == profiles::kUserManagerSelectProfileAboutChrome)
+    chrome::ShowAboutChrome(target_browser);
+  else if (hash_ == profiles::kUserManagerSelectProfileChromeSettings)
+    chrome::ShowSettings(target_browser);
+  else if (hash_ == profiles::kUserManagerSelectProfileChromeMemory)
+    chrome::ShowMemory(target_browser);
 }
 
 }  // namespace
@@ -278,6 +341,11 @@ ScreenlockBridge::LockHandler::AuthType UserManagerScreenHandler::GetAuthType(
   return it->second;
 }
 
+ScreenlockBridge::LockHandler::ScreenType
+UserManagerScreenHandler::GetScreenType() const {
+  return ScreenlockBridge::LockHandler::LOCK_SCREEN;
+}
+
 void UserManagerScreenHandler::Unlock(const std::string& user_email) {
   const ProfileInfoCache& info_cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -384,12 +452,6 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
   if (!base::GetValueAsFilePath(*profile_path_value, &profile_path))
     return;
 
-  // This handler could have been called for a supervised user, for example
-  // because the user fiddled with the web inspector. Silently return in this
-  // case.
-  if (Profile::FromWebUI(web_ui())->IsSupervised())
-    return;
-
   if (!profiles::IsMultipleProfilesEnabled())
     return;
 
@@ -402,7 +464,6 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 
 void UserManagerScreenHandler::HandleLaunchGuest(const base::ListValue* args) {
   if (IsGuestModeEnabled()) {
-    ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::SWITCH_PROFILE_GUEST);
     profiles::SwitchToGuestProfile(
         desktop_type_,
         base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
@@ -585,9 +646,9 @@ void UserManagerScreenHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON));
   localized_strings->SetString("removeUserWarningText",
       l10n_util::GetStringUTF16(IDS_LOGIN_POD_USER_REMOVE_WARNING));
-  localized_strings->SetString("removeSupervisedUserWarningText",
+  localized_strings->SetString("removeLegacySupervisedUserWarningText",
       l10n_util::GetStringFUTF16(
-          IDS_LOGIN_POD_SUPERVISED_USER_REMOVE_WARNING,
+          IDS_LOGIN_POD_LEGACY_SUPERVISED_USER_REMOVE_WARNING,
           base::UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL)));
 
   // Strings needed for the User Manager tutorial slides.
@@ -647,8 +708,6 @@ void UserManagerScreenHandler::GetLocalizedValues(
 
 void UserManagerScreenHandler::SendUserList() {
   base::ListValue users_list;
-  base::FilePath active_profile_path =
-      web_ui()->GetWebContents()->GetBrowserContext()->GetPath();
   const ProfileInfoCache& info_cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   user_auth_type_map_.clear();
@@ -661,26 +720,22 @@ void UserManagerScreenHandler::SendUserList() {
 
   for (size_t i = 0; i < info_cache.GetNumberOfProfiles(); ++i) {
     base::DictionaryValue* profile_value = new base::DictionaryValue();
-
     base::FilePath profile_path = info_cache.GetPathOfProfileAtIndex(i);
-    bool is_active_user = (profile_path == active_profile_path);
 
     profile_value->SetString(
         kKeyUsername, info_cache.GetUserNameOfProfileAtIndex(i));
     profile_value->SetString(
         kKeyEmailAddress, info_cache.GetUserNameOfProfileAtIndex(i));
-    // The profiles displayed in the User Manager are never guest profiles.
     profile_value->SetString(
         kKeyDisplayName,
         profiles::GetAvatarNameForProfile(profile_path));
     profile_value->Set(
         kKeyProfilePath, base::CreateFilePathValue(profile_path));
     profile_value->SetBoolean(kKeyPublicAccount, false);
-    profile_value->SetBoolean(
-        kKeySupervisedUser, info_cache.ProfileIsSupervisedAtIndex(i));
+    profile_value->SetBoolean(kKeyLegacySupervisedUser,
+                              info_cache.ProfileIsLegacySupervisedAtIndex(i));
     profile_value->SetBoolean(
         kKeyChildUser, info_cache.ProfileIsChildAtIndex(i));
-    profile_value->SetBoolean(kKeySignedIn, is_active_user);
     profile_value->SetBoolean(
         kKeyNeedsSignin, info_cache.ProfileIsSigninRequiredAtIndex(i));
     profile_value->SetBoolean(kKeyIsOwner, false);
@@ -689,11 +744,7 @@ void UserManagerScreenHandler::SendUserList() {
     profile_value->SetString(
         kKeyAvatarUrl, GetAvatarImageAtIndex(i, info_cache));
 
-    // The row of user pods should display the active user first.
-    if (is_active_user)
-      users_list.Insert(0, profile_value);
-    else
-      users_list.Append(profile_value);
+    users_list.Append(profile_value);
   }
 
   web_ui()->CallJavascriptFunction("login.AccountPickerScreen.loadUsers",
@@ -745,18 +796,11 @@ void UserManagerScreenHandler::OnBrowserWindowReady(Browser* browser) {
     info_cache.SetProfileSigninRequiredAtIndex(index, false);
   }
 
-  if (url_hash_ == profiles::kUserManagerSelectProfileTaskManager) {
+  if (!url_hash_.empty()) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&chrome::OpenTaskManager, browser));
-  } else if (url_hash_ == profiles::kUserManagerSelectProfileAboutChrome) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&chrome::ShowAboutChrome, browser));
-  } else if (url_hash_ == profiles::kUserManagerSelectProfileChromeSettings) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&chrome::ShowSettings, browser));
-  } else if (url_hash_ == profiles::kUserManagerSelectProfileChromeMemory) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&chrome::ShowMemory, browser));
+        FROM_HERE,
+        base::Bind(&UrlHashHelper::ExecuteUrlHash,
+                   base::Owned(new UrlHashHelper(browser, url_hash_))));
   }
 
   // This call is last as it deletes this object.

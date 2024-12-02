@@ -15,7 +15,7 @@
 #include "chrome/renderer/media/cast_rtp_stream.h"
 #include "chrome/renderer/media/cast_session.h"
 #include "chrome/renderer/media/cast_udp_transport.h"
-#include "content/public/renderer/v8_value_converter.h"
+#include "content/public/child/v8_value_converter.h"
 #include "extensions/renderer/script_context.h"
 #include "net/base/host_port_pair.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
@@ -111,6 +111,7 @@ void FromCastRtpPayloadParams(const CastRtpPayloadParams& cast_params,
                               RtpPayloadParams* ext_params) {
   ext_params->payload_type = cast_params.payload_type;
   ext_params->max_latency = cast_params.max_latency_ms;
+  ext_params->min_latency.reset(new int(cast_params.min_latency_ms));
   ext_params->codec_name = cast_params.codec_name;
   ext_params->ssrc = cast_params.ssrc;
   ext_params->feedback_ssrc = cast_params.feedback_ssrc;

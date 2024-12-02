@@ -185,6 +185,11 @@ void FakeFileSystem::SearchMetadata(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
+void FakeFileSystem::SearchByHashes(const std::set<std::string>& hashes,
+                                    const SearchByHashesCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
 void FakeFileSystem::GetAvailableSpace(
     const GetAvailableSpaceCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -230,6 +235,12 @@ void FakeFileSystem::GetPathFromResourceId(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
+void FakeFileSystem::FreeDiskSpaceIfNeededFor(
+    int64 num_bytes,
+    const FreeDiskSpaceCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
 // Implementation of GetFileContent.
 void FakeFileSystem::GetFileContentAfterGetResourceEntry(
     const GetFileContentInitializedCallback& initialized_callback,
@@ -266,7 +277,7 @@ void FakeFileSystem::GetFileContentAfterGetFileResource(
     const GetFileContentInitializedCallback& initialized_callback,
     const google_apis::GetContentCallback& get_content_callback,
     const FileOperationCallback& completion_callback,
-    google_apis::GDataErrorCode gdata_error,
+    google_apis::DriveApiErrorCode gdata_error,
     scoped_ptr<google_apis::FileResource> gdata_entry) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -311,7 +322,7 @@ void FakeFileSystem::GetFileContentAfterGetFileResource(
 
 void FakeFileSystem::GetFileContentAfterDownloadFile(
     const FileOperationCallback& completion_callback,
-    google_apis::GDataErrorCode gdata_error,
+    google_apis::DriveApiErrorCode gdata_error,
     const base::FilePath& temp_file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   completion_callback.Run(GDataToFileError(gdata_error));
@@ -320,7 +331,7 @@ void FakeFileSystem::GetFileContentAfterDownloadFile(
 // Implementation of GetResourceEntry.
 void FakeFileSystem::GetResourceEntryAfterGetAboutResource(
     const GetResourceEntryCallback& callback,
-    google_apis::GDataErrorCode gdata_error,
+    google_apis::DriveApiErrorCode gdata_error,
     scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -361,7 +372,7 @@ void FakeFileSystem::GetResourceEntryAfterGetParentEntryInfo(
 void FakeFileSystem::GetResourceEntryAfterGetFileList(
     const base::FilePath& base_name,
     const GetResourceEntryCallback& callback,
-    google_apis::GDataErrorCode gdata_error,
+    google_apis::DriveApiErrorCode gdata_error,
     scoped_ptr<google_apis::FileList> file_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 

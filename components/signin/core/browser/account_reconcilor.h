@@ -17,6 +17,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
+#include "components/content_settings/core/browser/content_settings_observer.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -34,6 +36,7 @@ class CanonicalCookie;
 }
 
 class AccountReconcilor : public KeyedService,
+                          public content_settings::Observer,
                           public GaiaAuthConsumer,
                           public MergeSessionHelper::Observer,
                           public OAuth2TokenService::Observer,
@@ -83,13 +86,20 @@ class AccountReconcilor : public KeyedService,
     return gaia_accounts_;
   }
 
-  // Virtual so that it can be overridden in tests.
-  virtual void StartFetchingExternalCcResult();
-
   friend class AccountReconcilorTest;
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, SigninManagerRegistration);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, Reauth);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, ProfileAlreadyConnected);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileCookiesDisabled);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettings);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsGaiaUrl);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsNonGaiaUrl);
+  FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest,
+                           StartReconcileContentSettingsInvalidPattern);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, GetAccountsFromCookieSuccess);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, GetAccountsFromCookieFailure);
   FRIEND_TEST_ALL_PREFIXES(AccountReconcilorTest, StartReconcileNoop);
@@ -114,6 +124,10 @@ class AccountReconcilor : public KeyedService,
   void UnregisterWithSigninManager();
   void RegisterWithTokenService();
   void UnregisterWithTokenService();
+  void RegisterWithMergeSessionHelper();
+  void UnregisterWithMergeSessionHelper();
+  void RegisterWithContentSettings();
+  void UnregisterWithContentSettings();
 
   bool IsProfileConnected();
 
@@ -137,6 +151,13 @@ class AccountReconcilor : public KeyedService,
   bool MarkAccountAsAddedToCookie(const std::string& account_id);
 
   void OnCookieChanged(const net::CanonicalCookie& cookie, bool removed);
+
+  // Overriden from content_settings::Observer.
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      std::string resource_identifier) override;
 
   // Overriden from GaiaAuthConsumer.
   void OnListAccountsSuccess(const std::string& data) override;
@@ -171,6 +192,8 @@ class AccountReconcilor : public KeyedService,
   MergeSessionHelper merge_session_helper_;
   scoped_ptr<GaiaAuthFetcher> gaia_fetcher_;
   bool registered_with_token_service_;
+  bool registered_with_merge_session_helper_;
+  bool registered_with_content_settings_;
 
   // True while the reconcilor is busy checking or managing the accounts in
   // this profile.
@@ -194,6 +217,7 @@ class AccountReconcilor : public KeyedService,
   std::string primary_account_;
   std::vector<std::string> chrome_accounts_;
   std::vector<std::string> add_to_cookie_;
+  bool chrome_accounts_changed_;
 
   std::deque<GetAccountsFromCookieCallback> get_gaia_accounts_callbacks_;
 

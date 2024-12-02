@@ -18,8 +18,12 @@
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
+#include "net/proxy/proxy_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -28,7 +32,7 @@ using testing::_;
 using testing::AnyNumber;
 using testing::Return;
 
-const char kDataReductionProxyDev[] = "http://foo-dev.com:80";
+const char kDataReductionProxyDev[] = "foo-dev.com:80";
 
 using data_reduction_proxy::DataReductionProxySettings;
 
@@ -44,9 +48,7 @@ class TestDataReductionProxySettingsAndroid
         settings_(settings) {}
 
   // Returns the provided setting object. Used by wrapping methods.
-  virtual DataReductionProxySettings* Settings() override {
-    return settings_;
-  }
+  DataReductionProxySettings* Settings() override { return settings_; }
 
   // The wrapped settings object.
   DataReductionProxySettings* settings_;
@@ -71,49 +73,19 @@ void data_reduction_proxy::DataReductionProxySettingsTestBase::ResetSettings(
   if (holdback)
     flags |= DataReductionProxyParams::kHoldback;
   MockDataReductionProxySettings<C>* settings =
-      new MockDataReductionProxySettings<C>(flags);
+      new MockDataReductionProxySettings<C>();
+  settings->config_ = test_context_->config();
+  settings->data_reduction_proxy_service_ =
+      test_context_->CreateDataReductionProxyService();
+  test_context_->config()->ResetParamFlagsForTest(flags);
+  settings->UpdateConfigValues();
   EXPECT_CALL(*settings, GetOriginalProfilePrefs())
       .Times(AnyNumber())
-      .WillRepeatedly(Return(&pref_service_));
+      .WillRepeatedly(Return(test_context_->pref_service()));
   EXPECT_CALL(*settings, GetLocalStatePrefs())
       .Times(AnyNumber())
-      .WillRepeatedly(Return(&pref_service_));
-  EXPECT_CALL(*settings, GetURLFetcherForAvailabilityCheck()).Times(0);
-  EXPECT_CALL(*settings, LogProxyState(_, _, _)).Times(0);
+      .WillRepeatedly(Return(test_context_->pref_service()));
   settings_.reset(settings);
-  settings_->SetDataReductionProxyStatisticsPrefs(
-      scoped_ptr<DataReductionProxyStatisticsPrefs>(
-          new DataReductionProxyStatisticsPrefs(
-              &pref_service_,
-              scoped_refptr<base::TestSimpleTaskRunner>(
-                  new base::TestSimpleTaskRunner()),
-              base::TimeDelta())));
-}
-
-template <class C>
-void data_reduction_proxy::DataReductionProxySettingsTestBase::SetProbeResult(
-    const std::string& test_url,
-    const std::string& response,
-    ProbeURLFetchResult result,
-    bool success,
-    int expected_calls)  {
-  MockDataReductionProxySettings<C>* settings =
-      static_cast<MockDataReductionProxySettings<C>*>(settings_.get());
-  if (0 == expected_calls) {
-    EXPECT_CALL(*settings, GetURLFetcherForAvailabilityCheck()).Times(0);
-    EXPECT_CALL(*settings, RecordProbeURLFetchResult(_)).Times(0);
-  } else {
-    EXPECT_CALL(*settings, RecordProbeURLFetchResult(result)).Times(1);
-    EXPECT_CALL(*settings, GetURLFetcherForAvailabilityCheck())
-        .Times(expected_calls)
-        .WillRepeatedly(Return(new net::FakeURLFetcher(
-            GURL(test_url),
-            settings,
-            response,
-            success ? net::HTTP_OK : net::HTTP_INTERNAL_SERVER_ERROR,
-            success ? net::URLRequestStatus::SUCCESS :
-                      net::URLRequestStatus::FAILED)));
-  }
 }
 
 template void
@@ -124,20 +96,12 @@ data_reduction_proxy::DataReductionProxySettingsTestBase::ResetSettings<
                                        bool promo_allowed,
                                        bool holdback);
 
-template void
-data_reduction_proxy::DataReductionProxySettingsTestBase::SetProbeResult<
-    DataReductionProxyChromeSettings>(const std::string& test_url,
-                                       const std::string& response,
-                                       ProbeURLFetchResult result,
-                                       bool success,
-                                       int expected_calls);
-
 class DataReductionProxySettingsAndroidTest
     : public data_reduction_proxy::ConcreteDataReductionProxySettingsTest<
           DataReductionProxyChromeSettings> {
  public:
   // DataReductionProxySettingsTest implementation:
-  virtual void SetUp() override {
+  void SetUp() override {
     env_ = base::android::AttachCurrentThread();
     DataReductionProxySettingsAndroid::Register(env_);
     DataReductionProxySettingsTestBase::SetUp();
@@ -167,8 +131,8 @@ TEST_F(DataReductionProxySettingsAndroidTest, TestGetDataReductionProxyOrigin) {
       SettingsAndroid()->GetDataReductionProxyOrigin(env_, NULL);
   ASSERT_TRUE(result.obj());
   const base::android::JavaRef<jstring>& str_ref = result;
-  EXPECT_EQ(GURL(expected_params_->DefaultOrigin()),
-            GURL(ConvertJavaStringToUTF8(str_ref)));
+  EXPECT_EQ(test_context_->config()->test_params()->DefaultOrigin(),
+            ConvertJavaStringToUTF8(str_ref));
 }
 
 TEST_F(DataReductionProxySettingsAndroidTest,
@@ -182,8 +146,8 @@ TEST_F(DataReductionProxySettingsAndroidTest,
       SettingsAndroid()->GetDataReductionProxyOrigin(env_, NULL);
   ASSERT_TRUE(result.obj());
   const base::android::JavaRef<jstring>& str_ref = result;
-  EXPECT_EQ(GURL(kDataReductionProxyDev),
-            GURL(ConvertJavaStringToUTF8(str_ref)));
+  EXPECT_EQ(kDataReductionProxyDev,
+            ConvertJavaStringToUTF8(str_ref));
 }
 
 TEST_F(DataReductionProxySettingsAndroidTest, TestGetDailyContentLengths) {

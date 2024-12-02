@@ -624,17 +624,17 @@ void FormStructure::ParseQueryResponse(
 }
 
 // static
-void FormStructure::GetFieldTypePredictions(
-    const std::vector<FormStructure*>& form_structures,
-    std::vector<FormDataPredictions>* forms) {
-  forms->clear();
-  forms->reserve(form_structures.size());
+std::vector<FormDataPredictions> FormStructure::GetFieldTypePredictions(
+    const std::vector<FormStructure*>& form_structures) {
+  std::vector<FormDataPredictions> forms;
+  forms.reserve(form_structures.size());
   for (size_t i = 0; i < form_structures.size(); ++i) {
     FormStructure* form_structure = form_structures[i];
     FormDataPredictions form;
     form.data.name = form_structure->form_name_;
     form.data.origin = form_structure->source_url_;
     form.data.action = form_structure->target_url_;
+    form.data.is_form_tag = form_structure->is_form_tag_;
     form.signature = form_structure->FormSignature();
 
     for (std::vector<AutofillField*>::const_iterator field =
@@ -652,8 +652,9 @@ void FormStructure::GetFieldTypePredictions(
       form.fields.push_back(annotated_field);
     }
 
-    forms->push_back(form);
+    forms.push_back(form);
   }
+  return forms;
 }
 
 std::string FormStructure::FormSignature() const {
@@ -743,6 +744,8 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
 
       field->set_heuristic_type(cached_field->second->heuristic_type());
       field->set_server_type(cached_field->second->server_type());
+      field->SetHtmlType(cached_field->second->html_type(),
+                         cached_field->second->html_mode());
     }
   }
 
@@ -1206,8 +1209,11 @@ void FormStructure::IdentifySections(bool has_author_specified_sections) {
       if (AutofillType(current_type).group() == PHONE_HOME)
         already_saw_current_type = false;
 
-      // Ignore non-focusable field while inferring boundaries between sections.
-      if (!field->is_focusable)
+      // Ignore non-focusable field and presentation role fields while inferring
+      // boundaries between sections.
+      bool ignored_field = !field->is_focusable ||
+          field->role == FormFieldData::ROLE_ATTRIBUTE_PRESENTATION;
+      if (ignored_field)
         already_saw_current_type = false;
 
       // Some forms have adjacent fields of the same type.  Two common examples:
@@ -1222,20 +1228,23 @@ void FormStructure::IdentifySections(bool has_author_specified_sections) {
       if (current_type == previous_type)
         already_saw_current_type = false;
 
-      previous_type = current_type;
-
       if (current_type != UNKNOWN_TYPE && already_saw_current_type) {
         // We reached the end of a section, so start a new section.
         seen_types.clear();
         current_section = field->unique_name();
       }
 
-      // Only consider a type "seen" if it was focusable. Some forms have
+      // Only consider a type "seen" if it was not ignored. Some forms have
       // sections for different locales, only one of which is enabled at a
       // time. Each section may duplicate some information (e.g. postal code)
       // and we don't want that to cause section splits.
-      if (field->is_focusable)
+      // Also only set |previous_type| when the field was not ignored. This
+      // prevents ignored fields from breaking up fields that are otherwise
+      // adjacent.
+      if (!ignored_field) {
         seen_types.insert(current_type);
+        previous_type = current_type;
+      }
 
       field->set_section(base::UTF16ToUTF8(current_section));
     }

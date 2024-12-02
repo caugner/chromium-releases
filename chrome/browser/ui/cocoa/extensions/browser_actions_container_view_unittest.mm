@@ -11,7 +11,20 @@
 namespace {
 
 const CGFloat kContainerHeight = 15.0;
-const CGFloat kMinimumContainerWidth = 10.0;
+const CGFloat kMinimumContainerWidth = 3.0;
+const CGFloat kMaxAllowedWidthForTest = 50.0;
+
+class BrowserActionsContainerTestDelegate
+    : public BrowserActionsContainerViewSizeDelegate {
+ public:
+  BrowserActionsContainerTestDelegate() {}
+  ~BrowserActionsContainerTestDelegate() override {}
+
+  CGFloat GetMaxAllowedWidth() override { return kMaxAllowedWidthForTest; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainerTestDelegate);
+};
 
 class BrowserActionsContainerViewTest : public CocoaTest {
  public:
@@ -33,7 +46,7 @@ TEST_F(BrowserActionsContainerViewTest, BasicTests) {
 
 TEST_F(BrowserActionsContainerViewTest, SetWidthTests) {
   // Try setting below the minimum width (10 pixels).
-  [view_ resizeToWidth:5.0 animate:NO];
+  [view_ resizeToWidth:kMinimumContainerWidth - 1 animate:NO];
   EXPECT_EQ(kMinimumContainerWidth, NSWidth([view_ frame])) << "Frame width is "
       << "less than the minimum allowed.";
   // Since the frame expands to the left, the x-position delta value will be
@@ -42,7 +55,7 @@ TEST_F(BrowserActionsContainerViewTest, SetWidthTests) {
 
   [view_ resizeToWidth:35.0 animate:NO];
   EXPECT_EQ(35.0, NSWidth([view_ frame]));
-  EXPECT_EQ(-25.0, [view_ resizeDeltaX]);
+  EXPECT_EQ(kMinimumContainerWidth - 35.0, [view_ resizeDeltaX]);
 
   [view_ resizeToWidth:20.0 animate:NO];
   EXPECT_EQ(20.0, NSWidth([view_ frame]));
@@ -64,6 +77,12 @@ TEST_F(BrowserActionsContainerViewTest, SetWidthTests) {
   [view_ resizeToWidth:35.0 animate:NO];
   EXPECT_EQ(35.0, NSWidth([view_ frame]));
   EXPECT_EQ(35.0, NSWidth([view_ animationEndFrame]));
+
+  BrowserActionsContainerTestDelegate delegate;
+  [view_ setDelegate:&delegate];
+  [view_ resizeToWidth:kMaxAllowedWidthForTest + 10.0 animate:NO];
+  EXPECT_EQ(kMaxAllowedWidthForTest, NSWidth([view_ frame]));
+  [view_ setDelegate:nil];
 }
 
 }  // namespace

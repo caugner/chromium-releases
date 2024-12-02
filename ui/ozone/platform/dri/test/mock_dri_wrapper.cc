@@ -39,8 +39,8 @@ class MockHardwareDisplayPlaneManager
 
 }  // namespace
 
-MockDriWrapper::MockDriWrapper(int fd)
-    : DriWrapper("", true),
+MockDriWrapper::MockDriWrapper()
+    : DriWrapper(base::FilePath(), base::File()),
       get_crtc_call_count_(0),
       set_crtc_call_count_(0),
       restore_crtc_call_count_(0),
@@ -53,15 +53,13 @@ MockDriWrapper::MockDriWrapper(int fd)
       page_flip_expectation_(true),
       create_dumb_buffer_expectation_(true),
       current_framebuffer_(0) {
-  fd_ = fd;
   plane_manager_.reset(new HardwareDisplayPlaneManagerLegacy());
 }
 
-MockDriWrapper::MockDriWrapper(int fd,
-                               bool use_sync_flips,
+MockDriWrapper::MockDriWrapper(bool use_sync_flips,
                                std::vector<uint32_t> crtcs,
                                size_t planes_per_crtc)
-    : DriWrapper("", use_sync_flips),
+    : DriWrapper(base::FilePath(), base::File()),
       get_crtc_call_count_(0),
       set_crtc_call_count_(0),
       restore_crtc_call_count_(0),
@@ -69,18 +67,18 @@ MockDriWrapper::MockDriWrapper(int fd,
       remove_framebuffer_call_count_(0),
       page_flip_call_count_(0),
       overlay_flip_call_count_(0),
+      overlay_clear_call_count_(0),
       set_crtc_expectation_(true),
       add_framebuffer_expectation_(true),
       page_flip_expectation_(true),
       create_dumb_buffer_expectation_(true),
+      use_sync_flips_(use_sync_flips),
       current_framebuffer_(0) {
-  fd_ = fd;
   plane_manager_.reset(
       new MockHardwareDisplayPlaneManager(this, crtcs, planes_per_crtc));
 }
 
 MockDriWrapper::~MockDriWrapper() {
-  fd_ = -1;
 }
 
 ScopedDrmCrtcPtr MockDriWrapper::GetCrtc(uint32_t crtc_id) {
@@ -135,6 +133,7 @@ ScopedDrmFramebufferPtr MockDriWrapper::GetFramebuffer(uint32_t framebuffer) {
 
 bool MockDriWrapper::PageFlip(uint32_t crtc_id,
                               uint32_t framebuffer,
+                              bool is_sync,
                               const PageFlipCallback& callback) {
   page_flip_call_count_++;
   current_framebuffer_ = framebuffer;
@@ -153,6 +152,8 @@ bool MockDriWrapper::PageFlipOverlay(uint32_t crtc_id,
                                      const gfx::Rect& location,
                                      const gfx::Rect& source,
                                      int overlay_plane) {
+  if (!framebuffer)
+    overlay_clear_call_count_++;
   overlay_flip_call_count_++;
   return true;
 }

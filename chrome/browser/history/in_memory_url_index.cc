@@ -4,21 +4,14 @@
 
 #include "chrome/browser/history/in_memory_url_index.h"
 
-#include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_notifications.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/url_index_private_data.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "components/history/core/browser/url_database.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
 
 using in_memory_url_index::InMemoryURLIndexCacheItem;
 
@@ -86,14 +79,10 @@ InMemoryURLIndex::RebuildPrivateDataFromHistoryDBTask::
 
 // InMemoryURLIndex ------------------------------------------------------------
 
-InMemoryURLIndex::InMemoryURLIndex(Profile* profile,
-                                   HistoryService* history_service,
+InMemoryURLIndex::InMemoryURLIndex(HistoryService* history_service,
                                    const base::FilePath& history_dir,
-                                   const std::string& languages,
-                                   HistoryClient* history_client)
-    : profile_(profile),
-      history_service_(history_service),
-      history_client_(history_client),
+                                   const std::string& languages)
+    : history_service_(history_service),
       history_dir_(history_dir),
       languages_(languages),
       private_data_(new URLIndexPrivateData),
@@ -101,37 +90,19 @@ InMemoryURLIndex::InMemoryURLIndex(Profile* profile,
       save_cache_observer_(NULL),
       shutdown_(false),
       restored_(false),
-      needs_to_be_cached_(false),
-      history_service_observer_(this) {
+      needs_to_be_cached_(false) {
   InitializeSchemeWhitelist(&scheme_whitelist_);
-  if (profile) {
-    // TODO(mrossetti): Register for language change notifications.
-    content::Source<Profile> source(profile);
-    registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED, source);
-  }
+  // TODO(mrossetti): Register for language change notifications.
   if (history_service_)
-    history_service_observer_.Add(history_service_);
-}
-
-// Called only by unit tests.
-InMemoryURLIndex::InMemoryURLIndex()
-    : profile_(NULL),
-      history_service_(nullptr),
-      history_client_(NULL),
-      private_data_(new URLIndexPrivateData),
-      restore_cache_observer_(NULL),
-      save_cache_observer_(NULL),
-      shutdown_(false),
-      restored_(false),
-      needs_to_be_cached_(false),
-      history_service_observer_(this) {
-  InitializeSchemeWhitelist(&scheme_whitelist_);
+    history_service_->AddObserver(this);
 }
 
 InMemoryURLIndex::~InMemoryURLIndex() {
   // If there was a history directory (which there won't be for some unit tests)
   // then insure that the cache has already been saved.
   DCHECK(history_dir_.empty() || !needs_to_be_cached_);
+  DCHECK(!history_service_);
+  DCHECK(shutdown_);
 }
 
 void InMemoryURLIndex::Init() {
@@ -139,8 +110,10 @@ void InMemoryURLIndex::Init() {
 }
 
 void InMemoryURLIndex::ShutDown() {
-  history_service_observer_.RemoveAll();
-  registrar_.RemoveAll();
+  if (history_service_) {
+    history_service_->RemoveObserver(this);
+    history_service_ = nullptr;
+  }
   cache_reader_tracker_.TryCancelAll();
   shutdown_ = true;
   base::FilePath path;
@@ -167,34 +140,16 @@ bool InMemoryURLIndex::GetCacheFilePath(base::FilePath* file_path) {
 ScoredHistoryMatches InMemoryURLIndex::HistoryItemsForTerms(
     const base::string16& term_string,
     size_t cursor_position,
-    size_t max_matches) {
-  return private_data_->HistoryItemsForTerms(
-      term_string,
-      cursor_position,
-      max_matches,
-      languages_,
-      history_client_);
+    size_t max_matches,
+    const ScoredHistoryMatch::Builder& builder) {
+  return private_data_->HistoryItemsForTerms(term_string, cursor_position,
+                                             max_matches, languages_, builder);
 }
 
 // Updating --------------------------------------------------------------------
 
 void InMemoryURLIndex::DeleteURL(const GURL& url) {
   private_data_->DeleteURL(url);
-}
-
-void InMemoryURLIndex::Observe(int notification_type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  switch (notification_type) {
-    case chrome::NOTIFICATION_HISTORY_URLS_DELETED:
-      OnURLsDeleted(
-          content::Details<history::URLsDeletedDetails>(details).ptr());
-      break;
-    default:
-      // For simplicity, the unit tests send us all notifications, even when
-      // we haven't registered for them, so don't assert here.
-      break;
-  }
 }
 
 void InMemoryURLIndex::OnURLVisited(HistoryService* history_service,
@@ -222,18 +177,17 @@ void InMemoryURLIndex::OnURLsModified(HistoryService* history_service,
   }
 }
 
-void InMemoryURLIndex::OnHistoryServiceLoaded(HistoryService* history_service) {
-  ScheduleRebuildFromHistory();
-}
-
-void InMemoryURLIndex::OnURLsDeleted(const URLsDeletedDetails* details) {
-  if (details->all_history) {
+void InMemoryURLIndex::OnURLsDeleted(HistoryService* history_service,
+                                     bool all_history,
+                                     bool expired,
+                                     const URLRows& deleted_rows,
+                                     const std::set<GURL>& favicon_urls) {
+  if (all_history) {
     ClearPrivateData();
     needs_to_be_cached_ = true;
   } else {
-    for (URLRows::const_iterator row = details->rows.begin();
-         row != details->rows.end(); ++row)
-      needs_to_be_cached_ |= private_data_->DeleteURL(row->url());
+    for (const auto& row : deleted_rows)
+      needs_to_be_cached_ |= private_data_->DeleteURL(row.url());
   }
   // If we made changes, destroy the previous cache.  Otherwise, if we go
   // through an unclean shutdown (and therefore fail to write a new cache file),
@@ -254,6 +208,10 @@ void InMemoryURLIndex::OnURLsDeleted(const URLsDeletedDetails* details) {
     content::BrowserThread::PostBlockingPoolTask(
         FROM_HERE, base::Bind(DeleteCacheFile, path));
   }
+}
+
+void InMemoryURLIndex::OnHistoryServiceLoaded(HistoryService* history_service) {
+  ScheduleRebuildFromHistory();
 }
 
 // Restoring from Cache --------------------------------------------------------
@@ -285,7 +243,7 @@ void InMemoryURLIndex::OnCacheLoadDone(
     restored_ = true;
     if (restore_cache_observer_)
       restore_cache_observer_->OnCacheRestoreFinished(true);
-  } else if (profile_) {
+  } else if (history_service_) {
     // When unable to restore from the cache file delete the cache file, if
     // it exists, and then rebuild from the history database if it's available,
     // otherwise wait until the history database loaded and then rebuild.
@@ -294,15 +252,8 @@ void InMemoryURLIndex::OnCacheLoadDone(
       return;
     content::BrowserThread::PostBlockingPoolTask(
         FROM_HERE, base::Bind(DeleteCacheFile, path));
-    HistoryService* service =
-        HistoryServiceFactory::GetForProfileWithoutCreating(profile_);
-    if (service) {
-      if (!service->backend_loaded()) {
-        if (!history_service_observer_.IsObserving(service))
-          history_service_observer_.Add(service);
-      } else {
-        ScheduleRebuildFromHistory();
-      }
+    if (history_service_->backend_loaded()) {
+      ScheduleRebuildFromHistory();
     }
   }
 }
@@ -310,10 +261,8 @@ void InMemoryURLIndex::OnCacheLoadDone(
 // Restoring from the History DB -----------------------------------------------
 
 void InMemoryURLIndex::ScheduleRebuildFromHistory() {
-  HistoryService* service =
-      HistoryServiceFactory::GetForProfile(profile_,
-                                           Profile::EXPLICIT_ACCESS);
-  service->ScheduleDBTask(
+  DCHECK(history_service_);
+  history_service_->ScheduleDBTask(
       scoped_ptr<history::HistoryDBTask>(
           new InMemoryURLIndex::RebuildPrivateDataFromHistoryDBTask(
               this, languages_, scheme_whitelist_)),

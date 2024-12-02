@@ -18,6 +18,7 @@ class WebContents;
 }
 
 namespace password_manager {
+enum class CredentialType : unsigned int;
 struct CredentialInfo;
 class PasswordFormManager;
 }
@@ -50,7 +51,12 @@ class ManagePasswordsUIController
   bool OnChooseCredentials(
       ScopedVector<autofill::PasswordForm> local_credentials,
       ScopedVector<autofill::PasswordForm> federated_credentials,
+      const GURL& origin,
       base::Callback<void(const password_manager::CredentialInfo&)> callback);
+
+  // Called when user is auto signed in to the site. |local_forms[0]| contains
+  // the credential returned to the site.
+  void OnAutoSignin(ScopedVector<autofill::PasswordForm> local_forms);
 
   // Called when the password will be saved automatically, but we still wish to
   // visually inform the user that the save has occured.
@@ -80,8 +86,9 @@ class ManagePasswordsUIController
 
   // Called from the model when the user chooses a credential.
   // The controller MUST be in a pending credentials state.
-  virtual void ChooseCredential(bool was_chosen,
-                                const autofill::PasswordForm& form);
+  virtual void ChooseCredential(
+      const autofill::PasswordForm& form,
+      password_manager::CredentialType credential_type);
 
   // Called from the model when the user chooses to never save passwords; passes
   // the action off to the FormManager. The controller MUST be in a pending
@@ -105,10 +112,17 @@ class ManagePasswordsUIController
   // Called from the model when the bubble is displayed.
   void OnBubbleShown();
 
+  // Called from the model when the bubble is hidden.
+  void OnBubbleHidden();
+
   password_manager::ui::State state() const { return state_; }
 
-  ScopedVector<autofill::PasswordForm>& new_password_forms() {
-    return new_password_forms_;
+  ScopedVector<autofill::PasswordForm>& federated_credentials_forms() {
+    return federated_credentials_forms_;
+  }
+
+  ScopedVector<autofill::PasswordForm>& local_credentials_forms() {
+    return local_credentials_forms_;
   }
 
   // True if a password is sitting around, waiting for a user to decide whether
@@ -120,6 +134,8 @@ class ManagePasswordsUIController
   }
 
   const GURL& origin() const { return origin_; }
+
+  bool IsAutomaticallyOpeningBubble() const { return should_pop_up_bubble_; }
 
  protected:
   explicit ManagePasswordsUIController(
@@ -148,12 +164,6 @@ class ManagePasswordsUIController
   // Sets |state_|. Protected so we can manipulate the value in tests.
   void SetState(password_manager::ui::State state);
 
-  // We create copies of PasswordForm objects that come in with unclear lifetime
-  // and store them in this vector as well as in |password_form_map_| to ensure
-  // that we destroy them correctly. If |new_password_forms_| gets cleared then
-  // |password_form_map_| is to be cleared too.
-  ScopedVector<autofill::PasswordForm> new_password_forms_;
-
   // All previously stored credentials for a specific site.
   // Protected, not private, so we can mess with the value in
   // ManagePasswordsUIControllerMock.
@@ -162,12 +172,19 @@ class ManagePasswordsUIController
  private:
   friend class content::WebContentsUserData<ManagePasswordsUIController>;
 
-  // Shows the password bubble without user interaction. The controller MUST
-  // be in PENDING_PASSWORD_AND_BUBBLE_STATE.
+  // Shows the password bubble without user interaction.
   void ShowBubbleWithoutUserInteraction();
 
   // content::WebContentsObserver:
   void WebContentsDestroyed() override;
+
+  // Saves the parameters and clean the previous forms.
+  void SaveForms(ScopedVector<autofill::PasswordForm> local_forms,
+                 ScopedVector<autofill::PasswordForm> federated_forms);
+
+  // Shows infobar which allows user to choose credentials. Placing this
+  // code to separate method allows mocking.
+  virtual void UpdateAndroidAccountChooserInfoBarVisibility();
 
   // The current state of the password manager UI.
   password_manager::ui::State state_;
@@ -183,13 +200,27 @@ class ManagePasswordsUIController
   // associated login information in Chrome's password store.
   scoped_ptr<password_manager::PasswordFormManager> form_manager_;
 
+  // We create copies of PasswordForm objects that come in with unclear lifetime
+  // and store them in this vector as well as in |password_form_map_| to ensure
+  // that we destroy them correctly. If |new_password_forms_| gets cleared then
+  // |password_form_map_| is to be cleared too.
+  ScopedVector<autofill::PasswordForm> new_password_forms_;
+
+  // Federated credentials. Stores federated credentials which will be shown
+  // when Credential Management API was used.
+  ScopedVector<autofill::PasswordForm> federated_credentials_forms_;
+
+  // Local credentials. Stores local credentials which will be shown
+  // when Credential Management API was used.
+  ScopedVector<autofill::PasswordForm> local_credentials_forms_;
+
   // A callback to be invoked when user selects a credential.
   base::Callback<void(const password_manager::CredentialInfo&)>
       credentials_callback_;
 
-  // Contains true is the bubble's appeared during the last call to
+  // Contains true if the bubble is to be popped up in the next call to
   // UpdateBubbleAndIconVisibility().
-  bool bubble_shown_;
+  bool should_pop_up_bubble_;
 
   // The origin of the form we're currently dealing with; we'll use this to
   // determine which PasswordStore changes we should care about when updating

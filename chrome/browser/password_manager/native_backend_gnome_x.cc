@@ -31,6 +31,10 @@ using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
 using content::BrowserThread;
 
+namespace {
+const int kMaxPossibleTimeTValue = std::numeric_limits<int>::max();
+}
+
 #define GNOME_KEYRING_DEFINE_POINTER(name) \
   typeof(&::gnome_keyring_##name) GnomeKeyringLoader::gnome_keyring_##name;
 GNOME_KEYRING_FOR_EACH_FUNC(GNOME_KEYRING_DEFINE_POINTER)
@@ -131,7 +135,15 @@ scoped_ptr<PasswordForm> FormFromAttributes(GnomeKeyringAttributeList* attrs) {
   bool date_ok = base::StringToInt64(string_attr_map["date_created"],
                                      &date_created);
   DCHECK(date_ok);
-  form->date_created = base::Time::FromTimeT(date_created);
+  // In the past |date_created| was stored as time_t. Currently is stored as
+  // base::Time's internal value. We need to distinguish, which format the
+  // number in |date_created| was stored in. We use the fact that
+  // kMaxPossibleTimeTValue interpreted as the internal value corresponds to an
+  // unlikely date back in 17th century, and anything above
+  // kMaxPossibleTimeTValue clearly must be in the internal value format.
+  form->date_created = date_created < kMaxPossibleTimeTValue
+                           ? base::Time::FromTimeT(date_created)
+                           : base::Time::FromInternalValue(date_created);
   form->blacklisted_by_user = uint_attr_map["blacklisted_by_user"];
   form->type = static_cast<PasswordForm::Type>(uint_attr_map["type"]);
   form->times_used = uint_attr_map["times_used"];
@@ -142,22 +154,25 @@ scoped_ptr<PasswordForm> FormFromAttributes(GnomeKeyringAttributeList* attrs) {
   form->display_name = UTF8ToUTF16(string_attr_map["display_name"]);
   form->avatar_url = GURL(string_attr_map["avatar_url"]);
   form->federation_url = GURL(string_attr_map["federation_url"]);
-  form->is_zero_click = uint_attr_map["is_zero_click"];
+  form->skip_zero_click = uint_attr_map["skip_zero_click"];
+  form->generation_upload_status =
+      static_cast<PasswordForm::GenerationUploadStatus>(
+          uint_attr_map["generation_upload_status"]);
 
   return form.Pass();
 }
 
-// Parse all the results from the given GList into a PasswordFormList, and free
-// the GList. PasswordForms are allocated on the heap, and should be deleted by
-// the consumer. If not NULL, |lookup_form| is used to filter out results --
-// only credentials with signon realms passing the PSL matching against
-// |lookup_form->signon_realm| will be kept. PSL matched results get their
-// signon_realm, origin, and action rewritten to those of |lookup_form_|, with
-// the original signon_realm saved into the result's original_signon_realm data
-// member.
+// Parse all the results from the given GList into a
+// ScopedVector<autofill::PasswordForm>, and free the GList. PasswordForms are
+// allocated on the heap, and should be deleted by the consumer. If not NULL,
+// |lookup_form| is used to filter out results -- only credentials with signon
+// realms passing the PSL matching against |lookup_form->signon_realm| will be
+// kept. PSL matched results get their signon_realm, origin, and action
+// rewritten to those of |lookup_form_|, with the original signon_realm saved
+// into the result's original_signon_realm data member.
 void ConvertFormList(GList* found,
                      const PasswordForm* lookup_form,
-                     NativeBackendGnome::PasswordFormList* forms) {
+                     ScopedVector<autofill::PasswordForm>* forms) {
   password_manager::PSLDomainMatchMetric psl_domain_match_metric =
       password_manager::PSL_DOMAIN_MATCH_NONE;
   for (GList* element = g_list_first(found); element != NULL;
@@ -230,7 +245,8 @@ const GnomeKeyringPasswordSchema kGnomeSchema = {
     { "display_name", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
     { "avatar_url", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
     { "federation_url", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
-    { "is_zero_click", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
+    { "skip_zero_click", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
+    { "generation_upload_status", GNOME_KEYRING_ATTRIBUTE_TYPE_UINT32 },
     // This field is always "chrome" so that we can search for it.
     { "application", GNOME_KEYRING_ATTRIBUTE_TYPE_STRING },
     { NULL }
@@ -255,8 +271,6 @@ const GnomeKeyringPasswordSchema kGnomeSchema = {
 // be used in parallel.
 class GKRMethod : public GnomeKeyringLoader {
  public:
-  typedef NativeBackendGnome::PasswordFormList PasswordFormList;
-
   GKRMethod() : event_(false, false), result_(GNOME_KEYRING_RESULT_CANCELLED) {}
 
   // Action methods. These call gnome_keyring_* functions. Call from UI thread.
@@ -274,7 +288,7 @@ class GKRMethod : public GnomeKeyringLoader {
 
   // Use after AddLoginSearch, UpdateLoginSearch, GetLogins, GetLoginsList,
   // GetAllLogins.
-  GnomeKeyringResult WaitResult(PasswordFormList* forms);
+  GnomeKeyringResult WaitResult(ScopedVector<autofill::PasswordForm>* forms);
 
  private:
   struct GnomeKeyringAttributeListFreeDeleter {
@@ -306,7 +320,7 @@ class GKRMethod : public GnomeKeyringLoader {
 
   base::WaitableEvent event_;
   GnomeKeyringResult result_;
-  NativeBackendGnome::PasswordFormList forms_;
+  ScopedVector<autofill::PasswordForm> forms_;
   // If the credential search is specified by a single form and needs to use PSL
   // matching, then the specifying form is stored in |lookup_form_|. If PSL
   // matching is used to find a result, then the results signon realm, origin
@@ -319,11 +333,11 @@ class GKRMethod : public GnomeKeyringLoader {
 
 void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  time_t date_created = form.date_created.ToTimeT();
+  int64 date_created = form.date_created.ToInternalValue();
   // If we are asked to save a password with 0 date, use the current time.
-  // We don't want to actually save passwords as though on January 1, 1970.
+  // We don't want to actually save passwords as though on January 1, 1601.
   if (!date_created)
-    date_created = time(NULL);
+    date_created = base::Time::Now().ToInternalValue();
   int64 date_synced = form.date_synced.ToInternalValue();
   gnome_keyring_store_password(
       &kGnomeSchema,
@@ -351,7 +365,8 @@ void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
       "display_name", UTF16ToUTF8(form.display_name).c_str(),
       "avatar_url", form.avatar_url.spec().c_str(),
       "federation_url", form.federation_url.spec().c_str(),
-      "is_zero_click", form.is_zero_click,
+      "skip_zero_click", form.skip_zero_click,
+      "generation_upload_status", form.generation_upload_status,
       "application", app_string,
       NULL);
 }
@@ -466,7 +481,8 @@ GnomeKeyringResult GKRMethod::WaitResult() {
   return result_;
 }
 
-GnomeKeyringResult GKRMethod::WaitResult(PasswordFormList* forms) {
+GnomeKeyringResult GKRMethod::WaitResult(
+    ScopedVector<autofill::PasswordForm>* forms) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   event_.Wait();
   if (forms->empty()) {
@@ -475,7 +491,7 @@ GnomeKeyringResult GKRMethod::WaitResult(PasswordFormList* forms) {
   } else {
     // Rare case. Append forms_ to *forms.
     forms->insert(forms->end(), forms_.begin(), forms_.end());
-    forms_.clear();
+    forms_.weak_clear();
   }
   return result_;
 }
@@ -564,7 +580,7 @@ password_manager::PasswordStoreChangeList NativeBackendGnome::AddLogin(
                                      base::Unretained(&method),
                                      form, app_string_.c_str()));
   ScopedVector<autofill::PasswordForm> forms;
-  GnomeKeyringResult result = method.WaitResult(&forms.get());
+  GnomeKeyringResult result = method.WaitResult(&forms);
   if (result != GNOME_KEYRING_RESULT_OK &&
       result != GNOME_KEYRING_RESULT_NO_MATCH) {
     LOG(ERROR) << "Keyring find failed: "
@@ -608,7 +624,7 @@ bool NativeBackendGnome::UpdateLogin(
                                      base::Unretained(&method),
                                      form, app_string_.c_str()));
   ScopedVector<autofill::PasswordForm> forms;
-  GnomeKeyringResult result = method.WaitResult(&forms.get());
+  GnomeKeyringResult result = method.WaitResult(&forms);
   if (result != GNOME_KEYRING_RESULT_OK) {
     LOG(ERROR) << "Keyring find failed: "
                << gnome_keyring_result_to_message(result);
@@ -667,8 +683,9 @@ bool NativeBackendGnome::RemoveLoginsSyncedBetween(
   return RemoveLoginsBetween(delete_begin, delete_end, SYNC_TIMESTAMP, changes);
 }
 
-bool NativeBackendGnome::GetLogins(const PasswordForm& form,
-                                   PasswordFormList* forms) {
+bool NativeBackendGnome::GetLogins(
+    const PasswordForm& form,
+    ScopedVector<autofill::PasswordForm>* forms) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   GKRMethod method;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -686,16 +703,19 @@ bool NativeBackendGnome::GetLogins(const PasswordForm& form,
   return true;
 }
 
-bool NativeBackendGnome::GetAutofillableLogins(PasswordFormList* forms) {
-  return GetLoginsList(forms, true);
+bool NativeBackendGnome::GetAutofillableLogins(
+    ScopedVector<autofill::PasswordForm>* forms) {
+  return GetLoginsList(true, forms);
 }
 
-bool NativeBackendGnome::GetBlacklistLogins(PasswordFormList* forms) {
-  return GetLoginsList(forms, false);
+bool NativeBackendGnome::GetBlacklistLogins(
+    ScopedVector<autofill::PasswordForm>* forms) {
+  return GetLoginsList(false, forms);
 }
 
-bool NativeBackendGnome::GetLoginsList(PasswordFormList* forms,
-                                       bool autofillable) {
+bool NativeBackendGnome::GetLoginsList(
+    bool autofillable,
+    ScopedVector<autofill::PasswordForm>* forms) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
 
   uint32_t blacklisted_by_user = !autofillable;
@@ -716,7 +736,8 @@ bool NativeBackendGnome::GetLoginsList(PasswordFormList* forms,
   return true;
 }
 
-bool NativeBackendGnome::GetAllLogins(PasswordFormList* forms) {
+bool NativeBackendGnome::GetAllLogins(
+    ScopedVector<autofill::PasswordForm>* forms) {
   GKRMethod method;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(&GKRMethod::GetAllLogins,
@@ -733,14 +754,15 @@ bool NativeBackendGnome::GetAllLogins(PasswordFormList* forms) {
   return true;
 }
 
-bool NativeBackendGnome::GetLoginsBetween(base::Time get_begin,
-                                          base::Time get_end,
-                                          TimestampToCompare date_to_compare,
-                                          PasswordFormList* forms) {
+bool NativeBackendGnome::GetLoginsBetween(
+    base::Time get_begin,
+    base::Time get_end,
+    TimestampToCompare date_to_compare,
+    ScopedVector<autofill::PasswordForm>* forms) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   // We could walk the list and add items as we find them, but it is much
   // easier to build the list and then filter the results.
-  PasswordFormList all_forms;
+  ScopedVector<autofill::PasswordForm> all_forms;
   if (!GetAllLogins(&all_forms))
     return false;
 
@@ -748,12 +770,11 @@ bool NativeBackendGnome::GetLoginsBetween(base::Time get_begin,
       date_to_compare == CREATION_TIMESTAMP
           ? &autofill::PasswordForm::date_created
           : &autofill::PasswordForm::date_synced;
-  for (size_t i = 0; i < all_forms.size(); ++i) {
-    if (get_begin <= all_forms[i]->*date_member &&
-        (get_end.is_null() || all_forms[i]->*date_member < get_end)) {
-      forms->push_back(all_forms[i]);
-    } else {
-      delete all_forms[i];
+  for (auto& saved_form : all_forms) {
+    if (get_begin <= saved_form->*date_member &&
+        (get_end.is_null() || saved_form->*date_member < get_end)) {
+      forms->push_back(saved_form);
+      saved_form = nullptr;
     }
   }
 
@@ -771,7 +792,7 @@ bool NativeBackendGnome::RemoveLoginsBetween(
   // We could walk the list and delete items as we find them, but it is much
   // easier to build the list and use RemoveLogin() to delete them.
   ScopedVector<autofill::PasswordForm> forms;
-  if (!GetLoginsBetween(get_begin, get_end, date_to_compare, &forms.get()))
+  if (!GetLoginsBetween(get_begin, get_end, date_to_compare, &forms))
     return false;
 
   bool ok = true;

@@ -26,21 +26,38 @@ HashValue GetTestHashValue(uint8 label, HashValueTag tag) {
   return hash_value;
 }
 
-std::string GetTestPin(uint8 label, HashValueTag tag) {
+std::string GetTestPinImpl(uint8 label, HashValueTag tag, bool quoted) {
   HashValue hash_value = GetTestHashValue(label, tag);
   std::string base64;
   base::Base64Encode(base::StringPiece(
       reinterpret_cast<char*>(hash_value.data()), hash_value.size()), &base64);
 
+  std::string ret;
   switch (hash_value.tag) {
     case HASH_VALUE_SHA1:
-      return std::string("pin-sha1=\"") + base64 + "\"";
+      ret = "pin-sha1=";
+      break;
     case HASH_VALUE_SHA256:
-      return std::string("pin-sha256=\"") + base64 + "\"";
+      ret = "pin-sha256=";
+      break;
     default:
       NOTREACHED() << "Unknown HashValueTag " << hash_value.tag;
       return std::string("ERROR");
   }
+  if (quoted)
+    ret += '\"';
+  ret += base64;
+  if (quoted)
+    ret += '\"';
+  return ret;
+}
+
+std::string GetTestPin(uint8 label, HashValueTag tag) {
+  return GetTestPinImpl(label, tag, true);
+}
+
+std::string GetTestPinUnquoted(uint8 label, HashValueTag tag) {
+  return GetTestPinImpl(label, tag, false);
 }
 
 };
@@ -142,6 +159,7 @@ static void TestBogusPinsHeaders(HashValueTag tag) {
 
   // The good pin must be in the chain, the backup pin must not be
   std::string good_pin = GetTestPin(2, tag);
+  std::string good_pin_unquoted = GetTestPinUnquoted(2, tag);
   std::string backup_pin = GetTestPin(4, tag);
 
   EXPECT_FALSE(ParseHPKPHeader(std::string(), chain_hashes, &max_age,
@@ -213,6 +231,9 @@ static void TestBogusPinsHeaders(HashValueTag tag) {
                                &hashes));
   EXPECT_FALSE(ParseHPKPHeader("max-age=34889.23", chain_hashes, &max_age,
                                &include_subdomains, &hashes));
+  EXPECT_FALSE(
+      ParseHPKPHeader("max-age=243; " + good_pin_unquoted + ";" + backup_pin,
+                      chain_hashes, &max_age, &include_subdomains, &hashes));
 
   // Check the out args were not updated by checking the default
   // values for its predictable fields.
@@ -391,6 +412,7 @@ static void TestValidPKPHeaders(HashValueTag tag) {
 
   // The good pin must be in the chain, the backup pin must not be
   std::string good_pin = GetTestPin(2, tag);
+  std::string good_pin2 = GetTestPin(3, tag);
   std::string backup_pin = GetTestPin(4, tag);
 
   EXPECT_TRUE(ParseHPKPHeader(
@@ -468,8 +490,7 @@ static void TestValidPKPHeaders(HashValueTag tag) {
   EXPECT_EQ(expect_max_age, max_age);
   EXPECT_FALSE(include_subdomains);
 
-  // Test that parsing the same header twice doesn't duplicate the recorded
-  // hashes.
+  // Test that parsing a different header resets the hashes.
   hashes.clear();
   EXPECT_TRUE(ParseHPKPHeader(
       "  max-age=999;  " +
@@ -477,9 +498,8 @@ static void TestValidPKPHeaders(HashValueTag tag) {
       chain_hashes, &max_age, &include_subdomains, &hashes));
   EXPECT_EQ(2u, hashes.size());
   EXPECT_TRUE(ParseHPKPHeader(
-      "  max-age=999;  " +
-          backup_pin + ";" + good_pin + ";   ",
-      chain_hashes, &max_age, &include_subdomains, &hashes));
+      "  max-age=999;  " + backup_pin + ";" + good_pin2 + ";   ", chain_hashes,
+      &max_age, &include_subdomains, &hashes));
   EXPECT_EQ(2u, hashes.size());
 }
 
@@ -713,6 +733,43 @@ TEST_F(HttpSecurityHeadersTest, NoClobberPins) {
                                         is_issued_by_known_root,
                                         saved_hashes,
                                         &failure_log));
+}
+
+// Tests that seeing an invalid HPKP header leaves the existing one alone.
+TEST_F(HttpSecurityHeadersTest, IgnoreInvalidHeaders) {
+  TransportSecurityState state;
+
+  HashValue good_hash = GetTestHashValue(1, HASH_VALUE_SHA256);
+  std::string good_pin = GetTestPin(1, HASH_VALUE_SHA256);
+  std::string bad_pin = GetTestPin(2, HASH_VALUE_SHA256);
+  std::string backup_pin = GetTestPin(3, HASH_VALUE_SHA256);
+
+  SSLInfo ssl_info;
+  ssl_info.public_key_hashes.push_back(good_hash);
+
+  // Add a valid HPKP header.
+  EXPECT_TRUE(state.AddHPKPHeader(
+      "example.com", "max-age = 10000; " + good_pin + "; " + backup_pin,
+      ssl_info));
+
+  // Check the insertion was valid.
+  EXPECT_TRUE(state.HasPublicKeyPins("example.com"));
+  std::string failure_log;
+  bool is_issued_by_known_root = true;
+  EXPECT_TRUE(state.CheckPublicKeyPins("example.com", is_issued_by_known_root,
+                                       ssl_info.public_key_hashes,
+                                       &failure_log));
+
+  // Now assert an invalid one. This should fail.
+  EXPECT_FALSE(state.AddHPKPHeader(
+      "example.com", "max-age = 10000; " + bad_pin + "; " + backup_pin,
+      ssl_info));
+
+  // The old pins must still exist.
+  EXPECT_TRUE(state.HasPublicKeyPins("example.com"));
+  EXPECT_TRUE(state.CheckPublicKeyPins("example.com", is_issued_by_known_root,
+                                       ssl_info.public_key_hashes,
+                                       &failure_log));
 }
 
 };    // namespace net

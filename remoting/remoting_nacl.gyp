@@ -4,7 +4,7 @@
 
 {
   'includes': [
-    '../native_client/build/untrusted.gypi',
+    '../build/common_untrusted.gypi',
     'remoting_srcs.gypi',
   ],
 
@@ -64,8 +64,8 @@
           '<(proto_out_dir)/control.pb.cc',
           '<(proto_out_dir)/event.pb.cc',
           '<(proto_out_dir)/internal.pb.cc',
-          '<(proto_out_dir)/video.pb.cc',
           '<(proto_out_dir)/mux.pb.cc',
+          '<(proto_out_dir)/video.pb.cc',
         ],
         'extra_deps': [ '<@(files_list)' ],
         'extra_args': [ '<@(files_list)' ],
@@ -182,7 +182,6 @@
         '../native_client/tools.gyp:prep_toolchain',
         '../native_client_sdk/native_client_sdk_untrusted.gyp:nacl_io_untrusted',
         '../net/net_nacl.gyp:net_nacl',
-        '../ppapi/native_client/native_client.gyp:nacl_irt',
         '../ppapi/native_client/native_client.gyp:ppapi_lib',
         '../ppapi/ppapi_nacl.gyp:ppapi_cpp_lib',
         '../third_party/expat/expat_nacl.gyp:expat_nacl',

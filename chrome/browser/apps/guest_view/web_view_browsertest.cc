@@ -5,6 +5,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
@@ -355,8 +356,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       content::WebContents** persistent_partition_contents2,
       content::WebContents** persistent_partition_contents3) {
     GURL::Replacements replace_host;
-    std::string host_str("localhost");  // Must stay in scope with replace_host.
-    replace_host.SetHostStr(host_str);
+    replace_host.SetHostStr("localhost");
 
     navigate_to_url = navigate_to_url.ReplaceComponents(replace_host);
 
@@ -624,8 +624,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   content::WebContents* LoadGuest(const std::string& guest_path,
                                   const std::string& app_path) {
     GURL::Replacements replace_host;
-    std::string host_str("localhost");  // Must stay in scope with replace_host.
-    replace_host.SetHostStr(host_str);
+    replace_host.SetHostStr("localhost");
 
     GURL guest_url = embedded_test_server()->GetURL(guest_path);
     guest_url = guest_url.ReplaceComponents(replace_host);
@@ -1087,6 +1086,14 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestContentLoadEvent) {
   TestHelper("testContentLoadEvent", "web_view/shim", NO_TEST_SERVER);
 }
 
+// TODO(fsamuel): Enable this test once <webview> can run in a detached state.
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestContentLoadEventWithDisplayNone) {
+  TestHelper("testContentLoadEventWithDisplayNone",
+             "web_view/shim",
+             NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestDeclarativeWebRequestAPI) {
   TestHelper("testDeclarativeWebRequestAPI",
              "web_view/shim",
@@ -1197,8 +1204,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestRemoveWebviewOnExit) {
   ASSERT_TRUE(embedder_web_contents);
 
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // Must stay in scope with replace_host.
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
 
   std::string guest_path(
       "/extensions/platform_apps/web_view/shim/empty_guest.html");
@@ -1388,8 +1394,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_CookieIsolation) {
       "document.cookie = 'guest2=true; path=/; expires=' + expire + ';';");
 
   GURL::Replacements replace_host;
-  std::string host_str("localhost");  // Must stay in scope with replace_host.
-  replace_host.SetHostStr(host_str);
+  replace_host.SetHostStr("localhost");
 
   GURL set_cookie_url = embedded_test_server()->GetURL(
       "/extensions/platform_apps/isolation/set_cookie.html");
@@ -1827,6 +1832,86 @@ void WebViewTest::MediaAccessAPIAllowTestHelper(const std::string& test_name) {
   mock->WaitForRequestMediaPermission();
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewTest, OpenURLFromTab_CurrentTab_Abort) {
+  LoadAppWithGuest("web_view/simple");
+
+  // Verify that OpenURLFromTab with a window disposition of CURRENT_TAB will
+  // navigate the current <webview>.
+  ExtensionTestMessageListener load_listener("WebViewTest.LOADSTOP", false);
+
+  // Navigating to a file URL is forbidden inside a <webview>.
+  content::OpenURLParams params(GURL("file://foo"),
+                                content::Referrer(),
+                                CURRENT_TAB,
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                true /* is_renderer_initiated */);
+  GetGuestWebContents()->GetDelegate()->OpenURLFromTab(
+      GetGuestWebContents(), params);
+
+  ASSERT_TRUE(load_listener.WaitUntilSatisfied());
+
+  // Verify that the <webview> ends up at about:blank.
+  EXPECT_EQ(GURL(url::kAboutBlankURL),
+            GetGuestWebContents()->GetLastCommittedURL());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, OpenURLFromTab_NewWindow_Abort) {
+  LoadAppWithGuest("web_view/simple");
+
+  // Verify that OpenURLFromTab with a window disposition of NEW_BACKGROUND_TAB
+  // will trigger the <webview>'s New Window API.
+  ExtensionTestMessageListener new_window_listener(
+      "WebViewTest.NEWWINDOW", false);
+
+  // Navigating to a file URL is forbidden inside a <webview>.
+  content::OpenURLParams params(GURL("file://foo"),
+                                content::Referrer(),
+                                NEW_BACKGROUND_TAB,
+                                ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                true /* is_renderer_initiated */);
+  GetGuestWebContents()->GetDelegate()->OpenURLFromTab(
+      GetGuestWebContents(), params);
+
+  ASSERT_TRUE(new_window_listener.WaitUntilSatisfied());
+
+  // Verify that a new guest was created.
+  content::WebContents* new_guest_web_contents =
+      GetGuestViewManager()->GetLastGuestCreated();
+  EXPECT_NE(GetGuestWebContents(), new_guest_web_contents);
+
+  // Verify that the new <webview> guest ends up at about:blank.
+  EXPECT_EQ(GURL(url::kAboutBlankURL),
+            new_guest_web_contents->GetLastCommittedURL());
+}
+
+// This test executes the context menu command 'LanguageSettings' which will
+// load chrome://settings/languages in a browser window. This is a browser-
+// initiated operation and so we expect this to succeed if the embedder is
+// allowed to perform the operation.
+IN_PROC_BROWSER_TEST_F(WebViewTest, ContextMenuLanguageSettings) {
+  LoadAppWithGuest("web_view/context_menus/basic");
+
+  content::WebContents* guest_web_contents = GetGuestWebContents();
+  content::WebContents* embedder = GetEmbedderWebContents();
+  ASSERT_TRUE(embedder);
+
+  // Create and build our test context menu.
+  content::WebContentsAddedObserver web_contents_added_observer;
+
+  GURL page_url("http://www.google.com");
+  scoped_ptr<TestRenderViewContextMenu> menu(TestRenderViewContextMenu::Create(
+      guest_web_contents, page_url, GURL(), GURL()));
+  menu->ExecuteCommand(IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS, 0);
+
+  content::WebContents* new_contents =
+      web_contents_added_observer.GetWebContents();
+
+  // Verify that a new WebContents has been created that is at the Language
+  // Settings page.
+  EXPECT_EQ(GURL("chrome://settings/languages"),
+            new_contents->GetVisibleURL());
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, ContextMenusAPI_Basic) {
   LoadAppWithGuest("web_view/context_menus/basic");
 
@@ -1952,7 +2037,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, ChromeVoxInjection) {
 #endif
 IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_TearDownTest) {
   const extensions::Extension* extension =
-      LoadAndLaunchPlatformApp("web_view/teardown", "guest-loaded");
+      LoadAndLaunchPlatformApp("web_view/simple", "WebViewTest.LAUNCHED");
   extensions::AppWindow* window = NULL;
   if (!GetAppWindowCount())
     window = CreateAppWindow(extension);
@@ -1961,7 +2046,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_TearDownTest) {
   CloseAppWindow(window);
 
   // Load the app again.
-  LoadAndLaunchPlatformApp("web_view/teardown", "guest-loaded");
+  LoadAndLaunchPlatformApp("web_view/simple", "WebViewTest.LAUNCHED");
 }
 
 // In following GeolocationAPIEmbedderHasNoAccess* tests, embedder (i.e. the

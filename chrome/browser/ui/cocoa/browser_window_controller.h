@@ -32,6 +32,7 @@
 class Browser;
 class BrowserWindow;
 class BrowserWindowCocoa;
+@class BrowserWindowEnterFullscreenTransition;
 @class DevToolsController;
 @class DownloadShelfController;
 class ExtensionKeybindingRegistryCocoa;
@@ -83,6 +84,8 @@ class Command;
   base::scoped_nsobject<PresentationModeController> presentationModeController_;
   base::scoped_nsobject<ExclusiveAccessBubbleWindowController>
       exclusiveAccessBubbleWindowController_;
+  base::scoped_nsobject<BrowserWindowEnterFullscreenTransition>
+      enterFullscreenTransition_;
 
   // Strong. StatusBubble is a special case of a strong reference that
   // we don't wrap in a scoped_ptr because it is acting the same
@@ -350,11 +353,10 @@ class Command;
 // Gets the window style.
 - (ThemedWindowStyle)themedWindowStyle;
 
-// Returns the position in the coordinates of the root view
-// ([[self contentView] superview]) that the top left of a theme image with
-// |alignment| should be painted at. If the window does not have a tab strip,
-// the offset for THEME_IMAGE_ALIGN_WITH_FRAME is always returned. The result of
-// this method can be used in conjunction with
+// Returns the position in window coordinates that the top left of a theme
+// image with |alignment| should be painted at. If the window does not have a
+// tab strip, the offset for THEME_IMAGE_ALIGN_WITH_FRAME is always returned.
+// The result of this method can be used in conjunction with
 // [NSGraphicsContext cr_setPatternPhase:] to set the offset of pattern colors.
 - (NSPoint)themeImagePositionForAlignment:(ThemeImageAlignment)alignment;
 
@@ -607,9 +609,6 @@ class Command;
 // Gets the rect, in window base coordinates, that the omnibox popup should be
 // positioned relative to.
 - (NSRect)omniboxPopupAnchorRect;
-
-// Force a layout of info bars.
-- (void)layoutInfoBars;
 
 @end  // @interface BrowserWindowController (TestingAPI)
 

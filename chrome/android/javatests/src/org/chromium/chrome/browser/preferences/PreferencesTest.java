@@ -31,6 +31,10 @@ import java.text.NumberFormat;
  */
 public class PreferencesTest extends ChromeShellTestBase {
 
+    // Category for launching the Notification Preferences screen.
+    private static final String CATEGORY_NOTIFICATION_PREFERENCES =
+            "android.intent.category.NOTIFICATION_PREFERENCES";
+
     @Override
     protected void setUp() throws Exception {
         super.setUp();
@@ -117,6 +121,9 @@ public class PreferencesTest extends ChromeShellTestBase {
             }
         });
     }
+
+    // TODO(mvanouwerkerk): Write new preference intent tests for notification settings.
+    // https://crbug.com/461885
 
     /**
      * Tests setting FontScaleFactor and ForceEnableZoom in AccessibilityPreferences and ensures

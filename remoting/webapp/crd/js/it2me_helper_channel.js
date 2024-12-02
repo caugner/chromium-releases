@@ -144,7 +144,7 @@ remoting.It2MeHelperChannel.prototype.instanceId = function() {
 };
 
 /**
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @return {boolean} whether the message is handled or not.
  * @private
  */
@@ -166,8 +166,8 @@ remoting.It2MeHelperChannel.prototype.onHangoutMessage_ = function(message) {
         return true;
     }
     throw new Error('Unknown message method=' + message.method);
-  } catch(e) {
-    var error = /** @type {Error} */ e;
+  } catch(/** @type {*} */ e) {
+    var error = /** @type {Error} */ (e);
     this.sendErrorResponse_(this.hangoutPort_, error, message);
   }
   return false;
@@ -176,7 +176,7 @@ remoting.It2MeHelperChannel.prototype.onHangoutMessage_ = function(message) {
 /**
  * Disconnect the existing connection to the helpee.
  *
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelperChannel.prototype.closeWebapp_ =
@@ -194,7 +194,7 @@ remoting.It2MeHelperChannel.prototype.closeWebapp_ =
 /**
  * Launches the web app.
  *
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelperChannel.prototype.launchWebapp_ =
@@ -204,18 +204,19 @@ remoting.It2MeHelperChannel.prototype.launchWebapp_ =
     throw new Error('Access code is missing');
   }
 
+  /**
+   * @this {remoting.It2MeHelperChannel}
+   * @param {string} instanceId
+   */
+  var setInstance = function(instanceId) {
+    this.instanceId_ = instanceId;
+  };
+
   // Launch the webapp.
   this.appLauncher_.launch({
     mode: 'hangout',
     accessCode: accessCode
-  }).then(
-    /**
-     * @this {remoting.It2MeHelperChannel}
-     * @param {string} instanceId
-     */
-    function(instanceId){
-      this.instanceId_ = instanceId;
-    }.bind(this));
+  }).then(setInstance.bind(this));
 };
 
 /**
@@ -258,7 +259,7 @@ remoting.It2MeHelperChannel.prototype.onWebappDisconnect_ = function(port) {
 };
 
 /**
- * @param {{method:string, data:Object.<string,*>}} message
+ * @param {{method:string, data:Object<string,*>}} message
  * @private
  */
 remoting.It2MeHelperChannel.prototype.onWebappMessage_ = function(message) {
@@ -270,13 +271,13 @@ remoting.It2MeHelperChannel.prototype.onWebappMessage_ = function(message) {
       case MessageTypes.SESSION_STATE_CHANGED:
         var state = getNumberAttr(message, 'state');
         this.sessionState_ =
-            /** @type {remoting.ClientSession.State} */ state;
+            /** @type {remoting.ClientSession.State} */(state);
         this.hangoutPort_.postMessage(message);
         return true;
     }
     throw new Error('Unknown message method=' + message.method);
-  } catch(e) {
-    var error = /** @type {Error} */ e;
+  } catch(/** @type {*} */ e) {
+    var error = /** @type {Error} */ (e);
     this.sendErrorResponse_(this.webappPort_, error, message);
   }
   return false;
@@ -306,7 +307,7 @@ remoting.It2MeHelperChannel.prototype.unhookPorts_ = function() {
 /**
  * @param {chrome.runtime.Port} port
  * @param {string|Error} error
- * @param {?{method:string, data:Object.<string,*>}=} opt_incomingMessage
+ * @param {?{method:string, data:Object<string,*>}=} opt_incomingMessage
  * @private
  */
 remoting.It2MeHelperChannel.prototype.sendErrorResponse_ =

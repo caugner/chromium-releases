@@ -35,7 +35,7 @@
 #include "content/browser/android/edge_effect_l.h"
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
 #include "content/browser/android/overscroll_controller_android.h"
-#include "content/browser/devtools/render_view_devtools_agent_host.h"
+#include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
@@ -44,6 +44,7 @@
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/dip_util.h"
+#include "content/browser/renderer_host/frame_metadata_util.h"
 #include "content/browser/renderer_host/input/synthetic_gesture_target_android.h"
 #include "content/browser/renderer_host/input/web_input_event_builders_android.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
@@ -87,11 +88,6 @@ namespace content {
 namespace {
 
 const int kUndefinedOutputSurfaceId = -1;
-
-// Used to accomodate finite precision when comparing scaled viewport and
-// content widths. While this value may seem large, width=device-width on an N7
-// V1 saw errors of ~0.065 between computed window and content widths.
-const float kMobileViewportWidthEpsilon = 0.15f;
 
 static const char kAsyncReadBackString[] = "Compositing.CopyFromSurfaceTime";
 
@@ -264,10 +260,12 @@ scoped_ptr<ui::TouchSelectionController> CreateSelectionController(
   DCHECK(content_view_core);
   int tap_timeout_ms = gfx::ViewConfiguration::GetTapTimeoutInMs();
   int touch_slop_pixels = gfx::ViewConfiguration::GetTouchSlopInPixels();
+  bool show_on_tap_for_empty_editable = false;
   return make_scoped_ptr(new ui::TouchSelectionController(
       client,
       base::TimeDelta::FromMilliseconds(tap_timeout_ms),
-      touch_slop_pixels / content_view_core->GetDpiScale()));
+      touch_slop_pixels / content_view_core->GetDpiScale(),
+      show_on_tap_for_empty_editable));
 }
 
 scoped_ptr<OverscrollControllerAndroid> CreateOverscrollController(
@@ -292,17 +290,30 @@ ui::GestureProvider::Config CreateGestureProviderConfig() {
   return config;
 }
 
-bool HasFixedPageScale(const cc::CompositorFrameMetadata& frame_metadata) {
-  return frame_metadata.min_page_scale_factor ==
-         frame_metadata.max_page_scale_factor;
+ui::SelectionBound::Type ConvertSelectionBoundType(
+    cc::SelectionBoundType type) {
+  switch (type) {
+    case cc::SELECTION_BOUND_LEFT:
+      return ui::SelectionBound::LEFT;
+    case cc::SELECTION_BOUND_RIGHT:
+      return ui::SelectionBound::RIGHT;
+    case cc::SELECTION_BOUND_CENTER:
+      return ui::SelectionBound::CENTER;
+    case cc::SELECTION_BOUND_EMPTY:
+      return ui::SelectionBound::EMPTY;
+  }
+  NOTREACHED() << "Unknown selection bound type";
+  return ui::SelectionBound::EMPTY;
 }
 
-bool HasMobileViewport(const cc::CompositorFrameMetadata& frame_metadata) {
-  float window_width_dip =
-      frame_metadata.page_scale_factor *
-          frame_metadata.scrollable_viewport_size.width();
-  float content_width_css = frame_metadata.root_layer_size.width();
-  return content_width_css <= window_width_dip + kMobileViewportWidthEpsilon;
+ui::SelectionBound ConvertSelectionBound(
+    const cc::ViewportSelectionBound& bound) {
+  ui::SelectionBound ui_bound;
+  ui_bound.set_type(ConvertSelectionBoundType(bound.type));
+  ui_bound.set_visible(bound.visible);
+  if (ui_bound.type() != ui::SelectionBound::EMPTY)
+    ui_bound.SetEdge(bound.edge_top, bound.edge_bottom);
+  return ui_bound;
 }
 
 }  // anonymous namespace
@@ -409,31 +420,6 @@ void RenderWidgetHostViewAndroid::InitAsFullscreen(
 RenderWidgetHost*
 RenderWidgetHostViewAndroid::GetRenderWidgetHost() const {
   return host_;
-}
-
-void RenderWidgetHostViewAndroid::WasShown() {
-  if (!host_ || !host_->is_hidden())
-    return;
-
-  host_->WasShown(ui::LatencyInfo());
-
-  if (content_view_core_) {
-    StartObservingRootWindow();
-    RequestVSyncUpdate(BEGIN_FRAME);
-  }
-}
-
-void RenderWidgetHostViewAndroid::WasHidden() {
-  RunAckCallbacks();
-
-  if (!host_ || host_->is_hidden())
-    return;
-
-  // Inform the renderer that we are being hidden so it can reduce its resource
-  // utilization.
-  host_->WasHidden();
-
-  StopObservingRootWindow();
 }
 
 void RenderWidgetHostViewAndroid::WasResized() {
@@ -582,7 +568,16 @@ void RenderWidgetHostViewAndroid::Show() {
     overscroll_controller_->Enable();
 
   frame_evictor_->SetVisible(true);
-  WasShown();
+
+  if (!host_ || !host_->is_hidden())
+    return;
+
+  host_->WasShown(ui::LatencyInfo());
+
+  if (content_view_core_) {
+    StartObservingRootWindow();
+    RequestVSyncUpdate(BEGIN_FRAME);
+  }
 }
 
 void RenderWidgetHostViewAndroid::Hide() {
@@ -600,7 +595,17 @@ void RenderWidgetHostViewAndroid::Hide() {
   // We don't know if we will ever get a frame if we are hiding the renderer, so
   // we need to cancel all requests
   AbortPendingReadbackRequests();
-  WasHidden();
+
+  RunAckCallbacks();
+
+  if (!host_ || host_->is_hidden())
+    return;
+
+  // Inform the renderer that we are being hidden so it can reduce its resource
+  // utilization.
+  host_->WasHidden();
+
+  StopObservingRootWindow();
 }
 
 bool RenderWidgetHostViewAndroid::IsShowing() {
@@ -846,6 +851,10 @@ void RenderWidgetHostViewAndroid::ResetGestureDetection() {
   gesture_provider_.ResetDetection();
 }
 
+void RenderWidgetHostViewAndroid::OnDidNavigateMainFrameToNewPage() {
+  ResetGestureDetection();
+}
+
 void RenderWidgetHostViewAndroid::SetDoubleTapSupportEnabled(bool enabled) {
   gesture_provider_.SetDoubleTapSupportForPlatformEnabled(enabled);
 }
@@ -1022,10 +1031,8 @@ void RenderWidgetHostViewAndroid::SendDelegatedFrameAck(
   cc::CompositorFrameAck ack;
   if (resource_collection_.get())
     resource_collection_->TakeUnusedResourcesForChildCompositor(&ack.resources);
-  RenderWidgetHostImpl::SendSwapCompositorFrameAck(host_->GetRoutingID(),
-                                                   output_surface_id,
-                                                   host_->GetProcess()->GetID(),
-                                                   ack);
+  host_->Send(new ViewMsg_SwapCompositorFrameAck(host_->GetRoutingID(),
+                                                 output_surface_id, ack));
 }
 
 void RenderWidgetHostViewAndroid::SendReturnedDelegatedResources(
@@ -1036,11 +1043,8 @@ void RenderWidgetHostViewAndroid::SendReturnedDelegatedResources(
   resource_collection_->TakeUnusedResourcesForChildCompositor(&ack.resources);
   DCHECK(!ack.resources.empty());
 
-  RenderWidgetHostImpl::SendReclaimCompositorResources(
-      host_->GetRoutingID(),
-      output_surface_id,
-      host_->GetProcess()->GetID(),
-      ack);
+  host_->Send(new ViewMsg_ReclaimCompositorResources(host_->GetRoutingID(),
+                                                     output_surface_id, ack));
 }
 
 void RenderWidgetHostViewAndroid::UnusedResourcesAreAvailable() {
@@ -1228,9 +1232,10 @@ void RenderWidgetHostViewAndroid::SynchronousFrameMetadata(
     // Unblock the compositor.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&RenderViewDevToolsAgentHost::SynchronousSwapCompositorFrame,
-                   static_cast<RenderViewDevToolsAgentHost*>(dtah.get()),
-                   frame_metadata));
+        base::Bind(
+            &RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame,
+            static_cast<RenderFrameDevToolsAgentHost*>(dtah.get()),
+            frame_metadata));
   }
 }
 
@@ -1337,15 +1342,8 @@ void RenderWidgetHostViewAndroid::SynchronousCopyContents(
 
 void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
     const cc::CompositorFrameMetadata& frame_metadata) {
-
-  // Disable double tap zoom for pages that have a width=device-width or
-  // narrower viewport (indicating that this is a mobile-optimized or responsive
-  // web design, so text will be legible without zooming). Also disable
-  // double tap and pinch for pages that prevent zooming in or out.
-  bool has_mobile_viewport = HasMobileViewport(frame_metadata);
-  bool has_fixed_page_scale = HasFixedPageScale(frame_metadata);
-  gesture_provider_.SetDoubleTapSupportForPageEnabled(
-      !has_fixed_page_scale && !has_mobile_viewport);
+  bool is_mobile_optimized = IsMobileOptimizedFrame(frame_metadata);
+  gesture_provider_.SetDoubleTapSupportForPageEnabled(!is_mobile_optimized);
 
   if (!content_view_core_)
     return;
@@ -1355,8 +1353,8 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
 
   if (selection_controller_) {
     selection_controller_->OnSelectionBoundsChanged(
-        ui::SelectionBound(frame_metadata.selection_start),
-        ui::SelectionBound(frame_metadata.selection_end));
+        ConvertSelectionBound(frame_metadata.selection_start),
+        ConvertSelectionBound(frame_metadata.selection_end));
   }
 
   // All offsets and sizes are in CSS pixels.
@@ -1368,7 +1366,8 @@ void RenderWidgetHostViewAndroid::OnFrameMetadataUpdated(
       frame_metadata.root_layer_size,
       frame_metadata.scrollable_viewport_size,
       frame_metadata.location_bar_offset,
-      frame_metadata.location_bar_content_translation);
+      frame_metadata.location_bar_content_translation,
+      is_mobile_optimized);
 #if defined(VIDEO_HOLE)
   if (host_ && host_->IsRenderView()) {
     RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
@@ -1781,7 +1780,7 @@ void RenderWidgetHostViewAndroid::OnDetachCompositor() {
 
 void RenderWidgetHostViewAndroid::OnVSync(base::TimeTicks frame_time,
                                           base::TimeDelta vsync_period) {
-  TRACE_EVENT0("cc", "RenderWidgetHostViewAndroid::OnVSync");
+  TRACE_EVENT0("cc,benchmark", "RenderWidgetHostViewAndroid::OnVSync");
   if (!host_)
     return;
 

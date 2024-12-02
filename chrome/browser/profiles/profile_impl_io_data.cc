@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
@@ -16,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
@@ -28,20 +30,16 @@
 #include "chrome/browser/net/http_server_properties_manager_factory.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/quota_policy_channel_id_store.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_io_data.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/domain_reliability/monitor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -74,7 +72,7 @@ net::BackendType ChooseCacheBackendType() {
         command_line.GetSwitchValueASCII(switches::kUseSimpleCacheBackend);
     if (LowerCaseEqualsASCII(opt_value, "off"))
       return net::CACHE_BACKEND_BLOCKFILE;
-    if (opt_value == "" || LowerCaseEqualsASCII(opt_value, "on"))
+    if (opt_value.empty() || LowerCaseEqualsASCII(opt_value, "on"))
       return net::CACHE_BACKEND_SIMPLE;
   }
   const std::string experiment_name =
@@ -90,7 +88,6 @@ net::BackendType ChooseCacheBackendType() {
 }  // namespace
 
 using content::BrowserThread;
-using data_reduction_proxy::DataReductionProxyParams;
 
 ProfileImplIOData::Handle::Handle(Profile* profile)
     : io_data_(new ProfileImplIOData),
@@ -102,7 +99,6 @@ ProfileImplIOData::Handle::Handle(Profile* profile)
 
 ProfileImplIOData::Handle::~Handle() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
   if (io_data_->predictor_ != NULL) {
     // io_data_->predictor_ might be NULL if Init() was never called
     // (i.e. we shut down before ProfileImpl::DoFinalInit() got called).
@@ -118,7 +114,7 @@ ProfileImplIOData::Handle::~Handle() {
   if (io_data_->http_server_properties_manager_)
     io_data_->http_server_properties_manager_->ShutdownOnPrefThread();
 
-  io_data_->data_reduction_proxy_enabled_.Destroy();
+  io_data_->data_reduction_proxy_io_data()->ShutdownOnUIThread();
   io_data_->ShutdownOnUIThread(GetAllContextGetters().Pass());
 }
 
@@ -136,16 +132,7 @@ void ProfileImplIOData::Handle::Init(
     content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
     storage::SpecialStoragePolicy* special_storage_policy,
     scoped_ptr<domain_reliability::DomainReliabilityMonitor>
-        domain_reliability_monitor,
-    const base::Callback<void(bool)>& data_reduction_proxy_unavailable,
-    scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
-        data_reduction_proxy_configurator,
-    scoped_ptr<data_reduction_proxy::DataReductionProxyParams>
-        data_reduction_proxy_params,
-    base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-        data_reduction_proxy_statistics_prefs,
-    scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
-        data_reduction_proxy_event_store) {
+        domain_reliability_monitor) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!io_data_->lazy_params_);
   DCHECK(predictor);
@@ -178,15 +165,24 @@ void ProfileImplIOData::Handle::Init(
   if (io_data_->domain_reliability_monitor_)
     io_data_->domain_reliability_monitor_->MoveToNetworkThread();
 
-  io_data_->set_data_reduction_proxy_unavailable_callback(
-      data_reduction_proxy_unavailable);
-  io_data_->set_data_reduction_proxy_configurator(
-      data_reduction_proxy_configurator.Pass());
-  io_data_->set_data_reduction_proxy_params(data_reduction_proxy_params.Pass());
-  io_data_->set_data_reduction_proxy_statistics_prefs(
-      data_reduction_proxy_statistics_prefs);
-  io_data_->set_data_reduction_proxy_event_store(
-      data_reduction_proxy_event_store.Pass());
+  // TODO(tbansal): Move this to IO thread once the data reduction proxy
+  // params are unified into a single object.
+  bool enable_quic_for_data_reduction_proxy =
+      IOThread::ShouldEnableQuicForDataReductionProxy();
+
+  io_data_->set_data_reduction_proxy_io_data(
+      CreateDataReductionProxyChromeIOData(
+          g_browser_process->io_thread()->net_log(), profile_->GetPrefs(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+          enable_quic_for_data_reduction_proxy)
+          .Pass());
+
+  DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile_)->
+      InitDataReductionProxySettings(
+          io_data_->data_reduction_proxy_io_data(), profile_->GetPrefs(),
+          profile_->GetRequestContext(),
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI));
 }
 
 content::ResourceContext*
@@ -366,10 +362,6 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
   io_data_->safe_browsing_enabled()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 #endif
-  io_data_->data_reduction_proxy_enabled_.Init(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled, pref_service);
-  io_data_->data_reduction_proxy_enabled_.MoveToThread(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   io_data_->InitializeOnUIThread(profile_);
 }
 
@@ -457,52 +449,6 @@ void ProfileImplIOData::InitializeInternal(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "436671 ProfileImplIOData::InitializeInternal2"));
 
-  set_data_reduction_proxy_auth_request_handler(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyAuthRequestHandler>
-          (new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-              DataReductionProxyChromeSettings::GetClient(),
-              data_reduction_proxy_params(),
-              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO))));
-  set_data_reduction_proxy_usage_stats(
-      scoped_ptr<data_reduction_proxy::DataReductionProxyUsageStats>
-          (new data_reduction_proxy::DataReductionProxyUsageStats(
-              data_reduction_proxy_params(),
-              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)
-                  .get())));
-  data_reduction_proxy_usage_stats()->set_unavailable_callback(
-      data_reduction_proxy_unavailable_callback());
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile3(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal3"));
-
-  scoped_ptr<data_reduction_proxy::DataReductionProxyNetworkDelegate>
-  data_reduction_proxy_network_delegate(
-      new data_reduction_proxy::DataReductionProxyNetworkDelegate(
-          chrome_network_delegate.Pass(),
-          data_reduction_proxy_params(),
-          data_reduction_proxy_auth_request_handler(),
-          base::Bind(
-              &data_reduction_proxy::DataReductionProxyConfigurator::
-                  GetProxyConfigOnIOThread,
-              base::Unretained(data_reduction_proxy_configurator()))));
-  data_reduction_proxy_network_delegate->InitProxyConfigOverrider(
-      base::Bind(data_reduction_proxy::OnResolveProxyHandler));
-  data_reduction_proxy_network_delegate->InitStatisticsPrefsAndUMA(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-      data_reduction_proxy_statistics_prefs(),
-      &data_reduction_proxy_enabled_,
-      data_reduction_proxy_usage_stats());
-  network_delegate_ = data_reduction_proxy_network_delegate.Pass();
-
-  // Initialize context members.
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal4"));
-
   ApplyProfileParamsToContext(main_context);
 
   if (http_server_properties_manager_)
@@ -511,6 +457,9 @@ void ProfileImplIOData::InitializeInternal(
   main_context->set_transport_security_state(transport_security_state());
 
   main_context->set_net_log(io_thread->net_log());
+
+  network_delegate_ = data_reduction_proxy_io_data()->CreateNetworkDelegate(
+      chrome_network_delegate.Pass(), true).Pass();
 
   main_context->set_network_delegate(network_delegate_.get());
 
@@ -635,14 +584,12 @@ void ProfileImplIOData::InitializeInternal(
   scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
       new net::URLRequestJobFactoryImpl());
   InstallProtocolHandlers(main_job_factory.get(), protocol_handlers);
+
   // The data reduction proxy interceptor should be as close to the network
   // as possible.
   request_interceptors.insert(
       request_interceptors.begin(),
-      new data_reduction_proxy::DataReductionProxyInterceptor(
-          data_reduction_proxy_params(),
-          data_reduction_proxy_usage_stats(),
-          data_reduction_proxy_event_store()));
+      data_reduction_proxy_io_data()->CreateInterceptor().release());
   main_job_factory_ = SetUpJobFactoryDefaults(
       main_job_factory.Pass(),
       request_interceptors.Pass(),
@@ -796,10 +743,7 @@ net::URLRequestContext* ProfileImplIOData::InitializeAppRequestContext(
   // as possible.
   request_interceptors.insert(
       request_interceptors.begin(),
-      new data_reduction_proxy::DataReductionProxyInterceptor(
-          data_reduction_proxy_params(),
-          data_reduction_proxy_usage_stats(),
-          data_reduction_proxy_event_store()));
+      data_reduction_proxy_io_data()->CreateInterceptor().release());
   scoped_ptr<net::URLRequestJobFactory> top_job_factory(
       SetUpJobFactoryDefaults(job_factory.Pass(),
                               request_interceptors.Pass(),
@@ -908,10 +852,4 @@ void ProfileImplIOData::ClearNetworkingHistorySinceOnIOThread(
   transport_security_state()->DeleteAllDynamicDataSince(time);
   DCHECK(http_server_properties_manager_);
   http_server_properties_manager_->Clear(completion);
-}
-
-bool ProfileImplIOData::IsDataReductionProxyEnabled() const {
-  return data_reduction_proxy_enabled_.GetValue() ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             data_reduction_proxy::switches::kEnableDataReductionProxy);
 }

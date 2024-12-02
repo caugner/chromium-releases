@@ -30,6 +30,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pepper_flash.h"
 #include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_constants.h"
@@ -215,7 +216,7 @@ bool MakePepperFlashPluginInfo(const base::FilePath& flash_path,
                                content::PepperPluginInfo* plugin_info) {
   if (!flash_version.IsValid())
     return false;
-  const std::vector<uint16_t> ver_nums = flash_version.components();
+  const std::vector<uint32_t> ver_nums = flash_version.components();
   if (ver_nums.size() < 3)
     return false;
 
@@ -330,12 +331,11 @@ bool CheckPepperFlashInterfaces(const base::DictionaryValue& manifest) {
 
 }  // namespace
 
-class PepperFlashComponentInstaller : public ComponentInstaller {
+class PepperFlashComponentInstaller : public update_client::ComponentInstaller {
  public:
   explicit PepperFlashComponentInstaller(const Version& version);
 
-  ~PepperFlashComponentInstaller() override {}
-
+  // ComponentInstaller implementation:
   void OnUpdateError(int error) override;
 
   bool Install(const base::DictionaryValue& manifest,
@@ -344,7 +344,11 @@ class PepperFlashComponentInstaller : public ComponentInstaller {
   bool GetInstalledFile(const std::string& file,
                         base::FilePath* installed_file) override;
 
+  bool Uninstall() override;
+
  private:
+  ~PepperFlashComponentInstaller() override {}
+
   Version current_version_;
 };
 
@@ -393,6 +397,10 @@ bool PepperFlashComponentInstaller::GetInstalledFile(
   return false;
 }
 
+bool PepperFlashComponentInstaller::Uninstall() {
+  return false;
+}
+
 bool CheckPepperFlashManifest(const base::DictionaryValue& manifest,
                               Version* version_out) {
   std::string name;
@@ -438,7 +446,7 @@ namespace {
 void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  CrxComponent pepflash;
+  update_client::CrxComponent pepflash;
   pepflash.name = "pepper_flash";
   pepflash.installer = new PepperFlashComponentInstaller(version);
   pepflash.version = version;

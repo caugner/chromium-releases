@@ -8,10 +8,11 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/common/content_switches.h"
+#include "content/renderer/scheduler/renderer_scheduler.h"
+#include "content/renderer/scheduler/web_scheduler_impl.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "content/test/web_gesture_curve_mock.h"
 #include "content/test/web_layer_tree_view_impl_for_testing.h"
@@ -52,19 +53,16 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
   url_loader_factory_.reset(new WebURLLoaderMockFactory());
   mock_clipboard_.reset(new MockWebClipboardImpl());
 
-  // Create an anonymous stats table since we don't need to share between
-  // processes.
-  stats_table_.reset(
-      new base::StatsTable(base::StatsTable::TableIdentifier(), 20, 200));
-  base::StatsTable::set_current(stats_table_.get());
-
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::IsolateHolder::LoadV8Snapshot();
 #endif
 
+  if (base::MessageLoopProxy::current()) {
+    renderer_scheduler_ = RendererScheduler::Create();
+    web_scheduler_.reset(new WebSchedulerImpl(renderer_scheduler_.get()));
+  }
+
   blink::initialize(this);
-  blink::mainThreadIsolate()->SetCounterFunction(
-      base::StatsTable::FindLocation);
   blink::setLayoutTestMode(true);
   blink::WebSecurityPolicy::registerURLSchemeAsLocal(
       blink::WebString::fromUTF8("test-shell-resource"));
@@ -118,8 +116,6 @@ TestBlinkWebUnitTestSupport::~TestBlinkWebUnitTestSupport() {
   url_loader_factory_.reset();
   mock_clipboard_.reset();
   blink::shutdown();
-  base::StatsTable::set_current(NULL);
-  stats_table_.reset();
 }
 
 blink::WebBlobRegistry* TestBlinkWebUnitTestSupport::blobRegistry() {
@@ -317,6 +313,10 @@ bool TestBlinkWebUnitTestSupport::getBlobItems(
     const blink::WebString& uuid,
     blink::WebVector<blink::WebBlobData::Item*>* items) {
   return blob_registry_.GetBlobItems(uuid, items);
+}
+
+blink::WebScheduler* TestBlinkWebUnitTestSupport::scheduler() {
+  return web_scheduler_.get();
 }
 
 }  // namespace content

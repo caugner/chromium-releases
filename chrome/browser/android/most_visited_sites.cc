@@ -18,8 +18,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/search/suggestions/suggestions_service_factory.h"
@@ -27,10 +26,10 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/suggestions/suggestions_service.h"
 #include "components/suggestions/suggestions_utils.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/url_data_source.h"
 #include "jni/MostVisitedSites_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -192,7 +191,7 @@ SyncState GetSyncState(Profile* profile) {
 MostVisitedSites::MostVisitedSites(Profile* profile)
     : profile_(profile), num_sites_(0), is_control_group_(false),
       initial_load_done_(false), num_local_thumbs_(0), num_server_thumbs_(0),
-      num_empty_thumbs_(0), weak_ptr_factory_(this) {
+      num_empty_thumbs_(0), scoped_observer_(this), weak_ptr_factory_(this) {
   // Register the debugging page for the Suggestions Service and the thumbnails
   // debugging page.
   content::URLDataSource::Add(profile_,
@@ -232,16 +231,16 @@ void MostVisitedSites::SetMostVisitedURLsObserver(JNIEnv* env,
 
   QueryMostVisitedURLs();
 
-  history::TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile_);
   if (top_sites) {
     // TopSites updates itself after a delay. To ensure up-to-date results,
     // force an update now.
     top_sites->SyncWithHistory();
 
-    // Register for notification when TopSites changes so that we can update
-    // ourself.
-    registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                   content::Source<history::TopSites>(top_sites));
+    // Register as TopSitesObserver so that we can update ourselves when the
+    // TopSites changes.
+    scoped_observer_.Add(top_sites.get());
   }
 }
 
@@ -256,7 +255,7 @@ void MostVisitedSites::GetURLThumbnail(JNIEnv* env,
   j_callback->Reset(env, j_callback_obj);
 
   std::string url_string = ConvertJavaStringToUTF8(env, url);
-  scoped_refptr<TopSites> top_sites(profile_->GetTopSites());
+  scoped_refptr<TopSites> top_sites(TopSitesFactory::GetForProfile(profile_));
 
   // If the Suggestions service is enabled and in use, create a callback to
   // fetch a server thumbnail from it, in case the local thumbnail is not found.
@@ -289,7 +288,8 @@ void MostVisitedSites::BlacklistUrl(JNIEnv* env,
 
   switch (mv_source_) {
     case TOP_SITES: {
-      TopSites* top_sites = profile_->GetTopSites();
+      scoped_refptr<TopSites> top_sites =
+          TopSitesFactory::GetForProfile(profile_);
       DCHECK(top_sites);
       top_sites->AddBlacklistedURL(GURL(url));
       break;
@@ -337,17 +337,6 @@ void MostVisitedSites::RecordOpenedMostVisitedItem(JNIEnv* env,
   }
 }
 
-void MostVisitedSites::Observe(int type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_TOP_SITES_CHANGED);
-
-  if (mv_source_ == TOP_SITES) {
-    // The displayed suggestions are invalidated.
-    QueryMostVisitedURLs();
-  }
-}
-
 void MostVisitedSites::OnStateChanged() {
   // There have been changes to the sync state. This class cares about a few
   // (just initialized, enabled/disabled or history sync state changed). Re-run
@@ -377,7 +366,7 @@ void MostVisitedSites::QueryMostVisitedURLs() {
 }
 
 void MostVisitedSites::InitiateTopSitesQuery() {
-  TopSites* top_sites = profile_->GetTopSites();
+  scoped_refptr<TopSites> top_sites = TopSitesFactory::GetForProfile(profile_);
   if (!top_sites)
     return;
 
@@ -527,6 +516,16 @@ void MostVisitedSites::RecordUMAMetrics() {
   num_empty_thumbs_ = 0;
   UMA_HISTOGRAM_SPARSE_SLOWLY(kNumServerTilesHistogramName, num_server_thumbs_);
   num_server_thumbs_ = 0;
+}
+
+void MostVisitedSites::TopSitesLoaded(history::TopSites* top_sites) {
+}
+
+void MostVisitedSites::TopSitesChanged(history::TopSites* top_sites) {
+  if (mv_source_ == TOP_SITES) {
+    // The displayed suggestions are invalidated.
+    QueryMostVisitedURLs();
+  }
 }
 
 static jlong Init(JNIEnv* env, jobject obj, jobject jprofile) {

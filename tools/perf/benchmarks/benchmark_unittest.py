@@ -47,7 +47,6 @@ class TestNoBenchmarkNamesDuplication(unittest.TestCase):
                         'Multiple benchmarks with the same name %s are '
                         'found: %s' % (n, str(names_to_benchmarks[n])))
 
-
 def _AddBenchmarkOptionsTests(suite):
   # Using |index_by_class_name=True| allows returning multiple benchmarks
   # from a module.

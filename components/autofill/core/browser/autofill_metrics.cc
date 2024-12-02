@@ -461,8 +461,143 @@ void AutofillMetrics::LogStoredProfileCount(size_t num_profiles) {
 }
 
 // static
+void AutofillMetrics::LogNumberOfProfilesAtAutofillableFormSubmission(
+    size_t num_profiles) {
+  UMA_HISTOGRAM_COUNTS(
+      "Autofill.StoredProfileCountAtAutofillableFormSubmission", num_profiles);
+}
+
+// static
 void AutofillMetrics::LogAddressSuggestionsCount(size_t num_suggestions) {
   UMA_HISTOGRAM_COUNTS("Autofill.AddressSuggestionsCount", num_suggestions);
+}
+
+AutofillMetrics::FormEventLogger::FormEventLogger(bool is_for_credit_card)
+    : is_for_credit_card_(is_for_credit_card),
+      is_server_data_available_(false),
+      is_local_data_available_(false),
+      has_logged_interacted_(false),
+      has_logged_suggestions_shown_(false),
+      has_logged_masked_server_card_suggestion_selected_(false),
+      has_logged_suggestion_filled_(false),
+      has_logged_submitted_(false),
+      logged_suggestion_filled_was_server_data_(false),
+      logged_suggestion_filled_was_masked_server_card_(false) {};
+
+void AutofillMetrics::FormEventLogger::OnDidInteractWithAutofillableForm() {
+  if (!has_logged_interacted_) {
+    has_logged_interacted_ = true;
+    Log(AutofillMetrics::FORM_EVENT_INTERACTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidShowSuggestions() {
+  Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN);
+  if (!has_logged_suggestions_shown_) {
+    has_logged_suggestions_shown_ = true;
+    Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidSelectMaskedServerCardSuggestion() {
+  DCHECK(is_for_credit_card_);
+  Log(AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED);
+  if (!has_logged_masked_server_card_suggestion_selected_) {
+    has_logged_masked_server_card_suggestion_selected_ = true;
+    Log(AutofillMetrics
+            ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
+    const CreditCard& credit_card) {
+  DCHECK(is_for_credit_card_);
+  if (credit_card.record_type() == CreditCard::MASKED_SERVER_CARD)
+    Log(AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED);
+  else if (credit_card.record_type() == CreditCard::FULL_SERVER_CARD)
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED);
+  else
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED);
+
+  if (!has_logged_suggestion_filled_) {
+    has_logged_suggestion_filled_ = true;
+    logged_suggestion_filled_was_server_data_ =
+        credit_card.record_type() == CreditCard::MASKED_SERVER_CARD ||
+        credit_card.record_type() == CreditCard::FULL_SERVER_CARD;
+    logged_suggestion_filled_was_masked_server_card_ =
+        credit_card.record_type() == CreditCard::MASKED_SERVER_CARD;
+    if (credit_card.record_type() == CreditCard::MASKED_SERVER_CARD) {
+      Log(AutofillMetrics
+              ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED_ONCE);
+    } else if (credit_card.record_type() == CreditCard::FULL_SERVER_CARD) {
+      Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE);
+    } else {
+      Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
+    }
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
+    const AutofillProfile& profile) {
+  DCHECK(!is_for_credit_card_);
+  if (profile.record_type() == AutofillProfile::SERVER_PROFILE)
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED);
+  else
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED);
+
+  if (!has_logged_suggestion_filled_) {
+    has_logged_suggestion_filled_ = true;
+    logged_suggestion_filled_was_server_data_ =
+        profile.record_type() == AutofillProfile::SERVER_PROFILE;
+    Log(profile.record_type() == AutofillProfile::SERVER_PROFILE
+        ? AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE
+        : AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidSubmitForm() {
+  // Not logging this kind of form if we haven't logged a user interaction.
+  if (!has_logged_interacted_)
+    return;
+
+  // Not logging twice.
+  if (has_logged_submitted_)
+    return;
+  has_logged_submitted_ = true;
+
+  if (!has_logged_suggestion_filled_) {
+    Log(AutofillMetrics::FORM_EVENT_NO_SUGGESTION_SUBMITTED_ONCE);
+  } else if (logged_suggestion_filled_was_masked_server_card_) {
+    Log(AutofillMetrics
+            ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SUBMITTED_ONCE);
+  } else if (logged_suggestion_filled_was_server_data_) {
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_SUBMITTED_ONCE);
+  } else {
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_SUBMITTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::Log(FormEvent event) const {
+  DCHECK_LT(event, NUM_FORM_EVENTS);
+  std::string name("Autofill.FormEvents.");
+  if (is_for_credit_card_)
+    name += "CreditCard";
+  else
+    name += "Address";
+  LogUMAHistogramEnumeration(name, event, NUM_FORM_EVENTS);
+
+  // Logging again in a different histogram for segmentation purposes.
+  // TODO(waltercacau): Re-evaluate if we still need such fine grained
+  // segmentation. http://crbug.com/454018
+  if (!is_server_data_available_ && !is_local_data_available_)
+    name += ".WithNoData";
+  else if (is_server_data_available_ && !is_local_data_available_)
+    name += ".WithOnlyServerData";
+  else if (!is_server_data_available_ && is_local_data_available_)
+    name += ".WithOnlyLocalData";
+  else
+    name += ".WithBothServerAndLocalData";
+  LogUMAHistogramEnumeration(name, event, NUM_FORM_EVENTS);
 }
 
 }  // namespace autofill

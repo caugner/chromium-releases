@@ -4,18 +4,22 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
 
+#include <string>
+
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "net/base/capturing_net_log.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
+#include "net/proxy/proxy_server.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_intercepting_job_factory.h"
@@ -81,7 +85,7 @@ class TestURLRequestContextWithDataReductionProxy
   TestURLRequestContextWithDataReductionProxy(DataReductionProxyParams* params,
                                               net::NetworkDelegate* delegate)
       : net::TestURLRequestContext(true) {
-    std::string proxy = params->origin().spec();
+    std::string proxy = params->origin().ToURI();
     context_storage_.set_proxy_service(net::ProxyService::CreateFixed(proxy));
     set_network_delegate(delegate);
   }
@@ -161,8 +165,9 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
   }
 
   ~DataReductionProxyInterceptorWithServerTest() override {
+    test_context_->io_data()->ShutdownOnUIThread();
     // URLRequestJobs may post clean-up tasks on destruction.
-    base::RunLoop().RunUntilIdle();
+    test_context_->RunUntilIdle();
   }
 
   void SetUp() override {
@@ -177,38 +182,32 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
     ASSERT_TRUE(proxy_.InitializeAndWaitUntilReady());
     ASSERT_TRUE(direct_.InitializeAndWaitUntilReady());
 
-    params_.reset(
-        new TestDataReductionProxyParams(
-            DataReductionProxyParams::kAllowed,
-            TestDataReductionProxyParams::HAS_EVERYTHING &
+    test_context_.reset(new DataReductionProxyTestContext(
+        DataReductionProxyParams::kAllowed,
+        TestDataReductionProxyParams::HAS_EVERYTHING &
             ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
-    params_->set_origin(proxy_.GetURL("/"));
+            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN,
+        DataReductionProxyTestContext::DEFAULT_TEST_CONTEXT_OPTIONS));
+    std::string spec;
+    base::TrimString(proxy_.GetURL("/").spec(), "/", &spec);
+    test_context_->config()->test_params()->set_origin(
+        net::ProxyServer::FromURI(spec, net::ProxyServer::SCHEME_HTTP));
     std::string proxy_name =
-        net::HostPortPair::FromURL(GURL(params_->origin())).ToString();
+        test_context_->config()->params()->origin().ToURI();
     proxy_service_.reset(
         net::ProxyService::CreateFixedFromPacResult(
             "PROXY " + proxy_name + "; DIRECT"));
 
     context_.set_proxy_service(proxy_service_.get());
 
-    event_store_.reset(
-        new DataReductionProxyEventStore(loop_.message_loop_proxy()));
-
-    DataReductionProxyInterceptor* interceptor =
-        new DataReductionProxyInterceptor(params_.get(), NULL,
-                                          event_store_.get());
-
     scoped_ptr<net::URLRequestJobFactoryImpl> job_factory_impl(
         new net::URLRequestJobFactoryImpl());
-    job_factory_.reset(
-        new net::URLRequestInterceptingJobFactory(
-            job_factory_impl.Pass(),
-            make_scoped_ptr(interceptor)));
+    job_factory_.reset(new net::URLRequestInterceptingJobFactory(
+        job_factory_impl.Pass(),
+        test_context_->io_data()->CreateInterceptor()));
     context_.set_job_factory(job_factory_.get());
     context_.Init();
   }
-
 
   const net::TestURLRequestContext& context() {
     return context_;
@@ -221,16 +220,12 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
  private:
   net::CapturingNetLog net_log_;
   net::TestNetworkDelegate network_delegate_;
-
   net::TestURLRequestContext context_;
   net::test_server::EmbeddedTestServer proxy_;
   net::test_server::EmbeddedTestServer direct_;
-  scoped_ptr<TestDataReductionProxyParams> params_;
   scoped_ptr<net::ProxyService> proxy_service_;
-  scoped_ptr<DataReductionProxyEventStore> event_store_;
   scoped_ptr<net::URLRequestJobFactory> job_factory_;
-
-  base::MessageLoopForIO loop_;
+  scoped_ptr<DataReductionProxyTestContext> test_context_;
 };
 
 TEST_F(DataReductionProxyInterceptorWithServerTest, TestBypass) {

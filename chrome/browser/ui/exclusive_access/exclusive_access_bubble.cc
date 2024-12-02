@@ -115,16 +115,17 @@ void ExclusiveAccessBubble::CheckMousePosition() {
 }
 
 void ExclusiveAccessBubble::ToggleFullscreen() {
-  browser_->fullscreen_controller()
-      ->ExitTabOrBrowserFullscreenToPreviousState();
+  browser_->exclusive_access_manager()
+      ->fullscreen_controller()
+      ->ExitExclusiveAccessToPreviousState();
 }
 
 void ExclusiveAccessBubble::Accept() {
-  browser_->fullscreen_controller()->OnAcceptFullscreenPermission();
+  browser_->exclusive_access_manager()->OnAcceptExclusiveAccessPermission();
 }
 
 void ExclusiveAccessBubble::Cancel() {
-  browser_->fullscreen_controller()->OnDenyFullscreenPermission();
+  browser_->exclusive_access_manager()->OnDenyExclusiveAccessPermission();
 }
 
 base::string16 ExclusiveAccessBubble::GetCurrentMessageText() const {
@@ -137,8 +138,8 @@ base::string16 ExclusiveAccessBubble::GetCurrentDenyButtonText() const {
   return exclusive_access_bubble::GetDenyButtonTextForType(bubble_type_);
 }
 
-base::string16 ExclusiveAccessBubble::GetAllowButtonText() const {
-  return l10n_util::GetStringUTF16(IDS_FULLSCREEN_ALLOW);
+base::string16 ExclusiveAccessBubble::GetCurrentAllowButtonText() const {
+  return exclusive_access_bubble::GetAllowButtonTextForType(bubble_type_, url_);
 }
 
 base::string16 ExclusiveAccessBubble::GetInstructionText() const {

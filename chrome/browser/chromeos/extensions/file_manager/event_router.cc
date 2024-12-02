@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/extensions/file_manager/event_router.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_change_registrar.h"
@@ -151,6 +152,17 @@ void BroadcastEvent(Profile* profile,
                     const std::string& event_name,
                     scoped_ptr<base::ListValue> event_args) {
   extensions::EventRouter::Get(profile)->BroadcastEvent(
+      make_scoped_ptr(new extensions::Event(event_name, event_args.Pass())));
+}
+
+// Sends an event named |event_name| with arguments |event_args| to an extension
+// of |extention_id|.
+void DispatchEventToExtension(Profile* profile,
+                              const std::string& extension_id,
+                              const std::string& event_name,
+                              scoped_ptr<base::ListValue> event_args) {
+  extensions::EventRouter::Get(profile)->DispatchEventToExtension(
+      extension_id,
       make_scoped_ptr(new extensions::Event(event_name, event_args.Pass())));
 }
 
@@ -340,8 +352,8 @@ class DeviceEventRouterImpl : public DeviceEventRouter {
   explicit DeviceEventRouterImpl(Profile* profile) : profile_(profile) {}
 
   // DeviceEventRouter overrides.
-  virtual void OnDeviceEvent(file_manager_private::DeviceEventType type,
-                             const std::string& device_path) override {
+  void OnDeviceEvent(file_manager_private::DeviceEventType type,
+                     const std::string& device_path) override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     file_manager_private::DeviceEvent event;
@@ -354,7 +366,7 @@ class DeviceEventRouterImpl : public DeviceEventRouter {
   }
 
   // DeviceEventRouter overrides.
-  virtual bool IsExternalStorageDisabled() override {
+  bool IsExternalStorageDisabled() override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     return profile_->GetPrefs()->GetBoolean(prefs::kExternalStorageDisabled);
   }
@@ -815,6 +827,16 @@ void EventRouter::OnRefreshTokenInvalid() {
       file_manager_private::OnDriveConnectionStatusChanged::Create());
 }
 
+void EventRouter::OnReadyToSendRequests() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Raise a DriveConnectionStatusChanged event to notify the status online.
+  BroadcastEvent(
+      profile_,
+      file_manager_private::OnDriveConnectionStatusChanged::kEventName,
+      file_manager_private::OnDriveConnectionStatusChanged::Create());
+}
+
 void EventRouter::HandleFileWatchNotification(const drive::FileChange* list,
                                               const base::FilePath& local_path,
                                               bool got_error) {
@@ -940,9 +962,11 @@ void EventRouter::DispatchDirectoryChangeEventWithEntryDefinition(
   event.entry.additional_properties.SetBoolean("fileIsDirectory",
                                                entry_definition.is_directory);
 
-  BroadcastEvent(profile_,
-                 file_manager_private::OnDirectoryChanged::kEventName,
-                 file_manager_private::OnDirectoryChanged::Create(event));
+  DispatchEventToExtension(
+      profile_,
+      *extension_id,
+      file_manager_private::OnDirectoryChanged::kEventName,
+      file_manager_private::OnDirectoryChanged::Create(event));
 }
 
 void EventRouter::OnDiskAdded(

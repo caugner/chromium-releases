@@ -4,8 +4,8 @@
 
 #include "content/common/gpu/client/gpu_memory_buffer_impl_surface_texture.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/android/surface_texture_manager.h"
 #include "ui/gl/gl_bindings.h"
 
@@ -75,8 +75,12 @@ void* GpuMemoryBufferImplSurfaceTexture::Map() {
     return NULL;
   }
 
+  size_t stride_in_bytes = 0;
+  if (!StrideInBytes(buffer.stride, format_, &stride_in_bytes))
+    return NULL;
+
   DCHECK_LE(size_.width(), buffer.stride);
-  stride_ = buffer.stride * BytesPerPixel(format_);
+  stride_ = stride_in_bytes;
   mapped_ = true;
   return buffer.bits;
 }

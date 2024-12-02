@@ -50,11 +50,17 @@ class TouchSelectionControllerTest : public testing::Test,
   ~TouchSelectionControllerTest() override {}
 
   // testing::Test implementation.
+
   void SetUp() override {
+    // Default touch selection controller is created with
+    // |show_on_tap_for_empty_editable| flag set to false. Use
+    // |AllowShowingOnTapForEmptyEditable()| function to override it.
+    bool show_on_tap_for_empty_editable = false;
     controller_.reset(new TouchSelectionController(
         this,
         base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs),
-        kDefaulTapSlop));
+        kDefaulTapSlop,
+        show_on_tap_for_empty_editable));
   }
 
   void TearDown() override { controller_.reset(); }
@@ -71,7 +77,7 @@ class TouchSelectionControllerTest : public testing::Test,
   }
 
   void SelectBetweenCoordinates(const gfx::PointF& base,
-                                        const gfx::PointF& extent) override {
+                                const gfx::PointF& extent) override {
     if (base == selection_end_ && extent == selection_start_)
       selection_points_swapped_ = true;
 
@@ -91,8 +97,16 @@ class TouchSelectionControllerTest : public testing::Test,
   }
 
   scoped_ptr<TouchHandleDrawable> CreateDrawable() override {
-    return scoped_ptr<TouchHandleDrawable>(
-        new MockTouchHandleDrawable(&dragging_enabled_));
+    return make_scoped_ptr(new MockTouchHandleDrawable(&dragging_enabled_));
+  }
+
+  void AllowShowingOnTapForEmptyEditable() {
+    bool show_on_tap_for_empty_editable = true;
+    controller_.reset(new TouchSelectionController(
+        this,
+        base::TimeDelta::FromMilliseconds(kDefaultTapTimeoutMs),
+        kDefaulTapSlop,
+        show_on_tap_for_empty_editable));
   }
 
   void SetAnimationEnabled(bool enabled) { animation_enabled_ = enabled; }
@@ -229,18 +243,19 @@ TEST_F(TouchSelectionControllerTest, InsertionClearedWhenNoLongerEditable) {
   EXPECT_EQ(INSERTION_CLEARED, GetLastEventType());
 }
 
-TEST_F(TouchSelectionControllerTest, InsertionStaysHiddenIfEmptyRegionTapped) {
+TEST_F(TouchSelectionControllerTest, InsertionWithNoShowOnTapForEmptyEditable) {
   gfx::RectF insertion_rect(5, 5, 0, 10);
   bool visible = true;
   controller().OnSelectionEditable(true);
 
-  // Taps should be ignored if they're in an empty editable region.
+  // Taps on an empty editable region should be ignored if the controller is
+  // created with |show_on_tap_for_empty_editable| set to false.
   controller().OnTapEvent();
   controller().OnSelectionEmpty(true);
   ChangeInsertion(insertion_rect, visible);
   EXPECT_EQ(gfx::PointF(), GetLastEventAnchor());
 
-  // Once the region becomes editable, taps should show the insertion handle.
+  // Once the region becomes non-empty, taps should show the insertion handle.
   controller().OnTapEvent();
   controller().OnSelectionEmpty(false);
   ChangeInsertion(insertion_rect, visible);
@@ -262,6 +277,22 @@ TEST_F(TouchSelectionControllerTest, InsertionStaysHiddenIfEmptyRegionTapped) {
   // Single Tap on an empty edit field should clear insertion handle.
   controller().OnTapEvent();
   EXPECT_EQ(INSERTION_CLEARED, GetLastEventType());
+}
+
+TEST_F(TouchSelectionControllerTest, InsertionWithShowOnTapForEmptyEditable) {
+  AllowShowingOnTapForEmptyEditable();
+
+  gfx::RectF insertion_rect(5, 5, 0, 10);
+  bool visible = true;
+  controller().OnSelectionEditable(true);
+
+  // Taps on an empty editable region should show the insertion handle if the
+  // controller is created with |show_on_tap_for_empty_editable| set to true.
+  controller().OnTapEvent();
+  controller().OnSelectionEmpty(true);
+  ChangeInsertion(insertion_rect, visible);
+  EXPECT_EQ(INSERTION_SHOWN, GetLastEventType());
+  EXPECT_EQ(insertion_rect.bottom_left(), GetLastEventAnchor());
 }
 
 TEST_F(TouchSelectionControllerTest, InsertionAppearsAfterTapFollowingTyping) {
@@ -728,6 +759,41 @@ TEST_F(TouchSelectionControllerTest, SelectionDraggedToSwitchBaseAndExtent) {
   EXPECT_TRUE(controller().WillHandleTouchEvent(event));
   EXPECT_EQ(SELECTION_DRAG_STOPPED, GetLastEventType());
   EXPECT_FALSE(GetAndResetSelectionMoved());
+}
+
+TEST_F(TouchSelectionControllerTest, SelectionDragExtremeLineSize) {
+  base::TimeTicks event_time = base::TimeTicks::Now();
+  controller().OnLongPressEvent();
+
+  float small_line_height = 1.f;
+  float large_line_height = 50.f;
+  gfx::RectF small_line_rect(0, 0, 0, small_line_height);
+  gfx::RectF large_line_rect(50, 50, 0, large_line_height);
+  bool visible = true;
+  ChangeSelection(small_line_rect, visible, large_line_rect, visible);
+  EXPECT_EQ(SELECTION_SHOWN, GetLastEventType());
+  EXPECT_EQ(small_line_rect.bottom_left(), GetLastEventAnchor());
+
+  // Start dragging the handle on the small line.
+  MockMotionEvent event(MockMotionEvent::ACTION_DOWN, event_time,
+                        small_line_rect.x(), small_line_rect.y());
+  SetDraggingEnabled(true);
+  EXPECT_TRUE(controller().WillHandleTouchEvent(event));
+  EXPECT_EQ(SELECTION_DRAG_STARTED, GetLastEventType());
+  // The drag coordinate for large lines should be capped to a reasonable
+  // offset, allowing seamless transition to neighboring lines with different
+  // sizes. The drag coordinate for small lines should have an offset
+  // commensurate with the small line size.
+  EXPECT_EQ(large_line_rect.bottom_left() - gfx::Vector2dF(0, 5.f),
+            GetLastSelectionStart());
+  EXPECT_EQ(small_line_rect.CenterPoint(), GetLastSelectionEnd());
+
+  small_line_rect += gfx::Vector2dF(25.f, 0);
+  event = MockMotionEvent(MockMotionEvent::ACTION_MOVE, event_time,
+                          small_line_rect.x(), small_line_rect.y());
+  EXPECT_TRUE(controller().WillHandleTouchEvent(event));
+  EXPECT_TRUE(GetAndResetSelectionMoved());
+  EXPECT_EQ(small_line_rect.CenterPoint(), GetLastSelectionEnd());
 }
 
 TEST_F(TouchSelectionControllerTest, Animation) {

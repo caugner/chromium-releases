@@ -42,12 +42,13 @@
         'display_change_notifier_unittest.cc',
         'display_unittest.cc',
         'font_list_unittest.cc',
+        'font_render_params_linux_unittest.cc',
         'geometry/box_unittest.cc',
         'geometry/cubic_bezier_unittest.cc',
         'geometry/insets_unittest.cc',
         'geometry/matrix3_unittest.cc',
-        'geometry/point_unittest.cc',
         'geometry/point3_unittest.cc',
+        'geometry/point_unittest.cc',
         'geometry/quad_unittest.cc',
         'geometry/r_tree_unittest.cc',
         'geometry/rect_unittest.cc',
@@ -59,6 +60,7 @@
         'image/image_mac_unittest.mm',
         'image/image_util_unittest.cc',
         'mac/coordinate_conversion_unittest.mm',
+        'platform_font_linux_unittest.cc',
         'platform_font_mac_unittest.mm',
         'range/range_mac_unittest.mm',
         'range/range_unittest.cc',
@@ -91,34 +93,8 @@
         }],
         ['OS != "mac" and OS != "ios"', {
           'sources': [
-            'transform_unittest.cc',
             'interpolated_transform_unittest.cc',
-          ],
-        }],
-        ['use_pango == 1', {
-          'dependencies': [
-            '../../build/linux/system.gyp:fontconfig',
-            '../../build/linux/system.gyp:pangocairo',
-          ],
-          'sources': [
-            'font_render_params_linux_unittest.cc',
-            'platform_font_pango_unittest.cc',
-          ],
-          'conditions': [
-            ['use_allocator!="none"', {
-              'dependencies': [
-                '../../base/allocator/allocator.gyp:allocator',
-              ],
-            }],
-          ],
-        }],
-        ['use_ozone==1 and use_pango==0', {
-          'sources!': [
-            'canvas_unittest.cc',
-            'font_list_unittest.cc',
-            'font_unittest.cc',
-            'render_text_unittest.cc',
-            'text_elider_unittest.cc',
+            'transform_unittest.cc',
           ],
         }],
         ['OS == "android"', {

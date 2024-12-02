@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
@@ -57,7 +58,6 @@ class BrowserToolbarModelDelegate;
 class BrowserTabRestoreServiceDelegate;
 class BrowserWindow;
 class FindBarController;
-class FullscreenController;
 class PrefService;
 class Profile;
 class SearchDelegate;
@@ -65,13 +65,13 @@ class SearchModel;
 class StatusBubble;
 class TabStripModel;
 class TabStripModelDelegate;
+class ValidationMessageBubble;
 struct WebApplicationInfo;
 
 namespace chrome {
 class BrowserCommandController;
 class FastUnloadController;
 class UnloadController;
-class ValidationMessageBubble;
 }
 
 namespace content {
@@ -475,8 +475,8 @@ class Browser : public TabStripModelObserver,
   // Show a download on the download shelf.
   void ShowDownload(content::DownloadItem* download);
 
-  FullscreenController* fullscreen_controller() const {
-    return fullscreen_controller_.get();
+  ExclusiveAccessManager* exclusive_access_manager() {
+    return exclusive_access_manager_.get();
   }
 
   extensions::WindowController* extension_window_controller() const {
@@ -548,7 +548,7 @@ class Browser : public TabStripModelObserver,
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   void ActivateContents(content::WebContents* contents) override;
@@ -611,8 +611,9 @@ class Browser : public TabStripModelObserver,
                           int request_id,
                           const base::FilePath& path) override;
   bool EmbedsFullscreenWidget() const override;
-  void ToggleFullscreenModeForTab(content::WebContents* web_contents,
-                                  bool enter_fullscreen) override;
+  void EnterFullscreenModeForTab(content::WebContents* web_contents,
+                                 const GURL& origin) override;
+  void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const override;
   void RegisterProtocolHandler(content::WebContents* web_contents,
@@ -953,7 +954,7 @@ class Browser : public TabStripModelObserver,
 
   BookmarkBar::State bookmark_bar_state_;
 
-  scoped_ptr<FullscreenController> fullscreen_controller_;
+  scoped_ptr<ExclusiveAccessManager> exclusive_access_manager_;
 
   scoped_ptr<extensions::WindowController> extension_window_controller_;
 
@@ -964,7 +965,7 @@ class Browser : public TabStripModelObserver,
 
   scoped_ptr<BrowserContentTranslateDriverObserver> translate_driver_observer_;
 
-  scoped_ptr<chrome::ValidationMessageBubble> validation_message_bubble_;
+  scoped_ptr<ValidationMessageBubble> validation_message_bubble_;
 
   // The following factory is used for chrome update coalescing.
   base::WeakPtrFactory<Browser> chrome_updater_factory_;

@@ -35,6 +35,7 @@
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/local_shared_objects_counter.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
@@ -68,21 +69,24 @@ enum SSLCertificateDecisionsDidRevoke {
   END_OF_SSL_CERTIFICATE_DECISIONS_DID_REVOKE_ENUM
 };
 
-// The list of content settings types to display on the Website Settings UI.
+// The list of content settings types to display on the Website Settings UI. THE
+// ORDER OF THESE ITEMS IS IMPORTANT. To propose changing it, email
+// security-dev@chromium.org.
 ContentSettingsType kPermissionType[] = {
-  CONTENT_SETTINGS_TYPE_IMAGES,
-  CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-  CONTENT_SETTINGS_TYPE_PLUGINS,
-  CONTENT_SETTINGS_TYPE_POPUPS,
-  CONTENT_SETTINGS_TYPE_GEOLOCATION,
-  CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-  CONTENT_SETTINGS_TYPE_FULLSCREEN,
-  CONTENT_SETTINGS_TYPE_MOUSELOCK,
-  CONTENT_SETTINGS_TYPE_MEDIASTREAM,
-  CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
-  CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+    CONTENT_SETTINGS_TYPE_GEOLOCATION,
+    CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+    CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+    CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+    CONTENT_SETTINGS_TYPE_IMAGES,
+    CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+    CONTENT_SETTINGS_TYPE_POPUPS,
+    CONTENT_SETTINGS_TYPE_FULLSCREEN,
+    CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+    CONTENT_SETTINGS_TYPE_PLUGINS,
+    CONTENT_SETTINGS_TYPE_MOUSELOCK,
+    CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
 #if defined(OS_ANDROID)
-  CONTENT_SETTINGS_TYPE_PUSH_MESSAGING,
+    CONTENT_SETTINGS_TYPE_PUSH_MESSAGING,
 #endif
 };
 
@@ -190,7 +194,7 @@ WebsiteSettings::WebsiteSettings(
   Init(profile, url, ssl);
 
   HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+      profile, ServiceAccessType::EXPLICIT_ACCESS);
   if (history_service) {
     history_service->GetVisibleVisitCountToHost(
         site_url_,
@@ -260,6 +264,7 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
   switch (type) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
+    case CONTENT_SETTINGS_TYPE_FULLSCREEN:
       // TODO(markusheintz): The rule we create here should also change the
       // location permission for iframed content.
       primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
@@ -273,61 +278,34 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
     case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
     case CONTENT_SETTINGS_TYPE_PLUGINS:
     case CONTENT_SETTINGS_TYPE_POPUPS:
-    case CONTENT_SETTINGS_TYPE_FULLSCREEN:
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
     case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       primary_pattern = ContentSettingsPattern::FromURL(site_url_);
       secondary_pattern = ContentSettingsPattern::Wildcard();
       break;
-    case CONTENT_SETTINGS_TYPE_MEDIASTREAM: {
-      // We need to use the same same patterns as other places like infobar code
-      // to override the existing rule instead of creating the new one.
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
       primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
       secondary_pattern = ContentSettingsPattern::Wildcard();
-      // Set permission for both microphone and camera.
-      content_settings_->SetContentSetting(
-          primary_pattern,
-          secondary_pattern,
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-          std::string(),
-          setting);
-
-      content_settings_->SetContentSetting(
-          primary_pattern,
-          secondary_pattern,
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-          std::string(),
-          setting);
       break;
-    }
     default:
       NOTREACHED() << "ContentSettingsType " << type << "is not supported.";
       break;
   }
 
-  if (type != CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
     // Permission settings are specified via rules. There exists always at least
     // one rule for the default setting. Get the rule that currently defines
     // the permission for the given permission |type|. Then test whether the
     // existing rule is more specific than the rule we are about to create. If
     // the existing rule is more specific, than change the existing rule instead
     // of creating a new rule that would be hidden behind the existing rule.
-    // This is not a concern for CONTENT_SETTINGS_TYPE_MEDIASTREAM since users
-    // can not create media settings exceptions by hand.
     content_settings::SettingInfo info;
     scoped_ptr<base::Value> v =
         content_settings_->GetWebsiteSettingWithoutOverride(
             site_url_, site_url_, type, std::string(), &info);
     content_settings_->SetNarrowestWebsiteSetting(
         primary_pattern, secondary_pattern, type, std::string(), setting, info);
-  } else {
-    base::Value* value = NULL;
-    if (setting != CONTENT_SETTING_DEFAULT)
-      value = new base::FundamentalValue(setting);
-    content_settings_->SetWebsiteSetting(
-        primary_pattern, secondary_pattern, type, std::string(), value);
-  }
 
   show_info_bar_ = true;
 
@@ -502,6 +480,8 @@ void WebsiteSettings::Init(Profile* profile,
       if ((ssl.cert_status & net::CERT_STATUS_SHA1_SIGNATURE_PRESENT) &&
           cert->valid_expiry() >
               base::Time::FromInternalValue(kSHA1LastIssuanceDate) &&
+          // NOTE: This use of SHA1IdentityUIWarning needs to be kept in sync
+          // with ToolbarModelImpl::IsDeprecatedSHA1Present().
           base::FieldTrialList::FindFullName("SHA1IdentityUIWarning") ==
               "Enabled") {
         site_identity_status_ =
@@ -696,49 +676,21 @@ void WebsiteSettings::PresentSitePermissions() {
     }
 
     content_settings::SettingInfo info;
-    if (permission_info.type == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
-      scoped_ptr<base::Value> mic_value =
-          content_settings_->GetWebsiteSettingWithoutOverride(
-              site_url_,
-              site_url_,
-              CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-              std::string(),
-              &info);
-      ContentSetting mic_setting =
-          content_settings::ValueToContentSetting(mic_value.get());
-
-      scoped_ptr<base::Value> camera_value =
-          content_settings_->GetWebsiteSettingWithoutOverride(
-              site_url_,
-              site_url_,
-              CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-              std::string(),
-              &info);
-      ContentSetting camera_setting =
-          content_settings::ValueToContentSetting(camera_value.get());
-
-      if (mic_setting != camera_setting || mic_setting == CONTENT_SETTING_ASK)
-        permission_info.setting = CONTENT_SETTING_DEFAULT;
-      else
-        permission_info.setting = mic_setting;
+    scoped_ptr<base::Value> value =
+        content_settings_->GetWebsiteSettingWithoutOverride(
+            site_url_, site_url_, permission_info.type, std::string(), &info);
+    DCHECK(value.get());
+    if (value->GetType() == base::Value::TYPE_INTEGER) {
+      permission_info.setting =
+          content_settings::ValueToContentSetting(value.get());
     } else {
-      scoped_ptr<base::Value> value =
-          content_settings_->GetWebsiteSettingWithoutOverride(
-              site_url_, site_url_, permission_info.type, std::string(), &info);
-      DCHECK(value.get());
-      if (value->GetType() == base::Value::TYPE_INTEGER) {
-        permission_info.setting =
-            content_settings::ValueToContentSetting(value.get());
-      } else {
-        NOTREACHED();
-      }
+      NOTREACHED();
     }
 
     permission_info.source = info.source;
 
     if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&
-        info.secondary_pattern == ContentSettingsPattern::Wildcard() &&
-        permission_info.type != CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
+        info.secondary_pattern == ContentSettingsPattern::Wildcard()) {
       permission_info.default_setting = permission_info.setting;
       permission_info.setting = CONTENT_SETTING_DEFAULT;
     } else {
@@ -746,7 +698,11 @@ void WebsiteSettings::PresentSitePermissions() {
           content_settings_->GetDefaultContentSetting(permission_info.type,
                                                       NULL);
     }
-    permission_info_list.push_back(permission_info);
+
+    if (permission_info.setting != CONTENT_SETTING_DEFAULT &&
+        permission_info.setting != permission_info.default_setting) {
+      permission_info_list.push_back(permission_info);
+    }
   }
 
   ui_->SetPermissionInfo(permission_info_list);

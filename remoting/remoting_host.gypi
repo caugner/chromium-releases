@@ -4,32 +4,26 @@
 
 {
   'includes': [
-    'remoting_host_linux.gypi',
-    'remoting_host_mac.gypi',
-    'remoting_host_win.gypi',
+    'remoting_enable.gypi',
   ],
 
-  'variables': {
-    'conditions': [
-      # Remoting host is supported only on Windows, OSX and Linux (with X11).
-      ['OS=="win" or OS=="mac" or (OS=="linux" and use_x11==1)', {
-        'enable_me2me_host': 1,
-        'enable_it2me_host': 1,
-        'enable_remoting_host': 1,
-      }, {
-        'enable_me2me_host': 0,
-        'enable_it2me_host': 0,
-        'enable_remoting_host': 0,
-      }],
-      ['chromeos==1', {
-        'enable_remoting_host': 1,
-        'enable_me2me_host': 0,
-        'enable_it2me_host': 1,
-      }],
-    ],
-  },
-
   'conditions': [
+    ['OS=="mac"', {
+      'includes': [
+        'remoting_host_mac.gypi',
+      ],
+    }],
+    ['OS=="win"', {
+      'includes': [
+        'remoting_host_win.gypi',
+      ],
+    }],
+    ['OS=="linux"', {
+      'includes': [
+        'remoting_host_linux.gypi',
+      ],
+    }],
+
     ['enable_remoting_host==1', {
       'targets': [
         {
@@ -46,6 +40,8 @@
             'remoting_protocol',
             'remoting_resources',
             '../base/base.gyp:base_i18n',
+            '../components/components.gyp:policy',
+            '../components/components.gyp:policy_component_common',
             '../crypto/crypto.gyp:crypto',
             '../google_apis/google_apis.gyp:google_apis',
             '../ipc/ipc.gyp:ipc',
@@ -88,8 +84,6 @@
             ['chromeos==1', {
               'dependencies' : [
                 '../cc/cc.gyp:cc',
-                '../components/components.gyp:policy_component_common',
-                '../content/content.gyp:content',
                 '../ppapi/ppapi_internal.gyp:ppapi_host',
                 '../skia/skia.gyp:skia',
                 '../ui/aura/aura.gyp:aura',
@@ -108,7 +102,6 @@
                 'host/linux/x_server_clipboard.cc',
                 'host/linux/x_server_clipboard.h',
                 'host/local_input_monitor_x11.cc',
-                'host/policy_hack/policy_watcher_linux.cc',
                 'host/remoting_me2me_host.cc',
               ],
               'conditions': [
@@ -225,14 +218,14 @@
             '../base/base.gyp:base',
           ],
           'sources': [
-            'host/native_messaging/pipe_messaging_channel.cc',
-            'host/native_messaging/pipe_messaging_channel.h',
             'host/native_messaging/native_messaging_pipe.cc',
             'host/native_messaging/native_messaging_pipe.h',
             'host/native_messaging/native_messaging_reader.cc',
             'host/native_messaging/native_messaging_reader.h',
             'host/native_messaging/native_messaging_writer.cc',
             'host/native_messaging/native_messaging_writer.h',
+            'host/native_messaging/pipe_messaging_channel.cc',
+            'host/native_messaging/pipe_messaging_channel.h',
           ],
         },  # end of target 'remoting_native_messaging_base'
 
@@ -257,8 +250,6 @@
             'host/setup/daemon_controller_delegate_mac.mm',
             'host/setup/daemon_controller_delegate_win.cc',
             'host/setup/daemon_controller_delegate_win.h',
-            'host/setup/daemon_installer_win.cc',
-            'host/setup/daemon_installer_win.h',
             'host/setup/me2me_native_messaging_host.cc',
             'host/setup/me2me_native_messaging_host.h',
             'host/setup/oauth_client.cc',
@@ -395,6 +386,28 @@
             ]},
           ],
         },  # end of target 'remoting_infoplist_strings'
+        {
+          # GN version: //remoting/host/it2me:common
+          'target_name': 'remoting_it2me_host_static',
+          'type': 'static_library',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base_i18n',
+            '../components/components.gyp:policy',
+            '../net/net.gyp:net',
+            'remoting_base',
+            'remoting_host',
+            'remoting_infoplist_strings',
+            'remoting_protocol',
+            'remoting_resources',
+          ],
+          'defines': [
+            'VERSION=<(version_full)',
+          ],
+          'sources': [
+            '<@(remoting_it2me_host_static_sources)',
+          ],
+        },  # end of target 'remoting_it2me_host_static'
       ],  # end of 'targets'
     }],  # 'enable_remoting_host==1'
 
@@ -433,34 +446,8 @@
             }],
           ],  # end of 'conditions'
         },  # end of target 'remoting_me2me_host_static'
-      ] # end of targets
-    }], # end of enable_me2me_host==1
-
-    ['enable_it2me_host==1', {
-      'targets': [
-        {
-          # GN version: //remoting/host/it2me:common
-          'target_name': 'remoting_it2me_host_static',
-          'type': 'static_library',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            '../base/base.gyp:base_i18n',
-            '../net/net.gyp:net',
-            'remoting_base',
-            'remoting_host',
-            'remoting_infoplist_strings',
-            'remoting_protocol',
-            'remoting_resources',
-          ],
-          'defines': [
-            'VERSION=<(version_full)',
-          ],
-          'sources': [
-            '<@(remoting_it2me_host_static_sources)',
-          ],
-        },  # end of target 'remoting_it2me_host_static'
-      ] # end of targets
-    }], # end of 'enable_it2me_host==1'
+      ]  # end of targets
+    }],  # end of enable_me2me_host==1
 
     ['OS!="win" and enable_me2me_host==1', {
       'targets': [
@@ -643,104 +630,115 @@
       ], # targets
     }], # end of OS!="win" and enable_me2me_host==1
 
-    ['OS!="win" and enable_it2me_host==1 and chromeos==0', {
-      'targets': [
-        {
-          'target_name': 'remoting_it2me_native_messaging_host',
-          'type': 'executable',
-          'product_name': 'remote_assistance_host',
-          'variables': { 'enable_wexit_time_destructors': 1, },
-          'dependencies': [
-            '../base/base.gyp:base',
-            'remoting_base',
-            'remoting_breakpad',
-            'remoting_host',
-            'remoting_it2me_host_static',
-            'remoting_native_messaging_base',
-            'remoting_protocol',
-          ],
-          'defines': [
-            'VERSION=<(version_full)',
-          ],
-          'sources': [
-            'host/it2me/it2me_native_messaging_host_entry_point.cc',
-            'host/it2me/it2me_native_messaging_host_main.cc',
-            'host/it2me/it2me_native_messaging_host_main.h',
-          ],
-          'conditions': [
-            ['OS=="linux" and chromeos==0 and use_ozone==0', {
+    ['OS!="win" and enable_remoting_host==1', {
+      'conditions': [
+        ['chromeos==0', {
+          'targets': [
+            {
+              'target_name': 'remoting_it2me_native_messaging_host',
+              'type': 'executable',
+              'product_name': 'remote_assistance_host',
+              'variables': { 'enable_wexit_time_destructors': 1, },
               'dependencies': [
-                # Always use GTK on Linux, even for Aura builds.
-                '../build/linux/system.gyp:gtk',
+                '../base/base.gyp:base',
+                'remoting_base',
+                'remoting_breakpad',
+                'remoting_host',
+                'remoting_it2me_host_static',
+                'remoting_native_messaging_base',
+                'remoting_protocol',
               ],
-            }],
-            ['OS=="linux" and use_allocator!="none"', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
+              'defines': [
+                'VERSION=<(version_full)',
               ],
-            }],
-            ['OS=="mac"', {
-              'mac_bundle': 1,
-              'variables': {
-                 'host_bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_REMOTE_ASSISTANCE_HOST_BUNDLE_ID@")',
-              },
-              'xcode_settings': {
-                'INFOPLIST_FILE': 'host/it2me/remote_assistance_host-Info.plist',
-                'INFOPLIST_PREPROCESS': 'YES',
-                'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)"',
-              },
-              'mac_bundle_resources': [
-                '<(PRODUCT_DIR)/icudtl.dat',
-                'host/disconnect_window.xib',
-                'host/it2me/remote_assistance_host-Info.plist',
-                '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x <(PRODUCT_DIR) <(remoting_locales))',
-
-                # Localized strings for 'Info.plist'
-                '<!@pymod_do_main(remoting_localize --locale_output '
-                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/remote_assistance_host-InfoPlist.strings/@{json_suffix}.lproj/InfoPlist.strings" '
-                    '--print_only <(remoting_locales))',
-              ],
-              'mac_bundle_resources!': [
-                'host/it2me/remote_assistance_host-Info.plist',
+              'sources': [
+                'host/it2me/it2me_native_messaging_host_entry_point.cc',
+                'host/it2me/it2me_native_messaging_host_main.cc',
+                'host/it2me/it2me_native_messaging_host_main.h',
               ],
               'conditions': [
-                ['mac_breakpad==1', {
-                  'variables': {
-                    # A real .dSYM is needed for dump_syms to operate on.
-                    'mac_real_dsym': 1,
-                  },
-                  'copies': [
-                    {
-                      'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
-                      'files': [
-                        '<(PRODUCT_DIR)/crash_inspector',
-                        '<(PRODUCT_DIR)/crash_report_sender.app'
-                      ],
-                    },
-                  ],
+                ['OS=="linux" and chromeos==0 and use_ozone==0', {
                   'dependencies': [
-                    '../breakpad/breakpad.gyp:dump_syms',
+                    # Always use GTK on Linux, even for Aura builds.
+                    '../build/linux/system.gyp:gtk',
                   ],
-                  'postbuilds': [
-                    {
-                      'postbuild_name': 'Dump Symbols',
-                      'variables': {
-                        'dump_product_syms_path':
-                            'scripts/mac/dump_product_syms',
-                      },
-                      'action': [
-                        '<(dump_product_syms_path)',
-                        '<(version_full)',
-                      ],
-                    },  # end of postbuild 'dump_symbols'
-                  ],  # end of 'postbuilds'
-                }],  # mac_breakpad==1
-              ],  # conditions
-            }],  # OS=mac
-          ],
-        },  # end of target 'remoting_it2me_native_messaging_host'
-      ],  # end of 'targets'
-    }],  # # end of OS!="win" and enable_it2me_host==1
+                }],
+                ['OS=="linux" and use_allocator!="none"', {
+                  'dependencies': [
+                    '../base/allocator/allocator.gyp:allocator',
+                  ],
+                }],
+                ['OS=="mac"', {
+                  'mac_bundle': 1,
+                  'variables': {
+                    'host_bundle_id': '<!(python <(version_py_path) -f <(branding_path) -t "@MAC_REMOTE_ASSISTANCE_HOST_BUNDLE_ID@")',
+                  },
+                  'xcode_settings': {
+                    'INFOPLIST_FILE': 'host/it2me/remote_assistance_host-Info.plist',
+                    'INFOPLIST_PREPROCESS': 'YES',
+                    'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'VERSION_FULL="<(version_full)" VERSION_SHORT="<(version_short)" BUNDLE_ID="<(host_bundle_id)"',
+                  },
+                  'mac_bundle_resources': [
+                    '<(PRODUCT_DIR)/icudtl.dat',
+                    'host/disconnect_window.xib',
+                    'host/it2me/remote_assistance_host-Info.plist',
+                    '<!@pymod_do_main(remoting_copy_locales -o -p <(OS) -x <(PRODUCT_DIR) <(remoting_locales))',
 
+                    # Localized strings for 'Info.plist'
+                    '<!@pymod_do_main(remoting_localize --locale_output '
+                    '"<(SHARED_INTERMEDIATE_DIR)/remoting/remote_assistance_host-InfoPlist.strings/@{json_suffix}.lproj/InfoPlist.strings" '
+                    '--print_only <(remoting_locales))',
+                  ],
+                  'mac_bundle_resources!': [
+                    'host/it2me/remote_assistance_host-Info.plist',
+                  ],
+                  'conditions': [
+                    ['mac_breakpad==1', {
+                      'variables': {
+                        # A real .dSYM is needed for dump_syms to operate on.
+                        'mac_real_dsym': 1,
+                      },
+                      'copies': [
+                        {
+                          'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Resources',
+                          'files': [
+                            '<(PRODUCT_DIR)/crash_inspector',
+                            '<(PRODUCT_DIR)/crash_report_sender.app'
+                          ],
+                        },
+                      ],
+                      'dependencies': [
+                        '../breakpad/breakpad.gyp:dump_syms',
+                      ],
+                      'postbuilds': [
+                        {
+                          'postbuild_name': 'Dump Symbols',
+                          'variables': {
+                            'dump_product_syms_path':
+                            'scripts/mac/dump_product_syms',
+                          },
+                          'action': [
+                            '<(dump_product_syms_path)',
+                            '<(version_full)',
+                          ],
+                        },  # end of postbuild 'dump_symbols'
+                      ],  # end of 'postbuilds'
+                    }],  # mac_breakpad==1
+                  ],  # conditions
+                }],  # OS=mac
+              ],  # end of conditions
+            },  # end of target 'remoting_it2me_native_messaging_host'
+          ],  # targets
+        }, {  # chromeos==0
+          'targets': [
+            {
+              # Dummy target for chromeos==1
+              'target_name': 'remoting_it2me_native_messaging_host',
+              'type': 'executable',
+            },
+          ],  # targets
+        }],  # end of chromeos==0
+      ],  # end of conditions
+    }],  # end of OS!="win" and enable_remoting_host==1
   ],  # end of 'conditions'
 }

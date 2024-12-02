@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/web_site_settings_uma_util.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
@@ -244,13 +245,6 @@ void AddExceptionsGrantedByHostedApps(content::BrowserContext* context,
   }
 }
 
-// Sort ZoomLevelChanges by host and scheme
-// (a.com < http://a.com < https://a.com < b.com).
-bool HostZoomSort(const content::HostZoomMap::ZoomLevelChange& a,
-                  const content::HostZoomMap::ZoomLevelChange& b) {
-  return a.host == b.host ? a.scheme < b.scheme : a.host < b.host;
-}
-
 }  // namespace
 
 namespace options {
@@ -327,9 +321,8 @@ void ContentSettingsHandler::GetLocalizedValues(
     {"plugins_header", IDS_PLUGIN_HEADER},
     {"pluginsAllow", IDS_PLUGIN_ALLOW_RADIO},
     {"pluginsDetect", IDS_PLUGIN_DETECT_RADIO},
-    {"pluginsAsk", IDS_PLUGIN_ASK_RADIO},
     {"pluginsBlock", IDS_PLUGIN_BLOCK_RADIO},
-    {"disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE},
+    {"manageIndividualPlugins", IDS_PLUGIN_MANAGE_INDIVIDUAL},
     // Pop-ups filter.
     {"popupsTabLabel", IDS_POPUP_TAB_LABEL},
     {"popups_header", IDS_POPUP_HEADER},
@@ -612,6 +605,12 @@ void ContentSettingsHandler::UpdateSettingDefaultFromModel(
       profile->GetHostContentSettingsMap()->GetDefaultContentSetting(
           type, &provider_id);
 
+  // For Plugins, display the obsolete ASK setting as BLOCK.
+  if (type == ContentSettingsType::CONTENT_SETTINGS_TYPE_PLUGINS &&
+      default_setting == ContentSetting::CONTENT_SETTING_ASK) {
+    default_setting = ContentSetting::CONTENT_SETTING_BLOCK;
+  }
+
   base::DictionaryValue filter_settings;
   filter_settings.SetString(ContentSettingsTypeToGroupName(type) + ".value",
                             ContentSettingToString(default_setting));
@@ -753,6 +752,11 @@ void ContentSettingsHandler::UpdateExceptionsViewFromModel(
     case CONTENT_SETTINGS_TYPE_METRO_SWITCH_TO_DESKTOP:
       break;
 #endif
+    case CONTENT_SETTINGS_TYPE_APP_BANNER:
+      // The content settings type CONTENT_SETTINGS_TYPE_APP_BANNER is used to
+      // track whether app banners should be shown or not, and is not a user
+      // visible content setting.
+      break;
     default:
       UpdateExceptionsViewFromHostContentSettingsMap(type);
       break;
@@ -1040,7 +1044,13 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
 
   AdjustZoomLevelsListForSigninPageIfNecessary(&zoom_levels);
 
-  std::sort(zoom_levels.begin(), zoom_levels.end(), HostZoomSort);
+  // Sort ZoomLevelChanges by host and scheme
+  // (a.com < http://a.com < https://a.com < b.com).
+  std::sort(zoom_levels.begin(), zoom_levels.end(),
+            [](const content::HostZoomMap::ZoomLevelChange& a,
+               const content::HostZoomMap::ZoomLevelChange& b) {
+              return a.host == b.host ? a.scheme < b.scheme : a.host < b.host;
+            });
 
   for (content::HostZoomMap::ZoomLevelVector::const_iterator i =
            zoom_levels.begin();
@@ -1056,11 +1066,12 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
               l10n_util::GetStringUTF8(IDS_ZOOMLEVELS_CHROME_ERROR_PAGES_LABEL);
         }
         exception->SetString(kOrigin, host);
+        break;
       }
       case content::HostZoomMap::ZOOM_CHANGED_FOR_SCHEME_AND_HOST:
         // These are not stored in preferences and get cleared on next browser
         // start. Therefore, we don't care for them.
-        break;
+        continue;
       case content::HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM:
         NOTREACHED();
     }
@@ -1408,6 +1419,9 @@ void ContentSettingsHandler::RemoveException(const base::ListValue* args) {
     RemoveMediaException(args);
   else
     RemoveExceptionFromHostContentSettingsMap(args, type);
+
+  WebSiteSettingsUmaUtil::LogPermissionChange(
+      type, ContentSetting::CONTENT_SETTING_DEFAULT);
 }
 
 void ContentSettingsHandler::SetException(const base::ListValue* args) {

@@ -47,11 +47,11 @@ TestMediaScanner.prototype.removeObserver = function(observer) {
 
 /** @override */
 TestMediaScanner.prototype.scan = function(entries) {
-  var result = new TestScanResult(this.fileEntries);
-  result.totalBytes = this.totalBytes;
-  result.scanDuration = this.scanDuration;
-  this.scans_.push(result);
-  return result;
+  var scan = new TestScanResult(this.fileEntries);
+  scan.totalBytes = this.totalBytes;
+  scan.scanDuration = this.scanDuration;
+  this.scans_.push(scan);
+  return scan;
 };
 
 /**
@@ -59,6 +59,19 @@ TestMediaScanner.prototype.scan = function(entries) {
  */
 TestMediaScanner.prototype.finalizeScans = function() {
   this.scans_.forEach(this.finalize.bind(this));
+};
+
+/**
+ * Notifies observers that the most recently started scan has been updated.
+ * @param {!importer.ScanResult} result
+ */
+TestMediaScanner.prototype.update = function() {
+  assertTrue(this.scans_.length > 0);
+  var scan = this.scans_[this.scans_.length - 1];
+  this.observers.forEach(
+      function(observer) {
+        observer(importer.ScanEvent.UPDATED, scan);
+      });
 };
 
 /**
@@ -102,6 +115,9 @@ function TestScanResult(fileEntries) {
   /** @type {number} */
   this.scanDuration = 100;
 
+  /** @type {number} */
+  this.duplicateFileCount = 0;
+
   /** @type {function} */
   this.resolveResult_;
 
@@ -131,16 +147,6 @@ TestScanResult.prototype.getFileEntries = function() {
 };
 
 /** @override */
-TestScanResult.prototype.getTotalBytes = function() {
-  return this.totalBytes;
-};
-
-/** @override */
-TestScanResult.prototype.getScanDurationMs = function() {
-  return this.scanDuration;
-};
-
-/** @override */
 TestScanResult.prototype.finalize = function() {
   return this.resolveResult_(this);
 };
@@ -153,4 +159,42 @@ TestScanResult.prototype.whenFinal = function() {
 /** @override */
 TestScanResult.prototype.isFinal = function() {
   return this.settled_;
+};
+
+/** @override */
+TestScanResult.prototype.isInvalidated = function() {
+  return false;
+};
+
+/** @override */
+TestScanResult.prototype.getStatistics = function() {
+  return {
+    scanDuration: this.scanDuration,
+    newFileCount: this.fileEntries.length,
+    duplicateFileCount: this.duplicateFileCount,
+    sizeBytes: this.totalBytes
+  };
+};
+
+/**
+ * @constructor
+ * @implements {importer.DirectoryWatcher}
+ */
+function TestDirectoryWatcher(callback) {
+  /**
+   * @public {function()}
+   * @const
+   */
+  this.callback = callback;
+
+  /**
+   * @public {boolean}
+   */
+  this.triggered = false;
+};
+
+/**
+ * @override
+ */
+TestDirectoryWatcher.prototype.addDirectory = function() {
 };

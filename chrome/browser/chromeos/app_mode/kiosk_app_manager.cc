@@ -21,6 +21,7 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_external_loader.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager_observer.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_external_updater.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -35,10 +36,6 @@
 #include "components/ownership/owner_key_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/extension_urls.h"
-
-#if !defined(USE_ATHENA)
-#include "chrome/browser/chromeos/app_mode/kiosk_external_updater.h"
-#endif
 
 namespace chromeos {
 
@@ -103,15 +100,21 @@ void KioskAppManager::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(kKioskDictionaryName);
 }
 
-KioskAppManager::App::App(const KioskAppData& data, bool is_extension_pending)
+KioskAppManager::App::App(
+    const KioskAppData& data,
+    bool is_extension_pending,
+    bool auto_launched_with_zero_delay)
     : app_id(data.app_id()),
       user_id(data.user_id()),
       name(data.name()),
       icon(data.icon()),
-      is_loading(data.IsLoading() || is_extension_pending) {
+      is_loading(data.IsLoading() || is_extension_pending),
+      was_auto_launched_with_zero_delay(auto_launched_with_zero_delay) {
 }
 
-KioskAppManager::App::App() : is_loading(false) {}
+KioskAppManager::App::App() : is_loading(false),
+                              was_auto_launched_with_zero_delay(false) {}
+
 KioskAppManager::App::~App() {}
 
 std::string KioskAppManager::GetAutoLaunchApp() const {
@@ -132,6 +135,12 @@ void KioskAppManager::SetAutoLaunchApp(const std::string& app_id) {
       app_id.empty() ? std::string() : GenerateKioskAppAccountId(app_id));
   CrosSettings::Get()->SetInteger(
       kAccountsPrefDeviceLocalAccountAutoLoginDelay, 0);
+}
+
+void KioskAppManager::SetAppWasAutoLaunchedWithZeroDelay(
+    const std::string& app_id) {
+  DCHECK_EQ(auto_launch_app_id_, app_id);
+  currently_auto_launched_with_zero_delay_app_ = app_id;
 }
 
 void KioskAppManager::EnableConsumerKioskAutoLaunch(
@@ -314,9 +323,11 @@ void KioskAppManager::GetApps(Apps* apps) const {
   apps->reserve(apps_.size());
   for (size_t i = 0; i < apps_.size(); ++i) {
     const KioskAppData& app_data = *apps_[i];
-    if (app_data.status() != KioskAppData::STATUS_ERROR)
+    if (app_data.status() != KioskAppData::STATUS_ERROR) {
       apps->push_back(App(
-          app_data, external_cache_->IsExtensionPending(app_data.app_id())));
+          app_data, external_cache_->IsExtensionPending(app_data.app_id()),
+          app_data.app_id() == currently_auto_launched_with_zero_delay_app_));
+    }
   }
 }
 
@@ -325,17 +336,9 @@ bool KioskAppManager::GetApp(const std::string& app_id, App* app) const {
   if (!data)
     return false;
 
-  *app = App(*data, external_cache_->IsExtensionPending(app_id));
+  *app = App(*data, external_cache_->IsExtensionPending(app_id),
+             app_id == currently_auto_launched_with_zero_delay_app_);
   return true;
-}
-
-const base::RefCountedString* KioskAppManager::GetAppRawIcon(
-    const std::string& app_id) const {
-  const KioskAppData* data = GetAppData(app_id);
-  if (!data)
-    return NULL;
-
-  return data->raw_icon();
 }
 
 bool KioskAppManager::GetDisableBailoutShortcut() const {
@@ -467,23 +470,19 @@ KioskAppManager::KioskAppManager()
 KioskAppManager::~KioskAppManager() {}
 
 void KioskAppManager::MonitorKioskExternalUpdate() {
-#if !defined(USE_ATHENA)
   base::FilePath cache_dir;
   GetCrxCacheDir(&cache_dir);
   base::FilePath unpack_dir;
   GetCrxUnpackDir(&unpack_dir);
   usb_stick_updater_.reset(new KioskExternalUpdater(
       GetBackgroundTaskRunner(), cache_dir, unpack_dir));
-#endif
 }
 
 void KioskAppManager::CleanUp() {
   local_accounts_subscription_.reset();
   local_account_auto_login_id_subscription_.reset();
   apps_.clear();
-#if !defined(USE_ATHENA)
   usb_stick_updater_.reset();
-#endif
   external_cache_.reset();
 }
 
@@ -602,6 +601,12 @@ void KioskAppManager::OnExtensionLoadedInCache(const std::string& id) {
   KioskAppData* app_data = GetAppDataMutable(id);
   if (!app_data)
     return;
+
+  base::FilePath crx_path;
+  std::string version;
+  if (GetCachedCrx(id, &crx_path, &version))
+    app_data->SetCachedCrx(crx_path);
+
   FOR_EACH_OBSERVER(KioskAppManagerObserver,
                     observers_,
                     OnKioskExtensionLoadedInCache(id));

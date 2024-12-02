@@ -9,6 +9,7 @@ import android.content.Intent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.TabState;
+import org.chromium.chrome.browser.document.IncognitoNotificationManager;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tabmodel.OffTheRecordTabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -31,6 +32,14 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     @VisibleForTesting
     public boolean isDocumentTabModelImplCreated() {
         return !(getDelegateModel() instanceof EmptyTabModel);
+    }
+
+    @Override
+    protected void destroyIncognitoIfNecessary() {
+        super.destroyIncognitoIfNecessary();
+        if (!isDocumentTabModelImplCreated()) {
+            IncognitoNotificationManager.dismissIncognitoNotification();
+        }
     }
 
     private DocumentTabModel getDelegateDocumentTabModel() {
@@ -64,8 +73,7 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
 
     @Override
     public void updateRecentlyClosed() {
-        if (!isDocumentTabModelImplCreated()) return;
-        getDelegateDocumentTabModel().updateRecentlyClosed();
+        if (isDocumentTabModelImplCreated()) getDelegateDocumentTabModel().updateRecentlyClosed();
         destroyIncognitoIfNecessary();
     }
 
@@ -106,6 +114,12 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     }
 
     @Override
+    public void addTab(Intent intent, Tab tab) {
+        ensureTabModelImpl();
+        getDelegateDocumentTabModel().addTab(intent, tab);
+    }
+
+    @Override
     public boolean closeTabAt(int index) {
         boolean success = false;
         if (isDocumentTabModelImplCreated()) {
@@ -134,9 +148,9 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     }
 
     @Override
-    public void setLastShownId(int id) {
+    public boolean setLastShownId(int id) {
         ensureTabModelImpl();
-        getDelegateDocumentTabModel().setLastShownId(id);
+        return getDelegateDocumentTabModel().setLastShownId(id);
     }
 
     @Override

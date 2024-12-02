@@ -10,9 +10,9 @@
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "base/bind.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/trace_event/trace_event_argument.h"
 
 namespace android_webview {
 
@@ -69,7 +69,6 @@ void RequestDrawGLTracker::ResetPending() {
 void RequestDrawGLTracker::SetQueuedFunctorOnUi(SharedRendererState* state) {
   base::AutoLock lock(lock_);
   DCHECK(state);
-  DCHECK(pending_ui_ == state || pending_non_ui_ == state);
   pending_ui_ = state;
   pending_non_ui_ = NULL;
 }
@@ -336,7 +335,7 @@ void SharedRendererState::ReleaseHardwareDrawIfNeededOnUI() {
   DCHECK(ui_loop_->BelongsToCurrentThread());
   InsideHardwareReleaseReset auto_inside_hardware_release_reset(this);
 
-  browser_view_renderer_->InvalidateOnFunctorDestroy();
+  browser_view_renderer_->DetachFunctorFromView();
   bool hardware_initialized = browser_view_renderer_->hardware_enabled();
   if (hardware_initialized) {
     bool draw_functor_succeeded = browser_view_renderer_->RequestDrawGL(true);

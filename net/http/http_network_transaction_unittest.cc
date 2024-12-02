@@ -477,7 +477,7 @@ class BeforeProxyHeadersSentHandler {
 
 // Fill |str| with a long header list that consumes >= |size| bytes.
 void FillLargeHeadersString(std::string* str, int size) {
-  const char* row =
+  const char row[] =
       "SomeHeaderName: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\n";
   const int sizeof_row = strlen(row);
   const int num_rows = static_cast<int>(
@@ -577,19 +577,18 @@ CaptureGroupNameSocketPool<ParentPool>::CaptureGroupNameSocketPool(
 
 template <>
 CaptureGroupNameHttpProxySocketPool::CaptureGroupNameSocketPool(
-    HostResolver* host_resolver,
+    HostResolver* /* host_resolver */,
     CertVerifier* /* cert_verifier */)
-    : HttpProxyClientSocketPool(0, 0, NULL, host_resolver, NULL, NULL, NULL) {
+    : HttpProxyClientSocketPool(0, 0, NULL, NULL, NULL, NULL) {
 }
 
 template <>
 CaptureGroupNameSSLSocketPool::CaptureGroupNameSocketPool(
-    HostResolver* host_resolver,
+    HostResolver* /* host_resolver */,
     CertVerifier* cert_verifier)
     : SSLClientSocketPool(0,
                           0,
                           NULL,
-                          host_resolver,
                           cert_verifier,
                           NULL,
                           NULL,
@@ -1314,7 +1313,7 @@ void HttpNetworkTransactionTest::KeepAliveConnectionResendRequestTest(
   StaticSocketDataProvider data2(data2_reads, arraysize(data2_reads), NULL, 0);
   session_deps_.socket_factory->AddSocketDataProvider(&data2);
 
-  const char* kExpectedResponseData[] = {
+  const char* const kExpectedResponseData[] = {
     "hello", "world"
   };
 
@@ -1855,8 +1854,8 @@ TEST_P(HttpNetworkTransactionTest, KeepAliveAfterUnreadBody) {
     "HTTP/1.1 301 Moved Permanently",
   };
 
-  COMPILE_ASSERT(kNumUnreadBodies == arraysize(kStatusLines),
-                 forgot_to_update_kStatusLines);
+  static_assert(kNumUnreadBodies == arraysize(kStatusLines),
+                "forgot to update kStatusLines");
 
   for (int i = 0; i < kNumUnreadBodies; ++i)
     EXPECT_EQ(kStatusLines[i], response_lines[i]);
@@ -3652,7 +3651,7 @@ TEST_P(HttpNetworkTransactionTest, HttpsProxySpdyConnectSpdy) {
   scoped_ptr<SpdyFrame> connect(spdy_util_.ConstructSpdyConnect(
       NULL, 0, 1, LOWEST, HostPortPair("www.google.com", 443)));
   // fetch https://www.google.com/ via SPDY
-  const char* const kMyUrl = "https://www.google.com/";
+  const char kMyUrl[] = "https://www.google.com/";
   scoped_ptr<SpdyFrame> get(
       spdy_util_.ConstructSpdyGet(kMyUrl, false, 1, LOWEST));
   scoped_ptr<SpdyFrame> wrapped_get(
@@ -5377,7 +5376,7 @@ TEST_P(HttpNetworkTransactionTest, ResendRequestOnWriteBodyError) {
   session_deps_.socket_factory->AddSocketDataProvider(&data1);
   session_deps_.socket_factory->AddSocketDataProvider(&data2);
 
-  const char* kExpectedResponseData[] = {
+  const char* const kExpectedResponseData[] = {
     "hello world", "welcome"
   };
 
@@ -6725,7 +6724,7 @@ TEST_P(HttpNetworkTransactionTest, BasicAuthSpdyProxy) {
 
   // The proxy responds to the connect with a 407, using a persistent
   // connection.
-  const char* const kAuthStatus = "407";
+  const char kAuthStatus[] = "407";
   const char* const kAuthChallenge[] = {
     "proxy-authenticate", "Basic realm=\"MyRealm1\"",
   };
@@ -7843,7 +7842,7 @@ scoped_refptr<HttpNetworkSession> SetupSessionForGroupNameTests(
       session->http_server_properties();
   http_server_properties->SetAlternateProtocol(
       HostPortPair("host.with.alternate", 80), 443,
-      AlternateProtocolFromNextProto(next_proto), 1);
+      AlternateProtocolFromNextProto(next_proto), 1.0);
 
   return session;
 }
@@ -8735,8 +8734,9 @@ TEST_P(HttpNetworkTransactionTest, HonorAlternateProtocolHeader) {
   HostPortPair http_host_port_pair("www.google.com", 80);
   HttpServerProperties& http_server_properties =
       *session->http_server_properties();
-  EXPECT_FALSE(
-      http_server_properties.HasAlternateProtocol(http_host_port_pair));
+  AlternateProtocolInfo alternate =
+      http_server_properties.GetAlternateProtocol(http_host_port_pair);
+  EXPECT_EQ(alternate.protocol, UNINITIALIZED_ALTERNATE_PROTOCOL);
 
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -8751,12 +8751,10 @@ TEST_P(HttpNetworkTransactionTest, HonorAlternateProtocolHeader) {
   ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
   EXPECT_EQ("hello world", response_data);
 
-  ASSERT_TRUE(http_server_properties.HasAlternateProtocol(http_host_port_pair));
-  const AlternateProtocolInfo alternate =
-      http_server_properties.GetAlternateProtocol(http_host_port_pair);
-  AlternateProtocolInfo expected_alternate(
-      443, AlternateProtocolFromNextProto(GetParam()), 1);
-  EXPECT_TRUE(expected_alternate.Equals(alternate));
+  alternate = http_server_properties.GetAlternateProtocol(http_host_port_pair);
+  EXPECT_EQ(443, alternate.port);
+  EXPECT_EQ(AlternateProtocolFromNextProto(GetParam()), alternate.protocol);
+  EXPECT_EQ(1.0, alternate.probability);
 }
 
 TEST_P(HttpNetworkTransactionTest,
@@ -8791,7 +8789,7 @@ TEST_P(HttpNetworkTransactionTest,
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(request.url),
       666 /* port is ignored by MockConnect anyway */,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      AlternateProtocolFromNextProto(GetParam()), 1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8810,11 +8808,10 @@ TEST_P(HttpNetworkTransactionTest,
   ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
   EXPECT_EQ("hello world", response_data);
 
-  ASSERT_TRUE(http_server_properties->HasAlternateProtocol(
-      HostPortPair::FromURL(request.url)));
   const AlternateProtocolInfo alternate =
       http_server_properties->GetAlternateProtocol(
           HostPortPair::FromURL(request.url));
+  EXPECT_NE(UNINITIALIZED_ALTERNATE_PROTOCOL, alternate.protocol);
   EXPECT_TRUE(alternate.is_broken);
 }
 
@@ -8852,8 +8849,8 @@ TEST_P(HttpNetworkTransactionTest,
   const int kUnrestrictedAlternatePort = 1024;
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(restricted_port_request.url),
-      kUnrestrictedAlternatePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      kUnrestrictedAlternatePort, AlternateProtocolFromNextProto(GetParam()),
+      1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8903,8 +8900,8 @@ TEST_P(HttpNetworkTransactionTest,
   const int kUnrestrictedAlternatePort = 1024;
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(restricted_port_request.url),
-      kUnrestrictedAlternatePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      kUnrestrictedAlternatePort, AlternateProtocolFromNextProto(GetParam()),
+      1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8951,8 +8948,8 @@ TEST_P(HttpNetworkTransactionTest,
   const int kRestrictedAlternatePort = 80;
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(restricted_port_request.url),
-      kRestrictedAlternatePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      kRestrictedAlternatePort, AlternateProtocolFromNextProto(GetParam()),
+      1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9000,8 +8997,8 @@ TEST_P(HttpNetworkTransactionTest,
   const int kRestrictedAlternatePort = 80;
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(unrestricted_port_request.url),
-      kRestrictedAlternatePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      kRestrictedAlternatePort, AlternateProtocolFromNextProto(GetParam()),
+      1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9048,8 +9045,8 @@ TEST_P(HttpNetworkTransactionTest,
   const int kUnrestrictedAlternatePort = 1024;
   http_server_properties->SetAlternateProtocol(
       HostPortPair::FromURL(unrestricted_port_request.url),
-      kUnrestrictedAlternatePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      kUnrestrictedAlternatePort, AlternateProtocolFromNextProto(GetParam()),
+      1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9090,9 +9087,8 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
       session->http_server_properties();
   const int kUnsafePort = 7;
   http_server_properties->SetAlternateProtocol(
-      HostPortPair::FromURL(request.url),
-      kUnsafePort,
-      AlternateProtocolFromNextProto(GetParam()), 1);
+      HostPortPair::FromURL(request.url), kUnsafePort,
+      AlternateProtocolFromNextProto(GetParam()), 1.0);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9776,10 +9772,10 @@ TEST_P(HttpNetworkTransactionTest, GenerateAuthToken) {
   static const int kNoSSL = 500;
 
   struct TestConfig {
-    const char* proxy_url;
+    const char* const proxy_url;
     AuthTiming proxy_auth_timing;
     int proxy_auth_rv;
-    const char* server_url;
+    const char* const server_url;
     AuthTiming server_auth_timing;
     int server_auth_rv;
     int num_auth_rounds;
@@ -10161,7 +10157,7 @@ TEST_P(HttpNetworkTransactionTest, MultiRoundAuth) {
                                          writes, arraysize(writes));
   session_deps_.socket_factory->AddSocketDataProvider(&data_provider);
 
-  const char* const kSocketGroup = "www.example.com:80";
+  const char kSocketGroup[] = "www.example.com:80";
 
   // First round of authentication.
   auth_handler->SetGenerateExpectation(false, OK);
@@ -12784,7 +12780,7 @@ class FakeWebSocketBasicHandshakeStream : public WebSocketHandshakeStreamBase {
     return false;
   }
 
-  void GetSSLInfo(SSLInfo* ssl_info) override { NOTREACHED(); }
+  void GetSSLInfo(SSLInfo* ssl_info) override {}
 
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override {
     NOTREACHED();

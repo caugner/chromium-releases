@@ -6,11 +6,11 @@
 
 #include <string>
 
-#include "base/debug/trace_event.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/accessibility/invert_bubble_prefs.h"
 #include "chrome/browser/autocomplete/zero_suggest_provider.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/component_updater/recovery_component_installer.h"
+#include "chrome/browser/component_updater/supervised_user_whitelist_installer.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
@@ -111,6 +112,7 @@
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/accessibility/animation_policy_prefs.h"
 #include "chrome/browser/apps/drive/drive_app_mapping.h"
 #include "chrome/browser/apps/shortcut_manager.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
@@ -169,6 +171,7 @@
 #include "chrome/browser/chromeos/login/users/avatar/user_image_sync_observer.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/net/proxy_config_handler.h"
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -191,9 +194,14 @@
 #include "chrome/browser/ui/webui/chromeos/login/reset_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chromeos/audio/audio_devices_pref_handler_impl.h"
+#include "chromeos/timezone/timezone_resolver.h"
 #include "components/invalidation/invalidator_storage.h"
 #else
 #include "chrome/browser/extensions/default_apps.h"
+#endif
+
+#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+#include "chrome/browser/ui/app_list/google_now_extension.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -214,10 +222,6 @@
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #endif
 
-#if !defined(USE_ATHENA)
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
-#endif
-
 namespace {
 
 enum MigratedPreferences {
@@ -234,10 +238,6 @@ enum MigratedPreferences {
 const char kBackupPref[] = "backup";
 
 #if !defined(OS_ANDROID)
-// The sync promo error message preference has been removed; this pref will
-// be cleared from user data.
-const char kSyncPromoErrorMessage[] = "sync_promo.error_message";
-
 // The AutomaticProfileResetter service used this preference to save that the
 // profile reset prompt had already been shown, however, the preference has been
 // renamed in Local State. We keep the name here for now so that we can clear
@@ -262,6 +262,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chrome_prefs::RegisterPrefs(registry);
   chrome_variations::VariationsService::RegisterPrefs(registry);
   component_updater::RegisterPrefsForRecoveryComponent(registry);
+  component_updater::SupervisedUserWhitelistInstaller::RegisterPrefs(registry);
   ExternalProtocolHandler::RegisterPrefs(registry);
   FlagsUI::RegisterPrefs(registry);
   geolocation::RegisterPrefs(registry);
@@ -345,9 +346,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   chromeos::system::AutomaticRebootManager::RegisterPrefs(registry);
   chromeos::UserImageManager::RegisterPrefs(registry);
   chromeos::UserSessionManager::RegisterPrefs(registry);
-#if !defined(USE_ATHENA)
   chromeos::WallpaperManager::RegisterPrefs(registry);
-#endif
   chromeos::echo_offer::RegisterPrefs(registry);
   extensions::ExtensionAssetsManagerChromeOS::RegisterPrefs(registry);
   invalidation::InvalidatorStorage::RegisterPrefs(registry);
@@ -357,6 +356,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   policy::DeviceCloudPolicyManagerChromeOS::RegisterPrefs(registry);
   policy::DeviceStatusCollector::RegisterPrefs(registry);
   policy::PolicyCertServiceFactory::RegisterPrefs(registry);
+  chromeos::TimeZoneResolver::RegisterPrefs(registry);
 #endif
 
 #if defined(OS_MACOSX)
@@ -383,7 +383,8 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
 
 // Register prefs applicable to all profiles.
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  TRACE_EVENT0("browser", "chrome::RegisterUserPrefs");
+  TRACE_EVENT0("browser", "chrome::RegisterProfilePrefs");
+  SCOPED_UMA_HISTOGRAM_TIMER("Settings.RegisterProfilePrefsTime");
   // User prefs. Please keep this list alphabetized.
   autofill::AutofillManager::RegisterProfilePrefs(registry);
   bookmarks::RegisterProfilePrefs(registry);
@@ -443,6 +444,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   extensions::CopresenceService::RegisterProfilePrefs(registry);
 #endif
+  RegisterAnimationPolicyPrefs(registry);
 #endif  // defined(ENABLE_EXTENSIONS)
 
 #if defined(ENABLE_NOTIFICATIONS)
@@ -535,12 +537,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       kBackupPref,
       new base::DictionaryValue(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#if !defined(OS_ANDROID)
-  registry->RegisterStringPref(
-      kSyncPromoErrorMessage,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-#endif
 }
 
 void RegisterUserProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -570,9 +566,6 @@ void MigrateUserPrefs(Profile* profile) {
   prefs->ClearPref(kBackupPref);
 
 #if !defined(OS_ANDROID)
-  // Cleanup now-removed sync promo error message preference.
-  // TODO(fdoray): Remove this when it's safe to do so (crbug.com/268442).
-  prefs->ClearPref(kSyncPromoErrorMessage);
   // Migrate kNetworkPredictionEnabled to kNetworkPredictionOptions when not on
   // Android.  On Android, platform-specific code performs preference migration.
   // TODO(bnc): https://crbug.com/401970  Remove migration code one year after
@@ -586,6 +579,10 @@ void MigrateUserPrefs(Profile* profile) {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   autofill::AutofillManager::MigrateUserPrefs(prefs);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
+#if defined(OS_CHROMEOS) && defined(ENABLE_APP_LIST)
+  MigrateGoogleNowPrefs(profile);
+#endif
 }
 
 void MigrateBrowserPrefs(Profile* profile, PrefService* local_state) {

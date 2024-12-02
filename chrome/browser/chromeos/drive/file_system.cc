@@ -30,7 +30,6 @@
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 #include "chrome/browser/chromeos/drive/search_metadata.h"
 #include "chrome/browser/chromeos/drive/sync_client.h"
-#include "chrome/browser/drive/drive_service_interface.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/drive_api_parser.h"
@@ -209,6 +208,11 @@ void GetPathFromResourceIdAfterGetPath(base::FilePath* file_path,
   callback.Run(error, *file_path);
 }
 
+bool FreeDiskSpaceIfNeededForOnBlockingPool(internal::FileCache* cache,
+                                            int64 num_bytes) {
+  return cache->FreeDiskSpaceIfNeededFor(num_bytes);
+}
+
 // Excludes hosted documents from the given entries.
 // Used to implement ReadDirectory().
 void FilterHostedDocuments(const ReadDirectoryEntriesCallback& callback,
@@ -233,8 +237,34 @@ void FilterHostedDocuments(const ReadDirectoryEntriesCallback& callback,
 // Adapter for using FileOperationCallback as google_apis::EntryActionCallback.
 void RunFileOperationCallbackAsEntryActionCallback(
     const FileOperationCallback& callback,
-    google_apis::GDataErrorCode error) {
+    google_apis::DriveApiErrorCode error) {
   callback.Run(GDataToFileError(error));
+}
+
+// Checks if the |entry|'s hash is included in |hashes|.
+bool CheckHashes(const std::set<std::string>& hashes,
+                 const ResourceEntry& entry) {
+  return hashes.find(entry.file_specific_info().md5()) != hashes.end();
+}
+
+// Runs |callback| with |error| and the list of HashAndFilePath obtained from
+// |original_result|.
+void RunSearchByHashesCallback(
+    const SearchByHashesCallback& callback,
+    FileError error,
+    scoped_ptr<MetadataSearchResultVector> original_result) {
+  std::vector<HashAndFilePath> result;
+  if (error != FILE_ERROR_OK) {
+    callback.Run(error, result);
+    return;
+  }
+  for (const auto& search_result : *original_result) {
+    HashAndFilePath hash_and_path;
+    hash_and_path.hash = search_result.md5;
+    hash_and_path.path = search_result.path;
+    result.push_back(hash_and_path);
+  }
+  callback.Run(FILE_ERROR_OK, result);
 }
 
 }  // namespace
@@ -250,7 +280,6 @@ FileSystem::FileSystem(
     PrefService* pref_service,
     EventLogger* logger,
     internal::FileCache* cache,
-    DriveServiceInterface* drive_service,
     JobScheduler* scheduler,
     internal::ResourceMetadata* resource_metadata,
     base::SequencedTaskRunner* blocking_task_runner,
@@ -258,7 +287,6 @@ FileSystem::FileSystem(
     : pref_service_(pref_service),
       logger_(logger),
       cache_(cache),
-      drive_service_(drive_service),
       scheduler_(scheduler),
       resource_metadata_(resource_metadata),
       last_update_check_error_(FILE_ERROR_OK),
@@ -669,7 +697,7 @@ void FileSystem::GetAvailableSpace(
 
 void FileSystem::OnGetAboutResource(
     const GetAvailableSpaceCallback& callback,
-    google_apis::GDataErrorCode status,
+    google_apis::DriveApiErrorCode status,
     scoped_ptr<google_apis::AboutResource> about_resource) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -739,7 +767,7 @@ void FileSystem::GetShareUrlAfterGetResourceEntry(
 
 void FileSystem::OnGetResourceEntryForGetShareUrl(
     const GetShareUrlCallback& callback,
-    google_apis::GDataErrorCode status,
+    google_apis::DriveApiErrorCode status,
     const GURL& share_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
@@ -776,12 +804,20 @@ void FileSystem::SearchMetadata(const std::string& query,
   if (pref_service_->GetBoolean(prefs::kDisableDriveHostedFiles))
     options |= SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS;
 
-  drive::internal::SearchMetadata(blocking_task_runner_,
-                                  resource_metadata_,
-                                  query,
-                                  options,
-                                  at_most_num_matches,
-                                  callback);
+  drive::internal::SearchMetadata(
+      blocking_task_runner_, resource_metadata_, query,
+      base::Bind(&drive::internal::MatchesType, options), at_most_num_matches,
+      callback);
+}
+
+void FileSystem::SearchByHashes(const std::set<std::string>& hashes,
+                                const SearchByHashesCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  drive::internal::SearchMetadata(
+      blocking_task_runner_, resource_metadata_,
+      /* any file name */ "", base::Bind(&CheckHashes, hashes),
+      std::numeric_limits<size_t>::max(),
+      base::Bind(&RunSearchByHashesCallback, callback));
 }
 
 void FileSystem::OnFileChangedByOperation(const FileChange& changed_files) {
@@ -992,5 +1028,16 @@ void FileSystem::GetPathFromResourceId(const std::string& resource_id,
       base::Bind(&GetPathFromResourceIdAfterGetPath,
                  base::Owned(file_path),
                  callback));
+}
+
+void FileSystem::FreeDiskSpaceIfNeededFor(
+    int64 num_bytes,
+    const FreeDiskSpaceCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+  base::PostTaskAndReplyWithResult(
+      blocking_task_runner_.get(), FROM_HERE,
+      base::Bind(&FreeDiskSpaceIfNeededForOnBlockingPool, cache_, num_bytes),
+      callback);
 }
 }  // namespace drive

@@ -72,7 +72,7 @@ void AutocompleteMatchToAssistedQuery(
       *subtype = 46;
       return;
     }
-    case AutocompleteMatchType::SEARCH_SUGGEST_INFINITE: {
+    case AutocompleteMatchType::SEARCH_SUGGEST_TAIL: {
       *subtype = 33;
       return;
     }
@@ -82,10 +82,6 @@ void AutocompleteMatchToAssistedQuery(
     }
     case AutocompleteMatchType::SEARCH_SUGGEST_PROFILE: {
       *subtype = 44;
-      return;
-    }
-    case AutocompleteMatchType::SEARCH_SUGGEST_ANSWER: {
-      *subtype = 70;
       return;
     }
     case AutocompleteMatchType::NAVSUGGEST: {

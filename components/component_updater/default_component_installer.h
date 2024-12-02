@@ -16,7 +16,7 @@
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "components/component_updater/component_updater_service.h"
+#include "components/update_client/update_client.h"
 
 namespace base {
 class FilePath;
@@ -25,6 +25,8 @@ class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace component_updater {
+
+class ComponentUpdateService;
 
 // Components should use a DefaultComponentInstaller by defining a class that
 // implements the members of ComponentInstallerTraits, and then registering a
@@ -82,7 +84,7 @@ class ComponentInstallerTraits {
 // A DefaultComponentInstaller is intended to be final, and not derived from.
 // Customization must be provided by passing a ComponentInstallerTraits object
 // to the constructor.
-class DefaultComponentInstaller : public ComponentInstaller {
+class DefaultComponentInstaller : public update_client::ComponentInstaller {
  public:
   DefaultComponentInstaller(
       scoped_ptr<ComponentInstallerTraits> installer_traits);
@@ -96,16 +98,19 @@ class DefaultComponentInstaller : public ComponentInstaller {
                const base::FilePath& unpack_path) override;
   bool GetInstalledFile(const std::string& file,
                         base::FilePath* installed_file) override;
-
-  ~DefaultComponentInstaller() override;
+  bool Uninstall() override;
 
  private:
+  ~DefaultComponentInstaller() override;
+
   base::FilePath GetInstallDirectory();
   bool InstallHelper(const base::DictionaryValue& manifest,
                      const base::FilePath& unpack_path,
                      const base::FilePath& install_path);
   void StartRegistration(ComponentUpdateService* cus);
   void FinishRegistration(ComponentUpdateService* cus);
+  void ComponentReady(scoped_ptr<base::DictionaryValue> manifest);
+  void UninstallOnTaskRunner();
 
   base::Version current_version_;
   std::string current_fingerprint_;

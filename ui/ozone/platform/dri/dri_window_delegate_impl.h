@@ -9,23 +9,22 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/ozone_export.h"
 #include "ui/ozone/platform/dri/display_change_observer.h"
 #include "ui/ozone/platform/dri/dri_window_delegate.h"
 
 namespace ui {
 
 class DriBuffer;
-class DriWindowDelegateManager;
-class DriWrapper;
+class DrmDeviceManager;
 class HardwareDisplayController;
 class ScreenManager;
 
-class DriWindowDelegateImpl : public DriWindowDelegate,
-                              public DisplayChangeObserver {
+class OZONE_EXPORT DriWindowDelegateImpl : public DriWindowDelegate,
+                                           public DisplayChangeObserver {
  public:
   DriWindowDelegateImpl(gfx::AcceleratedWidget widget,
-                        DriWrapper* drm,
-                        DriWindowDelegateManager* window_manager,
+                        DrmDeviceManager* device_manager,
                         ScreenManager* screen_manager);
   ~DriWindowDelegateImpl() override;
 
@@ -53,10 +52,11 @@ class DriWindowDelegateImpl : public DriWindowDelegate,
   // Draw next frame in an animated cursor.
   void OnCursorAnimationTimeout();
 
+  void UpdateWidgetToDrmDeviceMapping();
+
   gfx::AcceleratedWidget widget_;
 
-  DriWrapper* drm_;                           // Not owned.
-  DriWindowDelegateManager* window_manager_;  // Not owned.
+  DrmDeviceManager* device_manager_;          // Not owned.
   ScreenManager* screen_manager_;             // Not owned.
 
   // The current bounds of the window.

@@ -41,7 +41,7 @@ class WebContents;
 
 namespace extensions {
 class ExtensionFunctionDispatcher;
-class ExtensionMessageFilter;
+class IOThreadExtensionMessageFilter;
 class QuotaLimitHeuristic;
 }
 
@@ -215,9 +215,10 @@ class ExtensionFunction
   // Sets the function's bad message state.
   void set_bad_message(bool bad_message) { bad_message_ = bad_message; }
 
-  // Specifies the name of the function.
-  void set_name(const std::string& name) { name_ = name; }
-  const std::string& name() const { return name_; }
+  // Specifies the name of the function. A long-lived string (such as a string
+  // literal) must be provided.
+  void set_name(const char* name) { name_ = name; }
+  const char* name() const { return name_; }
 
   void set_profile_id(void* profile_id) { profile_id_ = profile_id; }
   void* profile_id() const { return profile_id_; }
@@ -308,6 +309,12 @@ class ExtensionFunction
                       const std::string& s1,
                       const std::string& s2,
                       const std::string& s3);
+  // Error with a list of arguments |args| to pass to caller. TAKES OWNERSHIP.
+  // Using this ResponseValue indicates something is wrong with the API.
+  // It shouldn't be possible to have both an error *and* some arguments.
+  // Some legacy APIs do rely on it though, like webstorePrivate.
+  ResponseValue ErrorWithArguments(scoped_ptr<base::ListValue> args,
+                                   const std::string& error);
   // Bad message. A ResponseValue equivalent to EXTENSION_FUNCTION_VALIDATE(),
   // so this will actually kill the renderer and not respond at all.
   ResponseValue BadMessage();
@@ -357,7 +364,7 @@ class ExtensionFunction
   scoped_refptr<const extensions::Extension> extension_;
 
   // The name of this function.
-  std::string name_;
+  const char* name_;
 
   // The URL of the frame which is making this request
   GURL source_url_;
@@ -523,13 +530,14 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   IOThreadExtensionFunction* AsIOThreadExtensionFunction() override;
 
   void set_ipc_sender(
-      base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender,
+      base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender,
       int routing_id) {
     ipc_sender_ = ipc_sender;
     routing_id_ = routing_id;
   }
 
-  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_weak() const {
+  base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender_weak()
+      const {
     return ipc_sender_;
   }
 
@@ -554,7 +562,7 @@ class IOThreadExtensionFunction : public ExtensionFunction {
   void SendResponse(bool success) override;
 
  private:
-  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender_;
+  base::WeakPtr<extensions::IOThreadExtensionMessageFilter> ipc_sender_;
   int routing_id_;
 
   scoped_refptr<const extensions::InfoMap> extension_info_map_;

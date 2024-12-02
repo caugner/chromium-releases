@@ -24,8 +24,11 @@ PermissionMenuModel::PermissionMenuModel(
           IDS_WEBSITE_SETTINGS_MENU_ITEM_DEFAULT_BLOCK);
       break;
     case CONTENT_SETTING_ASK:
+      // For Plugins, ASK is obsolete. Show as BLOCK to reflect actual behavior.
       label = l10n_util::GetStringUTF16(
-          IDS_WEBSITE_SETTINGS_MENU_ITEM_DEFAULT_ASK);
+          permission_.type == CONTENT_SETTINGS_TYPE_PLUGINS
+              ? IDS_WEBSITE_SETTINGS_MENU_ITEM_DEFAULT_BLOCK
+              : IDS_WEBSITE_SETTINGS_MENU_ITEM_DEFAULT_ASK);
       break;
     case CONTENT_SETTING_DETECT_IMPORTANT_CONTENT:
       label = l10n_util::GetStringUTF16(
@@ -38,15 +41,32 @@ PermissionMenuModel::PermissionMenuModel(
   }
   AddCheckItem(CONTENT_SETTING_DEFAULT, label);
 
-  // Media only support CONTENTE_SETTTING_ALLOW for https.
-  if (permission_.type != CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
-      url.SchemeIsSecure()) {
+  // CONTENT_SETTING_ALLOW and CONTENT_SETTING_BLOCK are not allowed for
+  // fullscreen or mouse lock on file:// URLs, because there wouldn't be
+  // a reasonable origin with which to associate the preference.
+  // TODO(estark): Revisit this when crbug.com/455882 is fixed.
+  bool is_exclusive_access_on_file =
+      (permission_.type == CONTENT_SETTINGS_TYPE_FULLSCREEN ||
+       permission_.type == CONTENT_SETTINGS_TYPE_MOUSELOCK) &&
+      url.SchemeIsFile();
+
+  // Media only support CONTENT_SETTTING_ALLOW for https.
+  if ((permission_.type != CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
+       url.SchemeIsSecure()) &&
+      !is_exclusive_access_on_file) {
     label = l10n_util::GetStringUTF16(
         IDS_WEBSITE_SETTINGS_MENU_ITEM_ALLOW);
     AddCheckItem(CONTENT_SETTING_ALLOW, label);
   }
 
-  if (permission_.type != CONTENT_SETTINGS_TYPE_FULLSCREEN) {
+  if (permission_.type == CONTENT_SETTINGS_TYPE_PLUGINS) {
+    label = l10n_util::GetStringUTF16(
+        IDS_WEBSITE_SETTINGS_MENU_ITEM_DETECT_IMPORTANT_CONTENT);
+    AddCheckItem(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT, label);
+  }
+
+  if (permission_.type != CONTENT_SETTINGS_TYPE_FULLSCREEN &&
+      !is_exclusive_access_on_file) {
     label = l10n_util::GetStringUTF16(
         IDS_WEBSITE_SETTINGS_MENU_ITEM_BLOCK);
     AddCheckItem(CONTENT_SETTING_BLOCK, label);
@@ -70,6 +90,12 @@ PermissionMenuModel::PermissionMenuModel(const GURL& url,
 PermissionMenuModel::~PermissionMenuModel() {}
 
 bool PermissionMenuModel::IsCommandIdChecked(int command_id) const {
+  // For Plugins, ASK is obsolete. Show as BLOCK to reflect actual behavior.
+  if (permission_.type == CONTENT_SETTINGS_TYPE_PLUGINS &&
+      permission_.setting == CONTENT_SETTING_ASK &&
+      command_id == CONTENT_SETTING_BLOCK) {
+    return true;
+  }
   return permission_.setting == command_id;
 }
 

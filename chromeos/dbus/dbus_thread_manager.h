@@ -45,6 +45,7 @@ class EasyUnlockClient;
 class GsmSMSClient;
 class ImageBurnerClient;
 class IntrospectableClient;
+class LeadershipDaemonManagerClient;
 class LorgnetteManagerClient;
 class ModemMessagingClient;
 class NfcAdapterClient;
@@ -55,7 +56,6 @@ class NfcTagClient;
 class PeerDaemonManagerClient;
 class PermissionBrokerClient;
 class PowerManagerClient;
-class PrivetDaemonClient;
 class SessionManagerClient;
 class ShillDeviceClient;
 class ShillIPConfigClient;
@@ -136,6 +136,7 @@ class CHROMEOS_EXPORT DBusThreadManager {
   GsmSMSClient* GetGsmSMSClient();
   ImageBurnerClient* GetImageBurnerClient();
   IntrospectableClient* GetIntrospectableClient();
+  LeadershipDaemonManagerClient* GetLeadershipDaemonManagerClient();
   LorgnetteManagerClient* GetLorgnetteManagerClient();
   ModemMessagingClient* GetModemMessagingClient();
   NfcAdapterClient* GetNfcAdapterClient();
@@ -146,7 +147,6 @@ class CHROMEOS_EXPORT DBusThreadManager {
   PeerDaemonManagerClient* GetPeerDaemonManagerClient();
   PermissionBrokerClient* GetPermissionBrokerClient();
   PowerManagerClient* GetPowerManagerClient();
-  PrivetDaemonClient* GetPrivetDaemonClient();
   SessionManagerClient* GetSessionManagerClient();
   ShillDeviceClient* GetShillDeviceClient();
   ShillIPConfigClient* GetShillIPConfigClient();
@@ -223,6 +223,8 @@ class CHROMEOS_EXPORT DBusThreadManagerSetter {
   void SetCryptohomeClient(scoped_ptr<CryptohomeClient> client);
   void SetDebugDaemonClient(scoped_ptr<DebugDaemonClient> client);
   void SetEasyUnlockClient(scoped_ptr<EasyUnlockClient> client);
+  void SetLeadershipDaemonManagerClient(
+      scoped_ptr<LeadershipDaemonManagerClient> client);
   void SetLorgnetteManagerClient(scoped_ptr<LorgnetteManagerClient> client);
   void SetShillDeviceClient(scoped_ptr<ShillDeviceClient> client);
   void SetShillIPConfigClient(scoped_ptr<ShillIPConfigClient> client);
@@ -241,7 +243,6 @@ class CHROMEOS_EXPORT DBusThreadManagerSetter {
   void SetPeerDaemonManagerClient(scoped_ptr<PeerDaemonManagerClient> client);
   void SetPermissionBrokerClient(scoped_ptr<PermissionBrokerClient> client);
   void SetPowerManagerClient(scoped_ptr<PowerManagerClient> client);
-  void SetPrivetDaemonClient(scoped_ptr<PrivetDaemonClient> client);
   void SetSessionManagerClient(scoped_ptr<SessionManagerClient> client);
   void SetSMSClient(scoped_ptr<SMSClient> client);
   void SetSystemClockClient(scoped_ptr<SystemClockClient> client);

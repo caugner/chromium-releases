@@ -27,6 +27,7 @@
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -127,6 +128,9 @@ void OffTheRecordProfileImpl::Init() {
   BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
       this);
 
+  set_is_guest_profile(
+      profile_->GetPath() == ProfileManager::GetGuestProfilePath());
+
   // Guest profiles may always be OTR. Check IncognitoModePrefs otherwise.
   DCHECK(profile_->IsGuestSession() ||
          IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) !=
@@ -221,8 +225,8 @@ void OffTheRecordProfileImpl::TrackZoomLevelsFromParent() {
                      base::Unretained(this)));
 }
 
-std::string OffTheRecordProfileImpl::GetProfileName() {
-  // Incognito profile should not return the profile name.
+std::string OffTheRecordProfileImpl::GetProfileUserName() const {
+  // Incognito profile should not return the username.
   return std::string();
 }
 
@@ -291,6 +295,10 @@ bool OffTheRecordProfileImpl::IsLegacySupervised() {
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
+  return prefs_;
+}
+
+const PrefService* OffTheRecordProfileImpl::GetPrefs() const {
   return prefs_;
 }
 
@@ -424,14 +432,6 @@ Time OffTheRecordProfileImpl::GetStartTime() const {
   return start_time_;
 }
 
-history::TopSites* OffTheRecordProfileImpl::GetTopSitesWithoutCreating() {
-  return NULL;
-}
-
-history::TopSites* OffTheRecordProfileImpl::GetTopSites() {
-  return NULL;
-}
-
 void OffTheRecordProfileImpl::SetExitType(ExitType exit_type) {
 }
 
@@ -511,13 +511,12 @@ class GuestSessionProfile : public OffTheRecordProfileImpl {
  public:
   explicit GuestSessionProfile(Profile* real_profile)
       : OffTheRecordProfileImpl(real_profile) {
+    set_is_guest_profile(true);
   }
 
-  virtual ProfileType GetProfileType() const override {
-    return GUEST_PROFILE;
-  }
+  ProfileType GetProfileType() const override { return GUEST_PROFILE; }
 
-  virtual void InitChromeOSPreferences() override {
+  void InitChromeOSPreferences() override {
     chromeos_preferences_.reset(new chromeos::Preferences());
     chromeos_preferences_->Init(
         this, user_manager::UserManager::Get()->GetActiveUser());

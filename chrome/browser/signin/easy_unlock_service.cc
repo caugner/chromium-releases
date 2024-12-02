@@ -4,8 +4,11 @@
 
 #include "chrome/browser/signin/easy_unlock_service.h"
 
+#include "apps/app_lifetime_monitor.h"
+#include "apps/app_lifetime_monitor_factory.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/guid.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -15,15 +18,13 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/component_loader.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_auth_attempt.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_observer.h"
 #include "chrome/browser/signin/screenlock_bridge.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/api/easy_unlock_private.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -31,14 +32,8 @@
 #include "components/user_manager/user.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_registry.h"
-#include "extensions/browser/extension_system.h"
-#include "extensions/common/one_shot_event.h"
-#include "grit/browser_resources.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/sys_info.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
@@ -51,19 +46,18 @@
 
 namespace {
 
-extensions::ComponentLoader* GetComponentLoader(
-    content::BrowserContext* context) {
-  extensions::ExtensionSystem* extension_system =
-      extensions::ExtensionSystem::Get(context);
-  ExtensionService* extension_service = extension_system->extension_service();
-  return extension_service->component_loader();
-}
-
 PrefService* GetLocalState() {
   return g_browser_process ? g_browser_process->local_state() : NULL;
 }
 
 }  // namespace
+
+EasyUnlockService::UserSettings::UserSettings()
+    : require_close_proximity(false) {
+}
+
+EasyUnlockService::UserSettings::~UserSettings() {
+}
 
 // static
 EasyUnlockService* EasyUnlockService::Get(Profile* profile) {
@@ -90,16 +84,21 @@ bool EasyUnlockService::IsSignInEnabled() {
 }
 
 class EasyUnlockService::BluetoothDetector
-    : public device::BluetoothAdapter::Observer {
+    : public device::BluetoothAdapter::Observer,
+      public apps::AppLifetimeMonitor::Observer {
  public:
   explicit BluetoothDetector(EasyUnlockService* service)
       : service_(service),
         weak_ptr_factory_(this) {
+    apps::AppLifetimeMonitorFactory::GetForProfile(service_->profile())
+        ->AddObserver(this);
   }
 
   ~BluetoothDetector() override {
     if (adapter_.get())
       adapter_->RemoveObserver(this);
+    apps::AppLifetimeMonitorFactory::GetForProfile(service_->profile())
+        ->RemoveObserver(this);
   }
 
   void Initialize() {
@@ -124,6 +123,32 @@ class EasyUnlockService::BluetoothDetector
     adapter_ = adapter;
     adapter_->AddObserver(this);
     service_->OnBluetoothAdapterPresentChanged();
+
+    // TODO(tengs): At the moment, there is no way for Bluetooth discoverability
+    // to be turned on except through the Easy Unlock setup. If we step on any
+    // toes in the future then we need to revisit this guard.
+    if (adapter_->IsDiscoverable())
+      TurnOffBluetoothDiscoverability();
+  }
+
+  // apps::AppLifetimeMonitor::Observer:
+  void OnAppDeactivated(Profile* profile, const std::string& app_id) override {
+    // TODO(tengs): Refactor the lifetime management to EasyUnlockAppManager.
+    if (app_id == extension_misc::kEasyUnlockAppId)
+      TurnOffBluetoothDiscoverability();
+  }
+
+  void OnAppStop(Profile* profile, const std::string& app_id) override {
+    // TODO(tengs): Refactor the lifetime management to EasyUnlockAppManager.
+    if (app_id == extension_misc::kEasyUnlockAppId)
+      TurnOffBluetoothDiscoverability();
+  }
+
+  void TurnOffBluetoothDiscoverability() {
+    if (adapter_) {
+      adapter_->SetDiscoverable(
+          false, base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
+    }
   }
 
   // Owner of this class and should out-live this class.
@@ -146,7 +171,7 @@ class EasyUnlockService::PowerMonitor
         AddObserver(this);
   }
 
-  virtual ~PowerMonitor() {
+  ~PowerMonitor() override {
     chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->
         RemoveObserver(this);
   }
@@ -167,11 +192,9 @@ class EasyUnlockService::PowerMonitor
 
  private:
   // chromeos::PowerManagerClient::Observer:
-  virtual void SuspendImminent() override {
-    service_->PrepareForSuspend();
-  }
+  void SuspendImminent() override { service_->PrepareForSuspend(); }
 
-  virtual void SuspendDone(const base::TimeDelta& sleep_duration) override {
+  void SuspendDone(const base::TimeDelta& sleep_duration) override {
     waking_up_ = true;
     wake_up_time_ = base::Time::Now();
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -203,10 +226,6 @@ EasyUnlockService::EasyUnlockService(Profile* profile)
       shut_down_(false),
       tpm_key_checked_(false),
       weak_ptr_factory_(this) {
-  extensions::ExtensionSystem::Get(profile_)->ready().Post(
-      FROM_HERE,
-      base::Bind(&EasyUnlockService::Initialize,
-                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 EasyUnlockService::~EasyUnlockService() {
@@ -235,7 +254,9 @@ void EasyUnlockService::RegisterProfilePrefs(
 
 // static
 void EasyUnlockService::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kEasyUnlockDeviceId, std::string());
   registry->RegisterDictionaryPref(prefs::kEasyUnlockHardlockState);
+  registry->RegisterDictionaryPref(prefs::kEasyUnlockLocalStateUserPrefs);
 #if defined(OS_CHROMEOS)
   EasyUnlockTpmKeyManager::RegisterLocalStatePrefs(registry);
 #endif
@@ -257,7 +278,56 @@ void EasyUnlockService::ResetLocalStateForUser(const std::string& user_id) {
 #endif
 }
 
-bool EasyUnlockService::IsAllowed() {
+// static
+EasyUnlockService::UserSettings EasyUnlockService::GetUserSettings(
+    const std::string& user_id) {
+  DCHECK(!user_id.empty());
+  UserSettings user_settings;
+
+  PrefService* local_state = GetLocalState();
+  if (!local_state)
+    return user_settings;
+
+  const base::DictionaryValue* all_user_prefs_dict =
+      local_state->GetDictionary(prefs::kEasyUnlockLocalStateUserPrefs);
+  if (!all_user_prefs_dict)
+    return user_settings;
+
+  const base::DictionaryValue* user_prefs_dict;
+  if (!all_user_prefs_dict->GetDictionaryWithoutPathExpansion(user_id,
+                                                              &user_prefs_dict))
+    return user_settings;
+
+  user_prefs_dict->GetBooleanWithoutPathExpansion(
+      prefs::kEasyUnlockProximityRequired,
+      &user_settings.require_close_proximity);
+
+  return user_settings;
+}
+
+// static
+std::string EasyUnlockService::GetDeviceId() {
+  PrefService* local_state = GetLocalState();
+  if (!local_state)
+    return std::string();
+
+  std::string device_id = local_state->GetString(prefs::kEasyUnlockDeviceId);
+  if (device_id.empty()) {
+    device_id = base::GenerateGUID();
+    local_state->SetString(prefs::kEasyUnlockDeviceId, device_id);
+  }
+  return device_id;
+}
+
+void EasyUnlockService::Initialize(
+    scoped_ptr<EasyUnlockAppManager> app_manager) {
+  app_manager_ = app_manager.Pass();
+  app_manager_->EnsureReady(
+      base::Bind(&EasyUnlockService::InitializeOnAppManagerReady,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+bool EasyUnlockService::IsAllowed() const {
   if (shut_down_)
     return false;
 
@@ -278,6 +348,16 @@ bool EasyUnlockService::IsAllowed() {
   // TODO(xiyuan): Revisit when non-chromeos platforms are supported.
   return false;
 #endif
+}
+
+bool EasyUnlockService::IsEnabled() const {
+  // The feature is enabled iff there are any paired devices.
+  const base::ListValue* devices = GetRemoteDevices();
+  return devices && !devices->empty();
+}
+
+void EasyUnlockService::OpenSetupApp() {
+  app_manager_->LaunchSetup();
 }
 
 void EasyUnlockService::SetHardlockState(
@@ -376,12 +456,13 @@ bool EasyUnlockService::UpdateScreenlockState(
 }
 
 void EasyUnlockService::AttemptAuth(const std::string& user_id) {
+  CHECK_EQ(GetUserEmail(), user_id);
+
   auth_attempt_.reset(new EasyUnlockAuthAttempt(
-      profile_,
-      GetUserEmail(),
-      GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
-                                : EasyUnlockAuthAttempt::TYPE_SIGNIN));
-  if (!auth_attempt_->Start(user_id))
+      app_manager_.get(), user_id, GetType() == TYPE_REGULAR
+                                       ? EasyUnlockAuthAttempt::TYPE_UNLOCK
+                                       : EasyUnlockAuthAttempt::TYPE_SIGNIN));
+  if (!auth_attempt_->Start())
     auth_attempt_.reset();
 }
 
@@ -389,12 +470,18 @@ void EasyUnlockService::FinalizeUnlock(bool success) {
   if (!auth_attempt_.get())
     return;
 
+  this->OnWillFinalizeUnlock(success);
   auth_attempt_->FinalizeUnlock(GetUserEmail(), success);
   auth_attempt_.reset();
+  // TODO(isherman): If observing screen unlock events, is there a race
+  // condition in terms of reading the service's state vs. the app setting the
+  // state?
 
   // Make sure that the lock screen is updated on failure.
-  if (!success)
+  if (!success) {
+    RecordEasyUnlockScreenUnlockEvent(EASY_UNLOCK_FAILURE);
     HandleAuthFailure(GetUserEmail());
+  }
 }
 
 void EasyUnlockService::FinalizeSignin(const std::string& key) {
@@ -463,11 +550,16 @@ void EasyUnlockService::CheckCryptohomeKeysAndMaybeHardlock() {
 }
 
 void EasyUnlockService::SetTrialRun() {
-  DCHECK(GetType() == TYPE_REGULAR);
+  DCHECK_EQ(GetType(), TYPE_REGULAR);
 
   EasyUnlockScreenlockStateHandler* handler = GetScreenlockStateHandler();
   if (handler)
     handler->SetTrialRun();
+}
+
+void EasyUnlockService::RecordClickOnLockIcon() {
+  if (screenlock_state_handler_)
+    screenlock_state_handler_->RecordClickOnLockIcon();
 }
 
 void EasyUnlockService::AddObserver(EasyUnlockServiceObserver* observer) {
@@ -485,89 +577,27 @@ void  EasyUnlockService::Shutdown() {
 
   ShutdownInternal();
 
-  weak_ptr_factory_.InvalidateWeakPtrs();
-
   ResetScreenlockState();
   bluetooth_detector_.reset();
 #if defined(OS_CHROMEOS)
   power_monitor_.reset();
 #endif
+
+  weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
-void EasyUnlockService::LoadApp() {
-  DCHECK(IsAllowed());
-
-#if defined(OS_CHROMEOS)
-  // TODO(xiyuan): Remove this when the app is bundled with chrome.
-  if (!base::SysInfo::IsRunningOnChromeOS() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          proximity_auth::switches::kForceLoadEasyUnlockAppInTests)) {
-    return;
-  }
-#endif
-
-#if defined(GOOGLE_CHROME_BUILD)
-  base::FilePath easy_unlock_path;
-#if defined(OS_CHROMEOS)
-  easy_unlock_path = base::FilePath("/usr/share/chromeos-assets/easy_unlock");
-#endif  // defined(OS_CHROMEOS)
-
-#ifndef NDEBUG
-  // Only allow app path override switch for debug build.
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEasyUnlockAppPath)) {
-    easy_unlock_path =
-        command_line->GetSwitchValuePath(switches::kEasyUnlockAppPath);
-  }
-#endif  // !defined(NDEBUG)
-
-  if (!easy_unlock_path.empty()) {
-    extensions::ComponentLoader* loader = GetComponentLoader(profile_);
-    if (!loader->Exists(extension_misc::kEasyUnlockAppId))
-      loader->Add(IDR_EASY_UNLOCK_MANIFEST, easy_unlock_path);
-
-    ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(profile_)->extension_service();
-    extension_service->EnableExtension(extension_misc::kEasyUnlockAppId);
-
-    NotifyUserUpdated();
-  }
-#endif  // defined(GOOGLE_CHROME_BUILD)
-}
-
-void EasyUnlockService::DisableAppIfLoaded() {
-  extensions::ComponentLoader* loader = GetComponentLoader(profile_);
-  if (!loader->Exists(extension_misc::kEasyUnlockAppId))
-    return;
-
-  ExtensionService* extension_service =
-      extensions::ExtensionSystem::Get(profile_)->extension_service();
-  extension_service->DisableExtension(extension_misc::kEasyUnlockAppId,
-                                      extensions::Extension::DISABLE_RELOAD);
-}
-
-void EasyUnlockService::UnloadApp() {
-  GetComponentLoader(profile_)->Remove(extension_misc::kEasyUnlockAppId);
-}
-
-void EasyUnlockService::ReloadApp() {
+void EasyUnlockService::ReloadAppAndLockScreen() {
   // Make sure lock screen state set by the extension gets reset.
   ResetScreenlockState();
-
-  if (!GetComponentLoader(profile_)->Exists(extension_misc::kEasyUnlockAppId))
-    return;
-  extensions::ExtensionSystem* extension_system =
-      extensions::ExtensionSystem::Get(profile_);
-  extension_system->extension_service()->ReloadExtension(
-      extension_misc::kEasyUnlockAppId);
+  app_manager_->ReloadApp();
   NotifyUserUpdated();
 }
 
 void EasyUnlockService::UpdateAppState() {
   if (IsAllowed()) {
     EnsureTpmKeyPresentIfNeeded();
-    LoadApp();
+    app_manager_->LoadApp();
+    NotifyUserUpdated();
 
 #if defined(OS_CHROMEOS)
     if (!power_monitor_)
@@ -585,7 +615,7 @@ void EasyUnlockService::UpdateAppState() {
 #endif
 
     if (!bluetooth_waking_up) {
-      DisableAppIfLoaded();
+      app_manager_->DisableAppIfLoaded();
       ResetScreenlockState();
 #if defined(OS_CHROMEOS)
       power_monitor_.reset();
@@ -594,26 +624,19 @@ void EasyUnlockService::UpdateAppState() {
   }
 }
 
+void EasyUnlockService::DisableAppWithoutResettingScreenlockState() {
+  app_manager_->DisableAppIfLoaded();
+}
+
 void EasyUnlockService::NotifyUserUpdated() {
   std::string user_id = GetUserEmail();
   if (user_id.empty())
     return;
 
   // Notify the easy unlock app that the user info changed.
-  extensions::api::easy_unlock_private::UserInfo info;
-  info.user_id = user_id;
-  info.logged_in = GetType() == TYPE_REGULAR;
-  info.data_ready = info.logged_in || GetRemoteDevices() != NULL;
-
-  scoped_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(info.ToValue().release());
-
-  scoped_ptr<extensions::Event> event(new extensions::Event(
-      extensions::api::easy_unlock_private::OnUserInfoUpdated::kEventName,
-      args.Pass()));
-
-  extensions::EventRouter::Get(profile_)->DispatchEventToExtension(
-       extension_misc::kEasyUnlockAppId, event.Pass());
+  bool logged_in = GetType() == TYPE_REGULAR;
+  bool data_ready = logged_in || GetRemoteDevices() != NULL;
+  app_manager_->SendUserUpdatedEvent(user_id, logged_in, data_ready);
 }
 
 void EasyUnlockService::NotifyTurnOffOperationStatusChanged() {
@@ -634,7 +657,9 @@ void EasyUnlockService::SetScreenlockHardlockedState(
     auth_attempt_.reset();
 }
 
-void EasyUnlockService::Initialize() {
+void EasyUnlockService::InitializeOnAppManagerReady() {
+  CHECK(app_manager_.get());
+
   InitializeInternal();
 
 #if defined(OS_CHROMEOS)
@@ -668,6 +693,61 @@ void EasyUnlockService::SetHardlockStateForUser(
     SetScreenlockHardlockedState(state);
 }
 
+EasyUnlockAuthEvent EasyUnlockService::GetPasswordAuthEvent() const {
+  DCHECK(IsEnabled());
+
+  if (GetHardlockState() != EasyUnlockScreenlockStateHandler::NO_HARDLOCK) {
+    switch (GetHardlockState()) {
+      case EasyUnlockScreenlockStateHandler::NO_HARDLOCK:
+        NOTREACHED();
+        return EASY_UNLOCK_AUTH_EVENT_COUNT;
+      case EasyUnlockScreenlockStateHandler::NO_PAIRING:
+        return PASSWORD_ENTRY_NO_PAIRING;
+      case EasyUnlockScreenlockStateHandler::USER_HARDLOCK:
+        return PASSWORD_ENTRY_USER_HARDLOCK;
+      case EasyUnlockScreenlockStateHandler::PAIRING_CHANGED:
+        return PASSWORD_ENTRY_PAIRING_CHANGED;
+      case EasyUnlockScreenlockStateHandler::LOGIN_FAILED:
+        return PASSWORD_ENTRY_LOGIN_FAILED;
+      case EasyUnlockScreenlockStateHandler::PAIRING_ADDED:
+        return PASSWORD_ENTRY_PAIRING_ADDED;
+    }
+  } else if (!screenlock_state_handler()) {
+    return PASSWORD_ENTRY_NO_SCREENLOCK_STATE_HANDLER;
+  } else {
+    switch (screenlock_state_handler()->state()) {
+      case EasyUnlockScreenlockStateHandler::STATE_INACTIVE:
+        return PASSWORD_ENTRY_SERVICE_NOT_ACTIVE;
+      case EasyUnlockScreenlockStateHandler::STATE_NO_BLUETOOTH:
+        return PASSWORD_ENTRY_NO_BLUETOOTH;
+      case EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING:
+        return PASSWORD_ENTRY_BLUETOOTH_CONNECTING;
+      case EasyUnlockScreenlockStateHandler::STATE_NO_PHONE:
+        return PASSWORD_ENTRY_NO_PHONE;
+      case EasyUnlockScreenlockStateHandler::STATE_PHONE_NOT_AUTHENTICATED:
+        return PASSWORD_ENTRY_PHONE_NOT_AUTHENTICATED;
+      case EasyUnlockScreenlockStateHandler::STATE_PHONE_LOCKED:
+        return PASSWORD_ENTRY_PHONE_LOCKED;
+      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNLOCKABLE:
+        return PASSWORD_ENTRY_PHONE_NOT_LOCKABLE;
+      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNSUPPORTED:
+        return PASSWORD_ENTRY_PHONE_UNSUPPORTED;
+      case EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW:
+        return PASSWORD_ENTRY_RSSI_TOO_LOW;
+      case EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH:
+        return PASSWORD_ENTRY_TX_POWER_TOO_HIGH;
+      case EasyUnlockScreenlockStateHandler::
+               STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
+        return PASSWORD_ENTRY_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
+      case EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED:
+        return PASSWORD_ENTRY_WITH_AUTHENTICATED_PHONE;
+    }
+  }
+
+  NOTREACHED();
+  return EASY_UNLOCK_AUTH_EVENT_COUNT;
+}
+
 #if defined(OS_CHROMEOS)
 void EasyUnlockService::OnCryptohomeKeysFetchedForChecking(
     const std::string& user_id,
@@ -698,7 +778,7 @@ void EasyUnlockService::OnCryptohomeKeysFetchedForChecking(
 #endif
 
 void EasyUnlockService::PrepareForSuspend() {
-  DisableAppIfLoaded();
+  app_manager_->DisableAppIfLoaded();
   if (screenlock_state_handler_ && screenlock_state_handler_->IsActive()) {
     UpdateScreenlockState(
         EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING);

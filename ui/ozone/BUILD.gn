@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//ui/ozone/ozone.gni")
+import("//testing/test.gni")
 
 # The list of platforms that will be built.
 ozone_platforms = []
@@ -58,6 +59,7 @@ component("ozone_base") {
     "public/surface_factory_ozone.cc",
     "public/surface_factory_ozone.h",
     "public/surface_ozone_canvas.h",
+    "public/surface_ozone_egl.cc",
     "public/surface_ozone_egl.h",
     "public/system_input_injector.h",
   ]
@@ -91,16 +93,16 @@ component("ozone") {
     "common/gpu/ozone_gpu_messages.h",
     "common/native_display_delegate_ozone.cc",
     "common/native_display_delegate_ozone.h",
+    "platform_selection.cc",
+    "platform_selection.h",
     "public/input_controller.cc",
     "public/input_controller.h",
+    "public/ozone_gpu_thread_helper.cc",
+    "public/ozone_gpu_thread_helper.h",
     "public/ozone_platform.cc",
     "public/ozone_platform.h",
     "public/ozone_switches.cc",
     "public/ozone_switches.h",
-    "public/ui_thread_gpu.cc",
-    "public/ui_thread_gpu.h",
-    "platform_selection.cc",
-    "platform_selection.h",
   ]
 
   defines = [ "OZONE_IMPLEMENTATION" ]
@@ -170,11 +172,13 @@ action("generate_constructor_list") {
 
 test("ozone_unittests") {
   sources = [
+    "common/display_util_unittest.cc",
     "run_all_unittests.cc",
   ]
 
   deps = [
            "//base/test:test_support",
            "//testing/gtest",
+           "//ui/gfx/geometry",
          ] + ozone_platform_test_deps
 }

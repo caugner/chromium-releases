@@ -13,17 +13,19 @@ namespace base {
 class Thread;
 }
 
-namespace webkit {
-namespace gpu {
-class ContextProviderInProcess;
-}
+namespace cc {
+class OnscreenDisplayClient;
+class SurfaceManager;
 }
 
 namespace ui {
 
 class InProcessContextFactory : public ContextFactory {
  public:
-  InProcessContextFactory();
+  // surface_manager is owned by the creator of this and must outlive the
+  // context factory.
+  InProcessContextFactory(bool context_factory_for_test,
+                          cc::SurfaceManager* surface_manager);
   ~InProcessContextFactory() override;
 
   // If true (the default) an OutputSurface is created that does not display
@@ -52,12 +54,15 @@ class InProcessContextFactory : public ContextFactory {
 
  private:
   scoped_ptr<base::Thread> compositor_thread_;
-  scoped_refptr<webkit::gpu::ContextProviderInProcess>
-      shared_main_thread_contexts_;
+  scoped_refptr<cc::ContextProvider> shared_main_thread_contexts_;
   cc::TestSharedBitmapManager shared_bitmap_manager_;
   cc::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   uint32_t next_surface_id_namespace_;
   bool use_test_surface_;
+  bool context_factory_for_test_;
+  cc::SurfaceManager* surface_manager_;
+
+  base::hash_map<Compositor*, cc::OnscreenDisplayClient*> per_compositor_data_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessContextFactory);
 };

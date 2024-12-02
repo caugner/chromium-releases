@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "net/base/net_errors.h"
 
@@ -22,6 +23,7 @@ class ConsumerManagementService;
 namespace chromeos {
 
 class SigninScreenHandler;
+class SigninScreenHandlerDelegate;
 
 // A class that's used to specify the way how Gaia should be loaded.
 struct GaiaContext {
@@ -69,7 +71,7 @@ class GaiaScreenHandler : public BaseScreenHandler {
       CoreOobeActor* core_oobe_actor,
       const scoped_refptr<NetworkStateInformer>& network_state_informer,
       policy::ConsumerManagementService* consumer_management);
-  virtual ~GaiaScreenHandler();
+  ~GaiaScreenHandler() override;
 
   void LoadGaia(const GaiaContext& context);
   void UpdateGaia(const GaiaContext& context);
@@ -93,15 +95,17 @@ class GaiaScreenHandler : public BaseScreenHandler {
   net::Error frame_error() const { return frame_error_; }
 
  private:
-  // TODO (ygorshenin@): remove this dependency.
+  // TODO (antrim@): remove this dependency.
   friend class SigninScreenHandler;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
-  virtual void Initialize() override;
+  void DeclareLocalizedValues(
+      ::login::LocalizedValuesBuilder* builder) override;
+  void GetAdditionalParameters(base::DictionaryValue* dict) override;
+  void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
 
   // WebUI message handlers.
   void HandleFrameLoadingCompleted(int status);
@@ -121,6 +125,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void HandleGaiaUIReady();
 
   void HandleSwitchToFullTab();
+
+  void HandleToggleWebviewSignin();
 
   // This is called when ConsumerManagementService::SetOwner() returns.
   void OnSetOwnerDone(const std::string& gaia_id,
@@ -180,11 +186,11 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // extension should be used.
   void LoadAuthExtension(bool force, bool silent_load, bool offline);
 
-  // TODO (ygorshenin@): GaiaScreenHandler should implement
+  // TODO (antrim@): GaiaScreenHandler should implement
   // NetworkStateInformer::Observer.
-  void UpdateState(ErrorScreenActor::ErrorReason reason);
+  void UpdateState(NetworkError::ErrorReason reason);
 
-  // TODO (ygorshenin@): remove this dependency.
+  // TODO (antrim@): remove this dependency.
   void SetSigninScreenHandler(SigninScreenHandler* handler);
 
   SigninScreenHandlerDelegate* Delegate();
@@ -248,7 +254,7 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   // Non-owning ptr to SigninScreenHandler instance. Should not be used
   // in dtor.
-  // TODO (ygorshenin@): GaiaScreenHandler shouldn't communicate with
+  // TODO (antrim@): GaiaScreenHandler shouldn't communicate with
   // signin_screen_handler directly.
   SigninScreenHandler* signin_screen_handler_;
 

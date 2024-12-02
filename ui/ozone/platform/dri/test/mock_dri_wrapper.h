@@ -19,12 +19,10 @@ class CrtcController;
 // The real DriWrapper makes actual DRM calls which we can't use in unit tests.
 class MockDriWrapper : public ui::DriWrapper {
  public:
-  MockDriWrapper(int fd);
-  MockDriWrapper(int fd,
-                 bool use_sync_flips,
+  MockDriWrapper();
+  MockDriWrapper(bool use_sync_flips,
                  std::vector<uint32_t> crtcs,
                  size_t planes_per_crtc);
-  ~MockDriWrapper() override;
 
   int get_get_crtc_call_count() const { return get_crtc_call_count_; }
   int get_set_crtc_call_count() const { return set_crtc_call_count_; }
@@ -37,7 +35,7 @@ class MockDriWrapper : public ui::DriWrapper {
   }
   int get_page_flip_call_count() const { return page_flip_call_count_; }
   int get_overlay_flip_call_count() const { return overlay_flip_call_count_; }
-  void fail_init() { fd_ = -1; }
+  int get_overlay_clear_call_count() const { return overlay_clear_call_count_; }
   void set_set_crtc_expectation(bool state) { set_crtc_expectation_ = state; }
   void set_page_flip_expectation(bool state) { page_flip_expectation_ = state; }
   void set_add_framebuffer_expectation(bool state) {
@@ -75,6 +73,7 @@ class MockDriWrapper : public ui::DriWrapper {
   ScopedDrmFramebufferPtr GetFramebuffer(uint32_t framebuffer) override;
   bool PageFlip(uint32_t crtc_id,
                 uint32_t framebuffer,
+                bool is_sync,
                 const PageFlipCallback& callback) override;
   bool PageFlipOverlay(uint32_t crtc_id,
                        uint32_t framebuffer,
@@ -103,6 +102,8 @@ class MockDriWrapper : public ui::DriWrapper {
                          void* pixels) override;
 
  private:
+  ~MockDriWrapper() override;
+
   int get_crtc_call_count_;
   int set_crtc_call_count_;
   int restore_crtc_call_count_;
@@ -110,11 +111,14 @@ class MockDriWrapper : public ui::DriWrapper {
   int remove_framebuffer_call_count_;
   int page_flip_call_count_;
   int overlay_flip_call_count_;
+  int overlay_clear_call_count_;
 
   bool set_crtc_expectation_;
   bool add_framebuffer_expectation_;
   bool page_flip_expectation_;
   bool create_dumb_buffer_expectation_;
+
+  bool use_sync_flips_;
 
   uint32_t current_framebuffer_;
 

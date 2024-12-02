@@ -15,9 +15,14 @@
 
 class ManagePasswordsIconController;
 class ManagePasswordsUIController;
+class Profile;
 
 namespace content {
 class WebContents;
+}
+
+namespace password_manager {
+enum class CredentialType : unsigned int;
 }
 
 // This model provides data for the ManagePasswordsBubble and controls the
@@ -75,13 +80,17 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Called by the view code when the manage link is clicked by the user.
   void OnManageLinkClicked();
 
+  // Called by the view code when the auto-signin toast is about to close.
+  void OnAutoSignInToastTimeout();
+
   // Called by the view code to delete or add a password form to the
   // PasswordStore.
   void OnPasswordAction(const autofill::PasswordForm& password_form,
                         PasswordAction action);
 
   // Called by the view code to notify about chosen credential.
-  void OnChooseCredentials(const autofill::PasswordForm& password_form);
+  void OnChooseCredentials(const autofill::PasswordForm& password_form,
+                           password_manager::CredentialType credential_type_);
 
   GURL origin() const { return origin_; }
 
@@ -94,8 +103,13 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   const autofill::ConstPasswordFormMap& best_matches() const {
     return best_matches_;
   }
-  const ScopedVector<autofill::PasswordForm>& pending_credentials() const {
-    return pending_credentials_;
+  const ScopedVector<autofill::PasswordForm>& local_pending_credentials()
+      const {
+    return local_pending_credentials_;
+  }
+  const ScopedVector<autofill::PasswordForm>& federated_pending_credentials()
+      const {
+    return federated_pending_credentials_;
   }
   const base::string16& manage_link() const { return manage_link_; }
   bool never_save_passwords() const { return never_save_passwords_; }
@@ -105,6 +119,8 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   const gfx::Range& save_confirmation_link_range() const {
     return save_confirmation_link_range_;
   }
+
+  Profile* GetProfile() const;
 
 #if defined(UNIT_TEST)
   // Gets and sets the reason the bubble was displayed.
@@ -133,7 +149,8 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   base::string16 title_;
   autofill::PasswordForm pending_password_;
   autofill::ConstPasswordFormMap best_matches_;
-  ScopedVector<autofill::PasswordForm> pending_credentials_;
+  ScopedVector<autofill::PasswordForm> local_pending_credentials_;
+  ScopedVector<autofill::PasswordForm> federated_pending_credentials_;
   base::string16 manage_link_;
   base::string16 save_confirmation_text_;
   gfx::Range save_confirmation_link_range_;

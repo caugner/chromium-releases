@@ -139,7 +139,13 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, FrameTreeAfterCrash) {
 
 // Test that we can navigate away if the previous renderer doesn't clean up its
 // child frames.
-IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, NavigateWithLeftoverFrames) {
+// Flaky on Mac. http://crbug.com/452018
+#if defined(OS_MACOSX)
+#define MAYBE_NavigateWithLeftoverFrames DISABLED_NavigateWithLeftoverFrames
+#else
+#define MAYBE_NavigateWithLeftoverFrames NavigateWithLeftoverFrames
+#endif
+IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, MAYBE_NavigateWithLeftoverFrames) {
   GURL base_url = embedded_test_server()->GetURL("A.com", "/site_isolation/");
 
   NavigateToURL(shell(),
@@ -221,6 +227,48 @@ IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, OriginSetOnNavigation) {
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
   EXPECT_EQ(root->current_replication_state().origin.string() + '/',
             main_url.GetOrigin().spec());
+}
+
+// Ensure that sandbox flags are correctly set when child frames are created.
+IN_PROC_BROWSER_TEST_F(FrameTreeBrowserTest, SandboxFlagsSetForChildFrames) {
+  GURL main_url(embedded_test_server()->GetURL("/sandboxed_frames.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()->root();
+
+  // Verify that sandbox flags are set properly for all FrameTreeNodes.
+  // First frame is completely sandboxed; second frame uses "allow-scripts",
+  // which resets both SandboxFlags::Scripts and
+  // SandboxFlags::AutomaticFeatures bits per blink::parseSandboxPolicy(), and
+  // third frame has "allow-scripts allow-same-origin".
+  EXPECT_EQ(root->current_replication_state().sandbox_flags,
+            SandboxFlags::NONE);
+  EXPECT_EQ(root->child_at(0)->current_replication_state().sandbox_flags,
+            SandboxFlags::ALL);
+  EXPECT_EQ(root->child_at(1)->current_replication_state().sandbox_flags,
+            SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
+                ~SandboxFlags::AUTOMATIC_FEATURES);
+  EXPECT_EQ(root->child_at(2)->current_replication_state().sandbox_flags,
+            SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
+                ~SandboxFlags::AUTOMATIC_FEATURES & ~SandboxFlags::ORIGIN);
+
+  // Sandboxed frames should set a unique origin unless they have the
+  // "allow-same-origin" directive.
+  EXPECT_EQ(root->child_at(0)->current_replication_state().origin.string(),
+            "null");
+  EXPECT_EQ(root->child_at(1)->current_replication_state().origin.string(),
+            "null");
+  EXPECT_EQ(
+      root->child_at(2)->current_replication_state().origin.string() + "/",
+      main_url.GetOrigin().spec());
+
+  // Navigating to a different URL should not clear sandbox flags.
+  GURL frame_url(embedded_test_server()->GetURL("/title1.html"));
+  NavigateFrameToURL(root->child_at(0), frame_url);
+  EXPECT_EQ(root->child_at(0)->current_replication_state().sandbox_flags,
+            SandboxFlags::ALL);
 }
 
 class CrossProcessFrameTreeBrowserTest : public ContentBrowserTest {

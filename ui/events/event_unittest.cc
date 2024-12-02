@@ -59,7 +59,7 @@ TEST(EventTest, GetCharacter) {
 
 TEST(EventTest, ClickCount) {
   const gfx::Point origin(0, 0);
-  MouseEvent mouseev(ET_MOUSE_PRESSED, origin, origin, 0, 0);
+  MouseEvent mouseev(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(), 0, 0);
   for (int i = 1; i <=3 ; ++i) {
     mouseev.SetClickCount(i);
     EXPECT_EQ(i, mouseev.GetClickCount());
@@ -68,8 +68,10 @@ TEST(EventTest, ClickCount) {
 
 TEST(EventTest, RepeatedClick) {
   const gfx::Point origin(0, 0);
-  MouseEvent mouse_ev1(ET_MOUSE_PRESSED, origin, origin, 0, 0);
-  MouseEvent mouse_ev2(ET_MOUSE_PRESSED, origin, origin, 0, 0);
+  MouseEvent mouse_ev1(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(), 0,
+                       0);
+  MouseEvent mouse_ev2(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(), 0,
+                       0);
   LocatedEventTestApi test_ev1(&mouse_ev1);
   LocatedEventTestApi test_ev2(&mouse_ev2);
 
@@ -109,23 +111,29 @@ TEST(EventTest, DoubleClickRequiresRelease) {
   scoped_ptr<MouseEvent> ev;
   base::TimeDelta start = base::TimeDelta::FromMilliseconds(0);
 
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin1, origin1, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin1, origin1, EventTimeForNow(),
+                          0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin1, origin1, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin1, origin1, EventTimeForNow(),
+                          0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
 
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin2, origin2, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin2, origin2, EventTimeForNow(),
+                          0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin2, origin2, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin2, origin2,
+                          EventTimeForNow(), 0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin2, origin2, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin2, origin2, EventTimeForNow(),
+                          0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin2, origin2, 0, 0));
+  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin2, origin2,
+                          EventTimeForNow(), 0, 0));
   ev->set_time_stamp(start);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
   MouseEvent::ResetLastClickForTest();
@@ -138,24 +146,21 @@ TEST(EventTest, SingleClickRightLeft) {
   scoped_ptr<MouseEvent> ev;
   base::TimeDelta start = base::TimeDelta::FromMilliseconds(0);
 
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin,
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(),
                           ui::EF_RIGHT_MOUSE_BUTTON,
                           ui::EF_RIGHT_MOUSE_BUTTON));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin,
-                          ui::EF_LEFT_MOUSE_BUTTON,
-                          ui::EF_LEFT_MOUSE_BUTTON));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(),
+                          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin, origin,
-                          ui::EF_LEFT_MOUSE_BUTTON,
-                          ui::EF_LEFT_MOUSE_BUTTON));
+  ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin, origin, EventTimeForNow(),
+                          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   ev->set_time_stamp(start);
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
-  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin,
-                          ui::EF_LEFT_MOUSE_BUTTON,
-                          ui::EF_LEFT_MOUSE_BUTTON));
+  ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(),
+                          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   ev->set_time_stamp(start);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
   MouseEvent::ResetLastClickForTest();
@@ -497,5 +502,69 @@ TEST(EventTest, AutoRepeat) {
 #endif
 }
 #endif  // USE_X11 || OS_WIN
+
+TEST(EventTest, TouchEventRadiusDefaultsToOtherAxis) {
+  const base::TimeDelta time = base::TimeDelta::FromMilliseconds(0);
+  const float non_zero_length1 = 30;
+  const float non_zero_length2 = 46;
+
+  TouchEvent event1(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    non_zero_length1, 0, 0, 0);
+  EXPECT_EQ(non_zero_length1, event1.radius_x());
+  EXPECT_EQ(non_zero_length1, event1.radius_y());
+
+  TouchEvent event2(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    0, non_zero_length2, 0, 0);
+  EXPECT_EQ(non_zero_length2, event2.radius_x());
+  EXPECT_EQ(non_zero_length2, event2.radius_y());
+}
+
+TEST(EventTest, TouchEventRotationAngleFixing) {
+  const base::TimeDelta time = base::TimeDelta::FromMilliseconds(0);
+  const float radius_x = 20;
+  const float radius_y = 10;
+
+  {
+    const float angle_in_range = 0;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                      radius_x, radius_y, angle_in_range, 0);
+    EXPECT_FLOAT_EQ(angle_in_range, event.rotation_angle());
+  }
+
+  {
+    const float angle_in_range = 179.9f;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    radius_x, radius_y, angle_in_range, 0);
+    EXPECT_FLOAT_EQ(angle_in_range, event.rotation_angle());
+  }
+
+  {
+    const float angle_negative = -0.1f;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    radius_x, radius_y, angle_negative, 0);
+    EXPECT_FLOAT_EQ(180 - 0.1f, event.rotation_angle());
+  }
+
+  {
+    const float angle_negative = -200;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    radius_x, radius_y, angle_negative, 0);
+    EXPECT_FLOAT_EQ(360 - 200, event.rotation_angle());
+  }
+
+  {
+    const float angle_too_big = 180;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    radius_x, radius_y, angle_too_big, 0);
+    EXPECT_FLOAT_EQ(0, event.rotation_angle());
+  }
+
+  {
+    const float angle_too_big = 400;
+    TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, 0, time,
+                    radius_x, radius_y, angle_too_big, 0);
+    EXPECT_FLOAT_EQ(400 - 360, event.rotation_angle());
+  }
+}
 
 }  // namespace ui

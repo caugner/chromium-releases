@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-widevine_arch = cpu_arch
+widevine_arch = current_cpu
 if (widevine_arch == "x86") {
   widevine_arch = "ia32"
 }
@@ -75,7 +75,7 @@ source_set("adapter") {
     deps = [
       ":version_h",
       ":binaries",
-      "//ppapi:ppapi_cpp",
+      "//ppapi/cpp",
 
       #'<(DEPTH)/media/media_cdm_adapter.gyp:cdmadapter',  TODO(GYP)
     ]

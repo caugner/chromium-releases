@@ -17,11 +17,18 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/process/process.h"
+#include "base/process/process_iterator.h"
+#include "base/process/process_metrics.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
@@ -33,9 +40,12 @@
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
 #include "policy/proto/device_management_backend.pb.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -102,6 +112,30 @@ std::vector<em::VolumeInfo> GetVolumeInfo(
   return result;
 }
 
+// Returns the DeviceLocalAccount associated with the current kiosk session.
+// Returns null if there is no active kiosk session, or if that kiosk
+// session has been removed from policy since the session started, in which
+// case we won't report its status).
+scoped_ptr<policy::DeviceLocalAccount>
+GetCurrentKioskDeviceLocalAccount(chromeos::CrosSettings* settings) {
+  if (!user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
+    return scoped_ptr<policy::DeviceLocalAccount>();
+  const user_manager::User* const user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  const std::string user_id = user->GetUserID();
+  const std::vector<policy::DeviceLocalAccount> accounts =
+      policy::GetDeviceLocalAccounts(settings);
+
+  for (const auto& device_local_account : accounts) {
+    if (device_local_account.user_id == user_id) {
+      return make_scoped_ptr(
+          new policy::DeviceLocalAccount(device_local_account)).Pass();
+    }
+  }
+  LOG(WARNING) << "Kiosk app not found in list of device-local accounts";
+  return scoped_ptr<policy::DeviceLocalAccount>();
+}
+
 }  // namespace
 
 namespace policy {
@@ -109,7 +143,8 @@ namespace policy {
 DeviceStatusCollector::DeviceStatusCollector(
     PrefService* local_state,
     chromeos::system::StatisticsProvider* provider,
-    LocationUpdateRequester* location_update_requester)
+    const LocationUpdateRequester& location_update_requester,
+    const VolumeInfoFetcher& volume_info_fetcher)
     : max_stored_past_activity_days_(kMaxStoredPastActivityDays),
       max_stored_future_activity_days_(kMaxStoredFutureActivityDays),
       local_state_(local_state),
@@ -117,7 +152,9 @@ DeviceStatusCollector::DeviceStatusCollector(
       last_reported_day_(0),
       duration_for_last_reported_day_(0),
       geolocation_update_in_progress_(false),
+      volume_info_fetcher_(volume_info_fetcher),
       statistics_provider_(provider),
+      location_update_requester_(location_update_requester),
       report_version_info_(false),
       report_activity_times_(false),
       report_boot_mode_(false),
@@ -125,13 +162,14 @@ DeviceStatusCollector::DeviceStatusCollector(
       report_network_interfaces_(false),
       report_users_(false),
       report_hardware_status_(false),
+      report_session_status_(false),
       weak_factory_(this) {
-  if (location_update_requester)
-    location_update_requester_ = *location_update_requester;
+  if (volume_info_fetcher_.is_null())
+    volume_info_fetcher_ = base::Bind(&GetVolumeInfo);
+
   idle_poll_timer_.Start(FROM_HERE,
                          TimeDelta::FromSeconds(kIdlePollIntervalSeconds),
                          this, &DeviceStatusCollector::CheckIdleState);
-  volume_info_fetcher_ = base::Bind(&GetVolumeInfo);
   hardware_status_sampling_timer_.Start(
       FROM_HERE,
       TimeDelta::FromSeconds(kHardwareStatusSampleIntervalSeconds),
@@ -159,6 +197,8 @@ DeviceStatusCollector::DeviceStatusCollector(
       chromeos::kReportDeviceUsers, callback);
   hardware_status_subscription_ = cros_settings_->AddSettingsObserver(
       chromeos::kReportDeviceHardwareStatus, callback);
+  session_status_subscription_ = cros_settings_->AddSettingsObserver(
+      chromeos::kReportDeviceSessionStatus, callback);
 
   // The last known location is persisted in local state. This makes location
   // information available immediately upon startup and avoids the need to
@@ -211,13 +251,6 @@ void DeviceStatusCollector::RegisterPrefs(PrefRegistrySimple* registry) {
                                    new base::DictionaryValue);
 }
 
-void DeviceStatusCollector::SetVolumeInfoFetcherForTest(
-    VolumeInfoFetcher fetcher) {
-  volume_info_fetcher_ = fetcher;
-  // Now that there is a new VolumeInfoFetcher, refresh the cached values.
-  SampleHardwareStatus();
-}
-
 void DeviceStatusCollector::CheckIdleState() {
   CalculateIdleState(kIdleStateThresholdSeconds,
       base::Bind(&DeviceStatusCollector::IdleStateCallback,
@@ -237,30 +270,36 @@ void DeviceStatusCollector::UpdateReportingSettings() {
 
   // All reporting settings default to 'enabled'.
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceVersionInfo, &report_version_info_)) {
+          chromeos::kReportDeviceVersionInfo, &report_version_info_)) {
     report_version_info_ = true;
   }
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceActivityTimes, &report_activity_times_)) {
+          chromeos::kReportDeviceActivityTimes, &report_activity_times_)) {
     report_activity_times_ = true;
   }
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceBootMode, &report_boot_mode_)) {
+          chromeos::kReportDeviceBootMode, &report_boot_mode_)) {
     report_boot_mode_ = true;
   }
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceNetworkInterfaces, &report_network_interfaces_)) {
+          chromeos::kReportDeviceNetworkInterfaces,
+          &report_network_interfaces_)) {
     report_network_interfaces_ = true;
   }
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceUsers, &report_users_)) {
+          chromeos::kReportDeviceUsers, &report_users_)) {
     report_users_ = true;
   }
 
   const bool already_reporting_hardware_status = report_hardware_status_;
   if (!cros_settings_->GetBoolean(
-      chromeos::kReportDeviceHardwareStatus, &report_hardware_status_)) {
+          chromeos::kReportDeviceHardwareStatus, &report_hardware_status_)) {
     report_hardware_status_ = true;
+  }
+
+  if (!cros_settings_->GetBoolean(
+          chromeos::kReportDeviceSessionStatus, &report_session_status_)) {
+    report_session_status_ = true;
   }
 
   // Device location reporting is disabled by default because it is
@@ -353,16 +392,17 @@ void DeviceStatusCollector::AddActivePeriod(Time start, Time end) {
 
 void DeviceStatusCollector::ClearCachedHardwareStatus() {
   volume_info_.clear();
+  resource_usage_.clear();
 }
 
-void DeviceStatusCollector::IdleStateCallback(IdleState state) {
+void DeviceStatusCollector::IdleStateCallback(ui::IdleState state) {
   // Do nothing if device activity reporting is disabled.
   if (!report_activity_times_)
     return;
 
   Time now = GetCurrentTime();
 
-  if (state == IDLE_STATE_ACTIVE) {
+  if (state == ui::IDLE_STATE_ACTIVE) {
     // If it's been too long since the last report, or if the activity is
     // negative (which can happen when the clock changes), assume a single
     // interval of activity.
@@ -380,10 +420,20 @@ void DeviceStatusCollector::IdleStateCallback(IdleState state) {
   last_idle_check_ = now;
 }
 
-bool DeviceStatusCollector::IsAutoLaunchedKioskSession() {
-  // TODO(atwilson): Determine if the currently active session is an
-  // autolaunched kiosk session (http://crbug.com/452968).
-  return false;
+scoped_ptr<DeviceLocalAccount>
+DeviceStatusCollector::GetAutoLaunchedKioskSessionInfo() {
+  scoped_ptr<DeviceLocalAccount> account =
+      GetCurrentKioskDeviceLocalAccount(cros_settings_);
+  if (account) {
+    chromeos::KioskAppManager::App current_app;
+    if (chromeos::KioskAppManager::Get()->GetApp(account->kiosk_app_id,
+                                                 &current_app) &&
+        current_app.was_auto_launched_with_zero_delay) {
+      return account.Pass();
+    }
+  }
+  // No auto-launched kiosk session active.
+  return scoped_ptr<DeviceLocalAccount>();
 }
 
 void DeviceStatusCollector::SampleHardwareStatus() {
@@ -407,8 +457,52 @@ void DeviceStatusCollector::SampleHardwareStatus() {
       base::Bind(&DeviceStatusCollector::ReceiveVolumeInfo,
                  weak_factory_.GetWeakPtr()));
 
-  // TODO(atwilson): Walk the process list and measure CPU utilization
-  // and system RAM (http://crbug.com/430908).
+  SampleResourceUsage();
+}
+
+void DeviceStatusCollector::SampleResourceUsage() {
+  // Walk the process list and measure CPU utilization.
+  double total_usage = 0;
+  std::vector<double> per_process_usage = GetPerProcessCPUUsage();
+  for (double cpu_usage : per_process_usage) {
+    total_usage += cpu_usage;
+  }
+
+  ResourceUsage usage = { total_usage,
+                          base::SysInfo::AmountOfAvailablePhysicalMemory() };
+
+  resource_usage_.push_back(usage);
+
+  // If our cache of samples is full, throw out old samples to make room for new
+  // sample.
+  if (resource_usage_.size() > kMaxResourceUsageSamples)
+    resource_usage_.pop_front();
+}
+
+std::vector<double> DeviceStatusCollector::GetPerProcessCPUUsage() {
+  std::vector<double> cpu_usage;
+  base::ProcessIterator process_iter(nullptr);
+
+  const int num_processors = base::SysInfo::NumberOfProcessors();
+  while (const base::ProcessEntry* process_entry =
+         process_iter.NextProcessEntry()) {
+    base::Process process = base::Process::Open(process_entry->pid());
+    if (!process.IsValid()) {
+      LOG(ERROR) << "Could not create process handle for process "
+                  << process_entry->pid();
+      continue;
+    }
+    scoped_ptr<base::ProcessMetrics> metrics(
+        base::ProcessMetrics::CreateProcessMetrics(process.Handle()));
+    const double usage = metrics->GetPlatformIndependentCPUUsage();
+    DCHECK_LE(0, usage);
+    if (usage > 0) {
+      // Convert CPU usage from "percentage of a single core" to "percentage of
+      // all CPU available".
+      cpu_usage.push_back(usage / num_processors);
+    }
+  }
+  return cpu_usage;
 }
 
 void DeviceStatusCollector::GetActivityTimes(
@@ -453,10 +547,10 @@ void DeviceStatusCollector::GetBootMode(
     em::DeviceStatusReportRequest* request) {
   std::string dev_switch_mode;
   if (statistics_provider_->GetMachineStatistic(
-          chromeos::system::kDevSwitchBootMode, &dev_switch_mode)) {
-    if (dev_switch_mode == "1")
+          chromeos::system::kDevSwitchBootKey, &dev_switch_mode)) {
+    if (dev_switch_mode == chromeos::system::kDevSwitchBootValueDev)
       request->set_boot_mode("Dev");
-    else if (dev_switch_mode == "0")
+    else if (dev_switch_mode == chromeos::system::kDevSwitchBootValueVerified)
       request->set_boot_mode("Verified");
   }
 }
@@ -552,7 +646,7 @@ void DeviceStatusCollector::GetNetworkInterfaces(
   }
 
   // Don't write any network state if we aren't in a kiosk session.
-  if (!IsAutoLaunchedKioskSession())
+  if (!GetAutoLaunchedKioskSessionInfo())
     return;
 
   // Walk the various networks and store their state in the status report.
@@ -622,7 +716,13 @@ void DeviceStatusCollector::GetHardwareStatus(
     *status->add_volume_info() = info;
   }
 
-  // TODO(atwilson): Add CPU/memory status (http://crbug.com/430908).
+  status->set_system_ram_total(base::SysInfo::AmountOfPhysicalMemory());
+  status->clear_system_ram_free();
+  status->clear_cpu_utilization_pct();
+  for (const ResourceUsage& usage : resource_usage_) {
+    status->add_cpu_utilization_pct(usage.cpu_usage_percent);
+    status->add_system_ram_free(usage.bytes_of_ram_free);
+  }
 }
 
 bool DeviceStatusCollector::GetDeviceStatus(
@@ -642,19 +742,63 @@ bool DeviceStatusCollector::GetDeviceStatus(
   if (report_network_interfaces_)
     GetNetworkInterfaces(status);
 
-  if (report_users_) {
+  if (report_users_)
     GetUsers(status);
-  }
 
   if (report_hardware_status_)
     GetHardwareStatus(status);
 
+  return (report_activity_times_ ||
+          report_version_info_ ||
+          report_boot_mode_ ||
+          report_location_ ||
+          report_network_interfaces_ ||
+          report_users_ ||
+          report_hardware_status_);
+}
+
+bool DeviceStatusCollector::GetDeviceSessionStatus(
+    em::SessionStatusReportRequest* status) {
+  // Only generate session status reports if session status reporting is
+  // enabled.
+  if (!report_session_status_)
+    return false;
+
+  scoped_ptr<const DeviceLocalAccount> account =
+      GetAutoLaunchedKioskSessionInfo();
+  // Only generate session status reports if we are in an auto-launched kiosk
+  // session.
+  if (!account)
+    return false;
+
+  // Get the account ID associated with this user.
+  status->set_device_local_account_id(account->account_id);
+  em::AppStatus* app_status = status->add_installed_apps();
+  app_status->set_app_id(account->kiosk_app_id);
+
+  // Look up the app and get the version.
+  const std::string app_version = GetAppVersion(account->kiosk_app_id);
+  if (app_version.empty()) {
+    DLOG(ERROR) << "Unable to get version for extension: "
+                << account->kiosk_app_id;
+  } else {
+    app_status->set_extension_version(app_version);
+  }
   return true;
 }
 
-bool DeviceStatusCollector::GetSessionStatus(
-    em::SessionStatusReportRequest* status) {
-  return false;
+std::string DeviceStatusCollector::GetAppVersion(
+    const std::string& kiosk_app_id) {
+  Profile* const profile =
+      chromeos::ProfileHelper::Get()->GetProfileByUser(
+          user_manager::UserManager::Get()->GetActiveUser());
+  const extensions::ExtensionRegistry* const registry =
+      extensions::ExtensionRegistry::Get(profile);
+  const extensions::Extension* const extension = registry->GetExtensionById(
+      kiosk_app_id, extensions::ExtensionRegistry::EVERYTHING);
+  if (!extension)
+    return std::string();
+  return extension->VersionString();
 }
 
 void DeviceStatusCollector::OnSubmittedSuccessfully() {

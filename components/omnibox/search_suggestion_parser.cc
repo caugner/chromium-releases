@@ -26,8 +26,8 @@ namespace {
 AutocompleteMatchType::Type GetAutocompleteMatchType(const std::string& type) {
   if (type == "ENTITY")
     return AutocompleteMatchType::SEARCH_SUGGEST_ENTITY;
-  if (type == "INFINITE")
-    return AutocompleteMatchType::SEARCH_SUGGEST_INFINITE;
+  if (type == "TAIL")
+    return AutocompleteMatchType::SEARCH_SUGGEST_TAIL;
   if (type == "PERSONALIZED_QUERY")
     return AutocompleteMatchType::SEARCH_SUGGEST_PERSONALIZED;
   if (type == "PROFILE")
@@ -139,7 +139,7 @@ void SearchSuggestionParser::SuggestResult::ClassifyMatchContents(
   }
 
   base::string16 lookup_text = input_text;
-  if (type_ == AutocompleteMatchType::SEARCH_SUGGEST_INFINITE) {
+  if (type_ == AutocompleteMatchType::SEARCH_SUGGEST_TAIL) {
     const size_t contents_index =
         suggestion_.length() - match_contents_.length();
     // Ensure the query starts with the input text, and ends with the match
@@ -343,14 +343,13 @@ std::string SearchSuggestionParser::ExtractJsonData(
 
 // static
 scoped_ptr<base::Value> SearchSuggestionParser::DeserializeJsonData(
-    std::string json_data) {
+    base::StringPiece json_data) {
   // The JSON response should be an array.
   for (size_t response_start_index = json_data.find("["), i = 0;
-       response_start_index != std::string::npos && i < 5;
+       response_start_index != base::StringPiece::npos && i < 5;
        response_start_index = json_data.find("[", 1), i++) {
     // Remove any XSSI guards to allow for JSON parsing.
-    if (response_start_index > 0)
-      json_data.erase(0, response_start_index);
+    json_data.remove_prefix(response_start_index);
 
     JSONStringValueSerializer deserializer(json_data);
     deserializer.set_allow_trailing_comma(true);
@@ -500,7 +499,6 @@ bool SearchSuggestionParser::ParseSuggestResults(
             int answer_type = 0;
             if (answer && base::StringToInt(answer_type_str, &answer_type)) {
               answer_parsed_successfully = true;
-              match_type = AutocompleteMatchType::SEARCH_SUGGEST_ANSWER;
 
               answer->set_type(answer_type);
               answer->AddImageURLsTo(&results->answers_image_urls);

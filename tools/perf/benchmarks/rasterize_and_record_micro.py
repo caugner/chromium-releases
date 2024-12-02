@@ -30,6 +30,10 @@ class _RasterizeAndRecordMicro(benchmark.Benchmark):
                       action='store_true',
                       help='Whether to report additional detailed results.')
 
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro'
+
   def CreatePageTest(self, options):
     return rasterize_and_record_micro.RasterizeAndRecordMicro(
         options.start_wait_time, options.rasterize_repeat,
@@ -44,13 +48,21 @@ class RasterizeAndRecordMicroTop25(_RasterizeAndRecordMicro):
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   page_set = page_sets.Top25SmoothPageSet
 
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.top_25_smooth'
+
 
 @benchmark.Disabled('mac', 'win')
 class RasterizeAndRecordMicroKeyMobileSites(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the key mobile sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.KeyMobileSitesSmoothPageSet
+  page_set = page_sets.KeyMobileSitesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.key_mobile_sites_smooth'
 
 
 @benchmark.Disabled('mac', 'win')
@@ -58,7 +70,13 @@ class RasterizeAndRecordMicroKeySilkCases(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the silk sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.KeySilkCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.key_silk_cases'
+
+  def CreatePageSet(self, options):
+    return page_sets.KeySilkCasesPageSet(run_no_page_interactions=True)
 
 
 @benchmark.Enabled('android')
@@ -66,4 +84,10 @@ class RasterizeAndRecordMicroPolymer(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the Polymer cases.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.PolymerPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.polymer'
+
+  def CreatePageSet(self, options):
+    return page_sets.PolymerPageSet(run_no_page_interactions=True)

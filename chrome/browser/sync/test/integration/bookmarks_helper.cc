@@ -4,6 +4,9 @@
 
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 
+#include <set>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
@@ -41,6 +44,9 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "ui/gfx/image/image_skia.h"
+
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 namespace {
 
@@ -152,6 +158,20 @@ int CountNodesWithTitlesMatching(BookmarkModel* model,
   return count;
 }
 
+// Returns the number of nodes of node type |node_type| in |model|.
+int CountNodes(BookmarkModel* model, BookmarkNode::Type node_type) {
+  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+  // Walk through the model tree looking for bookmark nodes of node type
+  // |node_type|.
+  int count = 0;
+  while (iterator.has_next()) {
+    const BookmarkNode* node = iterator.Next();
+    if (node->type() == node_type)
+      ++count;
+  }
+  return count;
+}
+
 // Checks if the favicon data in |bitmap_a| and |bitmap_b| are equivalent.
 // Returns true if they match.
 bool FaviconRawBitmapsMatch(const SkBitmap& bitmap_a,
@@ -230,9 +250,8 @@ void SetFaviconImpl(Profile* profile,
     BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
 
     FaviconChangeObserver observer(model, node);
-    FaviconService* favicon_service =
-        FaviconServiceFactory::GetForProfile(profile,
-                                             Profile::EXPLICIT_ACCESS);
+    FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (favicon_source == bookmarks_helper::FROM_UI) {
       favicon_service->SetFavicons(
           node->url(), icon_url, favicon_base::FAVICON, image);
@@ -771,6 +790,10 @@ const BookmarkNode* GetUniqueNodeByURL(int profile, const GURL& url) {
   if (nodes.empty())
     return NULL;
   return nodes[0];
+}
+
+int CountAllBookmarks(int profile) {
+  return CountNodes(GetBookmarkModel(profile), BookmarkNode::URL);
 }
 
 int CountBookmarksWithTitlesMatching(int profile, const std::string& title) {

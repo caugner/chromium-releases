@@ -9,13 +9,12 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/screenlock_bridge.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/ui/extensions/app_launch_params.h"
-#include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/common/extensions/api/easy_unlock_private.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/user_names.h"
@@ -26,7 +25,7 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/common/constants.h"
 
 #if defined(OS_CHROMEOS)
@@ -52,6 +51,7 @@ const char kKeyDevices[] = "devices";
 EasyUnlockServiceRegular::EasyUnlockServiceRegular(Profile* profile)
     : EasyUnlockService(profile),
       turn_off_flow_status_(EasyUnlockService::IDLE),
+      will_unlock_using_easy_unlock_(false),
       weak_ptr_factory_(this) {
 }
 
@@ -121,17 +121,6 @@ void EasyUnlockServiceRegular::SetHardlockAfterKeyOperation(
   CheckCryptohomeKeysAndMaybeHardlock();
 }
 #endif
-
-void EasyUnlockServiceRegular::OpenSetupApp() {
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile())->extension_service();
-  const extensions::Extension* extension =
-      service->GetExtensionById(extension_misc::kEasyUnlockAppId, false);
-
-  OpenApplication(
-      AppLaunchParams(profile(), extension, extensions::LAUNCH_CONTAINER_WINDOW,
-                      NEW_WINDOW, extensions::SOURCE_CHROME_INTERNAL));
-}
 
 const base::DictionaryValue* EasyUnlockServiceRegular::GetPermitAccess() const {
   const base::DictionaryValue* pairing_dict =
@@ -252,12 +241,44 @@ void EasyUnlockServiceRegular::RecordPasswordLoginEvent(
   NOTREACHED();
 }
 
+void EasyUnlockServiceRegular::StartAutoPairing(
+    const AutoPairingResultCallback& callback) {
+  if (!auto_pairing_callback_.is_null()) {
+    LOG(ERROR)
+        << "Start auto pairing when there is another auto pairing requested.";
+    callback.Run(false, std::string());
+    return;
+  }
+
+  auto_pairing_callback_ = callback;
+
+  scoped_ptr<base::ListValue> args(new base::ListValue());
+  scoped_ptr<extensions::Event> event(new extensions::Event(
+      extensions::api::easy_unlock_private::OnStartAutoPairing::kEventName,
+      args.Pass()));
+  extensions::EventRouter::Get(profile())->DispatchEventWithLazyListener(
+       extension_misc::kEasyUnlockAppId, event.Pass());
+}
+
+void EasyUnlockServiceRegular::SetAutoPairingResult(
+    bool success,
+    const std::string& error) {
+  DCHECK(!auto_pairing_callback_.is_null());
+
+  auto_pairing_callback_.Run(success, error);
+  auto_pairing_callback_.Reset();
+}
+
 void EasyUnlockServiceRegular::InitializeInternal() {
+  ScreenlockBridge::Get()->AddObserver(this);
   registrar_.Init(profile()->GetPrefs());
   registrar_.Add(
       prefs::kEasyUnlockAllowed,
       base::Bind(&EasyUnlockServiceRegular::OnPrefsChanged,
                  base::Unretained(this)));
+  registrar_.Add(prefs::kEasyUnlockProximityRequired,
+                 base::Bind(&EasyUnlockServiceRegular::OnPrefsChanged,
+                            base::Unretained(this)));
   OnPrefsChanged();
 }
 
@@ -268,9 +289,10 @@ void EasyUnlockServiceRegular::ShutdownInternal() {
 
   turn_off_flow_status_ = EasyUnlockService::IDLE;
   registrar_.RemoveAll();
+  ScreenlockBridge::Get()->RemoveObserver(this);
 }
 
-bool EasyUnlockServiceRegular::IsAllowedInternal() {
+bool EasyUnlockServiceRegular::IsAllowedInternal() const {
 #if defined(OS_CHROMEOS)
   if (!user_manager::UserManager::Get()->IsLoggedInAsUserWithGaiaAccount())
     return false;
@@ -280,7 +302,7 @@ bool EasyUnlockServiceRegular::IsAllowedInternal() {
   // ephemeral accounts can be locked, so we should revisit this use case.
   // TODO(tengs): Remove this special case and test this code path after test
   // refactoring is landed (crbug.com/414829).
-  user_manager::User* user =
+  const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile());
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user->email() != chromeos::login::kStubUser &&
@@ -300,7 +322,41 @@ bool EasyUnlockServiceRegular::IsAllowedInternal() {
 #endif
 }
 
+void EasyUnlockServiceRegular::OnWillFinalizeUnlock(bool success) {
+  will_unlock_using_easy_unlock_ = success;
+}
+
+void EasyUnlockServiceRegular::OnScreenDidLock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+  will_unlock_using_easy_unlock_ = false;
+}
+
+void EasyUnlockServiceRegular::OnScreenDidUnlock(
+    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+  // Notifications of signin screen unlock events can also reach this code path;
+  // disregard them.
+  if (screen_type != ScreenlockBridge::LockHandler::LOCK_SCREEN)
+    return;
+
+  // Only record metrics for users who have enabled the feature.
+  if (IsEnabled()) {
+    EasyUnlockAuthEvent event =
+        will_unlock_using_easy_unlock_
+            ? EASY_UNLOCK_SUCCESS
+            : GetPasswordAuthEvent();
+    RecordEasyUnlockScreenUnlockEvent(event);
+  }
+
+  will_unlock_using_easy_unlock_ = false;
+}
+
+void EasyUnlockServiceRegular::OnFocusedUserChanged(
+    const std::string& user_id) {
+  // Nothing to do.
+}
+
 void EasyUnlockServiceRegular::OnPrefsChanged() {
+  SyncProfilePrefsToLocalState();
   UpdateAppState();
 }
 
@@ -315,11 +371,32 @@ void EasyUnlockServiceRegular::OnToggleEasyUnlockApiComplete(
 
   SetRemoteDevices(base::ListValue());
   SetTurnOffFlowStatus(IDLE);
-  ReloadApp();
+  ReloadAppAndLockScreen();
 }
 
 void EasyUnlockServiceRegular::OnToggleEasyUnlockApiFailed(
     const std::string& error_message) {
   LOG(WARNING) << "Failed to turn off Smart Lock: " << error_message;
   SetTurnOffFlowStatus(FAIL);
+}
+
+void EasyUnlockServiceRegular::SyncProfilePrefsToLocalState() {
+  PrefService* local_state =
+      g_browser_process ? g_browser_process->local_state() : NULL;
+  PrefService* profile_prefs = profile()->GetPrefs();
+  if (!local_state || !profile_prefs)
+    return;
+
+  // Create the dictionary of Easy Unlock preferences for the current user. The
+  // items in the dictionary are the same profile prefs used for Easy Unlock.
+  scoped_ptr<base::DictionaryValue> user_prefs_dict(
+      new base::DictionaryValue());
+  user_prefs_dict->SetBooleanWithoutPathExpansion(
+      prefs::kEasyUnlockProximityRequired,
+      profile_prefs->GetBoolean(prefs::kEasyUnlockProximityRequired));
+
+  DictionaryPrefUpdate update(local_state,
+                              prefs::kEasyUnlockLocalStateUserPrefs);
+  std::string user_email = GetUserEmail();
+  update->SetWithoutPathExpansion(user_email, user_prefs_dict.Pass());
 }

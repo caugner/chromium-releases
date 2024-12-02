@@ -10,7 +10,6 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/command_line.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -53,7 +52,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
@@ -97,7 +95,6 @@
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "extensions/common/switches.h"
 #include "grit/browser_resources.h"
 #include "grit/components_strings.h"
 #include "grit/theme_resources.h"
@@ -119,8 +116,7 @@ bool ShouldDisplayExtensionInfoDialog() {
 #if defined(OS_MACOSX)
   return false;
 #else
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      extensions::switches::kDisableExtensionInfoDialog);
+  return true;
 #endif
 }
 
@@ -335,21 +331,23 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   }
   extension_data->Set("dependentExtensions", dependents_list);
 
-  // Extensions only want all URL access if:
-  // - The feature is enabled for the given extension.
+  // We show the "all urls" checkbox if:
+  // - The feature is enabled for the given extension, or has been set in the
+  //   past.
   // - The extension has access to enough urls that we can't just let it run
   //   on those specified in the permissions.
-  bool wants_all_urls =
-      util::ScriptsMayRequireActionForExtension(extension) &&
-      (extension->permissions_data()->HasWithheldImpliedAllHosts() ||
-       util::AllowedScriptingOnAllUrls(
-           extension->id(), extension_service_->GetBrowserContext()));
-  extension_data->SetBoolean("wantsAllUrls", wants_all_urls);
+  content::BrowserContext* context = extension_service_->GetBrowserContext();
+  bool show_all_urls =
+      (FeatureSwitch::scripts_require_action()->IsEnabled() &&
+       PermissionsData::ScriptsMayRequireActionForExtension(
+           extension,
+           extension->permissions_data()->active_permissions().get())) ||
+      extension->permissions_data()->HasWithheldImpliedAllHosts() ||
+      util::HasSetAllowedScriptingOnAllUrls(extension->id(), context);
+  extension_data->SetBoolean("showAllUrls", show_all_urls);
   extension_data->SetBoolean(
       "allowAllUrls",
-      util::AllowedScriptingOnAllUrls(
-          extension->id(),
-          extension_service_->GetBrowserContext()));
+      util::AllowedScriptingOnAllUrls(extension->id(), context));
 
   base::string16 location_text;
   if (extension->location() == Manifest::INTERNAL &&
@@ -400,7 +398,11 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   else
     extension_data->SetInteger("order", 2);
 
-  if (!ExtensionActionAPI::GetBrowserActionVisibility(prefs, extension->id())) {
+  // Don't show the "show button" for the browser action if the toolbar
+  // redesign is enabled, because "hidden" buttons are now just hidden in the
+  // wrench menu.
+  if (!ExtensionActionAPI::GetBrowserActionVisibility(prefs, extension->id()) &&
+      !FeatureSwitch::extension_action_redesign()->IsEnabled()) {
     extension_data->SetBoolean("enable_show_button", true);
   }
 
@@ -986,10 +988,10 @@ void ExtensionSettingsHandler::HandleToggleDeveloperMode(
   if (profile->IsSupervised())
     return;
 
-  bool developer_mode =
-      !profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
+  bool developer_mode_on;
+  CHECK(args->GetBoolean(0, &developer_mode_on));
   profile->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode,
-                                  developer_mode);
+                                  developer_mode_on);
 }
 
 void ExtensionSettingsHandler::HandleInspectMessage(

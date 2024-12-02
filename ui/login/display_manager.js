@@ -51,6 +51,7 @@
     'app_launch_network_config';
 /** @const */ var ACCELERATOR_EMBEDDED_SIGNIN = 'embedded_signin';
 /** @const */ var ACCELERATOR_NEW_OOBE = 'new_oobe';
+/** @const */ var ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN = 'toggle_webview_signin';
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -85,6 +86,8 @@
   APP_LAUNCH_SPLASH: 'app-launch-splash',
   DESKTOP_USER_MANAGER: 'login-add-user'
 };
+
+/** @const */ var USER_ACTION_ROLLBACK_TOGGLED = 'rollback-toggled';
 
 cr.define('cr.ui.login', function() {
   var Bubble = cr.ui.Bubble;
@@ -378,7 +381,8 @@ cr.define('cr.ui.login', function() {
           $('version-labels').hidden = !$('version-labels').hidden;
       } else if (name == ACCELERATOR_RESET) {
         if (currentStepId == SCREEN_OOBE_RESET)
-          chrome.send('toggleRollbackOnResetScreen');
+          $('reset').send(login.Screen.CALLBACK_USER_ACTED,
+                          USER_ACTION_ROLLBACK_TOGGLED);
         else if (RESET_AVAILABLE_SCREEN_GROUP.indexOf(currentStepId) != -1)
           chrome.send('toggleResetScreen');
       } else if (name == ACCELERATOR_DEVICE_REQUISITION) {
@@ -403,6 +407,9 @@ cr.define('cr.ui.login', function() {
           chrome.send('switchToEmbeddedSignin');
       } else if (name == ACCELERATOR_NEW_OOBE) {
         chrome.send('switchToNewOobe');
+      } else if (name == ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN) {
+        if (currentStepId == SCREEN_GAIA_SIGNIN)
+          chrome.send('toggleWebviewSignin');
       }
 
       if (!this.forceKeyboardFlow_)
@@ -609,9 +616,9 @@ cr.define('cr.ui.login', function() {
      */
     preloadScreen: function(screen) {
       var screenEl = $(screen.id);
-      if (screenEl.deferredDecorate !== undefined) {
-        screenEl.deferredDecorate();
-        delete screenEl.deferredDecorate;
+      if (screenEl.deferredInitialization !== undefined) {
+        screenEl.deferredInitialization();
+        delete screenEl.deferredInitialization;
       }
     },
 

@@ -186,6 +186,23 @@ bool WebViewInternalSetAllowTransparencyFunction::RunAsyncSafe(
   return true;
 }
 
+WebViewInternalSetAllowScalingFunction::
+    WebViewInternalSetAllowScalingFunction() {
+}
+
+WebViewInternalSetAllowScalingFunction::
+    ~WebViewInternalSetAllowScalingFunction() {
+}
+
+bool WebViewInternalSetAllowScalingFunction::RunAsyncSafe(WebViewGuest* guest) {
+  scoped_ptr<webview::SetAllowScaling::Params> params(
+      webview::SetAllowScaling::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+  guest->SetAllowScaling(params->allow);
+  SendResponse(true);
+  return true;
+}
+
 WebViewInternalSetZoomFunction::WebViewInternalSetZoomFunction() {
 }
 
@@ -244,7 +261,7 @@ bool WebViewInternalFindFunction::RunAsyncSafe(WebViewGuest* guest) {
         params->options->match_case ? *params->options->match_case : false;
   }
 
-  guest->StartFinding(search_text, options, this);
+  guest->StartFindInternal(search_text, options, this);
   return true;
 }
 
@@ -275,7 +292,7 @@ bool WebViewInternalStopFindingFunction::RunAsyncSafe(WebViewGuest* guest) {
       action = content::STOP_FIND_ACTION_KEEP_SELECTION;
   }
 
-  guest->StopFinding(action);
+  guest->StopFindingInternal(action);
   return true;
 }
 

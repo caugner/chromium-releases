@@ -23,10 +23,12 @@
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
+#include "chrome/browser/history/content_visit_delegate.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
+#include "chrome/browser/history/top_sites_impl.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -53,10 +55,14 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/history/content/browser/history_database_helper.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/webdata_services/web_data_service_wrapper.h"
@@ -104,12 +110,27 @@
 #endif
 
 using base::Time;
+using bookmarks::BookmarkModel;
 using content::BrowserThread;
 using content::DownloadManagerDelegate;
 using testing::NiceMock;
 using testing::Return;
 
 namespace {
+
+// TopSitesImpl::Shutdown schedules some tasks (from TopSitesBackend) that
+// need to be run to properly shutdown. Run all pending tasks now. This is
+// normally handled by browser_process shutdown.
+
+void CleanupAfterTopSitesDestroyed() {
+  if (base::MessageLoop::current())
+    base::MessageLoop::current()->RunUntilIdle();
+}
+
+// Returns true if a TopSites service has been registered for |profile|.
+bool HasTopSites(Profile* profile) {
+  return !!TopSitesFactory::GetInstance()->GetForProfileIfExists(profile);
+}
 
 // Used to make sure TopSites has finished loading
 class WaitTopSitesLoadedObserver : public history::TopSitesObserver {
@@ -194,9 +215,10 @@ KeyedService* BuildFaviconService(content::BrowserContext* profile) {
 }
 
 KeyedService* BuildHistoryService(content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
+  Profile* profile = Profile::FromBrowserContext(context);
   HistoryService* history_service = new HistoryService(
-      ChromeHistoryClientFactory::GetForProfile(profile), profile);
+      ChromeHistoryClientFactory::GetForProfile(profile),
+      scoped_ptr<history::VisitDelegate>(new ContentVisitDelegate(profile)));
   return history_service;
 }
 
@@ -223,9 +245,7 @@ KeyedService* BuildChromeBookmarkClient(
 KeyedService* BuildChromeHistoryClient(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile),
-                                 profile,
-                                 profile->GetTopSites());
+  return new ChromeHistoryClient(BookmarkModelFactory::GetForProfile(profile));
 }
 
 void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
@@ -241,6 +261,16 @@ KeyedService* BuildWebDataService(content::BrowserContext* context) {
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
       sync_start_util::GetFlareForSyncableService(context_path),
       &TestProfileErrorCallback);
+}
+
+scoped_refptr<RefcountedKeyedService> BuildTopSites(
+    content::BrowserContext* profile) {
+  history::TopSitesImpl* top_sites = new history::TopSitesImpl(
+      static_cast<Profile*>(profile), history::PrepopulatedPageList());
+  top_sites->Init(
+      profile->GetPath().Append(chrome::kTopSitesFilename),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB));
+  return make_scoped_refptr(top_sites);
 }
 
 }  // namespace
@@ -402,6 +432,8 @@ void TestingProfile::Init() {
              content::BrowserThread::UI) ||
          content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
+  set_is_guest_profile(guest_session_);
+
 #if defined(OS_ANDROID)
   // Make sure token service knows its running in tests.
   AndroidProfileOAuth2TokenService::set_is_testing_profile();
@@ -493,12 +525,19 @@ TestingProfile::~TestingProfile() {
 
   MaybeSendDestroyedNotification();
 
+  // Remember whether a TopSites has been created for the current profile,
+  // so that we can run cleanup after destroying all services.
+  bool had_top_sites = HasTopSites(this);
+
   browser_context_dependency_manager_->DestroyBrowserContextServices(this);
 
   if (host_content_settings_map_.get())
     host_content_settings_map_->ShutdownOnUIThread();
 
-  DestroyTopSites();
+  // Wait until TopSites shutdown tasks have completed if a TopSites has
+  // been created for the current profile.
+  if (had_top_sites)
+    CleanupAfterTopSitesDestroyed();
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
@@ -530,22 +569,18 @@ bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   HistoryService* history_service = static_cast<HistoryService*>(
       HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(
           this, BuildHistoryService));
-  if (!history_service->Init(this->GetPath(), no_db)) {
-    HistoryServiceFactory::GetInstance()->SetTestingFactoryAndUse(this, NULL);
+  if (!history_service->Init(
+          no_db, GetPrefs()->GetString(prefs::kAcceptLanguages),
+          history::HistoryDatabaseParamsForPath(GetPath()))) {
+    HistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
+    return false;
   }
   // Disable WebHistoryService by default, since it makes network requests.
-  WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, NULL);
+  WebHistoryServiceFactory::GetInstance()->SetTestingFactory(this, nullptr);
   return true;
 }
 
 void TestingProfile::DestroyHistoryService() {
-  // TODO(sdefresne): remove this once ChromeHistoryClient is no longer an
-  // HistoryServiceObserver, http://crbug.com/373326
-  ChromeHistoryClient* history_client =
-      ChromeHistoryClientFactory::GetForProfileWithoutCreating(this);
-  if (history_client)
-    history_client->Shutdown();
-
   HistoryService* history_service =
       HistoryServiceFactory::GetForProfileWithoutCreating(this);
   if (!history_service)
@@ -571,24 +606,17 @@ void TestingProfile::DestroyHistoryService() {
 
 void TestingProfile::CreateTopSites() {
   DestroyTopSites();
-  top_sites_ = history::TopSites::Create(
-      this, GetPath().Append(chrome::kTopSitesFilename));
-}
-
-void TestingProfile::SetTopSites(history::TopSites* top_sites) {
-  DestroyTopSites();
-  top_sites_ = top_sites;
+  TopSitesFactory::GetInstance()->SetTestingFactoryAndUse(this, BuildTopSites);
 }
 
 void TestingProfile::DestroyTopSites() {
-  if (top_sites_.get()) {
-    top_sites_->Shutdown();
-    top_sites_ = NULL;
-    // TopSitesImpl::Shutdown schedules some tasks (from TopSitesBackend) that
-    // need to be run to properly shutdown. Run all pending tasks now. This is
-    // normally handled by browser_process shutdown.
-    if (base::MessageLoop::current())
-      base::MessageLoop::current()->RunUntilIdle();
+  TopSitesFactory* top_sites_factory = TopSitesFactory::GetInstance();
+  if (top_sites_factory->GetForProfileIfExists(this)) {
+    // BrowserContextKeyedServiceFactory will destroy the previous service when
+    // registering a new testing factory so use this to ensure that destroy the
+    // old service.
+    top_sites_factory->SetTestingFactory(this, nullptr);
+    CleanupAfterTopSitesDestroyed();
   }
 }
 
@@ -634,9 +662,11 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
   scoped_refptr<content::MessageLoopRunner> runner =
       new content::MessageLoopRunner;
   WaitTopSitesLoadedObserver observer(runner.get());
-  top_sites_->AddObserver(&observer);
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(this);
+  top_sites->AddObserver(&observer);
   runner->Run();
-  top_sites_->RemoveObserver(&observer);
+  top_sites->RemoveObserver(&observer);
 }
 
 void TestingProfile::SetGuestSession(bool guest) {
@@ -666,7 +696,7 @@ TestingProfile* TestingProfile::AsTestingProfile() {
   return this;
 }
 
-std::string TestingProfile::GetProfileName() {
+std::string TestingProfile::GetProfileUserName() const {
   return profile_name_;
 }
 
@@ -786,7 +816,7 @@ if (!policy_service_) {
   policy::ProfilePolicyConnectorFactory::GetInstance()->SetServiceForTesting(
       this, profile_policy_connector_.get());
   CHECK_EQ(profile_policy_connector_.get(),
-           policy::ProfilePolicyConnectorFactory::GetForProfile(this));
+           policy::ProfilePolicyConnectorFactory::GetForBrowserContext(this));
 }
 
 PrefService* TestingProfile::GetPrefs() {
@@ -794,12 +824,9 @@ PrefService* TestingProfile::GetPrefs() {
   return prefs_.get();
 }
 
-history::TopSites* TestingProfile::GetTopSites() {
-  return top_sites_.get();
-}
-
-history::TopSites* TestingProfile::GetTopSitesWithoutCreating() {
-  return top_sites_.get();
+const PrefService* TestingProfile::GetPrefs() const {
+  DCHECK(prefs_);
+  return prefs_.get();
 }
 
 DownloadManagerDelegate* TestingProfile::GetDownloadManagerDelegate() {
@@ -925,8 +952,8 @@ PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(this, Profile::EXPLICIT_ACCESS);
+  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+      this, ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   DCHECK(base::MessageLoop::current());
 

@@ -120,30 +120,6 @@ const char* const kMockHttpsQuickTimeoutUrl =
 // captive portal.
 const char* const kInternetConnectedTitle = "Title Of Awesomeness";
 
-// Wait until all resources have loaded in an interstitial page.
-bool WaitForInterstitialReady(content::InterstitialPage* interstitial) {
-  content::RenderFrameHost* rfh = interstitial->GetMainFrame();
-  if (!rfh)
-    return false;
-  bool load_complete = false;
-  EXPECT_TRUE(
-      content::ExecuteScriptAndExtractBool(
-          rfh,
-          "(function() {"
-          "  var done = false;"
-          "  function checkState() {"
-          "    if (!done && document.readyState == 'complete') {"
-          "      done = true;"
-          "      window.domAutomationController.send(true);"
-          "    }"
-          "  }"
-          "  checkState();"
-          "  document.addEventListener('readystatechange', checkState);"
-          "})();",
-          &load_complete));
-  return load_complete;
-}
-
 // A URL request job that hangs until FailJobs() is called.  Started jobs
 // are stored in a static class variable containing a linked list so that
 // FailJobs() can locate them.
@@ -1982,10 +1958,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   tab_strip_model->ActivateTabAt(cert_error_tab_index, false);
   // Wait for the interstitial to load all the JavaScript code. Otherwise,
   // trying to click on a button will fail.
-  EXPECT_TRUE(WaitForInterstitialReady(
-      broken_tab_contents->GetInterstitialPage()));
   content::RenderFrameHost* rfh =
       broken_tab_contents->GetInterstitialPage()->GetMainFrame();
+  EXPECT_TRUE(WaitForRenderFrameReady(rfh));
   const char kClickConnectButtonJS[] =
       "document.getElementById('primary-button').click();";
   EXPECT_TRUE(
@@ -2095,10 +2070,19 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
             GetStateOfTabReloaderAt(browser(), 0));
 }
 
+// This test is very flaky on Linux and is disabled.
+// https://crbug.com/453875
+#if defined(OS_LINUX)
+#define MAYBE_InterstitialTimerReloadWhileLoading \
+        DISABLED_InterstitialTimerReloadWhileLoading
+#else
+#define MAYBE_InterstitialTimerReloadWhileLoading \
+        InterstitialTimerReloadWhileLoading
+#endif
 // Same as above, but instead of stopping, the loading page is reloaded. The end
 // result is the same. (i.e. page load stops, no interstitials shown)
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
-                       InterstitialTimerReloadWhileLoading) {
+                       MAYBE_InterstitialTimerReloadWhileLoading) {
   net::SpawnedTestServer::SSLOptions https_options;
   https_options.server_certificate =
       net::SpawnedTestServer::SSLOptions::CERT_MISMATCHED_NAME;
@@ -2151,10 +2135,20 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
             GetStateOfTabReloaderAt(browser(), 0));
 }
 
+// This test is very flaky on Linux and is disabled.
+// https://crbug.com/453875
+#if defined(OS_LINUX)
+#define MAYBE_InterstitialTimerNavigateAwayWhileLoading \
+        DISABLED_InterstitialTimerNavigateAwayWhileLoading
+#else
+#define MAYBE_InterstitialTimerNavigateAwayWhileLoading \
+        InterstitialTimerNavigateAwayWhileLoading
+#endif
+
 // Same as above, but instead of reloading, the page is navigated away. The new
 // page should load, and no interstitials should be shown.
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
-                       InterstitialTimerNavigateAwayWhileLoading) {
+                       MAYBE_InterstitialTimerNavigateAwayWhileLoading) {
   net::SpawnedTestServer::SSLOptions https_options;
   https_options.server_certificate =
       net::SpawnedTestServer::SSLOptions::CERT_MISMATCHED_NAME;
@@ -2693,8 +2687,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, Status511) {
 // in.
 IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, HstsLogin) {
   GURL::Replacements replacements;
-  std::string scheme = "http";
-  replacements.SetSchemeStr(scheme);
+  replacements.SetSchemeStr("http");
   GURL http_timeout_url = GURL(kMockHttpsUrl).ReplaceComponents(replacements);
 
   URLRequestFailedJob::GetMockHttpUrl(net::ERR_CONNECTION_TIMED_OUT);

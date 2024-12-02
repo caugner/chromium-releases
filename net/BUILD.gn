@@ -7,6 +7,7 @@ import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/module_args/v8.gni")
 import("//url/config.gni")
+import("//testing/test.gni")
 
 # TODO(cjhopman): //build/config/android/rules.gni also imports grit_rule.gni.
 # Currently, that file can't be imported multiple times.  Make this always
@@ -37,7 +38,7 @@ use_kerberos = !is_chromeos && !is_android && !is_ios
 # pretty confident that mmap-ing the index would not hurt any existing x86
 # android devices, but we cannot be so sure about the variety of ARM devices.
 # So enable it for x86 only for now.
-posix_avoid_mmap = is_android && cpu_arch != "x86"
+posix_avoid_mmap = is_android && current_cpu != "x86"
 
 # WebSockets and socket stream code are used everywhere except iOS.
 enable_websockets = !is_ios
@@ -60,14 +61,6 @@ config("net_config") {
   }
 }
 
-# Disables Windows warning about size to int truncations.
-# TODO(jschuh): crbug.com/167187 fix this and delete this config.
-config("net_win_size_truncation") {
-  if (is_win) {
-    cflags = [ "/wd4267" ]
-  }
-}
-
 component("net") {
   sources =
       gypi_values.net_nacl_common_sources + gypi_values.net_non_nacl_sources
@@ -82,13 +75,16 @@ component("net") {
     "DLOPEN_KERBEROS",
     "NET_IMPLEMENTATION",
   ]
-  configs += [ ":net_win_size_truncation" ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   public_configs = [ ":net_config" ]
   include_dirs = []
 
   public_deps = [
     "//crypto",
     "//crypto:platform",
+    "//url",
   ]
   deps = [
     ":net_resources",
@@ -112,8 +108,8 @@ component("net") {
     sources -= [
       "http/http_auth_gssapi_posix.cc",
       "http/http_auth_gssapi_posix.h",
-      "http/http_auth_handler_negotiate.h",
       "http/http_auth_handler_negotiate.cc",
+      "http/http_auth_handler_negotiate.h",
     ]
   }
 
@@ -129,12 +125,12 @@ component("net") {
     sources -= [
       "base/directory_lister.cc",
       "base/directory_lister.h",
+      "url_request/file_protocol_handler.cc",
+      "url_request/file_protocol_handler.h",
       "url_request/url_request_file_dir_job.cc",
       "url_request/url_request_file_dir_job.h",
       "url_request/url_request_file_job.cc",
       "url_request/url_request_file_job.h",
-      "url_request/file_protocol_handler.cc",
-      "url_request/file_protocol_handler.h",
     ]
   }
 
@@ -397,10 +393,10 @@ component("net") {
       "websockets/websocket_frame.h",
       "websockets/websocket_frame_parser.cc",
       "websockets/websocket_frame_parser.h",
-      "websockets/websocket_handshake_constants.cc",
-      "websockets/websocket_handshake_constants.h",
       "websockets/websocket_handshake_challenge.cc",
       "websockets/websocket_handshake_challenge.h",
+      "websockets/websocket_handshake_constants.cc",
+      "websockets/websocket_handshake_constants.h",
       "websockets/websocket_handshake_request_info.cc",
       "websockets/websocket_handshake_request_info.h",
       "websockets/websocket_handshake_response_info.cc",
@@ -476,10 +472,10 @@ component("net") {
       "cert/test_root_certs_nss.cc",
       "cert/x509_util_nss.cc",
       "cert/x509_util_nss.h",
-      "proxy/proxy_resolver_mac.cc",
-      "proxy/proxy_server_mac.cc",
       "ocsp/nss_ocsp.cc",
       "ocsp/nss_ocsp.h",
+      "proxy/proxy_resolver_mac.cc",
+      "proxy/proxy_server_mac.cc",
     ]
     set_sources_assignment_filter(sources_assignment_filter)
 
@@ -502,11 +498,11 @@ component("net") {
     # are needed.
     set_sources_assignment_filter([])
     sources += [
-      "base/platform_mime_util_linux.cc",
       "base/address_tracker_linux.cc",
       "base/address_tracker_linux.h",
       "base/net_util_linux.cc",
       "base/net_util_linux.h",
+      "base/platform_mime_util_linux.cc",
     ]
     set_sources_assignment_filter(sources_assignment_filter)
 
@@ -547,6 +543,7 @@ static_library("extras") {
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
   deps = [
     ":net",
+    "//base",
     "//sql:sql",
   ]
 }
@@ -567,8 +564,8 @@ static_library("http_server") {
     "server/web_socket_encoder.h",
   ]
   configs += [
+    "//build/config/compiler:no_size_t_to_int_warning",
     "//build/config/compiler:wexit_time_destructors",
-    ":net_win_size_truncation",
   ]
   deps = [
     ":net",
@@ -588,11 +585,12 @@ executable("dump_cache") {
     "tools/dump_cache/simple_cache_dumper.h",
     "tools/dump_cache/url_to_filename_encoder.cc",
     "tools/dump_cache/url_to_filename_encoder.h",
-    "tools/dump_cache/url_utilities.h",
     "tools/dump_cache/url_utilities.cc",
+    "tools/dump_cache/url_utilities.h",
   ]
 
-  configs += [ ":net_win_size_truncation" ]
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     "//base",
@@ -665,10 +663,10 @@ source_set("test_support") {
     "test/python_utils.h",
     "test/spawned_test_server/base_test_server.cc",
     "test/spawned_test_server/base_test_server.h",
-    "test/spawned_test_server/local_test_server_posix.cc",
-    "test/spawned_test_server/local_test_server_win.cc",
     "test/spawned_test_server/local_test_server.cc",
     "test/spawned_test_server/local_test_server.h",
+    "test/spawned_test_server/local_test_server_posix.cc",
+    "test/spawned_test_server/local_test_server_win.cc",
     "test/spawned_test_server/remote_test_server.cc",
     "test/spawned_test_server/remote_test_server.h",
     "test/spawned_test_server/spawned_test_server.h",
@@ -680,6 +678,8 @@ source_set("test_support") {
     "test/url_request/url_request_mock_data_job.h",
     "test/url_request/url_request_mock_http_job.cc",
     "test/url_request/url_request_mock_http_job.h",
+    "test/url_request/url_request_slow_download_job.cc",
+    "test/url_request/url_request_slow_download_job.h",
     "url_request/test_url_fetcher_factory.cc",
     "url_request/test_url_fetcher_factory.h",
     "url_request/test_url_request_interceptor.cc",
@@ -688,7 +688,8 @@ source_set("test_support") {
     "url_request/url_request_test_util.h",
   ]
 
-  configs += [ ":net_win_size_truncation" ]
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   public_deps = [
     "//base",
@@ -771,7 +772,7 @@ if (use_v8_in_net) {
 
     defines = [ "NET_IMPLEMENTATION" ]
     configs += [
-      ":net_win_size_truncation",
+      "//build/config/compiler:no_size_t_to_int_warning",
       "//build/config/compiler:wexit_time_destructors",
     ]
 
@@ -787,13 +788,45 @@ if (use_v8_in_net) {
   }
 }
 
+if (use_v8_in_net && !is_android) {
+  source_set("net_browser_services") {
+    sources = [
+      "dns/mojo_host_resolver_impl.cc",
+      "dns/mojo_host_resolver_impl.h",
+    ]
+
+    public_deps = [
+      ":mojo_type_converters",
+      ":net",
+      "//base",
+      "//net/interfaces",
+      "//third_party/mojo/src/mojo/public/cpp/bindings",
+    ]
+  }
+
+  source_set("mojo_type_converters") {
+    sources = [
+      "dns/mojo_type_converters.cc",
+      "dns/mojo_type_converters.h",
+    ]
+
+    public_deps = [
+      ":net",
+      "//net/interfaces",
+      "//third_party/mojo/src/mojo/public/cpp/bindings",
+    ]
+  }
+}
+
 if (!is_ios && !is_android) {
   executable("crash_cache") {
     testonly = true
     sources = [
       "tools/crash_cache/crash_cache.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       ":net",
       ":test_support",
@@ -806,7 +839,9 @@ if (!is_ios && !is_android) {
     sources = [
       "tools/crl_set_dump/crl_set_dump.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       ":net",
       "//base",
@@ -818,7 +853,9 @@ if (!is_ios && !is_android) {
     sources = [
       "tools/dns_fuzz_stub/dns_fuzz_stub.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       ":net",
       "//base",
@@ -842,7 +879,9 @@ if (!is_ios && !is_android) {
     sources = [
       "tools/get_server_time/get_server_time.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       ":net",
       "//base",
@@ -893,7 +932,9 @@ if (!is_ios && !is_android) {
     sources = [
       "disk_cache/blockfile/stress_cache.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       ":net",
       ":test_support",
@@ -905,7 +946,9 @@ if (!is_ios && !is_android) {
     sources = [
       "tools/tld_cleanup/tld_cleanup.cc",
     ]
-    configs += [ ":net_win_size_truncation" ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     deps = [
       "//base",
       "//base:i18n",
@@ -931,20 +974,20 @@ if (is_linux) {
     sources = [
       "tools/dump_cache/url_to_filename_encoder.cc",
       "tools/dump_cache/url_to_filename_encoder.h",
-      "tools/dump_cache/url_utilities.h",
       "tools/dump_cache/url_utilities.cc",
-      "tools/flip_server/acceptor_thread.h",
+      "tools/dump_cache/url_utilities.h",
       "tools/flip_server/acceptor_thread.cc",
+      "tools/flip_server/acceptor_thread.h",
+      "tools/flip_server/constants.h",
       "tools/flip_server/create_listener.cc",
       "tools/flip_server/create_listener.h",
-      "tools/flip_server/constants.h",
       "tools/flip_server/flip_config.cc",
       "tools/flip_server/flip_config.h",
       "tools/flip_server/http_interface.cc",
       "tools/flip_server/http_interface.h",
       "tools/flip_server/loadtime_measurement.h",
-      "tools/flip_server/mem_cache.h",
       "tools/flip_server/mem_cache.cc",
+      "tools/flip_server/mem_cache.h",
       "tools/flip_server/output_ordering.cc",
       "tools/flip_server/output_ordering.h",
       "tools/flip_server/ring_buffer.cc",
@@ -952,10 +995,10 @@ if (is_linux) {
       "tools/flip_server/sm_connection.cc",
       "tools/flip_server/sm_connection.h",
       "tools/flip_server/sm_interface.h",
-      "tools/flip_server/spdy_ssl.cc",
-      "tools/flip_server/spdy_ssl.h",
       "tools/flip_server/spdy_interface.cc",
       "tools/flip_server/spdy_interface.h",
+      "tools/flip_server/spdy_ssl.cc",
+      "tools/flip_server/spdy_ssl.h",
       "tools/flip_server/spdy_util.cc",
       "tools/flip_server/spdy_util.h",
       "tools/flip_server/streamer_interface.cc",
@@ -981,6 +1024,7 @@ if (is_linux) {
       "tools/flip_server/spdy_interface_test.cc",
     ]
     deps = [
+      ":balsa",
       ":flip_in_mem_edsm_server_base",
       ":net",
       ":test_support",
@@ -996,6 +1040,7 @@ if (is_linux) {
       "tools/flip_server/flip_in_mem_edsm_server.cc",
     ]
     deps = [
+      ":balsa",
       ":flip_in_mem_edsm_server_base",
       ":net",
       "//base",
@@ -1010,8 +1055,8 @@ if (is_linux) {
       "tools/quic/quic_client_session.h",
       "tools/quic/quic_default_packet_writer.cc",
       "tools/quic/quic_default_packet_writer.h",
-      "tools/quic/quic_dispatcher.h",
       "tools/quic/quic_dispatcher.cc",
+      "tools/quic/quic_dispatcher.h",
       "tools/quic/quic_epoll_clock.cc",
       "tools/quic/quic_epoll_clock.h",
       "tools/quic/quic_epoll_connection_helper.cc",
@@ -1032,8 +1077,8 @@ if (is_linux) {
       "tools/quic/quic_spdy_client_stream.h",
       "tools/quic/quic_spdy_server_stream.cc",
       "tools/quic/quic_spdy_server_stream.h",
-      "tools/quic/quic_time_wait_list_manager.h",
       "tools/quic/quic_time_wait_list_manager.cc",
+      "tools/quic/quic_time_wait_list_manager.h",
     ]
     deps = [
       ":balsa",
@@ -1052,6 +1097,8 @@ if (is_linux) {
       "tools/quic/quic_client_bin.cc",
     ]
     deps = [
+      ":balsa",
+      ":epoll_server",
       ":quic_base",
       ":net",
       "//base",
@@ -1129,7 +1176,8 @@ if (!is_android && !is_win && !is_mac) {
   test("net_unittests") {
     sources = gypi_values.net_test_sources
 
-    configs += [ ":net_win_size_truncation" ]
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
     defines = []
 
     deps = [
@@ -1146,7 +1194,9 @@ if (!is_android && !is_win && !is_mac) {
       "//crypto",
       "//crypto:platform",
       "//crypto:test_support",
+      "//gin",
       "//net/base/registry_controlled_domains",
+      "//sql",
       "//testing/gmock",
       "//testing/gtest",
       "//third_party/zlib",
@@ -1258,6 +1308,7 @@ if (!is_android && !is_win && !is_mac) {
         "websockets/websocket_deflate_predictor_impl_test.cc",
         "websockets/websocket_deflate_stream_test.cc",
         "websockets/websocket_deflater_test.cc",
+        "websockets/websocket_end_to_end_test.cc",
         "websockets/websocket_errors_test.cc",
         "websockets/websocket_extension_parser_test.cc",
         "websockets/websocket_frame_parser_test.cc",
@@ -1310,9 +1361,19 @@ if (!is_android && !is_win && !is_mac) {
       deps += [ ":net_with_v8" ]
     } else {
       sources -= [
-        "proxy/proxy_resolver_v8_unittest.cc",
         "proxy/proxy_resolver_v8_tracing_unittest.cc",
+        "proxy/proxy_resolver_v8_unittest.cc",
       ]
+    }
+
+    if (use_v8_in_net && !is_android) {
+      deps += [
+        ":net_browser_services",
+        "//mojo/environment:chromium",
+        "//third_party/mojo/src/mojo/edk/system",
+      ]
+    } else {
+      sources -= [ "dns/mojo_host_resolver_impl_unittest.cc" ]
     }
 
     if (!enable_mdns) {
