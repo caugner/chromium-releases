@@ -31,6 +31,7 @@
 #include "ash/wm/overview/scoped_overview_animation_settings.h"
 #include "ash/wm/overview/scoped_overview_hide_windows.h"
 #include "ash/wm/raster_scale/raster_scale_controller.h"
+#include "ash/wm/snap_group/snap_group_controller.h"
 #include "ash/wm/splitview/split_view_constants.h"
 #include "ash/wm/splitview/split_view_utils.h"
 #include "ash/wm/window_mini_view_header_view.h"
@@ -57,6 +58,7 @@
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/transform_util.h"
+#include "ui/views/background.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/window_animations.h"
@@ -66,7 +68,7 @@ namespace ash {
 
 namespace {
 
-using ::chromeos::WindowStateType;
+using chromeos::WindowStateType;
 
 // Opacity for fading out during closing a window.
 constexpr float kClosingItemOpacity = 0.8f;
@@ -286,7 +288,8 @@ void OverviewItem::SetBounds(const gfx::RectF& target_bounds,
   // initial transform.
   ScopedPauseRasterScaleUpdates scoped_pause;
 
-  if (in_bounds_update_ || !OverviewController::Get()->InOverviewSession()) {
+  if (in_bounds_update_ || transform_window_.is_restoring() ||
+      !OverviewController::Get()->InOverviewSession()) {
     return;
   }
 
@@ -986,14 +989,17 @@ const gfx::RoundedCornersF OverviewItem::GetRoundedCorners() const {
   }
 
   aura::Window* window = transform_window_.window();
-  const gfx::RoundedCornersF& header_rounded_corners =
-      overview_item_view_->header_view()->GetHeaderRoundedCorners(window);
+  const auto header_rounded_corners = overview_item_view_->header_view()
+                                          ->GetBackground()
+                                          ->GetRoundedCornerRadii();
+  CHECK(header_rounded_corners.has_value());
   const auto* layer = window->layer();
   const gfx::RoundedCornersF& transform_window_rounded_corners =
       layer->rounded_corner_radii();
   const float scale = layer->transform().To2dScale().x();
   return gfx::RoundedCornersF(
-      header_rounded_corners.upper_left(), header_rounded_corners.upper_right(),
+      header_rounded_corners->upper_left(),
+      header_rounded_corners->upper_right(),
       transform_window_rounded_corners.lower_right() * scale,
       transform_window_rounded_corners.lower_left() * scale);
 }

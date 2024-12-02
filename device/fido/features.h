@@ -101,11 +101,6 @@ COMPONENT_EXPORT(DEVICE_FIDO)
 BASE_DECLARE_FEATURE(kChromeOsPasskeys);
 #endif
 
-// A webauthn UI mode that detects screen readers and makes the dialog title
-// focusable.
-COMPONENT_EXPORT(DEVICE_FIDO)
-BASE_DECLARE_FEATURE(kWebAuthnScreenReaderMode);
-
 // Update the minimum, maximum, and default timeout values for webauthn requests
 // to be more generous and meet https://www.w3.org/TR/WCAG21/#enough-time.
 COMPONENT_EXPORT(DEVICE_FIDO)
@@ -133,6 +128,18 @@ BASE_DECLARE_FEATURE(kWebAuthnAndroidFidoJson);
 // authenticator if available.
 COMPONENT_EXPORT(DEVICE_FIDO)
 BASE_DECLARE_FEATURE(kWebAuthnPreferVirtualPlatformAuthenticator);
+
+// Enable the Chrome Android cable authenticator. This lets a Chrome module
+// handle cable requests from scanning a QR code, tapping on an FCM
+// notification, or coming from Play Services. The Chrome Android cable
+// authenticator has been replaced by an implementation in GMSCore, and this
+// flag is here to help us safely remove the code.
+//
+// Note that the USB cable authenticator is not controlled by this flag. That
+// feature hasn't shipped in GMSCore, so it is desirable to keep it around for a
+// while longer.
+COMPONENT_EXPORT(DEVICE_FIDO)
+BASE_DECLARE_FEATURE(kWebAuthnEnableAndroidCableAuthenticator);
 
 }  // namespace device
 
