@@ -121,9 +121,8 @@ const CGFloat kOffsetToPinOmnibox = 100;
   AddSameConstraints(discoverFeedView, self.view);
 
   UIViewController* parentViewController =
-      [self.ntpContentDelegate isFeedVisible]
-          ? self.discoverFeedWrapperViewController.discoverFeed
-          : self.discoverFeedWrapperViewController;
+      self.isFeedVisible ? self.discoverFeedWrapperViewController.discoverFeed
+                         : self.discoverFeedWrapperViewController;
 
   if (self.contentSuggestionsViewController.parentViewController) {
     [self.contentSuggestionsViewController willMoveToParentViewController:nil];
@@ -173,7 +172,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
 
   // If the feed is not visible, we control the delegate ourself (since it is
   // otherwise controlled by the DiscoverProvider).
-  if (![self.ntpContentDelegate isFeedVisible]) {
+  if (!self.isFeedVisible) {
     self.discoverFeedWrapperViewController.contentCollectionView.delegate =
         self;
   }
@@ -184,7 +183,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
 - (void)viewWillLayoutSubviews {
   [super viewWillLayoutSubviews];
 
-  [self updateContentSuggestionForCurrentLayout];
+  [self updateNTPLayout];
   [self updateHeaderSynchronizerOffset];
   [self.headerSynchronizer updateConstraints];
 }
@@ -203,7 +202,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
     [self applyCollectionViewConstraints];
   }
 
-  [self updateContentSuggestionForCurrentLayout];
+  [self updateNTPLayout];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -218,7 +217,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
     self.shouldFocusFakebox = NO;
   }
 
-  if (![self.ntpContentDelegate isFeedVisible]) {
+  if (!self.isFeedVisible) {
     [self setMinimumHeight];
   }
 
@@ -238,7 +237,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
   // we are reopening an existing NTP, the insets are already ok.
   // TODO(crbug.com/1170995): Remove this once we use a custom feed header.
   if (!self.viewDidAppear) {
-    [self updateFeedInsetsForContentSuggestions];
+    [self updateFeedInsetsForContentAbove];
   }
 }
 
@@ -274,7 +273,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
     if (yOffsetBeforeRotation < 0) {
       weakSelf.collectionView.contentOffset =
           CGPointMake(0, yOffsetBeforeRotation - heightAboveFeedDifference);
-      [weakSelf updateContentSuggestionForCurrentLayout];
+      [weakSelf updateNTPLayout];
     } else {
       [weakSelf.contentSuggestionsViewController.collectionView
               .collectionViewLayout invalidateLayout];
@@ -289,7 +288,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
         weakSelf.collectionView.contentOffset.y < pinnedOffsetY) {
       weakSelf.collectionView.contentOffset = CGPointMake(0, pinnedOffsetY);
     }
-    if (![self.ntpContentDelegate isFeedVisible]) {
+    if (!self.isFeedVisible) {
       [self setMinimumHeight];
     }
   };
@@ -297,7 +296,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
       animateAlongsideTransition:alongsideBlock
                       completion:^(
                           id<UIViewControllerTransitionCoordinatorContext>) {
-                        [self updateFeedInsetsForContentSuggestions];
+                        [self updateFeedInsetsForContentAbove];
                       }];
 }
 
@@ -348,8 +347,8 @@ const CGFloat kOffsetToPinOmnibox = 100;
          -[self adjustedContentSuggestionsHeight];
 }
 
-- (void)updateContentSuggestionForCurrentLayout {
-  [self updateFeedInsetsForContentSuggestions];
+- (void)updateNTPLayout {
+  [self updateFeedInsetsForContentAbove];
 
   // Reload data to ensure the Most Visited tiles and fake omnibox are correctly
   // positioned, in particular during a rotation while a ViewController is
@@ -596,12 +595,13 @@ const CGFloat kOffsetToPinOmnibox = 100;
   [self.ntpContentDelegate reloadContentSuggestions];
 }
 
-// Sets an inset to the Discover feed equal to the content suggestions height,
-// so that the content suggestions could act as the feed header.
-- (void)updateFeedInsetsForContentSuggestions {
+// Sets an inset to the feed equal to the height of the content above the feed,
+// then place the content above the feed in this space.
+- (void)updateFeedInsetsForContentAbove {
   // TODO(crbug.com/1114792): Handle landscape/iPad layout.
   self.contentSuggestionsViewController.view.frame = CGRectMake(
-      0, -[self contentSuggestionsContentHeight], self.view.frame.size.width,
+      self.contentSuggestionsViewController.view.frame.origin.x, 
+      -[self contentSuggestionsContentHeight], self.view.frame.size.width,
       [self contentSuggestionsContentHeight]);
   self.collectionView.contentInset =
       UIEdgeInsetsMake([self adjustedContentSuggestionsHeight], 0, 0, 0);
@@ -675,7 +675,7 @@ const CGFloat kOffsetToPinOmnibox = 100;
 // for the content suggestions within it.
 - (void)applyCollectionViewConstraints {
   UIView* containerView;
-  if ([self.ntpContentDelegate isFeedVisible]) {
+  if (self.isFeedVisible) {
     // TODO(crbug.com/1262536): Remove this when the bug is fixed.
     if (IsNTPViewHierarchyRepairEnabled()) {
       [self verifyNTPViewHierarchy];

@@ -382,10 +382,12 @@ void ServiceWorkerContainerHost::EnsureFileAccess(
     ChildProcessSecurityPolicyImpl* policy =
         ChildProcessSecurityPolicyImpl::GetInstance();
     for (const auto& file : file_paths) {
-      if (!policy->CanReadFile(GetProcessId(), file))
+      if (!policy->CanReadFile(GetProcessId(), file)) {
         mojo::ReportBadMessage(
             "The renderer doesn't have access to the file "
             "but it tried to grant access to the controller.");
+        return;
+      }
 
       if (!policy->CanReadFile(controller_process_id, file))
         policy->GrantReadFile(controller_process_id, file);
@@ -480,6 +482,7 @@ void ServiceWorkerContainerHost::AddMatchingRegistration(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(blink::ServiceWorkerScopeMatches(registration->scope(),
                                           GetUrlForScopeMatch()));
+  DCHECK(registration->key() == key());
   if (!IsEligibleForServiceWorkerController())
     return;
   size_t key = registration->scope().spec().size();
@@ -1199,7 +1202,7 @@ void ServiceWorkerContainerHost::SyncMatchingRegistrations() {
   const auto& registrations = context_->GetLiveRegistrations();
   for (const auto& key_registration : registrations) {
     ServiceWorkerRegistration* registration = key_registration.second;
-    if (!registration->is_uninstalled() &&
+    if (!registration->is_uninstalled() && registration->key() == key() &&
         blink::ServiceWorkerScopeMatches(registration->scope(),
                                          GetUrlForScopeMatch())) {
       AddMatchingRegistration(registration);
@@ -1677,7 +1680,7 @@ const GURL ServiceWorkerContainerHost::GetOrigin() const {
   // Ideally, the origins of GetUrlForScopeMatch() and url() should be the same
   // but GURL::GetOrigin() doesn't work with blob URL.
   // See https://crbug.com/1144717
-  return GetUrlForScopeMatch().GetOrigin();
+  return GetUrlForScopeMatch().DeprecatedGetOriginAsURL();
 }
 
 const GURL& ServiceWorkerContainerHost::GetUrlForScopeMatch() const {

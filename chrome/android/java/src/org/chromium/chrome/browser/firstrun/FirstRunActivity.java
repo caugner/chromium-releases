@@ -13,7 +13,6 @@ import android.view.View;
 import android.view.ViewTreeObserver.OnPreDrawListener;
 
 import androidx.annotation.CallSuper;
-import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.annotation.VisibleForTesting;
@@ -26,13 +25,13 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.BooleanSupplier;
+import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.datareduction.DataReductionPromoUtils;
 import org.chromium.chrome.browser.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.fonts.FontPreloader;
-import org.chromium.chrome.browser.lifecycle.NativeInitObserver;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
@@ -43,8 +42,6 @@ import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
@@ -63,7 +60,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
      * TODO(crbug.com/1114319): Rework and use a better testing setup.
      */
     public interface FirstRunActivityObserver {
-        /** See {@link #onCreatePostNativeAndPoliciesPageSequence}. */
+        /** See {@link #createPostNativeAndPoliciesPageSequence}. */
         void onCreatePostNativeAndPoliciesPageSequence(FirstRunActivity caller);
 
         /** See {@link #acceptTermsOfService}. */
@@ -98,38 +95,19 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         }
     }
 
-    /**
-     * This is used for histograms and should therefore be treated as append-only. See
-     * {@code MobileFreProgress} in tools/metrics/histograms/enums.xml.
-     */
-    @VisibleForTesting
-    @IntDef({MobileFreProgress.STARTED, MobileFreProgress.WELCOME_SHOWN,
-            MobileFreProgress.DATA_SAVER_SHOWN, MobileFreProgress.SYNC_CONSENT_SHOWN,
-            MobileFreProgress.COMPLETED_SYNC, MobileFreProgress.COMPLETED_NOT_SYNC,
-            MobileFreProgress.DEFAULT_SEARCH_ENGINE_SHOWN, MobileFreProgress.MAX})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface MobileFreProgress {
-        int STARTED = 0;
-        int WELCOME_SHOWN = 1;
-        int DATA_SAVER_SHOWN = 2;
-        int SYNC_CONSENT_SHOWN = 3;
-        int COMPLETED_SYNC = 4;
-        int COMPLETED_NOT_SYNC = 5;
-        int DEFAULT_SEARCH_ENGINE_SHOWN = 6;
-        int MAX = 7;
-    }
-
-    private BitSet mFreProgressStepsRecorded = new BitSet(MobileFreProgress.MAX);
+    private final BitSet mFreProgressStepsRecorded = new BitSet(MobileFreProgress.MAX);
 
     @Nullable
     private static FirstRunActivityObserver sObserver;
 
-    private String mResultSignInAccountName;
-    private boolean mResultShowSignInSettings;
+    private String mResultSyncConsentAccountName;
+    private boolean mResultShowAdvancedSyncSettings;
 
     private boolean mFlowIsKnown;
     private boolean mPostNativeAndPolicyPagesCreated;
-    private boolean mNativeSideIsInitialized;
+    // Use hasValue() to simplify access. Will be null before initialized.
+    private final OneshotSupplierImpl<Boolean> mNativeSideIsInitializedSupplier =
+            new OneshotSupplierImpl<>();
 
     private FirstRunFlowSequencer mFirstRunFlowSequencer;
 
@@ -158,15 +136,13 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
      */
     private FirstRunPagerAdapter mPagerAdapter;
 
-    /**
-     * Defines a sequence of pages to be shown (depending on parameters etc).
-     */
-    private void createPageSequence() {
+    /** Creates first page and sets up adapter. Should result UI being shown on the screen. */
+    private void createFirstPage() {
         FREMobileIdentityConsistencyFieldTrial.createFirstRunTrial();
+        BooleanSupplier showWelcomePage = () -> !FirstRunStatus.shouldSkipWelcomePage();
         if (FREMobileIdentityConsistencyFieldTrial.isEnabled()) {
-            mPages.add(new FirstRunPage<>(SigninFirstRunFragment.class, () -> true));
+            mPages.add(new FirstRunPage<>(SigninFirstRunFragment.class, showWelcomePage));
         } else {
-            BooleanSupplier showWelcomePage = () -> !FirstRunStatus.shouldSkipWelcomePage();
             // TODO(crbug.com/1111490): Revisit during post-MVP.
             // There's an edge case where we accept the welcome page in the main app, abort the FRE,
             // then go through this CCT FRE again.
@@ -210,8 +186,9 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         BooleanSupplier showSyncConsent = () -> mFreProperties.getBoolean(SHOW_SYNC_CONSENT_PAGE);
 
         boolean notifyAdapter = false;
-        // An optional sign-in page.
-        if (FREMobileIdentityConsistencyFieldTrial.isEnabled() && showSyncConsent.getAsBoolean()) {
+        // An optional sign-in page, the visibility of this page will be decided on the fly
+        // according to the situation.
+        if (FREMobileIdentityConsistencyFieldTrial.isEnabled()) {
             mPages.add(new FirstRunPage<>(SyncConsentFirstRunFragment.class, showSyncConsent));
             mFreProgressStates.add(MobileFreProgress.SYNC_CONSENT_SHOWN);
             notifyAdapter = true;
@@ -234,7 +211,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         }
 
         // An optional sign-in page.
-        if (!FREMobileIdentityConsistencyFieldTrial.isEnabled() && showSyncConsent.getAsBoolean()) {
+        if (!FREMobileIdentityConsistencyFieldTrial.isEnabled()) {
             mPages.add(new FirstRunPage<>(SyncConsentFirstRunFragment.class, showSyncConsent));
             mFreProgressStates.add(MobileFreProgress.SYNC_CONSENT_SHOWN);
             notifyAdapter = true;
@@ -352,7 +329,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     }
 
     private void onNativeDependenciesFullyInitialized() {
-        mNativeSideIsInitialized = true;
+        mNativeSideIsInitializedSupplier.set(true);
 
         onInternalStateChanged();
     }
@@ -369,13 +346,13 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
             return;
         }
 
-        if (mNativeSideIsInitialized && mFreProperties == null) {
+        if (mNativeSideIsInitializedSupplier.hasValue() && mFreProperties == null) {
             completeFirstRunExperience();
             return;
         }
 
         if (mPagerAdapter == null) {
-            createPageSequence();
+            createFirstPage();
         }
 
         if (!mPostNativeAndPolicyPagesCreated && areNativeAndPoliciesInitialized()) {
@@ -388,7 +365,7 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     }
 
     private boolean areNativeAndPoliciesInitialized() {
-        return mNativeSideIsInitialized && mFlowIsKnown
+        return mNativeSideIsInitializedSupplier.hasValue() && mFlowIsKnown
                 && this.getPolicyLoadListener().get() != null;
     }
 
@@ -399,18 +376,14 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         if (!(fragment instanceof FirstRunFragment)) return;
 
         FirstRunFragment page = (FirstRunFragment) fragment;
-        // Important that this check delegates to the dispatcher instead of using
-        // mNativeSideIsInitialized, the two flags are not updated atomically. The dispatcher does
-        // not call #onFinishNativeInitialization() if it already happened.
-        if (getLifecycleDispatcher().isNativeInitializationFinished()) {
+        // Delay notifying the child page until native and the TemplateUrlService are initialized.
+        // Tracked by mNativeSideIsInitializedSupplier is ready. Otherwise if the next page handles
+        // the default search engine, it will be missing dependencies. See https://crbug.com/1275950
+        // for when this didn't work.
+        if (mNativeSideIsInitializedSupplier.hasValue()) {
             page.onNativeInitialized();
         } else {
-            getLifecycleDispatcher().register(new NativeInitObserver() {
-                @Override
-                public void onFinishNativeInitialization() {
-                    page.onNativeInitialized();
-                }
-            });
+            mNativeSideIsInitializedSupplier.onAvailable((ignored) -> page.onNativeInitialized());
         }
     }
 
@@ -507,12 +480,15 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     public void completeFirstRunExperience() {
         RecordHistogram.recordMediumTimesHistogram("MobileFre.FromLaunch.FreCompleted",
                 SystemClock.elapsedRealtime() - mIntentCreationElapsedRealtimeMs);
-        recordFreProgressHistogram(TextUtils.isEmpty(mResultSignInAccountName)
-                        ? MobileFreProgress.COMPLETED_NOT_SYNC
-                        : MobileFreProgress.COMPLETED_SYNC);
+        if (mResultShowAdvancedSyncSettings) {
+            recordFreProgressHistogram(MobileFreProgress.SYNC_CONSENT_SETTINGS_LINK_CLICK);
+        }
+        recordFreProgressHistogram(TextUtils.isEmpty(mResultSyncConsentAccountName)
+                        ? MobileFreProgress.SYNC_CONSENT_DISMISSED
+                        : MobileFreProgress.SYNC_CONSENT_ACCEPTED);
 
         FirstRunFlowSequencer.markFlowAsCompleted(
-                mResultSignInAccountName, mResultShowSignInSettings);
+                mResultSyncConsentAccountName, mResultShowAdvancedSyncSettings);
 
         if (DataReductionPromoUtils.getDisplayedFreOrSecondRunPromo()) {
             if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()) {
@@ -566,15 +542,15 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     }
 
     @Override
-    public void refuseSignIn() {
-        mResultSignInAccountName = null;
-        mResultShowSignInSettings = false;
+    public void refuseSync() {
+        mResultSyncConsentAccountName = null;
+        mResultShowAdvancedSyncSettings = false;
     }
 
     @Override
-    public void acceptSignIn(String accountName, boolean openSettings) {
-        mResultSignInAccountName = accountName;
-        mResultShowSignInSettings = openSettings;
+    public void acceptSync(String accountName, boolean openSettings) {
+        mResultSyncConsentAccountName = accountName;
+        mResultShowAdvancedSyncSettings = openSettings;
     }
 
     @Override
@@ -583,7 +559,14 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     }
 
     @Override
+    public boolean isLaunchedFromCct() {
+        return mLaunchedFromCCT;
+    }
+
+    @Override
     public void acceptTermsOfService(boolean allowCrashUpload) {
+        assert mNativeSideIsInitializedSupplier.hasValue();
+
         // If default is true then it corresponds to opt-out and false corresponds to opt-in.
         UmaUtils.recordMetricsReportingDefaultOptIn(!DEFAULT_METRICS_AND_CRASH_REPORTING);
         RecordHistogram.recordMediumTimesHistogram("MobileFre.FromLaunch.TosAccepted",
@@ -638,7 +621,8 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         }
     }
 
-    private void recordFreProgressHistogram(int state) {
+    @Override
+    public void recordFreProgressHistogram(@MobileFreProgress int state) {
         assert 0 <= state && state < MobileFreProgress.MAX;
 
         if (mFreProgressStepsRecorded.get(state)) return;
@@ -660,8 +644,13 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
     }
 
     @VisibleForTesting
+    boolean hasPages() {
+        return mPagerAdapter != null && mPagerAdapter.getItemCount() > 0;
+    }
+
+    @VisibleForTesting
     public boolean isNativeSideIsInitializedForTest() {
-        return mNativeSideIsInitialized;
+        return mNativeSideIsInitializedSupplier.hasValue();
     }
 
     @VisibleForTesting

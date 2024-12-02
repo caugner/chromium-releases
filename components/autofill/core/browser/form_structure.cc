@@ -699,6 +699,16 @@ void FormStructure::DetermineHeuristicTypes(
         field->set_heuristic_type(iter->second.BestHeuristicType());
       }
     }
+  } else if (ShouldRunPromoCodeHeuristics()) {
+    const FieldCandidatesMap field_type_map =
+        FormField::ParseFormFieldsForPromoCodes(fields_, current_page_language_,
+                                                is_form_tag_, log_manager);
+    for (const auto& field : fields_) {
+      const auto iter = field_type_map.find(field->global_id());
+      if (iter != field_type_map.end()) {
+        field->set_heuristic_type(iter->second.BestHeuristicType());
+      }
+    }
   }
 
   UpdateAutofillCount();
@@ -1128,6 +1138,12 @@ bool FormStructure::ShouldRunHeuristics() const {
          HasAllowedScheme(source_url_);
 }
 
+bool FormStructure::ShouldRunPromoCodeHeuristics() const {
+  return base::FeatureList::IsEnabled(
+             features::kAutofillParseMerchantPromoCodeFields) &&
+         active_field_count() > 0 && HasAllowedScheme(source_url_);
+}
+
 bool FormStructure::ShouldBeQueried() const {
   return (has_password_field_ ||
           active_field_count() >= kMinRequiredFieldsForQuery) &&
@@ -1245,6 +1261,7 @@ void FormStructure::LogQualityMetrics(
   bool card_form = base::Contains(form_types, FormType::kCreditCardForm);
   bool address_form = base::Contains(form_types, FormType::kAddressForm);
 
+  ServerFieldTypeSet autofilled_field_types;
   size_t num_detected_field_types = 0;
   size_t num_edited_autofilled_fields = 0;
   size_t num_of_accepted_autofilled_fields = 0;
@@ -1257,6 +1274,10 @@ void FormStructure::LogQualityMetrics(
   // A perfectly filled form is submitted as it was filled from Autofill without
   // subsequent changes.
   bool perfect_filling = true;
+  // Contain the frames across which the fields are distributed.
+  base::flat_set<LocalFrameToken> frames_of_detected_fields;
+  base::flat_set<LocalFrameToken> frames_of_detected_credit_card_fields;
+  base::flat_set<LocalFrameToken> frames_of_autofilled_credit_card_fields;
 
   // Determine the correct suffix for the metric, depending on whether or
   // not a submission was observed.
@@ -1266,10 +1287,12 @@ void FormStructure::LogQualityMetrics(
 
   for (size_t i = 0; i < field_count(); ++i) {
     auto* const field = this->field(i);
+    AutofillType type = field->Type();
+
     if (IsUPIVirtualPaymentAddress(field->value)) {
       has_upi_vpa_field = true;
       AutofillMetrics::LogUserHappinessMetric(
-          AutofillMetrics::USER_DID_ENTER_UPI_VPA, field->Type().group(),
+          AutofillMetrics::USER_DID_ENTER_UPI_VPA, type.group(),
           security_state::SecurityLevel::SECURITY_LEVEL_COUNT,
           data_util::DetermineGroups(*this));
     }
@@ -1288,7 +1311,7 @@ void FormStructure::LogQualityMetrics(
     if (field->previously_autofilled())
       num_edited_autofilled_fields++;
 
-    if (field->Type().html_type() == HTML_TYPE_ONE_TIME_CODE)
+    if (type.html_type() == HTML_TYPE_ONE_TIME_CODE)
       has_observed_one_time_code_field = true;
 
     // The form was not perfectly filled if a non-empty field was not
@@ -1315,6 +1338,16 @@ void FormStructure::LogQualityMetrics(
       did_autofill_some_possible_fields = true;
     else if (!field->only_fill_when_focused())
       did_autofill_all_possible_fields = false;
+
+    autofilled_field_types.insert(type.GetStorableType());
+
+    // Keep track of the frames of detected and autofilled (credit card) fields.
+    frames_of_detected_fields.insert(field->host_frame);
+    if (type.group() == FieldTypeGroup::kCreditCard) {
+      frames_of_detected_credit_card_fields.insert(field->host_frame);
+      if (field->is_autofilled)
+        frames_of_autofilled_credit_card_fields.insert(field->host_frame);
+    }
 
     // If the form was submitted, record if field types have been filled and
     // subsequently edited by the user.
@@ -1414,6 +1447,18 @@ void FormStructure::LogQualityMetrics(
         AutofillMetrics::LogAutofillPerfectFilling(/*is_address=*/false,
                                                    perfect_filling);
       }
+    }
+
+    AutofillMetrics::LogNumberOfFramesWithDetectedFields(
+        frames_of_detected_fields.size());
+    AutofillMetrics::LogNumberOfFramesWithDetectedCreditCardFields(
+        frames_of_detected_credit_card_fields.size());
+    AutofillMetrics::LogNumberOfFramesWithAutofilledCreditCardFields(
+        frames_of_autofilled_credit_card_fields.size());
+
+    if (card_form) {
+      AutofillMetrics::LogCreditCardNumberFills(autofilled_field_types);
+      AutofillMetrics::LogCreditCardSeamlessFills(autofilled_field_types);
     }
   }
 }

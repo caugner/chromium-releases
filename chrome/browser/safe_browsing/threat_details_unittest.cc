@@ -222,7 +222,6 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
-    ASSERT_TRUE(profile()->CreateHistoryService());
     test_shared_loader_factory_ =
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &test_url_loader_factory_);
@@ -249,6 +248,11 @@ class ThreatDetailsTest : public ChromeRenderViewHostTestHarness {
   bool ReportWasSent() { return ui_manager_->ReportWasSent(); }
 
  protected:
+  TestingProfile::TestingFactories GetTestingFactories() const override {
+    return {{HistoryServiceFactory::GetInstance(),
+             HistoryServiceFactory::GetDefaultFactory()}};
+  }
+
   void InitResource(SBThreatType threat_type,
                     ThreatSource threat_source,
                     bool is_subresource,
@@ -444,7 +448,8 @@ TEST_F(ThreatDetailsTest, ThreatSubResource) {
   expected.set_url(kThreatURL);
   expected.set_page_url(kLandingURL);
   // The referrer is stripped to its origin because it's a cross-origin URL.
-  expected.set_referrer_url(GURL(kReferrerURL).GetOrigin().spec());
+  expected.set_referrer_url(
+      GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
   expected.set_did_proceed(true);
   expected.set_repeat_visit(true);
 
@@ -457,7 +462,7 @@ TEST_F(ThreatDetailsTest, ThreatSubResource) {
   pb_resource->set_url(kThreatURL);
   pb_resource = expected.add_resources();
   pb_resource->set_id(2);
-  pb_resource->set_url(GURL(kReferrerURL).GetOrigin().spec());
+  pb_resource->set_url(GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
 
   VerifyResults(actual, expected);
 }
@@ -501,7 +506,8 @@ TEST_F(ThreatDetailsTest, SuspiciousSiteWithReferrerChain) {
   expected.set_url(kThreatURL);
   expected.set_page_url(kLandingURL);
   // The referrer is stripped to its origin because it's a cross-origin URL.
-  expected.set_referrer_url(GURL(kReferrerURL).GetOrigin().spec());
+  expected.set_referrer_url(
+      GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
   expected.set_did_proceed(true);
   expected.set_repeat_visit(true);
 
@@ -514,7 +520,7 @@ TEST_F(ThreatDetailsTest, SuspiciousSiteWithReferrerChain) {
   pb_resource->set_url(kThreatURL);
   pb_resource = expected.add_resources();
   pb_resource->set_id(2);
-  pb_resource->set_url(GURL(kReferrerURL).GetOrigin().spec());
+  pb_resource->set_url(GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
 
   // Make sure the referrer chain returned by the provider is copied into the
   // resulting proto.
@@ -603,7 +609,8 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails) {
   parent_node->children.push_back(GURL(kDOMChildURL));
   params.push_back(std::move(parent_node));
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(params));
 
   std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 0 /* num_visit */);
@@ -822,10 +829,11 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames) {
 
     // Send both sets of nodes from different render frames.
     report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                       main_rfh(),
+                                       main_rfh()->GetGlobalId(),
                                        std::move(outer_params_copy));
     report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                       child_rfh, std::move(inner_params_copy));
+                                       child_rfh->GetGlobalId(),
+                                       std::move(inner_params_copy));
 
     std::string serialized = WaitForThreatDetailsDone(
         report.get(), false /* did_proceed*/, 0 /* num_visit */);
@@ -871,9 +879,11 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames) {
 
     // Send both sets of nodes from different render frames.
     report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                       child_rfh, std::move(inner_params));
+                                       child_rfh->GetGlobalId(),
+                                       std::move(inner_params));
     report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                       main_rfh(), std::move(outer_params));
+                                       main_rfh()->GetGlobalId(),
+                                       std::move(outer_params));
 
     std::string serialized = WaitForThreatDetailsDone(
         report.get(), false /* did_proceed*/, 0 /* num_visit */);
@@ -997,9 +1007,11 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM) {
 
   // Send both sets of nodes from different render frames.
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(outer_params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(outer_params));
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     child_rfh, std::move(inner_params));
+                                     child_rfh->GetGlobalId(),
+                                     std::move(inner_params));
   std::string serialized = WaitForThreatDetailsDone(
       report.get(), false /* did_proceed*/, 0 /* num_visit */);
   ClientSafeBrowsingReportRequest actual;
@@ -1264,10 +1276,10 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_TrimToAdTags) {
 
   // Send both sets of nodes from different render frames.
   trimmed_report->OnReceivedThreatDOMDetails(
-      mojo::Remote<mojom::ThreatReporter>(), child_rfh,
+      mojo::Remote<mojom::ThreatReporter>(), child_rfh->GetGlobalId(),
       std::move(inner_params));
   trimmed_report->OnReceivedThreatDOMDetails(
-      mojo::Remote<mojom::ThreatReporter>(), main_rfh(),
+      mojo::Remote<mojom::ThreatReporter>(), main_rfh()->GetGlobalId(),
       std::move(outer_params));
 
   std::string serialized = WaitForThreatDetailsDone(
@@ -1340,10 +1352,10 @@ TEST_F(ThreatDetailsTest, ThreatDOMDetails_EmptyReportNotSent) {
 
   // Send both sets of nodes from different render frames.
   trimmed_report->OnReceivedThreatDOMDetails(
-      mojo::Remote<mojom::ThreatReporter>(), child_rfh,
+      mojo::Remote<mojom::ThreatReporter>(), child_rfh->GetGlobalId(),
       std::move(inner_params));
   trimmed_report->OnReceivedThreatDOMDetails(
-      mojo::Remote<mojom::ThreatReporter>(), main_rfh(),
+      mojo::Remote<mojom::ThreatReporter>(), main_rfh()->GetGlobalId(),
       std::move(outer_params));
 
   std::string serialized = WaitForThreatDetailsDone(
@@ -1521,7 +1533,8 @@ TEST_F(ThreatDetailsTest, ThreatWithPendingLoad) {
   expected.set_url(kThreatURL);
   expected.set_page_url(kLandingURL);
   // The referrer is stripped to its origin because it's a cross-origin URL.
-  expected.set_referrer_url(GURL(kReferrerURL).GetOrigin().spec());
+  expected.set_referrer_url(
+      GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
   expected.set_did_proceed(true);
   expected.set_repeat_visit(true);
 
@@ -1534,7 +1547,7 @@ TEST_F(ThreatDetailsTest, ThreatWithPendingLoad) {
   pb_resource->set_url(kThreatURL);
   pb_resource = expected.add_resources();
   pb_resource->set_id(2);
-  pb_resource->set_url(GURL(kReferrerURL).GetOrigin().spec());
+  pb_resource->set_url(GURL(kReferrerURL).DeprecatedGetOriginAsURL().spec());
 
   VerifyResults(actual, expected);
 }
@@ -1600,7 +1613,8 @@ TEST_F(ThreatDetailsTest, HTTPCache) {
   // The cache collection starts after the IPC from the DOM is fired.
   std::vector<mojom::ThreatDOMDetailsNodePtr> params;
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
@@ -1680,7 +1694,8 @@ TEST_F(ThreatDetailsTest, HttpsResourceSanitization) {
   // The cache collection starts after the IPC from the DOM is fired.
   std::vector<mojom::ThreatDOMDetailsNodePtr> params;
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
@@ -1763,7 +1778,8 @@ TEST_F(ThreatDetailsTest, HTTPCacheNoEntries) {
   // The cache collection starts after the IPC from the DOM is fired.
   std::vector<mojom::ThreatDOMDetailsNodePtr> params;
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(params));
 
   // Let the cache callbacks complete.
   base::RunLoop().RunUntilIdle();
@@ -1822,7 +1838,8 @@ TEST_F(ThreatDetailsTest, HistoryServiceUrls) {
   // The redirects collection starts after the IPC from the DOM is fired.
   std::vector<mojom::ThreatDOMDetailsNodePtr> params;
   report->OnReceivedThreatDOMDetails(mojo::Remote<mojom::ThreatReporter>(),
-                                     main_rfh(), std::move(params));
+                                     main_rfh()->GetGlobalId(),
+                                     std::move(params));
 
   // Let the redirects callbacks complete.
   base::RunLoop().RunUntilIdle();
