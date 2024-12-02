@@ -1,4 +1,4 @@
-// Copyright 2021 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,8 +50,8 @@ class TouchInjector : public ui::EventRewriter {
   TouchInjector& operator=(const TouchInjector&) = delete;
   ~TouchInjector() override;
 
-  aura::Window* target_window() { return target_window_; }
-  const gfx::RectF& content_bounds() { return content_bounds_; }
+  aura::Window* window() { return window_; }
+  const gfx::RectF& content_bounds() const { return content_bounds_; }
   const gfx::Transform* rotation_transform() {
     return rotation_transform_.get();
   }
@@ -84,6 +84,9 @@ class TouchInjector : public ui::EventRewriter {
   bool enable_mouse_lock() { return enable_mouse_lock_; }
   void set_enable_mouse_lock(bool enable) { enable_mouse_lock_ = true; }
 
+  bool beta() const { return beta_; }
+  void set_beta(bool beta) { beta_ = beta; }
+
   // Parse Json to actions.
   // Json value format:
   // {
@@ -109,8 +112,12 @@ class TouchInjector : public ui::EventRewriter {
   // Change bindings. This could be from user editing from display overlay
   // (|mode| = DisplayMode::kEdit) or from customized protobuf data (|mode| =
   // DisplayMode::kView).
-  void OnBindingChange(Action* target_action,
-                       std::unique_ptr<InputElement> input_element);
+  void OnInputBindingChange(Action* target_action,
+                            std::unique_ptr<InputElement> input_element);
+  // Change position bindings. Only supports changing the first position for
+  // now.
+  void OnPositionBingingChange(Action* target_action,
+                               std::unique_ptr<Position> position);
   // Apply pending binding as current binding, but don't save into the storage.
   void OnApplyPendingBinding();
   // Save customized input binding/pending binding as current binding and go
@@ -193,6 +200,8 @@ class TouchInjector : public ui::EventRewriter {
   // Search action by its id.
   Action* GetActionById(int id);
 
+  // Convert the customized data to AppDataProto.
+  std::unique_ptr<AppDataProto> ConvertToProto();
   // Save proto file.
   void OnSaveProtoFile();
 
@@ -207,7 +216,10 @@ class TouchInjector : public ui::EventRewriter {
   int GetRewrittenTouchInfoSizeForTesting();
   DisplayOverlayController* GetControllerForTesting();
 
-  raw_ptr<aura::Window> target_window_;
+  // TouchInjector is created when targeted |window_| is created and is
+  // registered only when |window_| is focused. And TouchInjector doesn't own
+  // |window_| and it is destroyed when |window_| is destroyed.
+  raw_ptr<aura::Window> window_;
   gfx::RectF content_bounds_;
   base::WeakPtr<ui::EventRewriterContinuation> continuation_;
   std::vector<std::unique_ptr<Action>> actions_;
@@ -244,16 +256,18 @@ class TouchInjector : public ui::EventRewriter {
   // first time launch and before it is dismissed.
   bool show_nudge_ = false;
 
-  // TODO(cuicuiruan): It can be removed after the mouse lock is enabled for
-  // post MVP.
-  bool enable_mouse_lock_ = false;
-
   // Key is the original touch id. Value is a struct containing required info
   // for this touch event.
   base::flat_map<ui::PointerId, TouchPointInfo> rewritten_touch_infos_;
 
   // Callback when saving proto file.
   OnSaveProtoFileCallback save_file_callback_;
+
+  // TODO(cuicuiruan): It can be removed after the mouse lock is enabled for
+  // post MVP.
+  bool enable_mouse_lock_ = false;
+  // TODO(cuicuiruan): This can be removed when removing the flag.
+  bool beta_ = ash::features::IsArcInputOverlayBetaEnabled();
 
   base::WeakPtrFactory<TouchInjector> weak_ptr_factory_{this};
 };
