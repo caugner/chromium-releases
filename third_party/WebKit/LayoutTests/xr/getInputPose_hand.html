@@ -11,6 +11,13 @@
 <script>
 let fakeDevices = fakeXRDevices();
 
+let testName = "XRInputSources with a target ray mode of 'tracked-pointer' "
+  + "properly communicate their poses";
+
+let fakeDeviceInitParams = { supportsImmersive: true };
+
+let requestSessionOptions =  [{ immersive: true }];
+
 xr_session_promise_test( (session, t) => new Promise((resolve) => {
     // Session must have a baseLayer or frame requests will be ignored.
     session.baseLayer = new XRWebGLLayer(session, gl);
@@ -19,16 +26,16 @@ xr_session_promise_test( (session, t) => new Promise((resolve) => {
     setPose(VALID_POSE);
 
     let input_source = new MockXRInputSource();
-    input_source.pointerOrigin = "hand";
+    input_source.targetRayMode = "tracked-pointer";
     input_source.handedness = "right";
 
     // Don't set a grip matrix yet
 
     addInputSource(input_source);
 
-    // Must have a frameOfReference to get input poses. eyeLevel doesn't apply
+    // Must have a frameOfReference to get input poses. eye-level doesn't apply
     // any transforms to the given matrix.
-    session.requestFrameOfReference("eyeLevel").then( (frameOfRef) => {
+    session.requestFrameOfReference("eye-level").then( (frameOfRef) => {
 
       function CheckInvalidGrip(time, xrFrame) {
         let source = session.getInputSources()[0];
@@ -37,7 +44,7 @@ xr_session_promise_test( (session, t) => new Promise((resolve) => {
 
         t.step( () => {
           // The input pose should be null when no grip matrix is provided.
-          assert_equals(source.pointerOrigin, "hand");
+          assert_equals(source.targetRayMode, "tracked-pointer");
           assert_equals(input_pose, null);
         });
 
@@ -54,8 +61,11 @@ xr_session_promise_test( (session, t) => new Promise((resolve) => {
         t.step( () => {
           // When a grip matrix is present but no pointer offset is specified,
           // the grip and pointer matrices should be the same.
-          assert_matrices_approx_equal(input_pose.gripMatrix, VALID_GRIP, FLOAT_EPSILON, "A");
-          assert_matrices_approx_equal(input_pose.pointerMatrix, input_pose.gripMatrix, FLOAT_EPSILON, "B");
+          assert_matrices_approx_equal(input_pose.gripMatrix, VALID_GRIP,
+            FLOAT_EPSILON, "Grip matrix is not equal to input.");
+          assert_matrices_approx_equal(input_pose.targetRay.transformMatrix,
+            input_pose.gripMatrix, FLOAT_EPSILON,
+            "Grip matrix is not equal to target ray matrix.");
         });
 
         input_source.pointerOffset = VALID_POINTER_OFFSET;
@@ -72,8 +82,11 @@ xr_session_promise_test( (session, t) => new Promise((resolve) => {
           // When a grip matrix and pointer offset are specified,
           // pointer matrix should be grip matrix multiplied with the pointer
           // offset.
-          assert_matrices_approx_equal(input_pose.gripMatrix, VALID_GRIP, FLOAT_EPSILON, "C");
-          assert_matrices_approx_equal(input_pose.pointerMatrix, VALID_GRIP_WITH_POINTER_OFFSET, FLOAT_EPSILON, "D");
+          assert_matrices_approx_equal(input_pose.gripMatrix, VALID_GRIP,
+            FLOAT_EPSILON, "Grip matrix is not equal to input valid grip.");
+          assert_matrices_approx_equal(input_pose.targetRay.transformMatrix,
+            VALID_GRIP_WITH_POINTER_OFFSET, FLOAT_EPSILON,
+            "Grip matrix not multipled properly.");
         });
 
         resolve();
@@ -82,7 +95,7 @@ xr_session_promise_test( (session, t) => new Promise((resolve) => {
       // Can only request input poses in an xr frame.
       session.requestAnimationFrame(CheckInvalidGrip);
     });
-  }), fakeDevices["FakeGooglePixelPhone"], [ { exclusive: true } ],
+  }), fakeDevices["FakeGooglePixelPhone"], [ { immersive: true } ],
 "XRInputSources with a pointer origin of 'hand' properly communicate their poses");
 
 </script>

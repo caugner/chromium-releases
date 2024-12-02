@@ -31,6 +31,10 @@ function setPose(pose) {
   mockVRService.mockVRDisplays_[0].setPose(pose);
 }
 
+function setHitTestResults(results)  {
+  mockVRService.mockVRDisplays_[0].setHitTestResults(results);
+}
+
 function setStageTransform(transform) {
   mockVRService.mockVRDisplays_[0].setStageTransform(transform);
 }
@@ -146,6 +150,31 @@ function fakeXRDevices() {
         renderWidth: 1920,
         renderHeight: 2160
       },
+      webxrDefaultFramebufferScale: 0.7,
+    },
+
+    FakeARPhone: {
+      displayName: 'AR device',
+      capabilities: {
+        hasPosition: true,
+        hasExternalDisplay: false,
+        canPresent: false,
+        maxLayers: 1,
+        canProvidePassThroughImages: true,
+      },
+      stageParameters: null,
+      leftEye: {
+        fieldOfView: {
+          upDegrees: 48.316,
+          downDegrees: 50.099,
+          leftDegrees: 35.197,
+          rightDegrees: 50.899,
+        },
+        offset: [-0.032, 0, 0],
+        renderWidth: 1920,
+        renderHeight: 2160,
+      },
+      rightEye: null,
       webxrDefaultFramebufferScale: 0.7,
     }
   };
@@ -274,17 +303,44 @@ class MockDevice {
     }
   }
 
-  requestPresent(submitFrameClient, request, presentOptions) {
-    this.presentation_provider_.bind(
-        submitFrameClient, request, presentOptions);
-    // The JavaScript bindings convert c_style_names to camelCase names.
-    var options = new device.mojom.VRDisplayFrameTransportOptions();
-    options.transportMethod =
-        device.mojom.VRDisplayFrameTransportMethod.SUBMIT_AS_MAILBOX_HOLDER;
-    options.waitForTransferNotification = true;
-    options.waitForRenderNotification = true;
-    return Promise.resolve({success: true, transportOptions: options});
+  requestSession(sessionOptions, was_activation) {
+    return this.supportsSession(sessionOptions).then((result) => {
+      // The JavaScript bindings convert c_style_names to camelCase names.
+      var options = new device.mojom.VRDisplayFrameTransportOptions();
+      options.transportMethod =
+          device.mojom.VRDisplayFrameTransportMethod.SUBMIT_AS_MAILBOX_HOLDER;
+      options.waitForTransferNotification = true;
+      options.waitForRenderNotification = true;
+
+      let connection;
+      if (result.supportsSession) {
+        connection = {
+          clientRequest: this.presentation_provider_.getClientRequest(),
+          provider: this.presentation_provider_.bindProvider(sessionOptions),
+          transportOptions: options
+        };
+
+        let magicWindowPtr = new device.mojom.VRMagicWindowProviderPtr();
+        let magicWindowRequest = mojo.makeRequest(magicWindowPtr);
+        let magicWindowBinding = new mojo.Binding(
+            device.mojom.VRMagicWindowProvider, this, magicWindowRequest);
+
+        return Promise.resolve({
+          session:
+              {connection: connection, magicWindowProvider: magicWindowPtr}
+        });
+      } else {
+        return Promise.resolve({session: null});
+      }
+    });
   }
+
+  supportsSession(options) {
+    return Promise.resolve({
+      supportsSession:
+          !options.immersive || this.displayInfo_.capabilities.canPresent
+    });
+  };
 
   setPose(pose) {
     if (pose == null) {
@@ -293,12 +349,6 @@ class MockDevice {
       this.presentation_provider_.initPose();
       this.presentation_provider_.fillPose(pose);
     }
-  }
-
-  getPose() {
-    return Promise.resolve({
-      pose: this.presentation_provider_.pose_,
-    });
   }
 
   setStageTransform(value) {
@@ -317,6 +367,38 @@ class MockDevice {
     }
 
     this.displayClient_.onChanged(this.displayInfo_);
+  }
+
+  getFrameData() {
+    return Promise.resolve({
+      frameData: {
+        pose: this.presentation_provider_.pose_,
+        bufferHolder: null,
+        bufferSize: {},
+        timeDelta: [],
+        projectionMatrix: [1, 0, 0, 0,
+                            0, 1, 0, 0,
+                            0, 0, 1, 0,
+                            0, 0, 0, 1]
+      }
+    });
+  }
+
+  setHitTestResults(results) {
+    this.hittest_results_ = results;
+  }
+
+  requestHitTest(ray) {
+    var hit_results = this.hittest_results_;
+    if (!hit_results) {
+      var hit = new device.mojom.XRHitResult();
+      hit.hitMatrix = [1, 0, 0, 0,
+                       0, 1, 0, 0,
+                       0, 0, 1, 0,
+                       0, 0, 0, 1];
+      hit_results = { results: [hit] };
+    }
+    return Promise.resolve(hit_results);
   }
 
   getSubmitFrameCount() {
@@ -338,14 +420,9 @@ class MockDevice {
     let displayBinding =
         new mojo.Binding(device.mojom.VRDisplayHost, this, displayRequest);
 
-    let magicWindowPtr = new device.mojom.VRMagicWindowProviderPtr();
-    let magicWindowRequest = mojo.makeRequest(magicWindowPtr);
-    let magicWindowBinding = new mojo.Binding(
-        device.mojom.VRMagicWindowProvider, this, magicWindowRequest);
-
     let clientRequest = mojo.makeRequest(this.displayClient_);
     this.service_.client_.onDisplayConnected(
-        magicWindowPtr, displayPtr, clientRequest, this.displayInfo_);
+        displayPtr, clientRequest, this.displayInfo_);
   }
 
   addInputSource(input_source) {
@@ -359,7 +436,8 @@ class MockDevice {
 
 class MockVRPresentationProvider {
   constructor() {
-    this.binding_ = new mojo.Binding(device.mojom.VRPresentationProvider, this);
+    this.binding_ =
+        new mojo.Binding(device.mojom.VRPresentationProviderPtr, this);
     this.pose_ = null;
     this.next_frame_id_ = 0;
     this.submit_frame_count_ = 0;
@@ -369,11 +447,23 @@ class MockVRPresentationProvider {
     this.next_input_source_index_ = 1;
   }
 
-  bind(client, request) {
-    this.submitFrameClient_ = client;
+  bindProvider(request) {
+    let providerPtr = new device.mojom.VRPresentationProviderPtr();
+    let providerRequest = mojo.makeRequest(providerPtr);
+
     this.binding_.close();
-    this.binding_.bind(request);
+
+    this.binding_ = new mojo.Binding(
+        device.mojom.VRPresentationProvider, this, providerRequest);
+
+    return providerPtr;
   }
+
+  getClientRequest() {
+    this.submitFrameClient_ = new device.mojom.VRSubmitFrameClientPtr();
+    return mojo.makeRequest(this.submitFrameClient_);
+  }
+
 
   submitFrameMissing(frameId, mailboxHolder, timeWaited) {
     this.missing_frame_count_++;
@@ -391,7 +481,7 @@ class MockVRPresentationProvider {
     this.submitFrameClient_.onSubmitFrameRendered();
   }
 
-  getVSync() {
+  getFrameData() {
     if (this.pose_) {
       this.pose_.poseIndex++;
 
@@ -409,16 +499,19 @@ class MockVRPresentationProvider {
     now += diff;
     now *= 1000000;
 
-    let retval = Promise.resolve({
-      pose: this.pose_,
-      time: {
-        microseconds: now,
-      },
-      frameId: this.next_frame_id_++,
-      status: device.mojom.VRPresentationProvider.VSyncStatus.SUCCESS,
+    return Promise.resolve({
+      frameData: {
+        pose: this.pose_,
+        timeDelta: {
+          microseconds: now,
+        },
+        frameId: this.next_frame_id_++,
+        projectionMatrix : [1, 0, 0, 0,
+                            0, 1, 0, 0,
+                            0, 0, 1, 0,
+                            0, 0, 0, 1]
+      }
     });
-
-    return retval;
   }
 
   initPose() {
@@ -509,7 +602,7 @@ class MockXRInputSource {
     this.primary_input_clicked_ = false;
     this.grip_ = null;
 
-    this.pointer_origin_ = "head";
+    this.target_ray_mode_ = "gaze";
     this.pointer_offset_ = null;
     this.emulated_position_ = false;
     this.handedness_ = "";
@@ -543,14 +636,14 @@ class MockXRInputSource {
     this.grip_.matrix = new Float32Array(value);
   }
 
-  get pointerOrigin() {
-    return this.pointer_origin_;
+  get targetRayMode() {
+    return this.target_ray_mode_;
   }
 
-  set pointerOrigin(value) {
-    if (this.pointer_origin_ != value) {
+  set targetRayMode(value) {
+    if (this.target_ray_mode_ != value) {
       this.desc_dirty_ = true;
-      this.pointer_origin_ = value;
+      this.target_ray_mode_ = value;
     }
   }
 
@@ -608,12 +701,12 @@ class MockXRInputSource {
 
       input_desc.emulatedPosition = this.emulated_position_;
 
-      switch (this.pointer_origin_) {
-        case "head":
-          input_desc.pointerOrigin = device.mojom.XRPointerOrigin.HEAD;
+      switch (this.target_ray_mode_) {
+        case "gaze":
+          input_desc.targetRayMode = device.mojom.XRTargetRayMode.GAZING;
           break;
-        case "hand":
-          input_desc.pointerOrigin = device.mojom.XRPointerOrigin.HAND;
+        case "tracked-pointer":
+          input_desc.targetRayMode = device.mojom.XRTargetRayMode.POINTING;
           break;
       }
 
