@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #import "components/content_settings/core/common/content_settings.h"
 #include "components/sync/base/model_type.h"
+#import "ios/testing/earl_grey/app_launch_configuration.h"
 #import "ios/testing/earl_grey/base_eg_test_helper_impl.h"
 #include "third_party/metrics_proto/user_demographics.pb.h"
 #include "url/gurl.h"
@@ -46,16 +47,6 @@ id ExecuteJavaScript(NSString* javascript, NSError* __autoreleasing* out_error);
 
 #pragma mark - Device Utilities
 
-// Simulate the user action to rotate the device to a certain orientation.
-// TODO(crbug.com/1017265): Remove along EG1 support.
-- (void)rotateDeviceToOrientation:(UIDeviceOrientation)deviceOrientation
-                            error:(NSError**)error;
-
-// Returns |YES| if the keyboard is on screen. |error| is only supported if the
-// test is running in EG2.
-// TODO(crbug.com/1017281): Remove along EG1 support.
-- (BOOL)isKeyboardShownWithError:(NSError**)error;
-
 // Returns YES if running on an iPad.
 - (BOOL)isIPadIdiom;
 
@@ -81,8 +72,12 @@ id ExecuteJavaScript(NSString* javascript, NSError* __autoreleasing* out_error);
 // cleared within a timeout.
 - (void)clearBrowsingHistory;
 
-// Gets the number of entries in the browsing history database.
-- (NSInteger)getBrowsingHistoryEntryCount;
+// Gets the number of entries in the browsing history database. GREYAssert is
+// induced on error.
+- (NSInteger)browsingHistoryEntryCount;
+
+// Gets the number of items in the back list.
+- (NSInteger)navigationBackListItemsCount;
 
 // Clears browsing cache. Raises an EarlGrey exception if history is not
 // cleared within a timeout.
@@ -141,10 +136,6 @@ id ExecuteJavaScript(NSString* javascript, NSError* __autoreleasing* out_error);
 // Waits for there to be |count| number of incognito tabs within a timeout, or a
 // GREYAssert is induced.
 - (void)waitForIncognitoTabCount:(NSUInteger)count;
-
-// Waits for there to be |count| number of browsers within a timeout,
-// or a GREYAssert is induced.
-- (void)waitForBrowserCount:(NSUInteger)count;
 
 // Loads |URL| as if it was opened from an external application.
 - (void)openURLFromExternalApp:(const GURL&)URL;
@@ -346,6 +337,26 @@ id ExecuteJavaScript(NSString* javascript, NSError* __autoreleasing* out_error);
 // and tablet.
 - (void)showTabSwitcher;
 
+#pragma mark - Window utilities (EG2)
+
+// Returns the number of windows, including background and disconnected or
+// archived windows.
+- (NSUInteger)windowCount WARN_UNUSED_RESULT;
+
+// Returns the number of foreground (visible on screen) windows.
+- (NSUInteger)foregroundWindowCount WARN_UNUSED_RESULT;
+
+// Waits for there to be |count| number of browsers within a timeout,
+// or a GREYAssert is induced.
+- (void)waitForForegroundWindowCount:(NSUInteger)count;
+
+// Closes all but one window, including all non-foreground windows. Then kills
+// and relaunches app with launch args specified in |appConfig|. No-op if only
+// one window presents.
+// TODO(crbug.com/1143708): Remove the relaunch when EG2 slowness is fixed.
+- (void)closeAllExtraWindowsAndForceRelaunchWithAppConfig:
+    (AppLaunchConfiguration)appConfig;
+
 #pragma mark - SignIn Utilities (EG2)
 
 // Signs the user out, clears the known accounts entirely and checks whether the
@@ -522,6 +533,13 @@ id ExecuteJavaScript(NSString* javascript, NSError* __autoreleasing* out_error);
 
 // Returns whether the native context menus feature is enabled or not.
 - (BOOL)isNativeContextMenusEnabled;
+
+// Returns whether the app is configured to, and running in an environment which
+// can, open multiple windows.
+- (BOOL)areMultipleWindowsSupported;
+
+// Returns whether the Close All Tabs Confirmation feature is enabled.
+- (BOOL)isCloseAllTabsConfirmationEnabled;
 
 #pragma mark - Popup Blocking
 

@@ -10,6 +10,8 @@ source_set("public") {
     "browser_list_factory.h",
     "browser_list_observer.h",
     "browser_observer.h",
+    "browser_observer_bridge.h",
+    "browser_observer_bridge.mm",
     "browser_user_data.h",
   ]
   deps = [
@@ -62,6 +64,7 @@ source_set("main") {
     "//ios/chrome/browser/web:tab_id_tab_helper",
     "//ios/chrome/browser/web_state_list",
     "//ios/chrome/browser/web_state_list:agents",
+    "//ios/chrome/browser/web_state_list:session_metrics",
     "//ios/chrome/browser/web_state_list/web_usage_enabler",
     "//ios/public/provider/chrome/browser",
   ]

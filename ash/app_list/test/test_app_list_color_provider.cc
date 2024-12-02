@@ -36,11 +36,13 @@ SkColor TestAppListColorProvider::GetSearchBoxPlaceholderTextColor() const {
   return gfx::kGoogleGrey500;
 }
 
-SkColor TestAppListColorProvider::GetSearchBoxTextColor() const {
+SkColor TestAppListColorProvider::GetSearchBoxTextColor(
+    SkColor default_color) const {
   return gfx::kGoogleGrey200;
 }
 
-SkColor TestAppListColorProvider::GetSearchBoxSecondaryTextColor() const {
+SkColor TestAppListColorProvider::GetSearchBoxSecondaryTextColor(
+    SkColor default_color) const {
   return gfx::kGoogleGrey500;
 }
 
@@ -56,27 +58,33 @@ SkColor TestAppListColorProvider::GetAppListItemTextColor() const {
   return gfx::kGoogleGrey200;
 }
 
-SkColor TestAppListColorProvider::GetFolderBackgroundColor() const {
+SkColor TestAppListColorProvider::GetFolderBackgroundColor(
+    SkColor default_color) const {
   return gfx::kGoogleGrey900;
 }
 
-SkColor TestAppListColorProvider::GetPageSwitcherButtonColor() const {
+SkColor TestAppListColorProvider::GetPageSwitcherButtonColor(
+    bool is_root_app_grid_page_switcher) const {
   return gfx::kGoogleGrey700;
 }
 
-SkColor TestAppListColorProvider::GetPageSwitcherInkDropBaseColor() const {
+SkColor TestAppListColorProvider::GetPageSwitcherInkDropBaseColor(
+    bool is_root_app_grid_page_switcher) const {
   return SkColorSetA(SK_ColorBLACK, 0x0F);
 }
 
-SkColor TestAppListColorProvider::GetPageSwitcherInkDropHighlightColor() const {
+SkColor TestAppListColorProvider::GetPageSwitcherInkDropHighlightColor(
+    bool is_root_app_grid_page_switcher) const {
   return SkColorSetA(SK_ColorBLACK, 0x0F);
 }
 
-SkColor TestAppListColorProvider::GetSearchBoxIconColor() const {
+SkColor TestAppListColorProvider::GetSearchBoxIconColor(
+    SkColor default_color) const {
   return gfx::kGoogleGrey200;
 }
 
-SkColor TestAppListColorProvider::GetFolderTitleTextColor() const {
+SkColor TestAppListColorProvider::GetFolderTitleTextColor(
+    SkColor default_color) const {
   return gfx::kGoogleGrey200;
 }
 
@@ -89,6 +97,17 @@ SkColor TestAppListColorProvider::GetFolderNameBackgroundColor(
   if (!active)
     return SK_ColorTRANSPARENT;
 
+  return SkColorSetA(SK_ColorBLACK, 0x0F);
+}
+
+SkColor TestAppListColorProvider::GetFolderNameBorderColor(bool active) const {
+  if (!active)
+    return SK_ColorTRANSPARENT;
+
+  return SkColorSetA(SK_ColorBLACK, 0x0F);
+}
+
+SkColor TestAppListColorProvider::GetFolderNameSelectionColor() const {
   return SkColorSetA(SK_ColorBLACK, 0x0F);
 }
 

@@ -30,11 +30,10 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tasks.pseudotab.PseudoTab;
-import org.chromium.chrome.browser.tasks.tab_groups.TabGroupUtils;
+import org.chromium.chrome.browser.tasks.tab_management.PriceWelcomeMessageService.PriceTabData;
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.UiType;
 import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.chrome.tab_ui.R;
-import org.chromium.components.feature_engagement.FeatureConstants;
 import org.chromium.ui.modelutil.MVCListAdapter;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -50,7 +49,8 @@ import java.util.List;
 /**
  * Coordinator for showing UI for a list of tabs. Can be used in GRID or STRIP modes.
  */
-public class TabListCoordinator implements Destroyable {
+public class TabListCoordinator
+        implements PriceWelcomeMessageService.PriceWelcomeMessageProvider, Destroyable {
     /**
      * Modes of showing the list of tabs.
      *
@@ -224,11 +224,9 @@ public class TabListCoordinator implements Destroyable {
         }
 
         if (mode == TabListMode.CAROUSEL) {
-            // TODO(mattsimmons): Remove this height and let the parent determine the correct
-            //  height. This can be done once the width is dynamic as well in
-            //  TabCarouselViewHolder.
-            mRecyclerView.getLayoutParams().height =
-                    context.getResources().getDimensionPixelSize(R.dimen.tab_carousel_height);
+            ViewGroup.LayoutParams layoutParams = mRecyclerView.getLayoutParams();
+            layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            mRecyclerView.setLayoutParams(layoutParams);
         }
 
         mRecyclerView.setAdapter(mAdapter);
@@ -241,7 +239,7 @@ public class TabListCoordinator implements Destroyable {
         TabListFaviconProvider tabListFaviconProvider =
                 new TabListFaviconProvider(mContext, mMode == TabListMode.STRIP);
 
-        mMediator = new TabListMediator(context, mModel, tabModelSelector, thumbnailProvider,
+        mMediator = new TabListMediator(context, mModel, mMode, tabModelSelector, thumbnailProvider,
                 titleProvider, tabListFaviconProvider, actionOnRelatedTabs,
                 selectionDelegateProvider, gridCardOnClickListenerProvider, dialogHandler,
                 componentName, itemType);
@@ -344,6 +342,13 @@ public class TabListCoordinator implements Destroyable {
     }
 
     /**
+     * @return The index of the model list where the PriceWelcomeMessage should be inserted.
+     */
+    int getPriceWelcomeMessageIndex() {
+        return mModel.size();
+    }
+
+    /**
      * @return The container {@link androidx.recyclerview.widget.RecyclerView} that is showing the
      *         tab list UI.
      */
@@ -363,10 +368,6 @@ public class TabListCoordinator implements Destroyable {
      */
     boolean resetWithListOfTabs(
             @Nullable List<PseudoTab> tabs, boolean quickMode, boolean mruMode) {
-        if (mMode == TabListMode.STRIP && tabs != null && tabs.size() > 1) {
-            TabGroupUtils.maybeShowIPH(
-                    FeatureConstants.TAB_GROUPS_TAP_TO_SEE_ANOTHER_TAB_FEATURE, mRecyclerView);
-        }
         return mMediator.resetWithListOfTabs(tabs, quickMode, mruMode);
     }
 
@@ -452,5 +453,16 @@ public class TabListCoordinator implements Destroyable {
      */
     void removeSpecialListItem(@UiType int uiType, int itemIdentifier) {
         mMediator.removeSpecialItemFromModel(uiType, itemIdentifier);
+    }
+
+    // PriceWelcomeMessageService.PriceWelcomeMessageProvider implementation.
+    @Override
+    public PriceTabData getFirstTabShowingPriceCard() {
+        return mModel.getFirstTabShowingPriceCard();
+    }
+
+    @Override
+    public int getTabIndexFromTabId(int tabId) {
+        return mModel.indexFromId(tabId);
     }
 }

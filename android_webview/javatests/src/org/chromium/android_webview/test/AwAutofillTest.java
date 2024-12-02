@@ -40,7 +40,6 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient.AwWebResourceRequest;
-import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.test.AwActivityTestRule.TestDependencyFactory;
 import org.chromium.autofill.mojom.SubmissionSource;
 import org.chromium.base.Log;
@@ -56,6 +55,7 @@ import org.chromium.components.autofill.AutofillManagerWrapper;
 import org.chromium.components.autofill.AutofillPopup;
 import org.chromium.components.autofill.AutofillProvider;
 import org.chromium.components.autofill.AutofillProviderUMA;
+import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
@@ -531,7 +531,7 @@ public class AwAutofillTest {
 
     private static class AwAutofillTestClient extends TestAwContentsClient {
         public interface ShouldInterceptRequestImpl {
-            AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request);
+            WebResourceResponseInfo shouldInterceptRequest(AwWebResourceRequest request);
         }
 
         private ShouldInterceptRequestImpl mShouldInterceptRequestImpl;
@@ -541,8 +541,8 @@ public class AwAutofillTest {
         }
 
         @Override
-        public AwWebResourceResponse shouldInterceptRequest(AwWebResourceRequest request) {
-            AwWebResourceResponse response = null;
+        public WebResourceResponseInfo shouldInterceptRequest(AwWebResourceRequest request) {
+            WebResourceResponseInfo response = null;
             if (mShouldInterceptRequestImpl != null) {
                 response = mShouldInterceptRequestImpl.shouldInterceptRequest(request);
             }
@@ -1010,12 +1010,12 @@ public class AwAutofillTest {
 
         // Reload the page and check that the user clicking on the same form field ends the current
         // autofill session and starts a new session.
-        loadUrlSync(url);
+        reloadSync();
         DOMUtils.waitForNonZeroNodeBounds(mAwContents.getWebContents(), "text1");
         // TODO(changwan): mock out IME interaction.
         Assert.assertTrue(DOMUtils.clickNode(mTestContainerView.getWebContents(), "text1"));
         cnt += waitForCallbackAndVerifyTypes(cnt,
-                new Integer[] {AUTOFILL_CANCEL, AUTOFILL_VIEW_EXITED, AUTOFILL_VIEW_ENTERED,
+                new Integer[] {AUTOFILL_VIEW_EXITED, AUTOFILL_CANCEL, AUTOFILL_VIEW_ENTERED,
                         AUTOFILL_SESSION_STARTED});
     }
 
@@ -1201,14 +1201,14 @@ public class AwAutofillTest {
                     private int mCallCount;
 
                     @Override
-                    public AwWebResourceResponse shouldInterceptRequest(
+                    public WebResourceResponseInfo shouldInterceptRequest(
                             AwWebResourceRequest request) {
                         try {
                             if (url.equals(request.url)) {
                                 // Only intercept the iframe's request.
                                 if (mCallCount == 1) {
                                     final String encoding = "UTF-8";
-                                    return new AwWebResourceResponse("text/html", encoding,
+                                    return new WebResourceResponseInfo("text/html", encoding,
                                             new ByteArrayInputStream(
                                                     iframeData.getBytes(encoding)));
                                 }
@@ -1274,6 +1274,51 @@ public class AwAutofillTest {
     }
 
     /**
+     * This test is verifying that AutofillProvider correctly processes the removal and restoring
+     * of focus on a form element.
+     */
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testFocusRemovedAndRestored() throws Throwable {
+        int cnt = 0;
+        final String data = "<!DOCTYPE html>"
+                + "<html>"
+                + "<body>"
+                + "<form action='a.html' name='formname' id='formid'>"
+                + "<input type='text' id='text1' name='username'"
+                + " placeholder='placeholder@placeholder.com' autocomplete='username name'>"
+                + "<input type='password' id='passwordid' name='passwordname'>"
+                + "</form>"
+                + "</body>"
+                + "</html>";
+        final String url = mWebServer.setResponse(FILE, data, null);
+        loadUrlSync(url);
+
+        // Start the session by clicking on the username element.
+        DOMUtils.waitForNonZeroNodeBounds(mAwContents.getWebContents(), "text1");
+        // TODO(changwan): mock out IME interaction.
+        Assert.assertTrue(DOMUtils.clickNode(mTestContainerView.getWebContents(), "text1"));
+        cnt += waitForCallbackAndVerifyTypes(cnt,
+                new Integer[] {AUTOFILL_CANCEL, AUTOFILL_VIEW_ENTERED, AUTOFILL_SESSION_STARTED});
+
+        // Removing focus from this element should cause a notification that the autofill view was
+        // exited.
+        executeJavaScriptAndWaitForResult("document.getElementById('text1').blur();");
+        cnt += waitForCallbackAndVerifyTypes(cnt, new Integer[] {AUTOFILL_VIEW_EXITED});
+
+        // Restoring focus on the form element should cause notifications to the autofill framework
+        // that the autofill view was entered and value changed (AutofillProvider sends the latter
+        // as a safeguard whenever focus changes to a new form element in the current session; it
+        // was not sent as part of the first click above because at that point focus didn't change
+        // to a *new* form element but was still on the element whose focusing had caused the
+        // autofill session to start).
+        Assert.assertTrue(DOMUtils.clickNode(mTestContainerView.getWebContents(), "text1"));
+        waitForCallbackAndVerifyTypes(
+                cnt, new Integer[] {AUTOFILL_VIEW_ENTERED, AUTOFILL_VALUE_CHANGED});
+    }
+
+    /**
      * This test is verifying that a navigation occurring while there is a probably-submitted
      * form will trigger commit of the current autofill session.
      */
@@ -1307,7 +1352,8 @@ public class AwAutofillTest {
                         AUTOFILL_VALUE_CHANGED});
         executeJavaScriptAndWaitForResult("window.location.href = 'success.html'; ");
         waitForCallbackAndVerifyTypes(cnt,
-                new Integer[] {AUTOFILL_VALUE_CHANGED, AUTOFILL_VALUE_CHANGED, AUTOFILL_COMMIT});
+                new Integer[] {AUTOFILL_VIEW_EXITED, AUTOFILL_VALUE_CHANGED, AUTOFILL_VALUE_CHANGED,
+                        AUTOFILL_COMMIT});
         assertEquals(SubmissionSource.PROBABLY_FORM_SUBMITTED, mSubmissionSource);
     }
 
@@ -2040,6 +2086,14 @@ public class AwAutofillTest {
         int callCount = done.getCallCount();
         mRule.loadUrlSync(
                 mTestContainerView.getAwContents(), mContentsClient.getOnPageFinishedHelper(), url);
+        done.waitForCallback(callCount);
+    }
+
+    private void reloadSync() throws Exception {
+        CallbackHelper done = mContentsClient.getOnPageCommitVisibleHelper();
+        int callCount = done.getCallCount();
+        mRule.reloadSync(
+                mTestContainerView.getAwContents(), mContentsClient.getOnPageFinishedHelper());
         done.waitForCallback(callCount);
     }
 

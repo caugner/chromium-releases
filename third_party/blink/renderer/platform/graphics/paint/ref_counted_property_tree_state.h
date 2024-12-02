@@ -26,11 +26,6 @@ class PLATFORM_EXPORT RefCountedPropertyTreeState {
     return *this = RefCountedPropertyTreeState(property_tree_state);
   }
 
-  bool HasDirectCompositingReasons() const {
-    return Transform().Unalias().HasDirectCompositingReasons() ||
-           Effect().Unalias().HasDirectCompositingReasons();
-  }
-
   const TransformPaintPropertyNodeOrAlias& Transform() const {
     return *transform_;
   }
@@ -41,10 +36,10 @@ class PLATFORM_EXPORT RefCountedPropertyTreeState {
     return PropertyTreeStateOrAlias(Transform(), Clip(), Effect());
   }
 
-  void ClearChangedToRoot() const {
-    Transform().ClearChangedToRoot();
-    Clip().ClearChangedToRoot();
-    Effect().ClearChangedToRoot();
+  void ClearChangedTo(const PropertyTreeStateOrAlias& to) const {
+    Transform().ClearChangedTo(&to.Transform());
+    Clip().ClearChangedTo(&to.Clip());
+    Effect().ClearChangedTo(&to.Effect());
   }
 
   String ToString() const { return GetPropertyTreeState().ToString(); }

@@ -26,6 +26,8 @@ enum SceneActivationLevel : NSUInteger;
 - (void)sceneStateWillHideModalOverlay:(SceneState*)sceneState;
 // Notifies when presentingModalOverlay has been set to false.
 - (void)sceneStateDidHideModalOverlay:(SceneState*)sceneState;
+// Notifies when hasInitializedUI has been set.
+- (void)sceneStateHasInitializedUI:(SceneState*)sceneState;
 // Notifies when URLContexts have been added to |URLContextsToOpen|.
 - (void)sceneState:(SceneState*)sceneState
     hasPendingURLs:(NSSet<UIOpenURLContext*>*)URLContexts
@@ -33,6 +35,9 @@ enum SceneActivationLevel : NSUInteger;
 // Notifies that a new activity request has been received.
 - (void)sceneState:(SceneState*)sceneState
     receivedUserActivity:(NSUserActivity*)userActivity;
+// Notifies that the scene switched between incognito/normal mode.
+- (void)sceneState:(SceneState*)sceneState
+    isDisplayingIncognitoContent:(BOOL)incognitoContentVisible;
 
 @end
 

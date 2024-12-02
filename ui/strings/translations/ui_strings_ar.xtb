@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">تعذَّرت مشاركة <ph name="CONTENT_TYPE" />.</translation>
 <translation id="1487931858675166540">تم استبدال <ph name="FIRST_ITEM_TITLE" /> بالعنصر <ph name="SECOND_ITEM_TITLE" />.</translation>
 <translation id="1498028757988366001">لقد بحثت عن هذا الموضوع من قبل. سيؤدي حذف "<ph name="QUERY" />" من السجل إلى إزالته نهائيًا من حسابك على جميع أجهزتك.</translation>
+<translation id="1510238584712386396">مشغِّل التطبيقات</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{دقيقة واحدة و }zero{# من الدقائق و }two{دقيقتان (#) و }few{# دقائق و }many{# دقيقة و }other{# من الدقائق و }}</translation>
 <translation id="1643823602425662293">الإشعار</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418">ملف <ph name="SAVEAS_EXTENSION_TYPE" /></translation>
 <translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">البحث عن "<ph name="LOOKUP_STRING" />"</translation>
+<translation id="3622035490309591977">سجلّ الحافظة</translation>
 <translation id="364720409959344976">حدد مجلدًا للتحميل</translation>
 <translation id="3660179305079774227">مفتاح سهم متّجه للأعلى</translation>
 <translation id="3670030362669914947">رقم</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> بيتابايت</translation>
 <translation id="5266161281976477809">مثلث الإفصاح</translation>
 <translation id="5278860589123563674">تعذّر الإرسال</translation>
+<translation id="5283099933536931082">لديك إشعار من <ph name="APP_ITEM_TITLE" />.</translation>
 <translation id="528468243742722775">‏مفتاح End</translation>
 <translation id="5329858601952122676">&amp;حذف</translation>
 <translation id="5395308026110844773"><ph name="DRAGGED_APP_NAME" /> في أعلى <ph name="IN_PLACE_APP" />، يُرجى التحرير لإنشاء مجلد.</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840">نظام <ph name="IDS_SHORT_PRODUCT_OS_NAME" /></translation>
 <translation id="5583640892426849032">Backspace</translation>
 <translation id="5613020302032141669">مفتاح سهم إلى اليسار</translation>
+<translation id="5652575806481723716">لديك إشعار من <ph name="FOCUSED_APP_NAME" />.</translation>
 <translation id="5675363643668471212">عنصر الرف</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{دقيقة واحدة}zero{# من الدقائق}two{دقيقتان (#)}few{# دقائق}many{# دقيقة}other{# من الدقائق}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{نشط اليوم}=1{نشط قبل يوم واحد}two{نشط قبل يومين (#)}few{نشط قبل # أيام}many{نشط قبل # يومًا}other{نشط قبل # يوم}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{يوم واحد و }zero{# من الأيام و }two{يومان (#) و }few{# أيام و }many{# يومًا و }other{# من الأيام و }}</translation>
 <translation id="5789643057113097023">.</translation>
+<translation id="5843690142429128814">صورة</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{خلال عام واحد}zero{خلال # عام}two{خلال عامين (#)}few{خلال # أعوام}many{خلال # عامًا}other{خلال # عام}}</translation>
 <translation id="588258955323874662">ملء الشاشة</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{يتبقى ثانية واحدة}zero{يتبقى # من الثواني}two{يتبقى ثانيتان (#)}few{يتبقى # ثانية}many{يتبقى # ثانية}other{يتبقى # من الثواني}}</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">اضغط</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{يتبقى ساعة}zero{يتبقى # من الساعات}two{ يتبقى ساعتان (#)}few{يتبقى # ساعات}many{يتبقى # ساعة}other{يتبقى # من الساعات}}</translation>
 <translation id="688711909580084195">صفحة ويب بدون عنوان</translation>
+<translation id="6902419395050653510">‏محتوى HTML</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> بيتابايت/ثانية</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{تتبقى سنة واحدة}zero{تتبقى # سنة}two{تتبقى سنتين (#)}few{تتبقى # سنوات}many{تتبقى # سنةً}other{تتبقى # سنة}}</translation>
 <translation id="6945221475159498467">تحديد</translation>

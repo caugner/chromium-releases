@@ -7,6 +7,7 @@ package org.chromium.weblayer.test;
 import android.app.Activity;
 import android.app.Instrumentation.ActivityMonitor;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.net.Uri;
@@ -25,8 +26,8 @@ import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.EmbeddedTestServerRule;
@@ -73,10 +74,12 @@ public class InstrumentationActivityTestRule
     }
 
     public WebLayer getWebLayer() {
-        return TestThreadUtils.runOnUiThreadBlockingNoException(() -> {
-            return WebLayer.loadSync(
-                    InstrumentationRegistry.getTargetContext().getApplicationContext());
-        });
+        return TestThreadUtils.runOnUiThreadBlockingNoException(
+                () -> { return WebLayer.loadSync(getContextForWebLayer()); });
+    }
+
+    public Context getContextForWebLayer() {
+        return InstrumentationRegistry.getTargetContext().getApplicationContext();
     }
 
     /**
@@ -103,7 +106,7 @@ public class InstrumentationActivityTestRule
         Assert.assertNotNull(activity);
         try {
             TestThreadUtils.runOnUiThreadBlocking(
-                    () -> activity.loadWebLayerSync(activity.getApplicationContext()));
+                    () -> activity.loadWebLayerSync(getContextForWebLayer()));
         } catch (ExecutionException e) {
             throw new RuntimeException(e);
         }
@@ -219,18 +222,24 @@ public class InstrumentationActivityTestRule
     }
 
     public String executeScriptAndExtractString(String script) {
+        return executeScriptAndExtractString(script, true /* useSeparateIsolate */);
+    }
+
+    public String executeScriptAndExtractString(String script, boolean useSeparateIsolate) {
         try {
-            return executeScriptSync(script, true /* useSeparateIsolate */)
-                    .getString(Tab.SCRIPT_RESULT_KEY);
+            return executeScriptSync(script, useSeparateIsolate).getString(Tab.SCRIPT_RESULT_KEY);
         } catch (JSONException e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean executeScriptAndExtractBoolean(String script) {
+        return executeScriptAndExtractBoolean(script, true /* useSeparateIsolate */);
+    }
+
+    public boolean executeScriptAndExtractBoolean(String script, boolean useSeparateIsolate) {
         try {
-            return executeScriptSync(script, true /* useSeparateIsolate */)
-                    .getBoolean(Tab.SCRIPT_RESULT_KEY);
+            return executeScriptSync(script, useSeparateIsolate).getBoolean(Tab.SCRIPT_RESULT_KEY);
         } catch (JSONException e) {
             throw new RuntimeException(e);
         }

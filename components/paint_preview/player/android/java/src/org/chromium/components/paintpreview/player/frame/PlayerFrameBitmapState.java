@@ -11,7 +11,10 @@ import android.util.Size;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
+import org.chromium.base.MemoryPressureLevel;
 import org.chromium.base.UnguessableToken;
+import org.chromium.base.memory.MemoryPressureMonitor;
+import org.chromium.base.task.SequencedTaskRunner;
 import org.chromium.components.paintpreview.player.PlayerCompositorDelegate;
 
 import java.util.HashSet;
@@ -27,36 +30,43 @@ public class PlayerFrameBitmapState {
     /** The scale factor of bitmaps. */
     private float mScaleFactor;
     /** Bitmaps that make up the contents. */
-    private Bitmap[][] mBitmapMatrix;
+    private CompressibleBitmap[][] mBitmapMatrix;
     /** Whether a request for a bitmap tile is pending. */
-    private boolean[][] mPendingBitmapRequests;
+    private BitmapRequestHandler[][] mPendingBitmapRequests;
     /**
      * Whether we currently need a bitmap tile. This is used for deleting bitmaps that we don't
      * need and freeing up memory.
      */
     private boolean[][] mRequiredBitmaps;
+    /**
+     * Whether a bitmap is visible for a given request.
+     */
+    private boolean[][] mVisibleBitmaps;
     /** Delegate for accessing native to request bitmaps. */
     private final PlayerCompositorDelegate mCompositorDelegate;
     private final PlayerFrameBitmapStateController mStateController;
     private Set<Integer> mInitialMissingVisibleBitmaps = new HashSet<>();
+    private final SequencedTaskRunner mTaskRunner;
 
     PlayerFrameBitmapState(UnguessableToken guid, int tileWidth, int tileHeight, float scaleFactor,
             Size contentSize, PlayerCompositorDelegate compositorDelegate,
-            PlayerFrameBitmapStateController stateController) {
+            PlayerFrameBitmapStateController stateController, SequencedTaskRunner taskRunner) {
         mGuid = guid;
         mTileSize = new Size(tileWidth, tileHeight);
         mScaleFactor = scaleFactor;
         mCompositorDelegate = compositorDelegate;
         mStateController = stateController;
+        mTaskRunner = taskRunner;
 
         // Each tile is as big as the initial view port. Here we determine the number of
         // columns and rows for the current scale factor.
         int rows = (int) Math.ceil((contentSize.getHeight() * scaleFactor) / tileHeight);
         int cols = (int) Math.ceil((contentSize.getWidth() * scaleFactor) / tileWidth);
 
-        mBitmapMatrix = new Bitmap[rows][cols];
-        mPendingBitmapRequests = new boolean[rows][cols];
+        mBitmapMatrix = new CompressibleBitmap[rows][cols];
+        mPendingBitmapRequests = new BitmapRequestHandler[rows][cols];
         mRequiredBitmaps = new boolean[rows][cols];
+        mVisibleBitmaps = new boolean[rows][cols];
     }
 
     @VisibleForTesting
@@ -64,7 +74,7 @@ public class PlayerFrameBitmapState {
         return mRequiredBitmaps;
     }
 
-    Bitmap[][] getMatrix() {
+    CompressibleBitmap[][] getMatrix() {
         return mBitmapMatrix;
     }
 
@@ -77,6 +87,7 @@ public class PlayerFrameBitmapState {
      */
     void lock() {
         mRequiredBitmaps = null;
+        mCompositorDelegate.cancelAllBitmapRequests();
     }
 
     /**
@@ -89,10 +100,17 @@ public class PlayerFrameBitmapState {
     /**
      * Clears state so in-flight requests abort upon return.
      */
-    void clear() {
-        mBitmapMatrix = null;
+    void destroy() {
         mRequiredBitmaps = null;
         mPendingBitmapRequests = null;
+        for (int i = 0; i < mBitmapMatrix.length; i++) {
+            for (int j = 0; j < mBitmapMatrix[i].length; j++) {
+                if (mBitmapMatrix[i][j] != null) {
+                    mBitmapMatrix[i][j].destroy();
+                }
+            }
+        }
+        mBitmapMatrix = null;
     }
 
     /**
@@ -110,25 +128,13 @@ public class PlayerFrameBitmapState {
     }
 
     /**
-     * Clears all the required bitmaps before they are re-set in {@link #requestBitmapForRect()}
-     */
-    void clearRequiredBitmaps() {
-        if (mRequiredBitmaps == null) return;
-
-        for (int row = 0; row < mRequiredBitmaps.length; row++) {
-            for (int col = 0; col < mRequiredBitmaps[row].length; col++) {
-                mRequiredBitmaps[row][col] = false;
-            }
-        }
-    }
-
-    /**
      * Requests bitmaps for tiles that overlap with the provided rect. Also requests bitmaps for
      * adjacent tiles.
      * @param viewportRect The rect of the viewport for which bitmaps are needed.
      */
     void requestBitmapForRect(Rect viewportRect) {
         if (mRequiredBitmaps == null || mBitmapMatrix == null) return;
+        clearBeforeRequest();
 
         final int rowStart =
                 Math.max(0, (int) Math.floor((double) viewportRect.top / mTileSize.getHeight()));
@@ -142,18 +148,42 @@ public class PlayerFrameBitmapState {
 
         for (int col = colStart; col < colEnd; col++) {
             for (int row = rowStart; row < rowEnd; row++) {
+                mVisibleBitmaps[row][col] = true;
                 if (requestBitmapForTile(row, col) && mInitialMissingVisibleBitmaps != null) {
                     mInitialMissingVisibleBitmaps.add(row * mBitmapMatrix.length + col);
                 }
             }
         }
 
-        // Request bitmaps for adjacent tiles that are not currently in the view port. The reason
-        // that we do this in a separate loop is to make sure bitmaps for tiles inside the view port
-        // are fetched first.
-        for (int col = colStart; col < colEnd; col++) {
-            for (int row = rowStart; row < rowEnd; row++) {
-                requestBitmapForAdjacentTiles(row, col);
+        // Only fetch out-of-viewport bitmaps eagerly if not under memory pressure.
+        if (MemoryPressureMonitor.INSTANCE.getLastReportedPressure()
+                < MemoryPressureLevel.MODERATE) {
+            // Request bitmaps for adjacent tiles that are not currently in the view port. The
+            // reason that we do this in a separate loop is to make sure bitmaps for tiles inside
+            // the view port are fetched first.
+            for (int col = colStart; col < colEnd; col++) {
+                for (int row = rowStart; row < rowEnd; row++) {
+                    requestBitmapForAdjacentTiles(row, col);
+                }
+            }
+        }
+
+        cancelUnrequiredPendingRequests();
+    }
+
+    /**
+     * Releases and deletes all out-of-viewport tiles.
+     */
+    void releaseNotVisibleTiles() {
+        if (mBitmapMatrix == null || mVisibleBitmaps == null) return;
+
+        for (int row = 0; row < mBitmapMatrix.length; row++) {
+            for (int col = 0; col < mBitmapMatrix[row].length; col++) {
+                CompressibleBitmap bitmap = mBitmapMatrix[row][col];
+                if (!mVisibleBitmaps[row][col] && bitmap != null) {
+                    bitmap.destroy();
+                    mBitmapMatrix[row][col] = null;
+                }
             }
         }
     }
@@ -179,8 +209,12 @@ public class PlayerFrameBitmapState {
         if (mRequiredBitmaps == null) return false;
 
         mRequiredBitmaps[row][col] = true;
+        if (mPendingBitmapRequests != null && mPendingBitmapRequests[row][col] != null) {
+            mPendingBitmapRequests[row][col].setVisible(mVisibleBitmaps[row][col]);
+            return false;
+        }
         if (mBitmapMatrix == null || mPendingBitmapRequests == null
-                || mBitmapMatrix[row][col] != null || mPendingBitmapRequests[row][col]) {
+                || mBitmapMatrix[row][col] != null || mPendingBitmapRequests[row][col] != null) {
             return false;
         }
 
@@ -188,11 +222,16 @@ public class PlayerFrameBitmapState {
         final int x = col * mTileSize.getWidth();
 
         BitmapRequestHandler bitmapRequestHandler =
-                new BitmapRequestHandler(row, col, mScaleFactor);
-        mPendingBitmapRequests[row][col] = true;
-        mCompositorDelegate.requestBitmap(mGuid,
+                new BitmapRequestHandler(row, col, mScaleFactor, mVisibleBitmaps[row][col]);
+        mPendingBitmapRequests[row][col] = bitmapRequestHandler;
+        int requestId = mCompositorDelegate.requestBitmap(mGuid,
                 new Rect(x, y, x + mTileSize.getWidth(), y + mTileSize.getHeight()), mScaleFactor,
                 bitmapRequestHandler, bitmapRequestHandler::onError);
+        // It is possible that the request failed immediately, so make sure the request still
+        // exists.
+        if (mPendingBitmapRequests[row][col] != null) {
+            mPendingBitmapRequests[row][col].setRequestId(requestId);
+        }
         return true;
     }
 
@@ -205,9 +244,9 @@ public class PlayerFrameBitmapState {
 
         for (int row = 0; row < mBitmapMatrix.length; row++) {
             for (int col = 0; col < mBitmapMatrix[row].length; col++) {
-                Bitmap bitmap = mBitmapMatrix[row][col];
+                CompressibleBitmap bitmap = mBitmapMatrix[row][col];
                 if (!mRequiredBitmaps[row][col] && bitmap != null) {
-                    bitmap.recycle();
+                    bitmap.destroy();
                     mBitmapMatrix[row][col] = null;
                 }
             }
@@ -234,6 +273,43 @@ public class PlayerFrameBitmapState {
         mStateController.stateUpdated(this);
     }
 
+    private void clearBeforeRequest() {
+        if (mVisibleBitmaps == null || mRequiredBitmaps == null) return;
+
+        assert mVisibleBitmaps.length == mRequiredBitmaps.length;
+        assert (mVisibleBitmaps.length > 0)
+                ? mVisibleBitmaps[0].length == mRequiredBitmaps[0].length
+                : true;
+
+        for (int row = 0; row < mVisibleBitmaps.length; row++) {
+            for (int col = 0; col < mVisibleBitmaps[row].length; col++) {
+                mVisibleBitmaps[row][col] = false;
+                mRequiredBitmaps[row][col] = false;
+            }
+        }
+    }
+
+    private void cancelUnrequiredPendingRequests() {
+        if (mPendingBitmapRequests == null || mRequiredBitmaps == null) return;
+
+        assert mPendingBitmapRequests.length == mRequiredBitmaps.length;
+        assert (mPendingBitmapRequests.length > 0)
+                ? mPendingBitmapRequests[0].length == mRequiredBitmaps[0].length
+                : true;
+
+        for (int row = 0; row < mPendingBitmapRequests.length; row++) {
+            for (int col = 0; col < mPendingBitmapRequests[row].length; col++) {
+                if (mPendingBitmapRequests[row][col] != null && !mRequiredBitmaps[row][col]) {
+                    // If the cancellation failed, the bitmap is being processed already. If this
+                    // happens don't delete the request.
+                    if (mPendingBitmapRequests[row][col].cancel()) {
+                        mPendingBitmapRequests[row][col] = null;
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Used as the callback for bitmap requests from the Paint Preview compositor.
      */
@@ -241,11 +317,27 @@ public class PlayerFrameBitmapState {
         int mRequestRow;
         int mRequestCol;
         float mRequestScaleFactor;
+        boolean mVisible;
+        int mRequestId;
 
-        private BitmapRequestHandler(int requestRow, int requestCol, float requestScaleFactor) {
+        private BitmapRequestHandler(
+                int requestRow, int requestCol, float requestScaleFactor, boolean visible) {
             mRequestRow = requestRow;
             mRequestCol = requestCol;
             mRequestScaleFactor = requestScaleFactor;
+            mVisible = visible;
+        }
+
+        private void setVisible(boolean visible) {
+            mVisible = visible;
+        }
+
+        private void setRequestId(int requestId) {
+            mRequestId = requestId;
+        }
+
+        private boolean cancel() {
+            return mCompositorDelegate.cancelBitmapRequest(mRequestId);
         }
 
         /**
@@ -259,18 +351,22 @@ public class PlayerFrameBitmapState {
                 return;
             }
             if (mBitmapMatrix == null || mPendingBitmapRequests == null || mRequiredBitmaps == null
-                    || !mPendingBitmapRequests[mRequestRow][mRequestCol]
+                    || mPendingBitmapRequests[mRequestRow][mRequestCol] == null
                     || !mRequiredBitmaps[mRequestRow][mRequestCol]) {
-                markBitmapReceived(mRequestRow, mRequestCol);
                 result.recycle();
                 deleteUnrequiredBitmaps();
+                markBitmapReceived(mRequestRow, mRequestCol);
+                if (mPendingBitmapRequests != null) {
+                    mPendingBitmapRequests[mRequestRow][mRequestCol] = null;
+                }
                 return;
             }
 
-            mPendingBitmapRequests[mRequestRow][mRequestCol] = false;
-            mBitmapMatrix[mRequestRow][mRequestCol] = result;
-            markBitmapReceived(mRequestRow, mRequestCol);
+            mBitmapMatrix[mRequestRow][mRequestCol] =
+                    new CompressibleBitmap(result, mTaskRunner, mVisible);
             deleteUnrequiredBitmaps();
+            markBitmapReceived(mRequestRow, mRequestCol);
+            mPendingBitmapRequests[mRequestRow][mRequestCol] = null;
         }
 
         /**
@@ -284,9 +380,9 @@ public class PlayerFrameBitmapState {
             // TODO(crbug.com/1021590): Handle errors.
             assert mBitmapMatrix != null;
             assert mBitmapMatrix[mRequestRow][mRequestCol] == null;
-            assert mPendingBitmapRequests[mRequestRow][mRequestCol];
+            assert mPendingBitmapRequests[mRequestRow][mRequestCol] != null;
 
-            mPendingBitmapRequests[mRequestRow][mRequestCol] = false;
+            mPendingBitmapRequests[mRequestRow][mRequestCol] = null;
         }
     }
 

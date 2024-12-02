@@ -25,8 +25,8 @@ void Dactyloscoper::Record(WebFeature feature) {
 
 namespace {
 
-bool IsStudyEnabled(WebFeature feature) {
-  return IdentifiabilityStudySettings::Get()->IsSurfaceAllowed(
+bool ShouldSample(WebFeature feature) {
+  return IdentifiabilityStudySettings::Get()->ShouldSample(
       IdentifiableSurface::FromTypeAndToken(
           IdentifiableSurface::Type::kWebFeature, feature));
 }
@@ -48,7 +48,7 @@ void Dactyloscoper::Record(ExecutionContext* context, WebFeature feature) {
 void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
                                         WebFeature feature,
                                         const IdentifiableToken& value) {
-  if (!context || !IsStudyEnabled(feature))
+  if (!context || !ShouldSample(feature))
     return;
   auto* window = DynamicTo<LocalDOMWindow>(context);
   if (!window)
@@ -63,7 +63,7 @@ void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
 void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
                                         WebFeature feature,
                                         const String& str) {
-  if (!context || !IsStudyEnabled(feature))
+  if (!context || !ShouldSample(feature))
     return;
   if (str.IsEmpty())
     return;
@@ -75,7 +75,7 @@ void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
 void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
                                         WebFeature feature,
                                         const Vector<String>& strs) {
-  if (!context || !IsStudyEnabled(feature))
+  if (!context || !ShouldSample(feature))
     return;
   if (strs.IsEmpty())
     return;
@@ -90,13 +90,12 @@ void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
 void Dactyloscoper::RecordDirectSurface(ExecutionContext* context,
                                         WebFeature feature,
                                         const DOMArrayBufferView* buffer) {
-  if (!context || !IsStudyEnabled(feature))
+  if (!context || !ShouldSample(feature))
     return;
-  if (!buffer || buffer->byteLengthAsSizeT() == 0)
+  if (!buffer || buffer->byteLength() == 0)
     return;
-  IdentifiableTokenBuilder builder(
-      base::make_span(static_cast<uint8_t*>(buffer->BaseAddress()),
-                      buffer->byteLengthAsSizeT()));
+  IdentifiableTokenBuilder builder(base::make_span(
+      static_cast<uint8_t*>(buffer->BaseAddress()), buffer->byteLength()));
   Dactyloscoper::RecordDirectSurface(context, feature, builder.GetToken());
 }
 

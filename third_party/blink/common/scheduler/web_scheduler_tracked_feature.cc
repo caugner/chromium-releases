@@ -67,8 +67,6 @@ const char* FeatureToString(WebSchedulerTrackedFeature feature) {
       return "requested broadcast channel permission";
     case WebSchedulerTrackedFeature::kIndexedDBConnection:
       return "IndexedDB connection present";
-    case WebSchedulerTrackedFeature::kWebGL:
-      return "WebGL";
     case WebSchedulerTrackedFeature::kWebVR:
       return "WebVR";
     case WebSchedulerTrackedFeature::kWebXR:
@@ -107,11 +105,59 @@ const char* FeatureToString(WebSchedulerTrackedFeature feature) {
       return "SpeechSynthesis";
     case WebSchedulerTrackedFeature::kKeyboardLock:
       return "KeyboardLock";
-    case WebSchedulerTrackedFeature::kSmsService:
+    case WebSchedulerTrackedFeature::kWebOTPService:
       return "SMSService";
     case WebSchedulerTrackedFeature::kOutstandingNetworkRequestDirectSocket:
       return "outstanding network request (direct socket)";
   }
+}
+
+bool IsFeatureSticky(WebSchedulerTrackedFeature feature) {
+  return (FeatureToBit(feature) & StickyFeaturesBitmask()) > 0;
+}
+
+uint64_t StickyFeaturesBitmask() {
+  return FeatureToBit(
+             WebSchedulerTrackedFeature::kMainResourceHasCacheControlNoStore) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kMainResourceHasCacheControlNoCache) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kSubresourceHasCacheControlNoStore) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kSubresourceHasCacheControlNoCache) |
+         FeatureToBit(WebSchedulerTrackedFeature::kPageShowEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kPageHideEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kBeforeUnloadEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kUnloadEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kFreezeEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kResumeEventListener) |
+         FeatureToBit(WebSchedulerTrackedFeature::kContainsPlugins) |
+         FeatureToBit(WebSchedulerTrackedFeature::kDocumentLoaded) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedGeolocationPermission) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedNotificationsPermission) |
+         FeatureToBit(WebSchedulerTrackedFeature::kRequestedMIDIPermission) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedAudioCapturePermission) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedVideoCapturePermission) |
+         FeatureToBit(WebSchedulerTrackedFeature::
+                          kRequestedBackForwardCacheBlockedSensors) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedBackgroundWorkPermission) |
+         FeatureToBit(WebSchedulerTrackedFeature::kWebLocks) |
+         FeatureToBit(
+             WebSchedulerTrackedFeature::kRequestedStorageAccessGrant) |
+         FeatureToBit(WebSchedulerTrackedFeature::kWebNfc) |
+         FeatureToBit(WebSchedulerTrackedFeature::kWebFileSystem) |
+         FeatureToBit(WebSchedulerTrackedFeature::kAppBanner) |
+         FeatureToBit(WebSchedulerTrackedFeature::kPrinting) |
+         FeatureToBit(WebSchedulerTrackedFeature::kPictureInPicture) |
+         FeatureToBit(WebSchedulerTrackedFeature::kIdleManager) |
+         FeatureToBit(WebSchedulerTrackedFeature::kPaymentManager) |
+         FeatureToBit(WebSchedulerTrackedFeature::kKeyboardLock) |
+         FeatureToBit(WebSchedulerTrackedFeature::kWebOTPService);
 }
 
 }  // namespace scheduler

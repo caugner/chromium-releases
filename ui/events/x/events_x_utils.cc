@@ -25,7 +25,6 @@
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/x/extension_manager.h"
-#include "ui/gfx/x/x11.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/gfx/x/xproto.h"
 
@@ -376,7 +375,7 @@ base::TimeTicks TimeTicksFromXEvent(const x11::Event& xev) {
 
 // This is ported from libxi's FP1616toDBL in XExtInt.c
 double Fp1616ToDouble(x11::Input::Fp1616 x) {
-  auto x32 = static_cast<uint32_t>(x);
+  auto x32 = static_cast<int32_t>(x);
   return x32 * 1.0 / (1 << 16);
 }
 

@@ -7,14 +7,30 @@
 #include <memory>
 #include <string>
 
-#include "ash/ambient/ambient_constants.h"
 #include "ash/ambient/model/ambient_backend_model_observer.h"
+#include "ash/public/cpp/ambient/ambient_prefs.h"
+#include "ash/public/cpp/ambient/ambient_ui_model.h"
+#include "ash/session/session_controller_impl.h"
+#include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "base/scoped_observer.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_unittest_util.h"
 #include "ui/views/controls/image_view.h"
 
 namespace ash {
+
+namespace {
+class MockAmbientBackendModelObserver : public AmbientBackendModelObserver {
+ public:
+  MockAmbientBackendModelObserver() = default;
+  ~MockAmbientBackendModelObserver() override = default;
+
+  MOCK_METHOD(void, OnImagesFailed, (), (override));
+};
+
+}  // namespace
 
 class AmbientBackendModelTest : public AshTestBase {
  public:
@@ -59,21 +75,26 @@ class AmbientBackendModelTest : public AshTestBase {
   // Returns whether the image is null.
   bool IsNullImage(const gfx::ImageSkia& image) { return image.isNull(); }
 
-  base::TimeDelta GetPhotoRefreshInterval() {
+  base::TimeDelta GetPhotoRefreshInterval() const {
     return ambient_backend_model()->GetPhotoRefreshInterval();
   }
 
   void SetPhotoRefreshInterval(const base::TimeDelta& interval) {
-    ambient_backend_model()->SetPhotoRefreshInterval(interval);
+    PrefService* prefs =
+        Shell::Get()->session_controller()->GetPrimaryUserPrefService();
+    prefs->SetInteger(ambient::prefs::kAmbientModePhotoRefreshIntervalSeconds,
+                      interval.InSeconds());
   }
 
-  AmbientBackendModel* ambient_backend_model() {
+  AmbientBackendModel* ambient_backend_model() const {
     return ambient_backend_model_.get();
   }
 
   PhotoWithDetails GetNextImage() {
     return ambient_backend_model_->GetNextImage();
   }
+
+  int failure_count() { return ambient_backend_model_->failures_; }
 
  private:
   std::unique_ptr<AmbientBackendModel> ambient_backend_model_;
@@ -114,6 +135,41 @@ TEST_F(AmbientBackendModelTest, ShouldReturnExpectedPhotoRefreshInterval) {
   SetPhotoRefreshInterval(interval);
   // The refresh interval will be the set value.
   EXPECT_EQ(GetPhotoRefreshInterval(), interval);
+}
+
+TEST_F(AmbientBackendModelTest, ShouldNotifyObserversIfImagesFailed) {
+  ambient_backend_model()->Clear();
+  testing::NiceMock<MockAmbientBackendModelObserver> observer;
+  ScopedObserver<AmbientBackendModel, AmbientBackendModelObserver> scoped_obs{
+      &observer};
+
+  scoped_obs.Add(ambient_backend_model());
+
+  EXPECT_CALL(observer, OnImagesFailed).Times(1);
+
+  for (int i = 0; i < kMaxConsecutiveReadPhotoFailures; i++) {
+    ambient_backend_model()->AddImageFailure();
+  }
+}
+
+TEST_F(AmbientBackendModelTest, ShouldResetFailuresOnAddImage) {
+  testing::NiceMock<MockAmbientBackendModelObserver> observer;
+  ScopedObserver<AmbientBackendModel, AmbientBackendModelObserver> scoped_obs{
+      &observer};
+
+  scoped_obs.Add(ambient_backend_model());
+
+  EXPECT_CALL(observer, OnImagesFailed).Times(0);
+
+  for (int i = 0; i < kMaxConsecutiveReadPhotoFailures - 1; i++) {
+    ambient_backend_model()->AddImageFailure();
+  }
+
+  EXPECT_EQ(failure_count(), kMaxConsecutiveReadPhotoFailures - 1);
+
+  AddNTestImages(1);
+
+  EXPECT_EQ(failure_count(), 0);
 }
 
 }  // namespace ash

@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">Није успело дељење: <ph name="CONTENT_TYPE" /></translation>
 <translation id="1487931858675166540">Ставка <ph name="FIRST_ITEM_TITLE" /> је замењена ставком <ph name="SECOND_ITEM_TITLE" /></translation>
 <translation id="1498028757988366001">Ово сте већ тражили раније. Ако избришете „<ph name="QUERY" />“ из историје, трајно ћете га уклонити са налога на свим уређајима.</translation>
+<translation id="1510238584712386396">Покретач</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 минут и }one{# минут и }few{# минута и }other{# минута и }}</translation>
 <translation id="1643823602425662293">Обавештење</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418"><ph name="SAVEAS_EXTENSION_TYPE" /> датотека</translation>
 <translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">Потражи „<ph name="LOOKUP_STRING" />“</translation>
+<translation id="3622035490309591977">Историја привремене меморије</translation>
 <translation id="364720409959344976">Избор директоријума за отпремање</translation>
 <translation id="3660179305079774227">Стрелица нагоре</translation>
 <translation id="3670030362669914947">Број</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5266161281976477809">Троугао за откривање</translation>
 <translation id="5278860589123563674">Слање није успело</translation>
+<translation id="5283099933536931082"><ph name="APP_ITEM_TITLE" /> захтева вашу пажњу.</translation>
 <translation id="528468243742722775">Заврши</translation>
 <translation id="5329858601952122676">&amp;Избриши</translation>
 <translation id="5395308026110844773"><ph name="DRAGGED_APP_NAME" /> преко апликације <ph name="IN_PLACE_APP" />, отпустите да бисте направили директоријум.</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840"><ph name="IDS_SHORT_PRODUCT_OS_NAME" /> систем</translation>
 <translation id="5583640892426849032">Backspace</translation>
 <translation id="5613020302032141669">Стрелица налево</translation>
+<translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" /> захтева вашу пажњу.</translation>
 <translation id="5675363643668471212">Ставка на полици</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 мин}one{# мин}few{# мин}other{# мин}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{Последња активност: данас}=1{Последња активност: пре 1 дан}one{Последња активност: пре # дан}few{Последња активност: пре # дана}other{Последња активност: пре # дана}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 дан и }one{# дан и }few{# дана и }other{# дана и }}</translation>
 <translation id="5789643057113097023">,</translation>
+<translation id="5843690142429128814">Слика.</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{за 1 г}one{за # г}few{за # г}other{за # г}}</translation>
 <translation id="588258955323874662">Цеo екран</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{Још 1 секунда}one{Још # секунда}few{Још # секунде}other{Још # секунди}}</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">притисни</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{Још 1 сат}one{Још # сат}few{Још # сата}other{Још # сати}}</translation>
 <translation id="688711909580084195">Веб-страница без наслова</translation>
+<translation id="6902419395050653510">HTML садржај.</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/s</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{Још 1 година}one{Још # година}few{Још # године}other{Још # година}}</translation>
 <translation id="6945221475159498467">Изабери</translation>

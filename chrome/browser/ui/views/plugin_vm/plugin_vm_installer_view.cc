@@ -146,7 +146,7 @@ PluginVmInstallerView::PluginVmInstallerView(Profile* profile)
   message_container_view->AddChildView(message_label_);
 
   learn_more_link_ = new views::Link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
-  learn_more_link_->set_callback(base::BindRepeating(
+  learn_more_link_->SetCallback(base::BindRepeating(
       &PluginVmInstallerView::OnLinkClicked, base::Unretained(this)));
   learn_more_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   message_container_view->AddChildView(learn_more_link_);
@@ -212,10 +212,6 @@ bool PluginVmInstallerView::Accept() {
 }
 
 bool PluginVmInstallerView::Cancel() {
-  // We call |Cancel()| if the user hasn't started installation to log to UMA.
-  if (state_ == State::kConfirmInstall || state_ == State::kInstalling)
-    plugin_vm_installer_->Cancel();
-
   return true;
 }
 
@@ -435,6 +431,9 @@ void PluginVmInstallerView::SetFinishedCallbackForTesting(
 
 PluginVmInstallerView::~PluginVmInstallerView() {
   plugin_vm_installer_->RemoveObserver();
+  // We call |Cancel()| if the user hasn't started installation to log to UMA.
+  if (state_ == State::kConfirmInstall || state_ == State::kInstalling)
+    plugin_vm_installer_->Cancel();
   g_plugin_vm_installer_view = nullptr;
 }
 
@@ -584,5 +583,8 @@ void PluginVmInstallerView::StartInstallation() {
   OnStateUpdated();
 
   plugin_vm_installer_->SetObserver(this);
-  plugin_vm_installer_->Start();
+  base::Optional<plugin_vm::PluginVmInstaller::FailureReason> failure_reason =
+      plugin_vm_installer_->Start();
+  if (failure_reason)
+    OnError(failure_reason.value());
 }

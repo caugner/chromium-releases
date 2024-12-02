@@ -32,9 +32,10 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/features.h"
+#include "components/no_state_prefetch/browser/prerender_manager.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/prefs/pref_service.h"
-#include "components/prerender/browser/prerender_manager.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
 #include "services/device/public/cpp/device_features.h"
@@ -89,7 +90,8 @@ class ContentSettingGeolocationImageModel : public ContentSettingImageModel {
 
   bool IsGeolocationAccessed();
 #if defined(OS_MAC)
-  bool IsGeolocationBlockedOnASystemLevel();
+  bool IsGeolocationAllowedOnASystemLevel();
+  bool IsGeolocationPermissionDetermined();
 #endif  // defined(OS_MAC)
 
   std::unique_ptr<ContentSettingBubbleModel> CreateBubbleModelImpl(
@@ -216,8 +218,8 @@ namespace {
 bool ShouldShowPluginExplanation(content::WebContents* web_contents,
                                  HostContentSettingsMap* map) {
   const GURL& url = web_contents->GetURL();
-  ContentSetting setting = map->GetContentSetting(
-      url, url, ContentSettingsType::PLUGINS, std::string());
+  ContentSetting setting =
+      map->GetContentSetting(url, url, ContentSettingsType::PLUGINS);
 
   // For plugins, show the animated explanation in these cases:
   //  - The plugin is blocked despite the user having content setting ALLOW.
@@ -512,13 +514,18 @@ bool ContentSettingGeolocationImageModel::UpdateAndGetVisibility(
           ::features::kMacCoreLocationImplementation)) {
     set_explanatory_string_id(0);
     if (is_allowed) {
-      if (IsGeolocationBlockedOnASystemLevel()) {
+      if (!IsGeolocationAllowedOnASystemLevel()) {
         set_icon(vector_icons::kLocationOnIcon,
                  vector_icons::kBlockedBadgeIcon);
         set_tooltip(l10n_util::GetStringUTF16(IDS_BLOCKED_GEOLOCATION_MESSAGE));
         if (content_settings->geolocation_was_just_granted_on_site_level())
           set_should_auto_open_bubble(true);
-        set_explanatory_string_id(IDS_GEOLOCATION_TURNED_OFF);
+        // At this point macOS may not have told us whether location permission
+        // has been allowed or blocked. Wait until the permission state is
+        // determined before displaying this message since it triggers an
+        // animation that cannot be cancelled
+        if (IsGeolocationPermissionDetermined())
+          set_explanatory_string_id(IDS_GEOLOCATION_TURNED_OFF);
         return true;
       }
     }
@@ -534,12 +541,20 @@ bool ContentSettingGeolocationImageModel::UpdateAndGetVisibility(
 }
 
 #if defined(OS_MAC)
-bool ContentSettingGeolocationImageModel::IsGeolocationBlockedOnASystemLevel() {
+bool ContentSettingGeolocationImageModel::IsGeolocationAllowedOnASystemLevel() {
   GeolocationSystemPermissionManager* permission_manager =
       g_browser_process->platform_part()->location_permission_manager();
   SystemPermissionStatus permission = permission_manager->GetSystemPermission();
 
-  return permission != SystemPermissionStatus::kAllowed;
+  return permission == SystemPermissionStatus::kAllowed;
+}
+
+bool ContentSettingGeolocationImageModel::IsGeolocationPermissionDetermined() {
+  GeolocationSystemPermissionManager* permission_manager =
+      g_browser_process->platform_part()->location_permission_manager();
+  SystemPermissionStatus permission = permission_manager->GetSystemPermission();
+
+  return permission != SystemPermissionStatus::kNotDetermined;
 }
 
 #endif  // defined(OS_MAC)
@@ -941,16 +956,11 @@ bool ContentSettingNotificationsImageModel::UpdateAndGetVisibility(
   // Show promo the first time a quiet prompt is shown to the user.
   set_should_show_promo(
       QuietNotificationPermissionUiState::ShouldShowPromo(profile));
-  using QuietUiReason = permissions::PermissionRequestManager::QuietUiReason;
-  switch (manager->ReasonForUsingQuietUi()) {
-    case QuietUiReason::kEnabledInPrefs:
-      set_explanatory_string_id(IDS_NOTIFICATIONS_OFF_EXPLANATORY_TEXT);
-      break;
-    case QuietUiReason::kTriggeredByCrowdDeny:
-    case QuietUiReason::kTriggeredDueToAbusiveRequests:
-    case QuietUiReason::kTriggeredDueToAbusiveContent:
-      set_explanatory_string_id(0);
-      break;
+  if (permissions::NotificationPermissionUiSelector::ShouldSuppressAnimation(
+          manager->ReasonForUsingQuietUi())) {
+    set_explanatory_string_id(0);
+  } else {
+    set_explanatory_string_id(IDS_NOTIFICATIONS_OFF_EXPLANATORY_TEXT);
   }
   return true;
 }

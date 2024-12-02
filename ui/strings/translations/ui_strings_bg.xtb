@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">Споделянето на <ph name="CONTENT_TYPE" /> не е възможно</translation>
 <translation id="1487931858675166540"><ph name="FIRST_ITEM_TITLE" /> се замени от <ph name="SECOND_ITEM_TITLE" /></translation>
 <translation id="1498028757988366001">Тази заявка е сред предишните ви търсения. Изтриването на „<ph name="QUERY" />“ от историята ви ще я премахне за постоянно от профила ви на всичките ви устройства.</translation>
+<translation id="1510238584712386396">Стартов панел</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 минута и }other{# минути и }}</translation>
 <translation id="1643823602425662293">Известие</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418">Файл във формат <ph name="SAVEAS_EXTENSION_TYPE" /></translation>
 <translation id="3608915363409716668">Над <ph name="MAXIMUM_VALUE" /></translation>
 <translation id="3618849550573277856">Търсене на „<ph name="LOOKUP_STRING" />“</translation>
+<translation id="3622035490309591977">История на буферната памет</translation>
 <translation id="364720409959344976">Избиране на папка за качване</translation>
 <translation id="3660179305079774227">Стрелка нагоре</translation>
 <translation id="3670030362669914947">Номер</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> ПБ</translation>
 <translation id="5266161281976477809">Триъгълник за разкриване на съдържание</translation>
 <translation id="5278860589123563674">Изпращането не бе успешно</translation>
+<translation id="5283099933536931082"><ph name="APP_ITEM_TITLE" /> се нуждае от вниманието ви.</translation>
 <translation id="528468243742722775">Край</translation>
 <translation id="5329858601952122676">&amp;Изтриване</translation>
 <translation id="5395308026110844773"><ph name="DRAGGED_APP_NAME" /> е върху <ph name="IN_PLACE_APP" />. Освободете, за да създадете папка.</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840">Система <ph name="IDS_SHORT_PRODUCT_OS_NAME" /></translation>
 <translation id="5583640892426849032">Backspace</translation>
 <translation id="5613020302032141669">Стрелка наляво</translation>
+<translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" /> се нуждае от вниманието ви.</translation>
 <translation id="5675363643668471212">Елемент в лавицата</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 мин}other{# мин}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{Активно днес}=1{Активно преди 1 ден}other{Активно преди # дни}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 ден и }other{# дни и }}</translation>
 <translation id="5789643057113097023">.</translation>
+<translation id="5843690142429128814">Изображение.</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{след 1 г.}other{след # г.}}</translation>
 <translation id="588258955323874662">Цял екран</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{Остава 1 секунда}other{Остават # секунди}}</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">натискане</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{Остава 1 час}other{Остават # часа}}</translation>
 <translation id="688711909580084195">Неозаглавена уеб страница</translation>
+<translation id="6902419395050653510">HTML съдържание.</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> ПБ/сек</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{Остава 1 година}other{Остават # години}}</translation>
 <translation id="6945221475159498467">Избиране</translation>

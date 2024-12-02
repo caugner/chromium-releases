@@ -30,6 +30,7 @@ import org.robolectric.shadows.ShadowToast;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Promise;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.JniMocker;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.browserservices.ui.controller.Verifier;
@@ -54,7 +55,8 @@ import org.chromium.url.JUnitTestGURLs;
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@EnableFeatures(ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT)
+@EnableFeatures({ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT,
+        ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT_WARNING})
 @DisableFeatures(ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT_FORCED)
 public class QualityEnforcerUnitTest {
     private static final GURL TRUSTED_ORIGIN_PAGE = JUnitTestGURLs.getGURL(JUnitTestGURLs.URL_1);
@@ -64,6 +66,10 @@ public class QualityEnforcerUnitTest {
 
     @Rule
     public TestRule mFeaturesProcessor = new Features.JUnitProcessor();
+
+    @Rule
+    public JniMocker mocker = new JniMocker();
+
     @Mock
     private ChromeActivity mActivity;
     @Mock
@@ -84,6 +90,8 @@ public class QualityEnforcerUnitTest {
     private Tab mTab;
     @Mock
     public TrustedWebActivityUmaRecorder mUmaRecorder;
+    @Mock
+    private QualityEnforcer.Natives mNativeMock;
 
     private ShadowPackageManager mShadowPackageManager;
 
@@ -92,6 +100,8 @@ public class QualityEnforcerUnitTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
+        mocker.mock(QualityEnforcerJni.TEST_HOOKS, mNativeMock);
+
         doNothing()
                 .when(mTabObserverRegistrar)
                 .registerActivityTabObserver(mTabObserverCaptor.capture());
@@ -102,6 +112,7 @@ public class QualityEnforcerUnitTest {
         mQualityEnforcer = new QualityEnforcer(mActivity, mLifecycleDispatcher,
                 mTabObserverRegistrar, mIntentDataProvider, mCustomTabsConnection, mVerifier,
                 mClientPackageNameProvider, mUmaRecorder);
+        when(mIntentDataProvider.getUrlToLoad()).thenReturn(TRUSTED_ORIGIN_PAGE.getSpec());
     }
 
     @Test
@@ -140,32 +151,21 @@ public class QualityEnforcerUnitTest {
     @Test
     public void trigger_offline() {
         navigateToUrlInternet(TRUSTED_ORIGIN_PAGE);
-        Assert.assertEquals(ContextUtils.getApplicationContext().getString(
-                                    R.string.twa_quality_enforcement_violation_offline,
-                                    TRUSTED_ORIGIN_PAGE.getSpec()),
-                ShadowToast.getTextOfLatestToast());
+        verifyToastShown(ContextUtils.getApplicationContext().getString(
+                R.string.twa_quality_enforcement_violation_offline, TRUSTED_ORIGIN_PAGE.getSpec()));
         verifyNotifyClientApp();
     }
 
     @Test
     public void triggerCrash_whenClientSupports() {
-        Bundle result = new Bundle();
-        result.putBoolean("success", true);
-        when(mCustomTabsConnection.sendExtraCallbackWithResult(
-                     any(), eq(QualityEnforcer.CRASH), any()))
-                .thenReturn(result);
-
+        setClientEnable(true);
         navigateToUrlNotFound(TRUSTED_ORIGIN_PAGE);
         verify(mActivity).finish();
     }
 
     @Test
     public void notTriggerCrash_whenClientNotSupport() {
-        Bundle result = new Bundle();
-        result.putBoolean("success", false);
-        when(mCustomTabsConnection.sendExtraCallbackWithResult(
-                     any(), eq(QualityEnforcer.CRASH), any()))
-                .thenReturn(result);
+        setClientEnable(false);
 
         navigateToUrlNotFound(TRUSTED_ORIGIN_PAGE);
         verify(mActivity, never()).finish();
@@ -174,30 +174,23 @@ public class QualityEnforcerUnitTest {
     @Test
     public void notTrigger_digitalAssetLinkPass() {
         when(mIntentDataProvider.getUrlToLoad()).thenReturn(TRUSTED_ORIGIN_PAGE.getSpec());
-        mQualityEnforcer.onFinishNativeInitialization();
+        navigateToUrlNoError(TRUSTED_ORIGIN_PAGE);
         verifyNotTriggered();
     }
 
     @Test
     public void trigger_digitalAssetLinkFailed() {
         when(mIntentDataProvider.getUrlToLoad()).thenReturn(UNTRUSTED_PAGE.getSpec());
-        mQualityEnforcer.onFinishNativeInitialization();
-
-        Assert.assertEquals(ContextUtils.getApplicationContext().getString(
-                                    R.string.twa_quality_enforcement_violation_asset_link,
-                                    UNTRUSTED_PAGE.getSpec()),
-                ShadowToast.getTextOfLatestToast());
+        navigateToUrlNoError(UNTRUSTED_PAGE);
+        verifyToastShown(ContextUtils.getApplicationContext().getString(
+                R.string.twa_quality_enforcement_violation_asset_link, UNTRUSTED_PAGE.getSpec()));
         verifyNotifyClientApp();
     }
 
     @Test
     @EnableFeatures(ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT_FORCED)
     public void notTriggerCrash_whenClientNotSupportButForced() {
-        Bundle result = new Bundle();
-        result.putBoolean("success", false);
-        when(mCustomTabsConnection.sendExtraCallbackWithResult(
-                     any(), eq(QualityEnforcer.CRASH), any()))
-                .thenReturn(result);
+        setClientEnable(false);
 
         navigateToUrlNotFound(TRUSTED_ORIGIN_PAGE);
         verify(mActivity).finish();
@@ -210,18 +203,34 @@ public class QualityEnforcerUnitTest {
         verifyNotTriggered();
     }
 
+    @Test
+    @EnableFeatures(ChromeFeatureList.TRUSTED_WEB_ACTIVITY_QUALITY_ENFORCEMENT_FORCED)
+    public void triggerNotCrash_whenDigitalAssetLinkFailed() {
+        setClientEnable(true);
+        when(mIntentDataProvider.getUrlToLoad()).thenReturn(UNTRUSTED_PAGE.getSpec());
+        navigateToUrlNoError(UNTRUSTED_PAGE);
+        verifyNotifyClientApp();
+        verify(mActivity, never()).finish();
+    }
+
+    private void setClientEnable(boolean enabled) {
+        Bundle result = new Bundle();
+        result.putBoolean(QualityEnforcer.KEY_SUCCESS, enabled);
+        when(mCustomTabsConnection.sendExtraCallbackWithResult(
+                     any(), eq(QualityEnforcer.CRASH), any()))
+                .thenReturn(result);
+    }
+
     private void verifyTriggered404() {
-        Assert.assertEquals(ContextUtils.getApplicationContext().getString(
-                                    R.string.twa_quality_enforcement_violation_error,
-                                    HTTP_ERROR_NOT_FOUND, TRUSTED_ORIGIN_PAGE.getSpec()),
-                ShadowToast.getTextOfLatestToast());
+        verifyToastShown(ContextUtils.getApplicationContext().getString(
+                R.string.twa_quality_enforcement_violation_error, HTTP_ERROR_NOT_FOUND,
+                TRUSTED_ORIGIN_PAGE.getSpec()));
         verifyNotifyClientApp();
     }
 
     private void verifyNotifyClientApp() {
         verify(mCustomTabsConnection)
                 .sendExtraCallbackWithResult(any(), eq(QualityEnforcer.CRASH), any());
-        doNothing().when(mActivity).finish();
     }
 
     private void verifyNotTriggered() {
@@ -255,5 +264,9 @@ public class QualityEnforcerUnitTest {
         for (CustomTabTabObserver tabObserver : mTabObserverCaptor.getAllValues()) {
             tabObserver.onDidFinishNavigation(mTab, navigation);
         }
+    }
+
+    private void verifyToastShown(String message) {
+        Assert.assertTrue(ShadowToast.showedCustomToast(message, R.id.toast_text));
     }
 }

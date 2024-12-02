@@ -26,6 +26,7 @@
 #include "base/threading/thread_id_name_manager.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
+#include "base/trace_event/task_execution_macros.h"
 #include "base/trace_event/thread_instruction_count.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
@@ -307,6 +308,13 @@ class TraceEventDataSourceTest : public testing::Test {
     EXPECT_EQ(packet->sequence_flags(),
               static_cast<uint32_t>(perfetto::protos::pbzero::TracePacket::
                                         SEQ_INCREMENTAL_STATE_CLEARED));
+  }
+
+  void ExpectChildTrack(const perfetto::protos::TracePacket* packet,
+                        uint64_t uuid,
+                        uint64_t parent_uuid) {
+    EXPECT_EQ(packet->track_descriptor().uuid(), uuid);
+    EXPECT_EQ(packet->track_descriptor().parent_uuid(), parent_uuid);
   }
 
   size_t ExpectStandardPreamble(size_t packet_index = 0,
@@ -1011,20 +1019,17 @@ TEST_F(TraceEventDataSourceTest, EventWithConvertableArgs) {
 TEST_F(TraceEventDataSourceTest, TaskExecutionEvent) {
   CreateTraceEventDataSource();
 
-  INTERNAL_TRACE_EVENT_ADD(
-      TRACE_EVENT_PHASE_INSTANT, "toplevel", "ThreadControllerImpl::RunTask",
-      TRACE_EVENT_SCOPE_THREAD | TRACE_EVENT_FLAG_TYPED_PROTO_ARGS, "src_file",
-      "my_file", "src_func", "my_func");
-  INTERNAL_TRACE_EVENT_ADD(
-      TRACE_EVENT_PHASE_INSTANT, "toplevel", "ThreadControllerImpl::RunTask",
-      TRACE_EVENT_SCOPE_THREAD | TRACE_EVENT_FLAG_TYPED_PROTO_ARGS, "src_file",
-      "my_file", "src_func", "my_func");
+  base::PendingTask task;
+  task.posted_from =
+      base::Location("my_func", "my_file", 0, /*program_counter=*/&task);
+  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask1", task); }
+  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask1", task); }
 
   size_t packet_index = ExpectStandardPreamble();
 
   auto* e_packet = producer_client()->GetFinalizedPacket(packet_index++);
   ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/1u,
-                   TRACE_EVENT_PHASE_INSTANT, TRACE_EVENT_SCOPE_THREAD);
+                   TRACE_EVENT_PHASE_BEGIN);
 
   const auto& annotations = e_packet->track_event().debug_annotations();
   EXPECT_EQ(annotations.size(), 0);
@@ -1036,9 +1041,9 @@ TEST_F(TraceEventDataSourceTest, TaskExecutionEvent) {
   EXPECT_EQ(locations[0].function_name(), "my_func");
 
   // Second event should refer to the same interning entries.
-  auto* e_packet2 = producer_client()->GetFinalizedPacket(packet_index++);
+  auto* e_packet2 = producer_client()->GetFinalizedPacket(++packet_index);
   ExpectTraceEvent(e_packet2, /*category_iid=*/1u, /*name_iid=*/1u,
-                   TRACE_EVENT_PHASE_INSTANT, TRACE_EVENT_SCOPE_THREAD);
+                   TRACE_EVENT_PHASE_BEGIN);
 
   EXPECT_EQ(e_packet2->track_event().task_execution().posted_from_iid(), 1u);
   EXPECT_EQ(e_packet2->interned_data().source_locations().size(), 0);
@@ -1047,16 +1052,16 @@ TEST_F(TraceEventDataSourceTest, TaskExecutionEvent) {
 TEST_F(TraceEventDataSourceTest, TaskExecutionEventWithoutFunction) {
   CreateTraceEventDataSource();
 
-  INTERNAL_TRACE_EVENT_ADD(
-      TRACE_EVENT_PHASE_INSTANT, "toplevel", "ThreadControllerImpl::RunTask",
-      TRACE_EVENT_SCOPE_THREAD | TRACE_EVENT_FLAG_TYPED_PROTO_ARGS, "src",
-      "my_file");
+  base::PendingTask task;
+  task.posted_from = base::Location(/*function_name=*/nullptr, "my_file", 0,
+                                    /*program_counter=*/&task);
+  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask", task); }
 
   size_t packet_index = ExpectStandardPreamble();
 
   auto* e_packet = producer_client()->GetFinalizedPacket(packet_index++);
   ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/1u,
-                   TRACE_EVENT_PHASE_INSTANT, TRACE_EVENT_SCOPE_THREAD);
+                   TRACE_EVENT_PHASE_BEGIN, TRACE_EVENT_SCOPE_THREAD);
 
   const auto& annotations = e_packet->track_event().debug_annotations();
   EXPECT_EQ(annotations.size(), 0);
@@ -1217,6 +1222,9 @@ TEST_F(TraceEventDataSourceTest, TrackSupportOnBeginAndEndWithLambda) {
   ExpectEventCategories(b_packet, {{1u, "browser"}});
   ExpectEventNames(b_packet, {{1u, "bar"}});
 
+  auto* t_packet = producer_client()->GetFinalizedPacket(packet_index++);
+  ExpectChildTrack(t_packet, track.uuid, track.parent_uuid);
+
   auto* e_packet = producer_client()->GetFinalizedPacket(packet_index++);
 
   ExpectTraceEvent(e_packet, /*category_iid=*/0, /*name_iid=*/0,
@@ -1243,6 +1251,9 @@ TEST_F(TraceEventDataSourceTest, TrackSupportOnBeginAndEnd) {
 
   ExpectEventCategories(b_packet, {{1u, "browser"}});
   ExpectEventNames(b_packet, {{1u, "bar"}});
+
+  auto* t_packet = producer_client()->GetFinalizedPacket(packet_index++);
+  ExpectChildTrack(t_packet, track.uuid, track.parent_uuid);
 
   auto* e_packet = producer_client()->GetFinalizedPacket(packet_index++);
 
@@ -1917,9 +1928,11 @@ TEST_F(TraceEventDataSourceTest, HistogramSampleTraceConfigEmpty) {
                         {{1u, TRACE_DISABLED_BY_DEFAULT("histogram_samples")}});
   ExpectEventNames(e_packet, {{1u, "HistogramSample"}});
   ASSERT_TRUE(e_packet->track_event().has_chrome_histogram_sample());
-  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_hash(),
-            base::HashMetricName("Foo.Bar"));
   EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().sample(), 1u);
+  ASSERT_TRUE(e_packet->has_interned_data());
+  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_iid(),
+            e_packet->interned_data().histogram_names()[0].iid());
+  EXPECT_EQ(e_packet->interned_data().histogram_names()[0].name(), "Foo.Bar");
 }
 
 TEST_F(TraceEventDataSourceTest, HistogramSampleTraceConfigNotEmpty) {
@@ -1946,9 +1959,11 @@ TEST_F(TraceEventDataSourceTest, HistogramSampleTraceConfigNotEmpty) {
   ASSERT_TRUE(e_packet->track_event().has_chrome_histogram_sample());
   EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_hash(),
             base::HashMetricName("Foo1.Bar1"));
-  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name(),
-            "Foo1.Bar1");
   EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().sample(), 1u);
+  ASSERT_TRUE(e_packet->has_interned_data());
+  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_iid(),
+            e_packet->interned_data().histogram_names()[0].iid());
+  EXPECT_EQ(e_packet->interned_data().histogram_names()[0].name(), "Foo1.Bar1");
 
   e_packet = producer_client()->GetFinalizedPacket(packet_index++);
 
@@ -1957,9 +1972,11 @@ TEST_F(TraceEventDataSourceTest, HistogramSampleTraceConfigNotEmpty) {
   ASSERT_TRUE(e_packet->track_event().has_chrome_histogram_sample());
   EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_hash(),
             base::HashMetricName("Foo3.Bar3"));
-  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name(),
-            "Foo3.Bar3");
   EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().sample(), 1u);
+  ASSERT_TRUE(e_packet->has_interned_data());
+  EXPECT_EQ(e_packet->track_event().chrome_histogram_sample().name_iid(),
+            e_packet->interned_data().histogram_names()[0].iid());
+  EXPECT_EQ(e_packet->interned_data().histogram_names()[0].name(), "Foo3.Bar3");
 
   EXPECT_EQ(packet_index, producer_client()->GetFinalizedPacketCount());
 }

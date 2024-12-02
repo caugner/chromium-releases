@@ -4,6 +4,7 @@
 
 #include "weblayer/browser/navigation_impl.h"
 
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
@@ -14,6 +15,7 @@
 #if defined(OS_ANDROID)
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "components/embedder_support/android/util/web_resource_response.h"
 #include "weblayer/browser/java/jni/NavigationImpl_jni.h"
 #endif
 
@@ -25,7 +27,13 @@ using base::android::ScopedJavaLocalRef;
 namespace weblayer {
 
 NavigationImpl::NavigationImpl(content::NavigationHandle* navigation_handle)
-    : navigation_handle_(navigation_handle) {}
+    : navigation_handle_(navigation_handle) {
+  auto* navigation_entry = navigation_handle->GetNavigationEntry();
+  if (navigation_entry &&
+      navigation_entry->GetURL() == navigation_handle->GetURL()) {
+    navigation_entry_unique_id_ = navigation_entry->GetUniqueID();
+  }
+}
 
 NavigationImpl::~NavigationImpl() {
 #if defined(OS_ANDROID)
@@ -84,6 +92,23 @@ jboolean NavigationImpl::SetUserAgentString(
     return false;
   SetUserAgentString(ConvertJavaStringToUTF8(value));
   return true;
+}
+
+jboolean NavigationImpl::DisableNetworkErrorAutoReload(JNIEnv* env) {
+  if (!safe_to_disable_network_error_auto_reload_)
+    return false;
+  DisableNetworkErrorAutoReload();
+  return true;
+}
+
+void NavigationImpl::SetResponse(
+    std::unique_ptr<embedder_support::WebResourceResponse> response) {
+  response_ = std::move(response);
+}
+
+std::unique_ptr<embedder_support::WebResourceResponse>
+NavigationImpl::TakeResponse() {
+  return std::move(response_);
 }
 
 #endif
@@ -148,6 +173,11 @@ Navigation::LoadError NavigationImpl::GetLoadError() {
   if (error_code == net::OK)
     return kNoError;
 
+  // The safe browsing navigation throttle fails navigations with
+  // ERR_BLOCKED_BY_CLIENT when showing safe browsing interstitials.
+  if (error_code == net::ERR_BLOCKED_BY_CLIENT)
+    return kSafeBrowsingError;
+
   if (net::IsCertificateError(error_code))
     return kSSLError;
 
@@ -174,10 +204,22 @@ void NavigationImpl::SetRequestHeader(const std::string& name,
 
 void NavigationImpl::SetUserAgentString(const std::string& value) {
   DCHECK(safe_to_set_user_agent_);
+  // By default renderer initiated navigations inherit the user-agent override
+  // of the current NavigationEntry. But we don't want this per-navigation UA to
+  // be inherited.
+  navigation_handle_->GetWebContents()
+      ->SetRendererInitiatedUserAgentOverrideOption(
+          content::NavigationController::UA_OVERRIDE_FALSE);
   navigation_handle_->GetWebContents()->SetUserAgentOverride(
       blink::UserAgentOverride::UserAgentOnly(value),
       /* override_in_new_tabs */ false);
   navigation_handle_->SetIsOverridingUserAgent(!value.empty());
+  set_user_agent_string_called_ = true;
+}
+
+void NavigationImpl::DisableNetworkErrorAutoReload() {
+  DCHECK(safe_to_disable_network_error_auto_reload_);
+  disable_network_error_auto_reload_ = true;
 }
 
 #if defined(OS_ANDROID)

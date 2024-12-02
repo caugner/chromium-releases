@@ -34,7 +34,7 @@
 }
 
 - (void)tabGridTouchUp {
-  [self.dispatcher displayTabSwitcher];
+  [self.dispatcher displayTabSwitcherInGridLayout];
 }
 
 - (void)toolsMenuAction {
@@ -54,7 +54,7 @@
 }
 
 - (void)bookmarkAction {
-  [self.dispatcher bookmarkPage];
+  [self.dispatcher bookmarkCurrentPage];
 }
 
 - (void)searchAction:(id)sender {

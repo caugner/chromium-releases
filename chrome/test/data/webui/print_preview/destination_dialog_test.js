@@ -4,6 +4,7 @@
 
 import {Destination, DestinationConnectionStatus, DestinationOrigin, DestinationStore, DestinationType, InvitationStore, LocalDestinationInfo, makeRecentDestination, NativeLayerImpl, RecentDestination} from 'chrome://print/print_preview.js';
 import {assert} from 'chrome://resources/js/assert.m.js';
+import {isChromeOS} from 'chrome://resources/js/cr.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {keyEventOn} from 'chrome://resources/polymer/v3_0/iron-test-helpers/mock-interactions.js';
 import {flush} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
@@ -23,15 +24,6 @@ destination_dialog_test.TestNames = {
   PrinterList: 'PrinterList',
   ShowProvisionalDialog: 'ShowProvisionalDialog',
   UserAccounts: 'UserAccounts',
-  CloudPrinterDeprecationWarnings: 'CloudPrinterDeprecationWarnings',
-  CloudPrinterDeprecationWarningsSuppressed:
-      'CloudPrinterDeprecationWarningsSuppressed',
-  SaveToDriveDeprecationWarnings: 'SaveToDriveDeprecationWarnings',
-  SaveToDriveDeprecationWarningsSuppressed:
-      'SaveToDriveDeprecationWarningsSuppressed',
-  SaveToDriveDeprecationWarningsCros: 'SaveToDriveDeprecationWarningsCros',
-  SaveToDriveDeprecationWarningsSuppressedCros:
-      'SaveToDriveDeprecationWarningsSuppressedCros',
 };
 
 suite(destination_dialog_test.suiteName, function() {
@@ -56,6 +48,10 @@ suite(destination_dialog_test.suiteName, function() {
   /** @type {!Array<!RecentDestination>} */
   let recentDestinations = [];
 
+  /** @type {boolean} */
+  const saveToDriveFlagEnabled =
+      isChromeOS && loadTimeData.getBoolean('printSaveToDrive');
+
   /** @override */
   suiteSetup(function() {
     setupTestListenerElement();
@@ -73,7 +69,8 @@ suite(destination_dialog_test.suiteName, function() {
     recentDestinations = [makeRecentDestination(destinations[4])];
     nativeLayer.setLocalDestinations(localDestinations);
     destinationStore.init(
-        false /* pdfPrinterDisabled */, 'FooDevice' /* printerName */,
+        false /* pdfPrinterDisabled */, true /* isDriveMounted */,
+        'FooDevice' /* printerName */,
         '' /* serializedDefaultDestinationSelectionRulesStr */,
         recentDestinations /* recentDestinations */);
 
@@ -200,6 +197,11 @@ suite(destination_dialog_test.suiteName, function() {
     const printerItems = list.shadowRoot.querySelectorAll(
         'print-preview-destination-list-item:not([hidden])');
     assertEquals(numPrinters, printerItems.length);
+
+    if (isChromeOS && saveToDriveFlagEnabled) {
+      return;
+    }
+
     const drivePrinter = Array.from(printerItems).find(item => {
       return item.destination.id === Destination.GooglePromotedId.DOCS;
     });
@@ -217,6 +219,10 @@ suite(destination_dialog_test.suiteName, function() {
     const user2 = 'bar@chromium.org';
     cloudPrintInterface.setPrinter(getGoogleDriveDestination(user1));
     cloudPrintInterface.setPrinter(getGoogleDriveDestination(user2));
+    // Override so that privet printers will also be fetched, since we are
+    // simulating the case where the enterprise override is enabled.
+    loadTimeData.overrideValues(
+        {'cloudPrintDeprecationWarningsSuppressed': true});
     let userSelect = null;
 
     await finishSetup();
@@ -245,7 +251,9 @@ suite(destination_dialog_test.suiteName, function() {
     assertSignedInState(user1, 1);
 
     // Now have 7 printers (Google Drive), with user1 signed in.
-    assertNumPrintersWithDriveAccount(7, user1);
+    // On CrOS we do not show Save to Drive destination so 6 printers expected.
+    const expectedPrinters = isChromeOS && saveToDriveFlagEnabled ? 6 : 7;
+    assertNumPrintersWithDriveAccount(expectedPrinters, user1);
     assertEquals(3, nativeLayer.getCallCount('getPrinters'));
     // Cloud printers should have been re-fetched.
     assertEquals(2, cloudPrintInterface.getCallCount('search'));
@@ -266,7 +274,7 @@ suite(destination_dialog_test.suiteName, function() {
     assertSignedInState(user1, 2);
 
     // Still have 7 printers (Google Drive), with user1 signed in.
-    assertNumPrintersWithDriveAccount(7, user1);
+    assertNumPrintersWithDriveAccount(expectedPrinters, user1);
 
     // Select the second account.
     const whenEventFired = eventToPromise('account-change', dialog);
@@ -290,116 +298,9 @@ suite(destination_dialog_test.suiteName, function() {
     assertSignedInState(user2, 2);
 
     // 7 printers (Google Drive), with user2 signed in.
-    assertNumPrintersWithDriveAccount(7, user2);
+    assertNumPrintersWithDriveAccount(expectedPrinters, user2);
     assertEquals(3, nativeLayer.getCallCount('getPrinters'));
     // Cloud print should have been queried again for the new account.
     assertEquals(3, cloudPrintInterface.getCallCount('search'));
   });
-
-  /**
-   * @param {boolean} warningsSuppressed Whether warnings are suppressed.
-   * @return{!function()} Async function that tests whether Cloud print
-   *     deprecation warnings show when they're supposed to.
-   */
-  function testCloudPrinterDeprecationWarnings(warningsSuppressed) {
-    return async () => {
-      loadTimeData.overrideValues(
-          {cloudPrintDeprecationWarningsSuppressed: warningsSuppressed});
-
-      // Set up the cloud print interface with a Cloud printer for an account.
-      const user = 'foo@chromium.org';
-      cloudPrintInterface.setPrinter(
-          new Destination(
-              'ID', DestinationType.GOOGLE, DestinationOrigin.COOKIES,
-              'Cloud Printer', DestinationConnectionStatus.ONLINE,
-              {account: user, isOwned: true}),
-      );
-
-      await finishSetup();
-
-      // Nobody is signed in. There are no cloud printers.
-      assertSignedInState('', 0);
-      const statusEl = dialog.$$('.destinations-status');
-      assertTrue(statusEl.hidden);
-
-      // Set an active user. There is a cloud printer.
-      destinationStore.setActiveUser(user);
-      destinationStore.reloadUserCookieBasedDestinations(user);
-      dialog.activeUser = user;
-      dialog.users = [user];
-      flush();
-      assertSignedInState(user, 1);
-
-      assertEquals(warningsSuppressed, statusEl.hidden);
-    };
-  }
-
-  // Test that Cloud print deprecation warnings appear.
-  test(
-      assert(destination_dialog_test.TestNames.CloudPrinterDeprecationWarnings),
-      testCloudPrinterDeprecationWarnings(false));
-
-  // Test that Cloud print deprecation warnings are suppressed.
-  test(
-      assert(destination_dialog_test.TestNames
-                 .CloudPrinterDeprecationWarningsSuppressed),
-      testCloudPrinterDeprecationWarnings(true));
-
-  /**
-   * @param {boolean} warningsSuppressed Whether warnings are suppressed.
-   * @return{!function()} Async function that tests whether Cloud print
-   *     deprecation warnings show when they're supposed to.
-   */
-  function testSaveToDriveDeprecationWarnings(warningsSuppressed, isChromeOS) {
-    return async () => {
-      loadTimeData.overrideValues(
-          {cloudPrintDeprecationWarningsSuppressed: warningsSuppressed});
-
-      // Set up the cloud print interface with Google Drive printer for an
-      // account.
-      const user = 'foo@chromium.org';
-      cloudPrintInterface.setPrinter(getGoogleDriveDestination(user));
-
-      await finishSetup();
-
-      // Nobody is signed in. There are no cloud printers.
-      assertSignedInState('', 0);
-      const statusEl = dialog.$$('.destinations-status');
-      assertTrue(statusEl.hidden);
-
-      // Set an active user. There is a cloud printer (Save to Drive).
-      destinationStore.setActiveUser(user);
-      destinationStore.reloadUserCookieBasedDestinations(user);
-      dialog.activeUser = user;
-      dialog.users = [user];
-      flush();
-      assertSignedInState(user, 1);
-
-      // Warning should never appear on ChromeOS.
-      assertEquals(warningsSuppressed || isChromeOS, statusEl.hidden);
-    };
-  }
-
-  // Test that Save to Drive deprecation warnings appear.
-  test(
-      assert(destination_dialog_test.TestNames.SaveToDriveDeprecationWarnings),
-      testSaveToDriveDeprecationWarnings(false, false));
-
-  // Test that Save to Drive deprecation warnings are suppressed.
-  test(
-      assert(destination_dialog_test.TestNames
-                 .SaveToDriveDeprecationWarningsSuppressed),
-      testSaveToDriveDeprecationWarnings(true, false));
-
-  // Test that Save to Drive deprecation warnings never appear.
-  test(
-      assert(
-          destination_dialog_test.TestNames.SaveToDriveDeprecationWarningsCros),
-      testSaveToDriveDeprecationWarnings(false, true));
-
-  // Test that Save to Drive deprecation warnings are suppressed.
-  test(
-      assert(destination_dialog_test.TestNames
-                 .SaveToDriveDeprecationWarningsSuppressedCros),
-      testSaveToDriveDeprecationWarnings(true, true));
 });

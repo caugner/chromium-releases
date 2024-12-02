@@ -50,6 +50,14 @@ constexpr char kBackoffMaxDelayInMsKey[] = "backoff_policy_max_delay_in_ms";
 
 constexpr char kTileScoreDecayLambdaKey[] = "tile_score_decay_lambda";
 
+constexpr char kMinimumScoreForNewFrontTilesKey[] =
+    "min_score_for_new_front_tiles";
+
+constexpr char kNumTrendingTilesKey[] = "num_trending_tiles_to_display";
+
+constexpr char kMaxTrendingTileImpressionsKey[] =
+    "max_trending_tile_impressions";
+
 // Default expire duration.
 constexpr int kDefaultExpireDurationInSeconds = 48 * 60 * 60;  // 2 days.
 
@@ -72,6 +80,17 @@ constexpr int kDefaultBackoffMaxDelayInMs = 24 * 3600 * 1000;  // 1 day.
 // Default lambda value used for calculating tile score decay over time.
 constexpr double kDefaultTileScoreDecayLambda = -0.099;
 
+// Default minimum score for new tiles in front of others. 0.9 is chosen so
+// that new tiles will have a higher score than tiles that have not been
+// clicked for 2 days.
+constexpr double kDefaultMinimumTileScoreForNewFrontTiles = 0.9;
+
+// Default number of trending tiles to be displayed at the same time.
+constexpr int kDefaultNumTrendingTilesToDisplay = 2;
+
+// Default number of impressions a trending tile to be displayed .
+constexpr int kDefaultMaxTrendingTileImpressions = 2;
+
 namespace {
 
 // For testing. Json string for single tier experiment tag.
@@ -86,6 +105,7 @@ const GURL BuildGetQueryTileURL(const GURL& base_url, const char* path) {
   replacements.SetPathStr(path);
   return base_url.ReplaceComponents(replacements);
 }
+
 }  // namespace
 
 // static
@@ -181,6 +201,27 @@ double TileConfig::GetTileScoreDecayLambda() {
   return base::GetFieldTrialParamByFeatureAsDouble(
       features::kQueryTiles, kTileScoreDecayLambdaKey,
       kDefaultTileScoreDecayLambda);
+}
+
+// static
+double TileConfig::GetMinimumScoreForNewFrontTiles() {
+  return base::GetFieldTrialParamByFeatureAsDouble(
+      features::kQueryTiles, kMinimumScoreForNewFrontTilesKey,
+      kDefaultMinimumTileScoreForNewFrontTiles);
+}
+
+// static
+int TileConfig::GetNumTrendingTilesToDisplay() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kQueryTiles, kNumTrendingTilesKey,
+      kDefaultNumTrendingTilesToDisplay);
+}
+
+// static
+int TileConfig::GetMaxTrendingTileImpressions() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kQueryTiles, kMaxTrendingTileImpressionsKey,
+      kDefaultMaxTrendingTileImpressions);
 }
 
 }  // namespace query_tiles

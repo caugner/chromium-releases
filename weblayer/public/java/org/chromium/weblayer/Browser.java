@@ -35,17 +35,24 @@ public class Browser {
     private final ObserverList<TabListCallback> mTabListCallbacks;
     private final UrlBarController mUrlBarController;
 
+    private final ObserverList<BrowserControlsOffsetCallback> mBrowserControlsOffsetCallbacks;
+    private final ObserverList<BrowserRestoreCallback> mBrowserRestoreCallbacks;
+
     // Constructor for test mocking.
     protected Browser() {
         mImpl = null;
         mTabListCallbacks = null;
         mUrlBarController = null;
+        mBrowserControlsOffsetCallbacks = null;
+        mBrowserRestoreCallbacks = null;
     }
 
     Browser(IBrowser impl, BrowserFragment fragment) {
         mImpl = impl;
         mFragment = fragment;
         mTabListCallbacks = new ObserverList<TabListCallback>();
+        mBrowserControlsOffsetCallbacks = new ObserverList<BrowserControlsOffsetCallback>();
+        mBrowserRestoreCallbacks = new ObserverList<BrowserRestoreCallback>();
 
         try {
             mImpl.setClient(new BrowserClientImpl());
@@ -61,6 +68,10 @@ public class Browser {
         }
     }
 
+    IBrowser getIBrowser() {
+        return mImpl;
+    }
+
     /**
      * Returns the Browser for the supplied Fragment; null if
      * {@link fragment} was not created by WebLayer.
@@ -71,6 +82,14 @@ public class Browser {
     public static Browser fromFragment(@Nullable Fragment fragment) {
         return fragment instanceof BrowserFragment ? ((BrowserFragment) fragment).getBrowser()
                                                    : null;
+    }
+
+    /**
+     * Returns true if this Browser has been destroyed.
+     */
+    public boolean isDestroyed() {
+        ThreadCheck.ensureOnUiThread();
+        return mImpl == null;
     }
 
     // Called prior to notifying IBrowser of destroy().
@@ -209,6 +228,58 @@ public class Browser {
     }
 
     /**
+     * Returns true if this Browser is in the process of restoring the previous state.
+     *
+     * @param True if restoring previous state.
+     *
+     * @since 87
+     */
+    public boolean isRestoringPreviousState() {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 87) {
+            throw new UnsupportedOperationException();
+        }
+        throwIfDestroyed();
+        try {
+            return mImpl.isRestoringPreviousState();
+        } catch (RemoteException e) {
+            throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Adds a BrowserRestoreCallback.
+     *
+     * @param callback The BrowserRestoreCallback.
+     *
+     * @since 87
+     */
+    public void registerBrowserRestoreCallback(@NonNull BrowserRestoreCallback callback) {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 87) {
+            throw new UnsupportedOperationException();
+        }
+        throwIfDestroyed();
+        mBrowserRestoreCallbacks.addObserver(callback);
+    }
+
+    /**
+     * Removes a BrowserRestoreCallback.
+     *
+     * @param callback The BrowserRestoreCallback.
+     *
+     * @since 87
+     */
+    public void unregisterBrowserRestoreCallback(@NonNull BrowserRestoreCallback callback) {
+        ThreadCheck.ensureOnUiThread();
+        if (WebLayer.getSupportedMajorVersionInternal() < 87) {
+            throw new UnsupportedOperationException();
+        }
+        throwIfDestroyed();
+        mBrowserRestoreCallbacks.removeObserver(callback);
+    }
+
+    /**
      * Sets the View shown at the top of the browser. A value of null removes the view. The
      * top-view is typically used to show the uri. The top-view scrolls with the page.
      *
@@ -271,6 +342,55 @@ public class Browser {
             mImpl.setBottomView(ObjectWrapper.wrap(view));
         } catch (RemoteException e) {
             throw new APICallException(e);
+        }
+    }
+
+    /**
+     * Registers {@link callback} to be notified when the offset of the top or bottom view changes.
+     *
+     * @param callback The BrowserControlsOffsetCallback to notify
+     *
+     * @since 88
+     */
+    public void registerBrowserControlsOffsetCallback(
+            @NonNull BrowserControlsOffsetCallback callback) {
+        ThreadCheck.ensureOnUiThread();
+        throwIfDestroyed();
+        if (WebLayer.getSupportedMajorVersionInternal() < 88) {
+            throw new UnsupportedOperationException();
+        }
+        if (mBrowserControlsOffsetCallbacks.isEmpty()) {
+            try {
+                mImpl.setBrowserControlsOffsetsEnabled(true);
+            } catch (RemoteException e) {
+                throw new APICallException(e);
+            }
+        }
+        mBrowserControlsOffsetCallbacks.addObserver(callback);
+    }
+
+    /**
+     * Removes a BrowserControlsOffsetCallback that was added using {@link
+     * registerBrowserControlsOffsetCallback}.
+     *
+     * @param callback The BrowserControlsOffsetCallback to remove.
+     *
+     * @since 88
+     */
+    public void unregisterBrowserControlsOffsetCallback(
+            @NonNull BrowserControlsOffsetCallback callback) {
+        ThreadCheck.ensureOnUiThread();
+        throwIfDestroyed();
+        if (WebLayer.getSupportedMajorVersionInternal() < 88) {
+            throw new UnsupportedOperationException();
+        }
+        mBrowserControlsOffsetCallbacks.removeObserver(callback);
+        if (mBrowserControlsOffsetCallbacks.isEmpty()) {
+            try {
+                mImpl.setBrowserControlsOffsetsEnabled(false);
+            } catch (RemoteException e) {
+                throw new APICallException(e);
+            }
         }
     }
 
@@ -395,6 +515,24 @@ public class Browser {
         public IRemoteFragment createMediaRouteDialogFragment() {
             StrictModeWorkaround.apply();
             return MediaRouteDialogFragment.create(mFragment);
+        }
+
+        @Override
+        public void onBrowserControlsOffsetsChanged(boolean isTop, int offset) {
+            for (BrowserControlsOffsetCallback callback : mBrowserControlsOffsetCallbacks) {
+                if (isTop) {
+                    callback.onTopViewOffsetChanged(offset);
+                } else {
+                    callback.onBottomViewOffsetChanged(offset);
+                }
+            }
+        }
+
+        @Override
+        public void onRestoreCompleted() {
+            for (BrowserRestoreCallback callback : mBrowserRestoreCallbacks) {
+                callback.onRestoreCompleted();
+            }
         }
     }
 }

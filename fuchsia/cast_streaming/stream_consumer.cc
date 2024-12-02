@@ -12,13 +12,15 @@ namespace cast_streaming {
 
 StreamConsumer::StreamConsumer(openscreen::cast::Receiver* receiver,
                                mojo::ScopedDataPipeProducerHandle data_pipe,
-                               FrameReceivedCB frame_received_cb)
+                               FrameReceivedCB frame_received_cb,
+                               base::RepeatingClosure on_new_frame)
     : receiver_(receiver),
       data_pipe_(std::move(data_pipe)),
       frame_received_cb_(std::move(frame_received_cb)),
       pipe_watcher_(FROM_HERE,
                     mojo::SimpleWatcher::ArmingPolicy::MANUAL,
-                    base::SequencedTaskRunnerHandle::Get()) {
+                    base::SequencedTaskRunnerHandle::Get()),
+      on_new_frame_(std::move(on_new_frame)) {
   DCHECK(receiver_);
   receiver_->SetConsumer(this);
   MojoResult result =
@@ -27,6 +29,7 @@ StreamConsumer::StreamConsumer(openscreen::cast::Receiver* receiver,
                                               base::Unretained(this)));
   if (result != MOJO_RESULT_OK) {
     CloseDataPipeOnError();
+    return;
   }
 }
 
@@ -72,6 +75,7 @@ void StreamConsumer::OnPipeWritable(MojoResult result) {
 
 void StreamConsumer::OnFramesReady(int next_frame_buffer_size) {
   DCHECK(data_pipe_);
+  on_new_frame_.Run();
 
   if (pending_buffer_remaining_bytes_ != 0) {
     // There already is a pending frame. Ignore this one for now.
@@ -146,8 +150,16 @@ void StreamConsumer::OnFramesReady(int next_frame_buffer_size) {
            << "Received new frame. Timestamp: " << playout_time
            << ", is_key_frame: " << is_key_frame;
 
+  // Senders may not send a new video frame for a very long time if there is no
+  // update to send. When that happens, the Chromium media pipeline may end up
+  // deciding it does not have enough data, resulting in the stream being
+  // stalled. Setting the frame duration to 10 minutes prevents the media
+  // pipeline from considering the stream as being stalled. As a result, we end
+  // up with overlapping frames but this is fine since the media pipeline mostly
+  // considers the playout time when deciding which frame to present or play.
   frame_received_cb_.Run(media::mojom::DecoderBuffer::New(
-      playout_time /* timestamp */, base::TimeDelta() /* duration */,
+      playout_time /* timestamp */,
+      base::TimeDelta::FromMinutes(10) /* duration */,
       false /* is_end_of_stream */, buffer_size, is_key_frame,
       media::EmptyExtraData(), media::mojom::DecryptConfigPtr(),
       base::TimeDelta() /* front_discard */,

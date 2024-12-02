@@ -8,6 +8,7 @@
 #include "chrome/browser/reputation/safety_tip_ui.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view_base.h"
 #include "components/security_state/core/security_state.h"
+#include "content/public/browser/visibility.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/styled_label.h"
 
@@ -20,6 +21,7 @@ class Rect;
 }  // namespace gfx
 
 namespace views {
+class GridLayout;
 class View;
 class Widget;
 }  // namespace views
@@ -27,8 +29,7 @@ class Widget;
 // When Chrome displays a safety tip, we create a stripped-down bubble view
 // without all of the details. Safety tip info is still displayed in the usual
 // PageInfoBubbleView, just less prominently.
-class SafetyTipPageInfoBubbleView : public PageInfoBubbleViewBase,
-                                    public views::ButtonListener {
+class SafetyTipPageInfoBubbleView : public PageInfoBubbleViewBase {
  public:
   // If |anchor_view| is nullptr, or has no Widget, |parent_window| may be
   // provided to ensure this bubble is closed when the parent closes.
@@ -48,15 +49,25 @@ class SafetyTipPageInfoBubbleView : public PageInfoBubbleViewBase,
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* button, const ui::Event& event) override;
-
  private:
   friend class SafetyTipPageInfoBubbleViewBrowserTest;
 
+  void ExecuteLeaveCommand();
   void OpenHelpCenter();
 
   views::Button* GetLeaveButtonForTesting() { return leave_button_; }
+
+  // WebContentsObserver:
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
+  void DidStartNavigation(content::NavigationHandle* handle) override;
+  void DidChangeVisibleSecurityState() override;
+
+  void MaybeAddButtons(security_state::SafetyTipStatus safety_tip_status,
+                       views::GridLayout* bottom_layout,
+                       int spacing,
+                       int column_id,
+                       const gfx::Insets& insets);
 
   const security_state::SafetyTipStatus safety_tip_status_;
 
@@ -64,9 +75,9 @@ class SafetyTipPageInfoBubbleView : public PageInfoBubbleViewBase,
   // applicable (for SafetyTipStatus::kLookalike).
   const GURL suggested_url_;
 
-  views::StyledLabel* info_button_;
-  views::Button* ignore_button_;
-  views::Button* leave_button_;
+  views::StyledLabel* info_button_ = nullptr;
+  views::Button* ignore_button_ = nullptr;
+  views::Button* leave_button_ = nullptr;
   base::OnceCallback<void(SafetyTipInteraction)> close_callback_;
   SafetyTipInteraction action_taken_ = SafetyTipInteraction::kNoAction;
 

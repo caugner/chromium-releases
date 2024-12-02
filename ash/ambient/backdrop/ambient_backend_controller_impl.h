@@ -5,6 +5,7 @@
 #ifndef ASH_AMBIENT_BACKDROP_AMBIENT_BACKEND_CONTROLLER_IMPL_H_
 #define ASH_AMBIENT_BACKDROP_AMBIENT_BACKEND_CONTROLLER_IMPL_H_
 
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -46,8 +47,8 @@ class AmbientBackendControllerImpl : public AmbientBackendController {
       int banner_height,
       int num_albums,
       OnSettingsAndAlbumsFetchedCallback callback) override;
-  void SetPhotoRefreshInterval(base::TimeDelta interval) override;
   void FetchWeather(FetchWeatherCallback callback) override;
+  const std::array<const char*, 2>& GetBackupPhotoUrls() const override;
 
  private:
   using BackdropClientConfig = chromeos::ambient::BackdropClientConfig;

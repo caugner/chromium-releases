@@ -4,6 +4,8 @@
 
 package org.chromium.weblayer;
 
+import android.webkit.WebResourceResponse;
+
 import androidx.annotation.NonNull;
 
 /**
@@ -17,6 +19,7 @@ public class NavigateParams {
     private boolean mIntentProcessingDisabled;
     private boolean mNetworkErrorAutoReloadDisabled;
     private boolean mAutoPlayEnabled;
+    private WebResourceResponse mResponse;
 
     /**
      * A Builder class to help create NavigateParams.
@@ -70,9 +73,10 @@ public class NavigateParams {
 
         /**
          * Disables auto-reload for this navigation if the network is down and comes back later.
-         *          Auto-reload is enabled by default.
-         *
-         * @since 86
+         * Auto-reload is enabled by default. This is deprecated as of 88, instead use
+         * {@link Navigation#disableNetworkErrorAutoReload} which works for both embedder-initiated
+         * navigations and also user-initiated navigations (such as back or forward). Auto-reload
+         * is disabled if either method is called.
          */
         @NonNull
         public Builder disableNetworkErrorAutoReload() {
@@ -96,6 +100,32 @@ public class NavigateParams {
                 throw new UnsupportedOperationException();
             }
             mParams.mAutoPlayEnabled = true;
+            return this;
+        }
+
+        /**
+         * @param response If the embedder has already fetched the data for a navigation it can
+         *         supply it via a WebResourceResponse. The navigation will be committed at the
+         *         Uri given to NavigationController.navigate().
+         *         Caveats:
+         *             -ensure proper cache headers are set if you don't want it to be reloaded.
+         *                  Depending on the device available memory a back navigation might hit
+         *                  the network if the headers don't indicate it's cacheable and the
+         *                  page wasn't in the back-forward cache. An example to cache for 1 minute:
+         *                      Cache-Control: private, max-age=60
+         *             -since this isn't fetched by WebLayer it won't have the necessary certificate
+         *                  information to show the security padlock or certificate data. As such an
+         *                  exception is thrown if this is set when a View from UrlBarController is
+         *                  attached to a window.
+         *
+         * @since 87
+         */
+        @NonNull
+        public Builder setResponse(@NonNull WebResourceResponse response) {
+            if (WebLayer.getSupportedMajorVersionInternal() < 87) {
+                throw new UnsupportedOperationException();
+            }
+            mParams.mResponse = response;
             return this;
         }
     }
@@ -156,5 +186,16 @@ public class NavigateParams {
             throw new UnsupportedOperationException();
         }
         return mAutoPlayEnabled;
+    }
+
+    /**
+     * Returns a response of the html to use.
+     *
+     * @return WebResourceResponse of html to use.
+     *
+     * @since 87
+     */
+    WebResourceResponse getResponse() {
+        return mResponse;
     }
 }

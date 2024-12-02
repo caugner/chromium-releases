@@ -1088,7 +1088,7 @@ TEST_F(LegacySWPictureLayerImplTest, DontAddLowResDuringAnimation) {
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = true;
 
   ResetTilingsAndRasterScales();
@@ -1156,7 +1156,7 @@ TEST_F(LegacySWPictureLayerImplTest, DontAddLowResForSmallLayers) {
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   // Contents exactly fit on one tile at scale 1, no low res.
@@ -2746,8 +2746,8 @@ TEST_F(LegacySWPictureLayerImplTest,
                                starting_animation_scale, animating_transform);
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 2.f);
 
-  // Starting animation scale greater than maximum animation scale
-  // Bounds at starting scale within the viewport
+  // Starting animation scale greater than maximum animation scale.
+  // Bounds at starting scale within the viewport.
   animating_transform = true;
   starting_animation_scale = 5.f;
 
@@ -2763,15 +2763,15 @@ TEST_F(LegacySWPictureLayerImplTest,
                                starting_animation_scale, animating_transform);
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 2.f);
 
-  // Starting Animation scale greater than maximum animation scale
-  // Bounds at starting scale outisde the viewport
+  // Starting Animation scale greater than maximum animation scale.
+  // Bounds at starting scale outside the viewport.
   animating_transform = true;
   starting_animation_scale = 11.f;
 
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 3.f);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 10.f);
 }
 
 TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
@@ -2785,7 +2785,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.f);
@@ -2819,17 +2819,16 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
                                starting_animation_scale, animating_transform);
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 4.f);
 
-  // When animating with an unknown maximum animation scale factor, a new
-  // high-res tiling should be created at a source scale of 1.
+  // When animating with an unknown animation scale factors, a new high-res
+  // tiling should be created at the current contents scale.
   animating_transform = true;
   contents_scale = 2.f;
-  maximum_animation_scale = 0.f;
+  maximum_animation_scale = kNotScaled;
 
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 page_scale * device_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 2.f);
 
   // Further changes to scale during the animation should not cause a new
   // high-res tiling to get created.
@@ -2838,8 +2837,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 page_scale * device_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 2.f);
 
   // Once we stop animating, a new high-res tiling should be created.
   animating_transform = false;
@@ -2852,8 +2850,8 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
 
   // When animating with a maxmium animation scale factor that is so large
   // that the layer grows larger than the viewport at this scale, a new
-  // high-res tiling should get created at a source scale of 1, not at its
-  // maximum scale.
+  // high-res tiling should get created at a source scale that the rasterized
+  // layer will not be larger than the viewport, not at its maximum scale.
   animating_transform = true;
   contents_scale = 2.f;
   maximum_animation_scale = 11.f;
@@ -2861,8 +2859,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 page_scale * device_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 10.f);
 
   // Once we stop animating, a new high-res tiling should be created.
   animating_transform = false;
@@ -2876,7 +2873,8 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   // When animating with a maxmium animation scale factor that is so large
   // that the layer grows larger than the viewport at this scale, and where
   // the intial source scale is < 1, a new high-res tiling should get created
-  // at source scale 1.
+  // at a source scale that the rasterized layer will not be larger than the
+  // viewport.
   animating_transform = true;
   contents_scale = 0.1f;
   maximum_animation_scale = 11.f;
@@ -2884,8 +2882,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 device_scale * page_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 10.f);
 
   // Once we stop animating, a new high-res tiling should be created.
   animating_transform = false;
@@ -2898,7 +2895,8 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
 
   // When animating toward a smaller scale, but that is still so large that the
   // layer grows larger than the viewport at this scale, a new high-res tiling
-  // should get created at source scale 1.
+  // should get created at a source scale that the rasterized layer is not
+  // larger than the viewport.
   animating_transform = true;
   contents_scale = 11.f;
   maximum_animation_scale = 11.f;
@@ -2906,8 +2904,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 device_scale * page_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 10.f);
 
   // Once we stop animating, a new high-res tiling should be created.
   animating_transform = false;
@@ -2917,6 +2914,19 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimation) {
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 11.f);
+
+  // When animating with an unknown animation scale factors, a new high-res
+  // tiling should be created at the native scale if the current contents
+  // scale is smaller.
+  animating_transform = true;
+  contents_scale = 0.5f;
+  maximum_animation_scale = kNotScaled;
+
+  SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
+                               maximum_animation_scale,
+                               starting_animation_scale, animating_transform);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
+                 page_scale * device_scale);
 }
 
 TEST_F(LegacySWPictureLayerImplTest,
@@ -2931,7 +2941,7 @@ TEST_F(LegacySWPictureLayerImplTest,
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.f);
@@ -2990,7 +3000,7 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTilingDuringAnimationAspectRatio) {
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.f);
@@ -3019,13 +3029,14 @@ TEST_F(LegacySWPictureLayerImplTest,
   float device_scale = 1.f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.f);
 
   // The maximum animation scale exceeds the squared size of the maximum
-  // viewport dimension, so raster scale should fall back to 1.
+  // viewport dimension, so raster scale should be shrunk to make the
+  // rasterized layer not larger than the viewport.
   animating_transform = true;
   contents_scale = 2.f;
   maximum_animation_scale = 21.f;
@@ -3033,8 +3044,7 @@ TEST_F(LegacySWPictureLayerImplTest,
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(),
-                 page_scale * device_scale);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 20.f);
 }
 
 TEST_F(LegacySWPictureLayerImplTest, TilingSetRasterQueue) {
@@ -3480,7 +3490,7 @@ TEST_F(LegacySWPictureLayerImplTest, RasterScaleChangeWithoutAnimation) {
   float device_scale = 1.5f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
@@ -3527,21 +3537,13 @@ TEST_F(LegacySWPictureLayerImplTest, RasterScaleChangeWithoutAnimation) {
                                starting_animation_scale, animating_transform);
   EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.5f);
 
-  // ... unless the difference is very big.
+  // Ditto.
   contents_scale = 20.f;
 
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
                                maximum_animation_scale,
                                starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 20.f);
-
-  // And we don't downscale from a higher scale.
-  contents_scale = 2.f;
-
-  SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
-                               maximum_animation_scale,
-                               starting_animation_scale, animating_transform);
-  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 20.f);
+  EXPECT_BOTH_EQ(HighResTiling()->contents_scale_key(), 1.5f);
 
   // Disabling the will-change hint will once again make the raster scale update
   // with the ideal scale.
@@ -3566,7 +3568,7 @@ TEST_F(LegacySWPictureLayerImplTest, TinyRasterScale) {
   float device_scale = 1.5f;
   float page_scale = 1.f;
   float maximum_animation_scale = 1.f;
-  float starting_animation_scale = 0.f;
+  float starting_animation_scale = kNotScaled;
   bool animating_transform = false;
 
   SetContentsScaleOnBothLayers(contents_scale, device_scale, page_scale,
@@ -4724,15 +4726,11 @@ void GetClientDataAndUpdateInvalidation(RecordingSource* recording_source,
                                         gfx::Size layer_bounds) {
   gfx::Rect new_recorded_viewport = client->PaintableRegion();
   scoped_refptr<DisplayItemList> display_list =
-      client->PaintContentsToDisplayList(
-          ContentLayerClient::PAINTING_BEHAVIOR_NORMAL);
-  size_t painter_reported_memory_usage =
-      client->GetApproximateUnsharedMemoryUsage();
+      client->PaintContentsToDisplayList();
 
   recording_source->UpdateAndExpandInvalidation(&invalidation, layer_bounds,
                                                 new_recorded_viewport);
   recording_source->UpdateDisplayItemList(display_list,
-                                          painter_reported_memory_usage,
                                           1.f /** recording_scale_factor */);
 }
 

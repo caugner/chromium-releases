@@ -26,7 +26,9 @@
 #include "chrome/browser/android/tab_web_contents_delegate_android.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/notifications/notification_permission_context.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -42,7 +44,7 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/common/url_constants.h"
-#include "components/prerender/browser/prerender_manager.h"
+#include "components/no_state_prefetch/browser/prerender_manager.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_thread.h"
@@ -231,6 +233,14 @@ bool TabAndroid::IsHidden() {
   return Java_TabImpl_isHidden(env, weak_java_tab_.get(env));
 }
 
+void TabAndroid::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void TabAndroid::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 void TabAndroid::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   delete this;
 }
@@ -255,6 +265,9 @@ void TabAndroid::InitWebContents(
 
   AttachTabHelpers(web_contents_.get());
 
+  PropagateHideFutureNavigationsToHistoryTabHelper();
+  PropagateBlockNewNotificationRequestsToWebContents();
+
   SetWindowSessionID(session_window_id_);
 
   ContextMenuHelper::FromWebContents(web_contents())
@@ -274,6 +287,9 @@ void TabAndroid::InitWebContents(
 
   // Shows a warning notification for dangerous flags in about:flags.
   chrome::ShowBadFlagsPrompt(web_contents());
+
+  for (Observer& observer : observers_)
+    observer.OnInitWebContents(this);
 }
 
 void TabAndroid::UpdateDelegates(
@@ -455,13 +471,49 @@ void TabAndroid::LoadOriginalImage(JNIEnv* env,
   renderer->RequestReloadImageForContextNode();
 }
 
+void TabAndroid::SetAddApi2TransitionToFutureNavigations(JNIEnv* env,
+                                                         jboolean should_add) {
+  should_add_api2_transition_to_future_navigations_ = should_add;
+}
+
 scoped_refptr<content::DevToolsAgentHost> TabAndroid::GetDevToolsAgentHost() {
   return devtools_host_;
+}
+
+void TabAndroid::SetHideFutureNavigations(JNIEnv* env, jboolean hide) {
+  if (hide_future_navigations_ == hide)
+    return;
+  hide_future_navigations_ = hide;
+  PropagateHideFutureNavigationsToHistoryTabHelper();
+}
+
+void TabAndroid::SetShouldBlockNewNotificationRequests(JNIEnv* env,
+                                                       jboolean value) {
+  if (should_block_new_notification_requests_ == value)
+    return;
+
+  should_block_new_notification_requests_ = value;
+  PropagateBlockNewNotificationRequestsToWebContents();
 }
 
 void TabAndroid::SetDevToolsAgentHost(
     scoped_refptr<content::DevToolsAgentHost> host) {
   devtools_host_ = std::move(host);
+}
+
+void TabAndroid::PropagateHideFutureNavigationsToHistoryTabHelper() {
+  if (!web_contents())
+    return;
+  auto* history_tab_helper = HistoryTabHelper::FromWebContents(web_contents());
+  if (history_tab_helper)
+    history_tab_helper->set_hide_all_navigations(hide_future_navigations_);
+}
+
+void TabAndroid::PropagateBlockNewNotificationRequestsToWebContents() {
+  if (!web_contents())
+    return;
+  NotificationPermissionContext::SetBlockNewNotificationRequests(
+      web_contents(), should_block_new_notification_requests_);
 }
 
 base::android::ScopedJavaLocalRef<jobject> JNI_TabImpl_FromWebContents(

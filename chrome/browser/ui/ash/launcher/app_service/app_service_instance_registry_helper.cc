@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/web_applications/components/web_app_id.h"
-#include "chrome/common/chrome_features.h"
 #include "components/services/app_service/public/cpp/instance_update.h"
 #include "components/services/app_service/public/mojom/types.mojom.h"
 #include "content/public/browser/web_contents.h"
@@ -261,12 +260,15 @@ void AppServiceInstanceRegistryHelper::OnWindowVisibilityChanged(
     // state for the tab window to keep one instance for the Web app.
     auto windows = GetWindows(shelf_id.app_id);
     for (auto* it : windows) {
-      if (it->GetToplevelWindow() != window)
+      auto tab_it = tab_window_to_browser_window_.find(it);
+      if (tab_it == tab_window_to_browser_window_.end() ||
+          tab_it->second != window) {
         continue;
+      }
 
       // When the user drags a tab to a new browser, or to an other browser, the
-      // top window could be changed, so the relation for the tap window and the
-      // browser window.
+      // top window could be changed, so update the relation for the tap window
+      // and the browser window.
       UpdateTabWindow(shelf_id.app_id, it);
 
       apps::InstanceState state = CalculateVisibilityState(it, visible);

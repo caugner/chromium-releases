@@ -4,14 +4,16 @@
 
 package org.chromium.chrome.browser.signin.account_picker;
 
-import android.content.Context;
+import android.app.Activity;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.accessibility.AccessibilityEvent;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.StringRes;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -39,7 +41,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         boolean onBackPressed();
     }
 
-    private final Context mContext;
+    private final Activity mActivity;
     private final BackPressListener mBackPressListener;
     private final View mContentView;
     private final ImageView mLogoImage;
@@ -51,12 +53,20 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
     private final View mIncognitoInterstitialView;
     private final ProgressBar mSpinnerView;
     private final ButtonCompat mContinueAsButton;
+    private final ButtonCompat mDismissButton;
 
-    AccountPickerBottomSheetView(Context context, BackPressListener backPressListener) {
-        mContext = context;
+    private @StringRes int mTitleId;
+    private @StringRes int mContentDescriptionId;
+
+    /**
+     * @param activity The activity that hosts this view. Used for inflating views.
+     * @param backPressListener The listener to be notified when the user taps the back button.
+     */
+    AccountPickerBottomSheetView(Activity activity, BackPressListener backPressListener) {
+        mActivity = activity;
         mBackPressListener = backPressListener;
 
-        mContentView = LayoutInflater.from(mContext).inflate(
+        mContentView = LayoutInflater.from(mActivity).inflate(
                 R.layout.account_picker_bottom_sheet_view, null);
         mLogoImage = mContentView.findViewById(R.id.account_picker_bottom_sheet_logo);
         mAccountPickerTitle = mContentView.findViewById(R.id.account_picker_bottom_sheet_title);
@@ -71,6 +81,13 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         mSelectedAccountView = mContentView.findViewById(R.id.account_picker_selected_account);
         mSpinnerView = mContentView.findViewById(R.id.account_picker_signin_spinner_view);
         mContinueAsButton = mContentView.findViewById(R.id.account_picker_continue_as_button);
+        mDismissButton = mContentView.findViewById(R.id.account_picker_dismiss_button);
+    }
+
+    void setTitleAndContentDescriptionStrings(
+            @StringRes int titleId, @StringRes @Nullable Integer subtitleId) {
+        mTitleId = titleId;
+        mContentDescriptionId = subtitleId != null ? subtitleId : titleId;
     }
 
     /**
@@ -102,6 +119,13 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
     }
 
     /**
+     * The button to dismiss the bottom sheet.
+     */
+    ButtonCompat getDismissButton() {
+        return mDismissButton;
+    }
+
+    /**
      * Updates the views related to the selected account.
      *
      * This method only updates the UI elements like text related to the selected account, it
@@ -113,9 +137,17 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         ImageView rowEndImage = mSelectedAccountView.findViewById(R.id.account_selection_mark);
         rowEndImage.setImageResource(R.drawable.ic_expand_more_in_circle_24dp);
 
-        String continueAsButtonText = mContext.getString(R.string.signin_promo_continue_as,
+        String continueAsButtonText = mActivity.getString(R.string.signin_promo_continue_as,
                 accountProfileData.getGivenNameOrFullNameOrEmail());
         mContinueAsButton.setText(continueAsButtonText);
+        mAccountPickerTitle.setFocusable(true);
+    }
+
+    /**
+     * Set A11y focus on title
+     */
+    void setAccessibilityFocusOnTitle() {
+        mAccountPickerTitle.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED);
     }
 
     /**
@@ -131,6 +163,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
 
         mSelectedAccountView.setVisibility(View.GONE);
         mContinueAsButton.setVisibility(View.GONE);
+        mDismissButton.setVisibility(View.GONE);
         mIncognitoInterstitialView.setVisibility(View.GONE);
     }
 
@@ -144,6 +177,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         mHorizontalDivider.setVisibility(View.VISIBLE);
         mSelectedAccountView.setVisibility(View.VISIBLE);
         mContinueAsButton.setVisibility(View.VISIBLE);
+        mDismissButton.setVisibility(View.VISIBLE);
 
         mAccountListView.setVisibility(View.GONE);
         mSpinnerView.setVisibility(View.GONE);
@@ -155,6 +189,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
     void collapseToNoAccountView() {
         mContinueAsButton.setText(R.string.signin_add_account_to_device);
         mContinueAsButton.setVisibility(View.VISIBLE);
+        mDismissButton.setVisibility(View.VISIBLE);
 
         mAccountListView.setVisibility(View.GONE);
         mSelectedAccountView.setVisibility(View.GONE);
@@ -166,18 +201,17 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
     void setUpSignInInProgressView() {
         mLogoImage.setImageResource(R.drawable.chrome_sync_logo);
         mAccountPickerTitle.setText(R.string.signin_account_picker_bottom_sheet_signin_title);
-        mAccountPickerSubtitle.setVisibility(View.INVISIBLE);
-        // Set the account picker subtitle text in case there's an error.
-        mAccountPickerSubtitle.setText(R.string.signin_account_picker_general_error_subtitle);
         mSpinnerView.setVisibility(View.VISIBLE);
-        mContinueAsButton.setVisibility(View.INVISIBLE);
 
+        mAccountPickerSubtitle.setVisibility(View.GONE);
         mHorizontalDivider.setVisibility(View.GONE);
         mSelectedAccountView.setVisibility(View.GONE);
+        mContinueAsButton.setVisibility(View.GONE);
+        mDismissButton.setVisibility(View.GONE);
     }
 
     void setUpIncognitoInterstitialView() {
-        mLogoImage.setImageResource(R.drawable.location_bar_incognito_badge);
+        mLogoImage.setImageResource(R.drawable.ic_incognito_filled_24dp);
         mAccountPickerTitle.setText(R.string.incognito_interstitial_title);
         mIncognitoInterstitialView.setVisibility(View.VISIBLE);
 
@@ -200,6 +234,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         mHorizontalDivider.setVisibility(View.GONE);
         mSelectedAccountView.setVisibility(View.GONE);
         mSpinnerView.setVisibility(View.GONE);
+        mDismissButton.setVisibility(View.GONE);
     }
 
     /**
@@ -216,6 +251,7 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
         mHorizontalDivider.setVisibility(View.GONE);
         mSelectedAccountView.setVisibility(View.GONE);
         mSpinnerView.setVisibility(View.GONE);
+        mDismissButton.setVisibility(View.GONE);
     }
 
     @Override
@@ -264,29 +300,23 @@ class AccountPickerBottomSheetView implements BottomSheetContent {
 
     @Override
     public int getSheetContentDescriptionStringId() {
-        // TODO(https://crbug.com/1081253): The description will
-        // be adapter once the UI mock will be finalized
-        return R.string.signin_account_picker_dialog_title;
+        return mContentDescriptionId;
     }
 
     @Override
     public int getSheetHalfHeightAccessibilityStringId() {
-        // TODO(https://crbug.com/1081253): The description will
-        // be adapter once the UI mock will be finalized
-        return R.string.signin_account_picker_dialog_title;
+        return mTitleId;
     }
 
     @Override
     public int getSheetFullHeightAccessibilityStringId() {
-        // TODO(https://crbug.com/1081253): The description will
-        // be adapter once the UI mock will be finalized
-        return R.string.signin_account_picker_dialog_title;
+        return mTitleId;
     }
 
     @Override
     public int getSheetClosedAccessibilityStringId() {
-        // TODO(https://crbug.com/1081253): The description will
-        // be adapter once the UI mock will be finalized
-        return R.string.signin_account_picker_dialog_title;
+        // TODO(https://crbug.com/1112696): Use more specific string to when the account
+        // picker is closed.
+        return R.string.close;
     }
 }

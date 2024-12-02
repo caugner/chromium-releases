@@ -241,7 +241,7 @@ suite(printer_status_test_cros.suiteName, function() {
           destinationSelect.recentDestinationList = [
             destination1,
             destination2,
-            createDestination('ID3', 'Three', DestinationOrigin.PRIVET),
+            createDestination('ID3', 'Three', DestinationOrigin.EXTENSION),
             createDestination('ID4', 'Four', DestinationOrigin.EXTENSION),
           ];
           assertEquals(
@@ -349,12 +349,8 @@ destination_select_test_cros.suiteName = 'DestinationSelectTestCros';
 /** @enum {string} */
 destination_select_test_cros.TestNames = {
   UpdateStatus: 'update status',
-  UpdateStatusDeprecationWarnings: 'update status deprecation warnings',
   ChangeIcon: 'change icon',
-  ChangeIconDeprecationWarnings: 'change icon deprecation warnings',
   EulaIsDisplayed: 'eula is displayed',
-  SelectDriveDestination: 'select drive destination',
-  IsDriveMounted: 'is drive mounted',
 };
 
 suite(destination_select_test_cros.suiteName, function() {
@@ -423,11 +419,9 @@ suite(destination_select_test_cros.suiteName, function() {
   /**
    * Test that changing different destinations results in the correct icon being
    * shown.
-   * @param {boolean} cloudPrintDeprecationWarningsSuppressed Whether cloud
-   *     print deprecation warnings should be suppressed.
    * @return {!Promise} Promise that resolves when the test finishes.
    */
-  function testChangeIcon(cloudPrintDeprecationWarningsSuppressed) {
+  function testChangeIcon() {
     let selectEl;
 
     return waitBeforeNextRender(destinationSelect)
@@ -442,8 +436,6 @@ suite(destination_select_test_cros.suiteName, function() {
 
           return selectOption(
               destinationSelect,
-              loadTimeData.getBoolean('printSaveToDrive') ?
-                  SAVE_TO_DRIVE_CROS_DESTINATION_KEY :
                   driveKey);
         })
         .then(() => {
@@ -461,41 +453,31 @@ suite(destination_select_test_cros.suiteName, function() {
               destinationSelect, `ID2/${cookieOrigin}/${account}`);
         })
         .then(() => {
-          const dest2Icon = cloudPrintDeprecationWarningsSuppressed ?
-              'printer-shared' :
-              'printer-not-supported';
-
           // Should already be updated.
-          compareIcon(selectEl, dest2Icon);
+          compareIcon(selectEl, 'printer-shared');
 
           // Update destination.
           destinationSelect.destination = recentDestinationList[1];
-          compareIcon(selectEl, dest2Icon);
+          compareIcon(selectEl, 'printer-shared');
 
           // Select a destination with a standard printer icon.
           return selectOption(
               destinationSelect, `ID3/${cookieOrigin}/${account}`);
         })
         .then(() => {
-          const dest3Icon = cloudPrintDeprecationWarningsSuppressed ?
-              'print' :
-              'printer-not-supported';
-
-          compareIcon(selectEl, dest3Icon);
+          compareIcon(selectEl, 'print');
 
           // Update destination.
           destinationSelect.destination = recentDestinationList[2];
-          compareIcon(selectEl, dest3Icon);
+          compareIcon(selectEl, 'print');
         });
   }
 
   /**
    * Test that changing different destinations results in the correct status
    * being shown.
-   * @param {boolean} cloudPrintDeprecationWarningsSuppressed Whether cloud
-   *     print deprecation warnings should be suppressed.
    */
-  function testUpdateStatus(cloudPrintDeprecationWarningsSuppressed) {
+  function testUpdateStatus() {
     loadTimeData.overrideValues({
       offline: 'offline',
       printerNotSupportedWarning: 'printerNotSupportedWarning',
@@ -530,12 +512,8 @@ suite(destination_select_test_cros.suiteName, function() {
 
     destinationSelect.destination = recentDestinationList[2];
     destinationSelect.updateDestination();
-    assertEquals(
-        cloudPrintDeprecationWarningsSuppressed, additionalInfoEl.hidden);
-    const dest3Status = cloudPrintDeprecationWarningsSuppressed ?
-        '' :
-        'printerNotSupportedWarning';
-    assertEquals(dest3Status, statusEl.innerHTML);
+    assertTrue(additionalInfoEl.hidden);
+    assertEquals('', statusEl.innerHTML);
   }
 
   test(assert(destination_select_test_cros.TestNames.UpdateStatus), function() {
@@ -549,18 +527,9 @@ suite(destination_select_test_cros.suiteName, function() {
     destinationSelect.recentDestinationList = recentDestinationList;
 
     return waitBeforeNextRender(destinationSelect).then(() => {
-      testUpdateStatus(true);
+      testUpdateStatus();
     });
   });
-
-  test(
-      assert(destination_select_test_cros.TestNames
-                 .UpdateStatusDeprecationWarnings),
-      function() {
-        return waitBeforeNextRender(destinationSelect).then(() => {
-          testUpdateStatus(false);
-        });
-      });
 
   test(assert(destination_select_test_cros.TestNames.ChangeIcon), function() {
     loadTimeData.overrideValues(
@@ -572,15 +541,8 @@ suite(destination_select_test_cros.suiteName, function() {
     populateRecentDestinationList();
     destinationSelect.recentDestinationList = recentDestinationList;
 
-    return testChangeIcon(true);
+    return testChangeIcon();
   });
-
-  test(
-      assert(
-          destination_select_test_cros.TestNames.ChangeIconDeprecationWarnings),
-      function() {
-        return testChangeIcon(false);
-      });
 
   /**
    * Tests that destinations with a EULA will display the EULA URL.
@@ -597,63 +559,5 @@ suite(destination_select_test_cros.suiteName, function() {
         destinationSelect.set(
             'destination.eulaUrl', 'chrome://os-credits/eula');
         assertFalse(destinationEulaWrapper.hidden);
-      });
-
-  // Tests that the correct drive destination is in the select based on value of
-  // printSaveToDrive flag.
-  test(
-      assert(destination_select_test_cros.TestNames.SelectDriveDestination),
-      function() {
-        const driveDestinationKey = `${Destination.GooglePromotedId.DOCS}/${
-            DestinationOrigin.COOKIES}/${account}`;
-        const printSaveToDriveEnabled =
-            loadTimeData.getBoolean('printSaveToDrive');
-        const expectedKey = printSaveToDriveEnabled ?
-            SAVE_TO_DRIVE_CROS_DESTINATION_KEY :
-            driveDestinationKey;
-        const wrongKey = !printSaveToDriveEnabled ?
-            SAVE_TO_DRIVE_CROS_DESTINATION_KEY :
-            driveDestinationKey;
-
-        return waitBeforeNextRender(destinationSelect)
-            .then(() => {
-              destinationSelect.driveDestinationKey = driveDestinationKey;
-              destinationSelect.destination = recentDestinationList[0];
-              destinationSelect.updateDestination();
-
-              assertTrue(
-                  !!Array.from(destinationSelect.$$('.md-select').options)
-                        .find(option => option.value === expectedKey));
-              assertTrue(!Array.from(destinationSelect.$$('.md-select').options)
-                              .find(option => option.value === wrongKey));
-              return selectOption(destinationSelect, expectedKey);
-            })
-            .then(() => {
-              assertEquals(
-                  expectedKey, destinationSelect.$$('.md-select').value);
-            });
-      });
-
-  test(
-      assert(destination_select_test_cros.TestNames.IsDriveMounted),
-      function() {
-        return waitBeforeNextRender(destinationSelect)
-            .then(() => {
-              const options =
-                  Array.from(destinationSelect.getVisibleItemsForTest());
-              assertTrue(!!options.find(
-                  option =>
-                      option.value === SAVE_TO_DRIVE_CROS_DESTINATION_KEY));
-
-              destinationSelect.isDriveMounted = false;
-              return waitBeforeNextRender(destinationSelect);
-            })
-            .then(() => {
-              const options =
-                  Array.from(destinationSelect.getVisibleItemsForTest());
-              assertTrue(!options.find(
-                  option =>
-                      option.value === SAVE_TO_DRIVE_CROS_DESTINATION_KEY));
-            });
       });
 });

@@ -18,6 +18,9 @@
 <translation id="1112015203684611006">Printing failed.</translation>
 <translation id="1125564390852150847">Create new tab.</translation>
 <translation id="1145536944570833626">Izbris obstoječih podatkov.</translation>
+<translation id="1147031633655575115">Prijavljeni ste kot <ph name="USER" /></translation>
+<translation id="1154690515305205900">Povezave do označenega besedila ni mogoče ustvariti.</translation>
+<translation id="1157749421655780457">Dovoli lokacijo …</translation>
 <translation id="1165039591588034296">Napaka</translation>
 <translation id="1172898394251786223">Naslednje polje</translation>
 <translation id="1176932207622159128">Slike ni mog. shran.</translation>
@@ -52,6 +55,7 @@
 <translation id="1449835205994625556">Skrivanje gesla</translation>
 <translation id="145015347812617860">Št. elementov: <ph name="COUNT" /></translation>
 <translation id="1491277525950327607">Dvakrat se dotaknite, da preklopite nastavitev</translation>
+<translation id="1492417797159476138">Za to spletno mesto ste že shranili to uporabniško ime.</translation>
 <translation id="1509486075633541495">Prijavite se na spletnem mestu</translation>
 <translation id="1509960214886564027">Funkcije na številnih spletnih mestih morda ne bodo delovale</translation>
 <translation id="152234381334907219">Nikoli shranjeno</translation>
@@ -61,6 +65,7 @@
 <translation id="1545749641540134597">Scan QR Code</translation>
 <translation id="1552525382687785070">Sinhronizacijo je onemogočil skrbnik</translation>
 <translation id="1554477036522844996">Novo okno</translation>
+<translation id="1580715474678097352">Bodite zaščiteni pred nevarnimi spletnimi mesti</translation>
 <translation id="1580783302095112590">Pošta je poslana.</translation>
 <translation id="1582732959743469162">S tem boste prekinili trenutni prenos.</translation>
 <translation id="1605405588277479165">Izklopljeno – ni priporočljivo</translation>
@@ -210,6 +215,7 @@ Ko uporabljate način brez beleženja dejavnosti, spletna mesta ne smejo uporabl
 <translation id="3268451620468152448">Odprti zavihki</translation>
 <translation id="3272527697863656322">Prekliči</translation>
 <translation id="3277021493514034324">Kopiran naslov spletnega mesta</translation>
+<translation id="3285962946108803577">Deljenje strani …</translation>
 <translation id="3290875554372353449">Izberite račun</translation>
 <translation id="3311748811247479259">Izklopljeno</translation>
 <translation id="3324193307694657476">Naslov 2</translation>
@@ -263,6 +269,7 @@ Upoštevajte spodnja navodila:</translation>
 <translation id="385051799172605136">Nazaj</translation>
 <translation id="3892144330757387737">Tukaj bo prikazana zgodovina</translation>
 <translation id="3897092660631435901">Meni</translation>
+<translation id="3913386780052199712">Prijavljeni ste v Chrome</translation>
 <translation id="3915450441834151894">Podatki o spletnem mestu</translation>
 <translation id="3922310737605261887">Iskanje besedila, ki ste ga kopirali</translation>
 <translation id="3928666092801078803">Združevanje podatkov</translation>
@@ -315,7 +322,7 @@ Upoštevajte spodnja navodila:</translation>
 <translation id="4502566650163919158">Preveri</translation>
 <translation id="4505980578794259603">Nazadnje preverjeno: <ph name="TIME" />.</translation>
 <translation id="4508750114462689118">Zapri predstavitev prijave</translation>
-<translation id="4526249700380860531">Shranjena gesla si lahko ogledate in jih upravljate na <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /></translation>
+<translation id="4526249700380860531">Dostopajte do shranjenih gesel in jih upravljajte na <ph name="BEGIN_LINK" />passwords.google.com<ph name="END_LINK" /></translation>
 <translation id="4536418791685807335">Try signing in again.</translation>
 <translation id="457386861538956877">Več ...</translation>
 <translation id="4592368184551360546">Tipkovnica</translation>
@@ -337,6 +344,7 @@ Podatki so šifrirani z vašim geslom za sinhronizacijo. Vnesite ga, če želite
 <translation id="4751645464639803239">Nov zavihek brez beleženja zgodovine</translation>
 <translation id="4758977202923349869">Kreditno kartico postavite v ta okvir</translation>
 <translation id="4775879719735953715">Privzeti brskalnik</translation>
+<translation id="4778644898150334464">Uporaba drugega gesla</translation>
 <translation id="4802417911091824046">Šifriranje gesla ne vključuje plačilnih sredstev in naslovov iz Googla Pay.
 
 Če želite spremeniti to nastavitev, <ph name="BEGIN_LINK" />ponastavite sinhronizacijo<ph name="END_LINK" /></translation>
@@ -344,7 +352,7 @@ Podatki so šifrirani z vašim geslom za sinhronizacijo. Vnesite ga, če želite
 <translation id="4808744395915275922">Posodobitve</translation>
 <translation id="4818522717893377262">Dodaj jezik …</translation>
 <translation id="481968316161811770">Cookies, Site Data</translation>
-<translation id="4824497107140370669">{count,plural, =0{{domain}}=1{{domain} ]in še 1}one{{domain} in še {count}}two{{domain} in še {count}}few{{domain} in še {count}}other{{domain} in še {count}}}</translation>
+<translation id="4824497107140370669">{count,plural, =0{{domain}}=1{{domain} in še 1}one{{domain} in še {count}}two{{domain} in še {count}}few{{domain} in še {count}}other{{domain} in še {count}}}</translation>
 <translation id="4826218269716039351">Blokiraj piškotke drugih spletnih mest</translation>
 <translation id="48274138579728272">Označi kot prebrano</translation>
 <translation id="4833786495304741580">Samodejno pošilja statistične podatke o uporabi in poročila o zrušitvah Googlu.</translation>
@@ -369,6 +377,7 @@ Podatki so šifrirani z vašim geslom za sinhronizacijo. Vnesite ga, če želite
 <translation id="5059136629401106827">V redu</translation>
 <translation id="5062321486222145940">Namesti Google Drive</translation>
 <translation id="5083464117946352670">Velikost datoteke ni mogoče določiti.</translation>
+<translation id="5090832849094901128">Če izbrišete to geslo, ne izbrišete računa na <ph name="WEBSITE" />.</translation>
 <translation id="5094827893301452931">Tvit je dokončan.</translation>
 <translation id="5118764316110575523">Izklopljeno</translation>
 <translation id="5127805178023152808">Sinhroniziranje je izklopljeno</translation>
@@ -508,6 +517,9 @@ Spletna mesta ne smejo uporabljati piškotkov za ogled dejavnosti brskanja na ra
 <translation id="6476800141292307438">Prevajanje strani v ta jezik: <ph name="LANGUAGE" />. Možnosti so na voljo blizu dna zaslona.</translation>
 <translation id="648164694371393720">Napaka pri preverjanju pristnosti</translation>
 <translation id="6482629121755362506">Št. izbrisanih elementov: <ph name="NUMBER_OF_SELECTED_BOOKMARKS" /></translation>
+<translation id="6497772452874122664">Če zaupate izvoru <ph name="TIME" />, lahko uporabite shranjeno geslo za drugo spletno mesto.
+
+Poskusite uporabljati enolično geslo za vsako spletno mesto.</translation>
 <translation id="651505212789431520">Želite preklicati sinhronizacijo? Sinhronizacijo lahko kadarkoli vklopite v nastavitvah.</translation>
 <translation id="6561262006871132942">Povečaj</translation>
 <translation id="6585618849026997638">Na stran, ki vam je pomembna, se lahko vrnete tako, da jo dodate med zaznamke.</translation>
@@ -587,6 +599,7 @@ Spletna mesta ne smejo uporabljati piškotkov za ogled dejavnosti brskanja na ra
 <translation id="739941347996872055">Prejšnji zavihek</translation>
 <translation id="7400418766976504921">URL</translation>
 <translation id="7409985198648820906">Št. neprebranih člankov: <ph name="UNREAD_COUNT" />.</translation>
+<translation id="7412027924265291969">Naprej</translation>
 <translation id="7425346204213733349">Spremembe zaznamkov, zgodovine, gesel in drugih nastavitev ne bodo več sinhronizirane z Google Računom. Obstoječi podatki bodo še naprej shranjeni v Google Računu.</translation>
 <translation id="7435356471928173109">Izklopil skrbnik</translation>
 <translation id="7454057999980797137">Regija</translation>
@@ -597,6 +610,7 @@ Spletna mesta ne smejo uporabljati piškotkov za ogled dejavnosti brskanja na ra
 <translation id="7472734401283673885">Ime podjetja</translation>
 <translation id="7473891865547856676">Ne, hvala</translation>
 <translation id="7481312909269577407">Naprej</translation>
+<translation id="7483467499335917849">Uporaba trenutne lokacije</translation>
 <translation id="750493650310597496">0 izbranih</translation>
 <translation id="7514365320538308">Prenos</translation>
 <translation id="7537586195939242955">Elementa trenutno ni mogoče namesiti v Passbook.</translation>
@@ -610,6 +624,7 @@ Spletna mesta ne smejo uporabljati piškotkov za ogled dejavnosti brskanja na ra
 <translation id="7658239707568436148">Prekliči</translation>
 <translation id="766891008101699113">Če želite zasebno brskati po spletu, dodajte nov zavihek.</translation>
 <translation id="7671141431838911305">NAMESTI</translation>
+<translation id="7690812411882623730">Ni mogoče ustvariti povezave do besedila</translation>
 <translation id="7701040980221191251">Nič</translation>
 <translation id="7765158879357617694">Premakni</translation>
 <translation id="7771470029643830783">Z odjavo vaši zaznamki, zgodovina, gesla in drugi podatki v Chromu ne bodo več sinhronizirani z računom Google.
@@ -728,6 +743,8 @@ Spletna mesta lahko uporabljajo piškotke za ogled dejavnosti brskanja na razli�
 <translation id="9087108903408689779">Geslo, ki ga predlaga Chrome:</translation>
 <translation id="9094033019050270033">Posodobi geslo</translation>
 <translation id="9100610230175265781">Zahtevano je geslo</translation>
+<translation id="9107664647686727385">Iskanje ogroženih gesel</translation>
+<translation id="9137526406337347448">Googlove storitve</translation>
 <translation id="9148126808321036104">Prijavite se znova</translation>
 <translation id="9152539721251340337">Ustvari kodo QR</translation>
 <translation id="9157836665414082580">Onemogoči pogovorna okna</translation>

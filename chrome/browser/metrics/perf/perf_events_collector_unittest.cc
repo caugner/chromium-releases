@@ -14,8 +14,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
+#include "base/strings/string_split.h"
 #include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/metrics/perf/cpu_identity.h"
 #include "chrome/browser/metrics/perf/windowed_incognito_observer.h"
@@ -29,15 +30,14 @@ namespace metrics {
 
 namespace {
 
+const char kPerfCommandDelimiter[] = " ";
+
 const char kPerfCyclesCmd[] = "perf record -a -e cycles -c 1000003";
 const char kPerfFPCallgraphCmd[] = "perf record -a -e cycles -g -c 4000037";
 const char kPerfLBRCallgraphCmd[] =
     "perf record -a -e cycles -c 4000037 --call-graph lbr";
-const char kPerfCyclesPPPCmd[] = "perf record -a -e cycles:ppp -c 1000003";
 const char kPerfFPCallgraphPPPCmd[] =
     "perf record -a -e cycles:ppp -g -c 4000037";
-const char kPerfLBRCallgraphPPPCmd[] =
-    "perf record -a -e cycles:ppp -c 4000037 --call-graph lbr";
 const char kPerfLBRCmd[] = "perf record -a -e r20c4 -b -c 200011";
 const char kPerfLBRCmdAtom[] = "perf record -a -e rc4 -b -c 300001";
 const char kPerfITLBMissCyclesCmdIvyBridge[] =
@@ -206,6 +206,16 @@ const base::TimeDelta kPeriodicCollectionInterval =
     base::TimeDelta::FromHours(1);
 const base::TimeDelta kCollectionDuration = base::TimeDelta::FromSeconds(2);
 
+// A wrapper around internal::CommandSamplesCPUCycles, to test if a perf command
+// samples the cycles event. The wrapper takes a command as a string, while the
+// wrapped internal::CommandSamplesCPUCycles takes the command split into words.
+bool DoesCommandSampleCycles(std::string command) {
+  std::vector<std::string> cmd_args =
+      base::SplitString(command, kPerfCommandDelimiter, base::KEEP_WHITESPACE,
+                        base::SPLIT_WANT_ALL);
+  return internal::CommandSamplesCPUCycles(cmd_args);
+}
+
 }  // namespace
 
 class PerfCollectorTest : public testing::Test {
@@ -367,7 +377,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_IvyBridge) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -398,7 +410,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_SandyBridge) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -429,7 +443,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Haswell) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   // No LBR callstacks because the kernel is old.
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
@@ -468,7 +484,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Skylake) {
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
   // We have both FP and LBR based callstacks.
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[2].value, kPerfLBRCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -498,10 +516,12 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Tigerlake) {
   std::vector<RandomSelector::WeightAndValue> cmds =
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 3UL);
-  EXPECT_EQ(cmds[0].value, kPerfCyclesPPPCmd);
+  EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
   // We have both FP and LBR based callstacks.
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphPPPCmd);
-  EXPECT_EQ(cmds[2].value, kPerfLBRCallgraphPPPCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
+  EXPECT_EQ(cmds[2].value, kPerfLBRCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -531,13 +551,15 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Goldmont) {
   std::vector<RandomSelector::WeightAndValue> cmds =
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
-  EXPECT_EQ(cmds[0].value, kPerfCyclesPPPCmd);
+  EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphPPPCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   // No LBR callstacks because the microarchitecture doesn't support it.
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
-                     return cmd.value == kPerfLBRCallgraphPPPCmd;
+                     return cmd.value == kPerfLBRCallgraphCmd;
                    });
   EXPECT_EQ(cmds.end(), found);
   found = std::find_if(cmds.begin(), cmds.end(),
@@ -568,13 +590,15 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_GoldmontPlus) {
   std::vector<RandomSelector::WeightAndValue> cmds =
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
-  EXPECT_EQ(cmds[0].value, kPerfCyclesPPPCmd);
+  EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphPPPCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   // No LBR callstacks because the microarchitecture doesn't support it.
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
-                     return cmd.value == kPerfLBRCallgraphPPPCmd;
+                     return cmd.value == kPerfLBRCallgraphCmd;
                    });
   EXPECT_EQ(cmds.end(), found);
   found = std::find_if(cmds.begin(), cmds.end(),
@@ -605,7 +629,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnUarch_Excavator) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -625,7 +651,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnArch_Arm32) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -650,7 +678,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnArch_Arm64) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -675,7 +705,9 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnArch_x86_32) {
       internal::GetDefaultCommandsForCpu(cpuid);
   ASSERT_GE(cmds.size(), 2UL);
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
   EXPECT_EQ(cmds[1].value, kPerfFPCallgraphCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[1].value));
   auto found =
       std::find_if(cmds.begin(), cmds.end(),
                    [](const RandomSelector::WeightAndValue& cmd) -> bool {
@@ -700,6 +732,7 @@ TEST_F(PerfCollectorTest, DefaultCommandsBasedOnArch_Unknown) {
       internal::GetDefaultCommandsForCpu(cpuid);
   EXPECT_EQ(1UL, cmds.size());
   EXPECT_EQ(cmds[0].value, kPerfCyclesCmd);
+  EXPECT_TRUE(DoesCommandSampleCycles(cmds[0].value));
 }
 
 TEST_F(PerfCollectorTest, CommandMatching_Empty) {
@@ -1083,6 +1116,13 @@ TEST(PerfCollectorInternalTest, CommandSamplesCPUCycles) {
   EXPECT_TRUE(internal::CommandSamplesCPUCycles({"perf", "record", "-a", "-e",
                                                  "cycles", "-c", "4000037",
                                                  "--call-graph", "lbr"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "cycles:ppp", "-c", "1000003"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "cycles:ppp", "-g", "-c", "4000037"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles({"perf", "record", "-a", "-e",
+                                                 "cycles:ppp", "-c", "4000037",
+                                                 "--call-graph", "lbr"}));
 
   EXPECT_FALSE(internal::CommandSamplesCPUCycles(
       {"perf", "record", "-a", "-e", "r20c4", "-b", "-c", "200011"}));
@@ -1102,6 +1142,9 @@ TEST(PerfCollectorInternalTest, CommandSamplesCPUCycles) {
   EXPECT_TRUE(internal::CommandSamplesCPUCycles({"perf", "record", "-a", "-e",
                                                  "instructions", "-e", "cycles",
                                                  "-c", "1000003"}));
+  EXPECT_TRUE(internal::CommandSamplesCPUCycles(
+      {"perf", "record", "-a", "-e", "instructions", "-e", "cycles:ppp", "-c",
+       "1000003"}));
 
   EXPECT_FALSE(internal::CommandSamplesCPUCycles(
       {"perf", "stat", "-a", "-e", "cycles", "-e", "instructions"}));

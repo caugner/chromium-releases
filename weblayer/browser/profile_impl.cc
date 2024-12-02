@@ -32,7 +32,6 @@
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
-#include "weblayer/browser/android/metrics/weblayer_metrics_service_client.h"
 #include "weblayer/browser/browser_context_impl.h"
 #include "weblayer/browser/browser_impl.h"
 #include "weblayer/browser/browser_list.h"
@@ -40,6 +39,7 @@
 #include "weblayer/browser/cookie_manager_impl.h"
 #include "weblayer/browser/favicon/favicon_service_impl.h"
 #include "weblayer/browser/favicon/favicon_service_impl_factory.h"
+#include "weblayer/browser/no_state_prefetch/prerender_controller_impl.h"
 #include "weblayer/browser/persistence/browser_persister_file_utils.h"
 #include "weblayer/browser/tab_impl.h"
 
@@ -51,6 +51,7 @@
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/unified_consent/pref_names.h"
 #include "ui/gfx/android/java_bitmap.h"
+#include "weblayer/browser/android/metrics/weblayer_metrics_service_client.h"
 #include "weblayer/browser/browser_process.h"
 #include "weblayer/browser/java/jni/ProfileImpl_jni.h"
 #include "weblayer/browser/safe_browsing/safe_browsing_service.h"
@@ -123,7 +124,7 @@ void OnDidGetCachedFaviconForPageUrl(
     gfx::Image image) {
   SkBitmap favicon = image.AsImageSkia().GetRepresentation(1.0f).GetBitmap();
   base::android::RunObjectCallbackAndroid(
-      callback, favicon.empty() ? nullptr : gfx::ConvertToJavaBitmap(&favicon));
+      callback, favicon.empty() ? nullptr : gfx::ConvertToJavaBitmap(favicon));
 }
 
 #endif  // OS_ANDROID
@@ -174,11 +175,11 @@ base::FilePath ProfileImpl::GetCachePath(content::BrowserContext* context) {
   return profile->info_.cache_path;
 }
 
-ProfileImpl::ProfileImpl(const std::string& name)
+ProfileImpl::ProfileImpl(const std::string& name, bool is_incognito)
     : download_directory_(BrowserContextImpl::GetDefaultDownloadDirectory()) {
   {
     base::ScopedAllowBlocking allow_blocking;
-    info_ = CreateProfileInfo(name);
+    info_ = CreateProfileInfo(name, is_incognito);
   }
 
   GetProfiles().insert(this);
@@ -262,6 +263,11 @@ void ProfileImpl::DownloadsInitialized() {
 #endif
 }
 
+void ProfileImpl::MarkAsDeleted() {
+  GetBackgroundDiskOperationTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce(&MarkProfileAsDeleted, info_));
+}
+
 void ProfileImpl::ClearBrowsingData(
     const std::vector<BrowsingDataType>& data_types,
     base::Time from_time,
@@ -312,6 +318,13 @@ CookieManager* ProfileImpl::GetCookieManager() {
   if (!cookie_manager_)
     cookie_manager_ = std::make_unique<CookieManagerImpl>(GetBrowserContext());
   return cookie_manager_.get();
+}
+
+PrerenderController* ProfileImpl::GetPrerenderController() {
+  if (!prerender_controller_)
+    prerender_controller_ =
+        std::make_unique<PrerenderControllerImpl>(GetBrowserContext());
+  return prerender_controller_.get();
 }
 
 void ProfileImpl::GetBrowserPersistenceIds(
@@ -380,8 +393,9 @@ void ProfileImpl::OnLocaleChanged() {
 }
 
 // static
-std::unique_ptr<Profile> Profile::Create(const std::string& name) {
-  return std::make_unique<ProfileImpl>(name);
+std::unique_ptr<Profile> Profile::Create(const std::string& name,
+                                         bool is_incognito) {
+  return std::make_unique<ProfileImpl>(name, is_incognito);
 }
 
 // static
@@ -429,16 +443,19 @@ void ProfileImpl::OnProfileMarked(std::unique_ptr<ProfileImpl> profile,
 ProfileImpl::ProfileImpl(
     JNIEnv* env,
     const base::android::JavaParamRef<jstring>& name,
-    const base::android::JavaParamRef<jobject>& java_profile)
-    : ProfileImpl(ConvertJavaStringToUTF8(env, name)) {
+    const base::android::JavaParamRef<jobject>& java_profile,
+    bool is_incognito)
+    : ProfileImpl(ConvertJavaStringToUTF8(env, name), is_incognito) {
   java_profile_ = java_profile;
 }
 
 static jlong JNI_ProfileImpl_CreateProfile(
     JNIEnv* env,
     const base::android::JavaParamRef<jstring>& name,
-    const base::android::JavaParamRef<jobject>& java_profile) {
-  return reinterpret_cast<jlong>(new ProfileImpl(env, name, java_profile));
+    const base::android::JavaParamRef<jobject>& java_profile,
+    jboolean is_incognito) {
+  return reinterpret_cast<jlong>(
+      new ProfileImpl(env, name, java_profile, is_incognito));
 }
 
 static void JNI_ProfileImpl_DeleteProfile(JNIEnv* env, jlong profile) {
@@ -509,6 +526,10 @@ void ProfileImpl::SetDownloadDirectory(
 
 jlong ProfileImpl::GetCookieManager(JNIEnv* env) {
   return reinterpret_cast<jlong>(GetCookieManager());
+}
+
+jlong ProfileImpl::GetPrerenderController(JNIEnv* env) {
+  return reinterpret_cast<jlong>(GetPrerenderController());
 }
 
 void ProfileImpl::EnsureBrowserContextInitialized(JNIEnv* env) {

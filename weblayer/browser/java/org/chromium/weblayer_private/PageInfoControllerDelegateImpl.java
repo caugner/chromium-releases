@@ -12,6 +12,7 @@ import android.graphics.drawable.Drawable;
 import android.webkit.ValueCallback;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.base.StrictModeContext;
@@ -65,7 +66,7 @@ public class PageInfoControllerDelegateImpl extends PageInfoControllerDelegate {
     @Override
     public void showSiteSettings(String url) {
         Intent intent = SiteSettingsIntentHelper.createIntentForSingleWebsite(
-                mContext, mProfile.getName(), url);
+                mContext, mProfile.getName(), mProfile.isIncognito(), url);
 
         // Disabling StrictMode to avoid violations (https://crbug.com/819410).
         launchIntent(intent);
@@ -77,7 +78,7 @@ public class PageInfoControllerDelegateImpl extends PageInfoControllerDelegate {
         String title = mContext.getResources().getString(
                 ContentSettingsResources.getTitle(ContentSettingsType.COOKIES));
         Intent intent = SiteSettingsIntentHelper.createIntentForSingleCategory(
-                mContext, mProfile.getName(), category, title);
+                mContext, mProfile.getName(), mProfile.isIncognito(), category, title);
         launchIntent(intent);
     }
 
@@ -125,6 +126,12 @@ public class PageInfoControllerDelegateImpl extends PageInfoControllerDelegate {
                         callback.onResult(null);
                     }
                 }));
+    }
+
+    @Override
+    @Nullable
+    public Drawable getPreviewUiIcon() {
+        return null;
     }
 
     private static boolean isHttpOrHttps(GURL url) {

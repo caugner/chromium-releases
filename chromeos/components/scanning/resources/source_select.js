@@ -2,18 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://resources/mojo/mojo/public/mojom/base/big_buffer.mojom-lite.js';
-import 'chrome://resources/mojo/mojo/public/mojom/base/string16.mojom-lite.js';
-import 'chrome://resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-lite.js';
 import './scanning.mojom-lite.js';
+import './scan_settings_section.js';
+import './strings.m.js';
 
-import {getSourceTypeString} from './scanning_app_util.js';
-import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
-import './strings.js';
+import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-/** @type {number} */
-const NUM_REQUIRED_SOURCES = 2;
+import {alphabeticalCompare, getSourceTypeString} from './scanning_app_util.js';
+import {SelectBehavior} from './select_behavior.js';
 
 /**
  * @fileoverview
@@ -24,7 +21,7 @@ Polymer({
 
   _template: html`{__html_template__}`,
 
-  behaviors: [I18nBehavior],
+  behaviors: [I18nBehavior, SelectBehavior],
 
   properties: {
     /** @type {!Array<!chromeos.scanning.mojom.ScanSource>} */
@@ -33,17 +30,21 @@ Polymer({
       value: () => [],
     },
 
-    /** @private */
-    disabled_: Boolean,
+    /** @type {string} */
+    selectedSource: {
+      type: String,
+      notify: true,
+    },
   },
 
   observers: [
-    'updateDisabled_(sources.length)',
+    'onNumOptionsChange(sources.length)',
+    'onSourcesChange_(sources.*)',
   ],
 
   /**
-   * @param {number} mojoSourceType
-   * @return {!string}
+   * @param {chromeos.scanning.mojom.SourceType} mojoSourceType
+   * @return {string}
    * @private
    */
   getSourceTypeString_(mojoSourceType) {
@@ -51,19 +52,42 @@ Polymer({
   },
 
   /**
-   * @param {!Event} event
+   * "Flatbed" should always be the default option if it exists. If not, use
+   * the first source in the sources array.
+   * @return {string}
    * @private
    */
-  onSelectedSourceChange_(event) {
-    this.fire('selected-source-change', event.target);
+  getDefaultSelectedSource_() {
+    const flatbedSourceIndex = this.sources.findIndex((source) => {
+      return source.type === chromeos.scanning.mojom.SourceType.kFlatbed;
+    });
+
+    return flatbedSourceIndex === -1 ? this.sources[0].name :
+                                       this.sources[flatbedSourceIndex].name;
   },
 
   /**
-   * Disables the dropdown based on the number of available sources.
-   * @param {number} numSources
+   * Sorts the sources and sets the selected source when sources change.
    * @private
    */
-  updateDisabled_(numSources) {
-    this.disabled_ = numSources < NUM_REQUIRED_SOURCES;
+  onSourcesChange_() {
+    if (this.sources.length > 1) {
+      this.sources = this.customSort(
+          this.sources, alphabeticalCompare,
+          (source) => getSourceTypeString(source.type));
+    }
+
+    if (this.sources.length > 0) {
+      this.selectedSource = this.getDefaultSelectedSource_();
+    }
+  },
+
+  /**
+   * @param {!chromeos.scanning.mojom.SourceType} sourceType
+   * @return {boolean}
+   * @private
+   */
+  isDefaultSource_(sourceType) {
+    return sourceType === chromeos.scanning.mojom.SourceType.kFlatbed;
   },
 });

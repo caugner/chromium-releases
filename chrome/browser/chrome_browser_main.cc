@@ -60,6 +60,7 @@
 #include "chrome/browser/component_updater/registration.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/language/url_language_histogram_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/media/router/chrome_media_router_factory.h"
@@ -532,6 +533,15 @@ void ChromeBrowserMainParts::SetupMetrics() {
 void ChromeBrowserMainParts::StartMetricsRecording() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::StartMetricsRecording");
 
+  // Register a synthetic field trial for the sampling profiler configuration
+  // that was already chosen.
+  std::string trial_name, group_name;
+  if (ThreadProfilerConfiguration::Get()->GetSyntheticFieldTrial(&trial_name,
+                                                                 &group_name)) {
+    ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(trial_name,
+                                                              group_name);
+  }
+
 #if defined(OS_ANDROID)
   // Android updates the metrics service dynamically depending on whether the
   // application is in the foreground or not. Do not start here unless
@@ -548,15 +558,6 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
   // schedule to get the bast possible accuracy for the assessment.
   g_browser_process->metrics_service()->StartUpdatingLastLiveTimestamp();
 #endif
-
-  // Register a synthetic field trial for the sampling profiler configuration
-  // that was already chosen.
-  std::string trial_name, group_name;
-  if (ThreadProfilerConfiguration::Get()->GetSyntheticFieldTrial(&trial_name,
-                                                                 &group_name)) {
-    ChromeMetricsServiceAccessor::RegisterSyntheticFieldTrial(trial_name,
-                                                              group_name);
-  }
 
   g_browser_process->GetMetricsServicesManager()->UpdateUploadPermissions(true);
 }
@@ -1498,6 +1499,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   net::NetModule::SetResourceProvider(ChromeNetResourceProvider);
   media::SetLocalizedStringProvider(ChromeMediaLocalizedStringProvider);
 
+#if !defined(OS_ANDROID)
   // In unittest mode, this will do nothing.  In normal mode, this will create
   // the global IntranetRedirectDetector instance, which will promptly go to
   // sleep for seven seconds (to avoid slowing startup), and wake up afterwards
@@ -1510,6 +1512,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // This can't be created in the BrowserProcessImpl constructor because it
   // needs to read prefs that get set after that runs.
   browser_process_->intranet_redirect_detector();
+#endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
   if (parsed_command_line().HasSwitch(switches::kDebugPrint)) {
@@ -1532,6 +1535,11 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
       profile_->GetPrefs()->GetString(language::prefs::kAcceptLanguages));
   language_usage_metrics::LanguageUsageMetrics::RecordApplicationLanguage(
       browser_process_->GetApplicationLocale());
+// On ChromeOS results in a crash. https://crbug.com/1151558
+#if !defined(OS_CHROMEOS)
+  language_usage_metrics::LanguageUsageMetrics::RecordPageLanguages(
+      *UrlLanguageHistogramFactory::GetForBrowserContext(profile_));
+#endif  // defined(OS_CHROMEOS)
 
 // On mobile, need for clean shutdown arises only when the application comes
 // to foreground (i.e. MetricsService::OnAppEnterForeground is called).

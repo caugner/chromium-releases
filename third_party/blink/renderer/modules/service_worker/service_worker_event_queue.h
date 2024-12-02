@@ -90,22 +90,28 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
 
   // Enqueues a Normal event. See ServiceWorkerEventQueue::Event to know the
   // meaning of each parameter.
-  void EnqueueNormal(StartCallback start_callback,
+  void EnqueueNormal(int event_id,
+                     StartCallback start_callback,
                      AbortCallback abort_callback,
                      base::Optional<base::TimeDelta> custom_timeout);
 
   // Similar to EnqueueNormal(), but enqueues a Pending event.
-  void EnqueuePending(StartCallback start_callback,
+  void EnqueuePending(int event_id,
+                      StartCallback start_callback,
                       AbortCallback abort_callback,
                       base::Optional<base::TimeDelta> custom_timeout);
 
   // Similar to EnqueueNormal(), but enqueues an Offline event.
-  void EnqueueOffline(StartCallback start_callback,
+  void EnqueueOffline(int event_id,
+                      StartCallback start_callback,
                       AbortCallback abort_callback,
                       base::Optional<base::TimeDelta> custom_timeout);
 
-  // Returns true if |event_id| was started and hasn't ended.
+  // Returns true if |event_id| was enqueued and hasn't ended.
   bool HasEvent(int event_id) const;
+
+  // Returns true if |event_id| was enqueued and hasn't started.
+  bool HasEventInQueue(int event_id) const;
 
   // Creates a StayAwakeToken to ensure that the idle callback won't be
   // triggered while any of these are alive.
@@ -120,6 +126,9 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
   // triggered the |idle_callback_| passed to the constructor. It'll be reset to
   // false again when StartEvent() is called.
   bool did_idle_timeout() const { return did_idle_timeout_; }
+
+  // Returns the next event id, which is a monotonically increasing number.
+  int NextEventId();
 
   // Duration of the long standing event timeout since StartEvent() has been
   // called.
@@ -153,11 +162,13 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
       Offline,
     };
 
-    Event(Type type,
+    Event(int event_id,
+          Type type,
           StartCallback start_callback,
           AbortCallback abort_callback,
           base::Optional<base::TimeDelta> custom_timeout);
     ~Event();
+    const int event_id;
     Type type;
     // Callback which is run when the event queue starts this event. The
     // callback receives |event_id|. When an event finishes,
@@ -167,6 +178,13 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
     AbortCallback abort_callback;
     // The custom timeout value.
     base::Optional<base::TimeDelta> custom_timeout;
+  };
+
+  // Represents the type of the currently running events.
+  enum class RunningEventType {
+    kNone = 0,
+    kOnline,
+    kOffline,
   };
 
   // Enqueues the event to |queue_|, and run events in the queue or sometimes
@@ -205,6 +223,10 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
   // True if the idle callback is scheduled to run.
   bool HasScheduledIdleCallback() const;
 
+  // Returns either of `queued_online_events_` or `queued_offline_events_` to be
+  // executed depending on the currently running event type.
+  std::map<int, std::unique_ptr<Event>>& GetActiveEventQueue();
+
   struct EventInfo {
     EventInfo(base::TimeTicks expiration_time,
               base::OnceCallback<void(mojom::blink::ServiceWorkerEventStatus)>
@@ -219,7 +241,7 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
 
   // For long standing event timeouts. This is used to look up an EventInfo
   // by event id.
-  HashMap<int /* event_id */, std::unique_ptr<EventInfo>> id_event_map_;
+  HashMap<int /* event_id */, std::unique_ptr<EventInfo>> all_events_;
 
   // Callback which is run just before starting an event.
   BeforeStartEventCallback before_start_event_callback_;
@@ -245,18 +267,24 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
   // StartEvent() is called.
   bool did_idle_timeout_ = false;
 
-  // Event queue to where all events are enqueued.
-  // We use std::map as a task queue because it's ordered by the `event_id` and
-  // the entries can be effectively erased in random order.
-  std::map<int /* event_id */, std::unique_ptr<Event>> queue_;
+  // Event queue to where all online events (normal and pending events) are
+  // enqueued. We use std::map as a task queue because it's ordered by the
+  // `event_id` and the entries can be effectively erased in random order.
+  std::map<int /* event_id */, std::unique_ptr<Event>> queued_online_events_;
+
+  // Event queue to where offline events are enqueued. We use std::map as a task
+  // queue because it's ordered by the `event_id` and the entries can be
+  // effectively erased in random order.
+  std::map<int /* event_id */, std::unique_ptr<Event>> queued_offline_events_;
 
   // Set to true during running ProcessEvents(). This is used for avoiding to
   // invoke |idle_callback_| or to re-enter ProcessEvents() when calling
   // ProcessEvents().
   bool processing_events_ = false;
 
-  // Set to true during running offline events.
-  bool running_offline_events_ = false;
+  // Type of the currently running events. kNone if inflight events do not
+  // exist.
+  RunningEventType running_event_type_ = RunningEventType::kNone;
 
   // The number of the living StayAwakeToken. See also class comments.
   int num_of_stay_awake_tokens_ = 0;
@@ -267,7 +295,9 @@ class MODULES_EXPORT ServiceWorkerEventQueue {
   // |tick_clock_| outlives |this|.
   const base::TickClock* const tick_clock_;
 
-  bool in_dtor_ = false;
+  // Monotonically increasing number. Event id should not start from zero since
+  // HashMap in Blink requires non-zero keys.
+  int next_event_id_ = 1;
 
   base::WeakPtrFactory<ServiceWorkerEventQueue> weak_factory_{this};
 };

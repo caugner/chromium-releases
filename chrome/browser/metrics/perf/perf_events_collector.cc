@@ -110,13 +110,8 @@ bool KernelReleaseHasLBRCallgraph(const std::string& release) {
 const char kPerfCommandDelimiter[] = " ";
 
 // Collect precise=3 (:ppp) cycle events on microarchitectures that support it.
-const char kPerfCyclesPPPCmd[] = "perf record -a -e cycles:ppp -c 1000003";
-
 const char kPerfFPCallgraphPPPCmd[] =
     "perf record -a -e cycles:ppp -g -c 4000037";
-
-const char kPerfLBRCallgraphPPPCmd[] =
-    "perf record -a -e cycles:ppp -c 4000037 --call-graph lbr";
 
 // Collect default (imprecise) cycle events everywhere else.
 const char kPerfCyclesCmd[] = "perf record -a -e cycles -c 1000003";
@@ -191,9 +186,7 @@ const std::vector<RandomSelector::WeightAndValue> GetDefaultCommands_x86_64(
     lbr_cmd = kPerfLBRCmdAtom;
   }
   if (MicroarchitectureHasCyclesPPPEvent(cpu_uarch)) {
-    cycles_cmd = kPerfCyclesPPPCmd;
     fp_callgraph_cmd = kPerfFPCallgraphPPPCmd;
-    lbr_callgraph_cmd = kPerfLBRCallgraphPPPCmd;
   }
 
   cmds.emplace_back(WeightAndValue(50.0, cycles_cmd));
@@ -511,8 +504,11 @@ bool CommandSamplesCPUCycles(const std::vector<std::string>& args) {
   // Command must start with "perf record".
   if (args.size() < 4 || args[0] != "perf" || args[1] != "record")
     return false;
+  // Cycles event can be either the raw 'cycles' event, or the event name can be
+  // annotated with some qualifier suffix. Check for all cases.
   for (size_t i = 2; i + 1 < args.size(); ++i) {
-    if (args[i] == "-e" && args[i + 1] == "cycles")
+    if (args[i] == "-e" &&
+        (args[i + 1] == "cycles" || args[i + 1].rfind("cycles:", 0) == 0))
       return true;
   }
   return false;

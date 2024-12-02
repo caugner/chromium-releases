@@ -92,7 +92,8 @@ class BackgroundAnimation : public AppListFolderView::Animation,
                               : folder_view_->folder_item_icon_bounds();
     to_rect -= background_view_->bounds().OffsetFromOrigin();
     const SkColor background_color =
-        AppListColorProvider::Get()->GetFolderBackgroundColor();
+        AppListColorProvider::Get()->GetFolderBackgroundColor(
+            folder_view_->GetAppListConfig().folder_background_color());
     const SkColor from_color =
         show_ ? folder_view_->GetAppListConfig().folder_bubble_color()
               : background_color;
@@ -150,10 +151,14 @@ class FolderItemTitleAnimation : public AppListFolderView::Animation,
         animation_(this),
         folder_view_(folder_view) {
     // Calculate the source and target states.
-    from_color_ = show_ ? AppListColorProvider::Get()->GetFolderTitleTextColor()
-                        : SK_ColorTRANSPARENT;
-    to_color_ = show_ ? SK_ColorTRANSPARENT
-                      : AppListColorProvider::Get()->GetFolderTitleTextColor();
+    from_color_ = show_
+                      ? AppListColorProvider::Get()->GetFolderTitleTextColor(
+                            folder_view_->GetAppListConfig().grid_title_color())
+                      : SK_ColorTRANSPARENT;
+    to_color_ = show_
+                    ? SK_ColorTRANSPARENT
+                    : AppListColorProvider::Get()->GetFolderTitleTextColor(
+                          folder_view_->GetAppListConfig().grid_title_color());
 
     animation_.SetTweenType(gfx::Tween::FAST_OUT_SLOW_IN);
     animation_.SetSlideDuration(
@@ -423,8 +428,6 @@ class ContentsContainerAnimation : public AppListFolderView::Animation,
     // preferred bounds is calculated correctly.
     folder_view_->contents_container()->layer()->SetTransform(gfx::Transform());
     folder_view_->RecordAnimationSmoothness();
-
-    folder_view_->NotifyAccessibilityLocationChanges();
   }
 
  private:
@@ -688,17 +691,6 @@ void AppListFolderView::OnTabletModeChanged(bool started) {
   page_switcher_->set_is_tablet_mode(started);
 }
 
-void AppListFolderView::NotifyAccessibilityLocationChanges() {
-  contents_container_->NotifyAccessibilityEvent(
-      ax::mojom::Event::kLocationChanged, true);
-  items_grid_view_->NotifyAccessibilityEvent(ax::mojom::Event::kLocationChanged,
-                                             true);
-  folder_header_view_->NotifyAccessibilityEvent(
-      ax::mojom::Event::kLocationChanged, true);
-  page_switcher_->NotifyAccessibilityEvent(ax::mojom::Event::kLocationChanged,
-                                           true);
-}
-
 void AppListFolderView::CalculateIdealBounds() {
   gfx::Rect rect(GetContentsBounds());
   if (rect.IsEmpty())
@@ -827,7 +819,8 @@ void AppListFolderView::HideViewImmediately() {
   if (activated_folder_item_view) {
     activated_folder_item_view->SetIconVisible(true);
     activated_folder_item_view->title()->SetEnabledColor(
-        AppListColorProvider::Get()->GetFolderTitleTextColor());
+        AppListColorProvider::Get()->GetFolderTitleTextColor(
+            GetAppListConfig().grid_title_color()));
     activated_folder_item_view->title()->SetVisible(true);
   }
 }

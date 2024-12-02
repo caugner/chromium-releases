@@ -17,12 +17,11 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/current_thread.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "components/favicon/core/favicon_database.h"
 #include "components/history/core/browser/history_backend_client.h"
@@ -206,9 +205,9 @@ class ExpireHistoryTest : public testing::Test, public HistoryBackendNotifier {
                         const RedirectList& redirects,
                         base::Time visit_time) override {}
   void NotifyURLsModified(const URLRows& rows,
-                          bool is_from_expiration) override {
+                          UrlsModifiedReason reason) override {
     urls_modified_notifications_.push_back(
-        std::make_pair(is_from_expiration, rows));
+        std::make_pair(reason == UrlsModifiedReason::kExpired, rows));
   }
   void NotifyURLsDeleted(DeletionInfo deletion_info) override {
     urls_deleted_notifications_.push_back(std::move(deletion_info));

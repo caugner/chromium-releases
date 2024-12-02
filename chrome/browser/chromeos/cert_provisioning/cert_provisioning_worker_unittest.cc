@@ -22,13 +22,16 @@
 #include "chrome/browser/chromeos/cert_provisioning/cert_provisioning_metrics.h"
 #include "chrome/browser/chromeos/cert_provisioning/cert_provisioning_test_helpers.h"
 #include "chrome/browser/chromeos/cert_provisioning/mock_cert_provisioning_invalidator.h"
-#include "chrome/browser/chromeos/platform_keys/key_permissions/key_permissions_service.h"
-#include "chrome/browser/chromeos/platform_keys/key_permissions/key_permissions_service_factory.h"
-#include "chrome/browser/chromeos/platform_keys/key_permissions/mock_key_permissions_service.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions/fake_user_private_token_kpm_service.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions/key_permissions_manager.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions/key_permissions_manager_impl.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions/mock_key_permissions_manager.h"
+#include "chrome/browser/chromeos/platform_keys/key_permissions/user_private_token_kpm_service_factory.h"
 #include "chrome/browser/chromeos/platform_keys/mock_platform_keys_service.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys_service.h"
 #include "chrome/browser/chromeos/platform_keys/platform_keys_service_factory.h"
+#include "chromeos/dbus/attestation/fake_attestation_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
@@ -46,6 +49,7 @@ using chromeos::attestation::MockTpmChallengeKeySubtle;
 using testing::_;
 using testing::AtLeast;
 using testing::Mock;
+using testing::SaveArg;
 using testing::StrictMock;
 
 namespace chromeos {
@@ -110,6 +114,20 @@ const std::string& GetPublicKey() {
   return public_key;
 }
 
+void VerifyDeleteKeyCalledOnce(CertScope cert_scope) {
+  const std::vector<::attestation::DeleteKeysRequest> delete_keys_history =
+      chromeos::AttestationClient::Get()
+          ->GetTestInterface()
+          ->delete_keys_history();
+  EXPECT_EQ(delete_keys_history.size(), 1);
+  EXPECT_EQ(delete_keys_history[0].username().empty(),
+            cert_scope != CertScope::kUser);
+  EXPECT_EQ(delete_keys_history[0].key_label_match(),
+            GetKeyName(kCertProfileId));
+  EXPECT_EQ(delete_keys_history[0].match_behavior(),
+            ::attestation::DeleteKeysRequest::MATCH_BEHAVIOR_EXACT);
+}
+
 // Using macros to reduce boilerplate code, but keep real line numbers in
 // error messages in case of expectation failure. They use some of protected
 // fields of CertProvisioningWorkerTest class and may be considered as extra
@@ -165,18 +183,18 @@ const std::string& GetPublicKey() {
             /*va_challenge=*/"", kProtoHashAlgo, kDataToSign));       \
   }
 
-#define EXPECT_START_CSR_TRY_LATER(START_CSR_FUNC, DELAY_MS)              \
-  {                                                                       \
-    EXPECT_CALL(cloud_policy_client_, START_CSR_FUNC)                     \
-        .Times(1)                                                         \
-        .WillOnce(RunOnceCallback<4>(                                     \
-            policy::DeviceManagementStatus::DM_STATUS_SUCCESS,            \
-            /*response_error=*/base::nullopt,                             \
-            /*try_again_later_ms=*/(DELAY_MS), /*invalidation_topic=*/"", \
-            /*va_challenge=*/"",                                          \
-            enterprise_management::HashingAlgorithm::                     \
-                HASHING_ALGORITHM_UNSPECIFIED,                            \
-            /*data_to_sign=*/""));                                        \
+#define EXPECT_START_CSR_TRY_LATER(START_CSR_FUNC, DELAY_MS)       \
+  {                                                                \
+    EXPECT_CALL(cloud_policy_client_, START_CSR_FUNC)              \
+        .Times(1)                                                  \
+        .WillOnce(RunOnceCallback<4>(                              \
+            policy::DeviceManagementStatus::DM_STATUS_SUCCESS,     \
+            /*response_error=*/base::nullopt,                      \
+            /*try_again_later_ms=*/(DELAY_MS), kInvalidationTopic, \
+            /*va_challenge=*/"",                                   \
+            enterprise_management::HashingAlgorithm::              \
+                HASHING_ALGORITHM_UNSPECIFIED,                     \
+            /*data_to_sign=*/""));                                 \
   }
 
 #define EXPECT_START_CSR_INVALID_REQUEST(START_CSR_FUNC)                     \
@@ -337,6 +355,7 @@ class CertProvisioningWorkerTest : public ::testing::Test {
   ~CertProvisioningWorkerTest() override = default;
 
   void SetUp() override {
+    ::chromeos::AttestationClient::InitializeFake();
     // There should not be any calls to callback before this expect is
     // overridden.
     EXPECT_CALL(callback_observer_, Callback).Times(0);
@@ -348,6 +367,7 @@ class CertProvisioningWorkerTest : public ::testing::Test {
   void TearDown() override {
     EXPECT_FALSE(
         attestation::TpmChallengeKeySubtleFactory::WillReturnTestingInstance());
+    ::chromeos::AttestationClient::Shutdown();
   }
 
  protected:
@@ -363,13 +383,20 @@ class CertProvisioningWorkerTest : public ::testing::Test {
     platform_keys::PlatformKeysServiceFactory::GetInstance()
         ->SetDeviceWideServiceForTesting(platform_keys_service_);
 
-    key_permissions_service_ =
-        static_cast<platform_keys::MockKeyPermissionsService*>(
-            platform_keys::KeyPermissionsServiceFactory::GetInstance()
-                ->SetTestingFactoryAndUse(
-                    GetProfile(),
-                    base::BindRepeating(
-                        &platform_keys::BuildMockKeyPermissionsService)));
+    key_permissions_manager_ =
+        std::make_unique<platform_keys::MockKeyPermissionsManager>();
+
+    platform_keys::UserPrivateTokenKeyPermissionsManagerServiceFactory::
+        GetInstance()
+            ->SetTestingFactory(
+                GetProfile(),
+                base::BindRepeating(
+                    &platform_keys::
+                        BuildFakeUserPrivateTokenKeyPermissionsManagerService,
+                    key_permissions_manager_.get()));
+    platform_keys::KeyPermissionsManagerImpl::
+        SetSystemTokenKeyPermissionsManagerForTesting(
+            key_permissions_manager_.get());
 
     // Only explicitly expected removals are allowed.
     EXPECT_CALL(*platform_keys_service_, RemoveCertificate).Times(0);
@@ -427,13 +454,13 @@ class CertProvisioningWorkerTest : public ::testing::Test {
 
   StrictMock<StateChangeCallbackObserver> state_change_callback_observer_;
   StrictMock<CallbackObserver> callback_observer_;
-  StrictMock<SpyingFakeCryptohomeClient> fake_cryptohome_client_;
   ProfileHelperForTesting profile_helper_for_testing_;
   TestingPrefServiceSimple testing_pref_service_;
 
   policy::MockCloudPolicyClient cloud_policy_client_;
   platform_keys::MockPlatformKeysService* platform_keys_service_ = nullptr;
-  platform_keys::MockKeyPermissionsService* key_permissions_service_ = nullptr;
+  std::unique_ptr<platform_keys::MockKeyPermissionsManager>
+      key_permissions_manager_ = nullptr;
 };
 
 // Checks that the worker makes all necessary requests to other modules during
@@ -478,8 +505,10 @@ TEST_F(CertProvisioningWorkerTest, Success) {
     EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
     EXPECT_CALL(state_change_callback_observer_, StateChangeCallback());
 
-    EXPECT_CALL(*key_permissions_service_,
-                SetCorporateKey(GetPublicKey(), /*callback=*/_));
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
         platform_keys::TokenId::kUser, GetPublicKey(),
@@ -554,8 +583,10 @@ TEST_F(CertProvisioningWorkerTest, NoVaSuccess) {
         kCertScopeStrUser, kCertProfileId, kCertProfileVersion, GetPublicKey(),
         /*callback=*/_));
 
-    EXPECT_CALL(*key_permissions_service_,
-                SetCorporateKey(GetPublicKey(), /*callback=*/_));
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
         platform_keys::TokenId::kUser, GetPublicKey(),
@@ -636,9 +667,10 @@ TEST_F(CertProvisioningWorkerTest, TryLaterManualRetry) {
 
     EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
 
-    // Note: No call to KeyPermissionsService::SetCorporateKey, because it is
-    // only performed for platform_keys::TokenId::kUser, but this test works
-    // with the system token.
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
         platform_keys::TokenId::kSystem, GetPublicKey(),
@@ -750,8 +782,10 @@ TEST_F(CertProvisioningWorkerTest, TryLaterWait) {
 
     EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
 
-    EXPECT_CALL(*key_permissions_service_,
-                SetCorporateKey(GetPublicKey(), /*callback=*/_));
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
         platform_keys::TokenId::kUser, GetPublicKey(),
@@ -812,15 +846,138 @@ TEST_F(CertProvisioningWorkerTest, TryLaterWait) {
   }
 }
 
+// Checks that when the server returns try_again_later field, the worker will
+// retry when the invalidation is triggered.
+TEST_F(CertProvisioningWorkerTest, InvalidationRespected) {
+  CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
+                           /*is_va_enabled=*/true, kCertProfileRenewalPeriod);
+
+  MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
+  MockCertProvisioningInvalidator* mock_invalidator = nullptr;
+  CertProvisioningWorkerImpl worker(
+      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      &cloud_policy_client_, MakeInvalidator(&mock_invalidator),
+      GetStateChangeCallback(), GetResultCallback());
+
+  const TimeDelta start_csr_delay = TimeDelta::FromSeconds(30);
+  const TimeDelta finish_csr_delay = TimeDelta::FromSeconds(30);
+  const TimeDelta download_cert_server_delay = TimeDelta::FromMilliseconds(100);
+  const TimeDelta small_delay = TimeDelta::FromMilliseconds(500);
+
+  EXPECT_CALL(state_change_callback_observer_, StateChangeCallback)
+      .Times(AtLeast(1));
+  {
+    testing::InSequence seq;
+
+    EXPECT_PREPARE_KEY_OK(
+        *mock_tpm_challenge_key,
+        StartPrepareKeyStep(attestation::AttestationKeyType::KEY_USER,
+                            /*will_register_key=*/true,
+                            GetKeyName(kCertProfileId),
+                            /*profile=*/_,
+                            /*callback=*/_));
+
+    EXPECT_START_CSR_TRY_LATER(
+        ClientCertProvisioningStartCsr(kCertScopeStrUser, kCertProfileId,
+                                       kCertProfileVersion, GetPublicKey(),
+                                       /*callback=*/_),
+        start_csr_delay.InMilliseconds());
+
+    worker.DoStep();
+    EXPECT_EQ(worker.GetState(),
+              CertProvisioningWorkerState::kKeypairGenerated);
+  }
+
+  base::RepeatingClosure on_invalidation_callback;
+  {
+    testing::InSequence seq;
+
+    EXPECT_START_CSR_OK(ClientCertProvisioningStartCsr(
+        kCertScopeStrUser, kCertProfileId, kCertProfileVersion, GetPublicKey(),
+        /*callback=*/_));
+    EXPECT_CALL(*mock_invalidator, Register(kInvalidationTopic, _))
+        .WillOnce(SaveArg<1>(&on_invalidation_callback));
+
+    EXPECT_SIGN_CHALLENGE_OK(*mock_tpm_challenge_key,
+                             StartSignChallengeStep(kChallenge,
+                                                    /*callback=*/_));
+
+    EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
+
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
+
+    EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
+        platform_keys::TokenId::kUser, GetPublicKey(),
+        platform_keys::KeyAttributeType::kCertificateProvisioningId,
+        kCertProfileId, _));
+
+    EXPECT_SIGN_RSAPKC1_DIGEST_OK(SignRSAPKCS1Digest(
+        ::testing::Optional(platform_keys::TokenId::kUser), kDataToSign,
+        GetPublicKey(), kPkHashAlgo, /*callback=*/_));
+
+    EXPECT_FINISH_CSR_TRY_LATER(
+        ClientCertProvisioningFinishCsr(
+            kCertScopeStrUser, kCertProfileId, kCertProfileVersion,
+            GetPublicKey(), kChallengeResponse, kSignature, /*callback=*/_),
+        finish_csr_delay.InMilliseconds());
+
+    FastForwardBy(start_csr_delay + small_delay);
+    EXPECT_EQ(worker.GetState(), CertProvisioningWorkerState::kSignCsrFinished);
+  }
+
+  {
+    testing::InSequence seq;
+
+    EXPECT_FINISH_CSR_OK(ClientCertProvisioningFinishCsr(
+        kCertScopeStrUser, kCertProfileId, kCertProfileVersion, GetPublicKey(),
+        kChallengeResponse, kSignature, /*callback=*/_));
+
+    EXPECT_DOWNLOAD_CERT_TRY_LATER(
+        ClientCertProvisioningDownloadCert(kCertScopeStrUser, kCertProfileId,
+                                           kCertProfileVersion, GetPublicKey(),
+                                           /*callback=*/_),
+        download_cert_server_delay.InMilliseconds());
+
+    FastForwardBy(finish_csr_delay + small_delay);
+    EXPECT_EQ(worker.GetState(),
+              CertProvisioningWorkerState::kFinishCsrResponseReceived);
+  }
+
+  {
+    EXPECT_EQ(worker.GetState(),
+              CertProvisioningWorkerState::kFinishCsrResponseReceived);
+
+    testing::InSequence seq;
+
+    EXPECT_DOWNLOAD_CERT_OK(ClientCertProvisioningDownloadCert);
+
+    EXPECT_IMPORT_CERTIFICATE_OK(ImportCertificate(
+        platform_keys::TokenId::kUser, /*certificate=*/_, /*callback=*/_));
+
+    EXPECT_CALL(*mock_invalidator, Unregister()).Times(1);
+
+    EXPECT_CALL(callback_observer_,
+                Callback(cert_profile, CertProvisioningWorkerState::kSucceeded))
+        .Times(1);
+
+    on_invalidation_callback.Run();
+    EXPECT_EQ(worker.GetState(), CertProvisioningWorkerState::kSucceeded);
+  }
+}
+
 // Checks that when the server returns error status, the worker will enter an
 // error state and stop the provisioning.
 TEST_F(CertProvisioningWorkerTest, StatusErrorHandling) {
+  const CertScope kCertScope = CertScope::kUser;
   CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
                            /*is_va_enabled=*/true, kCertProfileRenewalPeriod);
 
   MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
   CertProvisioningWorkerImpl worker(
-      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      kCertScope, GetProfile(), &testing_pref_service_, cert_profile,
       &cloud_policy_client_, MakeInvalidator(), GetStateChangeCallback(),
       GetResultCallback());
 
@@ -841,12 +998,6 @@ TEST_F(CertProvisioningWorkerTest, StatusErrorHandling) {
         kCertScopeStrUser, kCertProfileId, kCertProfileVersion, GetPublicKey(),
         /*callback=*/_));
 
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_USER,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     EXPECT_CALL(callback_observer_,
                 Callback(cert_profile, CertProvisioningWorkerState::kFailed))
         .Times(1);
@@ -854,11 +1005,14 @@ TEST_F(CertProvisioningWorkerTest, StatusErrorHandling) {
 
   worker.DoStep();
   FastForwardBy(TimeDelta::FromSeconds(1));
+
+  VerifyDeleteKeyCalledOnce(kCertScope);
 }
 
 // Checks that when the server returns response error, the worker will enter an
 // error state and stop the provisioning. Also check factory.
 TEST_F(CertProvisioningWorkerTest, ResponseErrorHandling) {
+  const CertScope kCertScope = CertScope::kUser;
   base::HistogramTester histogram_tester;
 
   CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
@@ -866,7 +1020,7 @@ TEST_F(CertProvisioningWorkerTest, ResponseErrorHandling) {
 
   MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
   auto worker = CertProvisioningWorkerFactory::Get()->Create(
-      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      kCertScope, GetProfile(), &testing_pref_service_, cert_profile,
       &cloud_policy_client_, MakeInvalidator(), GetStateChangeCallback(),
       GetResultCallback());
 
@@ -885,12 +1039,6 @@ TEST_F(CertProvisioningWorkerTest, ResponseErrorHandling) {
 
     EXPECT_START_CSR_CA_ERROR(ClientCertProvisioningStartCsr);
 
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_USER,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     EXPECT_CALL(callback_observer_,
                 Callback(cert_profile, CertProvisioningWorkerState::kFailed))
         .Times(1);
@@ -898,6 +1046,8 @@ TEST_F(CertProvisioningWorkerTest, ResponseErrorHandling) {
 
   worker->DoStep();
   FastForwardBy(TimeDelta::FromSeconds(1));
+
+  VerifyDeleteKeyCalledOnce(kCertScope);
 
   histogram_tester.ExpectBucketCount("ChromeOS.CertProvisioning.Result.User",
                                      CertProvisioningWorkerState::kFailed, 1);
@@ -908,12 +1058,13 @@ TEST_F(CertProvisioningWorkerTest, ResponseErrorHandling) {
 }
 
 TEST_F(CertProvisioningWorkerTest, InconsistentDataErrorHandling) {
+  const CertScope kCertScope = CertScope::kUser;
   CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
                            /*is_va_enabled=*/true, kCertProfileRenewalPeriod);
 
   MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
   auto worker = CertProvisioningWorkerFactory::Get()->Create(
-      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      kCertScope, GetProfile(), &testing_pref_service_, cert_profile,
       &cloud_policy_client_, MakeInvalidator(), GetStateChangeCallback(),
       GetResultCallback());
 
@@ -932,12 +1083,6 @@ TEST_F(CertProvisioningWorkerTest, InconsistentDataErrorHandling) {
 
     EXPECT_START_CSR_INCONSISTENT_DATA(ClientCertProvisioningStartCsr);
 
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_USER,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     EXPECT_CALL(callback_observer_,
                 Callback(cert_profile,
                          CertProvisioningWorkerState::kInconsistentDataError))
@@ -946,6 +1091,8 @@ TEST_F(CertProvisioningWorkerTest, InconsistentDataErrorHandling) {
 
   worker->DoStep();
   FastForwardBy(TimeDelta::FromSeconds(1));
+
+  VerifyDeleteKeyCalledOnce(kCertScope);
 }
 
 // Checks that when the server returns TEMPORARY_UNAVAILABLE status code, the
@@ -1052,8 +1199,10 @@ TEST_F(CertProvisioningWorkerTest, RemoveRegisteredKey) {
 
     EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
 
-    EXPECT_CALL(*key_permissions_service_,
-                SetCorporateKey(GetPublicKey(), /*callback=*/_));
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_FAIL(SetAttributeForKey(
         platform_keys::TokenId::kUser, GetPublicKey(),
@@ -1128,7 +1277,7 @@ TEST_F(CertProvisioningWorkerTest, SerializationSuccess) {
           GetResultCallback());
 
   StrictMock<PrefServiceObserver> pref_observer(
-      &testing_pref_service_, GetPrefNameForSerialization(CertScope::kUser));
+      &testing_pref_service_, GetPrefNameForSerialization(kCertScope));
   base::Value pref_val;
 
   EXPECT_CALL(state_change_callback_observer_, StateChangeCallback)
@@ -1177,11 +1326,11 @@ TEST_F(CertProvisioningWorkerTest, SerializationSuccess) {
 
     mock_tpm_challenge_key = PrepareTpmChallengeKey();
 
-    EXPECT_CALL(
-        *mock_tpm_challenge_key,
-        RestorePreparedKeyState(attestation::AttestationKeyType::KEY_USER,
-                                /*will_register_key=*/true,
-                                GetKeyName(kCertProfileId), /*profile=*/_))
+    EXPECT_CALL(*mock_tpm_challenge_key,
+                RestorePreparedKeyState(
+                    attestation::AttestationKeyType::KEY_USER,
+                    /*will_register_key=*/true, GetKeyName(kCertProfileId),
+                    GetPublicKey(), /*profile=*/_))
         .Times(1);
 
     worker = CertProvisioningWorkerFactory::Get()->Deserialize(
@@ -1210,8 +1359,10 @@ TEST_F(CertProvisioningWorkerTest, SerializationSuccess) {
 
     EXPECT_REGISTER_KEY_OK(*mock_tpm_challenge_key, StartRegisterKeyStep);
 
-    EXPECT_CALL(*key_permissions_service_, SetCorporateKey(GetPublicKey(),
-                                                           /*callback=*/_));
+    EXPECT_CALL(
+        *key_permissions_manager_,
+        AllowKeyForUsage(/*callback=*/_, platform_keys::KeyUsage::kCorporate,
+                         GetPublicKey()));
 
     EXPECT_SET_ATTRIBUTE_FOR_KEY_OK(SetAttributeForKey(
         platform_keys::TokenId::kUser, GetPublicKey(),
@@ -1259,11 +1410,11 @@ TEST_F(CertProvisioningWorkerTest, SerializationSuccess) {
     EXPECT_CALL(*mock_invalidator, Register(kInvalidationTopic, _)).Times(1);
 
     mock_tpm_challenge_key = PrepareTpmChallengeKey();
-    EXPECT_CALL(
-        *mock_tpm_challenge_key,
-        RestorePreparedKeyState(attestation::AttestationKeyType::KEY_USER,
-                                /*will_register_key=*/true,
-                                GetKeyName(kCertProfileId), /*profile=*/_))
+    EXPECT_CALL(*mock_tpm_challenge_key,
+                RestorePreparedKeyState(
+                    attestation::AttestationKeyType::KEY_USER,
+                    /*will_register_key=*/true, GetKeyName(kCertProfileId),
+                    GetPublicKey(), /*profile=*/_))
         .Times(1);
 
     worker = CertProvisioningWorkerFactory::Get()->Deserialize(
@@ -1297,17 +1448,18 @@ TEST_F(CertProvisioningWorkerTest, SerializationSuccess) {
 }
 
 TEST_F(CertProvisioningWorkerTest, SerializationOnFailure) {
+  const CertScope kCertScope = CertScope::kUser;
   CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
                            /*is_va_enabled=*/true, kCertProfileRenewalPeriod);
 
   MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
   auto worker = CertProvisioningWorkerFactory::Get()->Create(
-      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      kCertScope, GetProfile(), &testing_pref_service_, cert_profile,
       &cloud_policy_client_, MakeInvalidator(), GetStateChangeCallback(),
       GetResultCallback());
 
-  PrefServiceObserver pref_observer(
-      &testing_pref_service_, GetPrefNameForSerialization(CertScope::kUser));
+  PrefServiceObserver pref_observer(&testing_pref_service_,
+                                    GetPrefNameForSerialization(kCertScope));
   base::Value pref_val;
 
   EXPECT_CALL(state_change_callback_observer_, StateChangeCallback)
@@ -1345,12 +1497,6 @@ TEST_F(CertProvisioningWorkerTest, SerializationOnFailure) {
     pref_val = ParseJson("{}");
     EXPECT_CALL(pref_observer, OnPrefValueUpdated(IsJson(pref_val))).Times(1);
 
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_USER,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     EXPECT_CALL(callback_observer_,
                 Callback(cert_profile, CertProvisioningWorkerState::kFailed))
         .Times(1);
@@ -1358,15 +1504,18 @@ TEST_F(CertProvisioningWorkerTest, SerializationOnFailure) {
 
   worker->DoStep();
   FastForwardBy(TimeDelta::FromSeconds(1));
+
+  VerifyDeleteKeyCalledOnce(kCertScope);
 }
 
 TEST_F(CertProvisioningWorkerTest, InformationalGetters) {
+  const CertScope kCertScope = CertScope::kUser;
   CertProfile cert_profile(kCertProfileId, kCertProfileVersion,
                            /*is_va_enabled=*/true, kCertProfileRenewalPeriod);
 
   MockTpmChallengeKeySubtle* mock_tpm_challenge_key = PrepareTpmChallengeKey();
   CertProvisioningWorkerImpl worker(
-      CertScope::kUser, GetProfile(), &testing_pref_service_, cert_profile,
+      kCertScope, GetProfile(), &testing_pref_service_, cert_profile,
       &cloud_policy_client_, MakeInvalidator(), GetStateChangeCallback(),
       GetResultCallback());
 
@@ -1394,18 +1543,14 @@ TEST_F(CertProvisioningWorkerTest, InformationalGetters) {
 
     EXPECT_START_CSR_CA_ERROR(ClientCertProvisioningStartCsr);
 
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_USER,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     EXPECT_CALL(callback_observer_,
                 Callback(cert_profile, CertProvisioningWorkerState::kFailed))
         .Times(1);
 
     worker.DoStep();
     FastForwardBy(TimeDelta::FromSeconds(1));
+
+    VerifyDeleteKeyCalledOnce(kCertScope);
 
     EXPECT_EQ(worker.GetState(), CertProvisioningWorkerState::kFailed);
     EXPECT_EQ(worker.GetPreviousState(),
@@ -1432,8 +1577,8 @@ TEST_F(CertProvisioningWorkerTest, CancelDeviceWorker) {
 
   EXPECT_CALL(callback_observer_, Callback).Times(0);
 
-  PrefServiceObserver pref_observer(
-      &testing_pref_service_, GetPrefNameForSerialization(CertScope::kDevice));
+  PrefServiceObserver pref_observer(&testing_pref_service_,
+                                    GetPrefNameForSerialization(kCertScope));
   base::Value pref_val;
 
   {
@@ -1470,12 +1615,6 @@ TEST_F(CertProvisioningWorkerTest, CancelDeviceWorker) {
   }
 
   {
-    EXPECT_CALL(
-        fake_cryptohome_client_,
-        OnTpmAttestationDeleteKey(attestation::AttestationKeyType::KEY_DEVICE,
-                                  GetKeyName(kCertProfileId)))
-        .Times(1);
-
     pref_val = ParseJson("{}");
     EXPECT_CALL(pref_observer, OnPrefValueUpdated(IsJson(pref_val))).Times(1);
 
@@ -1485,6 +1624,8 @@ TEST_F(CertProvisioningWorkerTest, CancelDeviceWorker) {
                 Callback(cert_profile, CertProvisioningWorkerState::kCanceled))
         .Times(1);
     FastForwardBy(TimeDelta::FromSeconds(1));
+
+    VerifyDeleteKeyCalledOnce(kCertScope);
   }
 
   histogram_tester.ExpectUniqueSample("ChromeOS.CertProvisioning.Result.Device",

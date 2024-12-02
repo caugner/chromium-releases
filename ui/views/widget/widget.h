@@ -98,6 +98,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   using Widgets = std::set<Widget*>;
   using ShapeRects = std::vector<gfx::Rect>;
   using PaintAsActiveCallbackList = base::RepeatingClosureList;
+  using Predicate = base::RepeatingCallback<bool(Widget*)>;
 
   enum class FrameType {
     kDefault,      // Use whatever the default would be.
@@ -396,16 +397,26 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Creates a decorated window Widget with the specified properties. The
   // returned Widget is owned by its NativeWidget; see Widget class comment for
   // details.
+  // The std::unique_ptr variant requires that delegate->owned_by_widget().
   static Widget* CreateWindowWithParent(WidgetDelegate* delegate,
                                         gfx::NativeView parent,
                                         const gfx::Rect& bounds = gfx::Rect());
+  static Widget* CreateWindowWithParent(
+      std::unique_ptr<WidgetDelegate> delegate,
+      gfx::NativeView parent,
+      const gfx::Rect& bounds = gfx::Rect());
 
   // Creates a decorated window Widget in the same desktop context as |context|.
   // The returned Widget is owned by its NativeWidget; see Widget class comment
   // for details.
+  // The std::unique_ptr variant requires that delegate->owned_by_widget().
   static Widget* CreateWindowWithContext(WidgetDelegate* delegate,
                                          gfx::NativeWindow context,
                                          const gfx::Rect& bounds = gfx::Rect());
+  static Widget* CreateWindowWithContext(
+      std::unique_ptr<WidgetDelegate> delegate,
+      gfx::NativeWindow context,
+      const gfx::Rect& bounds = gfx::Rect());
 
   // Closes all Widgets that aren't identified as "secondary widgets". Called
   // during application shutdown when the last non-secondary widget is closed.
@@ -615,7 +626,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Hides the widget.
   void Hide();
 
-  // Like Show(), but does not activate the window.
+  // Like Show(), but does not activate the window. Tests may be flaky on Mac:
+  // Mac browsertests do not have an activation policy so the widget may be
+  // activated.
   void ShowInactive();
 
   // Activates the widget, assuming it already exists and is visible.
@@ -876,6 +889,11 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     focus_on_creation_ = focus_on_creation;
   }
 
+  // Returns the parent of this widget. Note that a top-level widget is not
+  // necessarily a root widget and can have a parent.
+  Widget* parent() { return parent_; }
+  const Widget* parent() const { return parent_; }
+
   // True if the widget is considered top level widget. Top level widget
   // is a widget of TYPE_WINDOW, TYPE_PANEL, TYPE_WINDOW_FRAMELESS, BUBBLE,
   // POPUP or MENU, and has a focus manager and input method object associated
@@ -1053,6 +1071,11 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Non-owned pointer to the Widget's delegate. If a NULL delegate is supplied
   // to Init() a default WidgetDelegate is created.
   WidgetDelegate* widget_delegate_ = nullptr;
+
+  // The parent of this widget. This is the widget that associates with the
+  // |params.parent| supplied to Init(). If no parent is given or the native
+  // view parent has no associating Widget, this value will be nullptr.
+  Widget* parent_ = nullptr;
 
   // The root of the View hierarchy attached to this window.
   // WARNING: see warning in tooltip_manager_ for ordering dependencies with

@@ -62,7 +62,6 @@ class FullscreenDelegate;
 class NavigationControllerImpl;
 class NewTabDelegate;
 class ProfileImpl;
-class HttpAuthHandlerImpl;
 
 #if defined(OS_ANDROID)
 class BrowserControlsContainerView;
@@ -135,13 +134,12 @@ class TabImpl : public Tab,
 
   void ShowContextMenu(const content::ContextMenuParams& params);
 
-  void ShowHttpAuthPrompt(HttpAuthHandlerImpl* auth_handler);
-  void CloseHttpAuthPrompt();
-
 #if defined(OS_ANDROID)
   base::android::ScopedJavaGlobalRef<jobject> GetJavaTab() {
     return java_impl_;
   }
+
+  bool desktop_user_agent_enabled() { return desktop_user_agent_enabled_; }
 
   // Call this method to disable integration with the system-level Autofill
   // infrastructure. Useful in conjunction with InitializeAutofillForTests().
@@ -184,10 +182,6 @@ class TabImpl : public Tab,
                    const base::android::JavaParamRef<jobjectArray>& data);
   base::android::ScopedJavaLocalRef<jobjectArray> GetData(JNIEnv* env);
   jboolean IsRendererControllingBrowserControlsOffsets(JNIEnv* env);
-  void SetHttpAuth(JNIEnv* env,
-                   const base::android::JavaParamRef<jstring>& username,
-                   const base::android::JavaParamRef<jstring>& password);
-  void CancelHttpAuth(JNIEnv* env);
   base::android::ScopedJavaLocalRef<jstring> RegisterWebMessageCallback(
       JNIEnv* env,
       const base::android::JavaParamRef<jstring>& js_object_name,
@@ -202,6 +196,9 @@ class TabImpl : public Tab,
   void SetTranslateTargetLanguage(
       JNIEnv* env,
       const base::android::JavaParamRef<jstring>& translate_target_lang);
+  void SetDesktopUserAgentEnabled(JNIEnv* env, jboolean enable);
+  jboolean IsDesktopUserAgentEnabled(JNIEnv* env);
+  void Download(JNIEnv* env, jlong native_context_menu_params);
 #endif
 
   ErrorPageDelegate* error_page_delegate() { return error_page_delegate_; }
@@ -214,6 +211,7 @@ class TabImpl : public Tab,
   }
 
   // Tab:
+  Browser* GetBrowser() override;
   void SetErrorPageDelegate(ErrorPageDelegate* delegate) override;
   void SetFullscreenDelegate(FullscreenDelegate* delegate) override;
   void SetNewTabDelegate(NewTabDelegate* delegate) override;
@@ -279,7 +277,6 @@ class TabImpl : public Tab,
       content::WebContents* web_contents) override;
   bool OnlyExpandTopControlsAtPageTop() override;
   bool ShouldAnimateBrowserControlsHeightChanges() override;
-  bool EmbedsFullscreenWidget() override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
@@ -395,6 +392,8 @@ class TabImpl : public Tab,
 
   std::map<std::string, std::unique_ptr<WebMessageHostFactoryProxy>>
       js_name_to_proxy_;
+
+  bool desktop_user_agent_enabled_ = false;
 #endif
 
   bool is_fullscreen_ = false;
@@ -409,8 +408,6 @@ class TabImpl : public Tab,
   base::ObserverList<DataObserver>::Unchecked data_observers_;
 
   base::string16 title_;
-
-  HttpAuthHandlerImpl* auth_handler_ = nullptr;
 
   std::unique_ptr<js_injection::JsCommunicationHost> js_communication_host_;
 

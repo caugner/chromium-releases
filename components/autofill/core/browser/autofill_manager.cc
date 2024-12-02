@@ -61,6 +61,7 @@
 #include "components/autofill/core/browser/geo/phone_number_i18n.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
 #include "components/autofill/core/browser/metrics/form_events.h"
+#include "components/autofill/core/browser/payments/autofill_offer_manager.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/payments/payments_client.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
@@ -450,7 +451,9 @@ AutofillManager::FillingContext::FillingContext(
                             *optional_credit_card,
                             optional_cvc ? *optional_cvc : base::string16()))
                       : base::nullopt),
-      filled_field_name(field.unique_name()),
+      filled_field_renderer_id(field.unique_renderer_id),
+      filled_field_signature(field.GetFieldSignature()),
+      filled_field_unique_name(field.unique_name()),
       original_fill_time(AutofillTickClock::NowTicks()) {
   DCHECK(optional_profile || optional_credit_card);
   DCHECK(optional_credit_card || !optional_cvc);
@@ -1136,7 +1139,13 @@ void AutofillManager::FillProfileForm(const autofill::AutofillProfile& profile,
                            /*query_id=*/-1, form, field, profile);
 }
 
-void AutofillManager::OnFocusNoLongerOnForm() {
+void AutofillManager::OnFocusNoLongerOnForm(bool had_interacted_form) {
+  // For historical reasons, Chrome takes action on this message only if focus
+  // was previously on a form with which the user had interacted.
+  // TODO(crbug.com/1140473): Remove need for this short-circuit.
+  if (!had_interacted_form)
+    return;
+
   ProcessPendingFormForUpload();
 
 #if defined(OS_CHROMEOS)
@@ -1590,6 +1599,7 @@ void AutofillManager::Reset() {
       personal_data_, client_));
   credit_card_access_manager_.reset(new CreditCardAccessManager(
       driver(), client_, personal_data_, credit_card_form_event_logger_.get()));
+
   has_logged_autofill_enabled_ = false;
   has_logged_address_suggestions_count_ = false;
   did_show_suggestions_ = false;
@@ -1605,7 +1615,8 @@ void AutofillManager::Reset() {
   credit_card_action_ = AutofillDriver::FORM_DATA_ACTION_PREVIEW;
   initial_interaction_timestamp_ = TimeTicks();
   external_delegate_->Reset();
-  filling_contexts_map_.clear();
+  filling_context_by_renderer_id_.clear();
+  filling_context_by_unique_name_.clear();
 }
 
 AutofillManager::AutofillManager(
@@ -1651,6 +1662,7 @@ AutofillManager::AutofillManager(
         driver, this, GetAPIKeyForUrl(channel), client_->GetLogManager()));
   }
   CountryNames::SetLocaleString(app_locale_);
+  offer_manager_ = client_->GetAutofillOfferManager();
 }
 
 bool AutofillManager::RefreshDataModels() {
@@ -1736,9 +1748,9 @@ void AutofillManager::FillOrPreviewDataModelForm(
   DCHECK_EQ(form_structure->field_count(), form.fields.size());
 
   if (action == AutofillDriver::FORM_DATA_ACTION_FILL && !is_refill) {
-    filling_contexts_map_[form_structure->GetIdentifierForRefill()] =
-        std::make_unique<FillingContext>(*autofill_field, optional_profile,
-                                         optional_credit_card, optional_cvc);
+    SetFillingContext(*form_structure, std::make_unique<FillingContext>(
+                                           *autofill_field, optional_profile,
+                                           optional_credit_card, optional_cvc));
   }
 
   // Only record the types that are filled for an eventual refill if all the
@@ -1747,11 +1759,7 @@ void AutofillManager::FillOrPreviewDataModelForm(
   //  A form with the given name is already filled.
   //  A refill has not been attempted for that form yet.
   //  This fill is not a refill attempt.
-  FillingContext* filling_context = nullptr;
-  auto itr =
-      filling_contexts_map_.find(form_structure->GetIdentifierForRefill());
-  if (itr != filling_contexts_map_.end())
-    filling_context = itr->second.get();
+  FillingContext* filling_context = GetFillingContext(*form_structure);
   bool could_attempt_refill = filling_context != nullptr &&
                               !filling_context->attempted_refill && !is_refill;
 
@@ -2007,6 +2015,12 @@ std::vector<Suggestion> AutofillManager::GetCreditCardSuggestions(
       personal_data_->GetCreditCardSuggestions(
           type, SanitizeCreditCardFieldValue(field.value),
           client_->AreServerCardsSupported());
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillEnableOffersInDownstream) &&
+      offer_manager_) {
+    offer_manager_->UpdateSuggestionsWithOffers(client_->GetLastCommittedURL(),
+                                                suggestions);
+  }
   *should_display_gpay_logo =
       credit_card_access_manager_->ShouldDisplayGPayLogo();
 
@@ -2014,6 +2028,8 @@ std::vector<Suggestion> AutofillManager::GetCreditCardSuggestions(
     suggestions[i].frontend_id =
         MakeFrontendID(suggestions[i].backend_id, std::string());
   }
+
+  credit_card_form_event_logger_->set_suggestions(suggestions);
   return suggestions;
 }
 
@@ -2083,10 +2099,8 @@ void AutofillManager::OnFormsParsed(const std::vector<const FormData*>& forms,
     // been a refill attempt on that form yet, start the process of triggering a
     // refill.
     if (ShouldTriggerRefill(*form_structure)) {
-      auto itr =
-          filling_contexts_map_.find(form_structure->GetIdentifierForRefill());
-      DCHECK(itr != filling_contexts_map_.end());
-      FillingContext* filling_context = itr->second.get();
+      FillingContext* filling_context = GetFillingContext(*form_structure);
+      DCHECK(filling_context != nullptr);
 
       // If a timer for the refill was already running, it means the form
       // changed again. Stop the timer and start it again.
@@ -2453,18 +2467,44 @@ void AutofillManager::FillFieldWithValue(AutofillField* autofill_field,
   }
 }
 
+// TODO(crbug/896689): Remove code duplication once experiment is finished.
+void AutofillManager::SetFillingContext(
+    const FormStructure& form,
+    std::unique_ptr<FillingContext> context) {
+  if (base::FeatureList::IsEnabled(features::kAutofillRefillWithRendererIds)) {
+    filling_context_by_renderer_id_[form.unique_renderer_id()] =
+        std::move(context);
+  } else {
+    filling_context_by_unique_name_[form.GetIdentifierForRefill()] =
+        std::move(context);
+  }
+}
+
+// TODO(crbug/896689): Remove code duplication once experiment is finished.
+AutofillManager::FillingContext* AutofillManager::GetFillingContext(
+    const FormStructure& form) {
+  if (base::FeatureList::IsEnabled(features::kAutofillRefillWithRendererIds)) {
+    auto it = filling_context_by_renderer_id_.find(form.unique_renderer_id());
+    return it != filling_context_by_renderer_id_.end() ? it->second.get()
+                                                       : nullptr;
+  } else {
+    auto it =
+        filling_context_by_unique_name_.find(form.GetIdentifierForRefill());
+    return it != filling_context_by_unique_name_.end() ? it->second.get()
+                                                       : nullptr;
+  }
+}
+
 bool AutofillManager::ShouldTriggerRefill(const FormStructure& form_structure) {
-  // Should not refill if a form with the same name has not been filled
-  // before.
-  auto itr =
-      filling_contexts_map_.find(form_structure.GetIdentifierForRefill());
-  if (itr == filling_contexts_map_.end())
+  // Should not refill if a form with the same FormRendererId has not been
+  // filled before.
+  FillingContext* filling_context = GetFillingContext(form_structure);
+  if (filling_context == nullptr)
     return false;
 
   address_form_event_logger_->OnDidSeeFillableDynamicForm(sync_state_,
                                                           form_structure);
 
-  FillingContext* filling_context = itr->second.get();
   base::TimeTicks now = AutofillTickClock::NowTicks();
   base::TimeDelta delta = now - filling_context->original_fill_time;
 
@@ -2488,15 +2528,13 @@ void AutofillManager::TriggerRefill(const FormData& form) {
 
   address_form_event_logger_->OnDidRefill(sync_state_, *form_structure);
 
-  auto itr =
-      filling_contexts_map_.find(form_structure->GetIdentifierForRefill());
+  FillingContext* filling_context = GetFillingContext(*form_structure);
 
   // Since GetIdentifierForRefill() is not stable across dynamic changes,
-  // |filling_contexts_map_| may not contain the element anymore.
-  if (itr == filling_contexts_map_.end())
+  // |filling_context_by_unique_name_| may not contain the element anymore.
+  // TODO(crbug/896689): Can be replaced with DCHECK once experiment is over.
+  if (filling_context == nullptr)
     return;
-
-  FillingContext* filling_context = itr->second.get();
 
   // The refill attempt can happen from different paths, some of which happen
   // after waiting for a while. Therefore, although this condition has been
@@ -2508,11 +2546,41 @@ void AutofillManager::TriggerRefill(const FormData& form) {
   filling_context->attempted_refill = true;
 
   // Try to find the field from which the original field originated.
+  // Precedence is given to look up by |filled_field_renderer_id|.
+  // If that is unsuccessful, look up is done by |filled_field_signature|.
+  // TODO(crbug/896689): Clean up after feature launch.
   AutofillField* autofill_field = nullptr;
   for (const std::unique_ptr<AutofillField>& field : *form_structure) {
-    if (field->unique_name() == filling_context->filled_field_name) {
+    // TODO(crbug/896689): Clean up once experiment is over.
+    if ((base::FeatureList::IsEnabled(
+             features::kAutofillRefillWithRendererIds) &&
+         field->unique_renderer_id ==
+             filling_context->filled_field_renderer_id) ||
+        (!base::FeatureList::IsEnabled(
+             features::kAutofillRefillWithRendererIds) &&
+         field->unique_name() == filling_context->filled_field_unique_name)) {
       autofill_field = field.get();
       break;
+    }
+  }
+
+  // If the field was deleted, look for one with a matching signature. Prefer
+  // visible and newer fields over invisible or older ones.
+  if (base::FeatureList::IsEnabled(features::kAutofillRefillWithRendererIds) &&
+      autofill_field == nullptr) {
+    auto is_better = [](const AutofillField& f, const AutofillField& g) {
+      return std::forward_as_tuple(f.IsVisible(),
+                                   f.unique_renderer_id.value()) >
+             std::forward_as_tuple(g.IsVisible(), g.unique_renderer_id.value());
+    };
+
+    for (const std::unique_ptr<AutofillField>& field : *form_structure) {
+      if (field->GetFieldSignature() ==
+          filling_context->filled_field_signature) {
+        if (autofill_field == nullptr || is_better(*field, *autofill_field)) {
+          autofill_field = field.get();
+        }
+      }
     }
   }
 

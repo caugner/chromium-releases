@@ -3,6 +3,7 @@
 <translationbundle lang="mk">
 <translation id="1276998909102132017">Слики од галеријата</translation>
 <translation id="1430915738399379752">Печати</translation>
+<translation id="1473110567575736769">Тајмер од 3 секунди</translation>
 <translation id="1620510694547887537">Камера</translation>
 <translation id="1627744224761163218">4 x 4</translation>
 <translation id="1664224225747386870">Ништо не е снимено</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">Резолуција на камерата</translation>
 <translation id="3517926952904427380">Не може да фотографира во портрет</translation>
 <translation id="3569311554794739032">Дали навистина сакате да ја отстраните <ph name="FILE" />?</translation>
+<translation id="3750315947605636967">Друга апликација ја користи камерата</translation>
 <translation id="3810838688059735925">Видео</translation>
+<translation id="4000398125663085899">Новите фотографии и видеа отсега ќе се зачувуваат во папка во апликацијата „Датотеки“: „Мои датотеки &gt; Камера“</translation>
 <translation id="4118525110028899586">Паузирај го снимањето</translation>
 <translation id="4279490309300973883">Отсликување</translation>
 <translation id="4329152592498422850">Префрли на фотографирање во квадратна форма</translation>
@@ -58,11 +61,11 @@
 Ако повратните информации се за квалитетот на сликата или видеото, прикачете пример од фотографија или видео и опишете што не е во ред. (На пример, фотографијата е претемна или предметот не е во фокус.)</translation>
 <translation id="6420689864531458495">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> - <ph name="WIDTH" /> x <ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> мегапиксели</translation>
 <translation id="6681668084120808868">Фотографирај</translation>
-<translation id="6739700533200816396">Фотографиите и видеата отсега ќе се зачувуваат во нова папка во апликацијата „Датотеки“: „Мои датотеки &gt; Камера“. Претходните фотографии и видеа нема да се преместат во новата папка.</translation>
 <translation id="6778482348691154169">Не може да се фотографира</translation>
 <translation id="6965382102122355670">Во ред</translation>
 <translation id="698156982839284926">3 секунди</translation>
 <translation id="712848772518857951">Дали навистина сакате да отстраните <ph name="COUNT" /> ставки?</translation>
+<translation id="7134221860976209830">Тајмер од 10 секунди</translation>
 <translation id="7243947652761655814">Видеорезолуција</translation>
 <translation id="7337660886763914220">Грешки во системот со датотеки.</translation>
 <translation id="7557677699350329807">Префрли на следната камера</translation>
@@ -70,7 +73,6 @@
 <translation id="7649070708921625228">Помош</translation>
 <translation id="7658239707568436148">Откажи</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">Тајмер</translation>
 <translation id="8067883171444229417">Пушти го видеото</translation>
 <translation id="8131740175452115882">Потврди</translation>
 <translation id="8145038249676204903">Префрли на фотографирање</translation>

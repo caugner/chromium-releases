@@ -60,6 +60,8 @@ public class LinkToTextCoordinator extends EmptyTabObserver {
                 params, new ChromeShareExtras.Builder().build(), System.currentTimeMillis());
 
         if (selector.isEmpty()) {
+            // TODO(gayane): Android toast should be replace by another toast like UI which allows
+            // custom positioning as |setView| and |setGravity| are deprecated starting API 30.
             String toastMessage =
                     mContext.getResources().getString(R.string.link_to_text_failure_toast_message);
             Toast toast = Toast.makeText(mContext, toastMessage, Toast.LENGTH_SHORT);
@@ -67,10 +69,13 @@ public class LinkToTextCoordinator extends EmptyTabObserver {
                     mContext.getResources().getDimensionPixelSize(R.dimen.y_offset));
             toast.show();
         }
+        // After generation results are communicated to users, cleanup to remove tab listener.
+        cleanup();
     }
 
     public void requestSelector() {
         if (mTab.getWebContents().getMainFrame() != mTab.getWebContents().getFocusedFrame()) {
+            LinkToTextMetricsBridge.logGenerateErrorIFrame();
             onSelectorReady(INVALID_SELECTOR);
             return;
         }
@@ -81,7 +86,6 @@ public class LinkToTextCoordinator extends EmptyTabObserver {
             @Override
             public void call(String selector) {
                 onSelectorReady(selector);
-                cleanup();
             }
         });
     }
@@ -99,18 +103,21 @@ public class LinkToTextCoordinator extends EmptyTabObserver {
     // Discard results if tab is not on foreground anymore.
     @Override
     public void onHidden(Tab tab, @TabHidingType int type) {
+        LinkToTextMetricsBridge.logGenerateErrorTabHidden();
         cleanup();
     }
 
     // Discard results if tab content is changed by typing new URL in omnibox.
     @Override
     public void onUpdateUrl(Tab tab, String url) {
+        LinkToTextMetricsBridge.logGenerateErrorOmniboxNavigation();
         cleanup();
     }
 
     // Discard results if tab content crashes.
     @Override
     public void onCrash(Tab tab) {
+        LinkToTextMetricsBridge.logGenerateErrorTabCrash();
         cleanup();
     }
 

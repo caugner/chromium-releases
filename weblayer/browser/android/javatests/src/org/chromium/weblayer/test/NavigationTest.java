@@ -13,7 +13,9 @@ import static org.junit.Assert.assertTrue;
 import static org.chromium.content_public.browser.test.util.TestThreadUtils.runOnUiThreadBlocking;
 
 import android.net.Uri;
+import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
+import android.webkit.WebResourceResponse;
 
 import androidx.test.filters.SmallTest;
 
@@ -25,8 +27,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.weblayer.Browser;
@@ -42,10 +44,15 @@ import org.chromium.weblayer.TabListCallback;
 import org.chromium.weblayer.WebLayer;
 import org.chromium.weblayer.shell.InstrumentationActivity;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -63,6 +70,9 @@ public class NavigationTest {
     private static final String URL2 = "data:text,bar";
     private static final String URL3 = "data:text,baz";
     private static final String URL4 = "data:text,bat";
+    private static final String STREAM_URL = "https://doesntreallyexist123.com/bar";
+    private static final String STREAM_HTML = "<html>foobar</html>";
+    private static final String STREAM_INNER_BODY = "foobar";
 
     private static boolean sShouldTrackPageInitiated;
 
@@ -160,6 +170,44 @@ public class NavigationTest {
             }
         }
 
+        public static class FirstContentfulPaintCallbackHelper extends CallbackHelper {
+            private long mNavigationStartMillis;
+            private long mFirstContentfulPaintMs;
+
+            public void notifyCalled(long navigationStartMillis, long firstContentfulPaintMs) {
+                mNavigationStartMillis = navigationStartMillis;
+                mFirstContentfulPaintMs = firstContentfulPaintMs;
+                notifyCalled();
+            }
+
+            public long getNavigationStartMillis() {
+                return mNavigationStartMillis;
+            }
+
+            public long getFirstContentfulPaintMs() {
+                return mFirstContentfulPaintMs;
+            }
+        }
+
+        public static class LargestContentfulPaintCallbackHelper extends CallbackHelper {
+            private long mNavigationStartMillis;
+            private long mLargestContentfulPaintMs;
+
+            public void notifyCalled(long navigationStartMillis, long largestContentfulPaintMs) {
+                mNavigationStartMillis = navigationStartMillis;
+                mLargestContentfulPaintMs = largestContentfulPaintMs;
+                notifyCalled();
+            }
+
+            public long getNavigationStartMillis() {
+                return mNavigationStartMillis;
+            }
+
+            public long getLargestContentfulPaintMs() {
+                return mLargestContentfulPaintMs;
+            }
+        }
+
         public NavigationCallbackHelper onStartedCallback = new NavigationCallbackHelper();
         public NavigationCallbackHelper onRedirectedCallback = new NavigationCallbackHelper();
         public NavigationCallbackHelper onReadyToCommitCallback = new NavigationCallbackHelper();
@@ -170,6 +218,10 @@ public class NavigationTest {
         public NavigationCallbackValueRecorder loadProgressChangedCallback =
                 new NavigationCallbackValueRecorder();
         public CallbackHelper onFirstContentfulPaintCallback = new CallbackHelper();
+        public FirstContentfulPaintCallbackHelper onFirstContentfulPaint2Callback =
+                new FirstContentfulPaintCallbackHelper();
+        public LargestContentfulPaintCallbackHelper onLargestContentfulPaintCallback =
+                new LargestContentfulPaintCallbackHelper();
         public UriCallbackHelper onOldPageNoLongerRenderedCallback = new UriCallbackHelper();
 
         @Override
@@ -200,6 +252,20 @@ public class NavigationTest {
         @Override
         public void onFirstContentfulPaint() {
             onFirstContentfulPaintCallback.notifyCalled();
+        }
+
+        @Override
+        public void onFirstContentfulPaint(
+                long navigationStartMillis, long firstContentfulPaintMs) {
+            onFirstContentfulPaint2Callback.notifyCalled(
+                    navigationStartMillis, firstContentfulPaintMs);
+        }
+
+        @Override
+        public void onLargestContentfulPaint(
+                long navigationStartMillis, long largestContentfulPaintMs) {
+            onLargestContentfulPaintCallback.notifyCalled(
+                    navigationStartMillis, largestContentfulPaintMs);
         }
 
         @Override
@@ -506,16 +572,16 @@ public class NavigationTest {
         InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl("about:blank");
         setNavigationCallback(activity);
 
-        int curCompletedCount = mCallback.onCompletedCallback.getCallCount();
+        int curFailedCount = mCallback.onFailedCallback.getCallCount();
 
         // navigateAndWait() expects a success code, so it won't work here.
         runOnUiThreadBlocking(
                 () -> { activity.getTab().getNavigationController().navigate(Uri.parse(url)); });
 
-        mCallback.onCompletedCallback.assertCalledWith(
-                curCompletedCount, url, LoadError.HTTP_CLIENT_ERROR);
-        assertEquals(mCallback.onCompletedCallback.getHttpStatusCode(), 404);
-        assertEquals(mCallback.onCompletedCallback.getNavigationState(), NavigationState.COMPLETE);
+        mCallback.onFailedCallback.assertCalledWith(
+                curFailedCount, url, LoadError.HTTP_CLIENT_ERROR);
+        assertEquals(mCallback.onFailedCallback.getHttpStatusCode(), 404);
+        assertEquals(mCallback.onFailedCallback.getNavigationState(), NavigationState.FAILED);
     }
 
     @Test
@@ -566,6 +632,14 @@ public class NavigationTest {
                                                  .getTab()
                                                  .getNavigationController()
                                                  .registerNavigationCallback(callback));
+    }
+
+    private void unregisterNavigationCallback(NavigationCallback callback) {
+        runOnUiThreadBlocking(()
+                                      -> mActivityTestRule.getActivity()
+                                                 .getTab()
+                                                 .getNavigationController()
+                                                 .unregisterNavigationCallback(callback));
     }
 
     private void navigateAndWaitForCompletion(String expectedUrl, Runnable navigateRunnable)
@@ -727,6 +801,7 @@ public class NavigationTest {
     // NavigationCallback implementation that sets the user-agent string in onNavigationStarted().
     private static final class UserAgentSetter extends NavigationCallback {
         private final String mValue;
+        public boolean mGotIllegalStateException;
 
         UserAgentSetter(String value) {
             mValue = value;
@@ -734,7 +809,11 @@ public class NavigationTest {
 
         @Override
         public void onNavigationStarted(Navigation navigation) {
-            navigation.setUserAgentString(mValue);
+            try {
+                navigation.setUserAgentString(mValue);
+            } catch (IllegalStateException e) {
+                mGotIllegalStateException = true;
+            }
         }
     }
 
@@ -751,6 +830,73 @@ public class NavigationTest {
         mActivityTestRule.navigateAndWait(url);
         String actualUserAgent = testServer.getLastRequest("/ok.html").headerValue("User-Agent");
         assertEquals(customUserAgent, actualUserAgent);
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(88)
+    public void testCantUsePerNavigationAndDesktopMode() throws Exception {
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(null);
+        UserAgentSetter setter = new UserAgentSetter("foo");
+        registerNavigationCallback(setter);
+        String url = testServer.setResponse("/ok.html", "<html>ok</html>", null);
+        runOnUiThreadBlocking(() -> { activity.getTab().setDesktopUserAgentEnabled(true); });
+        mActivityTestRule.navigateAndWait(url);
+        assertTrue(setter.mGotIllegalStateException);
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(88)
+    public void testDesktopMode() throws Exception {
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl("about:blank");
+        String url = testServer.setResponse("/ok.html", "<html>ok</html>", null);
+        runOnUiThreadBlocking(() -> { activity.getTab().setDesktopUserAgentEnabled(true); });
+        mActivityTestRule.navigateAndWait(url);
+        String actualUserAgent = testServer.getLastRequest("/ok.html").headerValue("User-Agent");
+        assertFalse(actualUserAgent.contains("Android"));
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(88)
+    public void testDesktopModeSticks() throws Exception {
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl("about:blank");
+        String url = testServer.setResponse("/ok.html", "<html>ok</html>", null);
+        String url2 = testServer.setResponse("/ok2.html", "<html>ok</html>", null);
+        runOnUiThreadBlocking(() -> { activity.getTab().setDesktopUserAgentEnabled(true); });
+        mActivityTestRule.navigateAndWait(url);
+        mActivityTestRule.navigateAndWait(url2);
+        String actualUserAgent = testServer.getLastRequest("/ok2.html").headerValue("User-Agent");
+        assertFalse(actualUserAgent.contains("Android"));
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(88)
+    public void testDesktopModeGetter() throws Exception {
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(null);
+        setNavigationCallback(activity);
+
+        UserAgentSetter setter = new UserAgentSetter("foo");
+        registerNavigationCallback(setter);
+        mActivityTestRule.navigateAndWait(URL1);
+        unregisterNavigationCallback(setter);
+        runOnUiThreadBlocking(
+                () -> { assertFalse(activity.getTab().isDesktopUserAgentEnabled()); });
+
+        runOnUiThreadBlocking(() -> { activity.getTab().setDesktopUserAgentEnabled(true); });
+        mActivityTestRule.navigateAndWait(URL2);
+        runOnUiThreadBlocking(() -> { assertTrue(activity.getTab().isDesktopUserAgentEnabled()); });
+
+        navigateAndWaitForCompletion(
+                URL1, () -> activity.getTab().getNavigationController().goBack());
+        runOnUiThreadBlocking(
+                () -> { assertFalse(activity.getTab().isDesktopUserAgentEnabled()); });
     }
 
     @Test
@@ -912,5 +1058,206 @@ public class NavigationTest {
                     Uri.parse("http://localhost:7/non_existent"));
         });
         callbackHelper.waitForFirst();
+    }
+
+    private void navigateToStream(InstrumentationActivity activity, String mimeType,
+            String cacheControl) throws Exception {
+        int curOnFirstContentfulPaintCount =
+                mCallback.onFirstContentfulPaintCallback.getCallCount();
+        InputStream stream = new ByteArrayInputStream(STREAM_HTML.getBytes(StandardCharsets.UTF_8));
+        WebResourceResponse response = new WebResourceResponse(mimeType, "UTF-8", stream);
+        if (cacheControl != null) {
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Cache-Control", cacheControl);
+            response.setResponseHeaders(headers);
+        }
+
+        final NavigateParams params = new NavigateParams.Builder().setResponse(response).build();
+        navigateAndWaitForCompletion(STREAM_URL,
+                ()
+                        -> activity.getTab().getNavigationController().navigate(
+                                Uri.parse(STREAM_URL), params));
+        mCallback.onFirstContentfulPaintCallback.waitForCallback(curOnFirstContentfulPaintCount);
+    }
+
+    private void assertStreamContent() throws Exception {
+        assertEquals(STREAM_INNER_BODY,
+                mActivityTestRule.executeScriptAndExtractString("document.body.innerText"));
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponse() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        // The code asserts that when InputStreams are used that the stock URL bar is not visible.
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "text/html", null);
+        assertStreamContent();
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseMimeSniff() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "", null);
+        assertStreamContent();
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseNoCacheControl() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "text/html", null);
+
+        mActivityTestRule.navigateAndWait(URL1);
+
+        int curFailedCount = mCallback.onFailedCallback.getCallCount();
+        runOnUiThreadBlocking(() -> { activity.getTab().getNavigationController().goBack(); });
+        mCallback.onFailedCallback.assertCalledWith(
+                curFailedCount, STREAM_URL, LoadError.CONNECTIVITY_ERROR);
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseCached() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "text/html", "private, max-age=60");
+
+        // Now check that the data can be reused from the cache if it had the correct headers.
+        mActivityTestRule.navigateAndWait(URL1);
+        int curOnFirstContentfulPaintCount =
+                mCallback.onFirstContentfulPaintCallback.getCallCount();
+        navigateAndWaitForCompletion(
+                STREAM_URL, () -> { activity.getTab().getNavigationController().goBack(); });
+        mCallback.onFirstContentfulPaintCallback.waitForCallback(curOnFirstContentfulPaintCount);
+        assertStreamContent();
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseCachedWithSniffedMimeType() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "", "private, max-age=60");
+
+        mActivityTestRule.navigateAndWait(URL1);
+
+        int curOnFirstContentfulPaintCount =
+                mCallback.onFirstContentfulPaintCallback.getCallCount();
+        navigateAndWaitForCompletion(
+                STREAM_URL, () -> { activity.getTab().getNavigationController().goBack(); });
+        mCallback.onFirstContentfulPaintCallback.waitForCallback(curOnFirstContentfulPaintCount);
+        assertStreamContent();
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseNoStore() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "text/html", "no-store");
+
+        mActivityTestRule.navigateAndWait(URL1);
+
+        int curFailedCount = mCallback.onFailedCallback.getCallCount();
+        runOnUiThreadBlocking(() -> { activity.getTab().getNavigationController().goBack(); });
+        mCallback.onFailedCallback.assertCalledWith(
+                curFailedCount, STREAM_URL, LoadError.CONNECTIVITY_ERROR);
+    }
+
+    @Test
+    @SmallTest
+    @MinWebLayerVersion(87)
+    public void testWebResponseExpired() throws Exception {
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(URL1);
+        TestThreadUtils.runOnUiThreadBlocking(() -> { activity.getBrowser().setTopView(null); });
+        setNavigationCallback(activity);
+
+        navigateToStream(activity, "text/html", "private, max-age=2");
+
+        Thread.sleep(5000);
+
+        mActivityTestRule.navigateAndWait(URL1);
+
+        int curFailedCount = mCallback.onFailedCallback.getCallCount();
+        runOnUiThreadBlocking(() -> { activity.getTab().getNavigationController().goBack(); });
+        mCallback.onFailedCallback.assertCalledWith(
+                curFailedCount, STREAM_URL, LoadError.CONNECTIVITY_ERROR);
+    }
+
+    @MinWebLayerVersion(88)
+    @Test
+    @SmallTest
+    public void testOnFirstContentfulPaintTiming() throws Exception {
+        long activityStartTimeMs = SystemClock.uptimeMillis();
+
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(null);
+        setNavigationCallback(activity);
+        String url = testServer.setResponse("/ok.html", "<html>ok</html>", null);
+
+        int count = mCallback.onFirstContentfulPaint2Callback.getCallCount();
+        mActivityTestRule.navigateAndWait(url);
+        mCallback.onFirstContentfulPaint2Callback.waitForCallback(count);
+
+        long navigationStart = mCallback.onFirstContentfulPaint2Callback.getNavigationStartMillis();
+        long current = SystemClock.uptimeMillis();
+        Assert.assertTrue(navigationStart <= current);
+        Assert.assertTrue(navigationStart >= activityStartTimeMs);
+
+        long firstContentfulPaint =
+                mCallback.onFirstContentfulPaint2Callback.getFirstContentfulPaintMs();
+        Assert.assertTrue(firstContentfulPaint <= (current - navigationStart));
+    }
+
+    @MinWebLayerVersion(88)
+    @Test
+    @SmallTest
+    public void testOnLargestContentfulPaintTiming() throws Exception {
+        long activityStartTimeMs = SystemClock.uptimeMillis();
+
+        TestWebServer testServer = TestWebServer.start();
+        InstrumentationActivity activity = mActivityTestRule.launchShellWithUrl(null);
+        setNavigationCallback(activity);
+        String url = testServer.setResponse("/ok.html", "<html>ok</html>", null);
+
+        int count = mCallback.onLargestContentfulPaintCallback.getCallCount();
+        mActivityTestRule.navigateAndWait(url);
+
+        // Navigate to a new page, as metrics like LCP are only reported at the end of the page load
+        // lifetime.
+        mActivityTestRule.navigateAndWait("about:blank");
+        mCallback.onLargestContentfulPaintCallback.waitForCallback(count);
+
+        long navigationStart =
+                mCallback.onLargestContentfulPaintCallback.getNavigationStartMillis();
+        long current = SystemClock.uptimeMillis();
+        Assert.assertTrue(navigationStart <= current);
+        Assert.assertTrue(navigationStart >= activityStartTimeMs);
+
+        long largestContentfulPaint =
+                mCallback.onLargestContentfulPaintCallback.getLargestContentfulPaintMs();
+        Assert.assertTrue(largestContentfulPaint <= (current - navigationStart));
     }
 }

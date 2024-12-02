@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "chrome/browser/web_applications/components/app_registry_controller.h"
@@ -58,6 +57,8 @@ class WebAppSyncBridge : public AppRegistryController,
       WebAppRegistrarMutable* registrar,
       SyncInstallDelegate* install_delegate,
       std::unique_ptr<syncer::ModelTypeChangeProcessor> change_processor);
+  WebAppSyncBridge(const WebAppSyncBridge&) = delete;
+  WebAppSyncBridge& operator=(const WebAppSyncBridge&) = delete;
   ~WebAppSyncBridge() override;
 
   using CommitCallback = base::OnceCallback<void(bool success)>;
@@ -70,7 +71,8 @@ class WebAppSyncBridge : public AppRegistryController,
   // AppRegistryController:
   void Init(base::OnceClosure callback) override;
   void SetAppUserDisplayMode(const AppId& app_id,
-                             DisplayMode user_display_mode) override;
+                             DisplayMode user_display_mode,
+                             bool is_user_action) override;
   void SetAppIsDisabled(const AppId& app_id, bool is_disabled) override;
   void SetAppIsLocallyInstalled(const AppId& app_id,
                                 bool is_locally_installed) override;
@@ -145,7 +147,6 @@ class WebAppSyncBridge : public AppRegistryController,
 
   base::WeakPtrFactory<WebAppSyncBridge> weak_ptr_factory_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(WebAppSyncBridge);
 };
 
 bool AreAppsLocallyInstalledByDefault();

@@ -6,6 +6,9 @@
 
 #include "base/mac/foundation_util.h"
 #include "base/memory/scoped_refptr.h"
+#import "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
@@ -13,6 +16,7 @@
 #include "ios/chrome/browser/passwords/ios_chrome_password_check_manager.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_check_manager_factory.h"
 #include "ios/chrome/browser/passwords/ios_chrome_password_store_factory.h"
+#import "ios/chrome/browser/signin/authentication_service.h"
 #import "ios/chrome/browser/signin/authentication_service_factory.h"
 #include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #import "ios/chrome/browser/sync/sync_setup_service.h"
@@ -24,6 +28,7 @@
 #import "ios/chrome/browser/ui/settings/elements/enterprise_info_popover_view_controller.h"
 #import "ios/chrome/browser/ui/settings/google_services/google_services_settings_coordinator.h"
 #import "ios/chrome/browser/ui/settings/password/password_issues_coordinator.h"
+#import "ios/chrome/browser/ui/settings/safety_check/safety_check_constants.h"
 #import "ios/chrome/browser/ui/settings/safety_check/safety_check_mediator.h"
 #import "ios/chrome/browser/ui/settings/safety_check/safety_check_navigation_commands.h"
 #import "ios/chrome/browser/ui/settings/safety_check/safety_check_table_view_controller.h"
@@ -86,6 +91,10 @@
 #pragma mark - ChromeCoordinator
 
 - (void)start {
+  AuthenticationService* authenticationService =
+      AuthenticationServiceFactory::GetForBrowserState(
+          self.browser->GetBrowserState());
+  authenticationService->WaitUntilCacheIsPopulated();
   SafetyCheckTableViewController* viewController =
       [[SafetyCheckTableViewController alloc]
           initWithStyle:UITableViewStyleGrouped];
@@ -97,8 +106,7 @@
   self.mediator = [[SafetyCheckMediator alloc]
       initWithUserPrefService:self.browser->GetBrowserState()->GetPrefs()
          passwordCheckManager:passwordCheckManager
-                  authService:AuthenticationServiceFactory::GetForBrowserState(
-                                  self.browser->GetBrowserState())
+                  authService:authenticationService
                   syncService:SyncSetupServiceFactory::GetForBrowserState(
                                   self.browser->GetBrowserState())];
 
@@ -110,6 +118,15 @@
   DCHECK(self.baseNavigationController);
   [self.baseNavigationController pushViewController:self.viewController
                                            animated:YES];
+}
+
+- (void)stop {
+  // If the Google Services Settings page was accessed through the Safe Browsing
+  // row of the safety check, we need to explicity stop the
+  // googleServicesSettingsCoordinator before closing the settings window.
+  [self.googleServicesSettingsCoordinator stop];
+  self.googleServicesSettingsCoordinator.delegate = nil;
+  self.googleServicesSettingsCoordinator = nil;
 }
 
 #pragma mark - SafetyCheckTableViewControllerPresentationDelegate
@@ -124,7 +141,8 @@
 
 - (void)didTapLinkURL:(NSURL*)URL {
   GURL convertedURL = net::GURLWithNSURL(URL);
-  const GURL safeBrowsingURL(kSafeBrowsingStringURL);
+  const GURL safeBrowsingURL(
+      base::SysNSStringToUTF8(kSafeBrowsingSafetyCheckStringURL));
 
   // Take the user to Sync and Google Services page in Bling instead of desktop
   // settings.
@@ -189,6 +207,10 @@
 
 - (void)showSafeBrowsingPreferencePage {
   DCHECK(!self.googleServicesSettingsCoordinator);
+  base::RecordAction(
+      base::UserMetricsAction("Settings.SafetyCheck.ManageSafeBrowsing"));
+  base::UmaHistogramEnumeration("Settings.SafetyCheck.Interactions",
+                                SafetyCheckInteractions::kSafeBrowsingManage);
   self.googleServicesSettingsCoordinator =
       [[GoogleServicesSettingsCoordinator alloc]
           initWithBaseNavigationController:self.baseNavigationController
@@ -230,7 +252,8 @@
   self.passwordIssuesCoordinator = nil;
 }
 
-- (BOOL)willHandlePasswordDeletion:(const autofill::PasswordForm&)password {
+- (BOOL)willHandlePasswordDeletion:
+    (const password_manager::PasswordForm&)password {
   return NO;
 }
 

@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 import {browserProxy} from '../../browser_proxy/browser_proxy.js';
-import {assertInstanceof} from '../../chrome_util.js';
 import * as dom from '../../dom.js';
 import {DeviceOperator, parseMetadata} from '../../mojo/device_operator.js';
 import * as nav from '../../nav.js';
 import * as state from '../../state.js';
 import * as util from '../../util.js';
+import {windowController} from '../../window_controller/window_controller.js';
 
 /**
  * Creates a controller for the video preview of Camera view.
@@ -109,11 +109,8 @@ export class Preview {
    * @return {!Promise} Promise for the operation.
    */
   async setSource_(stream) {
-    const video =
-        assertInstanceof(document.createElement('video'), HTMLVideoElement);
-    video.id = 'preview-video';
-    video.classList = this.video_.classList;
-    video.muted = true;  // Mute to avoid echo from the captured audio.
+    const node = util.instantiateTemplate('#preview-video-template');
+    const video = dom.getFrom(node, 'video', HTMLVideoElement);
     await new Promise((resolve) => {
       const handler = () => {
         video.removeEventListener('canplay', handler);
@@ -123,7 +120,7 @@ export class Preview {
       video.srcObject = stream;
     });
     await video.play();
-    this.video_.parentElement.replaceChild(video, this.video_);
+    this.video_.parentElement.replaceChild(node, this.video_);
     this.video_.removeAttribute('srcObject');
     this.video_.load();
     this.video_ = video;
@@ -159,8 +156,9 @@ export class Preview {
 
   /**
    * Stops the preview.
+   * @return {!Promise}
    */
-  stop() {
+  async stop() {
     if (this.watchdog_) {
       clearInterval(this.watchdog_);
       this.watchdog_ = null;
@@ -168,7 +166,13 @@ export class Preview {
     // Pause video element to avoid black frames during transition.
     this.video_.pause();
     if (this.stream_) {
-      this.stream_.getVideoTracks()[0].stop();
+      const track = this.stream_.getVideoTracks()[0];
+      const {deviceId} = track.getSettings();
+      track.stop();
+      const deviceOperator = await DeviceOperator.getInstance();
+      if (deviceOperator !== null) {
+        await deviceOperator.waitForDeviceClose(deviceId);
+      }
       this.stream_ = null;
     }
     state.set(state.State.STREAMING, false);
@@ -229,28 +233,33 @@ export class Preview {
       element.textContent = val;
     };
 
-    const buildInverseTable = (obj, prefix) => {
-      const tbl = {};
+    /**
+     * @param {!Object<string, number>} obj
+     * @param {string} prefix
+     * @return {!Map<number, string>}
+     */
+    const buildInverseMap = (obj, prefix) => {
+      const map = new Map();
       for (const [key, val] of Object.entries(obj)) {
         if (!key.startsWith(prefix)) {
           continue;
         }
-        if (tbl.hasOwnProperty(val)) {
+        if (map.has(val)) {
           console.error(`Duplicated value: ${val}`);
           continue;
         }
-        tbl[val] = key.slice(prefix.length);
+        map.set(val, key.slice(prefix.length));
       }
-      return tbl;
+      return map;
     };
 
-    const afStateName = buildInverseTable(
+    const afStateName = buildInverseMap(
         cros.mojom.AndroidControlAfState, 'ANDROID_CONTROL_AF_STATE_');
-    const aeStateName = buildInverseTable(
+    const aeStateName = buildInverseMap(
         cros.mojom.AndroidControlAeState, 'ANDROID_CONTROL_AE_STATE_');
-    const awbStateName = buildInverseTable(
+    const awbStateName = buildInverseMap(
         cros.mojom.AndroidControlAwbState, 'ANDROID_CONTROL_AWB_STATE_');
-    const aeAntibandingModeName = buildInverseTable(
+    const aeAntibandingModeName = buildInverseMap(
         cros.mojom.AndroidControlAeAntibandingMode,
         'ANDROID_CONTROL_AE_ANTIBANDING_MODE_');
 
@@ -265,7 +274,7 @@ export class Preview {
         showValue('#preview-focus-distance', `${focusDistance} cm`);
       },
       [tag.ANDROID_CONTROL_AF_STATE]: ([value]) => {
-        showValue('#preview-af-state', afStateName[value]);
+        showValue('#preview-af-state', afStateName.get(value));
       },
       [tag.ANDROID_SENSOR_SENSITIVITY]: ([value]) => {
         const sensitivity = value;
@@ -280,10 +289,11 @@ export class Preview {
         showValue('#preview-frame-duration', `${frameFrequency} Hz`);
       },
       [tag.ANDROID_CONTROL_AE_ANTIBANDING_MODE]: ([value]) => {
-        showValue('#preview-ae-antibanding-mode', aeAntibandingModeName[value]);
+        showValue(
+            '#preview-ae-antibanding-mode', aeAntibandingModeName.get(value));
       },
       [tag.ANDROID_CONTROL_AE_STATE]: ([value]) => {
-        showValue('#preview-ae-state', aeStateName[value]);
+        showValue('#preview-ae-state', aeStateName.get(value));
       },
       [tag.ANDROID_COLOR_CORRECTION_GAINS]: ([valueRed, , , valueBlue]) => {
         const wbGainRed = valueRed.toFixed(2);
@@ -292,7 +302,7 @@ export class Preview {
         showValue('#preview-wb-gain-blue', `${wbGainBlue}x`);
       },
       [tag.ANDROID_CONTROL_AWB_STATE]: ([value]) => {
-        showValue('#preview-awb-state', awbStateName[value]);
+        showValue('#preview-awb-state', awbStateName.get(value));
       },
       [tag.ANDROID_CONTROL_AF_MODE]: ([value]) => {
         displayCategory(
@@ -421,7 +431,7 @@ export class Preview {
         .then(() => {
           // Resize window by aspect ratio only if it's not maximized or
           // fullscreen.
-          if (browserProxy.isFullscreenOrMaximized()) {
+          if (windowController.isFullscreenOrMaximized()) {
             return;
           }
           return browserProxy.fitWindow();
