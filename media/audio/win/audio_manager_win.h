@@ -18,15 +18,15 @@ class PCMWaveOutAudioOutputStream;
 // the AudioManager class.
 class AudioManagerWin : public AudioManagerBase {
  public:
-  AudioManagerWin() {}
+  AudioManagerWin();
   // Implementation of AudioManager.
   virtual bool HasAudioOutputDevices();
   virtual bool HasAudioInputDevices();
   virtual AudioOutputStream* MakeAudioOutputStream(AudioParameters params);
-  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params,
-                                                 int samples_per_packet);
+  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params);
   virtual void MuteAll();
   virtual void UnMuteAll();
+  virtual string16 GetAudioInputDeviceModel();
 
   // Windows-only methods to free a stream created in MakeAudioStream. These
   // are called internally by the audio stream when it has been closed.
@@ -36,8 +36,11 @@ class AudioManagerWin : public AudioManagerBase {
   void ReleaseInputStream(PCMWaveInAudioInputStream* stream);
 
  private:
-  friend void DestroyAudioManagerWin(void *);
   virtual ~AudioManagerWin();
+
+  // Number of currently open output streams.
+  int num_output_streams_;
+
   DISALLOW_COPY_AND_ASSIGN(AudioManagerWin);
 };
 

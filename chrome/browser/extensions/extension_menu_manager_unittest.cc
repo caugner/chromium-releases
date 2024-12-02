@@ -10,8 +10,8 @@
 #include "base/scoped_vector.h"
 #include "base/values.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -37,21 +37,21 @@ class ExtensionMenuManagerTest : public testing::Test {
   ExtensionMenuItem* CreateTestItem(Extension* extension) {
     ExtensionMenuItem::Type type = ExtensionMenuItem::NORMAL;
     ExtensionMenuItem::ContextList contexts(ExtensionMenuItem::ALL);
-    ExtensionMenuItem::Id id(extension->id(), next_id_++);
+    ExtensionMenuItem::Id id(NULL, extension->id(), next_id_++);
     return new ExtensionMenuItem(id, "test", false, type, contexts);
   }
 
   // Creates and returns a test Extension. The caller does *not* own the return
   // value.
   Extension* AddExtension(std::string name) {
-    Extension* extension = prefs_.AddExtension(name);
+    scoped_refptr<Extension> extension = prefs_.AddExtension(name);
     extensions_.push_back(extension);
     return extension;
   }
 
  protected:
   ExtensionMenuManager manager_;
-  ScopedVector<Extension> extensions_;
+  ExtensionList extensions_;
   TestExtensionPrefs prefs_;
   int next_id_;
 
@@ -94,7 +94,7 @@ TEST_F(ExtensionMenuManagerTest, AddGetRemoveItems) {
   ASSERT_EQ(2u, manager_.MenuItems(extension_id)->size());
 
   // Make sure removing a non-existent item returns false.
-  ExtensionMenuItem::Id id(extension->id(), id3.second + 50);
+  ExtensionMenuItem::Id id(NULL, extension->id(), id3.uid + 50);
   ASSERT_FALSE(manager_.RemoveContextMenuItem(id));
 }
 
@@ -211,7 +211,7 @@ TEST_F(ExtensionMenuManagerTest, DeleteParent) {
 
   // Now remove item1 and make sure item2 and item3 are gone as well.
   ASSERT_TRUE(manager_.RemoveContextMenuItem(item1_id));
-  ASSERT_EQ(0u, manager_.MenuItems(extension->id())->size());
+  ASSERT_EQ(NULL, manager_.MenuItems(extension->id()));
   ASSERT_EQ(0u, manager_.items_by_id_.size());
   ASSERT_EQ(NULL, manager_.GetItemById(item1_id));
   ASSERT_EQ(NULL, manager_.GetItemById(item2_id));
@@ -323,7 +323,7 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
   // gone.
   notifier->Notify(NotificationType::EXTENSION_UNLOADED,
                    Source<Profile>(NULL),
-                   Details<Extension>(extension1));
+                   Details<const Extension>(extension1));
   ASSERT_EQ(NULL, manager_.MenuItems(extension1->id()));
   ASSERT_EQ(1u, manager_.MenuItems(extension2->id())->size());
   ASSERT_TRUE(manager_.GetItemById(id1) == NULL);
@@ -331,25 +331,26 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
 }
 
 // A mock message service for tests of ExtensionMenuManager::ExecuteCommand.
-class MockExtensionMessageService : public ExtensionMessageService {
+class MockExtensionEventRouter : public ExtensionEventRouter {
  public:
-  explicit MockExtensionMessageService(Profile* profile) :
-      ExtensionMessageService(profile) {}
+  explicit MockExtensionEventRouter(Profile* profile) :
+      ExtensionEventRouter(profile) {}
 
-  MOCK_METHOD4(DispatchEventToRenderers, void(const std::string& event_name,
-                                              const std::string& event_args,
-                                              Profile* source_profile,
-                                              const GURL& event_url));
+  MOCK_METHOD5(DispatchEventImpl, void(const std::string& extension_id,
+                                       const std::string& event_name,
+                                       const std::string& event_args,
+                                       Profile* source_profile,
+                                       const GURL& event_url));
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockExtensionMessageService);
+  DISALLOW_COPY_AND_ASSIGN(MockExtensionEventRouter);
 };
 
 // A mock profile for tests of ExtensionMenuManager::ExecuteCommand.
 class MockTestingProfile : public TestingProfile {
  public:
   MockTestingProfile() {}
-  MOCK_METHOD0(GetExtensionMessageService, ExtensionMessageService*());
+  MOCK_METHOD0(GetExtensionEventRouter, ExtensionEventRouter*());
   MOCK_METHOD0(IsOffTheRecord, bool());
 
  private:
@@ -388,14 +389,31 @@ TEST_F(ExtensionMenuManagerTest, RemoveAll) {
   EXPECT_EQ(NULL, manager_.MenuItems(extension1->id()));
 }
 
+// Tests that removing all items one-by-one doesn't leave an entry around.
+TEST_F(ExtensionMenuManagerTest, RemoveOneByOne) {
+  // Add 2 test items.
+  Extension* extension1 = AddExtension("1111");
+  ExtensionMenuItem* item1 = CreateTestItem(extension1);
+  ExtensionMenuItem* item2 = CreateTestItem(extension1);
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item1));
+  ASSERT_TRUE(manager_.AddContextItem(extension1, item2));
+
+  ASSERT_FALSE(manager_.context_items_.empty());
+
+  manager_.RemoveContextMenuItem(item1->id());
+  manager_.RemoveContextMenuItem(item2->id());
+
+  ASSERT_TRUE(manager_.context_items_.empty());
+}
+
 TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   MessageLoopForUI message_loop;
   BrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
   MockTestingProfile profile;
 
-  scoped_refptr<MockExtensionMessageService> mock_message_service =
-      new MockExtensionMessageService(&profile);
+  scoped_ptr<MockExtensionEventRouter> mock_event_router(
+      new MockExtensionEventRouter(&profile));
 
   ContextMenuParams params;
   params.media_type = WebKit::WebContextMenuData::MediaTypeImage;
@@ -409,20 +427,22 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
   ExtensionMenuItem::Id id = item->id();
   ASSERT_TRUE(manager_.AddContextItem(extension, item));
 
-  EXPECT_CALL(profile, GetExtensionMessageService())
+  EXPECT_CALL(profile, GetExtensionEventRouter())
       .Times(1)
-      .WillOnce(Return(mock_message_service.get()));
+      .WillOnce(Return(mock_event_router.get()));
 
   // Use the magic of googlemock to save a parameter to our mock's
-  // DispatchEventToRenderers method into event_args.
+  // DispatchEventImpl method into event_args.
   std::string event_args;
-  std::string expected_event_name = "contextMenus/" + item->extension_id();
-  EXPECT_CALL(*mock_message_service.get(),
-              DispatchEventToRenderers(expected_event_name, _,
-                                       &profile,
-                                       GURL()))
+  std::string expected_event_name = "contextMenus";
+  EXPECT_CALL(*mock_event_router.get(),
+              DispatchEventImpl(item->extension_id(),
+                                expected_event_name,
+                                _,
+                                &profile,
+                                GURL()))
       .Times(1)
-      .WillOnce(SaveArg<1>(&event_args));
+      .WillOnce(SaveArg<2>(&event_args));
 
   manager_.ExecuteCommand(&profile, NULL /* tab_contents */, params, id);
 
@@ -441,7 +461,7 @@ TEST_F(ExtensionMenuManagerTest, ExecuteCommand) {
 
   int tmp_id = 0;
   ASSERT_TRUE(info->GetInteger("menuItemId", &tmp_id));
-  ASSERT_EQ(id.second, tmp_id);
+  ASSERT_EQ(id.uid, tmp_id);
 
   std::string tmp;
   ASSERT_TRUE(info->GetString("mediaType", &tmp));

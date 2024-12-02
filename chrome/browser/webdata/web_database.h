@@ -226,16 +226,19 @@ class WebDatabase {
   // Updates the database values for the specified profile.
   virtual bool UpdateAutoFillProfile(const AutoFillProfile& profile);
 
-  // Removes a row from the autofill_profiles table.  |profile_id| is the
-  // unique ID of the profile to remove.
-  virtual bool RemoveAutoFillProfile(int profile_id);
-
-  // Retrieves profile for unique id |profile_id|, owned by caller.
-  bool GetAutoFillProfileForID(int profile_id, AutoFillProfile** profile);
+  // Removes a row from the autofill_profiles table.  |guid| is the identifier
+  // of the profile to remove.
+  virtual bool RemoveAutoFillProfile(const std::string& guid);
 
   // Retrieves a profile with label |label|.  The caller owns |profile|.
+  // DEPRECATED: In favor of |GetAutoFillProfileForGUID(...)|.
+  // TODO(dhollowa): Remove labels.  http://crbug.com/58813
   bool GetAutoFillProfileForLabel(const string16& label,
                                   AutoFillProfile** profile);
+
+  // Retrieves a profile with guid |guid|.  The caller owns |profile|.
+  bool GetAutoFillProfileForGUID(const std::string& guid,
+                                 AutoFillProfile** profile);
 
   // Retrieves all profiles in the database.  Caller owns the returned profiles.
   virtual bool GetAutoFillProfiles(std::vector<AutoFillProfile*>* profiles);
@@ -246,21 +249,30 @@ class WebDatabase {
   // Updates the database values for the specified credit card.
   bool UpdateCreditCard(const CreditCard& credit_card);
 
-  // Removes a row from the credit_cards table.  |credit_card_id| is the
-  // unique ID of the credit card to remove.
-  bool RemoveCreditCard(int credit_card_id);
+  // Removes a row from the credit_cards table.  |guid| is the identifer  of the
+  // credit card to remove.
+  bool RemoveCreditCard(const std::string& guid);
 
   // Retrieves a credit card with label |label|.  The caller owns
   // |credit_card_id|.
+  // DEPRECATED: In favor of |GetCreditCardForGUID()|.
+  // TODO(dhollowa): Remove labels.  http://crbug.com/58813
   bool GetCreditCardForLabel(const string16& label,
-                                  CreditCard** credit_card);
+                             CreditCard** credit_card);
 
-  // Retrieves credit card for a card with unique id |credit_card_id|.
-  bool GetCreditCardForID(int credit_card_id, CreditCard** credit_card);
+  // Retrieves a credit card with guid |guid|.  The caller owns
+  // |credit_card_id|.
+  bool GetCreditCardForGUID(const std::string& guid, CreditCard** credit_card);
 
   // Retrieves all credit cards in the database.  Caller owns the returned
   // credit cards.
   virtual bool GetCreditCards(std::vector<CreditCard*>* credit_cards);
+
+  // Removes rows from autofill_profiles and credit_cards if they were created
+  // on or after |delete_begin| and strictly before |delete_end|.
+  bool RemoveAutoFillProfilesAndCreditCardsModifiedBetween(
+      base::Time delete_begin,
+      base::Time delete_end);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -308,6 +320,12 @@ class WebDatabase {
                            Autofill_GetAllAutofillEntries_TwoSame);
   FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill_UpdateDontReplace);
   FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, Autofill_AddFormFieldValues);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, AutoFillProfile);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, CreditCard);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, UpdateAutoFillProfile);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest, UpdateCreditCard);
+  FRIEND_TEST_ALL_PREFIXES(WebDatabaseTest,
+                           RemoveAutoFillProfilesAndCreditCardsModifiedBetween);
 
   // Methods for adding autofill entries at a specified time.  For
   // testing only.

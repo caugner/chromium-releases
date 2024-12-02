@@ -6,8 +6,9 @@
 
 #include "base/logging.h"
 #import "base/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/nsimage_cache_mac.h"
-#include "base/scoped_cftyperef.h"
+#include "chrome/browser/accessibility/browser_accessibility_state.h"
 #import "chrome/browser/cocoa/tab_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
 #import "chrome/browser/cocoa/themed_window.h"
@@ -73,6 +74,16 @@ const CGFloat kRapidCloseDist = 2.5;
 
 - (void)awakeFromNib {
   [self setShowsDivider:NO];
+
+  // It is desirable for us to remove the close button from the cocoa hierarchy,
+  // so that VoiceOver does not encounter it.
+  // TODO(dtseng): crbug.com/59978.
+  // Retain in case we remove it from its superview.
+  closeButtonRetainer_.reset([closeButton_ retain]);
+  if (Singleton<BrowserAccessibilityState>::get()->IsAccessibleBrowser()) {
+    // The superview gives up ownership of the closeButton here.
+    [closeButton_ removeFromSuperview];
+  }
 }
 
 - (void)dealloc {
@@ -967,9 +978,9 @@ const CGFloat kRapidCloseDist = 2.5;
 
   int workspace = -1;
   // It's possible to query in bulk, but probably not necessary.
-  scoped_cftyperef<CFArrayRef> windowIDs(CFArrayCreate(
+  base::mac::ScopedCFTypeRef<CFArrayRef> windowIDs(CFArrayCreate(
       NULL, reinterpret_cast<const void **>(&windowID), 1, NULL));
-  scoped_cftyperef<CFArrayRef> descriptions(
+  base::mac::ScopedCFTypeRef<CFArrayRef> descriptions(
       CGWindowListCreateDescriptionFromArray(windowIDs));
   DCHECK(CFArrayGetCount(descriptions.get()) <= 1);
   if (CFArrayGetCount(descriptions.get()) > 0) {

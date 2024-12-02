@@ -7,17 +7,16 @@
 #include "app/keyboard_codes.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/accessibility/browser_accessibility_state.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_widget_helper.h"
 #include "chrome/browser/renderer_host/render_widget_host_painting_observer.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/renderer_host/video_layer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
@@ -78,7 +77,7 @@ RenderWidgetHost::RenderWidgetHost(RenderProcessHost* process,
       routing_id_(routing_id),
       is_loading_(false),
       is_hidden_(false),
-      is_gpu_rendering_active_(false),
+      is_accelerated_compositing_active_(false),
       repaint_ack_pending_(false),
       resize_ack_pending_(false),
       mouse_move_pending_(false),
@@ -150,9 +149,6 @@ void RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_RequestMove, OnMsgRequestMove)
     IPC_MESSAGE_HANDLER(ViewHostMsg_PaintAtSize_ACK, OnMsgPaintAtSizeAck)
     IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateRect, OnMsgUpdateRect)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CreateVideo, OnMsgCreateVideo)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_UpdateVideo, OnMsgUpdateVideo)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DestroyVideo, OnMsgDestroyVideo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_HandleInputEvent_ACK, OnMsgInputEventAck)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Focus, OnMsgFocus)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Blur, OnMsgBlur)
@@ -161,10 +157,9 @@ void RenderWidgetHost::OnMessageReceived(const IPC::Message &msg) {
                         OnMsgImeUpdateTextInputState)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ImeCancelComposition,
                         OnMsgImeCancelComposition)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GpuRenderingActivated,
-                        OnMsgGpuRenderingActivated)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_DidActivateAcceleratedCompositing,
+                        OnMsgDidActivateAcceleratedCompositing)
 #if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ShowPopup, OnMsgShowPopup)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnMsgGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnMsgGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnMsgGetRootWindowRect)
@@ -237,7 +232,7 @@ void RenderWidgetHost::WasRestored() {
   // the backing store exists.
   bool needs_repainting;
   if (needs_repainting_on_restore_ || !backing_store ||
-      is_gpu_rendering_active()) {
+      is_accelerated_compositing_active()) {
     needs_repainting = true;
     needs_repainting_on_restore_ = false;
   } else {
@@ -252,6 +247,23 @@ void RenderWidgetHost::WasRestored() {
       NotificationType::RENDER_WIDGET_VISIBILITY_CHANGED,
       Source<RenderWidgetHost>(this),
       Details<bool>(&is_visible));
+
+  // It's possible for our size to be out of sync with the renderer. The
+  // following is one case that leads to this:
+  // 1. WasResized -> Send ViewMsg_Resize to render
+  // 2. WasResized -> do nothing as resize_ack_pending_ is true
+  // 3. WasHidden
+  // 4. OnMsgUpdateRect from (1) processed. Does NOT invoke WasResized as view
+  //    is hidden. Now renderer/browser out of sync with what they think size
+  //    is.
+  // By invoking WasResized the renderer is updated as necessary. WasResized
+  // does nothing if the sizes are already in sync.
+  //
+  // TODO: ideally ViewMsg_WasRestored would take a size. This way, the renderer
+  // could handle both the restore and resize at once. This isn't that big a
+  // deal as RenderWidget::WasRestored delays updating, so that the resize from
+  // WasResized is usually processed before the renderer is painted.
+  WasResized();
 }
 
 void RenderWidgetHost::WasResized() {
@@ -260,26 +272,39 @@ void RenderWidgetHost::WasResized() {
     return;
   }
 
-  gfx::Rect view_bounds = view_->GetViewBounds();
-  gfx::Size new_size(view_bounds.width(), view_bounds.height());
+  gfx::Size new_size = view_->GetViewBounds().size();
+  gfx::Rect reserved_rect = view_->reserved_contents_rect();
 
   // Avoid asking the RenderWidget to resize to its current size, since it
-  // won't send us a PaintRect message in that case.
-  if (new_size == current_size_)
+  // won't send us a PaintRect message in that case, unless reserved area is
+  // changed, but even in this case PaintRect message won't be sent.
+  if (new_size == current_size_ && reserved_rect == current_reserved_rect_)
     return;
 
-  if (in_flight_size_ != gfx::Size() && new_size == in_flight_size_)
+  if (in_flight_size_ != gfx::Size() && new_size == in_flight_size_ &&
+      in_flight_reserved_rect_ == reserved_rect) {
     return;
+  }
 
-  // We don't expect to receive an ACK when the requested size is empty.
-  if (!new_size.IsEmpty())
-    resize_ack_pending_ = true;
+  // We don't expect to receive an ACK when the requested size is empty or
+  // only reserved area is changed.
+  resize_ack_pending_ = !new_size.IsEmpty() && new_size != current_size_;
 
-  if (!Send(new ViewMsg_Resize(routing_id_, new_size,
-                               GetRootWindowResizerRect())))
+  if (!Send(new ViewMsg_Resize(routing_id_, new_size, reserved_rect))) {
     resize_ack_pending_ = false;
-  else
-    in_flight_size_ = new_size;
+  } else {
+    if (resize_ack_pending_) {
+      in_flight_size_ = new_size;
+      in_flight_reserved_rect_ = reserved_rect;
+    } else {
+      // Message was sent successfully, but we do not expect to receive an ACK,
+      // so update current values right away.
+      current_size_ = new_size;
+      // TODO(alekseys): send a message from renderer to ack a reserved rect
+      // changes only.
+      current_reserved_rect_ = reserved_rect;
+    }
+  }
 }
 
 void RenderWidgetHost::GotFocus() {
@@ -377,8 +402,9 @@ void RenderWidgetHost::DonePaintingToBackingStore() {
 }
 
 void RenderWidgetHost::ScheduleComposite() {
-  DCHECK(!is_hidden_ || !is_gpu_rendering_active_) <<
-      "ScheduleCompositeAndSync called while hidden!";
+  if (is_hidden_ || !is_accelerated_compositing_active_) {
+      return;
+  }
 
   // Send out a request to the renderer to paint the view if required.
   if (!repaint_ack_pending_ && !resize_ack_pending_ && !view_being_painted_) {
@@ -601,6 +627,13 @@ void RenderWidgetHost::ForwardEditCommandsForNextKeyEvent(
   // only handled by RenderView.
 }
 
+#if defined(TOUCH_UI)
+void RenderWidgetHost::ForwardTouchEvent(
+    const WebKit::WebTouchEvent& touch_event) {
+  ForwardInputEvent(touch_event, sizeof(WebKit::WebTouchEvent), false);
+}
+#endif
+
 void RenderWidgetHost::RendererExited() {
   // Clearing this flag causes us to re-create the renderer when recovering
   // from a crashed renderer.
@@ -622,8 +655,11 @@ void RenderWidgetHost::RendererExited() {
   repaint_ack_pending_ = false;
 
   in_flight_size_.SetSize(0, 0);
+  in_flight_reserved_rect_.SetRect(0, 0, 0, 0);
   current_size_.SetSize(0, 0);
+  current_reserved_rect_.SetRect(0, 0, 0, 0);
   is_hidden_ = false;
+  is_accelerated_compositing_active_ = false;
 
   if (view_) {
     view_->RenderViewGone();
@@ -678,10 +714,6 @@ void RenderWidgetHost::ImeConfirmComposition() {
 void RenderWidgetHost::ImeCancelComposition() {
   Send(new ViewMsg_ImeSetComposition(routing_id(), string16(),
             std::vector<WebKit::WebCompositionUnderline>(), 0, 0));
-}
-
-gfx::Rect RenderWidgetHost::GetRootWindowResizerRect() const {
-  return gfx::Rect();
 }
 
 void RenderWidgetHost::SetActive(bool active) {
@@ -780,6 +812,14 @@ void RenderWidgetHost::OnMsgUpdateRect(
     DCHECK(resize_ack_pending_);
     resize_ack_pending_ = false;
     in_flight_size_.SetSize(0, 0);
+    in_flight_reserved_rect_.SetRect(0, 0, 0, 0);
+    // Update our knowledge of the RenderWidget's resizer rect.
+    // ViewMsg_Resize is acknowledged only when view size is actually changed,
+    // otherwise current_reserved_rect_ is updated immediately after sending
+    // ViewMsg_Resize to the RenderWidget and can be clobbered by
+    // OnMsgUpdateRect called for a paint that was initiated before the resize
+    // message was sent.
+    current_reserved_rect_ = params.resizer_rect;
   }
 
   bool is_repaint_ack =
@@ -793,8 +833,7 @@ void RenderWidgetHost::OnMsgUpdateRect(
   DCHECK(!params.bitmap_rect.IsEmpty());
   DCHECK(!params.view_size.IsEmpty());
 
-  bool painted_synchronously = true;  // Default to sending a paint ACK below.
-  if (!is_gpu_rendering_active_) {
+  if (!is_accelerated_compositing_active_) {
     const size_t size = params.bitmap_rect.height() *
         params.bitmap_rect.width() * 4;
     TransportDIB* dib = process_->GetTransportDIB(params.bitmap);
@@ -817,8 +856,7 @@ void RenderWidgetHost::OnMsgUpdateRect(
         // renderer-supplied bits. The view will read out of the backing store
         // later to actually draw to the screen.
         PaintBackingStoreRect(params.bitmap, params.bitmap_rect,
-                              params.copy_rects, params.view_size,
-                              &painted_synchronously);
+                              params.copy_rects, params.view_size);
       }
     }
   }
@@ -826,10 +864,8 @@ void RenderWidgetHost::OnMsgUpdateRect(
   // ACK early so we can prefetch the next PaintRect if there is a next one.
   // This must be done AFTER we're done painting with the bitmap supplied by the
   // renderer. This ACK is a signal to the renderer that the backing store can
-  // be re-used, so the bitmap may be invalid after this call. If the backing
-  // store is painting asynchronously, it will manage issuing this IPC.
-  if (painted_synchronously)
-    Send(new ViewMsg_UpdateRect_ACK(routing_id_));
+  // be re-used, so the bitmap may be invalid after this call.
+  Send(new ViewMsg_UpdateRect_ACK(routing_id_));
 
   // We don't need to update the view if the view is hidden. We must do this
   // early return after the ACK is sent, however, or the renderer will not send
@@ -844,7 +880,7 @@ void RenderWidgetHost::OnMsgUpdateRect(
     // which attempts to move the plugin windows and in the process could
     // dispatch other window messages which could cause the view to be
     // destroyed.
-    if (view_ && !is_gpu_rendering_active_) {
+    if (view_ && !is_accelerated_compositing_active_) {
       view_being_painted_ = true;
       view_->DidUpdateBackingStore(params.scroll_rect, params.dx, params.dy,
                                    params.copy_rects);
@@ -857,11 +893,9 @@ void RenderWidgetHost::OnMsgUpdateRect(
 
   // If we got a resize ack, then perhaps we have another resize to send?
   if (is_resize_ack && view_) {
-    gfx::Rect view_bounds = view_->GetViewBounds();
-    if (current_size_.width() != view_bounds.width() ||
-        current_size_.height() != view_bounds.height()) {
-      WasResized();
-    }
+    // WasResized checks the current size and sends the resize update only
+    // when something was actually changed.
+    WasResized();
   }
 
   if (painting_observer_)
@@ -870,27 +904,6 @@ void RenderWidgetHost::OnMsgUpdateRect(
   // Log the time delta for processing a paint message.
   TimeDelta delta = TimeTicks::Now() - paint_start;
   UMA_HISTOGRAM_TIMES("MPArch.RWH_OnMsgUpdateRect", delta);
-}
-
-void RenderWidgetHost::OnMsgCreateVideo(const gfx::Size& size) {
-  DCHECK(!video_layer_.get());
-
-  video_layer_.reset(view_->AllocVideoLayer(size));
-
-  // TODO(scherkus): support actual video ids!
-  Send(new ViewMsg_CreateVideo_ACK(routing_id_, -1));
-}
-
-void RenderWidgetHost::OnMsgUpdateVideo(TransportDIB::Id bitmap,
-                                        const gfx::Rect& bitmap_rect) {
-  PaintVideoLayer(bitmap, bitmap_rect);
-
-  // TODO(scherkus): support actual video ids!
-  Send(new ViewMsg_UpdateVideo_ACK(routing_id_, -1));
-}
-
-void RenderWidgetHost::OnMsgDestroyVideo() {
-  video_layer_.reset();
 }
 
 void RenderWidgetHost::OnMsgInputEventAck(const IPC::Message& message) {
@@ -965,28 +978,24 @@ void RenderWidgetHost::OnMsgImeCancelComposition() {
     view_->ImeCancelComposition();
 }
 
-void RenderWidgetHost::OnMsgGpuRenderingActivated(bool activated) {
+void RenderWidgetHost::OnMsgDidActivateAcceleratedCompositing(bool activated) {
 #if defined(OS_MACOSX)
-  bool old_state = is_gpu_rendering_active_;
+  bool old_state = is_accelerated_compositing_active_;
 #endif
-  is_gpu_rendering_active_ = activated;
+  is_accelerated_compositing_active_ = activated;
 #if defined(OS_MACOSX)
-  if (old_state != is_gpu_rendering_active_ && view_)
+  if (old_state != is_accelerated_compositing_active_ && view_)
     view_->GpuRenderingStateDidChange();
+#elif defined(OS_WIN)
+  if (view_)
+    view_->ShowCompositorHostWindow(is_accelerated_compositing_active_);
+#elif defined(TOOLKIT_USES_GTK)
+  if (view_)
+    view_->AcceleratedCompositingActivated(activated);
 #endif
 }
 
 #if defined(OS_MACOSX)
-
-void RenderWidgetHost::OnMsgShowPopup(
-    const ViewHostMsg_ShowPopup_Params& params) {
-  view_->ShowPopupWithItems(params.bounds,
-                            params.item_height,
-                            params.item_font_size,
-                            params.selected_item,
-                            params.popup_items,
-                            params.right_aligned);
-}
 
 void RenderWidgetHost::OnMsgGetScreenInfo(gfx::NativeViewId view,
                                           WebScreenInfo* results) {
@@ -1056,9 +1065,13 @@ void RenderWidgetHost::OnAcceleratedSurfaceSetTransportDIB(
 }
 
 void RenderWidgetHost::OnAcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window) {
+    gfx::PluginWindowHandle window, uint64 surface_id) {
   if (view_) {
-    view_->AcceleratedSurfaceBuffersSwapped(window);
+    // This code path could be updated to implement flow control for
+    // updating of accelerated plugins as well. However, if we add support
+    // for composited plugins then this is not necessary.
+    view_->AcceleratedSurfaceBuffersSwapped(window, surface_id,
+                                            0, 0, 0);
   }
 }
 #elif defined(OS_POSIX)
@@ -1081,19 +1094,13 @@ void RenderWidgetHost::OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id) {
     NOTIMPLEMENTED();
   }
 }
-
 #endif
 
 void RenderWidgetHost::PaintBackingStoreRect(
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
     const std::vector<gfx::Rect>& copy_rects,
-    const gfx::Size& view_size,
-    bool* painted_synchronously) {
-  // On failure, we need to be sure our caller knows we're done with the
-  // backing store.
-  *painted_synchronously = true;
-
+    const gfx::Size& view_size) {
   // The view may be destroyed already.
   if (!view_)
     return;
@@ -1108,8 +1115,7 @@ void RenderWidgetHost::PaintBackingStoreRect(
 
   bool needs_full_paint = false;
   BackingStoreManager::PrepareBackingStore(this, view_size, bitmap, bitmap_rect,
-                                           copy_rects, &needs_full_paint,
-                                           painted_synchronously);
+                                           copy_rects, &needs_full_paint);
   if (needs_full_paint) {
     repaint_start_time_ = TimeTicks::Now();
     repaint_ack_pending_ = true;
@@ -1135,26 +1141,6 @@ void RenderWidgetHost::ScrollBackingStoreRect(int dx, int dy,
   if (!backing_store || (backing_store->size() != view_size))
     return;
   backing_store->ScrollBackingStore(dx, dy, clip_rect, view_size);
-}
-
-void RenderWidgetHost::PaintVideoLayer(TransportDIB::Id bitmap,
-                                       const gfx::Rect& bitmap_rect) {
-  if (is_hidden_ || !video_layer_.get())
-    return;
-
-  video_layer_->CopyTransportDIB(process(), bitmap, bitmap_rect);
-
-  // Don't update the view if we're hidden or if the view has been destroyed.
-  if (is_hidden_ || !view_)
-    return;
-
-  // Trigger a paint for the updated video layer bitmap.
-  std::vector<gfx::Rect> copy_rects;
-  copy_rects.push_back(bitmap_rect);
-
-  view_being_painted_ = true;
-  view_->DidUpdateBackingStore(gfx::Rect(), 0, 0, copy_rects);
-  view_being_painted_ = false;
 }
 
 void RenderWidgetHost::ToggleSpellPanel(bool is_currently_visible) {

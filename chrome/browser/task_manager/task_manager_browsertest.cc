@@ -6,13 +6,22 @@
 
 #include "app/l10n_util.h"
 #include "base/file_path.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_window.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/background_contents_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crashed_extension_infobar.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
+#include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/notification.h"
+#include "chrome/browser/notifications/notification_test_util.h"
+#include "chrome/browser/notifications/notification_ui_manager.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/page_transition_types.h"
 #include "chrome/test/in_process_browser_test.h"
@@ -76,19 +85,11 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
   }
 };
 
-// Crashes on Vista (dbg): http://crbug.com/44991
-#if defined(OS_WIN)
-#define ShutdownWhileOpen DISABLED_ShutdownWhileOpen
-#endif
 // Regression test for http://crbug.com/13361
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, ShutdownWhileOpen) {
   browser()->window()->ShowTaskManager();
 }
 
-// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
-#if defined(OS_WIN)
-#define NoticeTabContentsChanges DISABLED_NoticeTabContentsChanges
-#endif
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   EXPECT_EQ(0, model()->ResourceCount());
 
@@ -102,10 +103,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   // Open a new tab and make sure we notice that.
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
-  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-  params.index = 0;
-  browser()->AddTabWithURL(&params);
-  EXPECT_EQ(browser(), params.target);
+  AddTabAtIndex(0, url, PageTransition::TYPED);
   WaitForResourceChange(3);
 
   // Close the tab and verify that we notice.
@@ -115,13 +113,43 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeTabContentsChanges) {
   WaitForResourceChange(2);
 }
 
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeBGContentsChanges) {
+  EXPECT_EQ(0, model()->ResourceCount());
+
+  // Show the task manager. This populates the model, and helps with debugging
+  // (you see the task manager).
+  browser()->window()->ShowTaskManager();
+
+  // Browser and the New Tab Page.
+  EXPECT_EQ(2, model()->ResourceCount());
+
+  // Open a new background contents and make sure we notice that.
+  GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
+                                     FilePath(kTitle1File)));
+
+  BackgroundContentsService* service =
+      browser()->profile()->GetBackgroundContentsService();
+  string16 application_id(ASCIIToUTF16("test_app_id"));
+  service->LoadBackgroundContents(browser()->profile(),
+                                  url,
+                                  ASCIIToUTF16("background_page"),
+                                  application_id);
+  WaitForResourceChange(3);
+
+  // Close the background contents and verify that we notice.
+  service->ShutdownAssociatedBackgroundContents(application_id);
+  WaitForResourceChange(2);
+}
+
 #if defined(OS_WIN)
 // http://crbug.com/31663
-#define NoticeExtensionChanges DISABLED_NoticeExtensionChanges
+#define MAYBE_NoticeExtensionChanges DISABLED_NoticeExtensionChanges
+#else
+// Flaky test bug filed in http://crbug.com/51701
+#define MAYBE_NoticeExtensionChanges FLAKY_NoticeExtensionChanges
 #endif
 
-// Flaky test bug filed in http://crbug.com/51701
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, FLAKY_NoticeExtensionChanges) {
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_NoticeExtensionChanges) {
   EXPECT_EQ(0, model()->ResourceCount());
 
   // Show the task manager. This populates the model, and helps with debugging
@@ -138,10 +166,39 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, FLAKY_NoticeExtensionChanges) {
   WaitForResourceChange(3);
 }
 
-// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
-#if defined(OS_WIN)
-#define KillExtension DISABLED_KillExtension
-#endif
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeNotificationChanges) {
+  EXPECT_EQ(0, model()->ResourceCount());
+
+  // Show the task manager.
+  browser()->window()->ShowTaskManager();
+  // Expect to see the browser and the New Tab Page renderer.
+  EXPECT_EQ(2, model()->ResourceCount());
+
+  // Show a notification.
+  NotificationUIManager* notifications =
+      g_browser_process->notification_ui_manager();
+
+  string16 content = DesktopNotificationService::CreateDataUrl(
+      GURL(), ASCIIToUTF16("Hello World!"), string16(),
+      WebKit::WebTextDirectionDefault);
+
+  scoped_refptr<NotificationDelegate> del1(new MockNotificationDelegate("n1"));
+  Notification n1(
+      GURL(), GURL(content), ASCIIToUTF16("Test 1"), string16(), del1.get());
+  scoped_refptr<NotificationDelegate> del2(new MockNotificationDelegate("n2"));
+  Notification n2(
+      GURL(), GURL(content), ASCIIToUTF16("Test 2"), string16(), del2.get());
+
+  notifications->Add(n1, browser()->profile());
+  WaitForResourceChange(3);
+  notifications->Add(n2, browser()->profile());
+  WaitForResourceChange(4);
+  notifications->CancelById(n1.notification_id());
+  WaitForResourceChange(3);
+  notifications->CancelById(n2.notification_id());
+  WaitForResourceChange(2);
+}
+
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
@@ -163,10 +220,6 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtension) {
   WaitForResourceChange(2);
 }
 
-// Times out on Vista; disabled to keep tests fast. http://crbug.com/44991
-#if defined(OS_WIN)
-#define KillExtensionAndReload DISABLED_KillExtensionAndReload
-#endif
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillExtensionAndReload) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
@@ -249,9 +302,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   // Open a new tab and make sure we notice that.
   GURL url(ui_test_utils::GetTestUrl(FilePath(FilePath::kCurrentDirectory),
                                      FilePath(kTitle1File)));
-  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-  params.index = 0;
-  browser()->AddTabWithURL(&params);
+  AddTabAtIndex(0, url, PageTransition::TYPED);
   WaitForResourceChange(3);
 
   // Check that we get some value for the cache columns.

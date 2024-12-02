@@ -8,13 +8,14 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "third_party/ppapi/c/pp_completion_callback.h"
-#include "third_party/ppapi/c/pp_errors.h"
+#include "ppapi/c/pp_completion_callback.h"
+#include "ppapi/c/pp_errors.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserCompletion.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileChooserParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "webkit/glue/plugins/pepper_common.h"
 #include "webkit/glue/plugins/pepper_file_ref.h"
 #include "webkit/glue/plugins/pepper_plugin_delegate.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
@@ -37,12 +38,16 @@ PP_Resource Create(PP_Instance instance_id,
   if (!instance)
     return 0;
 
+  if ((options->mode != PP_FILECHOOSERMODE_OPEN) &&
+      (options->mode != PP_FILECHOOSERMODE_OPENMULTIPLE))
+    return 0;
+
   FileChooser* chooser = new FileChooser(instance, options);
   return chooser->GetReference();
 }
 
-bool IsFileChooser(PP_Resource resource) {
-  return !!Resource::GetAs<FileChooser>(resource);
+PP_Bool IsFileChooser(PP_Resource resource) {
+  return BoolToPPBool(!!Resource::GetAs<FileChooser>(resource));
 }
 
 int32_t Show(PP_Resource chooser_id, PP_CompletionCallback callback) {
@@ -118,9 +123,10 @@ void FileChooser::StoreChosenFiles(const std::vector<std::string>& files) {
   next_chosen_file_index_ = 0;
   std::vector<std::string>::const_iterator end_it = files.end();
   for (std::vector<std::string>::const_iterator it = files.begin();
-       it != end_it; it++)
-    chosen_files_.push_back(
-        new FileRef(module(), PP_FILESYSTEMTYPE_LOCALPERSISTENT, *it, ""));
+       it != end_it; it++) {
+    chosen_files_.push_back(make_scoped_refptr(
+        new FileRef(module(), FilePath().AppendASCII(*it))));
+  }
 
   if (!completion_callback_.func)
     return;

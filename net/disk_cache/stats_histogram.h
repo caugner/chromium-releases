@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 
 namespace disk_cache {
 
@@ -21,7 +21,7 @@ class Stats;
 // Class derivation of Histogram "deprecated," and should not be copied, and
 // may eventually go away.
 //
-class StatsHistogram : public Histogram {
+class StatsHistogram : public base::Histogram {
  public:
   class StatsSamples : public SampleSet {
    public:
@@ -44,10 +44,9 @@ class StatsHistogram : public Histogram {
   virtual Sample ranges(size_t i) const;
   virtual size_t bucket_count() const;
   virtual void SnapshotSample(SampleSet* sample) const;
+  virtual Inconsistencies FindCorruption(const SampleSet& snapshot) const;
 
  private:
-  friend class Histogram;
-
   bool init_;
   static const Stats* stats_;
   DISALLOW_COPY_AND_ASSIGN(StatsHistogram);

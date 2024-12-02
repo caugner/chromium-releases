@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,7 @@ BEGIN_MSG_MAP(T)
 END_MSG_MAP()
 
   bool Initialize() {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     DCHECK(!automation_client_.get());
     automation_client_ = CreateAutomationClient();
     if (!automation_client_.get()) {
@@ -51,7 +51,7 @@ END_MSG_MAP()
   }
 
   void Uninitialize() {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     if (IsValid()) {
       automation_client_->Uninitialize();
       automation_client_ = NULL;
@@ -75,8 +75,9 @@ END_MSG_MAP()
     // is Google Chrome Frame.
     FilePath actual_profile_name = profile_path.BaseName();
     launch_params_ = new ChromeFrameLaunchParams(url, referrer, profile_path,
-        actual_profile_name.value(), extra_chrome_arguments, incognito_mode,
-        is_widget_mode, route_all_top_level_navigations);
+        actual_profile_name.value(), SimpleResourceLoader::GetLanguage(),
+        extra_chrome_arguments, incognito_mode, is_widget_mode,
+        route_all_top_level_navigations);
     return automation_client_->Initialize(this, launch_params_);
   }
 
@@ -119,7 +120,7 @@ END_MSG_MAP()
 
   virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
                                    int align_flags,
-                                   const IPC::ContextMenuParams& params) {
+                                   const IPC::MiniContextMenuParams& params) {
     if (!menu_handle || !automation_client_.get()) {
       NOTREACHED();
       return;
@@ -156,7 +157,10 @@ END_MSG_MAP()
   LRESULT OnSetFocus(UINT message, WPARAM wparam, LPARAM lparam,
                      BOOL& handled) {  // NO_LINT
     if (!ignore_setfocus_ && IsValid()) {
-      GiveFocusToChrome(true);
+      // Pass false to |restore_focus_view|, because we do not want Chrome
+      // to focus the first focusable element in the current view, only the
+      // view itself.
+      GiveFocusToChrome(false);
     }
     return 0;
   }
@@ -215,7 +219,7 @@ END_MSG_MAP()
   // Return true if menu command is processed, otherwise the command will be
   // passed to Chrome for execution. Override in most-derived class if needed.
   bool HandleContextMenuCommand(UINT cmd,
-                                const IPC::ContextMenuParams& params) {
+                                const IPC::MiniContextMenuParams& params) {
     return false;
   }
 
@@ -229,9 +233,8 @@ END_MSG_MAP()
       TabProxy* tab = automation_client_->tab();
       HWND chrome_window = automation_client_->tab_window();
       if (tab && ::IsWindow(chrome_window)) {
-        DLOG(INFO) << "Setting initial focus";
-        tab->SetInitialFocus(win_util::IsShiftPressed(),
-                             restore_focus_to_view);
+        DVLOG(1) << "Setting initial focus";
+        tab->SetInitialFocus(win_util::IsShiftPressed(), restore_focus_to_view);
       }
     }
   }
@@ -240,7 +243,7 @@ END_MSG_MAP()
                               FilePath* profile_path) {
     chrome::GetChromeFrameUserDataDirectory(profile_path);
     *profile_path = profile_path->Append(profile_name);
-    DLOG(INFO) << __FUNCTION__ << ": " << profile_path->value();
+    DVLOG(1) << __FUNCTION__ << ": " << profile_path->value();
   }
 
  protected:

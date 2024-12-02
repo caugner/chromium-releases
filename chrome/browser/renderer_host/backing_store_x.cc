@@ -22,8 +22,8 @@
 #include "app/x11_util.h"
 #include "app/x11_util_internal.h"
 #include "base/compiler_specific.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "gfx/rect.h"
@@ -160,12 +160,7 @@ void BackingStoreX::PaintToBackingStore(
     RenderProcessHost* process,
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
-    const std::vector<gfx::Rect>& copy_rects,
-    bool* painted_synchronously) {
-  // Our paints are always synchronous and the caller can free the TransportDIB
-  // when we're done, even on error.
-  *painted_synchronously = true;
-
+    const std::vector<gfx::Rect>& copy_rects) {
   if (!display_)
     return;
 
@@ -435,10 +430,11 @@ void BackingStoreX::ScrollBackingStore(int dx, int dy,
   }
 }
 
-void BackingStoreX::XShowRect(const gfx::Rect& rect, XID target) {
+void BackingStoreX::XShowRect(const gfx::Point &origin,
+                              const gfx::Rect& rect, XID target) {
   XCopyArea(display_, pixmap_, target, static_cast<GC>(pixmap_gc_),
             rect.x(), rect.y(), rect.width(), rect.height(),
-            rect.x(), rect.y());
+            rect.x() + origin.x(), rect.y() + origin.y());
 }
 
 void BackingStoreX::CairoShowRect(const gfx::Rect& rect,

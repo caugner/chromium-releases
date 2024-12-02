@@ -124,9 +124,8 @@ void CloudPrintProxyService::OnTokenExpiredNotificationClick() {
 
 void CloudPrintProxyService::TokenExpiredNotificationDone(bool keep_alive) {
   if (token_expired_delegate_.get()) {
-    g_browser_process->notification_ui_manager()->Cancel(
-        Notification(GURL(), GURL(), string16(), string16(),
-                     token_expired_delegate_.get()));
+    g_browser_process->notification_ui_manager()->CancelById(
+        token_expired_delegate_->id());
     token_expired_delegate_ = NULL;
     if (!keep_alive)
       BrowserList::EndKeepAlive();
@@ -142,36 +141,30 @@ void CloudPrintProxyService::RefreshCloudPrintProxyStatus() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   ServiceProcessControl* process_control =
       ServiceProcessControlManager::instance()->GetProcessControl(profile_);
-  DCHECK(process_control && process_control->is_connected());
-  if (process_control && process_control->is_connected()) {
-    Callback2<bool, std::string>::Type* callback =
-         NewCallback(this, &CloudPrintProxyService::StatusCallback);
-    // GetCloudPrintProxyStatus takes ownership of callback.
-    process_control->GetCloudPrintProxyStatus(callback);
-  }
+  DCHECK(process_control->is_connected());
+  Callback2<bool, std::string>::Type* callback =
+       NewCallback(this, &CloudPrintProxyService::StatusCallback);
+  // GetCloudPrintProxyStatus takes ownership of callback.
+  process_control->GetCloudPrintProxyStatus(callback);
 }
 
 void CloudPrintProxyService::EnableCloudPrintProxy(const std::string& lsid,
                                                    const std::string& email) {
   ServiceProcessControl* process_control =
       ServiceProcessControlManager::instance()->GetProcessControl(profile_);
-  DCHECK(process_control && process_control->is_connected());
-  if (process_control->is_connected()) {
-    process_control->Send(new ServiceMsg_EnableCloudPrintProxy(lsid));
-    // Assume the IPC worked.
-    profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, email);
-  }
+  DCHECK(process_control->is_connected());
+  process_control->Send(new ServiceMsg_EnableCloudPrintProxy(lsid));
+  // Assume the IPC worked.
+  profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, email);
 }
 
 void CloudPrintProxyService::DisableCloudPrintProxy() {
   ServiceProcessControl* process_control =
       ServiceProcessControlManager::instance()->GetProcessControl(profile_);
-  DCHECK(process_control && process_control->is_connected());
-  if (process_control->is_connected()) {
-    process_control->Send(new ServiceMsg_DisableCloudPrintProxy);
-    // Assume the IPC worked.
-    profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, std::string());
-  }
+  DCHECK(process_control->is_connected());
+  process_control->Send(new ServiceMsg_DisableCloudPrintProxy);
+  // Assume the IPC worked.
+  profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, std::string());
 }
 
 void CloudPrintProxyService::StatusCallback(bool enabled, std::string email) {
@@ -184,7 +177,6 @@ bool CloudPrintProxyService::InvokeServiceTask(Task* task) {
       ServiceProcessControlManager::instance()->GetProcessControl(profile_);
   DCHECK(process_control);
   if (process_control)
-    process_control->Launch(task);
+    process_control->Launch(task, NULL);
   return !!process_control;
 }
-

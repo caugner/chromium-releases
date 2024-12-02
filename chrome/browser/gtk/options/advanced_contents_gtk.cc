@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "app/gtk_signal.h"
-#include "app/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -20,12 +19,14 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_tokenizer.h"
-#include "base/xdg_util.h"
+#include "base/thread_restrictions.h"
+#include "base/nix/xdg_util.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/fonts_languages_window.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/gtk/clear_browsing_data_dialog_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
@@ -44,6 +45,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/process_watcher.h"
+#include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -422,6 +424,10 @@ void NetworkSection::NotifyPrefChanged(const std::string* pref_name) {
 // static
 void NetworkSection::OnChangeProxiesButtonClicked(GtkButton *button,
                                                   NetworkSection* section) {
+  // Changing proxy settings searches the disk for the proxy configuration
+  // binary.  Temporarily allow IO for now, see http://crbug.com/63690
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+
   section->UserMetricsRecordAction(UserMetricsAction("Options_ChangeProxies"),
                                    NULL);
 
@@ -429,8 +435,8 @@ void NetworkSection::OnChangeProxiesButtonClicked(GtkButton *button,
 
   ProxyConfigCommand command;
   bool found_command = false;
-  switch (base::GetDesktopEnvironment(env.get())) {
-    case base::DESKTOP_ENVIRONMENT_GNOME: {
+  switch (base::nix::GetDesktopEnvironment(env.get())) {
+    case base::nix::DESKTOP_ENVIRONMENT_GNOME: {
       size_t index;
       ProxyConfigCommand commands[2];
       commands[0].argv = kGNOMEProxyConfigCommand;
@@ -441,25 +447,25 @@ void NetworkSection::OnChangeProxiesButtonClicked(GtkButton *button,
       break;
     }
 
-    case base::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
       command.argv = kKDE3ProxyConfigCommand;
       found_command = SearchPATH(&command, 1, NULL);
       break;
 
-    case base::DESKTOP_ENVIRONMENT_KDE4:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
       command.argv = kKDE4ProxyConfigCommand;
       found_command = SearchPATH(&command, 1, NULL);
       break;
 
-    case base::DESKTOP_ENVIRONMENT_XFCE:
-    case base::DESKTOP_ENVIRONMENT_OTHER:
+    case base::nix::DESKTOP_ENVIRONMENT_XFCE:
+    case base::nix::DESKTOP_ENVIRONMENT_OTHER:
       break;
   }
 
   if (found_command) {
     StartProxyConfigUtil(section->profile(), command);
   } else {
-    const char* name = base::GetDesktopEnvironmentName(env.get());
+    const char* name = base::nix::GetDesktopEnvironmentName(env.get());
     if (name)
       LOG(ERROR) << "Could not find " << name << " network settings in $PATH";
     browser::ShowOptionsURL(section->profile(), GURL(kLinuxProxyConfigUrl));
@@ -587,106 +593,6 @@ void TranslateSection::OnTranslateClicked(GtkWidget* widget) {
       profile()->GetPrefs());
   enable_translate_.SetValue(enabled);
 }
-
-///////////////////////////////////////////////////////////////////////////////
-// ChromeAppsSection
-
-class ChromeAppsSection : public OptionsPageBase {
- public:
-  explicit ChromeAppsSection(Profile* profile);
-  virtual ~ChromeAppsSection() {}
-
-  GtkWidget* get_page_widget() const {
-    return page_;
-  }
-
- private:
-  // Overridden from OptionsPageBase.
-  virtual void NotifyPrefChanged(const std::string* pref_name);
-
-  CHROMEGTK_CALLBACK_0(ChromeAppsSection, void, OnBackgroundModeClicked);
-  CHROMEGTK_CALLBACK_0(ChromeAppsSection, void, OnLearnMoreLinkClicked);
-
-  // Preferences for this section:
-  BooleanPrefMember enable_background_mode_;
-
-  // The widget containing the options for this section.
-  GtkWidget* page_;
-
-  // The checkbox.
-  GtkWidget* background_mode_checkbox_;
-
-  // Flag to ignore gtk callbacks while we are loading prefs, to avoid
-  // then turning around and saving them again.
-  bool pref_changing_;
-
-  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChromeAppsSection);
-};
-
-ChromeAppsSection::ChromeAppsSection(Profile* profile)
-    : OptionsPageBase(profile),
-      pref_changing_(true) {
-  page_ = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
-
-  accessible_widget_helper_.reset(new AccessibleWidgetHelper(page_, profile));
-
-  background_mode_checkbox_ = CreateCheckButtonWithWrappedLabel(
-      IDS_OPTIONS_CHROME_APPS_ENABLE_BACKGROUND_MODE);
-  gtk_box_pack_start(GTK_BOX(page_), background_mode_checkbox_,
-                     FALSE, FALSE, 0);
-  g_signal_connect(background_mode_checkbox_, "clicked",
-                   G_CALLBACK(OnBackgroundModeClickedThunk), this);
-  accessible_widget_helper_->SetWidgetName(
-      background_mode_checkbox_,
-      IDS_OPTIONS_CHROME_APPS_ENABLE_BACKGROUND_MODE);
-
-  // Init member prefs so we can update the controls if prefs change.
-  enable_background_mode_.Init(prefs::kBackgroundModeEnabled,
-                               profile->GetPrefs(), this);
-
-  GtkWidget* learn_more_link = gtk_chrome_link_button_new(
-      l10n_util::GetStringUTF8(IDS_LEARN_MORE).c_str());
-  // Stick it in an hbox so it doesn't expand to the whole width.
-  GtkWidget* learn_more_hbox = gtk_hbox_new(FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(learn_more_hbox), learn_more_link,
-                     FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(page_), learn_more_hbox,
-                     FALSE, FALSE, 0);
-  g_signal_connect(learn_more_link, "clicked",
-                   G_CALLBACK(OnLearnMoreLinkClickedThunk), this);
-
-  NotifyPrefChanged(NULL);
-}
-
-void ChromeAppsSection::NotifyPrefChanged(const std::string* pref_name) {
-  pref_changing_ = true;
-  if (!pref_name || *pref_name == prefs::kBackgroundModeEnabled) {
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(background_mode_checkbox_),
-                                 enable_background_mode_.GetValue());
-  }
-  pref_changing_ = false;
-}
-
-void ChromeAppsSection::OnBackgroundModeClicked(GtkWidget* widget) {
-  if (pref_changing_)
-    return;
-  bool enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
-  UserMetricsRecordAction(
-      enabled ?
-      UserMetricsAction("Options_BackgroundMode_Enable") :
-      UserMetricsAction("Options_BackgroundMode_Disable"),
-      profile()->GetPrefs());
-  enable_background_mode_.SetValue(enabled);
-}
-
-void ChromeAppsSection::OnLearnMoreLinkClicked(GtkWidget* widget) {
-  browser::ShowOptionsURL(
-      profile(),
-      GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_BACKGROUND_MODE_URL)));
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // PrivacySection
@@ -883,9 +789,9 @@ void PrivacySection::OnClearBrowsingDataButtonClicked(GtkButton* widget,
 // static
 void PrivacySection::OnLearnMoreLinkClicked(GtkButton *button,
                                             PrivacySection* privacy_section) {
-  browser::ShowOptionsURL(
-      privacy_section->profile(),
-      GURL(l10n_util::GetStringUTF8(IDS_LEARN_MORE_PRIVACY_URL)));
+  GURL url = google_util::AppendGoogleLocaleParam(
+      GURL(chrome::kPrivacyLearnMoreURL));
+  browser::ShowOptionsURL(privacy_section->profile(), url);
 }
 
 // static
@@ -1360,13 +1266,5 @@ void AdvancedContentsGtk::Init() {
       l10n_util::GetStringUTF8(IDS_OPTIONS_ADVANCED_SECTION_TITLE_SECURITY),
       security_section_->get_page_widget(), false);
 
-  // Add ChromeApps preferences if background mode is runtime-enabled.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBackgroundMode)) {
-    chrome_apps_section_.reset(new ChromeAppsSection(profile_));
-    options_builder->AddOptionGroup(l10n_util::GetStringUTF8(
-        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CHROME_APPS),
-        chrome_apps_section_->get_page_widget(), false);
-  }
   page_ = options_builder->get_page_widget();
 }

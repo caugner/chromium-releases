@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_split.h"
+#include "base/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profile.h"
@@ -23,12 +24,19 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_common.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/hunspell/google/bdict.h"
 
 namespace {
 
 FilePath GetFirstChoiceFilePath(const std::string& language) {
   FilePath dict_dir;
-  PathService::Get(chrome::DIR_APP_DICTIONARIES, &dict_dir);
+  {
+    // This should not do blocking IO from the UI thread!
+    // Temporarily allow it for now.
+    //   http://code.google.com/p/chromium/issues/detail?id=60643
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    PathService::Get(chrome::DIR_APP_DICTIONARIES, &dict_dir);
+  }
   return SpellCheckCommon::GetVersionedFileName(language, dict_dir);
 }
 
@@ -125,7 +133,7 @@ int SpellCheckHost::GetSpellCheckLanguages(
   if (SpellCheckerPlatform::SpellCheckerAvailable())
     SpellCheckerPlatform::GetAvailableLanguages(&accept_languages);
   else
-    SplitString(accept_languages_pref.GetValue(), ',', &accept_languages);
+    base::SplitString(accept_languages_pref.GetValue(), ',', &accept_languages);
 
   for (std::vector<std::string>::const_iterator i = accept_languages.begin();
        i != accept_languages.end(); ++i) {
@@ -189,7 +197,7 @@ void SpellCheckHost::InitializeInternal() {
     std::string contents;
     file_util::ReadFileToString(custom_dictionary_file_, &contents);
     std::vector<std::string> list_of_words;
-    SplitString(contents, '\n', &list_of_words);
+    base::SplitString(contents, '\n', &list_of_words);
     for (size_t i = 0; i < list_of_words.size(); ++i)
       custom_words_.push_back(list_of_words[i]);
   }
@@ -279,6 +287,16 @@ void SpellCheckHost::OnURLFetchComplete(const URLFetcher* source,
 
 void SpellCheckHost::SaveDictionaryData() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  // To prevent corrupted dictionary data from causing a renderer crash, scan
+  // the dictionary data and verify it is sane before save it to a file.
+  if (!hunspell::BDict::Verify(data_.data(), data_.size())) {
+    LOG(ERROR) << "Failure to verify the downloaded dictionary.";
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(this,
+                          &SpellCheckHost::InformObserverOfInitialization));
+    return;
+  }
 
   size_t bytes_written =
       file_util::WriteFile(bdict_file_path_, data_.data(), data_.length());

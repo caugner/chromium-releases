@@ -11,11 +11,33 @@ const StatusError = 'error';
 
 const NetworkOther = 'other';
 
+// Setup css canvas 'spinner-circle'
+(function() {
+  var lineWidth = 3;
+  var r = 8;
+  var ctx = document.getCSSCanvasContext('2d', 'spinner-circle', 2 * r, 2 * r);
+
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.strokeStyle = '#4e73c7';
+  ctx.beginPath();
+  ctx.moveTo(lineWidth / 2, r - lineWidth / 2);
+  ctx.arc(r, r, r - lineWidth / 2, Math.PI, Math.PI * 3 / 2);
+  ctx.stroke();
+})();
+
 /**
  * Sends "connect" using the 'action' DOMUI message.
  */
-function sendConnect(index, passphrase, identity) {
-  chrome.send('action', [ 'connect', String(index), passphrase, identity ]);
+function sendConnect(index, passphrase, identity, auto_connect) {
+  chrome.send('action',
+      ['connect',
+       String(index),
+       passphrase,
+       identity,
+       auto_connect ? '1' : '0']);
 }
 
 var networkMenuItemProto = (function() {
@@ -23,7 +45,7 @@ var networkMenuItemProto = (function() {
     networkMenuItem.innerHTML = '<div class="network-menu-item">' +
           '<div class="network-label-icon">' +
             '<div class="network-label"></div>' +
-            '<img class="network-icon hidden">' +
+            '<div class="network-icon hidden"></div>' +
           '</div>' +
           '<div class="network-status hidden"></div>' +
           '<div class="hidden"></div>' +
@@ -40,7 +62,7 @@ NetworkMenuItem.prototype = {
 
   ssidEdit: null,
   passwordEdit: null,
-  rememberCheckbox: null,
+  autoConnectCheckbox: null,
 
   /**
    * The label element.
@@ -95,7 +117,7 @@ NetworkMenuItem.prototype = {
    */
   setIcon_: function(icon) {
     if (icon) {
-      this.icon_.src = icon;
+      this.icon_.style.backgroundImage = 'url(' + icon + ')';
       this.icon_.classList.remove('hidden');
     } else {
       this.icon_.classList.add('hidden');
@@ -107,16 +129,25 @@ NetworkMenuItem.prototype = {
    * @private
    */
   handleConnect_ : function(e) {
-    // TODO: Handle "Remember" checkbox
-
+    var index = this.menu_.getMenuItemIndexOf(this);
     if (this.ssidEdit && this.passwordEdit) {
-      sendConnect(this.menu_.getMenuItemIndexOf(this),
-          this.passwordEdit.value, this.ssidEdit.value);
+      if (this.ssidEdit.value) {
+        sendConnect(index,
+            this.passwordEdit.value,
+            this.ssidEdit.value,
+            this.autoConnectCheckbox.checked);
+      }
     } else if (this.passwordEdit) {
-      sendConnect(this.menu_.getMenuItemIndexOf(this),
-          this.passwordEdit.value, '');
+      if (this.passwordEdit.value) {
+        sendConnect(index,
+            this.passwordEdit.value, '', this.autoConnectCheckbox.checked);
+      }
     } else {
-      sendConnect(this.menu_.getMenuItemIndexOf(this), '', '');
+      if (this.attrs.remembered) {
+        sendConnect(index, this.attrs.passphrase, '', this.attrs.auto_connect);
+      } else {
+        sendConnect(index, '', '', this.autoConnectCheckbox.checked);
+      }
     }
   },
 
@@ -198,22 +229,23 @@ NetworkMenuItem.prototype = {
   },
 
   /**
-   * Add remember this network check box to action area.
+   * Add auto-connect this network check box to action area.
    * @private
    */
-  addRememberCheckbox_: function() {
-    this.rememberCheckbox = this.ownerDocument.createElement('input');
-    this.rememberCheckbox.type = 'checkbox';
-    this.rememberCheckbox.checked = this.attrs.remembered;
+  addAutoConnectCheckbox_: function() {
+    this.autoConnectCheckbox = this.ownerDocument.createElement('input');
+    this.autoConnectCheckbox.type = 'checkbox';
+    this.autoConnectCheckbox.checked = this.attrs.auto_connect;
 
-    var rememberSpan = this.ownerDocument.createElement('span');
-    rememberSpan.textContent = localStrings.getString('remeber_this_network');
+    var autoConnectSpan = this.ownerDocument.createElement('span');
+    autoConnectSpan.textContent =
+        localStrings.getString('auto_connect_this_network');
 
-    var rememberLabel = this.ownerDocument.createElement('label');
-    rememberLabel.appendChild(this.rememberCheckbox);
-    rememberLabel.appendChild(rememberSpan);
+    var autoConnectLabel = this.ownerDocument.createElement('label');
+    autoConnectLabel.appendChild(this.autoConnectCheckbox);
+    autoConnectLabel.appendChild(autoConnectSpan);
 
-    this.action_.appendChild(rememberLabel);
+    this.action_.appendChild(autoConnectLabel);
   },
 
   /**
@@ -234,12 +266,15 @@ NetworkMenuItem.prototype = {
     if (attrs.network_type == NetworkOther) {
       this.addSsidEdit_();
       this.addPasswordEdit_();
-      this.addRememberCheckbox_();
+      this.addAutoConnectCheckbox_();
     } else if (attrs.status && attrs.status != 'unknown') {
       if (attrs.status == StatusConnected) {
         this.setStatus_(attrs.ip_address);
       } else if (attrs.status == StatusConnecting) {
         this.setStatus_(attrs.message);
+
+        this.icon_.classList.add('spinner');
+        this.icon_.classList.remove('hidden');
       } else if (attrs.status == StatusError) {
         this.setStatus_(attrs.message);
         this.setIcon_('chrome://theme/IDR_WARNING');
@@ -247,7 +282,10 @@ NetworkMenuItem.prototype = {
         var button = this.ownerDocument.createElement('button');
         button.textContent = localStrings.getString('reconnect');
         button.addEventListener('click', this.handleConnect_.bind(this));
-        this.action_.appendChild(button);
+        var box = this.ownerDocument.createElement('div');
+        box.appendChild(button);
+        this.action_.appendChild(box);
+
         this.showAction_(true);
       }
 
@@ -255,7 +293,7 @@ NetworkMenuItem.prototype = {
         this.addPasswordEdit_();
       }
 
-      this.addRememberCheckbox_();
+      this.addAutoConnectCheckbox_();
     }
     //////// End NetworkMenuItem specifi code
 
@@ -270,17 +308,21 @@ NetworkMenuItem.prototype = {
 
   /** @inheritDoc */
   activate: function() {
+    // Close action area and connect if it is visible.
+    if (this.isActionVisible_()) {
+      this.showAction_(false);
+      this.handleConnect_();
+      return;
+    }
+
     // Show action area for encrypted network and 'other' network.
     if ((this.attrs.network_type == NetworkOther ||
          this.attrs.status == StatusDisconnected) &&
         this.attrs.need_passphrase &&
         !this.isActionVisible_()) {
       this.showAction_(true);
-    }
-
-    // No default activate if action area is visible.
-    if (this.isActionVisible_())
       return;
+    }
 
     MenuItem.prototype.activate.call(this);
   }
@@ -299,19 +341,21 @@ NetworkMenu.prototype = {
     } else {
       return new MenuItem();
     }
-  }
+  },
 
-  onKeydown_: function(event) {
-    switch (event.keyIdentifier) {
-      case 'Enter':
-      case 'U+0020':  // space
-        // Temporary, for testing sendConnect()
-        sendConnect(this.getMenuItemIndexOf(this.current_),
-                    "passphrase", "identity");
-        break;
-      default:
-        Menu.prototype.onKeydown_.call(this, event);
-        break;
+  /** @inheritDoc */
+  onClick_: function(event, item) {
+    // If item is a NetworkMenuItem, it must have at least one of the following.
+    if (item.autoConnectCheckbox || item.ssidEdit || item.passwordEdit) {
+      // Ignore clicks other than on the NetworkMenuItem itself.
+      if (event.target == item.autoConnectCheckbox ||
+          event.target == item.autoConnectCheckbox.nextElementSibling ||
+          event.target == item.ssidEdit ||
+          event.target == item.passwordEdit) {
+        return;
+      }
     }
-  }
+
+    Menu.prototype.onClick_.call(this, event, item);
+  },
 };

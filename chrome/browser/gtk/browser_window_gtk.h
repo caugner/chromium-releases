@@ -12,12 +12,12 @@
 
 #include "app/active_window_watcher_x.h"
 #include "app/gtk_signal.h"
-#include "app/slide_animation.h"
 #include "app/x11_util.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/gtk/infobar_arrow_model.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -45,7 +45,7 @@ class BrowserWindowGtk : public BrowserWindow,
                          public NotificationObserver,
                          public TabStripModelObserver,
                          public ActiveWindowWatcherX::Observer,
-                         public AnimationDelegate {
+                         public InfoBarArrowModel::Observer {
  public:
   explicit BrowserWindowGtk(Browser* browser);
   virtual ~BrowserWindowGtk();
@@ -75,7 +75,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual LocationBar* GetLocationBar() const;
   virtual void SetFocusToLocationBar(bool select_all);
   virtual void UpdateReloadStopState(bool is_loading, bool force);
-  virtual void UpdateToolbar(TabContents* contents,
+  virtual void UpdateToolbar(TabContentsWrapper* contents,
                              bool should_restore_state);
   virtual void FocusToolbar();
   virtual void FocusAppMenu();
@@ -85,7 +85,6 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool IsBookmarkBarVisible() const;
   virtual bool IsBookmarkBarAnimating() const;
   virtual bool IsToolbarVisible() const;
-  virtual gfx::Rect GetRootWindowResizerRect() const;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
@@ -120,13 +119,16 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void ShowCreateShortcutsDialog(TabContents* tab_contents);
+  virtual void ShowCreateWebAppShortcutsDialog(TabContents*  tab_contents);
+  virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,
+                                                  const Extension* app);
   virtual void Cut();
   virtual void Copy();
   virtual void Paste();
   virtual void ToggleTabStripMode() {}
+  virtual void PrepareForInstant();
   virtual void ShowInstant(TabContents* preview_contents);
-  virtual void HideInstant();
+  virtual void HideInstant(bool instant_is_active);
   virtual gfx::Rect GetInstantBounds();
 
   // Overridden from NotificationObserver:
@@ -135,27 +137,22 @@ class BrowserWindowGtk : public BrowserWindow,
                        const NotificationDetails& details);
 
   // Overridden from TabStripModelObserver:
-  virtual void TabDetachedAt(TabContents* contents, int index);
-  virtual void TabSelectedAt(TabContents* old_contents,
-                             TabContents* new_contents,
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index);
+  virtual void TabSelectedAt(TabContentsWrapper* old_contents,
+                             TabContentsWrapper* new_contents,
                              int index,
                              bool user_gesture);
-  virtual void TabStripEmpty();
 
   // Overridden from ActiveWindowWatcher::Observer.
   virtual void ActiveWindowChanged(GdkWindow* active_window);
 
-  // Overridden from AnimationDelegate.
-  virtual void AnimationEnded(const Animation* animation);
-  virtual void AnimationProgressed(const Animation* animation);
-  virtual void AnimationCanceled(const Animation* animation);
+  // Overridden from InfoBarArrowModel::Observer.
+  virtual void PaintStateChanged();
 
   // Accessor for the tab strip.
   TabStripGtk* tabstrip() const { return tabstrip_.get(); }
 
   void UpdateDevToolsForContents(TabContents* contents);
-
-  void UpdateUIForContents(TabContents* contents);
 
   void OnBoundsChanged(const gfx::Rect& bounds);
   void OnDebouncedBoundsChanged();
@@ -178,16 +175,9 @@ class BrowserWindowGtk : public BrowserWindow,
   // else for the custom frame.
   void ResetCustomFrameCursor();
 
-  // Toggles whether an infobar is showing. If |colors| is NULL, then no infobar
-  // is showing. When non-NULL, |colors| describes the gradient stop colors for
-  // the showing infobar.
-  // |animate| controls whether we animate to the new state set by |colors|.
-  void SetInfoBarShowing(const std::pair<SkColor, SkColor>* colors,
-                         bool animate);
-
-  // Called by the RenderViewHostDelegate::View (TabContentsViewGtk in our case)
-  // to decide whether to draw a drop shadow on the render view.
-  bool ShouldDrawInfobarDropShadowOnRenderView();
+  // Toggles whether an infobar is showing.
+  // |animate| controls whether we animate to the new state set by |bar|.
+  void SetInfoBarShowing(InfoBar* bar, bool animate);
 
   // Returns the BrowserWindowGtk registered with |window|.
   static BrowserWindowGtk* GetBrowserWindowForNativeWindow(
@@ -209,6 +199,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // This should only be called by the bookmark bar itself.
   void BookmarkBarIsFloating(bool is_floating);
 
+  // Returns the tab contents we're currently displaying in the tab contents
+  // container.
+  TabContents* GetDisplayedTabContents();
+
   static void RegisterUserPrefs(PrefService* prefs);
 
   // Returns whether to draw the content drop shadow on the sides and bottom
@@ -220,6 +214,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // have this method as a hack because GTK doesn't queue the toolbar area for
   // redraw when it should.
   void QueueToolbarRedraw();
+
+  // Get the position where the infobar arrow should be anchored in
+  // |relative_to| coordinates. This is the middle of the omnibox location icon.
+  int GetXPositionOfLocationIcon(GtkWidget* relative_to);
 
  protected:
   virtual void DestroyBrowser();
@@ -247,7 +245,7 @@ class BrowserWindowGtk : public BrowserWindow,
 
  private:
   // Show or hide the bookmark bar.
-  void MaybeShowBookmarkBar(TabContents* contents, bool animate);
+  void MaybeShowBookmarkBar(bool animate);
 
   // Sets the default size for the window and the the way the user is allowed to
   // resize it.
@@ -301,6 +299,11 @@ class BrowserWindowGtk : public BrowserWindow,
 
   // Draws the normal custom frame using theme_frame.
   void DrawCustomFrame(cairo_t* cr, GtkWidget* widget, GdkEventExpose* event);
+
+  // The background frame image needs to be offset by the size of the top of
+  // the window to the top of the tabs when the full skyline isn't displayed
+  // for some reason.
+  int GetVerticalOffset();
 
   // Returns which frame image we should use based on the window's current
   // activation state / incognito state.
@@ -480,11 +483,9 @@ class BrowserWindowGtk : public BrowserWindow,
 
   scoped_ptr<FullscreenExitBubbleGtk> fullscreen_exit_bubble_;
 
-  // The top and bottom colors for the infobar gradient, if there is an
-  // infobar showing.
-  std::pair<SkColor, SkColor> infobar_colors_;
-
-  SlideAnimation infobar_animation_;
+  // The model that tracks the paint state of the arrow for the infobar
+  // directly below the toolbar.
+  InfoBarArrowModel infobar_arrow_model_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowGtk);
 };

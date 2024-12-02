@@ -8,12 +8,14 @@
 
 #include "app/menus/simple_menu_model.h"
 #include "base/gtest_prod_util.h"
+#include "chrome/browser/background_application_list_model.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 
 class Browser;
+class CommandLine;
 class Extension;
 class PrefService;
 class Profile;
@@ -25,10 +27,9 @@ class StatusTray;
 // are no open browser windows.
 //
 // Chrome enters background mode whenever there is an application with the
-// "background" permission installed and the appropriate user preference is
-// set (kBackgroundModeEnabled). This class monitors the set of installed/loaded
-// extensions to ensure that Chrome enters/exits background mode at the
-// appropriate time.
+// "background" permission installed. This class monitors the set of
+// installed/loaded extensions to ensure that Chrome enters/exits background
+// mode at the appropriate time.
 //
 // When Chrome is in background mode, it will continue running even after the
 // last browser window is closed, until the user explicitly exits the app.
@@ -36,13 +37,17 @@ class StatusTray;
 // no open windows to allow apps with the "background" permission to run in the
 // background.
 class BackgroundModeManager
-    : private NotificationObserver,
-      private menus::SimpleMenuModel::Delegate {
+    : public NotificationObserver,
+      public menus::SimpleMenuModel::Delegate,
+      public BackgroundApplicationListModel::Observer {
  public:
   BackgroundModeManager(Profile* profile, CommandLine* command_line);
   virtual ~BackgroundModeManager();
 
   static void RegisterUserPrefs(PrefService* prefs);
+
+  static bool IsBackgroundModeEnabled(const CommandLine* command_line);
+
  private:
   friend class TestBackgroundModeManager;
   friend class BackgroundModeManagerTest;
@@ -69,6 +74,13 @@ class BackgroundModeManager
                                           menus::Accelerator* accelerator);
   virtual void ExecuteCommand(int command_id);
 
+  // Open an application in a new tab, opening a new window if needed.
+  virtual void ExecuteApplication(int application_id);
+
+  // BackgroundApplicationListModel::Observer implementation.
+  virtual void OnApplicationDataChanged(const Extension* extension);
+  virtual void OnApplicationListChanged();
+
   // Called when an extension is loaded to manage count of background apps.
   void OnBackgroundAppLoaded();
 
@@ -82,12 +94,6 @@ class BackgroundModeManager
   // Invoked when an extension is uninstalled so we can ensure that
   // launch-on-startup is disabled if appropriate.
   void OnBackgroundAppUninstalled();
-
-  // Invoked when the kBackgroundModeEnabled preference has changed.
-  void OnBackgroundModePrefChanged();
-
-  // Returns true if the background mode preference is enabled
-  bool IsBackgroundModeEnabled();
 
   // Returns true if chrome has set "launch on startup" property for itself
   // earlier and is allowed to reset it later, reducing likelihood of
@@ -121,6 +127,16 @@ class BackgroundModeManager
   // Virtual to enable testing.
   virtual void RemoveStatusTrayIcon();
 
+  // Updates the status icon's context menu entry corresponding to |extension|
+  // to use the icon associated with |extension| in the
+  // BackgroundApplicationListModel.
+  void UpdateContextMenuEntryIcon(const Extension* extension);
+
+  // Create a context menu, or replace/update an existing context menu, for the
+  // status tray icon which, among other things, allows the user to shutdown
+  // Chrome when running in background mode.
+  virtual void UpdateStatusTrayIconContextMenu();
+
   // Returns a browser window, or creates one if none are open. Used by
   // operations (like displaying the preferences dialog) that require a Browser
   // window.
@@ -131,8 +147,19 @@ class BackgroundModeManager
   // The parent profile for this object.
   Profile* profile_;
 
+  // The cached list of BackgroundApplications.
+  BackgroundApplicationListModel applications_;
+
   // The number of background apps currently loaded.
   int background_app_count_;
+
+  // Reference to our status icon's context menu (if any) - owned by the
+  // status_icon_
+  menus::SimpleMenuModel* context_menu_;
+
+  // Set to the position of the first application entry in the status icon's
+  // context menu.
+  int context_menu_application_offset_;
 
   // Set to true when we are running in background mode. Allows us to track our
   // current background state so we can take the appropriate action when the
@@ -150,9 +177,6 @@ class BackgroundModeManager
 
   // Reference to our status icon (if any) - owned by the StatusTray.
   StatusIcon* status_icon_;
-
-  // Ensure observed preferences are properly cleaned up.
-  PrefChangeRegistrar pref_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundModeManager);
 };

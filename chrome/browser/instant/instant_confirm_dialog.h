@@ -8,12 +8,13 @@
 
 #include "gfx/native_widget_types.h"
 
+class GURL;
 class Profile;
 
 namespace browser {
 
 // URL for learning more about instant.
-extern const char kInstantLearnMoreURL[];
+GURL InstantLearnMoreURL();
 
 // Invoked from the opt-in and preferences when the user toggles instant. If the
 // instant confirm dialog hasn't been shown, it's shown. If the instant dialog
@@ -22,7 +23,8 @@ void ShowInstantConfirmDialogIfNecessary(gfx::NativeWindow parent,
                                          Profile* profile);
 
 // Shows the platform specific dialog to confirm if the user really wants to
-// enable opt-in.
+// enable instant. If the user accepts the dialog invoke
+// InstantController::Enable.
 void ShowInstantConfirmDialog(gfx::NativeWindow parent,
                               Profile* profile);
 

@@ -13,7 +13,7 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "base/task.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
@@ -57,7 +57,7 @@ class TypedUrlModelAssociator
   static syncable::ModelType model_type() { return syncable::TYPED_URLS; }
   TypedUrlModelAssociator(ProfileSyncService* sync_service,
                           history::HistoryBackend* history_backend);
-  virtual ~TypedUrlModelAssociator() { }
+  virtual ~TypedUrlModelAssociator();
 
   // PerDataTypeAssociatorInterface implementation.
   //

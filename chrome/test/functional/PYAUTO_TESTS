@@ -30,38 +30,52 @@
     'content',
     'cookies',
     'crash_reporter',
+    'databases',
     'downloads',
-    # 'find_in_page',  crashes during shutdown. crbug.com/58516
+    'find_in_page',
+    # Turkish I problem. crbug.com/60638
+    '-find_in_page.FindMatchTests.testLocalizationAndCaseOrder',
     'execute_javascript',
     'history',
     'imports',
     'infobars',
     'navigation',
+    'notifications',
+    'ntp',
     'omnibox',
     'passwords',
+    'pdf',
     'plugins',
     # 'popups',  crbug.com/59208
     'prefs',
     'search_engines',
+    # crbug.com/67628
+    '-search_engines.SearchEnginesTest.testTabToSearch',
     'special_tabs',
+    # 'sync',  crbug.com/60970
     'test_basic.SimpleTest.testCanOpenGoogle',
     'themes',
-    'translate',
-    # This test fails due to crbug.com/35485
-    '-translate.TranslateTest.testBarNotVisibleOnSSLErrorPage',
-    # This test fails due to crbug.com/50706
-    '-translate.TranslateTest.testToggleTranslateOption'
+    # Disable translate test until it can run fine on golo. crbug.com/61256
+    # 'translate',
+    ## This test fails due to crbug.com/35485
+    # '-translate.TranslateTest.testBarNotVisibleOnSSLErrorPage',
+    ## This test fails due to crbug.com/50706
+    # '-translate.TranslateTest.testToggleTranslateOption',
   ],
 
   'win': [
     # testBookmarkBarVisible fails on windows. crbug.com/42823
     '-bookmark_bar.BookmarkBarTest.testBookmarkBarVisible',
+    # crbug.com/64664
+    '-databases.DatabasesTest.testReloadActiveTab',
     # Some download test fails on win official builder, only thru buildbot when
     # downloading the small zip file.
     # crbug.com/50481, crbug.com/54942
     '-downloads.DownloadsTest.testZip',
     '-downloads.DownloadsTest.testRemoveDownload',
     '-prefs.PrefsTest.testDownloadDirPref',
+    # crbug.com/64269
+    '-passwords.PasswordTest.testDisplayAndSavePasswordInfobar',
   ],
 
   'mac': [
@@ -75,9 +89,11 @@
   ],
 
   'linux': [  # linux != chromeos
-    '-omnibox',  # http://crbug.com/44203
     '-browser.BrowserTest.testWindowResize',  # crbug.com/44963
+    '-browser.BrowserTest.testFlashLoadsAfterKill',  # crbug.com/63039
     '-content.ContentTest.testThreeWindows',  # crbug.com/47457
+    # crbug.com/64269
+    '-passwords.PasswordTest.testDisplayAndSavePasswordInfobar',
   ],
 
   # ChromeOS is linux, but note that this section does not include the
@@ -109,5 +125,9 @@
     '-downloads.DownloadsTest.testCancelDownload',
     '-downloads.DownloadsTest.testPauseAndResume',
     '-translate.TranslateTest.testDownloadsNotTranslated',
+    # crosbug.com/9499
+    '-crash_reporter.CrashReporterTest.testRendererCrash',
+    # crbug.com/64269
+    '-passwords.PasswordTest.testDisplayAndSavePasswordInfobar',
   ],
 }

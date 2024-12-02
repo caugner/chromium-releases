@@ -11,16 +11,16 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "grit/chromium_strings.h"
@@ -385,6 +385,7 @@ void PrefService::RegisterPreference(const char* path, Value* default_value) {
     pref_value_store_->SetDefaultPrefValue(path, Value::CreateNullValue());
   } else {
     // Hand off ownership.
+    DCHECK(!PrefStore::IsUseDefaultSentinelValue(default_value));
     pref_value_store_->SetDefaultPrefValue(path, scoped_value.release());
   }
 
@@ -601,8 +602,10 @@ const Value* PrefService::Preference::GetValue() const {
 }
 
 bool PrefService::Preference::IsManaged() const {
-  return pref_service_->pref_value_store_->
-      PrefValueInManagedStore(name_.c_str());
+  PrefValueStore* pref_value_store =
+      pref_service_->pref_value_store_;
+  return pref_value_store->PrefValueInManagedPlatformStore(name_.c_str()) ||
+      pref_value_store->PrefValueInDeviceManagementStore(name_.c_str());
 }
 
 bool PrefService::Preference::HasExtensionSetting() const {

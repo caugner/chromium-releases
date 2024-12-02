@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <string>
 
-#include "app/gfx/gl/gl_mock.h"
 #include "base/string_number_conversions.h"
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
@@ -39,22 +39,26 @@ void GLES2DecoderTestBase::SetUp() {
 void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
   gl_.reset(new StrictMock<MockGLInterface>());
   ::gfx::GLInterface::SetGLInterface(gl_.get());
+  group_ = ContextGroup::Ref(new ContextGroup());
 
   InSequence sequence;
 
   TestHelper::SetupContextGroupInitExpectations(gl_.get(), extensions);
 
-  EXPECT_TRUE(group_.Initialize(extensions));
+  EXPECT_TRUE(group_->Initialize(extensions));
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
       .RetiresOnSaturation();
-  static GLuint attrib_ids[] = {
+  static GLuint attrib_0_id[] = {
     kServiceAttrib0BufferId,
   };
-  EXPECT_CALL(*gl_, GenBuffersARB(arraysize(attrib_ids), _))
-      .WillOnce(SetArrayArgument<1>(attrib_ids,
-                                    attrib_ids + arraysize(attrib_ids)))
+  static GLuint fixed_attrib_buffer_id[] = {
+    kServiceFixedAttribBufferId,
+  };
+  EXPECT_CALL(*gl_, GenBuffersARB(arraysize(attrib_0_id), _))
+      .WillOnce(SetArrayArgument<1>(attrib_0_id,
+                                    attrib_0_id + arraysize(attrib_0_id)))
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, kServiceAttrib0BufferId))
       .Times(1)
@@ -64,6 +68,11 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, 0))
       .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GenBuffersARB(arraysize(fixed_attrib_buffer_id), _))
+      .WillOnce(SetArrayArgument<1>(
+          fixed_attrib_buffer_id,
+          fixed_attrib_buffer_id + arraysize(fixed_attrib_buffer_id)))
       .RetiresOnSaturation();
 
   for (GLint tt = 0; tt < TestHelper::kNumTextureUnits; ++tt) {
@@ -100,8 +109,9 @@ void GLES2DecoderTestBase::InitDecoder(const char* extensions) {
 
   context_ = new gfx::StubGLContext;
 
-  decoder_.reset(GLES2Decoder::Create(&group_));
-  decoder_->Initialize(context_, gfx::Size(), std::vector<int32>(), NULL, 0);
+  decoder_.reset(GLES2Decoder::Create(group_.get()));
+  decoder_->Initialize(
+      context_, gfx::Size(), NULL, std::vector<int32>(), NULL, 0);
   decoder_->set_engine(engine_.get());
 
   EXPECT_CALL(*gl_, GenBuffersARB(_, _))
@@ -144,11 +154,12 @@ void GLES2DecoderTestBase::TearDown() {
   // All Tests should have read all their GLErrors before getting here.
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_CALL(*gl_, DeleteBuffersARB(1, _))
-      .Times(1)
+      .Times(2)
       .RetiresOnSaturation();
   decoder_->Destroy();
   decoder_.reset();
-  group_.Destroy(false);
+  group_->set_have_context(false);
+  group_ = NULL;
   engine_.reset();
   ::gfx::GLInterface::SetGLInterface(NULL);
   gl_.reset();
@@ -391,6 +402,7 @@ const GLint GLES2DecoderTestBase::kMaxVaryingVectors;
 const GLint GLES2DecoderTestBase::kMaxVertexUniformVectors;
 
 const GLuint GLES2DecoderTestBase::kServiceAttrib0BufferId;
+const GLuint GLES2DecoderTestBase::kServiceFixedAttribBufferId;
 
 const GLuint GLES2DecoderTestBase::kServiceBufferId;
 const GLuint GLES2DecoderTestBase::kServiceFramebufferId;
@@ -563,8 +575,8 @@ void GLES2DecoderTestBase::SetupShader(
       GL_FRAGMENT_SHADER, fragment_shader_client_id,
       fragment_shader_service_id);
 
-  GetShaderInfo(vertex_shader_client_id)->SetStatus(true, "");
-  GetShaderInfo(fragment_shader_client_id)->SetStatus(true, "");
+  GetShaderInfo(vertex_shader_client_id)->SetStatus(true, "", NULL);
+  GetShaderInfo(fragment_shader_client_id)->SetStatus(true, "", NULL);
 
   AttachShader attach_cmd;
   attach_cmd.Init(program_client_id, vertex_shader_client_id);

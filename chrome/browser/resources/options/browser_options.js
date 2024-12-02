@@ -54,13 +54,30 @@ cr.define('options', function() {
         chrome.send('coreOptionsUserMetricsAction',
             ['Options_ManageSearchEngines']);
       };
+      $('instantEnableCheckbox').onclick = function(event) {
+        var alreadyConfirmed = $('instantDialogShown').checked;
 
+        if (this.checked && !alreadyConfirmed) {
+          // Leave disabled for now. The PrefCheckbox handler already set it to
+          // true so undo that.
+          Preferences.setBooleanPref(this.pref, false, this.metric);
+          OptionsPage.showOverlay('instantConfirmOverlay');
+        }
+      };
+
+      var homepageField = $('homepageURL');
       $('homepageUseNTPButton').onchange =
           this.handleHomepageUseNTPButtonChange_.bind(this);
       $('homepageUseURLButton').onchange =
           this.handleHomepageUseURLButtonChange_.bind(this);
-      $('homepageURL').onchange =
-          this.handleHomepageURLChange_.bind(this)
+      homepageField.onchange =
+          this.handleHomepageURLChange_.bind(this);
+
+      // Ensure that changes are committed when closing the page.
+      window.addEventListener('unload', function() {
+          if (document.activeElement == homepageField)
+            homepageField.blur();
+          });
 
       if (!cr.isChromeOS) {
         $('defaultBrowserUseAsDefaultButton').onclick = function(event) {
@@ -79,15 +96,25 @@ cr.define('options', function() {
         $('startupPages').redraw();
       });
 
-      // Initialize control enabled states.
-      Preferences.getInstance().addEventListener('session.restore_on_startup',
-          this.updateCustomStartupPageControlStates_.bind(this));
-      Preferences.getInstance().addEventListener('homepage_is_newtabpage',
-          this.handleHomepageIsNewTabPageChange_.bind(this));
-      Preferences.getInstance().addEventListener('homepage',
-          this.handleHomepageChange_.bind(this));
+      // Check if we are in the guest mode.
+      if (cr.commandLine.options['--bwsi']) {
+        // Disable input and button elements under the startup section.
+        var elements = $('startupSection').querySelectorAll('input, button');
+        for (var i = 0; i < elements.length; i++) {
+          elements[i].disabled = true;
+          elements[i].manually_disabled = true;
+        }
+      } else {
+        // Initialize control enabled states.
+        Preferences.getInstance().addEventListener('session.restore_on_startup',
+            this.updateCustomStartupPageControlStates_.bind(this));
+        Preferences.getInstance().addEventListener('homepage_is_newtabpage',
+            this.handleHomepageIsNewTabPageChange_.bind(this));
+        Preferences.getInstance().addEventListener('homepage',
+            this.handleHomepageChange_.bind(this));
 
-      this.updateCustomStartupPageControlStates_();
+        this.updateCustomStartupPageControlStates_();
+      }
 
       // Remove Windows-style accelerators from button labels.
       // TODO(stuartmorgan): Remove this once the strings are updated.
@@ -103,17 +130,15 @@ cr.define('options', function() {
      * @param {string} statusString Description of the current default state.
      * @param {boolean} isDefault Whether or not the browser is currently
      *     default.
+     * @param {boolean} canBeDefault Whether or not the browser can be default.
      */
-    updateDefaultBrowserState_: function(statusString, isDefault) {
+    updateDefaultBrowserState_: function(statusString, isDefault,
+                                         canBeDefault) {
       var label = $('defaultBrowserState');
       label.textContent = statusString;
-      if (isDefault) {
-        label.classList.add('current');
-      } else {
-        label.classList.remove('current');
-      }
 
-      $('defaultBrowserUseAsDefaultButton').disabled = isDefault;
+      $('defaultBrowserUseAsDefaultButton').disabled = !canBeDefault ||
+                                                       isDefault;
     },
 
     /**
@@ -259,8 +284,11 @@ cr.define('options', function() {
      * @private
      */
     updateHomepageControlStates_: function() {
-      $('homepageURL').disabled = !this.isHomepageURLFieldEnabled_();
-      $('homepageURL').value = this.homepage_pref_.value;
+      var homepageField = $('homepageURL');
+      homepageField.disabled = !this.isHomepageURLFieldEnabled_();
+      homepageField.value = this.homepage_pref_.value;
+      homepageField.style.backgroundImage = url('chrome://favicon/' +
+                                                this.homepage_pref_.value);
       var disableChoice = !this.isHomepageChoiceEnabled_();
       $('homepageUseURLButton').disabled = disableChoice;
       $('homepageUseNTPButton').disabled = disableChoice;
@@ -370,10 +398,12 @@ cr.define('options', function() {
     },
   };
 
-  BrowserOptions.updateDefaultBrowserState = function(statusString, isDefault) {
+  BrowserOptions.updateDefaultBrowserState = function(statusString, isDefault,
+                                                      canBeDefault) {
     if (!cr.isChromeOS) {
       BrowserOptions.getInstance().updateDefaultBrowserState_(statusString,
-                                                              isDefault);
+                                                              isDefault,
+                                                              canBeDefault);
     }
   };
 
@@ -395,4 +425,3 @@ cr.define('options', function() {
   };
 
 });
-

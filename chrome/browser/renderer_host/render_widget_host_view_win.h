@@ -15,13 +15,19 @@
 
 #include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
+#include "base/scoped_vector.h"
 #include "base/task.h"
 #include "chrome/browser/accessibility/browser_accessibility_manager.h"
 #include "chrome/browser/ime_input.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "gfx/native_widget_types.h"
 #include "webkit/glue/webcursor.h"
+
+namespace app {
+class ViewProp;
+}
 
 namespace gfx {
 class Size;
@@ -34,13 +40,11 @@ class Message;
 
 class BackingStore;
 class RenderWidgetHost;
-class GpuViewHost;
 
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
 
-static const wchar_t* const kRenderWidgetHostHWNDClass =
-    L"Chrome_RenderWidgetHostHWND";
+extern const wchar_t kRenderWidgetHostHWNDClass[];
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin
@@ -145,14 +149,18 @@ class RenderWidgetHostViewWin
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
       const std::vector<gfx::Rect>& copy_rects);
   virtual void RenderViewGone();
+  virtual void WillWmDestroy();  // called by TabContents before DestroyWindow
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh);
   virtual void Destroy();
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
-  virtual VideoLayer* AllocVideoLayer(const gfx::Size& size);
   virtual void SetBackground(const SkBitmap& background);
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
-  virtual void SetVisuallyDeemphasized(bool deemphasized);
+  virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate);
+
+  virtual gfx::PluginWindowHandle GetCompositorHostWindow();
+  virtual void ShowCompositorHostWindow(bool show);
+
   virtual void OnAccessibilityNotifications(
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params);
 
@@ -243,10 +251,6 @@ class RenderWidgetHostViewWin
   // asynchronously.
   void Redraw();
 
-  // Draw the resize corner bitmap on top of the given HDC, if it intersects the
-  // given paint rect.
-  void DrawResizeCorner(const gfx::Rect& paint_rect, HDC dc);
-
   // Draw our background over the given HDC in the given |rect|. The background
   // will be tiled such that it lines up with existing tiles starting from the
   // origin of |dc|.
@@ -255,15 +259,17 @@ class RenderWidgetHostViewWin
   // Create an intermediate window between the given HWND and its parent.
   HWND ReparentWindow(HWND window);
 
+  // Clean up the compositor window, if needed.
+  void CleanupCompositorWindow();
+
   // Whether the window should be activated.
   bool IsActivatable() const;
 
   // The associated Model.
   RenderWidgetHost* render_widget_host_;
 
-  // If we're doing out-of-process painting, this member will be non-NULL,
-  // indicating the gpu view we're using for the painting.
-  scoped_ptr<GpuViewHost> gpu_view_host_;
+  // When we are doing accelerated compositing
+  HWND compositor_host_window_;
 
   // The cursor for the page. This is passed up from the renderer.
   WebCursor current_cursor_;
@@ -332,9 +338,9 @@ class RenderWidgetHostViewWin
   // The time it took after this view was selected for it to be fully painted.
   base::TimeTicks tab_switch_paint_time_;
 
-  // True if we are showing a constrained window. We will grey out the view
-  // whenever we paint.
-  bool visually_deemphasized_;
+  // A color we use to shade the entire render view. If 100% transparent, we do
+  // not shade the render view.
+  SkColor overlay_color_;
 
   // Registrar so we can listen to RENDERER_PROCESS_TERMINATED events.
   NotificationRegistrar registrar_;
@@ -342,6 +348,8 @@ class RenderWidgetHostViewWin
   // Stores the current text input type received by ImeUpdateTextInputState()
   // method.
   WebKit::WebTextInputType text_input_type_;
+
+  ScopedVector<app::ViewProp> props_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

@@ -5,8 +5,8 @@
 #include "chrome/browser/automation/automation_provider.h"
 
 #include "app/keyboard_codes.h"
+#include "base/debug/trace_event.h"
 #include "base/json/json_reader.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_extension_function.h"
@@ -16,14 +16,14 @@
 #include "chrome/browser/automation/extension_port_container.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/external_tab_container_win.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/page_zoom.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "views/focus/accelerator_handler.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
@@ -241,12 +241,13 @@ void AutomationProvider::GetTabHWND(int handle, HWND* tab_hwnd) {
 void AutomationProvider::CreateExternalTab(
     const IPC::ExternalTabSettings& settings,
     gfx::NativeWindow* tab_container_window, gfx::NativeWindow* tab_window,
-    int* tab_handle) {
+    int* tab_handle, int* session_id) {
   TRACE_EVENT_BEGIN("AutomationProvider::CreateExternalTab", 0, "");
 
   *tab_handle = 0;
   *tab_container_window = NULL;
   *tab_window = NULL;
+  *session_id = -1;
   scoped_refptr<ExternalTabContainer> external_tab_container =
       new ExternalTabContainer(this, automation_resource_message_filter_);
 
@@ -266,6 +267,7 @@ void AutomationProvider::CreateExternalTab(
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
     *tab_window = tab_contents->GetNativeView();
+    *session_id = tab_contents->controller().session_id().id();
   } else {
     external_tab_container->Uninitialize();
   }
@@ -378,12 +380,14 @@ void AutomationProvider::ConnectExternalTab(
     gfx::NativeWindow parent_window,
     gfx::NativeWindow* tab_container_window,
     gfx::NativeWindow* tab_window,
-    int* tab_handle) {
+    int* tab_handle,
+    int* session_id) {
   TRACE_EVENT_BEGIN("AutomationProvider::ConnectExternalTab", 0, "");
 
   *tab_handle = 0;
   *tab_container_window = NULL;
   *tab_window = NULL;
+  *session_id = -1;
 
   scoped_refptr<ExternalTabContainer> external_tab_container =
       ExternalTabContainer::RemovePendingTab(static_cast<uintptr_t>(cookie));
@@ -400,6 +404,7 @@ void AutomationProvider::ConnectExternalTab(
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
     *tab_window = tab_contents->GetNativeView();
+    *session_id = tab_contents->controller().session_id().id();
   } else {
     external_tab_container->Uninitialize();
   }
@@ -495,8 +500,8 @@ bool AutomationProvider::InterceptBrowserEventMessageFromExternalHost(
     return false;
   }
 
-  if (profile()->GetExtensionMessageService()) {
-    profile()->GetExtensionMessageService()->DispatchEventToRenderers(
+  if (profile()->GetExtensionEventRouter()) {
+    profile()->GetExtensionEventRouter()->DispatchEventToRenderers(
         event_name, json_args, profile(), GURL());
   }
 

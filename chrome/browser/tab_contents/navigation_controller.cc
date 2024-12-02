@@ -718,7 +718,7 @@ void NavigationController::RendererDidNavigateToNewPage(
     // Don't use the page type from the pending entry. Some interstitial page
     // may have set the type to interstitial. Once we commit, however, the page
     // type must always be normal.
-    new_entry->set_page_type(NavigationEntry::NORMAL_PAGE);
+    new_entry->set_page_type(NORMAL_PAGE);
   } else {
     new_entry = new NavigationEntry;
   }
@@ -980,8 +980,10 @@ void NavigationController::CopyStateFromAndPrune(NavigationController* source) {
   // Take over the session id from source.
   session_id_ = source->session_id_;
 
-  // Reset source's session id as we're taking it over.
-  source->session_id_.clear();
+  // Reset source's session id as we're taking it over. We give it a new id in
+  // case source is added later on, which can happen with instant enabled if the
+  // tab has a before unload handler.
+  source->session_id_ = SessionID();
 }
 
 void NavigationController::PruneAllButActive() {
@@ -1200,8 +1202,7 @@ void NavigationController::InsertEntriesFrom(
   size_t insert_index = 0;
   for (int i = 0; i < max_index; i++) {
     // When cloning a tab, copy all entries except interstitial pages
-    if (source.entries_[i].get()->page_type() !=
-        NavigationEntry::INTERSTITIAL_PAGE) {
+    if (source.entries_[i].get()->page_type() != INTERSTITIAL_PAGE) {
       entries_.insert(entries_.begin() + insert_index++,
                       linked_ptr<NavigationEntry>(
                           new NavigationEntry(*source.entries_[i])));

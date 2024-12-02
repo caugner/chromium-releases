@@ -13,7 +13,7 @@
 #include "chrome/browser/appcache/chrome_appcache_service.h"
 #include "chrome/browser/chrome_blob_storage_context.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/file_system/file_system_host_context.h"
+#include "chrome/browser/file_system/browser_file_system_context.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/host_zoom_map.h"
 #include "chrome/browser/io_thread.h"
@@ -33,6 +33,7 @@ class PrefService;
 class Profile;
 
 namespace net {
+class DnsCertProvenanceChecker;
 class NetworkDelegate;
 class ProxyConfig;
 }
@@ -71,8 +72,8 @@ class ChromeURLRequestContext : public URLRequestContext {
   }
 
   // Gets the file system host context with this context's profile.
-  FileSystemHostContext* file_system_host_context() const {
-    return file_system_host_context_.get();
+  BrowserFileSystemContext* browser_file_system_context() const {
+    return browser_file_system_context_.get();
   }
 
   bool is_off_the_record() const {
@@ -130,6 +131,9 @@ class ChromeURLRequestContext : public URLRequestContext {
   void set_dnsrr_resolver(net::DnsRRResolver* dnsrr_resolver) {
     dnsrr_resolver_ = dnsrr_resolver;
   }
+  void set_dns_cert_checker(net::DnsCertProvenanceChecker* ctx) {
+    dns_cert_checker_.reset(ctx);
+  }
   void set_http_transaction_factory(net::HttpTransactionFactory* factory) {
     http_transaction_factory_ = factory;
   }
@@ -174,8 +178,8 @@ class ChromeURLRequestContext : public URLRequestContext {
   void set_blob_storage_context(ChromeBlobStorageContext* context) {
     blob_storage_context_ = context;
   }
-  void set_file_system_host_context(FileSystemHostContext* context) {
-    file_system_host_context_ = context;
+  void set_browser_file_system_context(BrowserFileSystemContext* context) {
+    browser_file_system_context_ = context;
   }
   void set_extension_info_map(ExtensionInfoMap* map) {
     extension_info_map_ = map;
@@ -204,7 +208,7 @@ class ChromeURLRequestContext : public URLRequestContext {
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<HostZoomMap> host_zoom_map_;
   scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
-  scoped_refptr<FileSystemHostContext> file_system_host_context_;
+  scoped_refptr<BrowserFileSystemContext> browser_file_system_context_;
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
 
   bool is_media_;
@@ -231,8 +235,6 @@ class ChromeURLRequestContextGetter : public URLRequestContextGetter,
   ChromeURLRequestContextGetter(Profile* profile,
                                 ChromeURLRequestContextFactory* factory);
 
-  static void RegisterUserPrefs(PrefService* user_prefs);
-
   // Note that GetURLRequestContext() can only be called from the IO
   // thread (it will assert otherwise). GetCookieStore() and
   // GetIOMessageLoopProxy however can be called from any thread.
@@ -240,7 +242,11 @@ class ChromeURLRequestContextGetter : public URLRequestContextGetter,
   // URLRequestContextGetter implementation.
   virtual URLRequestContext* GetURLRequestContext();
   virtual net::CookieStore* GetCookieStore();
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy();
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
+
+  // Releases |url_request_context_|.  It's invalid to call
+  // GetURLRequestContext() after this point.
+  void ReleaseURLRequestContext();
 
   // Convenience overload of GetURLRequestContext() that returns a
   // ChromeURLRequestContext* rather than a URLRequestContext*.
@@ -309,6 +315,10 @@ class ChromeURLRequestContextGetter : public URLRequestContextGetter,
 
   PrefChangeRegistrar registrar_;
 
+  // |io_thread_| is always valid during the lifetime of |this| since |this| is
+  // deleted on the IO thread.
+  IOThread* const io_thread_;
+
   // Deferred logic for creating a ChromeURLRequestContext.
   // Access only from the IO thread.
   scoped_ptr<ChromeURLRequestContextFactory> factory_;
@@ -365,7 +375,7 @@ class ChromeURLRequestContextFactory {
   scoped_refptr<net::SSLConfigService> ssl_config_service_;
   scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate_;
   scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
-  scoped_refptr<FileSystemHostContext> file_system_host_context_;
+  scoped_refptr<BrowserFileSystemContext> browser_file_system_context_;
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
 
   FilePath profile_dir_path_;
@@ -375,10 +385,5 @@ class ChromeURLRequestContextFactory {
 
   DISALLOW_COPY_AND_ASSIGN(ChromeURLRequestContextFactory);
 };
-
-// Creates a proxy configuration from proxy-related preferences fetched
-// from |pref_service|. The relevant preferences in |pref_service| are
-// initialized from the process' command line or by applicable proxy policies.
-net::ProxyConfig* CreateProxyConfig(const PrefService* pref_service);
 
 #endif  // CHROME_BROWSER_NET_CHROME_URL_REQUEST_CONTEXT_H_

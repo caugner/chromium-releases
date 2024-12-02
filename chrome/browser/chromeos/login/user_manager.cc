@@ -20,7 +20,9 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
@@ -43,14 +45,16 @@ const char kIncognitoUser[] = "";
 
 // Special pathes to default user images.
 const char* kDefaultImageNames[] = {
-    "default:blue",
+    "default:gray",
     "default:green",
+    "default:blue",
     "default:yellow",
     "default:red",
 };
 
 // Resource IDs of default user images.
 const int kDefaultImageResources[] = {
+  IDR_LOGIN_DEFAULT_USER,
   IDR_LOGIN_DEFAULT_USER_1,
   IDR_LOGIN_DEFAULT_USER_2,
   IDR_LOGIN_DEFAULT_USER_3,
@@ -68,7 +72,7 @@ void SavePathToLocalState(const std::string& username,
   DictionaryValue* images =
       local_state->GetMutableDictionary(kUserImages);
   images->SetWithoutPathExpansion(username, new StringValue(image_path));
-  DLOG(INFO) << "Saving path to user image in Local State.";
+  DVLOG(1) << "Saving path to user image in Local State.";
   local_state->SavePersistentPrefs();
 }
 
@@ -98,6 +102,15 @@ void SaveImageToFile(const SkBitmap& image,
                           username, image_path.value()));
 }
 
+// Deletes user's image file. Runs on FILE thread.
+void DeleteUserImage(const FilePath& image_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  if (!file_util::Delete(image_path, false)) {
+    LOG(ERROR) << "Failed to remove user image.";
+    return;
+  }
+}
+
 // Checks if given path is one of the default ones. If it is, returns true
 // and its index in kDefaultImageNames through |image_id|. If not, returns
 // false.
@@ -112,12 +125,31 @@ bool IsDefaultImagePath(const std::string& path, size_t* image_id) {
   return false;
 }
 
+// Updates current user ownership on UI thread.
+void UpdateOwnership(bool is_owner) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  UserManager* user_manager = UserManager::Get();
+  user_manager->set_current_user_is_owner(is_owner);
+
+  if (is_owner) {
+    // Also update cached value.
+    UserCrosSettingsProvider::UpdateCachedOwner(
+      user_manager->logged_in_user().email());
+  }
+}
+
 // Checks current user's ownership on file thread.
 void CheckOwnership() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  UserManager::Get()->set_current_user_is_owner(
-      OwnershipService::GetSharedInstance()->CurrentUserIsOwner());
+  bool is_owner = OwnershipService::GetSharedInstance()->CurrentUserIsOwner();
+
+  // UserManager should be accessed only on UI thread.
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      NewRunnableFunction(&UpdateOwnership, is_owner));
 }
 
 }  // namespace
@@ -156,7 +188,7 @@ std::vector<UserManager::User> UserManager::GetUsers() const {
   PrefService* local_state = g_browser_process->local_state();
   const ListValue* prefs_users = local_state->GetList(kLoggedInUsers);
   const DictionaryValue* prefs_images =
-      local_state->GetDictionary(kUserImages);
+      local_state->GetMutableDictionary(kUserImages);
 
   if (prefs_users) {
     for (ListValue::const_iterator it = prefs_users->begin();
@@ -197,6 +229,7 @@ std::vector<UserManager::User> UserManager::GetUsers() const {
 }
 
 void UserManager::OffTheRecordUserLoggedIn() {
+  user_is_logged_in_ = true;
   logged_in_user_ = User();
   logged_in_user_.set_email(kIncognitoUser);
   NotifyOnLogin();
@@ -208,6 +241,11 @@ void UserManager::UserLoggedIn(const std::string& email) {
     return;
   }
 
+  if (!IsKnownUser(email)) {
+    current_user_is_new_ = true;
+    browser_defaults::skip_restore = true;
+  }
+
   // Get a copy of the current users.
   std::vector<User> users = GetUsers();
 
@@ -216,6 +254,8 @@ void UserManager::UserLoggedIn(const std::string& email) {
   ListValue* prefs_users = prefs->GetMutableList(kLoggedInUsers);
   prefs_users->Clear();
 
+  user_is_logged_in_ = true;
+  logged_in_user_ = User();
   logged_in_user_.set_email(email);
 
   // Make sure this user is first.
@@ -242,6 +282,7 @@ void UserManager::RemoveUser(const std::string& email) {
   // Clear the prefs view of the users.
   PrefService* prefs = g_browser_process->local_state();
   ListValue* prefs_users = prefs->GetMutableList(kLoggedInUsers);
+  DCHECK(prefs_users);
   prefs_users->Clear();
 
   for (std::vector<User>::iterator it = users.begin();
@@ -252,7 +293,24 @@ void UserManager::RemoveUser(const std::string& email) {
     if (email != user_email)
       prefs_users->Append(Value::CreateStringValue(user_email));
   }
+
+  DictionaryValue* prefs_images = prefs->GetMutableDictionary(kUserImages);
+  DCHECK(prefs_images);
+  std::string image_path_string;
+  prefs_images->GetStringWithoutPathExpansion(email, &image_path_string);
+  prefs_images->RemoveWithoutPathExpansion(email, NULL);
+
   prefs->SavePersistentPrefs();
+
+  size_t default_image_id;
+  if (!IsDefaultImagePath(image_path_string, &default_image_id)) {
+    FilePath image_path(image_path_string);
+    BrowserThread::PostTask(
+        BrowserThread::FILE,
+        FROM_HERE,
+        NewRunnableFunction(&DeleteUserImage,
+                            image_path));
+  }
 }
 
 bool UserManager::IsKnownUser(const std::string& email) {
@@ -277,11 +335,8 @@ void UserManager::SetLoggedInUserImage(const SkBitmap& image) {
 void UserManager::SaveUserImage(const std::string& username,
                                 const SkBitmap& image) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::string filename = username + ".png";
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  FilePath image_path = user_data_dir.AppendASCII(filename);
-  DLOG(INFO) << "Saving user image to " << image_path.value();
+  FilePath image_path = GetImagePathForUser(username);
+  DVLOG(1) << "Saving user image to " << image_path.value();
 
   BrowserThread::PostTask(
       BrowserThread::FILE,
@@ -299,7 +354,7 @@ void UserManager::SetDefaultUserImage(const std::string& username) {
   const ListValue* prefs_users = local_state->GetList(kLoggedInUsers);
   DCHECK(prefs_users);
   const DictionaryValue* prefs_images =
-      local_state->GetMutableDictionary(kUserImages);
+      local_state->GetDictionary(kUserImages);
   DCHECK(prefs_images);
 
   // We want to distribute default images between users uniformly so that if
@@ -335,7 +390,7 @@ void UserManager::SetDefaultUserImage(const std::string& username) {
 
 void UserManager::OnImageLoaded(const std::string& username,
                                 const SkBitmap& image) {
-  DLOG(INFO) << "Loaded image for " << username;
+  DVLOG(1) << "Loaded image for " << username;
   user_images_[username] = image;
   User user;
   user.set_email(username);
@@ -349,13 +404,22 @@ void UserManager::OnImageLoaded(const std::string& username,
 // Private constructor and destructor. Do nothing.
 UserManager::UserManager()
     : ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_(new UserImageLoader(this))),
-      current_user_is_owner_(false) {
+      current_user_is_owner_(false),
+      current_user_is_new_(false),
+      user_is_logged_in_(false) {
   registrar_.Add(this, NotificationType::OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
       NotificationService::AllSources());
 }
 
 UserManager::~UserManager() {
   image_loader_->set_delegate(NULL);
+}
+
+FilePath UserManager::GetImagePathForUser(const std::string& username) {
+  std::string filename = username + ".png";
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  return user_data_dir.AppendASCII(filename);
 }
 
 void UserManager::NotifyOnLogin() {

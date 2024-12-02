@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/file_path.h"
 #include "net/base/completion_callback.h"
@@ -34,6 +35,10 @@ class URLRequestFileJob : public URLRequestJob {
   virtual void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers);
 
   static URLRequest::ProtocolFactory Factory;
+
+#if defined(OS_CHROMEOS)
+  static bool AccessDisabled(const FilePath& file_path);
+#endif
 
  protected:
   virtual ~URLRequestFileJob();

@@ -24,7 +24,8 @@
 
 
 class AutomationResourceRoutingDelegate;
-struct BookmarkDragData;
+class BackgroundContents;
+struct BookmarkNodeData;
 class BookmarkNode;
 struct ContextMenuParams;
 class FilePath;
@@ -49,7 +50,9 @@ struct ViewHostMsg_DomMessage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
 struct ViewHostMsg_PageHasOSDD_Type;
 struct ViewHostMsg_RunFileChooser_Params;
+struct WebApplicationInfo;
 struct WebDropData;
+struct WebMenuItem;
 class WebKeyboardEvent;
 struct WebPreferences;
 
@@ -67,11 +70,14 @@ namespace IPC {
 class Message;
 }
 
+namespace net {
+class CookieOptions;
+}
+
 namespace webkit_glue {
 struct FormData;
 class FormField;
 struct PasswordForm;
-struct WebApplicationInfo;
 }
 
 //
@@ -146,6 +152,16 @@ class RenderViewHostDelegate {
     // provided in the supplied params.
     virtual void ShowContextMenu(const ContextMenuParams& params) = 0;
 
+    // Shows a popup menu with the specified items.
+    // This method should call RenderViewHost::DidSelectPopupMenuItemAt() or
+    // RenderViewHost::DidCancelPopupMenu() ased on the user action.
+    virtual void ShowPopupMenu(const gfx::Rect& bounds,
+                               int item_height,
+                               double item_font_size,
+                               int selected_item,
+                               const std::vector<WebMenuItem>& items,
+                               bool right_aligned) = 0;
+
     // The user started dragging content of the specified type within the
     // RenderView. Contextual information about the dragged content is supplied
     // by WebDropData.
@@ -197,10 +213,6 @@ class RenderViewHostDelegate {
 
     // The contents' preferred size changed.
     virtual void UpdatePreferredSize(const gfx::Size& pref_size) = 0;
-
-    // Called to determine whether the render view needs to draw a drop shadow
-    // at the top (currently used for infobars).
-    virtual bool ShouldDrawDropShadow();
 
    protected:
     virtual ~View() {}
@@ -272,10 +284,15 @@ class RenderViewHostDelegate {
     virtual void OnDisabledOutdatedPlugin(const string16& name,
                                           const GURL& update_url) = 0;
 
-    // Notification that a request for install info has completed.
+    // Notification that a user's request to install an application has
+    // completed.
     virtual void OnDidGetApplicationInfo(
         int32 page_id,
-        const webkit_glue::WebApplicationInfo& app_info) = 0;
+        const WebApplicationInfo& app_info) = 0;
+
+    // Notification when an application programmatically requests installation.
+    virtual void OnInstallApplication(
+        const WebApplicationInfo& app_info) = 0;
 
     // Notification that the contents of the page has been loaded.
     virtual void OnPageContents(const GURL& url,
@@ -292,8 +309,12 @@ class RenderViewHostDelegate {
                                   TranslateErrors::Type error_type) = 0;
 
     // Notification that the page has a suggest result.
-    virtual void OnSetSuggestResult(int32 page_id,
-                                    const std::string& result) = 0;
+    virtual void OnSetSuggestions(
+        int32 page_id,
+        const std::vector<std::string>& result) = 0;
+
+    // Notification of whether the page supports instant-style interaction.
+    virtual void OnInstantSupportDetermined(int32 page_id, bool result) = 0;
 
    protected:
     virtual ~BrowserIntegration() {}
@@ -354,7 +375,10 @@ class RenderViewHostDelegate {
         bool showing_repost_interstitial) = 0;
 
     // Notification that a document has been loaded in a frame.
-    virtual void DocumentLoadedInFrame() = 0;
+    virtual void DocumentLoadedInFrame(long long frame_id) = 0;
+
+    // Notification that a frame finished loading.
+    virtual void DidFinishLoad(long long frame_id) = 0;
 
    protected:
     virtual ~Resource() {}
@@ -376,6 +400,7 @@ class RenderViewHostDelegate {
     // OnContentBlocked.
     virtual void OnCookieAccessed(const GURL& url,
                                   const std::string& cookie_line,
+                                  const net::CookieOptions& options,
                                   bool blocked_by_policy) = 0;
 
     // Called when a specific indexed db factory in the current page was
@@ -383,7 +408,6 @@ class RenderViewHostDelegate {
     // |blocked_by_policy| should be true, and this function should invoke
     // OnContentBlocked.
     virtual void OnIndexedDBAccessed(const GURL& url,
-                                     const string16& name,
                                      const string16& description,
                                      bool blocked_by_policy) = 0;
 
@@ -507,10 +531,7 @@ class RenderViewHostDelegate {
     // query. When the database thread is finished, the AutocompleteHistory
     // manager retrieves the calling RenderViewHost and then passes the vector
     // of suggestions to RenderViewHost::AutocompleteSuggestionsReturned.
-    // Returns true to indicate that FormFieldHistorySuggestionsReturned will be
-    // called.
-    virtual bool GetAutocompleteSuggestions(int query_id,
-                                            const string16& field_name,
+    virtual void GetAutocompleteSuggestions(const string16& field_name,
                                             const string16& user_text) = 0;
 
     // Called when the user has indicated that she wants to remove the specified
@@ -534,21 +555,22 @@ class RenderViewHostDelegate {
     // frame.
     virtual void FormsSeen(const std::vector<webkit_glue::FormData>& forms) = 0;
 
-    // Called to retrieve a list of AutoFill suggestions from the web database
-    // given the name of the field and what the user has already typed in the
-    // field. |form_autofilled| is true if the form containing |field| has any
-    // auto-filled fields. Returns true to indicate that
-    // RenderViewHost::AutoFillSuggestionsReturned has been called.
+    // Called to retrieve a list of AutoFill suggestions for the portion of the
+    // |form| containing |field|, given the current state of the |form|.
+    // Returns true to indicate that RenderViewHost::AutoFillSuggestionsReturned
+    // has been called.
     virtual bool GetAutoFillSuggestions(
-        int query_id,
-        bool form_autofilled,
+        const webkit_glue::FormData& form,
         const webkit_glue::FormField& field) = 0;
 
-    // Called to fill the FormData object with AutoFill profile information that
-    // matches the |value|, |unique_id| key. Returns true to indicate that
-    // RenderViewHost::AutoFillFormDataFilled has been called.
+    // Called to fill the |form| with AutoFill profile information that matches
+    // the |unique_id| key. If the portion of the form containing |field| has
+    // been autofilled already, only fills |field|.
+    // Returns true to indicate that RenderViewHost::AutoFillFormDataFilled
+    // has been called.
     virtual bool FillAutoFillFormData(int query_id,
                                       const webkit_glue::FormData& form,
+                                      const webkit_glue::FormField& field,
                                       int unique_id) = 0;
 
     // Called when the user selects the 'AutoFill Options...' suggestions in the
@@ -564,20 +586,13 @@ class RenderViewHostDelegate {
 
   class BookmarkDrag {
    public:
-    virtual void OnDragEnter(const BookmarkDragData& data) = 0;
-    virtual void OnDragOver(const BookmarkDragData& data) = 0;
-    virtual void OnDragLeave(const BookmarkDragData& data) = 0;
-    virtual void OnDrop(const BookmarkDragData& data) = 0;
+    virtual void OnDragEnter(const BookmarkNodeData& data) = 0;
+    virtual void OnDragOver(const BookmarkNodeData& data) = 0;
+    virtual void OnDragLeave(const BookmarkNodeData& data) = 0;
+    virtual void OnDrop(const BookmarkNodeData& data) = 0;
 
    protected:
     virtual ~BookmarkDrag() {}
-  };
-
-  class BlockedPlugin {
-   public:
-    virtual void OnNonSandboxedPluginBlocked(const std::string& plugin,
-                                             const string16& name) = 0;
-    virtual void OnBlockedPluginLoaded() = 0;
   };
 
   // SSL -----------------------------------------------------------------------
@@ -650,7 +665,6 @@ class RenderViewHostDelegate {
   virtual Autocomplete* GetAutocompleteDelegate();
   virtual AutoFill* GetAutoFillDelegate();
   virtual BookmarkDrag* GetBookmarkDragDelegate();
-  virtual BlockedPlugin* GetBlockedPluginDelegate();
   virtual SSL* GetSSLDelegate();
   virtual FileSelect* GetFileSelectDelegate();
 
@@ -665,6 +679,10 @@ class RenderViewHostDelegate {
   // Return this object cast to a TabContents, if it is one. If the object is
   // not a TabContents, returns NULL.
   virtual TabContents* GetAsTabContents();
+
+  // Return this object cast to a BackgroundContents, if it is one. If the
+  // object is not a BackgroundContents, returns NULL.
+  virtual BackgroundContents* GetAsBackgroundContents();
 
   // Return id number of browser window which this object is attached to. If no
   // browser window is attached to, just return -1.
@@ -716,9 +734,9 @@ class RenderViewHostDelegate {
 
   // Inspector setting was changed and should be persisted.
   virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value) {}
+                                      const std::string& value) = 0;
 
-  virtual void ClearInspectorSettings() {}
+  virtual void ClearInspectorSettings() = 0;
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -814,10 +832,6 @@ class RenderViewHostDelegate {
 
   // Notification from the renderer that JS runs out of memory.
   virtual void OnJSOutOfMemory() {}
-
-  // Return the rect where to display the resize corner, if any, otherwise
-  // an empty rect.
-  virtual gfx::Rect GetRootWindowResizerRect() const;
 
   // Notification that the renderer has become unresponsive. The
   // delegate can use this notification to show a warning to the user.

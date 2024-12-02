@@ -71,8 +71,8 @@ class MockVideoDecodeEngine : public VideoDecodeEngine {
 // Class that just mocks the private functions.
 class DecoderPrivateMock : public FFmpegVideoDecoder {
  public:
-  DecoderPrivateMock(VideoDecodeEngine* engine)
-      : FFmpegVideoDecoder(engine) {
+  explicit DecoderPrivateMock(VideoDecodeContext* context)
+      : FFmpegVideoDecoder(context) {
   }
 
   // change access qualifier for test: used in actions.
@@ -125,8 +125,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
     // Create an FFmpegVideoDecoder, and MockVideoDecodeEngine.
     //
     // TODO(ajwong): Break the test's dependency on FFmpegVideoDecoder.
-    factory_ = FFmpegVideoDecoder::CreateFactory();
-    decoder_ = factory_->Create<DecoderPrivateMock>(media_format);
+    decoder_ = new DecoderPrivateMock(NULL);
     renderer_ = new MockVideoRenderer();
     engine_ = new StrictMock<MockVideoDecodeEngine>();
 
@@ -161,12 +160,15 @@ class FFmpegVideoDecoderTest : public testing::Test {
   }
 
   virtual ~FFmpegVideoDecoderTest() {
-    // We had to set this because not all tests had initialized the engine.
-    engine_->event_handler_ = decoder_.get();
     EXPECT_CALL(callback_, OnFilterCallback());
     EXPECT_CALL(callback_, OnCallbackDestroyed());
-    EXPECT_CALL(*engine_, Uninitialize())
-        .WillOnce(EngineUninitialize(engine_));
+
+    // The presence of an event handler means we need to uninitialize.
+    if (engine_->event_handler_) {
+      EXPECT_CALL(*engine_, Uninitialize())
+          .WillOnce(EngineUninitialize(engine_));
+    }
+
     decoder_->Stop(callback_.NewCallback());
 
     // Finish up any remaining tasks.
@@ -194,7 +196,6 @@ class FFmpegVideoDecoderTest : public testing::Test {
     message_loop_.RunAllPending();
   }
   // Fixture members.
-  scoped_refptr<FilterFactory> factory_;
   MockVideoDecodeEngine* engine_;  // Owned by |decoder_|.
   scoped_refptr<DecoderPrivateMock> decoder_;
   scoped_refptr<MockVideoRenderer> renderer_;
@@ -228,23 +229,6 @@ const FFmpegVideoDecoder::TimeTuple FFmpegVideoDecoderTest::kTestPts2 =
 const FFmpegVideoDecoder::TimeTuple FFmpegVideoDecoderTest::kTestPts3 =
     { base::TimeDelta::FromMicroseconds(789),
       base::TimeDelta::FromMicroseconds(60) };
-
-TEST(FFmpegVideoDecoderFactoryTest, Create) {
-  // Should only accept video/x-ffmpeg mime type.
-  scoped_refptr<FilterFactory> factory = FFmpegVideoDecoder::CreateFactory();
-  MediaFormat media_format;
-  media_format.SetAsString(MediaFormat::kMimeType, "foo/x-bar");
-  scoped_refptr<VideoDecoder> decoder =
-      factory->Create<VideoDecoder>(media_format);
-  ASSERT_FALSE(decoder);
-
-  // Try again with video/x-ffmpeg mime type.
-  media_format.Clear();
-  media_format.SetAsString(MediaFormat::kMimeType,
-                           mime_type::kFFmpegVideo);
-  decoder = factory->Create<VideoDecoder>(media_format);
-  ASSERT_TRUE(decoder);
-}
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_QueryInterfaceFails) {
   // Test QueryInterface returning NULL.
@@ -304,17 +288,17 @@ TEST_F(FFmpegVideoDecoderTest, FindPtsAndDuration) {
   AVRational time_base = {1, 2};
 
   FFmpegVideoDecoder::TimeTuple last_pts;
-  last_pts.timestamp = StreamSample::kInvalidTimestamp;
-  last_pts.duration = StreamSample::kInvalidTimestamp;
+  last_pts.timestamp = kNoTimestamp;
+  last_pts.duration = kNoTimestamp;
 
   // Simulate an uninitialized |video_frame| and |last_pts| where we cannot
   // determine a timestamp at all.
-  video_frame_->SetTimestamp(StreamSample::kInvalidTimestamp);
-  video_frame_->SetDuration(StreamSample::kInvalidTimestamp);
+  video_frame_->SetTimestamp(kNoTimestamp);
+  video_frame_->SetDuration(kNoTimestamp);
   FFmpegVideoDecoder::TimeTuple result_pts =
       decoder_->FindPtsAndDuration(time_base, &pts_heap,
                                    last_pts, video_frame_.get());
-  EXPECT_EQ(StreamSample::kInvalidTimestamp.InMicroseconds(),
+  EXPECT_EQ(kNoTimestamp.InMicroseconds(),
             result_pts.timestamp.InMicroseconds());
   EXPECT_EQ(500000, result_pts.duration.InMicroseconds());
 
@@ -325,8 +309,8 @@ TEST_F(FFmpegVideoDecoderTest, FindPtsAndDuration) {
 
   // Simulate an uninitialized |video_frame| where |last_pts| will be used to
   // generate a timestamp and |time_base| will be used to generate a duration.
-  video_frame_->SetTimestamp(StreamSample::kInvalidTimestamp);
-  video_frame_->SetDuration(StreamSample::kInvalidTimestamp);
+  video_frame_->SetTimestamp(kNoTimestamp);
+  video_frame_->SetDuration(kNoTimestamp);
   result_pts =
       decoder_->FindPtsAndDuration(time_base, &pts_heap,
                                    last_pts, video_frame_.get());

@@ -17,7 +17,7 @@
 
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_pref_update.h"
 #include "chrome/browser/profile.h"
@@ -157,11 +157,6 @@ void GeolocationContentSettingsMap::SetContentSetting(
     requesting_origin_settings_dictionary->SetWithoutPathExpansion(
         embedding_origin.spec(), Value::CreateIntegerValue(setting));
   }
-
-  NotificationService::current()->Notify(
-      NotificationType::GEOLOCATION_SETTINGS_CHANGED,
-      Source<GeolocationContentSettingsMap>(this),
-      NotificationService::NoDetails());
 }
 
 void GeolocationContentSettingsMap::ResetToDefault() {

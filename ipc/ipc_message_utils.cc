@@ -233,6 +233,23 @@ void ParamTraits<unsigned long long>::Log(const param_type& p, std::string* l) {
   l->append(base::Uint64ToString(p));
 }
 
+void ParamTraits<unsigned short>::Write(Message* m, const param_type& p) {
+  m->WriteBytes(&p, sizeof(param_type));
+}
+
+bool ParamTraits<unsigned short>::Read(const Message* m, void** iter,
+                                       param_type* r) {
+  const char* data;
+  if (!m->ReadBytes(iter, &data, sizeof(param_type)))
+    return false;
+  memcpy(r, data, sizeof(param_type));
+  return true;
+}
+
+void ParamTraits<unsigned short>::Log(const param_type& p, std::string* l) {
+  l->append(base::UintToString(p));
+}
+
 void ParamTraits<base::Time>::Write(Message* m, const param_type& p) {
   ParamTraits<int64>::Write(m, p.ToInternalValue());
 }
@@ -248,6 +265,25 @@ bool ParamTraits<base::Time>::Read(const Message* m, void** iter,
 
 void ParamTraits<base::Time>::Log(const param_type& p, std::string* l) {
   ParamTraits<int64>::Log(p.ToInternalValue(), l);
+}
+
+void ParamTraits<base::TimeDelta> ::Write(Message* m, const param_type& p) {
+  ParamTraits<int64> ::Write(m, p.InMicroseconds());
+}
+
+bool ParamTraits<base::TimeDelta> ::Read(const Message* m,
+                                         void** iter,
+                                         param_type* r) {
+  int64 value;
+  bool ret = ParamTraits<int64> ::Read(m, iter, &value);
+  if (ret)
+    *r = base::TimeDelta::FromMicroseconds(value);
+
+  return ret;
+}
+
+void ParamTraits<base::TimeDelta> ::Log(const param_type& p, std::string* l) {
+  ParamTraits<int64> ::Log(p.InMicroseconds(), l);
 }
 
 void ParamTraits<DictionaryValue>::Write(Message* m, const param_type& p) {

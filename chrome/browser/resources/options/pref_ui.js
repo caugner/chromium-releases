@@ -25,12 +25,17 @@ cr.define('options', function() {
       // Listen to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            var value = (event.value && event.value['value'] != undefined) ?
+            var value = event.value && event.value['value'] != undefined ?
                 event.value['value'] : event.value;
             self.checked = Boolean(value);
-            self.managed = (event.value && event.value['managed'] != undefined) ?
+            self.managed = event.value && event.value['managed'] != undefined ?
                 event.value['managed'] : false;
             self.disabled = self.managed;
+            // Honor manually_disabled property, so options pages can
+            // disable preferences manually when needed.
+            if (self.manually_disabled) {
+              self.disabled = true;
+            }
           });
 
       // Listen to user events.
@@ -42,7 +47,7 @@ cr.define('options', function() {
                     Number(self.checked), self.metric);
                 break;
               case 'boolean':
-                Preferences.setBooleanPref(self.pref, self.checked,
+                Preferences.setBooleanPref(self.pref,
                     self.checked, self.metric);
                 break;
             }
@@ -96,12 +101,17 @@ cr.define('options', function() {
       // Listen to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            var value = (event.value && event.value['value'] != undefined) ?
+            var value = event.value && event.value['value'] != undefined ?
                 event.value['value'] : event.value;
-            self.managed = (event.value && event.value['managed'] != undefined) ?
+            self.managed = event.value && event.value['managed'] != undefined ?
                 event.value['managed'] : false;
             self.checked = String(value) == self.value;
             self.disabled = self.managed;
+            // Honor manually_disabled property, so options pages can
+            // disable preferences manually when needed.
+            if (self.manually_disabled) {
+              self.disabled = true;
+            }
           });
 
       // Listen to user events.
@@ -156,9 +166,9 @@ cr.define('options', function() {
       // Listen to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            self.value = (event.value && event.value['value'] != undefined) ?
+            self.value = event.value && event.value['value'] != undefined ?
                 event.value['value'] : event.value;
-            self.managed = (event.value && event.value['managed'] != undefined) ?
+            self.managed = event.value && event.value['managed'] != undefined ?
                 event.value['managed'] : false;
             self.disabled = self.managed;
           });
@@ -268,11 +278,16 @@ cr.define('options', function() {
       // Listen to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            var value = (event.value && event.value['value'] != undefined) ?
+            var value = event.value && event.value['value'] != undefined ?
                 event.value['value'] : event.value;
-            self.managed = (event.value && event.value['managed'] != undefined) ?
+            self.managed = event.value && event.value['managed'] != undefined ?
                 event.value['managed'] : false;
             self.disabled = self.managed;
+            // Honor manually_disabled property, so options pages can
+            // disable preferences manually when needed.
+            if (self.manually_disabled) {
+              self.disabled = true;
+            }
             for (var i = 0; i < self.options.length; i++) {
               if (self.options[i].value == value) {
                 self.selectedIndex = i;
@@ -360,9 +375,9 @@ cr.define('options', function() {
       // Listen to pref changes.
       Preferences.getInstance().addEventListener(this.pref,
           function(event) {
-            self.value = (event.value && event.value['value'] != undefined) ?
+            self.value = event.value && event.value['value'] != undefined ?
                 event.value['value'] : event.value;
-            self.managed = (event.value && event.value['managed'] != undefined) ?
+            self.managed = event.value && event.value['managed'] != undefined ?
                 event.value['managed'] : false;
             self.disabled = self.managed;
           });

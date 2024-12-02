@@ -31,14 +31,14 @@ static const char kWeakDHKeyLearnMoreUrl[] =
     "http://sites.google.com/a/chromium.org/dev/err_ssl_weak_server_ephemeral_dh_key";
 static const char kESETLearnMoreUrl[] =
     "http://sites.google.com/a/chromium.org/dev/err_eset_anti_virus_ssl_interception";
-static const char kNetNannyLearnMoreUrl[] =
-    "http://sites.google.com/a/chromium.org/dev/err_netnanny_ssl_interception";
 
 enum NAV_SUGGESTIONS {
   SUGGEST_NONE     = 0,
   SUGGEST_RELOAD   = 1 << 0,
   SUGGEST_HOSTNAME = 1 << 1,
-  SUGGEST_LEARNMORE = 1 << 2,
+  SUGGEST_FIREWALL_CONFIG = 1 << 2,
+  SUGGEST_PROXY_CONFIG = 1 << 3,
+  SUGGEST_LEARNMORE = 1 << 4,
 };
 
 struct LocalizedErrorMap {
@@ -78,6 +78,34 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
    IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED,
    SUGGEST_RELOAD,
+  },
+  {net::ERR_ADDRESS_UNREACHABLE,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_ADDRESS_UNREACHABLE,
+   IDS_ERRORPAGES_DETAILS_ADDRESS_UNREACHABLE,
+   SUGGEST_RELOAD | SUGGEST_FIREWALL_CONFIG | SUGGEST_PROXY_CONFIG,
+  },
+  {net::ERR_NETWORK_ACCESS_DENIED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NETWORK_ACCESS_DENIED,
+   IDS_ERRORPAGES_SUMMARY_NETWORK_ACCESS_DENIED,
+   IDS_ERRORPAGES_DETAILS_NETWORK_ACCESS_DENIED,
+   SUGGEST_FIREWALL_CONFIG,
+  },
+  {net::ERR_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED,
+   IDS_ERRORPAGES_DETAILS_PROXY_CONNECTION_FAILED,
+   SUGGEST_PROXY_CONFIG,
+  },
+  {net::ERR_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED,
+   IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
+   SUGGEST_NONE,
   },
   {net::ERR_FILE_NOT_FOUND,
    IDS_ERRORPAGES_TITLE_NOT_FOUND,
@@ -121,13 +149,6 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
   },
-  {net::ERR_PROXY_CONNECTION_FAILED,
-   IDS_ERRORPAGES_TITLE_PROXY_CONNECTION_FAILED,
-   IDS_ERRORPAGES_HEADING_PROXY_CONNECTION_FAILED,
-   IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED,
-   IDS_ERRORPAGES_DETAILS_PROXY_CONNECTION_FAILED,
-   SUGGEST_NONE,
-  },
   {net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_ESET_ANTI_VIRUS_SSL_INTERCEPTION,
@@ -135,32 +156,6 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
   },
-  {net::ERR_NETNANNY_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
-   IDS_ERRORPAGES_HEADING_NETNANNY_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_SUMMARY_NETNANNY_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
-   SUGGEST_LEARNMORE,
-  },
-  // TODO(mmenke): Once Linux-specific instructions are added, remove this
-  // conditional, and the one further down as well.
-#if defined(OS_MACOSX) || defined(OS_WIN)
-  {net::ERR_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_TITLE_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_HEADING_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
-   SUGGEST_NONE,
-  },
-#else
-  {net::ERR_INTERNET_DISCONNECTED,
-   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
-   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
-   IDS_ERRORPAGES_SUMMARY_NOT_AVAILABLE,
-   IDS_ERRORPAGES_DETAILS_INTERNET_DISCONNECTED,
-   SUGGEST_NONE,
-  },
-#endif
 };
 
 const LocalizedErrorMap http_error_options[] = {
@@ -315,12 +310,6 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
   bool rtl = LocaleIsRTL();
   error_strings->SetString("textdirection", rtl ? "rtl" : "ltr");
 
-  // Grab strings that are applicable to all error pages
-  error_strings->SetString("detailsLink",
-    l10n_util::GetStringUTF16(IDS_ERRORPAGES_DETAILS_LINK));
-  error_strings->SetString("detailsHeading",
-    l10n_util::GetStringUTF16(IDS_ERRORPAGES_DETAILS_HEADING));
-
   // Grab the strings and settings that depend on the error type.  Init
   // options with default values.
   LocalizedErrorMap options = {
@@ -339,12 +328,11 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
   if (error_map)
     options = *error_map;
 
-  string16 suggestions_heading;
   if (options.suggestions != SUGGEST_NONE) {
-    suggestions_heading =
-        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_HEADING);
+    error_strings->SetString(
+        "suggestionsHeading",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_HEADING));
   }
-  error_strings->SetString("suggestionsHeading", suggestions_heading);
 
   string16 failed_url(ASCIIToUTF16(error.unreachableURL.spec()));
   // URLs are always LTR.
@@ -368,17 +356,8 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
   error_strings->SetString("details",
       GetErrorDetailsString(error_domain, error_code, details));
 
-  // Any special case processing that needs to happen for particular
-  // errors (hack).
-  if (error_domain == net::kErrorDomain &&
-      error_code == net::ERR_PROXY_CONNECTION_FAILED) {
-    // Suffix the platform dependent portion of the summary section.
-    summary->SetString("msg",
-        l10n_util::GetStringFUTF16(options.summary_resource_id,
-            l10n_util::GetStringUTF16(
-                IDS_ERRORPAGES_SUMMARY_PROXY_CONNECTION_FAILED_PLATFORM)));
-  }
-
+  // Platform specific instructions for diagnosing network issues on OSX and
+  // Windows.
 #if defined(OS_MACOSX) || defined(OS_WIN)
   if (error_domain == net::kErrorDomain &&
       error_code == net::ERR_INTERNET_DISCONNECTED) {
@@ -399,9 +378,12 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
           IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_PLATFORM_VISTA;
     }
 #endif  // defined(OS_WIN)
-    // Suffix the platform dependent portion of the summary section.
+    // Lead with the general error description, and suffix with the platform
+    // dependent portion of the summary section.
     summary->SetString("msg",
-        l10n_util::GetStringFUTF16(options.summary_resource_id,
+        l10n_util::GetStringFUTF16(
+            IDS_ERRORPAGES_SUMMARY_INTERNET_DISCONNECTED_INSTRUCTIONS_TEMPLATE,
+            l10n_util::GetStringUTF16(options.summary_resource_id),
             l10n_util::GetStringUTF16(platform_string_id)));
   }
 #endif  // defined(OS_MACOSX) || defined(OS_WIN)
@@ -432,6 +414,29 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
     }
   }
 
+  if (options.suggestions & SUGGEST_FIREWALL_CONFIG) {
+    DictionaryValue* suggest_firewall_config = new DictionaryValue;
+    suggest_firewall_config->SetString("msg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_FIREWALL_CONFIG));
+    suggest_firewall_config->SetString("productName",
+        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+    error_strings->Set("suggestionsFirewallConfig", suggest_firewall_config);
+  }
+
+  if (options.suggestions & SUGGEST_PROXY_CONFIG) {
+    DictionaryValue* suggest_proxy_config = new DictionaryValue;
+    suggest_proxy_config->SetString("msg",
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_SUGGESTION_PROXY_CONFIG));
+    error_strings->Set("suggestionsProxyConfig", suggest_proxy_config);
+
+    DictionaryValue* suggest_proxy_disable = new DictionaryValue;
+    suggest_proxy_disable->SetString("msg",
+        l10n_util::GetStringFUTF16(IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE,
+            l10n_util::GetStringUTF16(
+                IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE_PLATFORM)));
+    error_strings->Set("suggestionsProxyDisable", suggest_proxy_disable);
+  }
+
   if (options.suggestions & SUGGEST_LEARNMORE) {
     GURL learn_more_url;
     switch (options.error_code) {
@@ -443,9 +448,6 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
         break;
       case net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION:
         learn_more_url = GURL(kESETLearnMoreUrl);
-        break;
-      case net::ERR_NETNANNY_SSL_INTERCEPTION:
-        learn_more_url = GURL(kNetNannyLearnMoreUrl);
         break;
       default:
         break;
@@ -487,7 +489,6 @@ void LocalizedError::GetFormRepostStrings(const GURL& display_url,
                                           failed_url));
   error_strings->SetString(
       "heading", l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_TITLE));
-  error_strings->SetString("suggestionsHeading", "");
   DictionaryValue* summary = new DictionaryValue;
   summary->SetString(
       "msg", l10n_util::GetStringUTF16(IDS_ERRORPAGES_HTTP_POST_WARNING));

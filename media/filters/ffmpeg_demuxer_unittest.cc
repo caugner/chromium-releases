@@ -65,11 +65,7 @@ class FFmpegDemuxerTest : public testing::Test {
 
   FFmpegDemuxerTest() {
     // Create an FFmpegDemuxer.
-    factory_ = FFmpegDemuxer::CreateFilterFactory();
-    MediaFormat media_format;
-    media_format.SetAsString(MediaFormat::kMimeType,
-                             mime_type::kApplicationOctetStream);
-    demuxer_ = factory_->Create<FFmpegDemuxer>(media_format);
+    demuxer_ = new FFmpegDemuxer();
     DCHECK(demuxer_);
 
     // Inject a filter host and message loop and prepare a data source.
@@ -159,7 +155,6 @@ class FFmpegDemuxerTest : public testing::Test {
   }
 
   // Fixture members.
-  scoped_refptr<FilterFactory> factory_;
   scoped_refptr<FFmpegDemuxer> demuxer_;
   scoped_refptr<StrictMock<MockDataSource> > data_source_;
   StrictMock<MockFilterHost> host_;
@@ -189,22 +184,6 @@ const size_t FFmpegDemuxerTest::kDataSize = 4;
 const uint8 FFmpegDemuxerTest::kAudioData[kDataSize] = {0, 1, 2, 3};
 const uint8 FFmpegDemuxerTest::kVideoData[kDataSize] = {4, 5, 6, 7};
 const uint8* FFmpegDemuxerTest::kNullData = NULL;
-
-TEST(FFmpegDemuxerFactoryTest, Create) {
-  // Should only accept application/octet-stream type.
-  scoped_refptr<FilterFactory> factory = FFmpegDemuxer::CreateFilterFactory();
-  MediaFormat media_format;
-  media_format.SetAsString(MediaFormat::kMimeType, "foo/x-bar");
-  scoped_refptr<Demuxer> demuxer(factory->Create<Demuxer>(media_format));
-  ASSERT_FALSE(demuxer);
-
-  // Try again with application/octet-stream mime type.
-  media_format.Clear();
-  media_format.SetAsString(MediaFormat::kMimeType,
-                           mime_type::kApplicationOctetStream);
-  demuxer = factory->Create<Demuxer>(media_format);
-  ASSERT_TRUE(demuxer);
-}
 
 TEST_F(FFmpegDemuxerTest, Initialize_OpenFails) {
   // Simulate av_open_input_file() failing.
@@ -355,7 +334,6 @@ TEST_F(FFmpegDemuxerTest, Read_Audio) {
 
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_FALSE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kAudioData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
@@ -387,7 +365,6 @@ TEST_F(FFmpegDemuxerTest, Read_Video) {
 
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_FALSE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kVideoData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
@@ -421,10 +398,8 @@ TEST_F(FFmpegDemuxerTest, Read_EndOfStream) {
 }
 
 TEST_F(FFmpegDemuxerTest, Seek) {
-  // We're testing the following:
-  //
-  //   1) The demuxer frees all queued packets when it receives a Seek().
-  //   2) The demuxer queues a single discontinuous packet on every stream.
+  // We're testing that the demuxer frees all queued packets when it receives
+  // a Seek().
   //
   // Since we can't test which packets are being freed, we use check points to
   // infer that the correct packets have been freed.
@@ -506,7 +481,6 @@ TEST_F(FFmpegDemuxerTest, Seek) {
   message_loop_.RunAllPending();
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_FALSE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kVideoData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
@@ -522,48 +496,41 @@ TEST_F(FFmpegDemuxerTest, Seek) {
   message_loop_.RunAllPending();
   MockFFmpeg::get()->CheckPoint(2);
 
-  // The next read from each stream should now be discontinuous, but subsequent
-  // reads should not.
-
-  // Audio read #1, should be discontinuous.
+  // Audio read #1.
   reader->Read(audio);
   message_loop_.RunAllPending();
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_TRUE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kAudioData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
 
-  // Audio read #2, should not be discontinuous.
+  // Audio read #2.
   reader->Reset();
   reader->Read(audio);
   message_loop_.RunAllPending();
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_FALSE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kAudioData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
 
-  // Video read #1, should be discontinuous.
+  // Video read #1.
   reader->Reset();
   reader->Read(video);
   message_loop_.RunAllPending();
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_TRUE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kVideoData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
 
-  // Video read #2, should not be discontinuous.
+  // Video read #2.
   reader->Reset();
   reader->Read(video);
   message_loop_.RunAllPending();
   EXPECT_TRUE(reader->called());
   ASSERT_TRUE(reader->buffer());
-  EXPECT_FALSE(reader->buffer()->IsDiscontinuous());
   ASSERT_EQ(kDataSize, reader->buffer()->GetDataSize());
   EXPECT_EQ(0, memcmp(kVideoData, reader->buffer()->GetData(),
                       reader->buffer()->GetDataSize()));
@@ -690,7 +657,7 @@ void RunCallback(size_t size, DataSource::ReadCallback* callback) {
 
 TEST_F(FFmpegDemuxerTest, ProtocolRead) {
   // Creates a demuxer.
-  scoped_refptr<MockFFmpegDemuxer> demuxer = new MockFFmpegDemuxer();
+  scoped_refptr<MockFFmpegDemuxer> demuxer(new MockFFmpegDemuxer());
   ASSERT_TRUE(demuxer);
   demuxer->set_host(&host_);
   demuxer->set_message_loop(&message_loop_);

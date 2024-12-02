@@ -15,6 +15,7 @@
 #include "webkit/glue/plugins/test/plugin_npobject_proxy_test.h"
 #include "webkit/glue/plugins/test/plugin_private_test.h"
 #include "webkit/glue/plugins/test/plugin_schedule_timer_test.h"
+#include "webkit/glue/plugins/test/plugin_setup_test.h"
 #include "webkit/glue/plugins/test/plugin_thread_async_call_test.h"
 #include "webkit/glue/plugins/test/plugin_window_size_test.h"
 #if defined(OS_WIN)
@@ -33,7 +34,8 @@ PluginTest* CreatePluginTest(const std::string& test_name,
     new_test = new PluginArgumentsTest(instance, host_functions);
   } else if (test_name == "geturl" || test_name == "geturl_404_response" ||
              test_name == "geturl_fail_write" ||
-             test_name == "plugin_referrer_test") {
+             test_name == "plugin_referrer_test" ||
+             test_name == "geturlredirectnotify") {
     new_test = new PluginGetURLTest(instance, host_functions);
   } else if (test_name == "npobject_proxy") {
     new_test = new NPObjectProxyTest(instance, host_functions);
@@ -91,6 +93,9 @@ PluginTest* CreatePluginTest(const std::string& test_name,
              test_name == "invoke_js_function_on_create") {
     new_test = new WindowedPluginTest(instance, host_functions);
 #endif
+  } else if (test_name == "setup") {
+    // "plugin" is the name for plugin documents.
+    new_test = new PluginSetupTest(instance, host_functions);
   }
 
   return new_test;

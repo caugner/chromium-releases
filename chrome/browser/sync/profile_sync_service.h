@@ -14,6 +14,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
@@ -171,7 +172,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Whether sync is enabled by user or not.
   virtual bool HasSyncSetupCompleted() const;
-  void SetSyncSetupCompleted();
+  virtual void SetSyncSetupCompleted();
 
   // SyncFrontend implementation.
   virtual void OnBackendInitialized();
@@ -179,6 +180,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnAuthError();
   virtual void OnStopSyncingPermanently();
   virtual void OnClearServerDataFailed();
+  virtual void OnClearServerDataTimeout();
   virtual void OnClearServerDataSucceeded();
 
   // Called when a user enters credentials through UI.
@@ -203,7 +205,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Get various information for displaying in the user interface.
   browser_sync::SyncBackendHost::StatusSummary QuerySyncStatusSummary();
-  browser_sync::SyncBackendHost::Status QueryDetailedSyncStatus();
+  virtual browser_sync::SyncBackendHost::Status QueryDetailedSyncStatus();
 
   const GoogleServiceAuthError& GetAuthError() const {
     return last_auth_error_;
@@ -231,7 +233,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // TODO(timsteele): What happens if the bookmark model is loaded, a change
   // takes place, and the backend isn't initialized yet?
   bool sync_initialized() const { return backend_initialized_; }
-  bool unrecoverable_error_detected() const {
+  virtual bool unrecoverable_error_detected() const {
     return unrecoverable_error_detected_;
   }
   const std::string& unrecoverable_error_message() {
@@ -250,6 +252,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
     return observed_passphrase_required_;
   }
 
+  bool passphrase_required_for_decryption() const {
+    return passphrase_required_for_decryption_;
+  }
+
   // A timestamp marking the last time the service observed a transition from
   // the SYNCING state to the READY state. Note that this does not reflect the
   // last time we polled the server to see if there were any changes; the
@@ -258,7 +264,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   const base::Time& last_synced_time() const { return last_synced_time_; }
 
   // Returns a user-friendly string form of last synced time (in minutes).
-  string16 GetLastSyncedTimeString() const;
+  virtual string16 GetLastSyncedTimeString() const;
 
   // Returns the authenticated username of the sync user, or empty if none
   // exists. It will only exist if the authentication service provider (e.g
@@ -277,6 +283,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
 
+  // Returns true if |observer| has already been added as an observer.
+  bool HasObserver(Observer* observer) const;
+
   // Record stats on various events.
   static void SyncEvent(SyncEventCodes code);
 
@@ -285,7 +294,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // command-line switches).
   static bool IsSyncEnabled();
 
-  // Retuns whether sync is managed, i.e. controlled by configuration
+  // Returns whether sync is managed, i.e. controlled by configuration
   // management. If so, the user is not allowed to configure sync.
   bool IsManaged();
 
@@ -335,20 +344,23 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Returns true if a secondary passphrase is being used.
   virtual bool IsUsingSecondaryPassphrase() const;
 
-  // Sets the secondary passphrase.
-  virtual void SetSecondaryPassphrase(const std::string& passphrase);
-
   // Sets the Cryptographer's passphrase, or caches it until that is possible.
   // This will check asynchronously whether the passphrase is valid and notify
   // ProfileSyncServiceObservers via the NotificationService when the outcome
   // is known.
-  virtual void SetPassphrase(const std::string& passphrase);
+  // |is_explicit| is true if the call is in response to the user explicitly
+  // setting a passphrase as opposed to implicitly (from the users' perspective)
+  // using their Google Account password.  An implicit SetPassphrase will *not*
+  // *not* override an explicit passphrase set previously.
+  virtual void SetPassphrase(const std::string& passphrase, bool is_explicit);
 
   // Returns whether processing changes is allowed.  Check this before doing
   // any model-modifying operations.
   bool ShouldPushChanges();
 
   const GURL& sync_service_url() const { return sync_service_url_; }
+  SigninManager* signin() { return signin_.get(); }
+  const std::string& cros_user() const { return cros_user_; }
 
  protected:
   // Used by ProfileSyncServiceMock only.
@@ -397,12 +409,15 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // backend, telling us that it is safe to send a passphrase down ASAP.
   bool observed_passphrase_required_;
 
+  // Was the last SYNC_PASSPHRASE_REQUIRED notification sent because it
+  // was required for decryption?
+  bool passphrase_required_for_decryption_;
+
  private:
   friend class ProfileSyncServiceTest;
   friend class ProfileSyncServicePasswordTest;
   friend class ProfileSyncServicePreferenceTest;
   friend class ProfileSyncServiceSessionTest;
-  friend class ProfileSyncServiceTestHarness;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest,
                            UnrecoverableErrorSuspendsService);
@@ -457,7 +472,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   SyncSetupWizard wizard_;
 
   // Encapsulates user signin with TokenService.
-  SigninManager signin_;
+  scoped_ptr<SigninManager> signin_;
 
   // True if an unrecoverable error (e.g. violation of an assumed invariant)
   // occurred during syncer operation.  This value should be checked before
@@ -480,7 +495,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   NotificationRegistrar registrar_;
 
   ScopedRunnableMethodFactory<ProfileSyncService>
-    scoped_runnable_method_factory_;
+      scoped_runnable_method_factory_;
 
   // The preference that controls whether sync is under control by configuration
   // management.
@@ -497,10 +512,31 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // yet have a backend to send it to.  This happens during initialization as
   // we don't StartUp until we have a valid token, which happens after valid
   // credentials were provided.
-  std::string cached_passphrase_;
+  struct CachedPassphrase {
+    std::string value;
+    bool is_explicit;
+    CachedPassphrase() : is_explicit(false) {}
+  };
+  CachedPassphrase cached_passphrase_;
+
+  // TODO(tim): Remove this once new 'explicit passphrase' code flushes through
+  // dev channel. See bug 62103.
+  // To "migrate" early adopters of password sync on dev channel to the new
+  // model that stores their secondary passphrase preference in the cloud, we
+  // need some extra state since this cloud pref will be empty for all of them
+  // regardless of how they set up sync, and we can't trust
+  // kSyncUsingSecondaryPassphrase due to bugs in that implementation.
+  bool tried_implicit_gaia_remove_when_bug_62103_fixed_;
 
   // Keep track of where we are in a server clear operation
   ClearServerDataState clear_server_data_state_;
+
+  // Timeout for the clear data command.  This timeout is a temporary hack
+  // and is necessary because the nudge sync framework can drop nudges for
+  // a wide variety of sync-related conditions (throttling, connections issues,
+  // syncer paused, etc.).  It can only be removed correctly when the framework
+  // is reworked to allow one-shot commands like clearing server data.
+  base::OneShotTimer<ProfileSyncService> clear_server_data_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

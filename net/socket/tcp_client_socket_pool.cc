@@ -5,9 +5,9 @@
 #include "net/socket/tcp_client_socket_pool.h"
 
 #include "base/compiler_specific.h"
-#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "net/base/net_log.h"
@@ -218,17 +218,37 @@ int TCPClientSocketPool::RequestSocket(
   const scoped_refptr<TCPSocketParams>* casted_params =
       static_cast<const scoped_refptr<TCPSocketParams>*>(params);
 
-  if (net_log.IsLoggingAll()) {
+  if (net_log.IsLoggingAllEvents()) {
     // TODO(eroman): Split out the host and port parameters.
     net_log.AddEvent(
         NetLog::TYPE_TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKET,
-        new NetLogStringParameter(
+        make_scoped_refptr(new NetLogStringParameter(
             "host_and_port",
-            casted_params->get()->destination().host_port_pair().ToString()));
+            casted_params->get()->destination().host_port_pair().ToString())));
   }
 
   return base_.RequestSocket(group_name, *casted_params, priority, handle,
                              callback, net_log);
+}
+
+void TCPClientSocketPool::RequestSockets(
+    const std::string& group_name,
+    const void* params,
+    int num_sockets,
+    const BoundNetLog& net_log) {
+  const scoped_refptr<TCPSocketParams>* casted_params =
+      static_cast<const scoped_refptr<TCPSocketParams>*>(params);
+
+  if (net_log.IsLoggingAllEvents()) {
+    // TODO(eroman): Split out the host and port parameters.
+    net_log.AddEvent(
+        NetLog::TYPE_TCP_CLIENT_SOCKET_POOL_REQUESTED_SOCKETS,
+        make_scoped_refptr(new NetLogStringParameter(
+            "host_and_port",
+            casted_params->get()->destination().host_port_pair().ToString())));
+  }
+
+  base_.RequestSockets(group_name, *casted_params, num_sockets, net_log);
 }
 
 void TCPClientSocketPool::CancelRequest(

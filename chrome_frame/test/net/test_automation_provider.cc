@@ -1,12 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome_frame/test/net/test_automation_provider.h"
 
 #include "base/command_line.h"
-#include "chrome/test/automation/automation_messages.h"
-
+#include "base/file_version_info.h"
+#include "base/path_service.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome_frame/test/net/test_automation_resource_message_filter.h"
 
 namespace {
@@ -38,7 +39,8 @@ TestAutomationProvider::TestAutomationProvider(
                                       TestAutomationProvider::Factory);
   URLRequest::RegisterProtocolFactory("https",
                                       TestAutomationProvider::Factory);
-  filter_ = new TestAutomationResourceMessageFilter(this);
+  automation_resource_message_filter_ =
+      new TestAutomationResourceMessageFilter(this);
   g_provider_instance_ = this;
 }
 
@@ -47,7 +49,7 @@ TestAutomationProvider::~TestAutomationProvider() {
 }
 
 void TestAutomationProvider::OnMessageReceived(const IPC::Message& msg) {
-  if (filter_->OnMessageReceived(msg))
+  if (automation_resource_message_filter_->OnMessageReceived(msg))
     return;  // Message handled by the filter.
 
   __super::OnMessageReceived(msg);
@@ -59,7 +61,7 @@ bool TestAutomationProvider::Send(IPC::Message* msg) {
     DCHECK(tab_handle_ == -1) << "Currently only support one tab";
     void* iter = NULL;
     CHECK(msg->ReadInt(&iter, &tab_handle_));
-    DLOG(INFO) << "Got tab handle: " << tab_handle_;
+    DVLOG(1) << "Got tab handle: " << tab_handle_;
     DCHECK(tab_handle_ != -1 && tab_handle_ != 0);
     delegate_->OnInitialTabLoaded();
   }
@@ -89,7 +91,7 @@ URLRequestJob* TestAutomationProvider::Factory(URLRequest* request,
       static int new_id = 0x00100000;
       URLRequestAutomationJob* job = new URLRequestAutomationJob(request,
           g_provider_instance_->tab_handle_, new_id++,
-          g_provider_instance_->filter_, false);
+          g_provider_instance_->automation_resource_message_filter_, false);
       return job;
     }
   }
@@ -97,12 +99,27 @@ URLRequestJob* TestAutomationProvider::Factory(URLRequest* request,
   return NULL;
 }
 
+std::string TestAutomationProvider::GetProtocolVersion() {
+  // Return the version of chrome.dll
+  FilePath path;
+  PathService::Get(base::DIR_MODULE, &path);
+  path = path.AppendASCII("chrome.dll");
+
+  std::string version;
+  scoped_ptr<FileVersionInfo> version_info(
+      FileVersionInfo::CreateFileVersionInfo(path));
+  if (version_info.get()) {
+    version = WideToASCII(version_info->product_version());
+  }
+  return version;
+}
+
 // static
 TestAutomationProvider* TestAutomationProvider::NewAutomationProvider(
     Profile* p, const std::string& channel,
     TestAutomationProviderDelegate* delegate) {
   TestAutomationProvider* automation = new TestAutomationProvider(p, delegate);
-  automation->ConnectToChannel(channel);
+  automation->InitializeChannel(channel);
   automation->SetExpectedTabCount(1);
   return automation;
 }

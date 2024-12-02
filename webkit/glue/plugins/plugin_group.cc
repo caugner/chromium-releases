@@ -26,7 +26,7 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     "http://www.apple.com/quicktime/download/" },
   { "java-runtime-environment", "Java", "Java", "", "", "",
     "http://support.apple.com/kb/HT1338" },
-  { "adobe-flash-player", "Flash", "Shockwave Flash", "", "", "10.1.85",
+  { "adobe-flash-player", "Flash", "Shockwave Flash", "", "", "10.1.102",
     "http://get.adobe.com/flashplayer/" },
   { "silverlight-3", "Silverlight 3", "Silverlight", "0", "4", "3.0.50106.0",
     "http://www.microsoft.com/getsilverlight/" },
@@ -34,7 +34,7 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     "http://www.microsoft.com/getsilverlight/" },
   { "flip4mac", "Flip4Mac", "Flip4Mac", "", "", "2.2.1",
     "http://www.telestream.net/flip4mac-wmv/overview.htm" },
-  { "shockwave", "Shockwave", "Shockwave for Director", "",  "", "11.5.8.612",
+  { "shockwave", "Shockwave", "Shockwave for Director", "",  "", "11.5.9.615",
     "http://www.adobe.com/shockwave/download/" }
 };
 
@@ -47,16 +47,16 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
   { "java-runtime-environment", "Java 6", "Java", "", "6", "6.0.220",
     "http://www.java.com/" },
   { "adobe-reader", PluginGroup::kAdobeReader9GroupName, "Adobe Acrobat", "9",
-    "10", "9.4.0", "http://get.adobe.com/reader/" },
+    "10", "9.4.1", "http://get.adobe.com/reader/" },
   { "adobe-reader-8", PluginGroup::kAdobeReader8GroupName, "Adobe Acrobat", "0",
     "9", "8.2.5", "http://get.adobe.com/reader/" },
-  { "adobe-flash-player", "Flash", "Shockwave Flash", "", "", "10.1.85",
+  { "adobe-flash-player", "Flash", "Shockwave Flash", "", "", "10.1.102",
     "http://get.adobe.com/flashplayer/" },
   { "silverlight-3", "Silverlight 3", "Silverlight", "0", "4", "3.0.50106.0",
     "http://www.microsoft.com/getsilverlight/" },
   { "silverlight-4", "Silverlight 4", "Silverlight", "4", "5", "",
     "http://www.microsoft.com/getsilverlight/" },
-  { "shockwave", "Shockwave", "Shockwave for Director", "", "", "11.5.8.612",
+  { "shockwave", "Shockwave", "Shockwave for Director", "", "", "11.5.9.615",
     "http://www.adobe.com/shockwave/download/" },
   { "divx-player", "DivX Player", "DivX Web Player", "", "", "1.4.3.4",
     "http://download.divx.com/divx/autoupdate/player/"

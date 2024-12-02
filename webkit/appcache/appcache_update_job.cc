@@ -353,9 +353,9 @@ void AppCacheUpdateJob::OnResponseStarted(URLRequest *request) {
           service_->storage()->CreateResponseWriter(manifest_url_),
           this, request);
       stored_response_ids_.push_back(info->response_writer_->response_id());
-      scoped_refptr<HttpResponseInfoIOBuffer> io_buffer =
+      scoped_refptr<HttpResponseInfoIOBuffer> io_buffer(
           new HttpResponseInfoIOBuffer(
-              new net::HttpResponseInfo(request->response_info()));
+              new net::HttpResponseInfo(request->response_info())));
       info->response_writer_->WriteInfo(io_buffer, &info->write_callback_);
     } else {
       ReadResponseData(request);
@@ -538,7 +538,8 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(URLRequest* request) {
       ContinueHandleManifestFetchCompleted(true);
   } else if (response_code == 304 && update_type_ == UPGRADE_ATTEMPT) {
     ContinueHandleManifestFetchCompleted(false);
-  } else if (response_code == 404 || response_code == 410) {
+  } else if ((response_code == 404 || response_code == 410) &&
+             update_type_ == UPGRADE_ATTEMPT) {
     service_->storage()->MakeGroupObsolete(group_, this);  // async
   } else {
     std::string message;
@@ -559,7 +560,8 @@ void AppCacheUpdateJob::HandleManifestFetchCompleted(URLRequest* request) {
 void AppCacheUpdateJob::OnGroupMadeObsolete(AppCacheGroup* group,
                                             bool success) {
   DCHECK(master_entry_fetches_.empty());
-  CancelAllMasterEntryFetches("The group has been made obsolete");
+  CancelAllMasterEntryFetches("The cache has been made obsolete, "
+                              "the manifest file returned 404 or 410");
   if (success) {
     DCHECK(group->is_obsolete());
     NotifyAllAssociatedHosts(OBSOLETE_EVENT);
@@ -567,7 +569,7 @@ void AppCacheUpdateJob::OnGroupMadeObsolete(AppCacheGroup* group,
     MaybeCompleteUpdate();
   } else {
     // Treat failure to mark group obsolete as a cache failure.
-    HandleCacheFailure("Failed to make the group as obsolete");
+    HandleCacheFailure("Failed to mark the cache as obsolete");
   }
 }
 
@@ -591,7 +593,7 @@ void AppCacheUpdateJob::ContinueHandleManifestFetchCompleted(bool changed) {
     const std::string message = base::StringPrintf(kFormatString,
         manifest_url_.spec().c_str());
     HandleCacheFailure(message);
-    LOG(INFO) << message;
+    VLOG(1) << message;
     return;
   }
 
@@ -646,9 +648,9 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLRequest* request) {
     // whose value doesn't match the manifest url of the application cache
     // being processed, mark the entry as being foreign.
   } else {
-    LOG(INFO) << "Request status: " << request->status().status()
-        << " os_error: " << request->status().os_error()
-        << " response code: " << response_code;
+    VLOG(1) << "Request status: " << request->status().status()
+            << " os_error: " << request->status().os_error()
+            << " response code: " << response_code;
     if (entry.IsExplicit() || entry.IsFallback()) {
       if (response_code == 304 && info->existing_entry_.has_response_id()) {
         // Keep the existing response.
@@ -782,15 +784,15 @@ void AppCacheUpdateJob::HandleManifestRefetchCompleted(URLRequest* request) {
       manifest_response_writer_.reset(
           service_->storage()->CreateResponseWriter(manifest_url_));
       stored_response_ids_.push_back(manifest_response_writer_->response_id());
-      scoped_refptr<HttpResponseInfoIOBuffer> io_buffer =
-          new HttpResponseInfoIOBuffer(manifest_response_info_.release());
+      scoped_refptr<HttpResponseInfoIOBuffer> io_buffer(
+          new HttpResponseInfoIOBuffer(manifest_response_info_.release()));
       manifest_response_writer_->WriteInfo(io_buffer,
                                            &manifest_info_write_callback_);
     }
   } else {
-    LOG(INFO) << "Request status: " << request->status().status()
-        << " os_error: " << request->status().os_error()
-        << " response code: " << response_code;
+    VLOG(1) << "Request status: " << request->status().status()
+            << " os_error: " << request->status().os_error()
+            << " response code: " << response_code;
     ScheduleUpdateRetry(kRerunDelayMs);
     HandleCacheFailure("Manifest changed during update, scheduling retry");
   }
@@ -798,8 +800,8 @@ void AppCacheUpdateJob::HandleManifestRefetchCompleted(URLRequest* request) {
 
 void AppCacheUpdateJob::OnManifestInfoWriteComplete(int result) {
   if (result > 0) {
-    scoped_refptr<net::StringIOBuffer> io_buffer =
-        new net::StringIOBuffer(manifest_data_);
+    scoped_refptr<net::StringIOBuffer> io_buffer(
+        new net::StringIOBuffer(manifest_data_));
     manifest_response_writer_->WriteData(io_buffer, manifest_data_.length(),
                                          &manifest_data_write_callback_);
   } else {

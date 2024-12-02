@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/importer/firefox_proxy_settings.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/common/chrome_switches.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/dnsrr_resolver.h"
@@ -37,6 +38,9 @@ namespace {
 // to the specified "experiment".
 class ExperimentURLRequestContext : public URLRequestContext {
  public:
+  explicit ExperimentURLRequestContext(IOThread* io_thread)
+      : io_thread_(io_thread) {}
+
   int Init(const ConnectionTester::Experiment& experiment) {
     int rv;
 
@@ -61,8 +65,9 @@ class ExperimentURLRequestContext : public URLRequestContext {
         host_resolver_);
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(host_resolver_, dnsrr_resolver_,
-            proxy_service_, ssl_config_service_, http_auth_handler_factory_,
-            NULL, NULL),
+            NULL /* dns_cert_checker */,
+            NULL /* ssl_host_info_factory */, proxy_service_,
+            ssl_config_service_, http_auth_handler_factory_, NULL, NULL),
         net::HttpCache::DefaultBackend::InMemory(0));
     // In-memory cookie store.
     cookie_store_ = new net::CookieMonster(NULL, NULL);
@@ -159,8 +164,12 @@ class ExperimentURLRequestContext : public URLRequestContext {
       return net::ERR_NOT_IMPLEMENTED;
     }
 
-    *proxy_service = net::ProxyService::Create(config_service.release(), true,
-        0u, this, NULL, MessageLoop::current());
+    *proxy_service = net::ProxyService::CreateUsingV8ProxyResolver(
+        config_service.release(),
+        0u,
+        io_thread_->CreateAndRegisterProxyScriptFetcher(this),
+        host_resolver(),
+        NULL);
 
     return net::OK;
   }
@@ -204,6 +213,8 @@ class ExperimentURLRequestContext : public URLRequestContext {
 
     return net::ERR_FAILED;
   }
+
+  IOThread* io_thread_;
 };
 
 }  // namespace
@@ -267,8 +278,8 @@ void ConnectionTester::TestRunner::OnReadCompleted(URLRequest* request,
 
 void ConnectionTester::TestRunner::ReadBody(URLRequest* request) {
   // Read the response body |kReadBufferSize| bytes at a time.
-  scoped_refptr<net::IOBuffer> unused_buffer =
-      new net::IOBuffer(kReadBufferSize);
+  scoped_refptr<net::IOBuffer> unused_buffer(
+      new net::IOBuffer(kReadBufferSize));
   int num_bytes;
   if (request->Read(unused_buffer, kReadBufferSize, &num_bytes)) {
     OnReadCompleted(request, num_bytes);
@@ -289,8 +300,8 @@ void ConnectionTester::TestRunner::OnResponseCompleted(URLRequest* request) {
 
 void ConnectionTester::TestRunner::Run(const Experiment& experiment) {
   // Try to create a URLRequestContext for this experiment.
-  scoped_refptr<ExperimentURLRequestContext> context =
-      new ExperimentURLRequestContext();
+  scoped_refptr<ExperimentURLRequestContext> context(
+      new ExperimentURLRequestContext(tester_->io_thread_));
   int rv = context->Init(experiment);
   if (rv != net::OK) {
     // Complete the experiment with a failure.
@@ -306,9 +317,10 @@ void ConnectionTester::TestRunner::Run(const Experiment& experiment) {
 
 // ConnectionTester ----------------------------------------------------------
 
-ConnectionTester::ConnectionTester(Delegate* delegate)
-    : delegate_(delegate) {
+ConnectionTester::ConnectionTester(Delegate* delegate, IOThread* io_thread)
+    : delegate_(delegate), io_thread_(io_thread) {
   DCHECK(delegate);
+  DCHECK(io_thread);
 }
 
 ConnectionTester::~ConnectionTester() {

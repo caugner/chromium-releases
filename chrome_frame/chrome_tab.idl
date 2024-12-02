@@ -85,24 +85,40 @@ interface IChromeFrame : IDispatch {
 
 [
   object,
-  uuid(655A11E0-EF63-4fbe-9DF6-C182D2FCD6DC),
+  uuid(851bedec-4b2c-4959-abc0-a53403117257),
+  local,  // This interface should never be marshaled.
+  hidden,
+]
+// Internal implementation interface. Not intended as an API. May change
+// frequently, don't treat this as frozen.
+interface IChromeFrameInternal : IUnknown {
+  // This method is available only when the control is in privileged mode.
+  HRESULT getSessionId([out, retval] int* session_id);
+};
+
+[
+  object,
+  uuid(B1B52A4D-B22E-489f-8CCD-1CF9166FA90E),
   oleautomation,
   nonextensible,
   hidden,
 ]
-interface IChromeFramePrivileged: IUnknown {
+// Internal implementation interface. Not intended as an API. May change
+// frequently, don't treat this as frozen.
+interface IChromeFramePrivileged : IUnknown {
   // If the host returns false for wants_privileged, the control
   // won't enable privileged mode.
   HRESULT GetWantsPrivileged([out] boolean *wants_privileged);
-  // Extra arguments to supply to the Chrome instance.  Returns S_FALSE when
-  // no extra arguments are needed.  Always sets the output string to non-NULL.
-  HRESULT GetChromeExtraArguments([out] BSTR *args);
   // The profile name we want to use.
   HRESULT GetChromeProfileName([out] BSTR *profile_name);
   // The comma-separated list of extension API functions you wish to automate.
   // Return S_FALSE to leave the default, which is to not automate any 
   // functions.
   HRESULT GetExtensionApisToAutomate([out] BSTR *extension_apis);
+  // Called when an automation version mismatch occurs. Returns S_OK if
+  // a dialog should be showed to the user by this CF instance, S_FALSE if
+  // not.
+  HRESULT ShouldShowVersionMismatchDialog();
 };
 
 // Expose this service to the ChromeFrame control to trigger privileged
@@ -118,6 +134,7 @@ typedef enum {
   CF_EVENT_DISPID_ONEXTENSIONREADY,
   CF_EVENT_DISPID_ONGETENABLEDEXTENSIONSCOMPLETE,
   CF_EVENT_DISPID_ONCHANNELERROR,
+  CF_EVENT_DISPID_ONCLOSE,
   CF_EVENT_DISPID_ONREADYSTATECHANGED = DISPID_READYSTATECHANGE,
 } ChromeFrameEventDispId;
 
@@ -166,6 +183,12 @@ library ChromeTabLib {
     // This event is fired when there is an error in communication channel with
     // Chrome and Automation must be reconnected to continue.
     void onchannelerror();
+
+    [id(CF_EVENT_DISPID_ONCLOSE)]
+    // This event is fired when the script inside the page wants to close it.
+    // This is just a notification, there is no way to prevent the script from
+    // closing.
+    void onclose();
   };
 
   [uuid(BB1176EE-20DD-41DC-9D1E-AC1335C7BBB0)]

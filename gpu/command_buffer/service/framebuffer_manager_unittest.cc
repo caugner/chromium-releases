@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/framebuffer_manager.h"
-#include "app/gfx/gl/gl_mock.h"
+
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gpu {
@@ -123,12 +124,13 @@ TEST_F(FramebufferInfoTest, AttachRenderbuffer) {
   const GLuint kRenderbufferService1Id = 333;
   const GLuint kRenderbufferClient2Id = 34;
   const GLuint kRenderbufferService2Id = 334;
+  const GLint kMaxRenderbufferSize = 128;
   EXPECT_FALSE(info_->HasUnclearedAttachment(GL_COLOR_ATTACHMENT0));
   EXPECT_FALSE(info_->HasUnclearedAttachment(GL_DEPTH_ATTACHMENT));
   EXPECT_FALSE(info_->HasUnclearedAttachment(GL_STENCIL_ATTACHMENT));
   EXPECT_FALSE(info_->HasUnclearedAttachment(GL_DEPTH_STENCIL_ATTACHMENT));
 
-  RenderbufferManager rb_manager;
+  RenderbufferManager rb_manager(kMaxRenderbufferSize);
   rb_manager.CreateRenderbufferInfo(
       kRenderbufferClient1Id, kRenderbufferService1Id);
   RenderbufferManager::RenderbufferInfo* rb_info1 =

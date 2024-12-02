@@ -8,6 +8,10 @@
 
 #include "chrome/browser/prefs/pref_service.h"
 
+class CommandLine;
+namespace policy {
+class ConfigurationPolicyProvider;
+}
 class PrefStore;
 
 // A PrefService subclass for testing. It operates totally in memory and
@@ -19,6 +23,7 @@ class TestingPrefService : public PrefService {
   class TestingPrefValueStore : public PrefValueStore {
    public:
     TestingPrefValueStore(PrefStore* managed_prefs,
+                          PrefStore* device_management_prefs,
                           PrefStore* extension_prefs,
                           PrefStore* command_line_prefs,
                           PrefStore* user_prefs,
@@ -28,6 +33,19 @@ class TestingPrefService : public PrefService {
 
   // Create an empty instance.
   TestingPrefService();
+
+  // Create an instance that has a managed PrefStore and a command- line
+  // PrefStore. |managed_platform_provider| contains the provider with which to
+  // initialize the managed platform PrefStore. If it is NULL, then a
+  // DummyPrefStore will be created. |device_management_provider| contains the
+  // provider with which to initialize the device management
+  // PrefStore. |command_line| contains the provider with which to initialize
+  // the command line PrefStore. If it is NULL then a DummyPrefStore will be
+  // created as the command line PrefStore.
+  TestingPrefService(
+      policy::ConfigurationPolicyProvider* managed_platform_provider,
+      policy::ConfigurationPolicyProvider* device_management_provider,
+      CommandLine* command_line);
 
   // Read the value of a preference from the managed layer. Returns NULL if the
   // preference is not defined at the managed layer.
@@ -59,6 +77,15 @@ class TestingPrefService : public PrefService {
   void RemoveUserPref(const char* path);
 
  private:
+  // Creates a ConfigurationPolicyPrefStore based on the provided
+  // |provider| or a DummyPrefStore if |provider| is NULL.
+  PrefStore* CreatePolicyPrefStoreFromProvider(
+      policy::ConfigurationPolicyProvider* provider);
+
+  // Creates a CommandLinePrefStore based on the supplied
+  // |command_line| or a DummyPrefStore if |command_line| is NULL.
+  PrefStore* CreateCommandLinePrefStore(CommandLine* command_line);
+
   // Reads the value of the preference indicated by |path| from |pref_store|.
   // Returns NULL if the preference was not found.
   const Value* GetPref(PrefStore* pref_store, const char* path);
@@ -70,9 +97,10 @@ class TestingPrefService : public PrefService {
   void RemovePref(PrefStore* pref_store, const char* path);
 
   // Pointers to the pref stores our value store uses.
-  PrefStore* managed_prefs_;
-  PrefStore* user_prefs_;
-  PrefStore* default_prefs_;
+  PrefStore* managed_platform_prefs_;  // weak
+  PrefStore* device_management_prefs_;  // weak
+  PrefStore* user_prefs_;  // weak
+  PrefStore* default_prefs_;  // weak
 
   DISALLOW_COPY_AND_ASSIGN(TestingPrefService);
 };

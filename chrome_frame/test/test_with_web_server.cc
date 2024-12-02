@@ -9,7 +9,7 @@
 #include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/helper.h"
@@ -17,6 +17,7 @@
 #include "chrome_frame/utils.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
+#include "chrome_frame/test/mock_ie_event_sink_test.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_util.h"
 
@@ -126,6 +127,10 @@ void ChromeFrameTestWithWebServer::SetUp() {
 }
 
 void ChromeFrameTestWithWebServer::TearDown() {
+  // Make sure that the Firefox privilege mode is never forced either on or off
+  // after the test completes.
+  DeleteConfigValue(kEnableFirefoxPrivilegeMode);
+
   CloseBrowser();
   CloseAllBrowsers();
   file_util::Delete(CFInstall_path_, false);
@@ -280,11 +285,31 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
   ASSERT_EQ(version, UTF8ToWide(server_mock_.posted_result()));
 }
 
+void ChromeFrameTestWithWebServer::SessionIdTest(BrowserKind browser,
+                                                 const wchar_t* page,
+                                                 int privilege_mode,
+                                                 const char* expected_result) {
+  SetConfigInt(kEnableFirefoxPrivilegeMode, privilege_mode);
+  EXPECT_TRUE(LaunchBrowser(browser, page));
+  server_mock_.set_expected_result(expected_result);
+  server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
+                                           kPostedResultSubstring);
+  WaitForTestToComplete(kLongWaitTimeout);
+  ASSERT_EQ(expected_result, server_mock_.posted_result());
+}
+
 // MockWebServer methods
 void MockWebServer::ExpectAndServeRequest(CFInvocation invocation,
                                           const std::wstring& url) {
+  ExpectAndServeRequestWithCardinality(invocation, url, testing::Exactly(1));
+}
+
+void MockWebServer::ExpectAndServeRequestWithCardinality(
+    CFInvocation invocation, const std::wstring& url,
+    testing::Cardinality cardinality) {
   EXPECT_CALL(*this, Get(_, chrome_frame_test::UrlPathEq(url), _))
-      .WillOnce(SendResponse(this, invocation));
+      .Times(cardinality)
+      .WillRepeatedly(SendResponse(this, invocation));
 }
 
 void MockWebServer::ExpectAndServeRequestAllowCache(CFInvocation invocation,
@@ -346,7 +371,8 @@ void MockWebServer::SendResponseHelper(
 
   std::string headers, body;
   std::string content_type;
-  if (file_util::PathExists(file_path)) {
+  if (file_util::PathExists(file_path) &&
+      !file_util::DirectoryExists(file_path)) {
     FilePath mock_http_headers(file_path.value() + L".mock-http-headers");
     if (file_util::PathExists(mock_http_headers)) {
       headers = GetMockHttpHeaders(mock_http_headers);
@@ -354,8 +380,8 @@ void MockWebServer::SendResponseHelper(
                                                              headers);
     } else {
       EXPECT_TRUE(net::GetMimeTypeFromFile(file_path, &content_type));
-      DLOG(INFO) << "Going to send file (" << WideToUTF8(file_path.value())
-                 << ") with content type (" << content_type << ")";
+      DVLOG(1) << "Going to send file (" << WideToUTF8(file_path.value())
+               << ") with content type (" << content_type << ")";
       headers = CreateHttpHeaders(invocation, add_no_cache_header,
                                   content_type);
     }
@@ -370,8 +396,8 @@ void MockWebServer::SendResponseHelper(
           << "meta tag to HTML file.";
     }
   } else {
-    DLOG(INFO) << "Going to send 404 for non-existent file ("
-               << WideToUTF8(file_path.value()) << ")";
+    DVLOG(1) << "Going to send 404 for non-existent file ("
+             << WideToUTF8(file_path.value()) << ")";
     headers = "HTTP/1.1 404 Not Found";
     body = "";
   }
@@ -449,8 +475,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeOpera_NavigateURLRelative) {
 
 const wchar_t kNavigateSimpleObjectFocus[] = L"simple_object_focus.html";
 
-// http://crbug.com/37087
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeFF_ObjectFocus) {
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_ObjectFocus) {
   SimpleBrowserTest(FIREFOX, kNavigateSimpleObjectFocus);
 }
 
@@ -631,6 +656,10 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeOpera_CFInstanceIfrPost) {
 const wchar_t kCFIPostPage[] = L"CFInstance_post_host.html";
 
 TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstancePost) {
+  if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
+    LOG(INFO) << "Not running test on Vista/Windows 7 with IE9";
+    return;
+  }
   SimpleBrowserTest(IE, kCFIPostPage);
 }
 
@@ -655,6 +684,10 @@ TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeOpera_CFInstancePost) {
 const wchar_t kCFIRPCPage[] = L"CFInstance_rpc_host.html";
 
 TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstanceRPC) {
+  if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
+    LOG(INFO) << "Not running test on Vista/Windows 7 with IE9";
+    return;
+  }
   SimpleBrowserTest(IE, kCFIRPCPage);
 }
 
@@ -680,6 +713,10 @@ const wchar_t kCFIRPCInternalPage[] =
     L"CFInstance_rpc_internal_host.html";
 
 TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstanceRPCInternal) {
+  if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
+    LOG(INFO) << "Not running test on Vista/Windows 7 with IE9";
+    return;
+  }
   SimpleBrowserTest(IE, kCFIRPCInternalPage);
 }
 
@@ -757,8 +794,7 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_CFHttpHeaderFrameSet) {
   SimpleBrowserTest(IE, kFullTabHttpHeaderPageFrameset);
 }
 
-// Flaky on the build bots. See http://crbug.com/30622
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeFF_InitializeHidden) {
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_InitializeHidden) {
   SimpleBrowserTest(FIREFOX, kInitializeHiddenPage);
 }
 
@@ -771,8 +807,7 @@ TEST_F(ChromeFrameTestWithWebServer,
 
 const wchar_t kInHeadPage[] = L"in_head.html";
 
-// Flaky on build bots. See http://crbug.com/37009
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeFF_InHead) {
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_InHead) {
   SimpleBrowserTest(FIREFOX, kInHeadPage);
 }
 
@@ -784,6 +819,16 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_Version) {
 
 TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_Version) {
   VersionTest(FIREFOX, kVersionPage);
+}
+
+const wchar_t kSessionIdPage[] = L"sessionid.html";
+
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_SessionIdPrivilege) {
+  SessionIdTest(FIREFOX, kSessionIdPage, 1, "OK");
+}
+
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeFF_SessionIdNoPrivilege) {
+  SessionIdTest(FIREFOX, kSessionIdPage, 0, "no sessionId");
 }
 
 const wchar_t kEventListenerPage[] = L"event_listener.html";
@@ -802,8 +847,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeOpera_EventListener) {
 
 const wchar_t kPrivilegedApisPage[] = L"privileged_apis_host.html";
 
-// http://crbug.com/32321
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_PrivilegedApis) {
+TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_PrivilegedApis) {
   SimpleBrowserTest(IE, kPrivilegedApisPage);
 }
 
@@ -834,10 +878,8 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_PersistentCookieTest) {
   SimpleBrowserTest(IE, kPersistentCookieTest);
 }
 
-// This test has been disabled because we need a better way to navigate out
-// of chrome frame and detect it.
 const wchar_t kNavigateOutPage[] = L"navigate_out.html";
-TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_NavigateOut) {
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_NavigateOut) {
   SimpleBrowserTest(IE, kNavigateOutPage);
 }
 
@@ -868,7 +910,7 @@ const wchar_t kInstallFlowTestUrl[] =
     L"install_flow_test.html";
 
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_InstallFlowTest) {
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     ScopedChromeFrameRegistrar::UnregisterAtPath(
         ScopedChromeFrameRegistrar::GetChromeFrameBuildPath().value());
 
@@ -919,25 +961,13 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_DeleteCookieTest) {
 const wchar_t kAnchorUrlNavigate[] =
     L"fulltab_anchor_url_navigate.html#chrome_frame";
 
-// http://code.google.com/p/chromium/issues/detail?id=35341
-TEST_F(ChromeFrameTestWithWebServer,
-       FLAKY_FullTabModeIE_AnchorUrlNavigateTest) {
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
-    return;
-  }
-
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_AnchorUrlNavigateTest) {
   SimpleBrowserTest(IE, kAnchorUrlNavigate);
 }
 
 // Test whether POST-ing a form from an mshtml page to a CF page will cause
 // the request to get reissued.  It should not.
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
-    return;
-  }
-
   // The order of pages in this array is assumed to be mshtml, cf, script.
   const wchar_t* kPages[] = {
     L"full_tab_post_mshtml.html",
@@ -969,11 +999,6 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestPostReissue) {
 // Test whether following a link from an mshtml page to a CF page will cause
 // multiple network requests.  It should not.
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestMultipleGet) {
-  if (IsIBrowserServicePatchEnabled()) {
-    LOG(ERROR) << "Not running test. IBrowserServicePatch is in place.";
-    return;
-  }
-
   // The order of pages in this array is assumed to be mshtml, cf, script.
   const wchar_t* kPages[] = {
     L"full_tab_get_mshtml.html",
@@ -1015,6 +1040,24 @@ const wchar_t kXHRConditionalHeaderTestUrl[] =
 
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_XHRConditionalHeaderTest) {
   SimpleBrowserTest(IE, kXHRConditionalHeaderTestUrl);
+}
+
+const wchar_t kWindowCloseTestUrl[] =
+    L"window_close.html";
+
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_WindowClose) {
+  SimpleBrowserTest(IE, kWindowCloseTestUrl);
+}
+
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeFF_WindowClose) {
+  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
+  // for more information on why this test is disabled for Vista with IE7.
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
+      chrome_frame_test::GetInstalledIEVersion() == IE_7) {
+    LOG(INFO) << "Not running test on Vista with IE7";
+    return;
+  }
+  SimpleBrowserTest(FIREFOX, kWindowCloseTestUrl);
 }
 
 std::string GetHeaderValue(const std::string& headers,
@@ -1107,7 +1150,8 @@ TEST_F(ChromeFrameTestWithWebServer, FAILS_FullTabModeIE_RefreshMshtmlTest) {
   for (; it != connections.end(); ++it) {
     test_server::Connection* c = (*it);
     const test_server::Request& r = c->request();
-    if (ASCIIToWide(r.path().substr(1)).compare(kPages[0]) == 0) {
+    if (!r.path().empty() &&
+        ASCIIToWide(r.path().substr(1)).compare(kPages[0]) == 0) {
       requests_for_first_page++;
       std::string ua(GetHeaderValue(r.headers(), "User-Agent"));
       EXPECT_NE(std::string::npos, ua.find("chromeframe"));
@@ -1116,3 +1160,130 @@ TEST_F(ChromeFrameTestWithWebServer, FAILS_FullTabModeIE_RefreshMshtmlTest) {
   EXPECT_GT(requests_for_first_page, 1);
 }
 
+// See bug 36694 for details.  http://crbug.com/36694
+TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_TestDownloadFromForm) {
+  chrome_frame_test::MockWindowObserver win_observer_mock;
+  win_observer_mock.WatchWindow("File Download", "");
+  win_observer_mock.WatchWindow("View Downloads*", "");
+
+  // The content of our HTML test page.  This will be returned whenever
+  // we reply to a GET request.
+  static const char kHtml[] =
+      "<html><head>\n"
+      "<title>ChromeFrame Form Download Test</title>\n"
+      // To see how this test runs with only IE (no CF in the picture), comment
+      // out this meta tag.  The outcome of the test should be identical.
+      "<meta http-equiv=\"X-UA-Compatible\" content=\"chrome=1\" />\n"
+      "</head>\n"
+      "<script language=\"javascript\">\n"
+      "function SubmitForm() {\n"
+      "  var form = document.forms['myform'];\n"
+      "  form.action = document.location;\n"
+      "  form.submit();\n"
+      "  return true;\n"
+      "}\n"
+      "</script>\n"
+      "<body onload=\"SubmitForm();\">\n"
+      "<form method=\"post\" action=\"foo.html\" id=\"myform\">\n"
+      "  <input type=\"hidden\" name=\"Field1\" value=\"myvalue\" />\n"
+      "  <input type=\"button\" name=\"btn\" value=\"Test Download\" "
+          "onclick=\"return SubmitForm();\" id=\"Button1\"/>\n"
+      "</form></body></html>\n";
+
+  // The content of our HTML test page.  This will be returned whenever
+  // we reply to a POST request.
+  static const char kText[] =
+      "This is a text file (in case you were wondering).";
+
+  // This http response class will return an HTML document that contains
+  // a form whenever it receives a GET request.  Whenever it gets a POST
+  // request, it will respond with a text file that needs to be downloaded
+  // (content-disposition is "attachment").
+  class CustomResponse : public test_server::ResponseForPath {
+   public:
+    explicit CustomResponse(const char* path)
+      : test_server::ResponseForPath(path), is_post_(false),
+        post_requests_(0), get_requests_(0) {
+    }
+
+    virtual bool GetContentType(std::string* content_type) const {
+      DCHECK(!is_post_);
+      return false;
+    }
+
+    virtual size_t ContentLength() const {
+      DCHECK(!is_post_);
+      return sizeof(kHtml) - 1;
+    }
+
+    virtual bool GetCustomHeaders(std::string* headers) const {
+      if (!is_post_)
+        return false;
+      *headers = StringPrintf(
+          "HTTP/1.1 200 OK\r\n"
+          "Content-Disposition: attachment;filename=\"test.txt\"\r\n"
+          "Content-Type: application/text\r\n"
+          "Connection: close\r\n"
+          "Content-Length: %i\r\n\r\n", sizeof(kText) - 1);
+      return true;
+    }
+
+    virtual bool Matches(const test_server::Request& r) const {
+      bool match = __super::Matches(r);
+      if (match) {
+        is_post_ = LowerCaseEqualsASCII(r.method().c_str(), "post");
+      }
+      return match;
+    }
+
+    virtual void WriteContents(ListenSocket* socket) const {
+      if (is_post_) {
+        socket->Send(kText, sizeof(kText) - 1, false);
+      } else {
+        socket->Send(kHtml, sizeof(kHtml) - 1, false);
+      }
+    }
+
+    virtual void IncrementAccessCounter() {
+      __super::IncrementAccessCounter();
+      if (is_post_) {
+        post_requests_++;
+      } else {
+        get_requests_++;
+      }
+    }
+
+    size_t get_request_count() const {
+      return get_requests_;
+    }
+
+    size_t post_request_count() const {
+      return get_requests_;
+    }
+
+   protected:
+    mutable bool is_post_;
+    size_t post_requests_;
+    size_t get_requests_;
+  };
+
+  EXPECT_CALL(win_observer_mock, OnWindowOpen(_))
+      .Times(testing::AtMost(1))
+      .WillOnce(chrome_frame_test::DoCloseWindow());
+
+  EXPECT_CALL(win_observer_mock, OnWindowClose(_))
+      .Times(testing::AtMost(1))
+      .WillOnce(QUIT_LOOP(loop_));
+
+  SimpleWebServerTest server(46664);
+  CustomResponse* response = new CustomResponse("/form.html");
+  server.web_server()->AddResponse(response);
+
+  std::wstring url(server.FormatHttpPath(L"form.html"));
+
+  ASSERT_TRUE(LaunchBrowser(IE, url.c_str()));
+  loop_.RunFor(kChromeFrameLongNavigationTimeoutInSeconds);
+
+  EXPECT_EQ(1, response->get_request_count());
+  EXPECT_EQ(1, response->post_request_count());
+}

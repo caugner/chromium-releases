@@ -9,13 +9,14 @@
 #include "base/string_util.h"
 #include "base/string16.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -51,7 +52,7 @@ const char kShownState[] = "shown";
 }
 
 static GURL ResolvePossiblyRelativeURL(const std::string& url_string,
-                                       Extension* extension) {
+                                       const Extension* extension) {
   GURL url = GURL(url_string);
   if (!url.is_valid())
     url = extension->GetResourceURL(url_string);
@@ -59,7 +60,7 @@ static GURL ResolvePossiblyRelativeURL(const std::string& url_string,
   return url;
 }
 
-static bool CanUseHost(Extension* extension,
+static bool CanUseHost(const Extension* extension,
                        const GURL& url,
                        std::string* error) {
   if (extension->HasHostPermission(url))
@@ -89,7 +90,7 @@ void ExtensionSidebarEventRouter::OnStateChanged(
   base::JSONWriter::Write(&args, false, &json_args);
 
   const std::string& extension_id(content_id);
-  profile->GetExtensionMessageService()->DispatchEventToExtension(
+  profile->GetExtensionEventRouter()->DispatchEventToExtension(
       extension_id, kOnStateChanged, json_args, profile, GURL());
 }
 
@@ -122,7 +123,7 @@ bool SidebarFunction::RunImpl() {
   }
 
   int tab_id;
-  TabContents* tab_contents = NULL;
+  TabContentsWrapper* tab_contents = NULL;
   if (details->HasKey(kTabIdKey)) {
     EXTENSION_FUNCTION_VALIDATE(details->GetInteger(kTabIdKey, &tab_id));
     if (!ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
@@ -146,7 +147,7 @@ bool SidebarFunction::RunImpl() {
     return false;
 
   std::string content_id(GetExtension()->id());
-  return RunImpl(tab_contents, content_id, *details);
+  return RunImpl(tab_contents->tab_contents(), content_id, *details);
 }
 
 
@@ -193,7 +194,7 @@ bool GetStateSidebarFunction::RunImpl(TabContents* tab,
 
         // Check if this tab is selected.
         Browser* browser = GetCurrentBrowser();
-        TabContents* contents = NULL;
+        TabContentsWrapper* contents = NULL;
         int default_tab_id = -1;
         if (browser &&
             ExtensionTabUtil::GetDefaultTab(browser, &contents,

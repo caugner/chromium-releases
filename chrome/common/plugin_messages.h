@@ -56,6 +56,7 @@ struct PluginHostMsg_URLRequest_Params {
   std::vector<char> buffer;
   int notify_id;
   bool popups_allowed;
+  bool notify_redirects;
 };
 
 struct PluginMsg_DidReceiveResponseParams {
@@ -111,9 +112,9 @@ struct PluginMsg_UpdateGeometry_Param {
 
   gfx::Rect window_rect;
   gfx::Rect clip_rect;
+  bool transparent;
   TransportDIB::Handle windowless_buffer;
   TransportDIB::Handle background_buffer;
-  bool transparent;
 
 #if defined(OS_MACOSX)
   // This field contains a key that the plug-in process is expected to return

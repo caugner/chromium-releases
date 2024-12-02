@@ -7,28 +7,37 @@
 #ifndef REMOTING_CLIENT_CHROMOTING_CLIENT_H
 #define REMOTING_CLIENT_CHROMOTING_CLIENT_H
 
+#include <list>
+
 #include "base/task.h"
-#include "remoting/client/host_connection.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_view.h"
-#include "remoting/protocol/messages_decoder.h"
+#include "remoting/protocol/client_stub.h"
+#include "remoting/protocol/connection_to_host.h"
+#include "remoting/protocol/input_stub.h"
+#include "remoting/protocol/video_stub.h"
 
 class MessageLoop;
 
 namespace remoting {
 
-class ChromotingHostMessage;
+namespace protocol {
+class NotifyResolutionRequest;
+}  // namespace protocol
+
 class ClientContext;
-class InitClientMessage;
 class InputHandler;
 class RectangleUpdateDecoder;
 
-class ChromotingClient : public HostConnection::HostEventCallback {
+// TODO(sergeyu): Move VideoStub implementation to RectangleUpdateDecoder.
+class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
+                         public protocol::ClientStub,
+                         public protocol::VideoStub {
  public:
   // Objects passed in are not owned by this class.
   ChromotingClient(const ClientConfig& config,
                    ClientContext* context,
-                   HostConnection* connection,
+                   protocol::ConnectionToHost* connection,
                    ChromotingView* view,
                    RectangleUpdateDecoder* rectangle_decoder,
                    InputHandler* input_handler,
@@ -50,32 +59,46 @@ class ChromotingClient : public HostConnection::HostEventCallback {
   // thread synchronously really.
   virtual void SetViewport(int x, int y, int width, int height);
 
-  // HostConnection::HostEventCallback implementation.
-  virtual void HandleMessage(HostConnection* conn,
-                             ChromotingHostMessage* messages);
-  virtual void OnConnectionOpened(HostConnection* conn);
-  virtual void OnConnectionClosed(HostConnection* conn);
-  virtual void OnConnectionFailed(HostConnection* conn);
+  // ConnectionToHost::HostEventCallback implementation.
+  virtual void OnConnectionOpened(protocol::ConnectionToHost* conn);
+  virtual void OnConnectionClosed(protocol::ConnectionToHost* conn);
+  virtual void OnConnectionFailed(protocol::ConnectionToHost* conn);
+
+  // ClientStub implementation.
+  virtual void NotifyResolution(const protocol::NotifyResolutionRequest* msg,
+                                Task* done);
+
+  // VideoStub implementation.
+  virtual void ProcessVideoPacket(const VideoPacket* packet, Task* done);
+  virtual int GetPendingPackets();
 
  private:
+  struct QueuedVideoPacket {
+    QueuedVideoPacket(const VideoPacket* packet, Task* done)
+        : packet(packet), done(done) {
+    }
+    const VideoPacket* packet;
+    Task* done;
+  };
+
   MessageLoop* message_loop();
+
+  // Initializes connection.
+  void Initialize();
 
   // Convenience method for modifying the state on this object's message loop.
   void SetConnectionState(ConnectionState s);
 
-  // If a message is not being processed, dispatches a single message from the
-  // |received_messages_| queue.
-  void DispatchMessage();
+  // If a packet is not being processed, dispatches a single message from the
+  // |received_packets_| queue.
+  void DispatchPacket();
 
-  void OnMessageDone(ChromotingHostMessage* msg);
-
-  // Handles for chromotocol messages.
-  void InitClient(const InitClientMessage& msg, Task* done);
+  void OnPacketDone();
 
   // The following are not owned by this class.
   ClientConfig config_;
   ClientContext* context_;
-  HostConnection* connection_;
+  protocol::ConnectionToHost* connection_;
   ChromotingView* view_;
   RectangleUpdateDecoder* rectangle_decoder_;
   InputHandler* input_handler_;
@@ -85,15 +108,15 @@ class ChromotingClient : public HostConnection::HostEventCallback {
 
   ConnectionState state_;
 
-  // Contains all messages that have been received, but have not yet been
+  // Contains all video packets that have been received, but have not yet been
   // processed.
   //
   // Used to serialize sending of messages to the client.
-  HostMessageList received_messages_;
+  std::list<QueuedVideoPacket> received_packets_;
 
   // True if a message is being processed. Can be used to determine if it is
   // safe to dispatch another message.
-  bool message_being_processed_;
+  bool packet_being_processed_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingClient);
 };

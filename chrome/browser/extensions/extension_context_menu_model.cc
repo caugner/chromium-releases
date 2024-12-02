@@ -5,15 +5,15 @@
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
@@ -21,6 +21,7 @@
 enum MenuEntries {
   NAME = 0,
   CONFIGURE,
+  HIDE,
   DISABLE,
   UNINSTALL,
   MANAGE,
@@ -28,11 +29,11 @@ enum MenuEntries {
 };
 
 ExtensionContextMenuModel::ExtensionContextMenuModel(
-    Extension* extension,
+    const Extension* extension,
     Browser* browser,
     PopupDelegate* delegate)
     : ALLOW_THIS_IN_INITIALIZER_LIST(SimpleMenuModel(this)),
-      extension_(extension),
+      extension_id_(extension->id()),
       browser_(browser),
       profile_(browser->profile()),
       delegate_(delegate) {
@@ -53,11 +54,19 @@ ExtensionContextMenuModel::~ExtensionContextMenuModel() {
 }
 
 void ExtensionContextMenuModel::InitCommonCommands() {
-  AddItem(NAME, UTF8ToUTF16(extension_->name()));
+  const Extension* extension = GetExtension();
+
+  // The extension pointer should only be null if the extension was uninstalled,
+  // and since the menu just opened, it should still be installed.
+  DCHECK(extension);
+
+  AddItem(NAME, UTF8ToUTF16(extension->name()));
   AddSeparator();
   AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS);
   AddItemWithStringId(DISABLE, IDS_EXTENSIONS_DISABLE);
   AddItemWithStringId(UNINSTALL, IDS_EXTENSIONS_UNINSTALL);
+  if (extension->browser_action())
+    AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
   AddSeparator();
   AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSIONS);
 }
@@ -67,14 +76,16 @@ bool ExtensionContextMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
+  const Extension* extension = this->GetExtension();
+  if (!extension)
+    return false;
+
   if (command_id == CONFIGURE) {
-    return extension_->options_url().spec().length() > 0;
+    return extension->options_url().spec().length() > 0;
   } else if (command_id == NAME) {
-    // The NAME links to the gallery page, which only makes sense if Google is
-    // hosting the extension. For other 3rd party extensions we don't have a
-    // homepage url, so we just disable this menu item on those cases, at least
-    // for now.
-    return extension_->GalleryUrl().is_valid();
+    // The NAME links to the Homepage URL. If the extension doesn't have a
+    // homepage, we just disable this menu item.
+    return extension->GetHomepageURL().is_valid();
   } else if (command_id == INSPECT_POPUP) {
     TabContents* contents = browser_->GetSelectedTabContents();
     if (!contents)
@@ -91,26 +102,35 @@ bool ExtensionContextMenuModel::GetAcceleratorForCommandId(
 }
 
 void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
+  const Extension* extension = GetExtension();
+  if (!extension)
+    return;
+
   switch (command_id) {
     case NAME: {
-      browser_->OpenURL(extension_->GalleryUrl(), GURL(),
+      browser_->OpenURL(extension->GetHomepageURL(), GURL(),
                         NEW_FOREGROUND_TAB, PageTransition::LINK);
       break;
     }
     case CONFIGURE:
-      DCHECK(!extension_->options_url().is_empty());
-      profile_->GetExtensionProcessManager()->OpenOptionsPage(extension_,
+      DCHECK(!extension->options_url().is_empty());
+      profile_->GetExtensionProcessManager()->OpenOptionsPage(extension,
                                                               browser_);
       break;
+    case HIDE: {
+      ExtensionsService* extension_service = profile_->GetExtensionsService();
+      extension_service->SetBrowserActionVisibility(extension, false);
+      break;
+    }
     case DISABLE: {
       ExtensionsService* extension_service = profile_->GetExtensionsService();
-      extension_service->DisableExtension(extension_->id());
+      extension_service->DisableExtension(extension_id_);
       break;
     }
     case UNINSTALL: {
       AddRef();  // Balanced in InstallUIProceed and InstallUIAbort.
       install_ui_.reset(new ExtensionInstallUI(profile_));
-      install_ui_->ConfirmUninstall(this, extension_);
+      install_ui_->ConfirmUninstall(this, extension);
       break;
     }
     case MANAGE: {
@@ -129,12 +149,17 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
 }
 
 void ExtensionContextMenuModel::InstallUIProceed() {
-  std::string id = extension_->id();
-  profile_->GetExtensionsService()->UninstallExtension(id, false);
+  if (GetExtension())
+    profile_->GetExtensionsService()->UninstallExtension(extension_id_, false);
 
   Release();
 }
 
 void ExtensionContextMenuModel::InstallUIAbort() {
   Release();
+}
+
+const Extension* ExtensionContextMenuModel::GetExtension() const {
+  ExtensionsService* extension_service = profile_->GetExtensionsService();
+  return extension_service->GetExtensionById(extension_id_, false);
 }

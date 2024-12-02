@@ -14,12 +14,12 @@
 #include "chrome/browser/background_contents_service.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chrome_blob_storage_context.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/file_system/file_system_host_context.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/file_system/browser_file_system_context.h"
 #include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -78,6 +78,7 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kSearchSuggestEnabled, true);
   prefs->RegisterBooleanPref(prefs::kSessionExitedCleanly, true);
   prefs->RegisterBooleanPref(prefs::kSafeBrowsingEnabled, true);
+  prefs->RegisterBooleanPref(prefs::kSafeBrowsingReportingEnabled, false);
   // TODO(estade): IDS_SPELLCHECK_DICTIONARY should be an ASCII string.
   prefs->RegisterLocalizedStringPref(prefs::kSpellCheckDictionary,
       IDS_SPELLCHECK_DICTIONARY);
@@ -96,6 +97,14 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kCurrentThemeDisplayProperties);
   prefs->RegisterBooleanPref(prefs::kDisableExtensions, false);
   prefs->RegisterStringPref(prefs::kSelectFileLastDirectory, "");
+#if defined(OS_CHROMEOS)
+  // TODO(dilmah): For OS_CHROMEOS we maintain kApplicationLocale in both
+  // local state and user's profile.  For other platforms we maintain
+  // kApplicationLocale only in local state.
+  // In the future we may want to maintain kApplicationLocale
+  // in user's profile for other platforms as well.
+  prefs->RegisterStringPref(prefs::kApplicationLocale, "");
+#endif
 }
 
 // static
@@ -115,7 +124,7 @@ bool Profile::IsSyncAccessible() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 class OffTheRecordProfileImpl : public Profile,
-                                public NotificationObserver {
+                                public BrowserList::Observer {
  public:
   explicit OffTheRecordProfileImpl(Profile* real_profile)
       : profile_(real_profile),
@@ -123,11 +132,8 @@ class OffTheRecordProfileImpl : public Profile,
     request_context_ = ChromeURLRequestContextGetter::CreateOffTheRecord(this);
     extension_process_manager_.reset(ExtensionProcessManager::Create(this));
 
-    // Register for browser close notifications so we can detect when the last
-    // off-the-record window is closed, in which case we can clean our states
-    // (cookies, downloads...).
-    registrar_.Add(this, NotificationType::BROWSER_CLOSED,
-                   NotificationService::AllSources());
+    BrowserList::AddObserver(this);
+
     background_contents_service_.reset(
         new BackgroundContentsService(this, CommandLine::ForCurrentProcess()));
   }
@@ -145,6 +151,8 @@ class OffTheRecordProfileImpl : public Profile,
         NewRunnableMethod(
             db_tracker_.get(),
             &webkit_database::DatabaseTracker::DeleteIncognitoDBDirectory));
+
+    BrowserList::RemoveObserver(this);
   }
 
   virtual ProfileId GetRuntimeId() {
@@ -205,7 +213,7 @@ class OffTheRecordProfileImpl : public Profile,
     return GetOriginalProfile()->GetExtensionsService();
   }
 
-  virtual BackgroundContentsService* GetBackgroundContentsService() {
+  virtual BackgroundContentsService* GetBackgroundContentsService() const {
     return background_contents_service_.get();
   }
 
@@ -229,6 +237,10 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual ExtensionMessageService* GetExtensionMessageService() {
     return GetOriginalProfile()->GetExtensionMessageService();
+  }
+
+  virtual ExtensionEventRouter* GetExtensionEventRouter() {
+    return GetOriginalProfile()->GetExtensionEventRouter();
   }
 
   virtual SSLHostState* GetSSLHostState() {
@@ -320,19 +332,19 @@ class OffTheRecordProfileImpl : public Profile,
     return NULL;
   }
 
-  virtual FileSystemHostContext* GetFileSystemHostContext() {
-    if (!file_system_host_context_)
-      file_system_host_context_ = new FileSystemHostContext(
+  virtual BrowserFileSystemContext* GetFileSystemContext() {
+    if (!browser_file_system_context_)
+      browser_file_system_context_ = new BrowserFileSystemContext(
           GetPath(), IsOffTheRecord());
-    DCHECK(file_system_host_context_.get());
-    return file_system_host_context_.get();
+    DCHECK(browser_file_system_context_.get());
+    return browser_file_system_context_.get();
   }
 
   virtual void InitThemes() {
     profile_->InitThemes();
   }
 
-  virtual void SetTheme(Extension* extension) {
+  virtual void SetTheme(const Extension* extension) {
     profile_->SetTheme(extension);
   }
 
@@ -344,7 +356,7 @@ class OffTheRecordProfileImpl : public Profile,
     profile_->ClearTheme();
   }
 
-  virtual Extension* GetTheme() {
+  virtual const Extension* GetTheme() {
     return profile_->GetTheme();
   }
 
@@ -421,6 +433,11 @@ class OffTheRecordProfileImpl : public Profile,
     return false;
   }
 
+  virtual bool HasProfileSyncService() const {
+    // We never have a profile sync service.
+    return false;
+  }
+
   virtual bool DidLastSessionExitCleanly() {
     return profile_->DidLastSessionExitCleanly();
   }
@@ -448,6 +465,10 @@ class OffTheRecordProfileImpl : public Profile,
   virtual ProfileSyncService* GetProfileSyncService(
       const std::string& cros_user) {
     return NULL;
+  }
+
+  virtual BrowserSignin* GetBrowserSignin() {
+    return profile_->GetBrowserSignin();
   }
 
   virtual CloudPrintProxyService* GetCloudPrintProxyService() {
@@ -482,6 +503,10 @@ class OffTheRecordProfileImpl : public Profile,
       webkit_context_ = new WebKitContext(this);
     DCHECK(webkit_context_.get());
     return webkit_context_.get();
+  }
+
+  virtual history::TopSites* GetTopSitesWithoutCreating() {
+    return NULL;
   }
 
   virtual history::TopSites* GetTopSites() {
@@ -533,18 +558,11 @@ class OffTheRecordProfileImpl : public Profile,
     }
   }
 
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    DCHECK_EQ(NotificationType::BROWSER_CLOSED, type.value);
-    // We are only interested in OTR browser closing.
-    if (Source<Browser>(source)->profile() != this)
-      return;
+  virtual void OnBrowserAdded(const Browser* browser) {
+  }
 
-    // Let's check if we still have an Off The Record window opened.
-    // Note that we check against 1 as this notification is sent before the
-    // browser window is actually removed from the list.
-    if (BrowserList::GetBrowserCount(this) <= 1)
+  virtual void OnBrowserRemoved(const Browser* browser) {
+    if (BrowserList::GetBrowserCount(this) == 0)
       ExitedOffTheRecordMode();
   }
 
@@ -562,6 +580,18 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual ExtensionInfoMap* GetExtensionInfoMap() {
     return profile_->GetExtensionInfoMap();
+  }
+
+  virtual policy::ProfilePolicyContext* GetPolicyContext() {
+    return NULL;
+  }
+
+  virtual PromoCounter* GetInstantPromoCounter() {
+    return NULL;
+  }
+
+  virtual PrefProxyConfigTracker* GetProxyConfigTracker() {
+    return profile_->GetProxyConfigTracker();
   }
 
  private:
@@ -623,11 +653,11 @@ class OffTheRecordProfileImpl : public Profile,
   scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
 
   // The file_system context for this profile.
-  scoped_refptr<FileSystemHostContext> file_system_host_context_;
+  scoped_refptr<BrowserFileSystemContext> browser_file_system_context_;
 
   DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileImpl);
 };
 
-Profile *Profile::CreateOffTheRecordProfile() {
+Profile* Profile::CreateOffTheRecordProfile() {
   return new OffTheRecordProfileImpl(this);
 }

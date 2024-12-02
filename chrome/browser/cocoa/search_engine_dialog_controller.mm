@@ -40,7 +40,9 @@ const int kLogoLabelHeight = 25;
 - (IBAction)searchEngineSelected:(id)sender;
 @end
 
-class SearchEngineDialogControllerBridge : public TemplateURLModelObserver {
+class SearchEngineDialogControllerBridge :
+    public base::RefCounted<SearchEngineDialogControllerBridge>,
+    public TemplateURLModelObserver {
  public:
   SearchEngineDialogControllerBridge(SearchEngineDialogController* controller);
 
@@ -71,7 +73,7 @@ void SearchEngineDialogControllerBridge::OnTemplateURLModelChanged() {
                                           ofType:@"nib"];
   self = [super initWithWindowNibPath:nibpath owner:self];
   if (self != nil) {
-    bridge_.reset(new SearchEngineDialogControllerBridge(self));
+    bridge_ = new SearchEngineDialogControllerBridge(self);
   }
   return self;
 }
@@ -85,11 +87,15 @@ void SearchEngineDialogControllerBridge::OnTemplateURLModelChanged() {
   searchEnginesModel_->AddObserver(bridge_.get());
 
   if (searchEnginesModel_->loaded()) {
-    [self onTemplateURLModelChanged];
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(
+            bridge_.get(),
+            &SearchEngineDialogControllerBridge::OnTemplateURLModelChanged));
   } else {
     searchEnginesModel_->Load();
-    MessageLoop::current()->Run();
   }
+  MessageLoop::current()->Run();
 }
 
 - (void)onTemplateURLModelChanged {
@@ -111,7 +117,7 @@ void SearchEngineDialogControllerBridge::OnTemplateURLModelChanged() {
   [win setBackgroundColor:[NSColor whiteColor]];
 
   NSImage* headerImage = ResourceBundle::GetSharedInstance().
-      GetNSImageNamed(IDR_SEARCH_ENGINE_DIALOG_TOP);
+      GetNativeImageNamed(IDR_SEARCH_ENGINE_DIALOG_TOP);
   [headerImageView_ setImage:headerImage];
 
   // Is the user's default search engine included in the first three
@@ -191,7 +197,7 @@ void SearchEngineDialogControllerBridge::OnTemplateURLModelChanged() {
   int logoId = engine->logo_id();
   if (useImages && logoId > 0) {
     NSImage* logoImage =
-        ResourceBundle::GetSharedInstance().GetNSImageNamed(logoId);
+        ResourceBundle::GetSharedInstance().GetNativeImageNamed(logoId);
     NSRect logoBounds = NSZeroRect;
     logoBounds.size = [logoImage size];
     NSImageView* logoView =

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
@@ -63,7 +64,7 @@ void KeywordProviderTest::RunTest(
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
     AutocompleteInput input(keyword_cases[i].input, std::wstring(), true,
-                            false, false);
+                            false, true, false);
     kw_provider_->Start(input, false);
     EXPECT_TRUE(kw_provider_->done());
     matches = kw_provider_->matches();

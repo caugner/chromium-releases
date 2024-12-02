@@ -48,7 +48,7 @@ bool InitializeGLBindings(GLImplementation implementation) {
       base::NativeLibrary library = base::LoadNativeLibrary(
           module_path.Append("libosmesa.so"));
       if (!library) {
-        DLOG(INFO) << "libosmesa.so not found";
+        DVLOG(1) << "libosmesa.so not found";
         return false;
       }
 
@@ -149,6 +149,13 @@ bool InitializeGLBindings(GLImplementation implementation) {
 
 
   return true;
+}
+
+void InitializeDebugGLBindings() {
+  InitializeDebugGLBindingsEGL();
+  InitializeDebugGLBindingsGL();
+  InitializeDebugGLBindingsGLX();
+  InitializeDebugGLBindingsOSMESA();
 }
 
 }  // namespace gfx

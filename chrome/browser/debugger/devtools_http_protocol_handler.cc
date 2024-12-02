@@ -10,14 +10,15 @@
 #include "base/string_number_conversions.h"
 #include "base/thread.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/devtools_messages.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
@@ -95,7 +96,7 @@ void DevToolsHttpProtocolHandler::OnHttpRequest(
         FROM_HERE,
         NewRunnableMethod(this,
                           &DevToolsHttpProtocolHandler::OnHttpRequestUI,
-                          socket,
+                          make_scoped_refptr(socket),
                           info));
     return;
   }
@@ -123,7 +124,7 @@ void DevToolsHttpProtocolHandler::OnWebSocketRequest(
       NewRunnableMethod(
           this,
           &DevToolsHttpProtocolHandler::OnWebSocketRequestUI,
-          socket,
+          make_scoped_refptr(socket),
           request));
 }
 
@@ -135,7 +136,7 @@ void DevToolsHttpProtocolHandler::OnWebSocketMessage(HttpListenSocket* socket,
       NewRunnableMethod(
           this,
           &DevToolsHttpProtocolHandler::OnWebSocketMessageUI,
-          socket,
+          make_scoped_refptr(socket),
           data));
 }
 
@@ -154,6 +155,8 @@ void DevToolsHttpProtocolHandler::OnClose(HttpListenSocket* socket) {
     socket_to_requests_io_.erase(socket);
   }
 
+  // This can't use make_scoped_refptr because |socket| is already deleted
+  // when this runs -- http://crbug.com/59930
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
@@ -171,7 +174,7 @@ void DevToolsHttpProtocolHandler::OnHttpRequestUI(
        end = BrowserList::end(); it != end; ++it) {
     TabStripModel* model = (*it)->tabstrip_model();
     for (int i = 0, size = model->count(); i < size; ++i) {
-      TabContents* tab_contents = model->GetTabContentsAt(i);
+      TabContentsWrapper* tab_contents = model->GetTabContentsAt(i);
       NavigationController& controller = tab_contents->controller();
       NavigationEntry* entry = controller.GetActiveEntry();
       if (entry == NULL)
@@ -181,7 +184,8 @@ void DevToolsHttpProtocolHandler::OnHttpRequestUI(
         continue;
 
       DevToolsClientHost* client_host = DevToolsManager::GetInstance()->
-          GetDevToolsClientHostFor(tab_contents->render_view_host());
+          GetDevToolsClientHostFor(tab_contents->tab_contents()->
+                                      render_view_host());
       if (!client_host) {
         response += StringPrintf(
             "<a href='/devtools/devtools.html?page=%d'>%s (%s)</a><br>",

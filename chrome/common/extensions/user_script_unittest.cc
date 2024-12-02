@@ -15,7 +15,7 @@ static const int kAllSchemes =
     URLPattern::SCHEME_FTP |
     URLPattern::SCHEME_CHROMEUI;
 
-TEST(UserScriptTest, Match1) {
+TEST(ExtensionUserScriptTest, Match1) {
   UserScript script;
   script.add_glob("*mail.google.com*");
   script.add_glob("*mail.yahoo.com*");
@@ -34,7 +34,7 @@ TEST(UserScriptTest, Match1) {
   EXPECT_FALSE(script.MatchesUrl(GURL("http://mail.google.com/foo")));
 }
 
-TEST(UserScriptTest, Match2) {
+TEST(ExtensionUserScriptTest, Match2) {
   UserScript script;
   script.add_glob("*mail.google.com/");
   // GURL normalizes the URL to have a trailing "/"
@@ -43,7 +43,7 @@ TEST(UserScriptTest, Match2) {
   EXPECT_FALSE(script.MatchesUrl(GURL("http://mail.google.com/foo")));
 }
 
-TEST(UserScriptTest, Match3) {
+TEST(ExtensionUserScriptTest, Match3) {
   UserScript script;
   script.add_glob("http://mail.google.com/*");
   // GURL normalizes the URL to have a trailing "/"
@@ -52,7 +52,7 @@ TEST(UserScriptTest, Match3) {
   EXPECT_FALSE(script.MatchesUrl(GURL("https://mail.google.com/foo")));
 }
 
-TEST(UserScriptTest, Match4) {
+TEST(ExtensionUserScriptTest, Match4) {
   UserScript script;
   script.add_glob("*");
   EXPECT_TRUE(script.MatchesUrl(GURL("http://foo.com/bar")));
@@ -61,7 +61,7 @@ TEST(UserScriptTest, Match4) {
   EXPECT_TRUE(script.MatchesUrl(GURL("file:///foo/bar")));
 }
 
-TEST(UserScriptTest, Match5) {
+TEST(ExtensionUserScriptTest, Match5) {
   UserScript script;
   script.add_glob("*foo*");
   EXPECT_TRUE(script.MatchesUrl(GURL("http://foo.com/bar")));
@@ -69,9 +69,9 @@ TEST(UserScriptTest, Match5) {
   EXPECT_FALSE(script.MatchesUrl(GURL("http://baz.org")));
 }
 
-TEST(UserScriptTest, Match6) {
+TEST(ExtensionUserScriptTest, Match6) {
   URLPattern pattern(kAllSchemes);
-  ASSERT_TRUE(pattern.Parse("http://*/foo*"));
+  ASSERT_EQ(URLPattern::PARSE_SUCCESS, pattern.Parse("http://*/foo*"));
 
   UserScript script;
   script.add_url_pattern(pattern);
@@ -81,12 +81,13 @@ TEST(UserScriptTest, Match6) {
   // NOTE: URLPattern is tested more extensively in url_pattern_unittest.cc.
 }
 
-TEST(UserScriptTest, UrlPatternGlobInteraction) {
+TEST(ExtensionUserScriptTest, UrlPatternGlobInteraction) {
   // If there are both, match intersection(union(globs), union(urlpatterns)).
   UserScript script;
 
   URLPattern pattern(kAllSchemes);
-  ASSERT_TRUE(pattern.Parse("http://www.google.com/*"));
+  ASSERT_EQ(URLPattern::PARSE_SUCCESS,
+            pattern.Parse("http://www.google.com/*"));
   script.add_url_pattern(pattern);
 
   script.add_glob("*bar*");
@@ -111,11 +112,11 @@ TEST(UserScriptTest, UrlPatternGlobInteraction) {
   EXPECT_TRUE(script.MatchesUrl(GURL("http://www.google.com/foo")));
 }
 
-TEST(UserScriptTest, Pickle) {
+TEST(ExtensionUserScriptTest, Pickle) {
   URLPattern pattern1(kAllSchemes);
   URLPattern pattern2(kAllSchemes);
-  ASSERT_TRUE(pattern1.Parse("http://*/foo*"));
-  ASSERT_TRUE(pattern2.Parse("http://bar/baz*"));
+  ASSERT_EQ(URLPattern::PARSE_SUCCESS, pattern1.Parse("http://*/foo*"));
+  ASSERT_EQ(URLPattern::PARSE_SUCCESS, pattern2.Parse("http://bar/baz*"));
 
   UserScript script1;
   script1.js_scripts().push_back(UserScript::File(
@@ -161,7 +162,7 @@ TEST(UserScriptTest, Pickle) {
   }
 }
 
-TEST(UserScriptTest, Defaults) {
+TEST(ExtensionUserScriptTest, Defaults) {
   UserScript script;
   ASSERT_EQ(UserScript::DOCUMENT_IDLE, script.run_location());
 }

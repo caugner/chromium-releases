@@ -150,7 +150,6 @@ PageInfoModel::PageInfoModel(Profile* profile,
   }
   sections_.push_back(SectionInfo(
       icon_id,
-      l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_IDENTITY_TITLE),
       headline,
       description,
       SECTION_INFO_IDENTITY));
@@ -162,12 +161,20 @@ PageInfoModel::PageInfoModel(Profile* profile,
   icon_id = ICON_STATE_OK;
   headline.clear();
   description.clear();
-  if (ssl.security_bits() < 0) {
+  if (!ssl.cert_id()) {
+    // Not HTTPS.
+    DCHECK_EQ(ssl.security_style(), SECURITY_STYLE_UNAUTHENTICATED);
+    icon_id = ssl.security_style() == SECURITY_STYLE_UNAUTHENTICATED ?
+        ICON_STATE_WARNING_MAJOR : ICON_STATE_ERROR;
+    description.assign(l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
+        subject_name));
+  } else if (ssl.security_bits() < 0) {
     // Security strength is unknown.  Say nothing.
     icon_id = ICON_STATE_ERROR;
   } else if (ssl.security_bits() == 0) {
-    icon_id = ssl.security_style() == SECURITY_STYLE_UNAUTHENTICATED ?
-        ICON_STATE_WARNING_MAJOR : ICON_STATE_ERROR;
+    DCHECK_NE(ssl.security_style(), SECURITY_STYLE_UNAUTHENTICATED);
+    icon_id = ICON_STATE_ERROR;
     description.assign(l10n_util::GetStringFUTF16(
         IDS_PAGE_INFO_SECURITY_TAB_NOT_ENCRYPTED_CONNECTION_TEXT,
         subject_name));
@@ -182,18 +189,8 @@ PageInfoModel::PageInfoModel(Profile* profile,
         subject_name,
         base::IntToString16(ssl.security_bits())));
     if (ssl.displayed_insecure_content() || ssl.ran_insecure_content()) {
-      // The old SSL dialog only had good and bad state, so for the old
-      // implementation we raise an error on finding mixed content. The new
-      // SSL info bubble has a warning state for displaying insecure content,
-      // so we check. The command line check will go away once we eliminate
-      // the old dialogs.
-      const CommandLine* command_line(CommandLine::ForCurrentProcess());
-      if (!command_line->HasSwitch(switches::kDisableNewPageInfoBubble) &&
-          !ssl.ran_insecure_content()) {
-        icon_id = ICON_STATE_WARNING_MINOR;
-      } else {
-        icon_id = ICON_STATE_ERROR;
-      }
+      icon_id = ssl.ran_insecure_content() ?
+          ICON_STATE_ERROR : ICON_STATE_WARNING_MINOR;
       description.assign(l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTED_SENTENCE_LINK,
           description,
@@ -206,6 +203,15 @@ PageInfoModel::PageInfoModel(Profile* profile,
   uint16 cipher_suite =
       net::SSLConnectionStatusToCipherSuite(ssl.connection_status());
   if (ssl.security_bits() > 0 && cipher_suite) {
+    int ssl_version =
+        net::SSLConnectionStatusToVersion(ssl.connection_status());
+    const char* ssl_version_str;
+    net::SSLVersionToString(&ssl_version_str, ssl_version);
+    description += ASCIIToUTF16("\n\n");
+    description += l10n_util::GetStringFUTF16(
+        IDS_PAGE_INFO_SECURITY_TAB_SSL_VERSION,
+        ASCIIToUTF16(ssl_version_str));
+
     bool did_fallback = (ssl.connection_status() &
                          net::SSL_CONNECTION_SSL3_FALLBACK) != 0;
     bool no_renegotiation =
@@ -223,7 +229,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
     uint8 compression_id =
         net::SSLConnectionStatusToCompression(ssl.connection_status());
     if (compression_id) {
-      const char *compression;
+      const char* compression;
       net::SSLCompressionToString(&compression, compression_id);
       description += l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_COMPRESSION_DETAILS,
@@ -250,7 +256,6 @@ PageInfoModel::PageInfoModel(Profile* profile,
   if (!description.empty()) {
     sections_.push_back(SectionInfo(
         icon_id,
-        l10n_util::GetStringUTF16(IDS_PAGE_INFO_SECURITY_TAB_CONNECTION_TITLE),
         headline,
         description,
         SECTION_INFO_CONNECTION));
@@ -289,12 +294,6 @@ PageInfoModel::SectionInfo PageInfoModel::GetSectionInfo(int index) {
 gfx::NativeImage PageInfoModel::GetIconImage(SectionStateIcon icon_id) {
   if (icon_id == ICON_NONE)
     return NULL;
-  // TODO(rsesek): Remove once the window is replaced with the bubble.
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  if (command_line->HasSwitch(switches::kDisableNewPageInfoBubble) &&
-      icon_id != ICON_STATE_OK) {
-    return icons_[ICON_STATE_WARNING_MAJOR];
-  }
   // The bubble uses new, various icons.
   return icons_[icon_id];
 }
@@ -315,30 +314,19 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
     visited_before_today = (first_visit_midnight < today);
   }
 
-  // We only show the Site Information heading for the new dialogs.
-  string16 title;
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  bool as_bubble = !command_line->HasSwitch(
-      switches::kDisableNewPageInfoBubble);
-  if (as_bubble)
-    title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_SITE_INFO_TITLE);
+  string16 headline = l10n_util::GetStringUTF16(IDS_PAGE_INFO_SITE_INFO_TITLE);
 
   if (!visited_before_today) {
     sections_.push_back(SectionInfo(
         ICON_STATE_WARNING_MAJOR,
-        l10n_util::GetStringUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE),
-        title,
+        headline,
         l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_FIRST_VISITED_TODAY),
         SECTION_INFO_FIRST_VISIT));
   } else {
     sections_.push_back(SectionInfo(
-        // TODO(rsesek): Remove once the window is replaced with the bubble.
-        as_bubble ? ICON_STATE_INFO : ICON_STATE_OK,
-        l10n_util::GetStringUTF16(
-            IDS_PAGE_INFO_SECURITY_TAB_PERSONAL_HISTORY_TITLE),
-        title,
+        ICON_STATE_INFO,
+        headline,
         l10n_util::GetStringFUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_VISITED_BEFORE_TODAY,
             WideToUTF16(base::TimeFormatShortDate(first_visit))),
@@ -347,12 +335,7 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
   observer_->ModelChanged();
 }
 
-// static
-void PageInfoModel::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kPageInfoWindowPlacement);
-}
-
-PageInfoModel::PageInfoModel() {
+PageInfoModel::PageInfoModel() : observer_(NULL) {
   Init();
 }
 

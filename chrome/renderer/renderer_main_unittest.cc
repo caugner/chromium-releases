@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/test/multiprocess_test.h"
+#include "base/test/test_timeouts.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/main_function_params.h"
 #include "ipc/ipc_channel.h"
@@ -25,6 +27,8 @@ extern int RendererMain(const MainFunctionParams& parameters);
 // functionality, we should combine them.
 class RendererMainTest : public base::MultiProcessTest {
  protected:
+  RendererMainTest() {}
+
   // Create a new MessageLoopForIO For each test.
   virtual void SetUp();
   virtual void TearDown();
@@ -32,6 +36,9 @@ class RendererMainTest : public base::MultiProcessTest {
   // Spawns a child process of the specified type
   base::ProcessHandle SpawnChild(const std::string& procname,
                                  IPC::Channel* channel);
+
+  virtual CommandLine MakeCmdLine(const std::string& procname,
+                                  bool debug_on_start) OVERRIDE;
 
   // Created around each test instantiation.
   MessageLoopForIO *message_loop_;
@@ -60,6 +67,19 @@ ProcessHandle RendererMainTest::SpawnChild(const std::string& procname,
   }
 
   return MultiProcessTest::SpawnChild(procname, fds_to_map, false);
+}
+
+CommandLine RendererMainTest::MakeCmdLine(const std::string& procname,
+                                          bool debug_on_start) {
+  CommandLine command_line =
+      MultiProcessTest::MakeCmdLine(procname, debug_on_start);
+#if defined(USE_SECCOMP_SANDBOX)
+  // Turn off seccomp for this test.  It's just a problem of refactoring,
+  // not a bug.
+  // http://code.google.com/p/chromium/issues/detail?id=59376
+  command_line.AppendSwitch(switches::kDisableSeccompSandbox);
+#endif
+  return command_line;
 }
 
 // Listener class that kills the message loop when it connects.
@@ -92,12 +112,14 @@ TEST_F(RendererMainTest, CreateDestroy) {
   base::ProcessHandle renderer_pid = SpawnChild("SimpleRenderer",
                                                 &control_channel);
 
-  control_channel.Connect();
+  ASSERT_TRUE(control_channel.Connect());
+
   MessageLoop::current()->Run();
 
   // The renderer should exit when we close the channel.
   control_channel.Close();
 
-  EXPECT_TRUE(base::WaitForSingleProcess(renderer_pid, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(renderer_pid,
+                                         TestTimeouts::action_timeout_ms()));
 }
 #endif  // defined(OS_POSIX)

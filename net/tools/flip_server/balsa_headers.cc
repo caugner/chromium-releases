@@ -555,22 +555,23 @@ void BalsaHeaders::DumpToString(std::string* str) const {
   // Then check whether the header is in a partially parsed state. If so, just
   // dump the raw data.
   if (balsa_buffer_.can_write_to_contiguous_buffer()) {
-    StringAppendF(str, "\n<incomplete header len: %d>\n%.*s\n",
-                  buffer_length, buffer_length, OriginalHeaderStreamBegin());
+    base::StringAppendF(str, "\n<incomplete header len: %d>\n%.*s\n",
+                        buffer_length, buffer_length,
+                        OriginalHeaderStreamBegin());
     return;
   }
 
   // If the header is complete, then just dump them with the logical key value
   // pair.
   str->reserve(str->size() + GetSizeForWriteBuffer());
-  StringAppendF(str, "\n %.*s\n",
-                static_cast<int>(firstline.size()),
-                firstline.data());
+  base::StringAppendF(str, "\n %.*s\n",
+                      static_cast<int>(firstline.size()),
+                      firstline.data());
   BalsaHeaders::const_header_lines_iterator i = header_lines_begin();
   for (; i != header_lines_end(); ++i) {
-    StringAppendF(str, " %.*s: %.*s\n",
-                  static_cast<int>(i->first.size()), i->first.data(),
-                  static_cast<int>(i->second.size()), i->second.data());
+    base::StringAppendF(str, " %.*s: %.*s\n",
+                        static_cast<int>(i->first.size()), i->first.data(),
+                        static_cast<int>(i->second.size()), i->second.data());
   }
 }
 
@@ -615,7 +616,7 @@ void BalsaHeaders::SetContentLength(size_t length) {
   content_length_ = length;
   // FastUInt64ToBuffer is supposed to use a maximum of kFastToBufferSize bytes.
   char buffer[kFastToBufferSize];
-  int len_converted = snprintf(buffer, sizeof(buffer), "%d", length);
+  int len_converted = snprintf(buffer, sizeof(buffer), "%zd", length);
   CHECK_GT(len_converted, 0);
   const base::StringPiece length_str(buffer, len_converted);
   AppendHeader(content_length, length_str);
@@ -724,7 +725,7 @@ void BalsaHeaders::SetParsedResponseCodeAndUpdateFirstline(
     size_t parsed_response_code) {
   char buffer[kFastToBufferSize];
   int len_converted = snprintf(buffer, sizeof(buffer),
-                               "%d", parsed_response_code);
+                               "%zd", parsed_response_code);
   CHECK_GT(len_converted, 0);
   SetResponseCode(base::StringPiece(buffer, len_converted));
 }

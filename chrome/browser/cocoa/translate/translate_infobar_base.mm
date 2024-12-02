@@ -6,11 +6,11 @@
 #import "chrome/browser/cocoa/translate/translate_infobar_base.h"
 
 #include "app/l10n_util.h"
-#include "base/histogram.h"
-#include "base/logging.h"  // for NOTREACHED()
+#include "base/logging.h"
 #include "base/mac_util.h"
+#include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/cocoa/hover_close_button.h"
 #include "chrome/browser/cocoa/infobar.h"
 #import "chrome/browser/cocoa/infobar_controller.h"

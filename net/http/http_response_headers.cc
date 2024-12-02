@@ -484,7 +484,7 @@ bool HttpResponseHeaders::HasHeaderValue(const std::string& name,
   while (EnumerateHeader(&iter, name, &temp)) {
     if (value.size() == temp.size() &&
         std::equal(temp.begin(), temp.end(), value.begin(),
-                   CaseInsensitiveCompare<char>()))
+                   base::CaseInsensitiveCompare<char>()))
       return true;
   }
   return false;
@@ -513,20 +513,20 @@ HttpVersion HttpResponseHeaders::ParseVersion(
   // TODO: handle leading zeros, which is allowed by the rfc1616 sec 3.1.
 
   if ((line_end - p < 4) || !LowerCaseEqualsASCII(p, p + 4, "http")) {
-    DLOG(INFO) << "missing status line";
+    DVLOG(1) << "missing status line";
     return HttpVersion();
   }
 
   p += 4;
 
   if (p >= line_end || *p != '/') {
-    DLOG(INFO) << "missing version";
+    DVLOG(1) << "missing version";
     return HttpVersion();
   }
 
   std::string::const_iterator dot = find(p, line_end, '.');
   if (dot == line_end) {
-    DLOG(INFO) << "malformed version";
+    DVLOG(1) << "malformed version";
     return HttpVersion();
   }
 
@@ -534,7 +534,7 @@ HttpVersion HttpResponseHeaders::ParseVersion(
   ++dot;  // from . to second digit.
 
   if (!(*p >= '0' && *p <= '9' && *dot >= '0' && *dot <= '9')) {
-    DLOG(INFO) << "malformed version number";
+    DVLOG(1) << "malformed version number";
     return HttpVersion();
   }
 
@@ -566,15 +566,15 @@ void HttpResponseHeaders::ParseStatusLine(
     raw_headers_ = "HTTP/1.0";
   }
   if (parsed_http_version_ != http_version_) {
-    DLOG(INFO) << "assuming HTTP/" << http_version_.major_value() << "."
-               << http_version_.minor_value();
+    DVLOG(1) << "assuming HTTP/" << http_version_.major_value() << "."
+             << http_version_.minor_value();
   }
 
   // TODO(eroman): this doesn't make sense if ParseVersion failed.
   std::string::const_iterator p = find(line_begin, line_end, ' ');
 
   if (p == line_end) {
-    DLOG(INFO) << "missing response status; assuming 200 OK";
+    DVLOG(1) << "missing response status; assuming 200 OK";
     raw_headers_.append(" 200 OK");
     raw_headers_.push_back('\0');
     response_code_ = 200;
@@ -590,7 +590,7 @@ void HttpResponseHeaders::ParseStatusLine(
     ++p;
 
   if (p == code) {
-    DLOG(INFO) << "missing response status number; assuming 200";
+    DVLOG(1) << "missing response status number; assuming 200";
     raw_headers_.append(" 200 OK");
     response_code_ = 200;
     return;
@@ -598,7 +598,7 @@ void HttpResponseHeaders::ParseStatusLine(
   raw_headers_.push_back(' ');
   raw_headers_.append(code, p);
   raw_headers_.push_back(' ');
-  base::StringToInt(std::string(code, p), &response_code_);
+  base::StringToInt(code, p, &response_code_);
 
   // Skip whitespace.
   while (*p == ' ')
@@ -609,7 +609,7 @@ void HttpResponseHeaders::ParseStatusLine(
     --line_end;
 
   if (p == line_end) {
-    DLOG(INFO) << "missing response status text; assuming OK";
+    DVLOG(1) << "missing response status text; assuming OK";
     // Not super critical what we put here. Just use "OK"
     // even if it isn't descriptive of response_code_.
     raw_headers_.append("OK");
@@ -629,7 +629,7 @@ size_t HttpResponseHeaders::FindHeader(size_t from,
     const std::string::const_iterator& name_end = parsed_[i].name_end;
     if (static_cast<size_t>(name_end - name_begin) == search.size() &&
         std::equal(name_begin, name_end, search.begin(),
-                   CaseInsensitiveCompare<char>()))
+                   base::CaseInsensitiveCompare<char>()))
       return i;
   }
 
@@ -973,7 +973,9 @@ bool HttpResponseHeaders::GetMaxAgeValue(TimeDelta* result) const {
                                value.begin() + kMaxAgePrefixLen,
                                kMaxAgePrefix)) {
         int64 seconds;
-        base::StringToInt64(value.substr(kMaxAgePrefixLen), &seconds);
+        base::StringToInt64(value.begin() + kMaxAgePrefixLen,
+                            value.end(),
+                            &seconds);
         *result = TimeDelta::FromSeconds(seconds);
         return true;
       }
@@ -1148,9 +1150,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
           byte_range_resp_spec.begin() + minus_position;
       HttpUtil::TrimLWS(&first_byte_pos_begin, &first_byte_pos_end);
 
-      bool ok = base::StringToInt64(
-          std::string(first_byte_pos_begin, first_byte_pos_end),
-          first_byte_position);
+      bool ok = base::StringToInt64(first_byte_pos_begin,
+                                    first_byte_pos_end,
+                                    first_byte_position);
 
       // Obtain last-byte-pos.
       std::string::const_iterator last_byte_pos_begin =
@@ -1159,9 +1161,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
           byte_range_resp_spec.end();
       HttpUtil::TrimLWS(&last_byte_pos_begin, &last_byte_pos_end);
 
-      ok &= base::StringToInt64(
-          std::string(last_byte_pos_begin, last_byte_pos_end),
-          last_byte_position);
+      ok &= base::StringToInt64(last_byte_pos_begin,
+                                last_byte_pos_end,
+                                last_byte_position);
       if (!ok) {
         *first_byte_position = *last_byte_position = -1;
         return false;
@@ -1184,9 +1186,9 @@ bool HttpResponseHeaders::GetContentRange(int64* first_byte_position,
 
   if (LowerCaseEqualsASCII(instance_length_begin, instance_length_end, "*")) {
     return false;
-  } else if (!base::StringToInt64(
-      std::string(instance_length_begin, instance_length_end),
-      instance_length)) {
+  } else if (!base::StringToInt64(instance_length_begin,
+                                  instance_length_end,
+                                  instance_length)) {
     *instance_length = -1;
     return false;
   }

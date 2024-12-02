@@ -24,12 +24,15 @@ namespace net {
 
 class ClientSocketFactory;
 class ConnectJobFactory;
+class DnsCertProvenanceChecker;
 class DnsRRResolver;
+class HostPortPair;
 class HttpProxyClientSocketPool;
 class HttpProxySocketParams;
 class SOCKSClientSocketPool;
 class SOCKSSocketParams;
 class SSLClientSocket;
+class SSLHostInfoFactory;
 class TCPClientSocketPool;
 class TCPSocketParams;
 struct RRResponse;
@@ -42,7 +45,7 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
                   const scoped_refptr<SOCKSSocketParams>& socks_params,
                   const scoped_refptr<HttpProxySocketParams>& http_proxy_params,
                   ProxyServer::Scheme proxy,
-                  const std::string& hostname,
+                  const HostPortPair& host_and_port,
                   const SSLConfig& ssl_config,
                   int load_flags,
                   bool force_spdy_over_ssl,
@@ -56,7 +59,7 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
     return socks_params_;
   }
   ProxyServer::Scheme proxy() const { return proxy_; }
-  const std::string& hostname() const { return hostname_; }
+  const HostPortPair& host_and_port() const { return host_and_port_; }
   const SSLConfig& ssl_config() const { return ssl_config_; }
   int load_flags() const { return load_flags_; }
   bool force_spdy_over_ssl() const { return force_spdy_over_ssl_; }
@@ -70,7 +73,7 @@ class SSLSocketParams : public base::RefCounted<SSLSocketParams> {
   const scoped_refptr<HttpProxySocketParams> http_proxy_params_;
   const scoped_refptr<SOCKSSocketParams> socks_params_;
   const ProxyServer::Scheme proxy_;
-  const std::string hostname_;
+  const HostPortPair host_and_port_;
   const SSLConfig ssl_config_;
   const int load_flags_;
   const bool force_spdy_over_ssl_;
@@ -93,6 +96,8 @@ class SSLConnectJob : public ConnectJob {
       ClientSocketFactory* client_socket_factory,
       HostResolver* host_resolver,
       DnsRRResolver* dnsrr_resolver,
+      DnsCertProvenanceChecker* dns_cert_checker,
+      SSLHostInfoFactory* ssl_host_info_factory,
       Delegate* delegate,
       NetLog* net_log);
   virtual ~SSLConnectJob();
@@ -140,12 +145,15 @@ class SSLConnectJob : public ConnectJob {
   HttpProxyClientSocketPool* const http_proxy_pool_;
   ClientSocketFactory* const client_socket_factory_;
   HostResolver* const resolver_;
-  DnsRRResolver* dnsrr_resolver_;
+  DnsRRResolver* const dnsrr_resolver_;
+  DnsCertProvenanceChecker* dns_cert_checker_;
+  SSLHostInfoFactory* const ssl_host_info_factory_;
 
   State next_state_;
   CompletionCallbackImpl<SSLConnectJob> callback_;
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
   scoped_ptr<SSLClientSocket> ssl_socket_;
+  scoped_ptr<SSLHostInfo> ssl_host_info_;
 
   // The time the DoSSLConnect() method was called.
   base::TimeTicks ssl_connect_start_time_;
@@ -166,6 +174,8 @@ class SSLClientSocketPool : public ClientSocketPool,
       ClientSocketPoolHistograms* histograms,
       HostResolver* host_resolver,
       DnsRRResolver* dnsrr_resolver,
+      DnsCertProvenanceChecker* dns_cert_checker,
+      SSLHostInfoFactory* ssl_host_info_factory,
       ClientSocketFactory* client_socket_factory,
       TCPClientSocketPool* tcp_pool,
       SOCKSClientSocketPool* socks_pool,
@@ -182,6 +192,11 @@ class SSLClientSocketPool : public ClientSocketPool,
                             ClientSocketHandle* handle,
                             CompletionCallback* callback,
                             const BoundNetLog& net_log);
+
+  virtual void RequestSockets(const std::string& group_name,
+                              const void* params,
+                              int num_sockets,
+                              const BoundNetLog& net_log);
 
   virtual void CancelRequest(const std::string& group_name,
                              ClientSocketHandle* handle);
@@ -233,6 +248,8 @@ class SSLClientSocketPool : public ClientSocketPool,
         ClientSocketFactory* client_socket_factory,
         HostResolver* host_resolver,
         DnsRRResolver* dnsrr_resolver,
+        DnsCertProvenanceChecker* dns_cert_checker,
+        SSLHostInfoFactory* ssl_host_info_factory,
         NetLog* net_log);
 
     virtual ~SSLConnectJobFactory() {}
@@ -251,7 +268,9 @@ class SSLClientSocketPool : public ClientSocketPool,
     HttpProxyClientSocketPool* const http_proxy_pool_;
     ClientSocketFactory* const client_socket_factory_;
     HostResolver* const host_resolver_;
-    DnsRRResolver* dnsrr_resolver_;
+    DnsRRResolver* const dnsrr_resolver_;
+    DnsCertProvenanceChecker* const dns_cert_checker_;
+    SSLHostInfoFactory* const ssl_host_info_factory_;
     base::TimeDelta timeout_;
     NetLog* net_log_;
 

@@ -12,6 +12,7 @@
 #include "app/win_util.h"
 #include "base/i18n/rtl.h"
 #include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "gfx/canvas_skia_paint.h"
 #include "gfx/font.h"
 #include "gfx/icon_util.h"
@@ -193,7 +194,7 @@ static BOOL CALLBACK SendDwmCompositionChanged(HWND window, LPARAM param) {
 }  // namespace
 
 void WindowWin::FrameTypeChanged() {
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     // We need to toggle the rendering policy of the DWM/glass frame as we
     // change from opaque to glass. "Non client rendering enabled" means that
     // the DWM's glass non-client rendering is enabled, which is why
@@ -416,9 +417,7 @@ void WindowWin::UpdateWindowTitle() {
     window_title = window_delegate_->GetAccessibleWindowTitle();
   else
     window_title = window_delegate_->GetWindowTitle();
-  std::wstring localized_text;
-  if (base::i18n::AdjustStringForLocaleDirection(window_title, &localized_text))
-    window_title.assign(localized_text);
+  base::i18n::AdjustStringForLocaleDirection(&window_title);
   SetWindowText(GetNativeView(), window_title.c_str());
 
   // Also update the accessibility name.
@@ -1270,19 +1269,23 @@ void WindowWin::SetInitialBounds(const gfx::Rect& create_bounds) {
   // Restore the window's placement from the controller.
   gfx::Rect saved_bounds(create_bounds.ToRECT());
   if (window_delegate_->GetSavedWindowBounds(&saved_bounds)) {
-    // Make sure the bounds are at least the minimum size.
-    if (saved_bounds.width() < minimum_size_.width()) {
-      saved_bounds.SetRect(saved_bounds.x(), saved_bounds.y(),
-                           saved_bounds.right() + minimum_size_.width() -
-                              saved_bounds.width(),
-                           saved_bounds.bottom());
-    }
+    if (!window_delegate_->ShouldRestoreWindowSize()) {
+      saved_bounds.set_size(non_client_view_->GetPreferredSize());
+    } else {
+      // Make sure the bounds are at least the minimum size.
+      if (saved_bounds.width() < minimum_size_.width()) {
+        saved_bounds.SetRect(saved_bounds.x(), saved_bounds.y(),
+                             saved_bounds.right() + minimum_size_.width() -
+                                 saved_bounds.width(),
+                             saved_bounds.bottom());
+      }
 
-    if (saved_bounds.height() < minimum_size_.height()) {
-      saved_bounds.SetRect(saved_bounds.x(), saved_bounds.y(),
-                           saved_bounds.right(),
-                           saved_bounds.bottom() + minimum_size_.height() -
-                              saved_bounds.height());
+      if (saved_bounds.height() < minimum_size_.height()) {
+        saved_bounds.SetRect(saved_bounds.x(), saved_bounds.y(),
+                             saved_bounds.right(),
+                             saved_bounds.bottom() + minimum_size_.height() -
+                                 saved_bounds.height());
+      }
     }
 
     // "Show state" (maximized, minimized, etc) is handled by Show().

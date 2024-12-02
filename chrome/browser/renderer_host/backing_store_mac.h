@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "chrome/browser/renderer_host/backing_store.h"
 
 class BackingStoreMac : public BackingStore {
@@ -28,8 +28,7 @@ class BackingStoreMac : public BackingStore {
       RenderProcessHost* process,
       TransportDIB::Id bitmap,
       const gfx::Rect& bitmap_rect,
-      const std::vector<gfx::Rect>& copy_rects,
-      bool* painted_synchronously);
+      const std::vector<gfx::Rect>& copy_rects);
   virtual bool CopyFromBackingStore(const gfx::Rect& rect,
                                     skia::PlatformCanvas* output);
   virtual void ScrollBackingStore(int dx, int dy,
@@ -48,8 +47,8 @@ class BackingStoreMac : public BackingStore {
   // result.
   CGContextRef CreateCGBitmapContext();
 
-  scoped_cftyperef<CGContextRef> cg_bitmap_;
-  scoped_cftyperef<CGLayerRef> cg_layer_;
+  base::mac::ScopedCFTypeRef<CGContextRef> cg_bitmap_;
+  base::mac::ScopedCFTypeRef<CGLayerRef> cg_layer_;
 
   DISALLOW_COPY_AND_ASSIGN(BackingStoreMac);
 };

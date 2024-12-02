@@ -37,25 +37,18 @@ class MockAuthenticator : public Authenticator {
                                    const std::string& password,
                                    const std::string& login_token,
                                    const std::string& login_captcha) {
-    if (expected_username_ == username &&
-        expected_password_ == password) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this,
-                            &MockAuthenticator::OnLoginSuccess,
-                            GaiaAuthConsumer::ClientLoginResult(),
-                            false));
+    if (expected_username_ == username && expected_password_ == password) {
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+          NewRunnableMethod(this, &MockAuthenticator::OnLoginSuccess,
+                            GaiaAuthConsumer::ClientLoginResult(), false));
       return true;
-    } else {
-      GoogleServiceAuthError error(
-          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this,
-                            &MockAuthenticator::OnLoginFailure,
-                            LoginFailure::FromNetworkAuthFailure(error)));
-      return false;
     }
+    GoogleServiceAuthError error(
+        GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(this, &MockAuthenticator::OnLoginFailure,
+                          LoginFailure::FromNetworkAuthFailure(error)));
+    return false;
   }
 
   virtual bool AuthenticateToUnlock(const std::string& username,
@@ -73,13 +66,14 @@ class MockAuthenticator : public Authenticator {
     // If we want to be more like the real thing, we could save username
     // in AuthenticateToLogin, but there's not much of a point.
     consumer_->OnLoginSuccess(expected_username_,
+                              expected_password_,
                               credentials,
                               request_pending);
   }
 
   void OnLoginFailure(const LoginFailure& failure) {
       consumer_->OnLoginFailure(failure);
-      LOG(INFO) << "Posting a QuitTask to UI thread";
+      VLOG(1) << "Posting a QuitTask to UI thread";
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
   }
@@ -117,8 +111,10 @@ class MockLoginUtils : public LoginUtils {
   }
 
   virtual void CompleteLogin(const std::string& username,
+                             const std::string& password,
                              const GaiaAuthConsumer::ClientLoginResult& res) {
     EXPECT_EQ(expected_username_, username);
+    EXPECT_EQ(expected_password_, password);
   }
 
   virtual void CompleteOffTheRecordLogin(const GURL& start_url) {
@@ -138,6 +134,9 @@ class MockLoginUtils : public LoginUtils {
 
   virtual const std::string& GetAuthToken() const {
     return auth_token_;
+  }
+
+  virtual void PrewarmAuthentication() {
   }
 
  private:

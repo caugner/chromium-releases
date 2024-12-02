@@ -61,6 +61,20 @@ void RenderViewTest::ExecuteJavaScript(const char* js) {
   GetMainFrame()->executeScript(WebScriptSource(WebString::fromUTF8(js)));
 }
 
+bool RenderViewTest::ExecuteJavaScriptAndReturnIntValue(
+    const string16& script,
+    int* int_result) {
+  v8::Handle<v8::Value> result =
+      GetMainFrame()->executeScriptAndReturnValue(WebScriptSource(script));
+  if (result.IsEmpty() || !result->IsInt32())
+    return false;
+
+  if (int_result)
+    *int_result = result->Int32Value();
+
+  return true;
+}
+
 void RenderViewTest::LoadHTML(const char* html) {
   std::string url_str = "data:text/html;charset=utf-8,";
   url_str.append(html);
@@ -75,7 +89,7 @@ void RenderViewTest::LoadHTML(const char* html) {
 
 void RenderViewTest::SetUp() {
   sandbox_init_wrapper_.reset(new SandboxInitWrapper());
-  command_line_.reset(new CommandLine(CommandLine::ARGUMENTS_ONLY));
+  command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
   params_.reset(new MainFunctionParams(*command_line_, *sandbox_init_wrapper_,
                                        NULL));
   platform_.reset(new RendererMainPlatformDelegate(*params_));

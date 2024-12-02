@@ -11,7 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -104,6 +104,12 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
                                  const gfx::Rect& initial_pos);
   virtual void ShowCreatedFullscreenWidget(int route_id);
   virtual void ShowContextMenu(const ContextMenuParams& params);
+  virtual void ShowPopupMenu(const gfx::Rect& bounds,
+                             int item_height,
+                             double item_font_size,
+                             int selected_item,
+                             const std::vector<WebMenuItem>& items,
+                             bool right_aligned);
   virtual void StartDragging(const WebDropData& drop_data,
                              WebDragOperationsMask operations_allowed,
                              const SkBitmap& image,
@@ -217,7 +223,7 @@ void InterstitialPage::Show() {
     NavigationEntry* entry = new NavigationEntry;
     entry->set_url(url_);
     entry->set_virtual_url(url_);
-    entry->set_page_type(NavigationEntry::INTERSTITIAL_PAGE);
+    entry->set_page_type(INTERSTITIAL_PAGE);
 
     // Give sub-classes a chance to set some states on the navigation entry.
     UpdateEntry(entry);
@@ -615,6 +621,15 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::ShowContextMenu(
     const ContextMenuParams& params) {
 }
 
+void InterstitialPage::InterstitialPageRVHViewDelegate::ShowPopupMenu(
+    const gfx::Rect& bounds,
+    int item_height,
+    double item_font_size,
+    int selected_item,
+    const std::vector<WebMenuItem>& items,
+    bool right_aligned) {
+}
+
 void InterstitialPage::InterstitialPageRVHViewDelegate::StartDragging(
     const WebDropData& drop_data,
     WebDragOperationsMask allowed_operations,
@@ -696,4 +711,14 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::OnFindReply(
 
 int InterstitialPage::GetBrowserWindowID() const {
   return tab_->GetBrowserWindowID();
+}
+
+void InterstitialPage::UpdateInspectorSetting(const std::string& key,
+                                              const std::string& value) {
+  RenderViewHostDelegateHelper::UpdateInspectorSetting(
+      tab_->profile(), key, value);
+}
+
+void InterstitialPage::ClearInspectorSettings() {
+  RenderViewHostDelegateHelper::ClearInspectorSettings(tab_->profile());
 }

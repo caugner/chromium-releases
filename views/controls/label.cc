@@ -68,7 +68,8 @@ int Label::GetHeightForWidth(int w) {
 
   w = std::max(0, w - GetInsets().width());
   int h = font_.GetHeight();
-  gfx::CanvasSkia::SizeStringInt(text_, font_, &w, &h, ComputeMultiLineFlags());
+  gfx::CanvasSkia::SizeStringInt(WideToUTF16Hack(text_), font_, &w, &h,
+                                 ComputeMultiLineFlags());
   return h + GetInsets().height();
 }
 
@@ -184,7 +185,8 @@ bool Label::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
   }
 
   // Show the full text if the text does not fit.
-  if (!is_multi_line_ && font_.GetStringWidth(text_) > width()) {
+  if (!is_multi_line_ &&
+      (font_.GetStringWidth(text_) > GetAvailableRect().width())) {
     *tooltip = text_;
     return true;
   }
@@ -231,7 +233,7 @@ void Label::SizeToFit(int max_width) {
   DCHECK(is_multi_line_);
 
   std::vector<std::wstring> lines;
-  SplitString(text_, L'\n', &lines);
+  base::SplitString(text_, L'\n', &lines);
 
   int label_width = 0;
   for (std::vector<std::wstring>::const_iterator iter = lines.begin();
@@ -293,7 +295,8 @@ gfx::Size Label::GetTextSize() const {
     int flags = ComputeMultiLineFlags();
     if (!is_multi_line_)
       flags |= gfx::Canvas::NO_ELLIPSIS;
-    gfx::CanvasSkia::SizeStringInt(text_, font_, &w, &h, flags);
+    gfx::CanvasSkia::SizeStringInt(WideToUTF16Hack(text_), font_, &w, &h,
+                                   flags);
     text_size_.SetSize(w, h);
     text_size_valid_ = true;
   }
@@ -423,7 +426,8 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
   if (url_set_) {
     // TODO(jungshik) : Figure out how to get 'intl.accept_languages'
     // preference and use it when calling ElideUrl.
-    *paint_text = gfx::ElideUrl(url_, font_, width(), std::wstring());
+    *paint_text = UTF16ToWideHack(
+        gfx::ElideUrl(url_, font_, GetAvailableRect().width(), std::wstring()));
 
     // An URLs is always treated as an LTR text and therefore we should
     // explicitly mark it as such if the locale is RTL so that URLs containing
@@ -437,7 +441,8 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
     *paint_text = UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
         WideToUTF16(*paint_text)));
   } else if (elide_in_middle_) {
-    *paint_text = gfx::ElideText(text_, font_, width(), true);
+    *paint_text = UTF16ToWideHack(gfx::ElideText(WideToUTF16Hack(text_),
+        font_, GetAvailableRect().width(), true));
   } else {
     *paint_text = text_;
   }

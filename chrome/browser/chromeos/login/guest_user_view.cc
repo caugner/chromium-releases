@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/guest_user_view.h"
 
 #include "app/l10n_util.h"
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_controller.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "grit/generated_resources.h"
@@ -12,11 +13,11 @@
 namespace chromeos {
 
 // Button with custom processing for Tab/Shift+Tab to select entries.
-class UserEntryButton : public views::NativeButton {
+class UserEntryButton : public login::WideButton {
  public:
   UserEntryButton(UserController* controller,
                   const std::wstring& label)
-      : NativeButton(controller, label),
+      : WideButton(controller, label),
         controller_(controller) {}
 
   // Overridden from views::View:
@@ -26,13 +27,13 @@ class UserEntryButton : public views::NativeButton {
       controller_->SelectUser(index);
       return true;
     }
-    return views::NativeButton::OnKeyPressed(e);
+    return WideButton::OnKeyPressed(e);
   }
 
   virtual bool SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
     if (e.GetKeyCode() == app::VKEY_TAB)
       return true;
-    return views::NativeButton::SkipDefaultKeyEventProcessing(e);
+    return WideButton::SkipDefaultKeyEventProcessing(e);
   }
 
  private:
@@ -63,7 +64,7 @@ void GuestUserView::RecreateFields() {
   delete submit_button_;
   submit_button_ = new UserEntryButton(
       user_controller_,
-      l10n_util::GetString(IDS_LOGIN_BUTTON));
+      l10n_util::GetString(IDS_ENTER_GUEST_SESSION_BUTTON));
   AddChildView(submit_button_);
   Layout();
   SchedulePaint();

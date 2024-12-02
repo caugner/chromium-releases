@@ -21,6 +21,8 @@ FFmpegVideoAllocator::FFmpegVideoAllocator()
       release_buffer_(NULL) {
 }
 
+FFmpegVideoAllocator::~FFmpegVideoAllocator() {}
+
 void FFmpegVideoAllocator::Initialize(AVCodecContext* codec_context,
                                       VideoFrame::Format surface_format) {
 #ifdef FF_THREAD_FRAME  // Only defined in FFMPEG-MT.
@@ -86,8 +88,8 @@ scoped_refptr<VideoFrame> FFmpegVideoAllocator::DecodeDone(
       codec_context->width, codec_context->height, 3,
       av_frame->data,
       av_frame->linesize,
-      StreamSample::kInvalidTimestamp,
-      StreamSample::kInvalidTimestamp,
+      kNoTimestamp,
+      kNoTimestamp,
       ffmpeg_video_frame,  // |private_buffer_|.
       &frame);
 #endif

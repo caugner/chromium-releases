@@ -6,8 +6,9 @@
 
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/automation/automation_provider.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/automation_messages.h"
 
 namespace {
 
@@ -53,4 +54,3 @@ void AutomationJSONReply::SendError(const std::string& error_message) {
   provider_->Send(message_);
   message_ = NULL;
 }
-

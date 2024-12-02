@@ -69,9 +69,9 @@ class LoginScreenTest : public WizardInProcessBrowserTest {
 };
 
 static void Quit() {
-  LOG(INFO) << "Posting a QuitTask to UI thread";
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
+  VLOG(1) << "Posting a QuitTask to UI thread";
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          new MessageLoop::QuitTask);
 }
 IN_PROC_BROWSER_TEST_F(LoginScreenTest, TestBasic) {
   ASSERT_TRUE(controller() != NULL);
@@ -132,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(LoginScreenTest, IncognitoLogin) {
   controller()->set_observer(mock_screen_observer.get());
   NewUserView* login = controller()->GetLoginScreen()->view();
 
-  login->LinkActivated(login->browse_without_signin_link_, 0);
+  login->LinkActivated(login->guest_link_, 0);
   controller()->set_observer(NULL);
   Quit();
 }

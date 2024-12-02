@@ -13,7 +13,7 @@
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
-#include "chrome/test/live_sync/profile_sync_service_test_harness.h"
+#include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 
@@ -55,30 +55,7 @@ class LiveSyncTest : public InProcessBrowserTest {
   };
 
   // A LiveSyncTest must be associated with a particular test type.
-  explicit LiveSyncTest(TestType test_type)
-      : test_type_(test_type),
-        num_clients_(-1),
-        test_server_handle_(base::kNullProcessHandle) {
-    InProcessBrowserTest::set_show_window(true);
-    switch (test_type_) {
-      case SINGLE_CLIENT: {
-        num_clients_ = 1;
-        break;
-      }
-      case TWO_CLIENT: {
-        num_clients_ = 2;
-        break;
-      }
-      case MULTIPLE_CLIENT: {
-        num_clients_ = 3;
-        break;
-      }
-      case MANY_CLIENT: {
-        num_clients_ = 10;
-        break;
-      }
-    }
-  }
+  explicit LiveSyncTest(TestType test_type);
 
   virtual ~LiveSyncTest() {}
 
@@ -93,37 +70,41 @@ class LiveSyncTest : public InProcessBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) {}
 
   // Used to get the number of sync clients used by a test.
-  int num_clients() { return num_clients_; }
+  int num_clients() WARN_UNUSED_RESULT { return num_clients_; }
 
   // Returns a pointer to a particular sync profile. Callee owns the object
   // and manages its lifetime.
-  Profile* GetProfile(int index);
+  Profile* GetProfile(int index) WARN_UNUSED_RESULT;
 
   // Returns a pointer to a particular sync client. Callee owns the object
   // and manages its lifetime.
-  ProfileSyncServiceTestHarness* GetClient(int index);
+  ProfileSyncServiceHarness* GetClient(int index) WARN_UNUSED_RESULT;
 
   // Returns a reference to the collection of sync clients. Callee owns the
   // object and manages its lifetime.
-  std::vector<ProfileSyncServiceTestHarness*>& clients() {
+  std::vector<ProfileSyncServiceHarness*>& clients() WARN_UNUSED_RESULT {
     return clients_.get();
   }
 
   // Returns a pointer to the sync profile that is used to verify changes to
   // individual sync profiles. Callee owns the object and manages its lifetime.
-  Profile* verifier();
+  Profile* verifier() WARN_UNUSED_RESULT;
 
   // Initializes sync clients and profiles but does not sync any of them.
-  virtual bool SetupClients();
+  virtual bool SetupClients() WARN_UNUSED_RESULT;
 
   // Initializes sync clients and profiles if required and syncs each of them.
-  virtual bool SetupSync();
+  virtual bool SetupSync() WARN_UNUSED_RESULT;
+
+  // Enable outgoing network connections for the given profile.
+  virtual void EnableNetwork(Profile* profile);
 
   // Disable outgoing network connections for the given profile.
   virtual void DisableNetwork(Profile* profile);
 
-  // Enable outgoing network connections for the given profile.
-  virtual void EnableNetwork(Profile* profile);
+  // Blocks until all sync clients have completed their mutual sync cycles.
+  // Returns true if a quiescent state was successfully reached.
+  bool AwaitQuiescence();
 
  protected:
   // InProcessBrowserTest override. Destroys all the sync clients and sync
@@ -190,6 +171,9 @@ class LiveSyncTest : public InProcessBrowserTest {
   void SetProxyConfig(URLRequestContextGetter* context,
                       const net::ProxyConfig& proxy_config);
 
+  // Test server of type sync, started on demand.
+  net::TestServer sync_server_;
+
   // Used to differentiate between single-client, two-client, multi-client and
   // many-client tests.
   TestType test_type_;
@@ -205,7 +189,7 @@ class LiveSyncTest : public InProcessBrowserTest {
   // Collection of sync clients used by a test. A sync client is associated with
   // a sync profile, and implements methods that sync the contents of the
   // profile with the server.
-  ScopedVector<ProfileSyncServiceTestHarness> clients_;
+  ScopedVector<ProfileSyncServiceHarness> clients_;
 
   // Sync profile against which changes to individual profiles are verified. We
   // don't need a corresponding verifier sync client because the contents of the

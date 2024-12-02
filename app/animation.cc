@@ -4,11 +4,13 @@
 
 #include "app/animation.h"
 
+#include "app/animation_container.h"
+#include "app/animation_delegate.h"
 #include "app/tween.h"
 #include "gfx/rect.h"
 
 #if defined(OS_WIN)
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #endif
 
 Animation::Animation(base::TimeDelta timer_interval)
@@ -63,7 +65,6 @@ double Animation::CurrentValueBetween(double start, double target) const {
 
 int Animation::CurrentValueBetween(int start, int target) const {
   return Tween::ValueBetween(GetCurrentValue(), start, target);
-
 }
 
 gfx::Rect Animation::CurrentValueBetween(const gfx::Rect& start_bounds,
@@ -90,7 +91,7 @@ void Animation::SetContainer(AnimationContainer* container) {
 // static
 bool Animation::ShouldRenderRichAnimation() {
 #if defined(OS_WIN)
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     BOOL result;
     // Get "Turn off all unnecessary animations" value.
     if (::SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, &result, 0)) {

@@ -42,6 +42,17 @@ class DOMUI {
   // page.
   virtual void RenderViewReused(RenderViewHost* render_view_host) {}
 
+  // Called when this becomes the active DOMUI instance for a re-used
+  // RenderView; this is the point at which this DOMUI instance will receive
+  // DOM messages instead of the previous DOMUI instance.
+  //
+  // If a DOMUI instance has code that is usually triggered from a JavaScript
+  // onload handler, this should be overridden to check to see if the web page's
+  // DOM is still intact (e.g., due to a back/forward navigation that remains
+  // within the same page), and if so trigger that code manually since onload
+  // won't be run in that case.
+  virtual void DidBecomeActiveForReusedRenderView() {}
+
   // Called from TabContents.
   virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
 
@@ -116,9 +127,13 @@ class DOMUI {
 
   ThemeProvider* GetThemeProvider() const;
 
-  TabContents* tab_contents() const { return tab_contents_; }
+  // May be overridden by DOMUI's which do not have a tab contents.
+  virtual Profile* GetProfile() const;
 
-  Profile* GetProfile() const;
+  // May be overridden by DOMUI's which do not have a tab contents.
+  virtual RenderViewHost* GetRenderViewHost() const;
+
+  TabContents* tab_contents() const { return tab_contents_; }
 
  protected:
   void AddMessageHandler(DOMMessageHandler* handler);
@@ -137,12 +152,12 @@ class DOMUI {
   // The DOMMessageHandlers we own.
   std::vector<DOMMessageHandler*> handlers_;
 
+  // Non-owning pointer to the TabContents this DOMUI is associated with.
+  TabContents* tab_contents_;
+
  private:
   // Execute a string of raw Javascript on the page.
   void ExecuteJavascript(const std::wstring& javascript);
-
-  // Non-owning pointer to the TabContents this DOMUI is associated with.
-  TabContents* tab_contents_;
 
   // A map of message name -> message handling callback.
   typedef std::map<std::string, MessageCallback*> MessageCallbackMap;

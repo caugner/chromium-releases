@@ -50,8 +50,13 @@ class PluginRequestHandlerProxy
 
   PluginRequestHandlerProxy(ChromePluginLib* plugin,
                             ScopableCPRequest* cprequest)
-      : PluginHelper(plugin), cprequest_(cprequest), sync_(false),
-        response_data_offset_(0), completed_(false), read_buffer_(NULL) {
+      : PluginHelper(plugin),
+        cprequest_(cprequest),
+        sync_(false),
+        response_data_offset_(0),
+        completed_(false),
+        read_buffer_(NULL),
+        read_buffer_size_(0) {
     load_flags_ = PluginResponseUtils::CPLoadFlagsToNetFlags(0);
     cprequest_->data = this;  // see FromCPRequest().
   }
@@ -128,10 +133,6 @@ class PluginRequestHandlerProxy
       plugin_->functions().response_funcs->read_completed(
           cprequest_.get(), CPERR_SUCCESS);
     }
-  }
-
-  virtual GURL GetURLForDebugging() const {
-    return GURL(cprequest_->url);
   }
 
   void set_extra_headers(const std::string& headers) {

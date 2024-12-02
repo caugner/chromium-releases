@@ -6,11 +6,15 @@
 #define MEDIA_AUDIO_AUDIO_MANAGER_H_
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "media/audio/audio_parameters.h"
 
 class AudioInputStream;
 class AudioOutputStream;
 class MessageLoop;
+
+// TODO(sergeyu): In this interface and some other places AudioParameters struct
+// is passed by value. It is better to change it to const reference.
 
 // Manages all audio resources. In particular it owns the AudioOutputStream
 // objects. Provides some convenience functions that avoid the need to provide
@@ -26,20 +30,36 @@ class AudioManager {
   // sample rates.
   virtual bool HasAudioInputDevices() = 0;
 
-  // Factory for all the supported stream formats. The |channels| can be 1 to 5.
-  // The |sample_rate| is in hertz and can be any value supported by the
-  // platform. For some future formats the |sample_rate| and |bits_per_sample|
-  // can take special values.
+  // Returns a human readable string for the model/make of the active audio
+  // input device for this computer.
+  virtual string16 GetAudioInputDeviceModel() = 0;
+
+  // Factory for all the supported stream formats. |params| defines parameters
+  // of the audio stream to be created.
+  //
+  // |params.sample_per_packet| is the requested buffer allocation which the
+  // audio source thinks it can usually fill without blocking. Internally two
+  // or three buffers are created, one will be locked for playback and one will
+  // be ready to be filled in the call to AudioSourceCallback::OnMoreData().
+  //
   // Returns NULL if the combination of the parameters is not supported, or if
   // we have reached some other platform specific limit.
   //
-  // AUDIO_PCM_LOW_LATENCY can be passed to this method and it has two effects:
+  // |params.format| can be set to AUDIO_PCM_LOW_LATENCY and that has two
+  // effects:
   // 1- Instead of triple buffered the audio will be double buffered.
   // 2- A low latency driver or alternative audio subsystem will be used when
   //    available.
   //
   // Do not free the returned AudioOutputStream. It is owned by AudioManager.
   virtual AudioOutputStream* MakeAudioOutputStream(AudioParameters params) = 0;
+
+  // Creates new audio output proxy. A proxy implements
+  // AudioOutputStream interface, but unlike regular output stream
+  // created with MakeAudioOutputStream() it opens device only when a
+  // sound is actually playing.
+  virtual AudioOutputStream* MakeAudioOutputStreamProxy(
+      const AudioParameters& params) = 0;
 
   // Factory to create audio recording streams.
   // |channels| can be 1 or 2.
@@ -53,8 +73,7 @@ class AudioManager {
   //
   // Do not free the returned AudioInputStream. It is owned by AudioManager.
   // When you are done with it, call |Stop()| and |Close()| to release it.
-  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params,
-                                                 int samples_per_packet) = 0;
+  virtual AudioInputStream* MakeAudioInputStream(AudioParameters params) = 0;
 
   // Muting continues playback but effectively the volume is set to zero.
   // Un-muting returns the volume to the previous level.

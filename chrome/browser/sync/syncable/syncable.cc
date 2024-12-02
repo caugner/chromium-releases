@@ -157,7 +157,9 @@ bool LessPathNames::operator() (const string& a, const string& b) const {
 ///////////////////////////////////////////////////////////////////////////
 // EntryKernel
 
-EntryKernel::EntryKernel() : dirty_(false) {}
+EntryKernel::EntryKernel() : dirty_(false) {
+  memset(int64_fields, 0, sizeof(int64_fields));
+}
 
 EntryKernel::~EntryKernel() {}
 
@@ -350,12 +352,12 @@ EntryKernel* Directory::GetEntryByServerTag(const string& tag) {
   return NULL;
 }
 
-EntryKernel* Directory::GetEntryByHandle(const int64 metahandle) {
+EntryKernel* Directory::GetEntryByHandle(int64 metahandle) {
   ScopedKernelLock lock(this);
   return GetEntryByHandle(metahandle, &lock);
 }
 
-EntryKernel* Directory::GetEntryByHandle(const int64 metahandle,
+EntryKernel* Directory::GetEntryByHandle(int64 metahandle,
                                          ScopedKernelLock* lock) {
   // Look up in memory
   kernel_->needle.put(META_HANDLE, metahandle);
@@ -955,8 +957,9 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
     ++entries_done;
     int64 elapsed_ms = check_timer.Elapsed().InMilliseconds();
     if (elapsed_ms > max_ms) {
-      LOG(INFO) << "Cutting Invariant check short after " << elapsed_ms << "ms."
-        " Processed " << entries_done << "/" << handles.size() << " entries";
+      VLOG(1) << "Cutting Invariant check short after " << elapsed_ms
+              << "ms. Processed " << entries_done << "/" << handles.size()
+              << " entries";
       return;
     }
   }
@@ -995,10 +998,19 @@ void BaseTransaction::Lock() {
 }
 
 BaseTransaction::BaseTransaction(Directory* directory, const char* name,
-                 const char* source_file, int line, WriterTag writer)
+    const char* source_file, int line, WriterTag writer)
   : directory_(directory), dirkernel_(directory->kernel_), name_(name),
     source_file_(source_file), line_(line), writer_(writer) {
   Lock();
+}
+
+BaseTransaction::BaseTransaction(Directory* directory)
+    : directory_(directory),
+      dirkernel_(NULL),
+      name_(NULL),
+      source_file_(NULL),
+      line_(NULL),
+      writer_(INVALID) {
 }
 
 BaseTransaction::~BaseTransaction() {}
@@ -1093,6 +1105,11 @@ WriteTransaction::WriteTransaction(const ScopedDirLookup& scoped_dir,
                                    WriterTag writer, const char* file, int line)
   : BaseTransaction(scoped_dir.operator -> (), "Write", file, line, writer),
     originals_(new OriginalEntries) {
+}
+
+WriteTransaction::WriteTransaction(Directory *directory)
+    : BaseTransaction(directory),
+      originals_(new OriginalEntries) {
 }
 
 void WriteTransaction::SaveOriginal(EntryKernel* entry) {

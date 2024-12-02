@@ -16,7 +16,6 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
@@ -24,14 +23,18 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/master_preferences.h"
+#include "chrome/installer/util/master_preferences_constants.h"
 
 #include "installer_util_strings.h"
+
+using base::win::RegKey;
 
 namespace {
 
@@ -199,7 +202,7 @@ class RegistryEntry {
       found = (key.ReadValue(_name.c_str(), &read_value)) &&
               (read_value.size() == _value.size()) &&
               (std::equal(_value.begin(), _value.end(), read_value.begin(),
-                          CaseInsensitiveCompare<wchar_t>()));
+                          base::CaseInsensitiveCompare<wchar_t>()));
     } else {
       DWORD read_value;
       found = key.ReadValueDW(_name.c_str(), &read_value) &&
@@ -292,43 +295,42 @@ bool IsChromeRegistered(const std::wstring& chrome_exe,
   return registered;
 }
 
-// This method registers Chrome on Vista by launching eleavated setup.exe.
-// That will show user standard Vista elevation prompt. If user accepts it
-// the new process will make the necessary changes and return SUCCESS that
-// we capture and return.
+// This method registers Chrome on Vista by launching an elevated setup.exe.
+// That will show the user the standard Vista elevation prompt. If the user
+// accepts it the new process will make the necessary changes and return SUCCESS
+// that we capture and return.
 bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
                               const std::wstring& suffix) {
-  std::wstring exe_path(file_util::GetDirectoryFromPath(chrome_exe));
-  file_util::AppendToPath(&exe_path, installer_util::kSetupExe);
-  if (!file_util::PathExists(FilePath::FromWStringHack(exe_path))) {
+  FilePath exe_path =
+      FilePath::FromWStringHack(chrome_exe).DirName()
+          .Append(installer_util::kSetupExe);
+  if (!file_util::PathExists(exe_path)) {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     HKEY reg_root = InstallUtil::IsPerUserInstall(chrome_exe.c_str()) ?
         HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
     RegKey key(reg_root, dist->GetUninstallRegPath().c_str(), KEY_READ);
-    key.ReadValue(installer_util::kUninstallStringField, &exe_path);
-    CommandLine command_line = CommandLine::FromString(exe_path);
-    exe_path = command_line.program();
+    std::wstring uninstall_string;
+    key.ReadValue(installer_util::kUninstallStringField, &uninstall_string);
+    CommandLine command_line = CommandLine::FromString(uninstall_string);
+    exe_path = command_line.GetProgram();
   }
-  if (file_util::PathExists(FilePath::FromWStringHack(exe_path))) {
-    std::wstring params(L"--");
-    params.append(
-        ASCIIToWide(installer_util::switches::kRegisterChromeBrowser));
-    params.append(L"=\"" + chrome_exe + L"\"");
+
+  if (file_util::PathExists(exe_path)) {
+    CommandLine cmd(exe_path);
+    cmd.AppendSwitchNative(installer_util::switches::kRegisterChromeBrowser,
+                           chrome_exe);
     if (!suffix.empty()) {
-      params.append(L" --");
-      params.append(ASCIIToWide(
-          installer_util::switches::kRegisterChromeBrowserSuffix));
-      params.append(L"=\"" + suffix + L"\"");
+      cmd.AppendSwitchNative(
+          installer_util::switches::kRegisterChromeBrowserSuffix, suffix);
     }
 
     CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
     if (browser_command_line.HasSwitch(switches::kChromeFrame)) {
-      params.append(L" --");
-      params.append(installer_util::switches::kChromeFrame);
+      cmd.AppendSwitch(installer_util::switches::kChromeFrame);
     }
 
     DWORD ret_val = 0;
-    InstallUtil::ExecuteExeAsAdmin(exe_path, params, &ret_val);
+    InstallUtil::ExecuteExeAsAdmin(cmd, &ret_val);
     if (ret_val == 0)
       return true;
   }
@@ -361,12 +363,13 @@ bool AnotherUserHasDefaultBrowser(const std::wstring& chrome_exe) {
   if ((registry_chrome_exe.size() == chrome_exe.size()) &&
       (std::equal(chrome_exe.begin(), chrome_exe.end(),
                   registry_chrome_exe.begin(),
-                  CaseInsensitiveCompare<wchar_t>())))
+                  base::CaseInsensitiveCompare<wchar_t>()))) {
     return false;
+  }
 
   std::vector<std::wstring> v1, v2;
-  SplitString(registry_chrome_exe, L'\\', &v1);
-  SplitString(chrome_exe, L'\\', &v2);
+  base::SplitString(registry_chrome_exe, L'\\', &v1);
+  base::SplitString(chrome_exe, L'\\', &v2);
   if (v1.size() == 0 || v2.size() == 0 || v1.size() != v2.size())
     return false;
 
@@ -379,7 +382,7 @@ bool AnotherUserHasDefaultBrowser(const std::wstring& chrome_exe) {
     std::wstring s2 = *itr2;
     if ((s1.size() != s2.size()) ||
         (!std::equal(s1.begin(), s1.end(),
-                     s2.begin(), CaseInsensitiveCompare<wchar_t>()))) {
+                     s2.begin(), base::CaseInsensitiveCompare<wchar_t>()))) {
       if (one_mismatch)
         return false;
       else
@@ -549,7 +552,7 @@ bool ShellUtil::GetQuickLaunchPath(bool system_level, std::wstring* path) {
     if ((p == NULL) || ((p)(qlaunch, &size) != TRUE))
       return false;
     *path = qlaunch;
-    if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+    if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
       file_util::AppendToPath(path, L"AppData\\Roaming");
     } else {
       file_util::AppendToPath(path, L"Application Data");
@@ -568,7 +571,8 @@ void ShellUtil::GetRegisteredBrowsers(std::map<std::wstring,
                                       std::wstring>* browsers) {
   std::wstring base_key(ShellUtil::kRegStartMenuInternet);
   HKEY root = HKEY_LOCAL_MACHINE;
-  for (RegistryKeyIterator iter(root, base_key.c_str()); iter.Valid(); ++iter) {
+  for (base::win::RegistryKeyIterator iter(root, base_key.c_str());
+       iter.Valid(); ++iter) {
     std::wstring key = base_key + L"\\" + iter.Name();
     RegKey capabilities(root, (key + L"\\Capabilities").c_str(), KEY_READ);
     std::wstring name;
@@ -616,8 +620,8 @@ bool ShellUtil::MakeChromeDefault(int shell_change,
   bool ret = true;
   // First use the new "recommended" way on Vista to make Chrome default
   // browser.
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
-    LOG(INFO) << "Registering Chrome as default browser on Vista.";
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+    VLOG(1) << "Registering Chrome as default browser on Vista.";
     IApplicationAssociationRegistration* pAAR;
     HRESULT hr = CoCreateInstance(CLSID_ApplicationAssociationRegistration,
         NULL, CLSCTX_INPROC, __uuidof(IApplicationAssociationRegistration),
@@ -697,7 +701,7 @@ bool ShellUtil::RegisterChromeBrowser(const std::wstring& chrome_exe,
 
   // If user is not an admin and OS is Vista, try to elevate and register.
   if (elevate_if_not_admin &&
-      win_util::GetWinVersion() >= win_util::WINVERSION_VISTA &&
+      base::win::GetVersion() >= base::win::VERSION_VISTA &&
       ElevateAndRegisterChrome(chrome_exe, suffix))
     return true;
 
@@ -777,12 +781,10 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
 
   FilePath prefs_path(chrome_path);
   prefs_path = prefs_path.AppendASCII(installer_util::kDefaultMasterPrefs);
-  scoped_ptr<DictionaryValue> prefs(
-      installer_util::ParseDistributionPreferences(prefs_path));
+  installer_util::MasterPreferences prefs(prefs_path);
   int icon_index = dist->GetIconIndex();
-  installer_util::GetDistroIntegerPreference(prefs.get(),
-      installer_util::master_preferences::kChromeShortcutIconIndex,
-      &icon_index);
+  prefs.GetInt(installer_util::master_preferences::kChromeShortcutIconIndex,
+               &icon_index);
   if (create_new) {
     return file_util::CreateShortcutLink(
         chrome_exe.c_str(),                // target

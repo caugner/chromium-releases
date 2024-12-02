@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
-#include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
@@ -274,8 +273,9 @@ Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
     : mode_(mode),
       is_blocked_on_write_(false),
       message_send_bytes_written_(0),
-      uses_fifo_(CommandLine::ForCurrentProcess()->HasSwitch(
-                     switches::kIPCUseFIFO)),
+      uses_fifo_(
+          CommandLine::ForCurrentProcess()->HasSwitch(switches::kIPCUseFIFO) ||
+          mode == MODE_NAMED_SERVER || mode == MODE_NAMED_CLIENT),
       server_listen_pipe_(-1),
       pipe_(-1),
       client_pipe_(-1),
@@ -286,10 +286,15 @@ Channel::ChannelImpl::ChannelImpl(const std::string& channel_id, Mode mode,
       listener_(listener),
       waiting_connect_(true),
       factory_(this) {
-  if (!CreatePipe(channel_id, mode)) {
+  if (mode_ == MODE_NAMED_SERVER)
+    mode_ = MODE_SERVER;
+  if (mode_ == MODE_NAMED_CLIENT)
+    mode_ = MODE_CLIENT;
+
+  if (!CreatePipe(channel_id, mode_)) {
     // The pipe may have been closed already.
     PLOG(WARNING) << "Unable to create pipe named \"" << channel_id
-                  << "\" in " << (mode == MODE_SERVER ? "server" : "client")
+                  << "\" in " << (mode_ == MODE_SERVER ? "server" : "client")
                   << " mode";
   }
 }
@@ -347,7 +352,7 @@ bool Channel::ChannelImpl::CreatePipe(const std::string& channel_id,
     // TODO(playmobil): We shouldn't need to create fifos on disk.
     // TODO(playmobil): If we do, they should be in the user data directory.
     // TODO(playmobil): Cleanup any stale fifos.
-    pipe_name_ = "/var/tmp/chrome_" + channel_id;
+    pipe_name_ = channel_id;
     if (mode == MODE_SERVER) {
       if (!CreateServerFifo(pipe_name_, &server_listen_pipe_)) {
         return false;
@@ -685,10 +690,8 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
               &fds[fds_i], m.header()->num_fds);
           fds_i += m.header()->num_fds;
         }
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-        DLOG(INFO) << "received message on channel @" << this <<
-                      " with type " << m.type();
-#endif
+        DVLOG(2) << "received message on channel @" << this
+                 << " with type " << m.type();
         if (m.routing_id() == MSG_ROUTING_NONE &&
             m.type() == HELLO_MESSAGE_TYPE) {
           // The Hello message contains only the process id.
@@ -907,10 +910,8 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       message_send_bytes_written_ = 0;
 
       // Message sent OK!
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-      DLOG(INFO) << "sent message @" << msg << " on channel @" << this <<
-                    " with type " << msg->type();
-#endif
+      DVLOG(2) << "sent message @" << msg << " on channel @" << this
+               << " with type " << msg->type();
       delete output_queue_.front();
       output_queue_.pop();
     }
@@ -919,11 +920,9 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
 }
 
 bool Channel::ChannelImpl::Send(Message* message) {
-#ifdef IPC_MESSAGE_DEBUG_EXTRA
-  DLOG(INFO) << "sending message @" << message << " on channel @" << this
-             << " with type " << message->type()
-             << " (" << output_queue_.size() << " in queue)";
-#endif
+  DVLOG(2) << "sending message @" << message << " on channel @" << this
+           << " with type " << message->type()
+           << " (" << output_queue_.size() << " in queue)";
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   Logging::current()->OnSendMessage(message, "");

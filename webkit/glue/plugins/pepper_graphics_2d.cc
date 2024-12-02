@@ -13,19 +13,20 @@
 #include "gfx/point.h"
 #include "gfx/rect.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/ppapi/c/pp_errors.h"
-#include "third_party/ppapi/c/pp_module.h"
-#include "third_party/ppapi/c/pp_rect.h"
-#include "third_party/ppapi/c/pp_resource.h"
-#include "third_party/ppapi/c/ppb_graphics_2d.h"
+#include "ppapi/c/pp_errors.h"
+#include "ppapi/c/pp_module.h"
+#include "ppapi/c/pp_rect.h"
+#include "ppapi/c/pp_resource.h"
+#include "ppapi/c/ppb_graphics_2d.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/glue/plugins/pepper_common.h"
 #include "webkit/glue/plugins/pepper_image_data.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_plugin_module.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac_util.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #endif
 
 namespace pepper {
@@ -63,30 +64,77 @@ bool ValidateAndConvertRect(const PP_Rect* rect,
   return true;
 }
 
+// Converts BGRA <-> RGBA.
+void ConvertBetweenBGRAandRGBA(const uint32_t* input,
+                               int pixel_length,
+                               uint32_t* output) {
+  for (int i = 0; i < pixel_length; i++) {
+    const unsigned char* pixel_in =
+        reinterpret_cast<const unsigned char*>(&input[i]);
+    unsigned char* pixel_out = reinterpret_cast<unsigned char*>(&output[i]);
+    pixel_out[0] = pixel_in[2];
+    pixel_out[1] = pixel_in[1];
+    pixel_out[2] = pixel_in[0];
+    pixel_out[3] = pixel_in[3];
+  }
+}
+
+// Converts ImageData from PP_IMAGEDATAFORMAT_BGRA_PREMUL to
+// PP_IMAGEDATAFORMAT_RGBA_PREMUL, or reverse.
+void ConvertImageData(ImageData* src_image, const SkIRect& src_rect,
+                      ImageData* dest_image, const SkRect& dest_rect) {
+  DCHECK(src_image->format() != dest_image->format());
+  DCHECK(ImageData::IsImageDataFormatSupported(src_image->format()));
+  DCHECK(ImageData::IsImageDataFormatSupported(dest_image->format()));
+
+  const SkBitmap* src_bitmap = src_image->GetMappedBitmap();
+  const SkBitmap* dest_bitmap = dest_image->GetMappedBitmap();
+  if (src_rect.width() == src_image->width() &&
+      dest_rect.width() == dest_image->width()) {
+    // Fast path if the full line needs to be converted.
+    ConvertBetweenBGRAandRGBA(
+        src_bitmap->getAddr32(static_cast<int>(src_rect.fLeft),
+                              static_cast<int>(src_rect.fTop)),
+        src_rect.width() * src_rect.height(),
+        dest_bitmap->getAddr32(static_cast<int>(dest_rect.fLeft),
+                               static_cast<int>(dest_rect.fTop)));
+  } else {
+    // Slow path where we convert line by line.
+    for (int y = 0; y < src_rect.height(); y++) {
+      ConvertBetweenBGRAandRGBA(
+          src_bitmap->getAddr32(static_cast<int>(src_rect.fLeft),
+                                static_cast<int>(src_rect.fTop + y)),
+          src_rect.width(),
+          dest_bitmap->getAddr32(static_cast<int>(dest_rect.fLeft),
+                                 static_cast<int>(dest_rect.fTop + y)));
+    }
+  }
+}
+
 PP_Resource Create(PP_Module module_id,
                    const PP_Size* size,
-                   bool is_always_opaque) {
+                   PP_Bool is_always_opaque) {
   PluginModule* module = ResourceTracker::Get()->GetModule(module_id);
   if (!module)
     return 0;
 
   scoped_refptr<Graphics2D> context(new Graphics2D(module));
-  if (!context->Init(size->width, size->height, is_always_opaque))
+  if (!context->Init(size->width, size->height, PPBoolToBool(is_always_opaque)))
     return 0;
   return context->GetReference();
 }
 
-bool IsGraphics2D(PP_Resource resource) {
-  return !!Resource::GetAs<Graphics2D>(resource);
+PP_Bool IsGraphics2D(PP_Resource resource) {
+  return BoolToPPBool(!!Resource::GetAs<Graphics2D>(resource));
 }
 
-bool Describe(PP_Resource graphics_2d,
+PP_Bool Describe(PP_Resource graphics_2d,
               PP_Size* size,
-              bool* is_always_opaque) {
+              PP_Bool* is_always_opaque) {
   scoped_refptr<Graphics2D> context(
       Resource::GetAs<Graphics2D>(graphics_2d));
   if (!context)
-    return false;
+    return PP_FALSE;
   return context->Describe(size, is_always_opaque);
 }
 
@@ -186,8 +234,8 @@ const PPB_Graphics2D* Graphics2D::GetInterface() {
 bool Graphics2D::Init(int width, int height, bool is_always_opaque) {
   // The underlying ImageData will validate the dimensions.
   image_data_ = new ImageData(module());
-  if (!image_data_->Init(PP_IMAGEDATAFORMAT_BGRA_PREMUL, width, height, true) ||
-      !image_data_->Map()) {
+  if (!image_data_->Init(ImageData::GetNativeImageDataFormat(), width, height,
+      true) || !image_data_->Map()) {
     image_data_ = NULL;
     return false;
   }
@@ -195,11 +243,11 @@ bool Graphics2D::Init(int width, int height, bool is_always_opaque) {
   return true;
 }
 
-bool Graphics2D::Describe(PP_Size* size, bool* is_always_opaque) {
+PP_Bool Graphics2D::Describe(PP_Size* size, PP_Bool* is_always_opaque) {
   size->width = image_data_->width();
   size->height = image_data_->height();
-  *is_always_opaque = false;  // TODO(brettw) implement this.
-  return true;
+  *is_always_opaque = PP_FALSE;  // TODO(brettw) implement this.
+  return PP_TRUE;
 }
 
 void Graphics2D::PaintImageData(PP_Resource image_data,
@@ -251,7 +299,7 @@ void Graphics2D::Scroll(const PP_Rect* clip_rect, const PP_Point* amount) {
   int32 dx = amount->x;
   int32 dy = amount->y;
   if (dx <= -image_data_->width() || dx >= image_data_->width() ||
-      dx <= -image_data_->height() || dy >= image_data_->height())
+      dy <= -image_data_->height() || dy >= image_data_->height())
     return;
 
   operation.scroll_dx = dx;
@@ -265,7 +313,7 @@ void Graphics2D::ReplaceContents(PP_Resource image_data) {
       Resource::GetAs<ImageData>(image_data));
   if (!image_resource)
     return;
-  if (image_resource->format() != PP_IMAGEDATAFORMAT_BGRA_PREMUL)
+  if (!ImageData::IsImageDataFormatSupported(image_resource->format()))
     return;
 
   if (image_resource->width() != image_data_->width() ||
@@ -287,7 +335,7 @@ int32_t Graphics2D::Flush(const PP_CompletionCallback& callback) {
   if (!callback.func)
     return PP_ERROR_BADARGUMENT;
 
-  gfx::Rect changed_rect;
+  bool nothing_visible = true;
   for (size_t i = 0; i < queued_operations_.size(); i++) {
     QueuedOperation& operation = queued_operations_[i];
     gfx::Rect op_rect;
@@ -307,26 +355,34 @@ int32_t Graphics2D::Flush(const PP_CompletionCallback& callback) {
         ExecuteReplaceContents(operation.replace_image, &op_rect);
         break;
     }
-    changed_rect = changed_rect.Union(op_rect);
+
+    // We need the rect to be in terms of the current clip rect of the plugin
+    // since that's what will actually be painted. If we issue an invalidate
+    // for a clipped-out region, WebKit will do nothing and we won't get any
+    // ViewInitiatedPaint/ViewFlushedPaint calls, leaving our callback stranded.
+    gfx::Rect visible_changed_rect;
+    if (bound_instance_ && !op_rect.IsEmpty())
+      visible_changed_rect = bound_instance_->clip().Intersect(op_rect);
+
+    if (bound_instance_ && !visible_changed_rect.IsEmpty()) {
+      if (operation.type == QueuedOperation::SCROLL) {
+        bound_instance_->ScrollRect(operation.scroll_dx, operation.scroll_dy,
+                                    visible_changed_rect);
+      } else {
+        bound_instance_->InvalidateRect(visible_changed_rect);
+      }
+      nothing_visible = false;
+    }
   }
   queued_operations_.clear();
   flushed_any_data_ = true;
 
-  // We need the rect to be in terms of the current clip rect of the plugin
-  // since that's what will actually be painted. If we issue an invalidate
-  // for a clipped-out region, WebKit will do nothing and we won't get any
-  // ViewInitiatedPaint/ViewFlushedPaint calls, leaving our callback stranded.
-  gfx::Rect visible_changed_rect;
-  if (bound_instance_ && !changed_rect.IsEmpty())
-    visible_changed_rect = bound_instance_->clip().Intersect(changed_rect);
-
-  if (bound_instance_ && !visible_changed_rect.IsEmpty()) {
-    unpainted_flush_callback_.Set(callback);
-    bound_instance_->InvalidateRect(visible_changed_rect);
-  } else {
+  if (nothing_visible) {
     // There's nothing visible to invalidate so just schedule the callback to
     // execute in the next round of the message loop.
     ScheduleOffscreenCallback(FlushCallbackData(callback));
+  } else {
+    unpainted_flush_callback_.Set(callback);
   }
   return PP_ERROR_WOULDBLOCK;
 }
@@ -337,7 +393,7 @@ bool Graphics2D::ReadImageData(PP_Resource image,
   scoped_refptr<ImageData> image_resource(Resource::GetAs<ImageData>(image));
   if (!image_resource)
     return false;
-  if (image_resource->format() != PP_IMAGEDATAFORMAT_BGRA_PREMUL)
+  if (!ImageData::IsImageDataFormatSupported(image_resource->format()))
     return false;  // Must be in the right format.
 
   // Validate the bitmap position.
@@ -355,7 +411,6 @@ bool Graphics2D::ReadImageData(PP_Resource image,
   ImageDataAutoMapper auto_mapper(image_resource);
   if (!auto_mapper.is_valid())
     return false;
-  skia::PlatformCanvas* dest_canvas = image_resource->mapped_canvas();
 
   SkIRect src_irect = { x, y,
                         x + image_resource->width(),
@@ -365,11 +420,19 @@ bool Graphics2D::ReadImageData(PP_Resource image,
                        SkIntToScalar(image_resource->width()),
                        SkIntToScalar(image_resource->height()) };
 
-  // We want to replace the contents of the bitmap rather than blend.
-  SkPaint paint;
-  paint.setXfermodeMode(SkXfermode::kSrc_Mode);
-  dest_canvas->drawBitmapRect(*image_data_->GetMappedBitmap(),
-                              &src_irect, dest_rect, &paint);
+  ImageDataAutoMapper auto_mapper2(image_data_);
+  if (image_resource->format() != image_data_->format()) {
+    // Convert the image data if the format does not match.
+    ConvertImageData(image_data_, src_irect, image_resource.get(), dest_rect);
+  } else {
+    skia::PlatformCanvas* dest_canvas = image_resource->mapped_canvas();
+
+    // We want to replace the contents of the bitmap rather than blend.
+    SkPaint paint;
+    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    dest_canvas->drawBitmapRect(*image_data_->GetMappedBitmap(),
+                                &src_irect, dest_rect, &paint);
+  }
   return true;
 }
 
@@ -410,17 +473,17 @@ bool Graphics2D::BindToInstance(PluginInstance* new_instance) {
 void Graphics2D::Paint(WebKit::WebCanvas* canvas,
                        const gfx::Rect& plugin_rect,
                        const gfx::Rect& paint_rect) {
-  // We're guaranteed to have a mapped canvas since we mapped it in Init().
+  ImageDataAutoMapper auto_mapper(image_data_);
   const SkBitmap& backing_bitmap = *image_data_->GetMappedBitmap();
 
 #if defined(OS_MACOSX)
   SkAutoLockPixels lock(backing_bitmap);
 
-  scoped_cftyperef<CGDataProviderRef> data_provider(
+  base::mac::ScopedCFTypeRef<CGDataProviderRef> data_provider(
       CGDataProviderCreateWithData(
           NULL, backing_bitmap.getAddr32(0, 0),
           backing_bitmap.rowBytes() * backing_bitmap.height(), NULL));
-  scoped_cftyperef<CGImageRef> image(
+  base::mac::ScopedCFTypeRef<CGImageRef> image(
       CGImageCreate(
           backing_bitmap.width(), backing_bitmap.height(),
           8, 32, backing_bitmap.rowBytes(),
@@ -505,14 +568,19 @@ void Graphics2D::ExecutePaintImageData(ImageData* image,
                        SkIntToScalar(invalidated_rect->right()),
                        SkIntToScalar(invalidated_rect->bottom()) };
 
-  // We're guaranteed to have a mapped canvas since we mapped it in Init().
-  skia::PlatformCanvas* backing_canvas = image_data_->mapped_canvas();
+  if (image->format() != image_data_->format()) {
+    // Convert the image data if the format does not match.
+    ConvertImageData(image, src_irect, image_data_, dest_rect);
+  } else {
+    // We're guaranteed to have a mapped canvas since we mapped it in Init().
+    skia::PlatformCanvas* backing_canvas = image_data_->mapped_canvas();
 
-  // We want to replace the contents of the bitmap rather than blend.
-  SkPaint paint;
-  paint.setXfermodeMode(SkXfermode::kSrc_Mode);
-  backing_canvas->drawBitmapRect(*image->GetMappedBitmap(),
-                                 &src_irect, dest_rect, &paint);
+    // We want to replace the contents of the bitmap rather than blend.
+    SkPaint paint;
+    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    backing_canvas->drawBitmapRect(*image->GetMappedBitmap(),
+                                   &src_irect, dest_rect, &paint);
+  }
 }
 
 void Graphics2D::ExecuteScroll(const gfx::Rect& clip, int dx, int dy,
@@ -524,7 +592,19 @@ void Graphics2D::ExecuteScroll(const gfx::Rect& clip, int dx, int dy,
 
 void Graphics2D::ExecuteReplaceContents(ImageData* image,
                                         gfx::Rect* invalidated_rect) {
-  image_data_->Swap(image);
+  if (image->format() != image_data_->format()) {
+    DCHECK(image->width() == image_data_->width() &&
+           image->height() == image_data_->height());
+    // Convert the image data if the format does not match.
+    SkIRect src_irect = { 0, 0, image->width(), image->height() };
+    SkRect dest_rect = { SkIntToScalar(0),
+                         SkIntToScalar(0),
+                         SkIntToScalar(image_data_->width()),
+                         SkIntToScalar(image_data_->height()) };
+    ConvertImageData(image, src_irect, image_data_, dest_rect);
+  } else {
+    image_data_->Swap(image);
+  }
   *invalidated_rect = gfx::Rect(0, 0,
                                 image_data_->width(), image_data_->height());
 }

@@ -4,43 +4,46 @@
 
 #include "chrome/browser/net/preconnect.h"
 
-#include "base/histogram.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/common/net/url_request_context_getter.h"
-#include "net/base/host_port_pair.h"
 #include "net/http/http_network_session.h"
-#include "net/http/http_request_info.h"
-#include "net/http/http_stream.h"
 #include "net/http/http_transaction_factory.h"
-#include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 
 namespace chrome_browser_net {
 
 // static
 void Preconnect::PreconnectOnUIThread(const GURL& url,
-    UrlInfo::ResolutionMotivation motivation) {
+    UrlInfo::ResolutionMotivation motivation, int count) {
   // Prewarm connection to Search URL.
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableFunction(Preconnect::PreconnectOnIOThread, url, motivation));
+      NewRunnableFunction(Preconnect::PreconnectOnIOThread, url, motivation,
+                          count));
   return;
 }
 
 // static
 void Preconnect::PreconnectOnIOThread(const GURL& url,
-    UrlInfo::ResolutionMotivation motivation) {
+    UrlInfo::ResolutionMotivation motivation, int count) {
   Preconnect* preconnect = new Preconnect(motivation);
   // TODO(jar): Should I use PostTask for LearnedSubresources to delay the
   // preconnection a tad?
-  preconnect->Connect(url);
+  preconnect->Connect(url, count);
 }
 
-void Preconnect::Connect(const GURL& url) {
+Preconnect::Preconnect(UrlInfo::ResolutionMotivation motivation)
+    : motivation_(motivation),
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          io_callback_(this, &Preconnect::OnPreconnectComplete)) {}
+
+Preconnect::~Preconnect() {}
+
+void Preconnect::Connect(const GURL& url, int count) {
   URLRequestContextGetter* getter = Profile::GetDefaultRequestContext();
   if (!getter)
     return;
@@ -83,6 +86,7 @@ void Preconnect::Connect(const GURL& url) {
       request_info_->motivation = net::HttpRequestInfo::PRECONNECT_MOTIVATED;
       break;
     case UrlInfo::EARLY_LOAD_MOTIVATED:
+      request_info_->motivation = net::HttpRequestInfo::EARLY_LOAD_MOTIVATED;
       break;
     default:
       // Other motivations should never happen here.
@@ -96,41 +100,21 @@ void Preconnect::Connect(const GURL& url) {
   if (session->http_stream_factory()->next_protos())
     ssl_config_->next_protos = *session->http_stream_factory()->next_protos();
 
-  // All preconnects should be for main pages.
+  // All preconnects should perform EV certificate verification.
   ssl_config_->verify_ev_cert = true;
 
   proxy_info_.reset(new net::ProxyInfo());
   net::StreamFactory* stream_factory = session->http_stream_factory();
-  stream_factory->RequestStream(request_info_.get(),
-                                ssl_config_.get(),
-                                proxy_info_.get(),
-                                NULL,
-                                this,
-                                net_log_,
-                                session,
-                                &stream_request_job_);
+  int rv = stream_factory->PreconnectStreams(count, request_info_.get(),
+                                             ssl_config_.get(),
+                                             proxy_info_.get(), session,
+                                             net_log_, &io_callback_);
+  if (rv != net::ERR_IO_PENDING)
+    delete this;
 }
 
-void Preconnect::OnStreamReady(net::HttpStream* stream) {
-  delete stream;
+void Preconnect::OnPreconnectComplete(int error_code) {
   delete this;
 }
 
-void Preconnect::OnStreamFailed(int status) {
-  delete this;
-}
-
-void Preconnect::OnCertificateError(int status, const net::SSLInfo& ssl_info) {
-  delete this;
-}
-
-void Preconnect::OnNeedsProxyAuth(const net::HttpResponseInfo& proxy_response,
-                                  net::HttpAuthController* auth_controller) {
-  delete this;
-}
-
-void Preconnect::OnNeedsClientAuth(net::SSLCertRequestInfo* cert_info) {
-  delete this;
-}
-
-}  // chrome_browser_net
+}  // namespace chrome_browser_net

@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/task.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "views/accelerator.h"
 #include "views/controls/button/button.h"
@@ -54,12 +55,15 @@ class NewUserView : public views::View,
 
     // User tries to navigate away from NewUserView pod.
     virtual void NavigateAway() = 0;
+
+    // Enables/disables raw of controls at status area.
+    virtual void SetStatusAreaEnabled(bool enable) = 0;
   };
 
   // If |need_border| is true, RoundedRect border and background are required.
   NewUserView(Delegate* delegate,
               bool need_border,
-              bool need_browse_without_signin);
+              bool need_guest_link);
 
   virtual ~NewUserView();
 
@@ -74,6 +78,9 @@ class NewUserView : public views::View,
 
   // Resets password and username text and focuses on username.
   void ClearAndEnableFields();
+
+  // Starts throbber shown during login.
+  void StartThrobber();
 
   // Stops throbber shown during login.
   void StopThrobber();
@@ -139,6 +146,9 @@ class NewUserView : public views::View,
   // button is enabled, otherwise it's disabled.
   void UpdateSignInButtonState();
 
+  // Create view with specified solid background and add it as  child.
+  views::View* CreateSplitter(SkColor color);
+
   // Screen controls.
   // NOTE: sign_in_button_ and languages_menubutton_ are handled with
   // special care: they are recreated on any text/locale change
@@ -147,10 +157,13 @@ class NewUserView : public views::View,
   views::Textfield* password_field_;
   views::Label* title_label_;
   views::Label* title_hint_label_;
-  views::View* splitter_;
+  views::View* splitter_up1_;
+  views::View* splitter_up2_;
+  views::View* splitter_down1_;
+  views::View* splitter_down2_;
   views::NativeButton* sign_in_button_;
   views::Link* create_account_link_;
-  views::Link* browse_without_signin_link_;
+  views::Link* guest_link_;
   views::MenuButton* languages_menubutton_;
   views::Throbber* throbber_;
 
@@ -176,8 +189,8 @@ class NewUserView : public views::View,
   // If true, this view needs RoundedRect border and background.
   bool need_border_;
 
-  // Whether browse without signin is needed.
-  bool need_browse_without_signin_;
+  // Whether Guest Mode link is needed.
+  bool need_guest_link_;
 
   // Whether create account link is needed. Set to false for now but we may
   // need it back in near future.

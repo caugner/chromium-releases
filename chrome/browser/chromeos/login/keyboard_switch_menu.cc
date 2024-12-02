@@ -18,7 +18,8 @@ namespace chromeos {
 KeyboardSwitchMenu::KeyboardSwitchMenu()
     : InputMethodMenu(NULL /* pref_service */,
                       false /* is_browser_mode */,
-                      false /* is_screen_locker */) {
+                      false /* is_screen_locker_mode */,
+                      true /* is_out_of_box_experience_mode */) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -43,18 +44,17 @@ void KeyboardSwitchMenu::RunMenu(views::View* source, const gfx::Point& pt) {
   } else {
     new_pt.set_x(pt.x() - reverse_offset);
   }
-  language_menu().RunMenuAt(new_pt, views::Menu2::ALIGN_TOPLEFT);
+  input_method_menu().RunMenuAt(new_pt, views::Menu2::ALIGN_TOPLEFT);
 }
 
 std::wstring KeyboardSwitchMenu::GetCurrentKeyboardName() const {
   const int count = GetItemCount();
   for (int i = 0; i < count; ++i) {
-    if (IsItemCheckedAt(i)) {
+    if (IsItemCheckedAt(i))
       return UTF16ToWide(GetLabelAt(i));
-    }
   }
-  LOG(INFO) << "The input method menu is not ready yet. "
-            << "Show a language name that matches the hardware keyboard layout";
+  VLOG(1) << "The input method menu is not ready yet.  Show a language name "
+             "that matches the hardware keyboard layout";
   KeyboardLibrary *library = CrosLibrary::Get()->GetKeyboardLibrary();
   const std::string keyboard_layout_id =
       library->GetHardwareKeyboardLayoutName();

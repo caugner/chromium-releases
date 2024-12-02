@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
-#include "third_party/ppapi/c/ppb_image_data.h"
+#include "ppapi/c/ppb_image_data.h"
 #include "webkit/glue/plugins/pepper_plugin_delegate.h"
 #include "webkit/glue/plugins/pepper_resource.h"
 
@@ -28,11 +28,8 @@ class ImageData : public Resource {
   int width() const { return width_; }
   int height() const { return height_; }
 
-  // Returns the image format. Currently there is only one format so this
-  // always returns the same thing. But if you care about the formation, you
-  // should probably check this so when we support multiple formats, we can't
-  // forget to update your code.
-  PP_ImageDataFormat format() const { return PP_IMAGEDATAFORMAT_BGRA_PREMUL; }
+  // Returns the image format.
+  PP_ImageDataFormat format() const { return format_; }
 
   // Returns true if this image is mapped. False means that the image is either
   // invalid or not mapped. See ImageDataAutoMapper below.
@@ -47,6 +44,14 @@ class ImageData : public Resource {
   static const PPB_ImageData* GetInterface();
   static const PPB_ImageDataTrusted* GetTrustedInterface();
 
+  // Returns the image data format used by the browser. If the plugin uses the
+  // same format, there is no conversion. Otherwise the browser will be in
+  // charge of converting from a supported format to its native format.
+  static PP_ImageDataFormat GetNativeImageDataFormat();
+
+  // Returns true if the format is supported by the browser.
+  static bool IsImageDataFormatSupported(PP_ImageDataFormat format);
+
   // Resource overrides.
   virtual ImageData* AsImageData() { return this; }
 
@@ -59,7 +64,7 @@ class ImageData : public Resource {
   void Unmap();
 
   // PPB_ImageDataTrusted implementation.
-  uint64 GetNativeMemoryHandle() const;
+  uint64 GetNativeMemoryHandle(uint32* byte_count) const;
 
   // The mapped bitmap and canvas will be NULL if the image is not mapped.
   skia::PlatformCanvas* mapped_canvas() const { return mapped_canvas_.get(); }
@@ -76,6 +81,7 @@ class ImageData : public Resource {
   // When the device is mapped, this is the image. Null when umapped.
   scoped_ptr<skia::PlatformCanvas> mapped_canvas_;
 
+  PP_ImageDataFormat format_;
   int width_;
   int height_;
 

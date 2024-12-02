@@ -5,8 +5,10 @@
 #include "media/filters/audio_renderer_base.h"
 
 #include <algorithm>
+#include <string>
 
 #include "base/callback.h"
+#include "base/logging.h"
 #include "media/base/filter_host.h"
 #include "media/filters/audio_renderer_algorithm_ola.h"
 
@@ -226,7 +228,8 @@ uint32 AudioRendererBase::FillBuffer(uint8* dest,
 
   // Update the pipeline's time if it was set last time.
   if (last_fill_buffer_time.InMicroseconds() > 0 &&
-      last_fill_buffer_time != last_fill_buffer_time_) {
+      (last_fill_buffer_time != last_fill_buffer_time_ ||
+       (last_fill_buffer_time - playback_delay) > host()->GetTime())) {
     // Adjust the |last_fill_buffer_time| with the playback delay.
     // TODO(hclam): If there is a playback delay, the pipeline would not be
     // updated with a correct timestamp when the stream is played at the very

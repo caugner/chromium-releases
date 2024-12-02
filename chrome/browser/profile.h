@@ -30,6 +30,10 @@ class TransportSecurityState;
 class SSLConfigService;
 }
 
+namespace policy {
+class ProfilePolicyContext;
+}
+
 namespace webkit_database {
 class DatabaseTracker;
 }
@@ -38,6 +42,7 @@ class AutocompleteClassifier;
 class BackgroundContentsService;
 class BackgroundModeManager;
 class BookmarkModel;
+class BrowserSignin;
 class BrowserThemeProvider;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
@@ -47,12 +52,13 @@ class DesktopNotificationService;
 class DownloadManager;
 class Extension;
 class ExtensionDevToolsManager;
-class ExtensionProcessManager;
+class ExtensionEventRouter;
 class ExtensionMessageService;
+class ExtensionProcessManager;
 class ExtensionsService;
 class FaviconService;
 class FilePath;
-class FileSystemHostContext;
+class BrowserFileSystemContext;
 class FindBarState;
 class GeolocationContentSettingsMap;
 class GeolocationPermissionContext;
@@ -66,6 +72,8 @@ class PersonalDataManager;
 class PinnedTabService;
 class PrefService;
 class ExtensionInfoMap;
+class PrefProxyConfigTracker;
+class PromoCounter;
 class ProfileSyncService;
 class ProfileSyncFactory;
 class SessionService;
@@ -172,6 +180,9 @@ class Profile {
   // for this profile.
   virtual history::TopSites* GetTopSites() = 0;
 
+  // Variant of GetTopSites that doesn't force creation.
+  virtual history::TopSites* GetTopSitesWithoutCreating() = 0;
+
   // Retrieves a pointer to the VisitedLinkMaster associated with this
   // profile.  The VisitedLinkMaster is lazily created the first time
   // that this method is called.
@@ -197,6 +208,9 @@ class Profile {
   // Retrieves a pointer to the ExtensionMessageService associated with this
   // profile.  The instance is created at startup.
   virtual ExtensionMessageService* GetExtensionMessageService() = 0;
+
+  // Accessor. The instance is created at startup.
+  virtual ExtensionEventRouter* GetExtensionEventRouter() = 0;
 
   // Retrieves a pointer to the SSLHostState associated with this profile.
   // The SSLHostState is lazily created the first time that this method is
@@ -279,14 +293,19 @@ class Profile {
   // Returns the PersonalDataManager associated with this profile.
   virtual PersonalDataManager* GetPersonalDataManager() = 0;
 
-  // Returns the HTML5 FileSystemHostContext assigned to this profile.
-  virtual FileSystemHostContext* GetFileSystemHostContext() = 0;
+  // Returns the FileSystemContext associated to this profile.  The context
+  // is lazily created the first time this method is called.  This is owned
+  // by the profile.
+  virtual BrowserFileSystemContext* GetFileSystemContext() = 0;
+
+  // Returns the BrowserSignin object assigned to this profile.
+  virtual BrowserSignin* GetBrowserSignin() = 0;
 
   // Init our themes system.
   virtual void InitThemes() = 0;
 
   // Set the theme to the specified extension.
-  virtual void SetTheme(Extension* extension) = 0;
+  virtual void SetTheme(const Extension* extension) = 0;
 
   // Set the theme to the machine's native theme.
   virtual void SetNativeTheme() = 0;
@@ -296,7 +315,7 @@ class Profile {
 
   // Gets the theme that was last set. Returns NULL if the theme is no longer
   // installed, if there is no installed theme, or the theme was cleared.
-  virtual Extension* GetTheme() = 0;
+  virtual const Extension* GetTheme() = 0;
 
   // Returns or creates the ThemeProvider associated with this profile
   virtual BrowserThemeProvider* GetThemeProvider() = 0;
@@ -319,12 +338,14 @@ class Profile {
   // notification has fired. The purpose for handling this event first is to
   // avoid race conditions by making sure URLRequestContexts learn about new
   // extensions before anything else needs them to know.
-  virtual void RegisterExtensionWithRequestContexts(Extension* extension) {}
+  virtual void RegisterExtensionWithRequestContexts(
+      const Extension* extension) {}
 
   // Called by the ExtensionsService that lives in this profile. Lets the
   // profile clean up its RequestContexts once all the listeners to the
   // EXTENSION_UNLOADED notification have finished running.
-  virtual void UnregisterExtensionWithRequestContexts(Extension* extension) {}
+  virtual void UnregisterExtensionWithRequestContexts(
+      const Extension* extension) {}
 
   // Returns the SSLConfigService for this profile.
   virtual net::SSLConfigService* GetSSLConfigService() = 0;
@@ -365,6 +386,9 @@ class Profile {
 
   // Returns true if this profile has a session service.
   virtual bool HasSessionService() const = 0;
+
+  // Returns true if this profile has a profile sync service.
+  virtual bool HasProfileSyncService() const = 0;
 
   // Returns true if the last time this profile was open it was exited cleanly.
   virtual bool DidLastSessionExitCleanly() = 0;
@@ -418,7 +442,7 @@ class Profile {
   virtual DesktopNotificationService* GetDesktopNotificationService() = 0;
 
   // Returns the service that manages BackgroundContents for this profile.
-  virtual BackgroundContentsService* GetBackgroundContentsService() = 0;
+  virtual BackgroundContentsService* GetBackgroundContentsService() const = 0;
 
   // Returns the StatusTray, which provides an API for displaying status icons
   // in the system status tray. Returns NULL if status icons are not supported
@@ -450,11 +474,21 @@ class Profile {
   // Returns the IO-thread-accessible profile data for this profile.
   virtual ExtensionInfoMap* GetExtensionInfoMap() = 0;
 
+  // Returns the PromoCounter for Instant, or NULL if not applicable.
+  virtual PromoCounter* GetInstantPromoCounter() = 0;
+
+  // Gets the policy context associated with this profile.
+  virtual policy::ProfilePolicyContext* GetPolicyContext() = 0;
+
 #if defined(OS_CHROMEOS)
   // Returns ChromeOS's ProxyConfigServiceImpl, creating if not yet created.
   virtual chromeos::ProxyConfigServiceImpl*
       GetChromeOSProxyConfigServiceImpl() = 0;
 #endif  // defined(OS_CHROMEOS)
+
+  // Returns the helper object that provides the proxy configuration service
+  // access to the the proxy configuration possibly defined by preferences.
+  virtual PrefProxyConfigTracker* GetProxyConfigTracker() = 0;
 
 #ifdef UNIT_TEST
   // Use with caution.  GetDefaultRequestContext may be called on any thread!

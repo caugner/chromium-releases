@@ -4,14 +4,20 @@
 
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 
+#include "app/l10n_util.h"
+#include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/instant/promo_counter.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
+#include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
 
 namespace browser {
 
-// TODO: get the right url.
-const char kInstantLearnMoreURL[] = "http://www.google.com";
+GURL InstantLearnMoreURL() {
+  return GURL(l10n_util::GetStringUTF8(IDS_INSTANT_LEARN_MORE_URL));
+}
 
 void ShowInstantConfirmDialogIfNecessary(gfx::NativeWindow parent,
                                          Profile* profile) {
@@ -19,20 +25,16 @@ void ShowInstantConfirmDialogIfNecessary(gfx::NativeWindow parent,
   if (!prefs)
     return;
 
+  PromoCounter* promo_counter = profile->GetInstantPromoCounter();
+  if (promo_counter)
+    promo_counter->Hide();
+
   if (prefs->GetBoolean(prefs::kInstantConfirmDialogShown)) {
-    prefs->SetBoolean(prefs::kInstantEnabled, true);
+    InstantController::Enable(profile);
     return;
   }
 
-  prefs->SetBoolean(prefs::kInstantConfirmDialogShown, true);
   ShowInstantConfirmDialog(parent, profile);
 }
-
-#if !defined(TOOLKIT_VIEWS)
-void ShowInstantConfirmDialog(gfx::NativeWindow parent,
-                              Profile* profile) {
-  NOTIMPLEMENTED();
-}
-#endif
 
 }  // namespace browser

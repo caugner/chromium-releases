@@ -64,6 +64,8 @@ std::string ChildProcessInfo::GetTypeNameInEnglish(
       return "Native Client broker";
     case GPU_PROCESS:
       return "GPU";
+    case PPAPI_PLUGIN_PROCESS:
+      return "Pepper Plugin";
     case UNKNOWN_PROCESS:
     default:
       DCHECK(false) << "Unknown child process type!";
@@ -80,7 +82,7 @@ string16 ChildProcessInfo::GetLocalizedTitle() const {
   // to avoid the wrong concatenation result similar to "!Yahoo! Mail: the
   // best web-based Email: NIGULP", in which "NIGULP" stands for the Hebrew
   // or Arabic word for "plugin".
-  base::i18n::AdjustStringForLocaleDirection(title, &title);
+  base::i18n::AdjustStringForLocaleDirection(&title);
 
   switch (type_) {
     case ChildProcessInfo::UTILITY_PROCESS:
@@ -96,6 +98,7 @@ string16 ChildProcessInfo::GetLocalizedTitle() const {
       return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NACL_BROKER_PREFIX);
 
     case ChildProcessInfo::PLUGIN_PROCESS:
+    case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
       return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PLUGIN_PREFIX,
                                         title,
                                         WideToUTF16Hack(version_));
@@ -135,9 +138,9 @@ std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {
   // parent browser process, an identifier for the child instance, and a random
   // component. We use a random component so that a hacked child process can't
   // cause denial of service by causing future named pipe creation to fail.
-  return StringPrintf("%d.%p.%d",
-                      base::GetCurrentProcId(), instance,
-                      base::RandInt(0, std::numeric_limits<int>::max()));
+  return base::StringPrintf("%d.%p.%d",
+                            base::GetCurrentProcId(), instance,
+                            base::RandInt(0, std::numeric_limits<int>::max()));
 }
 
 // static

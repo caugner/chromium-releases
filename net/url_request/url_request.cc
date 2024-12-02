@@ -6,8 +6,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/metrics/stats_counters.h"
 #include "base/singleton.h"
-#include "base/stats_counters.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
@@ -89,6 +89,7 @@ void URLRequest::Delegate::OnGetCookies(URLRequest* request,
 
 void URLRequest::Delegate::OnSetCookie(URLRequest* request,
                                        const std::string& cookie_line,
+                                       const net::CookieOptions& options,
                                        bool blocked_by_policy) {
 }
 
@@ -274,6 +275,17 @@ bool URLRequest::IsHandledURL(const GURL& url) {
   return IsHandledProtocol(url.scheme());
 }
 
+// static
+void URLRequest::AllowFileAccess() {
+  GetJobManager()->set_enable_file_access(true);
+}
+
+// static
+bool URLRequest::IsFileAccessAllowed() {
+  return GetJobManager()->enable_file_access();
+}
+
+
 void URLRequest::set_first_party_for_cookies(
     const GURL& first_party_for_cookies) {
   first_party_for_cookies_ = first_party_for_cookies;
@@ -315,8 +327,8 @@ void URLRequest::StartJob(URLRequestJob* job) {
 
   net_log_.BeginEvent(
       net::NetLog::TYPE_URL_REQUEST_START_JOB,
-      new URLRequestStartEventParameters(
-          url_, method_, load_flags_, priority_));
+      make_scoped_refptr(new URLRequestStartEventParameters(
+          url_, method_, load_flags_, priority_)));
 
   job_ = job;
   job_->SetExtraRequestHeaders(extra_request_headers_);
@@ -490,14 +502,14 @@ void URLRequest::OrphanJob() {
 }
 
 int URLRequest::Redirect(const GURL& location, int http_status_code) {
-  if (net_log_.IsLoggingAll()) {
+  if (net_log_.IsLoggingAllEvents()) {
     net_log_.AddEvent(
         net::NetLog::TYPE_URL_REQUEST_REDIRECTED,
-        new net::NetLogStringParameter(
-            "location", location.possibly_invalid_spec()));
+        make_scoped_refptr(new net::NetLogStringParameter(
+            "location", location.possibly_invalid_spec())));
   }
   if (redirect_limit_ <= 0) {
-    DLOG(INFO) << "disallowing redirect: exceeds limit";
+    DVLOG(1) << "disallowing redirect: exceeds limit";
     return net::ERR_TOO_MANY_REDIRECTS;
   }
 
@@ -505,7 +517,7 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     return net::ERR_INVALID_URL;
 
   if (!job_->IsSafeRedirect(location)) {
-    DLOG(INFO) << "disallowing redirect: unsafe protocol";
+    DVLOG(1) << "disallowing redirect: unsafe protocol";
     return net::ERR_UNSAFE_REDIRECT;
   }
 

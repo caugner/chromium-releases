@@ -19,6 +19,7 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread.h"
+#include "base/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
@@ -66,6 +67,10 @@ class OmniBoxUsageObserver : public NotificationObserver {
   OmniBoxUsageObserver() {
     registrar_.Add(this, NotificationType::OMNIBOX_OPENED_URL,
                    NotificationService::AllSources());
+    // If instant is enabled we'll start searching as soon as the user starts
+    // typing in the omnibox (which triggers INSTANT_CONTROLLER_UPDATED).
+    registrar_.Add(this, NotificationType::INSTANT_CONTROLLER_UPDATED,
+                   NotificationService::AllSources());
     omnibox_used_ = false;
     DCHECK(!instance_);
     instance_ = this;
@@ -74,6 +79,9 @@ class OmniBoxUsageObserver : public NotificationObserver {
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
+    // Needs to be evaluated. See http://crbug.com/62328.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+
     // Try to record event now, else set the flag to try later when we
     // attempt the ping.
     if (!RLZTracker::RecordProductEvent(rlz_lib::CHROME,
@@ -127,6 +135,9 @@ class DailyPingTask : public Task {
  private:
   // Causes a ping to the server using WinInet.
   static void _cdecl PingNow(void*) {
+    // Needs to be evaluated. See http://crbug.com/62328.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+
     std::wstring lang;
     GoogleUpdateSettings::GetLanguage(&lang);
     if (lang.empty())
@@ -157,6 +168,9 @@ class DelayedInitTask : public Task {
   virtual ~DelayedInitTask() {
   }
   virtual void Run() {
+    // Needs to be evaluated. See http://crbug.com/62328.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+
     // For non-interactive tests we don't do the rest of the initialization
     // because sometimes the very act of loading the dll causes QEMU to crash.
     if (::GetEnvironmentVariableW(ASCIIToWide(env_vars::kHeadless).c_str(),

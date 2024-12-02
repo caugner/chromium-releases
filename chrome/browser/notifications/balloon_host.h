@@ -7,19 +7,18 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/notifications/balloon.h"
-#include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
-#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/renderer_preferences.h"
-#include "webkit/glue/webpreferences.h"
 
+class Balloon;
 class Browser;
 class Profile;
+class SiteInstance;
+struct RendererPreferences;
+struct WebPreferences;
 
 class BalloonHost : public RenderViewHostDelegate,
                     public RenderViewHostDelegate::View,
@@ -34,46 +33,28 @@ class BalloonHost : public RenderViewHostDelegate,
   void Shutdown();
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual Browser* GetBrowser() const {
-    // Notifications aren't associated with a particular browser.
-    return NULL;
-  }
-  virtual gfx::NativeView GetNativeViewOfHost() {
-    // TODO(aa): Should this return the native view of the BalloonView*?
-    return NULL;
-  }
-  virtual TabContents* associated_tab_contents() const { return NULL; }
+  virtual Browser* GetBrowser() const;
+  virtual gfx::NativeView GetNativeViewOfHost();
+  virtual TabContents* associated_tab_contents() const;
 
   RenderViewHost* render_view_host() const { return render_view_host_; }
 
-  const string16& GetSource() const {
-    return balloon_->notification().display_source();
-  }
+  const string16& GetSource() const;
 
   // RenderViewHostDelegate overrides.
   virtual WebPreferences GetWebkitPrefs();
-  virtual SiteInstance* GetSiteInstance() const {
-    return site_instance_.get();
-  }
-  virtual Profile* GetProfile() const { return balloon_->profile(); }
-  virtual const GURL& GetURL() const {
-    return balloon_->notification().content_url();
-  }
+  virtual SiteInstance* GetSiteInstance() const;
+  virtual Profile* GetProfile() const;
+  virtual const GURL& GetURL() const;
   virtual void Close(RenderViewHost* render_view_host);
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void RenderViewReady(RenderViewHost* render_view_host);
   virtual void RenderViewGone(RenderViewHost* render_view_host);
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id, const std::wstring& title) {}
-  virtual int GetBrowserWindowID() const {
-    return extension_misc::kUnknownWindowId;
-  }
-  virtual ViewType::Type GetRenderViewType() const {
-    return ViewType::NOTIFICATION;
-  }
-  virtual RenderViewHostDelegate::View* GetViewDelegate() {
-    return this;
-  }
+  virtual int GetBrowserWindowID() const;
+  virtual ViewType::Type GetRenderViewType() const;
+  virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
 
   // RenderViewHostDelegate::View methods. Only the ones for opening new
@@ -93,6 +74,12 @@ class BalloonHost : public RenderViewHostDelegate,
                                  const gfx::Rect& initial_pos) {}
   virtual void ShowCreatedFullscreenWidget(int route_id) {}
   virtual void ShowContextMenu(const ContextMenuParams& params) {}
+  virtual void ShowPopupMenu(const gfx::Rect& bounds,
+                             int item_height,
+                             double item_font_size,
+                             int selected_item,
+                             const std::vector<WebMenuItem>& items,
+                             bool right_aligned) {}
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops) {}
   virtual void StartDragging(const WebDropData&,
@@ -121,8 +108,15 @@ class BalloonHost : public RenderViewHostDelegate,
   // Enable DOM UI. This has to be called before renderer is created.
   void EnableDOMUI();
 
+  virtual void UpdateInspectorSetting(const std::string& key,
+                                      const std::string& value);
+  virtual void ClearInspectorSettings();
+
+  // Called when the render view has painted.
+  void RenderWidgetHostDidPaint();
+
  protected:
-  virtual ~BalloonHost() {}
+  virtual ~BalloonHost();
   // Must override in platform specific implementations.
   virtual void InitRenderWidgetHostView() = 0;
   virtual RenderWidgetHostView* render_widget_host_view() const = 0;

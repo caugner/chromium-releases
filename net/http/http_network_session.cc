@@ -21,6 +21,8 @@ namespace net {
 HttpNetworkSession::HttpNetworkSession(
     HostResolver* host_resolver,
     DnsRRResolver* dnsrr_resolver,
+    DnsCertProvenanceChecker* dns_cert_checker,
+    SSLHostInfoFactory* ssl_host_info_factory,
     ProxyService* proxy_service,
     ClientSocketFactory* client_socket_factory,
     SSLConfigService* ssl_config_service,
@@ -31,16 +33,18 @@ HttpNetworkSession::HttpNetworkSession(
     : socket_factory_(client_socket_factory),
       host_resolver_(host_resolver),
       dnsrr_resolver_(dnsrr_resolver),
+      dns_cert_checker_(dns_cert_checker),
       proxy_service_(proxy_service),
       ssl_config_service_(ssl_config_service),
       socket_pool_manager_(net_log,
                            client_socket_factory,
                            host_resolver,
                            dnsrr_resolver,
+                           dns_cert_checker,
+                           ssl_host_info_factory,
                            proxy_service,
                            ssl_config_service),
       spdy_session_pool_(spdy_session_pool),
-      http_stream_factory_(new HttpStreamFactory()),
       http_auth_handler_factory_(http_auth_handler_factory),
       network_delegate_(network_delegate),
       net_log_(net_log) {
@@ -62,6 +66,10 @@ void HttpNetworkSession::RemoveResponseDrainer(
     HttpResponseBodyDrainer* drainer) {
   DCHECK(ContainsKey(response_drainers_, drainer));
   response_drainers_.erase(drainer);
+}
+
+Value* HttpNetworkSession::SpdySessionPoolInfoToValue() const {
+  return spdy_session_pool_->SpdySessionPoolInfoToValue();
 }
 
 }  //  namespace net

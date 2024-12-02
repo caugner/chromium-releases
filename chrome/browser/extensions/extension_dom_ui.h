@@ -33,7 +33,9 @@ class ExtensionDOMUI
  public:
   static const char kExtensionURLOverrides[];
 
-  explicit ExtensionDOMUI(TabContents* tab_contents, GURL url);
+  explicit ExtensionDOMUI(TabContents* tab_contents, const GURL& url);
+
+  virtual ~ExtensionDOMUI();
 
   ExtensionFunctionDispatcher* extension_function_dispatcher() const {
     return extension_function_dispatcher_.get();
@@ -48,15 +50,10 @@ class ExtensionDOMUI
   virtual Browser* GetBrowser() const;
   virtual gfx::NativeView GetNativeViewOfHost();
   virtual gfx::NativeWindow GetCustomFrameNativeWindow();
-  virtual TabContents* associated_tab_contents() const {
-    return tab_contents();
-  }
-  virtual Profile* GetProfile();
+  virtual TabContents* associated_tab_contents() const;
 
   virtual ExtensionBookmarkManagerEventRouter*
-      extension_bookmark_manager_event_router() {
-    return extension_bookmark_manager_event_router_.get();
-  }
+      extension_bookmark_manager_event_router();
 
   // BrowserURLHandler
   static bool HandleChromeURLOverride(GURL* url, Profile* profile);
@@ -101,6 +98,9 @@ class ExtensionDOMUI
   // the other extension APIs?
   scoped_ptr<ExtensionBookmarkManagerEventRouter>
       extension_bookmark_manager_event_router_;
+
+  // The URL this DOMUI was created for.
+  GURL url_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_DOM_UI_H_

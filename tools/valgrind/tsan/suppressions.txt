@@ -55,6 +55,93 @@
   fun:ThreadSanitizerStartThread
 }
 
+{
+  bug_61210
+  ThreadSanitizer:Race
+  ...
+  fun:linked_ptr<PluginGroup>*
+}
+
+{
+  bug_62880
+  ThreadSanitizer:Race
+  fun:ObserverListBase*Iterator*
+  fun:browser_sync::sessions::SyncSessionContext::NotifyListeners*
+  ...
+  fun:browser_sync::SyncerThread::*
+}
+
+{
+  bug_64075a
+  ThreadSanitizer:Race
+  fun:disk_cache::EntryImpl::GetDataSize*
+  fun:net::HttpCache::Transaction::AddTruncatedFlag*
+  fun:net::HttpCache::DoneWithEntry*
+}
+
+{
+  bug_64075b
+  ThreadSanitizer:Race
+  fun:disk_cache::EntryImpl::UpdateSize*
+  fun:disk_cache::EntryImpl::WriteDataImpl*
+}
+
+{
+  bug_64080
+  ThreadSanitizer:Race
+  ...
+  fun:chromeos::PulseAudioMixer::~PulseAudioMixer*
+  ...
+  fun:Singleton<chromeos::AudioHandler*>::OnExit*
+}
+
+{
+  bug_64186a
+  ThreadSanitizer:Race
+  fun:chromeos::CrosLibrary::Library*GetDefaultImpl*
+  fun:chromeos::CrosLibrary::GetSystemLibrary*
+}
+
+{
+  bug_64186b
+  ThreadSanitizer:Race
+  ...
+  fun:MetricsService::InitTask::Run*
+}
+
+{
+  bug_64188
+  ThreadSanitizer:Race
+  ...
+  fun:base::RefCounted<net::NetLog::EventParameters>::*
+}
+
+############################
+# Benign races
+{
+  bug_62694 [benign races in Histogram in CookieMonster]
+  ThreadSanitizer:Race
+  ...
+  fun:base::Histogram::*
+  fun:net::CookieMonster::*
+}
+
+{
+  bug_64185a [probably-benign races in Histogram in skia::ImageOperations]
+  ThreadSanitizer:Race
+  ...
+  fun:base::Histogram::*
+  fun:skia::ImageOperations::*
+}
+
+{
+  bug_64185b [probably-benign races in Histogram in skia::ImageOperations]
+  ThreadSanitizer:Race
+  ...
+  fun:base::Histogram::*
+  fun:HistogramSynchronizer::DeserializeHistogramList*
+}
+
 ############################
 # Real races in third_party
 {
@@ -138,6 +225,7 @@
   fun:__tcf_0
   fun:exit
 }
+
 ############################
 # Data races in tests
 
@@ -146,6 +234,16 @@
   ThreadSanitizer:Race
   fun:*LongCallbackD*
   fun:*WorkerThreadTickerTest_LongCallback_Test*TestBody*
+}
+
+{
+  bug_61731
+  ThreadSanitizer:Race
+  fun:*Log*
+  ...
+  fun:*Worker*
+  ...
+  obj:*ipc_tests
 }
 
 # TODO(timurrrr): bug item
@@ -206,6 +304,13 @@
    fun:*TOOLS_SANITY_TEST_CONCURRENT_THREAD*ThreadMain*
 }
 
+{
+   Benign race (or even a false positive) on atomics in ThreadCollisionWarner
+   ThreadSanitizer:Race
+   fun:base::subtle::NoBarrier_Store
+   fun:base::ThreadCollisionWarner::Leave
+}
+
 ############################
 # Benign races in ICU
 {
@@ -250,6 +355,16 @@
   ThreadSanitizer:Race
   fun:sqlite3_initialize
   fun:openDatabase
+}
+
+############################
+# Races in V8
+
+# http://code.google.com/p/v8/issues/detail?id=361
+{
+  Race on Locker::active_ in v8
+  ThreadSanitizer:Race
+  fun:v8::Locker::*
 }
 
 ############################

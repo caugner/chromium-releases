@@ -1,18 +1,19 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/disk_cache/backend_impl.h"
 
-#include "base/field_trial.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/thread_restrictions.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "base/worker_pool.h"
@@ -115,6 +116,10 @@ FilePath GetTempCacheName(const FilePath& path, const std::string& name) {
 
 // Moves the cache files to a new folder and creates a task to delete them.
 bool DelayedCacheCleanup(const FilePath& full_path) {
+  // GetTempCacheName() and MoveCache() use synchronous file
+  // operations.
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+
   FilePath current_path = full_path.StripTrailingSeparators();
 
   FilePath path = current_path.DirName();
@@ -133,7 +138,7 @@ bool DelayedCacheCleanup(const FilePath& full_path) {
   }
 
   if (!disk_cache::MoveCache(full_path, to_delete)) {
-    LOG(ERROR) << "Unable to rename cache folder";
+    LOG(ERROR) << "Unable to move cache folder";
     return false;
   }
 
@@ -169,9 +174,10 @@ bool SetFieldTrialInfo(int size_group) {
 
   // Field trials involve static objects so we have to do this only once.
   first = false;
-  scoped_refptr<FieldTrial> trial1 = new FieldTrial("CacheSize", 10);
+  scoped_refptr<base::FieldTrial> trial1(
+      new base::FieldTrial("CacheSize", 10));
   std::string group1 = base::StringPrintf("CacheSizeGroup_%d", size_group);
-  trial1->AppendGroup(group1, FieldTrial::kAllRemainingProbability);
+  trial1->AppendGroup(group1, base::FieldTrial::kAllRemainingProbability);
 
   return false;
 }
@@ -1300,6 +1306,13 @@ int BackendImpl::RunTaskForTest(Task* task, CompletionCallback* callback) {
   return net::ERR_IO_PENDING;
 }
 
+void BackendImpl::ThrottleRequestsForTest(bool throttle) {
+  if (throttle)
+    background_queue_.StartQueingOperations();
+  else
+    background_queue_.StopQueingOperations();
+}
+
 int BackendImpl::SelfCheck() {
   if (!init_) {
     LOG(ERROR) << "Init failed";
@@ -1825,9 +1838,8 @@ void BackendImpl::LogStats() {
   StatsItems stats;
   GetStats(&stats);
 
-  for (size_t index = 0; index < stats.size(); index++) {
-    LOG(INFO) << stats[index].first << ": " << stats[index].second;
-  }
+  for (size_t index = 0; index < stats.size(); index++)
+    VLOG(1) << stats[index].first << ": " << stats[index].second;
 }
 
 void BackendImpl::ReportStats() {

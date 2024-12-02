@@ -54,7 +54,7 @@ bool ChannelProxy::MessageFilter::OnMessageReceived(const Message& message) {
   return false;
 }
 
-void ChannelProxy::MessageFilter::OnDestruct() {
+void ChannelProxy::MessageFilter::OnDestruct() const {
   delete this;
 }
 
@@ -70,7 +70,7 @@ ChannelProxy::Context::Context(Channel::Listener* listener,
       peer_pid_(0),
       channel_connected_called_(false) {
   if (filter)
-    filters_.push_back(filter);
+    filters_.push_back(make_scoped_refptr(filter));
 }
 
 void ChannelProxy::Context::CreateChannel(const std::string& id,
@@ -190,15 +190,12 @@ void ChannelProxy::Context::OnSendMessage(Message* message) {
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnAddFilter(MessageFilter* filter) {
-  filters_.push_back(filter);
+  filters_.push_back(make_scoped_refptr(filter));
 
   // If the channel has already been created, then we need to send this message
   // so that the filter gets access to the Channel.
   if (channel_)
     filter->OnFilterAdded(channel_);
-
-  // Balances the AddRef in ChannelProxy::AddFilter.
-  filter->Release();
 }
 
 // Called on the IPC::Channel thread
@@ -317,23 +314,27 @@ bool ChannelProxy::Send(Message* message) {
 }
 
 void ChannelProxy::AddFilter(MessageFilter* filter) {
-  // We want to addref the filter to prevent it from
-  // being destroyed before the OnAddFilter call is invoked.
-  filter->AddRef();
-  context_->ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      context_.get(), &Context::OnAddFilter, filter));
+  context_->ipc_message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(
+          context_.get(),
+          &Context::OnAddFilter,
+          make_scoped_refptr(filter)));
 }
 
 void ChannelProxy::RemoveFilter(MessageFilter* filter) {
-  context_->ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      context_.get(), &Context::OnRemoveFilter, filter));
+  context_->ipc_message_loop()->PostTask(
+      FROM_HERE, NewRunnableMethod(
+          context_.get(),
+          &Context::OnRemoveFilter,
+          make_scoped_refptr(filter)));
 }
 
 void ChannelProxy::ClearIPCMessageLoop() {
   context()->ClearIPCMessageLoop();
 }
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
 // See the TODO regarding lazy initialization of the channel in
 // ChannelProxy::Init().
 // We assume that IPC::Channel::GetClientFileDescriptorMapping() is thread-safe.

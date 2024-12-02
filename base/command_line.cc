@@ -60,7 +60,7 @@ CommandLine::~CommandLine() {
 }
 
 #if defined(OS_WIN)
-CommandLine::CommandLine(ArgumentsOnly args_only) {
+CommandLine::CommandLine(NoProgram no_program) {
 }
 
 void CommandLine::ParseFromString(const std::wstring& command_line) {
@@ -121,7 +121,7 @@ CommandLine::CommandLine(const FilePath& program) {
 }
 
 #elif defined(OS_POSIX)
-CommandLine::CommandLine(ArgumentsOnly args_only) {
+CommandLine::CommandLine(NoProgram no_program) {
   // Push an empty argument, because we always assume argv_[0] is a program.
   argv_.push_back("");
 }
@@ -224,7 +224,7 @@ void CommandLine::Init(int argc, const char* const* argv) {
 #endif
 }
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_NACL)
 // static
 void CommandLine::SetProcTitle() {
   // Build a single string which consists of all the arguments separated
@@ -340,12 +340,6 @@ FilePath CommandLine::GetProgram() const {
 #endif
 }
 
-#if defined(OS_WIN)
-std::wstring CommandLine::program() const {
-  return program_;
-}
-#endif
-
 #if defined(OS_POSIX)
 std::string CommandLine::command_line_string() const {
   return JoinString(argv_, ' ');
@@ -437,7 +431,14 @@ void CommandLine::AppendArguments(const CommandLine& other,
   // Verify include_program is used correctly.
   // Logic could be shorter but this is clearer.
   DCHECK_EQ(include_program, !other.GetProgram().empty());
-  command_line_string_ += L" " + other.command_line_string_;
+  if (include_program)
+    program_ = other.program_;
+
+  if (!command_line_string_.empty())
+    command_line_string_ += L' ';
+
+  command_line_string_ += other.command_line_string_;
+
   std::map<std::string, StringType>::const_iterator i;
   for (i = other.switches_.begin(); i != other.switches_.end(); ++i)
     switches_[i->first] = i->second;
@@ -449,7 +450,7 @@ void CommandLine::PrependWrapper(const std::wstring& wrapper) {
   // The wrapper may have embedded arguments (like "gdb --args"). In this case,
   // we don't pretend to do anything fancy, we just split on spaces.
   std::vector<std::wstring> wrapper_and_args;
-  SplitString(wrapper, ' ', &wrapper_and_args);
+  base::SplitString(wrapper, ' ', &wrapper_and_args);
   program_ = wrapper_and_args[0];
   command_line_string_ = wrapper + L" " + command_line_string_;
 }
@@ -488,9 +489,15 @@ void CommandLine::AppendArguments(const CommandLine& other,
   // Verify include_program is used correctly.
   // Logic could be shorter but this is clearer.
   DCHECK_EQ(include_program, !other.GetProgram().empty());
-  size_t first_arg = include_program ? 0 : 1;
-  for (size_t i = first_arg; i < other.argv_.size(); ++i)
+
+  if (include_program)
+    argv_[0] = other.argv_[0];
+
+  // Skip the first arg when copying since it's the program but push all
+  // arguments to our arg vector.
+  for (size_t i = 1; i < other.argv_.size(); ++i)
     argv_.push_back(other.argv_[i]);
+
   std::map<std::string, StringType>::const_iterator i;
   for (i = other.switches_.begin(); i != other.switches_.end(); ++i)
     switches_[i->first] = i->second;
@@ -500,7 +507,7 @@ void CommandLine::PrependWrapper(const std::string& wrapper) {
   // The wrapper may have embedded arguments (like "gdb --args"). In this case,
   // we don't pretend to do anything fancy, we just split on spaces.
   std::vector<std::string> wrapper_and_args;
-  SplitString(wrapper, ' ', &wrapper_and_args);
+  base::SplitString(wrapper, ' ', &wrapper_and_args);
   argv_.insert(argv_.begin(), wrapper_and_args.begin(), wrapper_and_args.end());
 }
 

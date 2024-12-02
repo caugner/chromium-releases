@@ -30,12 +30,13 @@ void StoreTimestampsCommand::ExecuteImpl(sessions::SyncSession* session) {
   sessions::StatusController* status = session->status_controller();
   if (updates.has_changes_remaining()) {
     int64 changes_left = updates.changes_remaining();
-    LOG(INFO) << "Changes remaining:" << changes_left;
+    VLOG(1) << "Changes remaining:" << changes_left;
     status->set_num_server_changes_remaining(changes_left);
   }
 
-  LOG_IF(INFO, updates.has_new_timestamp()) << "Get Updates got new timestamp: "
-      << updates.new_timestamp() << " for type mask: "
+  VLOG_IF(1, updates.has_new_timestamp())
+      << "Get Updates got new timestamp: " << updates.new_timestamp()
+      << " for type mask: "
       << status->updates_request_parameters().data_types.to_string();
 
   // Update the saved download timestamp for any items we fetched.

@@ -10,15 +10,15 @@
 
 #include "app/menus/simple_menu_model.h"
 #include "base/command_line.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chromeos/frame/panel_browser_view.h"
-#include "chrome/browser/chromeos/status/language_menu_button.h"
+#include "chrome/browser/chromeos/status/input_method_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "chrome/browser/views/app_launcher.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/views/frame/browser_frame_gtk.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/frame/browser_view_layout.h"
@@ -209,10 +209,13 @@ class BrowserViewLayout : public ::BrowserViewLayout {
 
 BrowserView::BrowserView(Browser* browser)
     : ::BrowserView(browser),
-      status_area_(NULL) {
+      status_area_(NULL),
+      saved_focused_widget_(NULL) {
 }
 
 BrowserView::~BrowserView() {
+  if (toolbar())
+    toolbar()->RemoveMenuListener(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -232,6 +235,9 @@ void BrowserView::Init() {
   // NonClientFrameView.
   BrowserFrameGtk* gtk_frame = static_cast<BrowserFrameGtk*>(frame());
   gtk_frame->GetNonClientView()->SetContextMenuController(this);
+
+  // Listen to wrench menu opens.
+  toolbar()->AddMenuListener(this);
 
   // Make sure the window is set to the right type.
   std::vector<int> params;
@@ -261,7 +267,7 @@ void BrowserView::Show() {
 
 void BrowserView::FocusChromeOSStatus() {
   SaveFocusedView();
-  status_area_->SetToolbarFocus(last_focused_view_storage_id(), NULL);
+  status_area_->SetPaneFocus(last_focused_view_storage_id(), NULL);
 }
 
 views::LayoutManager* BrowserView::CreateLayoutManager() const {
@@ -286,6 +292,18 @@ bool BrowserView::GetSavedWindowBounds(gfx::Rect* bounds) const {
   return ::BrowserView::GetSavedWindowBounds(bounds);
 }
 
+void BrowserView::Cut() {
+  gtk_util::DoCut(this);
+}
+
+void BrowserView::Copy() {
+  gtk_util::DoCopy(this);
+}
+
+void BrowserView::Paste() {
+  gtk_util::DoPaste(this);
+}
+
 // views::ContextMenuController overrides.
 void BrowserView::ShowContextMenu(views::View* source,
                                   const gfx::Point& p,
@@ -299,6 +317,11 @@ void BrowserView::ShowContextMenu(views::View* source,
   int hit_test = NonClientHitTest(point_in_parent_coords);
   if (hit_test == HTCAPTION || hit_test == HTNOWHERE)
     system_menu_menu_->RunMenuAt(p, views::Menu2::ALIGN_TOPLEFT);
+}
+
+void BrowserView::OnMenuOpened() {
+  // Save the focused widget before wrench menu opens.
+  saved_focused_widget_ = gtk_window_get_focus(GetNativeHandle());
 }
 
 // StatusAreaHost overrides.
@@ -319,10 +342,10 @@ void BrowserView::ExecuteBrowserCommand(int id) const {
   browser()->ExecuteCommand(id);
 }
 
-void BrowserView::OpenButtonOptions(const views::View* button_view) const {
+void BrowserView::OpenButtonOptions(const views::View* button_view) {
   if (button_view == status_area_->network_view()) {
     browser()->OpenInternetOptionsDialog();
-  } else if (button_view == status_area_->language_view()) {
+  } else if (button_view == status_area_->input_method_view()) {
     browser()->OpenLanguageOptionsDialog();
   } else {
     browser()->OpenSystemOptionsDialog();
@@ -340,10 +363,10 @@ bool BrowserView::IsScreenLockerMode() const {
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserView protected:
 
-void BrowserView::GetAccessibleToolbars(
-    std::vector<AccessibleToolbarView*>* toolbars) {
-  ::BrowserView::GetAccessibleToolbars(toolbars);
-  toolbars->push_back(status_area_);
+void BrowserView::GetAccessiblePanes(
+    std::vector<AccessiblePaneView*>* panes) {
+  ::BrowserView::GetAccessiblePanes(panes);
+  panes->push_back(status_area_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

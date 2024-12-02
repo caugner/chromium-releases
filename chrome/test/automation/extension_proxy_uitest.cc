@@ -139,7 +139,8 @@ TEST_F(ExtensionProxyUITest, DISABLED_ExecuteBrowserActionInActiveTabAsync) {
   StopHttpServer();
 }
 
-TEST_F(ExtensionProxyUITest, MoveBrowserAction) {
+// Flaky, http://crbug.com/59441.
+TEST_F(ExtensionProxyUITest, FLAKY_MoveBrowserAction) {
   scoped_refptr<ExtensionProxy> rename_tab_extension =
       InstallRenameTabExtension();
   ASSERT_TRUE(rename_tab_extension.get());
@@ -165,7 +166,8 @@ TEST_F(ExtensionProxyUITest, MoveBrowserAction) {
   ASSERT_FALSE(simple_extension_->MoveBrowserAction(2));
 }
 
-TEST_F(ExtensionProxyUITest, GetProperty) {
+// Flaky, http://crbug.com/59440.
+TEST_F(ExtensionProxyUITest, FLAKY_GetProperty) {
   ASSERT_NO_FATAL_FAILURE(simple_extension_->
                           EnsureIdMatches("aiglobglfckejlcpcbdokbkbjeemfhno"));
   ASSERT_NO_FATAL_FAILURE(simple_extension_->

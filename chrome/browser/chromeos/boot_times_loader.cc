@@ -9,49 +9,64 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/singleton.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/thread.h"
+#include "base/thread_restrictions.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/login/authentication_notification_details.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/network_state_notifier.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 
 namespace chromeos {
 
+#define FPL(value) FILE_PATH_LITERAL(value)
+
 // File uptime logs are located in.
-static const char kLogPath[] = "/tmp";
+static const FilePath::CharType kLogPath[] = FPL("/tmp");
 // Prefix for the time measurement files.
-static const char kUptimePrefix[] = "uptime-";
+static const FilePath::CharType kUptimePrefix[] = FPL("uptime-");
 // Prefix for the disk usage files.
-static const char kDiskPrefix[] = "disk-";
+static const FilePath::CharType kDiskPrefix[] = FPL("disk-");
 // Name of the time that Chrome's main() is called.
-static const char kChromeMain[] = "chrome-main";
+static const FilePath::CharType kChromeMain[] = FPL("chrome-main");
 // Delay in milliseconds between file read attempts.
 static const int64 kReadAttemptDelayMs = 250;
+// Delay in milliseconds before writing the login times to disk.
+static const int64 kLoginTimeWriteDelayMs = 3000;
 
 // Names of login stats files.
-static const char kLoginSuccess[] = "login-success";
-static const char kChromeFirstRender[] = "chrome-first-render";
+static const FilePath::CharType kLoginSuccess[] = FPL("login-success");
+static const FilePath::CharType kChromeFirstRender[] =
+    FPL("chrome-first-render");
 
 // Names of login UMA values.
 static const char kUmaAuthenticate[] = "BootTime.Authenticate";
 static const char kUmaLogin[] = "BootTime.Login";
+static const char kUmaLoginPrefix[] = "BootTime.";
+static const char kUmaLogout[] = "ShutdownTime.Logout";
+static const char kUmaLogoutPrefix[] = "ShutdownTime.";
 
 // Name of file collecting login times.
-static const char kLoginTimes[] = "login-times-sent";
+static const FilePath::CharType kLoginTimes[] = FPL("login-times-sent");
+
+// Name of file collecting logout times.
+static const char kLogoutTimes[] = "logout-times-sent";
 
 BootTimesLoader::BootTimesLoader()
     : backend_(new Backend()),
       have_registered_(false) {
+  login_time_markers_.reserve(30);
+  logout_time_markers_.reserve(30);
 }
 
 // static
@@ -88,7 +103,7 @@ BootTimesLoader::Handle BootTimesLoader::GetBootTimes(
 
 // Extracts the uptime value from files located in /tmp, returning the
 // value as a double in value.
-static bool GetTime(const std::string& log, double* value) {
+static bool GetTime(const FilePath::StringType& log, double* value) {
   FilePath log_dir(kLogPath);
   FilePath log_file = log_dir.Append(log);
   std::string contents;
@@ -115,7 +130,8 @@ static void SendBootTimesToUMA(const BootTimesLoader::BootTimes& boot_times) {
   // Checks if the times for the most recent boot event have been
   // reported already to avoid sending boot time histogram samples
   // every time the user logs out.
-  static const char kBootTimesSent[] = "/tmp/boot-times-sent";
+  static const FilePath::CharType kBootTimesSent[] =
+      FPL("/tmp/boot-times-sent");
   FilePath sent(kBootTimesSent);
   if (file_util::PathExists(sent))
     return;
@@ -152,20 +168,20 @@ static void SendBootTimesToUMA(const BootTimesLoader::BootTimes& boot_times) {
 
 void BootTimesLoader::Backend::GetBootTimes(
     scoped_refptr<GetBootTimesRequest> request) {
-  const char* kFirmwareBootTime = "firmware-boot-time";
-  const char* kPreStartup = "pre-startup";
-  const char* kChromeExec = "chrome-exec";
-  const char* kChromeMain = "chrome-main";
-  const char* kXStarted = "x-started";
-  const char* kLoginPromptReady = "login-prompt-ready";
-  std::string uptime_prefix = kUptimePrefix;
+  const FilePath::CharType kFirmwareBootTime[] = FPL("firmware-boot-time");
+  const FilePath::CharType kPreStartup[] = FPL("pre-startup");
+  const FilePath::CharType kChromeExec[] = FPL("chrome-exec");
+  const FilePath::CharType kChromeMain[] = FPL("chrome-main");
+  const FilePath::CharType kXStarted[] = FPL("x-started");
+  const FilePath::CharType kLoginPromptReady[] = FPL("login-prompt-ready");
+  const FilePath::StringType uptime_prefix = kUptimePrefix;
 
   if (request->canceled())
     return;
 
-  // Wait until login_prompt_ready is output by reposting.
+  // Wait until firmware-boot-time file exists by reposting.
   FilePath log_dir(kLogPath);
-  FilePath log_file = log_dir.Append(uptime_prefix + kLoginPromptReady);
+  FilePath log_file = log_dir.Append(kFirmwareBootTime);
   if (!file_util::PathExists(log_file)) {
     BrowserThread::PostDelayedTask(
         BrowserThread::FILE,
@@ -198,35 +214,93 @@ void BootTimesLoader::Backend::GetBootTimes(
       GetBootTimesCallback::TupleType(request->handle(), boot_times));
 }
 
-static void RecordStatsDelayed(
-    const std::string& name,
-    const std::string& uptime,
-    const std::string& disk) {
+// Appends the given buffer into the file. Returns the number of bytes
+// written, or -1 on error.
+// TODO(satorux): Move this to file_util.
+static int AppendFile(const FilePath& file_path,
+                      const char* data,
+                      int size) {
+  FILE* file = file_util::OpenFile(file_path, "a");
+  if (!file) {
+    return -1;
+  }
+  const int num_bytes_written = fwrite(data, 1, size, file);
+  file_util::CloseFile(file);
+  return num_bytes_written;
+}
+
+static void RecordStatsDelayed(const FilePath::StringType& name,
+                               const std::string& uptime,
+                               const std::string& disk) {
   const FilePath log_path(kLogPath);
-  std::string disk_prefix = kDiskPrefix;
   const FilePath uptime_output =
       log_path.Append(FilePath(kUptimePrefix + name));
   const FilePath disk_output = log_path.Append(FilePath(kDiskPrefix + name));
 
-  // Write out the files, ensuring that they don't exist already.
-  if (!file_util::PathExists(uptime_output))
-    file_util::WriteFile(uptime_output, uptime.data(), uptime.size());
-  if (!file_util::PathExists(disk_output))
-    file_util::WriteFile(disk_output, disk.data(), disk.size());
+  // Append numbers to the files.
+  AppendFile(uptime_output, uptime.data(), uptime.size());
+  AppendFile(disk_output, disk.data(), disk.size());
 }
 
-static void WriteLoginTimes(
-    base::Time login_attempt,
-    base::Time login_success,
-    base::Time chrome_first_render) {
+// static
+void BootTimesLoader::WriteTimes(
+    const std::string base_name,
+    const std::string uma_name,
+    const std::string uma_prefix,
+    const std::vector<TimeMarker> login_times) {
+  const int kMinTimeMillis = 1;
+  const int kMaxTimeMillis = 30000;
+  const int kNumBuckets = 100;
   const FilePath log_path(kLogPath);
+
+  base::Time first = login_times.front().time();
+  base::Time last = login_times.back().time();
+  base::TimeDelta total = last - first;
+  scoped_refptr<base::Histogram>total_hist = base::Histogram::FactoryTimeGet(
+      uma_name,
+      base::TimeDelta::FromMilliseconds(kMinTimeMillis),
+      base::TimeDelta::FromMilliseconds(kMaxTimeMillis),
+      kNumBuckets,
+      base::Histogram::kUmaTargetedHistogramFlag);
+  total_hist->AddTime(total);
   std::string output =
-      base::StringPrintf("total: %.2f\nauth: %.2f\nlogin: %.2f\n",
-          (chrome_first_render - login_attempt).InSecondsF(),
-          (login_success - login_attempt).InSecondsF(),
-          (chrome_first_render - login_success).InSecondsF());
+      base::StringPrintf("%s: %.2f", uma_name.c_str(), total.InSecondsF());
+  base::Time prev = first;
+  for (unsigned int i = 0; i < login_times.size(); ++i) {
+    TimeMarker tm = login_times[i];
+    base::TimeDelta since_first = tm.time() - first;
+    base::TimeDelta since_prev = tm.time() - prev;
+    std::string name;
+
+    if (tm.send_to_uma()) {
+      name = uma_prefix + tm.name();
+      scoped_refptr<base::Histogram>prev_hist = base::Histogram::FactoryTimeGet(
+          name,
+          base::TimeDelta::FromMilliseconds(kMinTimeMillis),
+          base::TimeDelta::FromMilliseconds(kMaxTimeMillis),
+          kNumBuckets,
+          base::Histogram::kUmaTargetedHistogramFlag);
+      prev_hist->AddTime(since_prev);
+    } else {
+      name = tm.name();
+    }
+    output +=
+        StringPrintf(
+            "\n%.2f +%.2f %s",
+            since_first.InSecondsF(),
+            since_prev.InSecondsF(),
+            name.data());
+    prev = tm.time();
+  }
   file_util::WriteFile(
-      log_path.Append(kLoginTimes), output.data(), output.size());
+      log_path.Append(base_name), output.data(), output.size());
+}
+
+void BootTimesLoader::WriteLogoutTimes() {
+  WriteTimes(kLogoutTimes,
+             kUmaLogout,
+             kUmaLogoutPrefix,
+             logout_time_markers_);
 }
 
 void BootTimesLoader::RecordStats(const std::string& name, const Stats& stats) {
@@ -237,10 +311,10 @@ void BootTimesLoader::RecordStats(const std::string& name, const Stats& stats) {
 }
 
 BootTimesLoader::Stats BootTimesLoader::GetCurrentStats() {
-  const FilePath kProcUptime("/proc/uptime");
-  const FilePath kDiskStat("/sys/block/sda/stat");
+  const FilePath kProcUptime(FPL("/proc/uptime"));
+  const FilePath kDiskStat(FPL("/sys/block/sda/stat"));
   Stats stats;
-
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   file_util::ReadFileToString(kProcUptime, &stats.uptime);
   file_util::ReadFileToString(kDiskStat, &stats.disk);
   return stats;
@@ -259,7 +333,8 @@ void BootTimesLoader::RecordChromeMainStats() {
 }
 
 void BootTimesLoader::RecordLoginAttempted() {
-  login_attempt_ = base::Time::NowFromSystemTime();
+  login_time_markers_.clear();
+  AddLoginTimeMarker("LoginStarted", false);
   if (!have_registered_) {
     have_registered_ = true;
     registrar_.Add(this, NotificationType::LOAD_START,
@@ -269,38 +344,56 @@ void BootTimesLoader::RecordLoginAttempted() {
   }
 }
 
+void BootTimesLoader::AddLoginTimeMarker(
+    const std::string& marker_name, bool send_to_uma) {
+  login_time_markers_.push_back(TimeMarker(marker_name, send_to_uma));
+}
+
+void BootTimesLoader::AddLogoutTimeMarker(
+    const std::string& marker_name, bool send_to_uma) {
+  logout_time_markers_.push_back(TimeMarker(marker_name, send_to_uma));
+}
+
 void BootTimesLoader::Observe(
     NotificationType type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   if (type == NotificationType::LOGIN_AUTHENTICATION) {
     Details<AuthenticationNotificationDetails> auth_details(details);
-    if (!login_attempt_.is_null() && auth_details->success()) {
-      login_success_ = base::Time::NowFromSystemTime();
+    if (auth_details->success()) {
+      AddLoginTimeMarker("Authenticate", true);
       RecordCurrentStats(kLoginSuccess);
-      UMA_HISTOGRAM_TIMES(kUmaAuthenticate, login_success_ - login_attempt_);
       registrar_.Remove(this, NotificationType::LOGIN_AUTHENTICATION,
                         NotificationService::AllSources());
     }
   } else if (type == NotificationType::LOAD_START) {
+    // Make sure it's not some page load initiated by OOBE/login screen.
+    if (!UserManager::Get()->user_is_logged_in())
+      return;
     // Only log for first tab to render.  Make sure this is only done once.
     // If the network isn't connected we'll get a second LOAD_START once it is
     // and the page is reloaded.
-    if (!login_success_.is_null() &&
-        NetworkStateNotifier::Get()->is_connected()) {
+    if (NetworkStateNotifier::Get()->is_connected()) {
       // Post difference between first tab and login success time.
-      chrome_first_render_ = base::Time::NowFromSystemTime();
+      AddLoginTimeMarker("LoginDone", true);
       RecordCurrentStats(kChromeFirstRender);
-      UMA_HISTOGRAM_TIMES(kUmaLogin, chrome_first_render_ - login_success_);
       // Post chrome first render stat.
       registrar_.Remove(this, NotificationType::LOAD_START,
                         NotificationService::AllSources());
-      BrowserThread::PostTask(
+      // Don't swamp the FILE thread right away.
+      BrowserThread::PostDelayedTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableFunction(
-              WriteLoginTimes,
-              login_attempt_, login_success_, chrome_first_render_));
+          // This doesn't compile without std::string(...), as
+          // NewRunnableFunction doesn't accept arrays.
+          NewRunnableFunction(WriteTimes,
+                              std::string(kLoginTimes),
+                              std::string(kUmaLogin),
+                              std::string(kUmaLoginPrefix),
+                              login_time_markers_),
+          kLoginTimeWriteDelayMs);
       have_registered_ = false;
+    } else {
+      AddLoginTimeMarker("LoginRenderNoNetwork", false);
     }
   }
 }

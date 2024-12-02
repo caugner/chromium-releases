@@ -33,8 +33,8 @@
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -42,10 +42,12 @@
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
@@ -125,12 +127,8 @@ HistoryService::HistoryService()
       profile_(NULL),
       backend_loaded_(false),
       bookmark_service_(NULL),
-      no_db_(false) {
-  // Is NULL when running generate_profile.
-  if (NotificationService::current()) {
-    registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
-                   Source<Profile>(profile_));
-  }
+      no_db_(false),
+      needs_top_sites_migration_(false) {
 }
 
 HistoryService::HistoryService(Profile* profile)
@@ -138,8 +136,12 @@ HistoryService::HistoryService(Profile* profile)
       profile_(profile),
       backend_loaded_(false),
       bookmark_service_(NULL),
-      no_db_(false) {
+      no_db_(false),
+      needs_top_sites_migration_(false) {
+  DCHECK(profile_);
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
+                 Source<Profile>(profile_));
+  registrar_.Add(this, NotificationType::TEMPLATE_URL_REMOVED,
                  Source<Profile>(profile_));
 }
 
@@ -228,7 +230,7 @@ history::InMemoryURLIndex* HistoryService::InMemoryIndex() {
   // for this call.
   LoadBackendIfNecessary();
   if (in_memory_backend_.get())
-    return in_memory_backend_->index();
+    return in_memory_backend_->InMemoryIndex();
   return NULL;
 }
 
@@ -607,30 +609,40 @@ HistoryService::Handle HistoryService::QueryMostVisitedURLs(
 void HistoryService::Observe(NotificationType type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
-  if (type != NotificationType::HISTORY_URLS_DELETED) {
-    NOTREACHED();
+  if (!thread_)
     return;
-  }
 
-  // Update the visited link system for deleted URLs. We will update the
-  // visited link system for added URLs as soon as we get the add
-  // notification (we don't have to wait for the backend, which allows us to
-  // be faster to update the state).
-  //
-  // For deleted URLs, we don't typically know what will be deleted since
-  // delete notifications are by time. We would also like to be more
-  // respectful of privacy and never tell the user something is gone when it
-  // isn't. Therefore, we update the delete URLs after the fact.
-  if (!profile_)
-    return;  // No profile, probably unit testing.
-  Details<history::URLsDeletedDetails> deleted_details(details);
-  VisitedLinkMaster* visited_links = profile_->GetVisitedLinkMaster();
-  if (!visited_links)
-    return;  // Nobody to update.
-  if (deleted_details->all_history)
-    visited_links->DeleteAllURLs();
-  else  // Delete individual ones.
-    visited_links->DeleteURLs(deleted_details->urls);
+  switch (type.value) {
+    case NotificationType::HISTORY_URLS_DELETED: {
+      // Update the visited link system for deleted URLs. We will update the
+      // visited link system for added URLs as soon as we get the add
+      // notification (we don't have to wait for the backend, which allows us to
+      // be faster to update the state).
+      //
+      // For deleted URLs, we don't typically know what will be deleted since
+      // delete notifications are by time. We would also like to be more
+      // respectful of privacy and never tell the user something is gone when it
+      // isn't. Therefore, we update the delete URLs after the fact.
+      if (!profile_)
+        return;  // No profile, probably unit testing.
+      Details<history::URLsDeletedDetails> deleted_details(details);
+      VisitedLinkMaster* visited_links = profile_->GetVisitedLinkMaster();
+      if (!visited_links)
+        return;  // Nobody to update.
+      if (deleted_details->all_history)
+        visited_links->DeleteAllURLs();
+      else  // Delete individual ones.
+        visited_links->DeleteURLs(deleted_details->urls);
+      break;
+    }
+
+    case NotificationType::TEMPLATE_URL_REMOVED:
+      DeleteAllSearchTermsForKeyword(*(Details<TemplateURLID>(details).ptr()));
+      break;
+
+    default:
+      NOTREACHED();
+  }
 }
 
 bool HistoryService::Init(const FilePath& history_dir,
@@ -671,6 +683,7 @@ bool HistoryService::CanAddURL(const GURL& url) {
   // typed.  Right now, however, these are marked as typed even when triggered
   // by a shortcut or menu action.
   if (url.SchemeIs(chrome::kJavaScriptScheme) ||
+      url.SchemeIs(chrome::kChromeDevToolsScheme) ||
       url.SchemeIs(chrome::kChromeUIScheme) ||
       url.SchemeIs(chrome::kViewSourceScheme) ||
       url.SchemeIs(chrome::kChromeInternalScheme))
@@ -731,6 +744,9 @@ void HistoryService::BroadcastNotifications(
   if (!g_browser_process)
     return;
 
+  if (!thread_)
+    return;
+
   // The source of all of our notifications is the profile. Note that this
   // pointer is NULL in unit tests.
   Source<Profile> source(profile_);
@@ -753,7 +769,13 @@ void HistoryService::LoadBackendIfNecessary() {
                          bookmark_service_));
   history_backend_.swap(backend);
 
-  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init, no_db_);
+  // There may not be a profile when unit testing.
+  std::string languages;
+  if (profile_) {
+    PrefService* prefs = profile_->GetPrefs();
+    languages = prefs->GetString(prefs::kAcceptLanguages);
+  }
+  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init, languages, no_db_);
 }
 
 void HistoryService::OnDBLoaded() {
@@ -761,12 +783,21 @@ void HistoryService::OnDBLoaded() {
   NotificationService::current()->Notify(NotificationType::HISTORY_LOADED,
                                          Source<Profile>(profile_),
                                          Details<HistoryService>(this));
+  if (thread_ && profile_ && history::TopSites::IsEnabled()) {
+    // We don't want to force creation of TopSites.
+    history::TopSites* ts = profile_->GetTopSitesWithoutCreating();
+    if (ts)
+      ts->HistoryLoaded();
+  }
 }
 
 void HistoryService::StartTopSitesMigration() {
-  if (history::TopSites::IsEnabled()) {
-    history::TopSites* ts = profile_->GetTopSites();
-    ts->StartMigration();
+  needs_top_sites_migration_ = true;
+  if (thread_ && profile_ && history::TopSites::IsEnabled()) {
+    // We don't want to force creation of TopSites.
+    history::TopSites* ts = profile_->GetTopSitesWithoutCreating();
+    if (ts)
+      ts->MigrateFromHistory();
   }
 }
 

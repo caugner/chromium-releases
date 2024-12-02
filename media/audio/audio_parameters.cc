@@ -10,15 +10,18 @@ AudioParameters::AudioParameters()
     : format(AUDIO_PCM_LINEAR),
       channels(0),
       sample_rate(0),
-      bits_per_sample(0) {
+      bits_per_sample(0),
+      samples_per_packet(0) {
 }
 
 AudioParameters::AudioParameters(Format format, int channels,
-                                 int sample_rate, int bits_per_sample)
+                                 int sample_rate, int bits_per_sample,
+                                 int samples_per_packet)
     : format(format),
       channels(channels),
       sample_rate(sample_rate),
-      bits_per_sample(bits_per_sample) {
+      bits_per_sample(bits_per_sample),
+      samples_per_packet(samples_per_packet) {
 }
 
 bool AudioParameters::IsValid() const {
@@ -26,5 +29,33 @@ bool AudioParameters::IsValid() const {
       (channels > 0) && (channels <= media::Limits::kMaxChannels) &&
       (sample_rate > 0) && (sample_rate <= media::Limits::kMaxSampleRate) &&
       (bits_per_sample > 0) &&
-      (bits_per_sample <= media::Limits::kMaxBitsPerSample);
+      (bits_per_sample <= media::Limits::kMaxBitsPerSample) &&
+      (samples_per_packet > 0) &&
+      (samples_per_packet <= media::Limits::kMaxSamplesPerPacket);
+}
+
+int AudioParameters::GetPacketSize() const {
+  return samples_per_packet * channels * bits_per_sample / 8;
+}
+
+bool AudioParameters::Compare::operator()(
+    const AudioParameters& a,
+    const AudioParameters& b) const {
+  if (a.format < b.format)
+    return true;
+  if (a.format > b.format)
+    return false;
+  if (a.channels < b.channels)
+    return true;
+  if (a.channels > b.channels)
+    return false;
+  if (a.sample_rate < b.sample_rate)
+    return true;
+  if (a.sample_rate > b.sample_rate)
+    return false;
+  if (a.bits_per_sample < b.bits_per_sample)
+    return true;
+  if (a.bits_per_sample > b.bits_per_sample)
+    return false;
+  return a.samples_per_packet < b.samples_per_packet;
 }

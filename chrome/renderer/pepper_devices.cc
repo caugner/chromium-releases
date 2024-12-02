@@ -20,10 +20,29 @@ const uint32 kBytesPerPixel = 4;  // Only 8888 RGBA for now.
 
 int Graphics2DDeviceContext::next_buffer_id_ = 0;
 
+struct Graphics2DDeviceContext::FlushCallbackData {
+  FlushCallbackData(NPDeviceFlushContextCallbackPtr f,
+                    NPP n,
+                    NPDeviceContext2D* c,
+                    NPUserData* u)
+      : function(f),
+        npp(n),
+        context(c),
+        user_data(u) {
+  }
+
+  NPDeviceFlushContextCallbackPtr function;
+  NPP npp;
+  NPDeviceContext2D* context;
+  NPUserData* user_data;
+};
+
 Graphics2DDeviceContext::Graphics2DDeviceContext(
     WebPluginDelegatePepper* plugin_delegate)
     : plugin_delegate_(plugin_delegate) {
 }
+
+Graphics2DDeviceContext::~Graphics2DDeviceContext() {}
 
 NPError Graphics2DDeviceContext::Initialize(
     gfx::Rect window_rect, const NPDeviceContext2DConfig* config,
@@ -153,6 +172,12 @@ void Graphics2DDeviceContext::RenderViewFlushedPaint() {
   painted_flush_callbacks_.clear();
 }
 
+AudioDeviceContext::AudioDeviceContext()
+    : context_(NULL),
+      stream_id_(0),
+      shared_memory_size_(0) {
+}
+
 AudioDeviceContext::~AudioDeviceContext() {
   if (stream_id_) {
     OnDestroy();
@@ -188,8 +213,7 @@ NPError AudioDeviceContext::Initialize(AudioMessageFilter* filter,
   }
 
   context->config = *config;
-  params.packet_size = config->sampleFrameCount * config->outputChannelMap *
-      (params.params.bits_per_sample >> 3);
+  params.params.samples_per_packet = config->sampleFrameCount;
 
   stream_id_ = filter_->AddDelegate(this);
   filter->Send(new ViewHostMsg_CreateAudioStream(0, stream_id_, params, true));

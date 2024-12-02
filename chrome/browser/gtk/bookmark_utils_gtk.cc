@@ -11,7 +11,7 @@
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
@@ -282,7 +282,13 @@ void SetButtonTextColors(GtkWidget* label, GtkThemeProvider* provider) {
   } else {
     GdkColor color = provider->GetGdkColor(
         BrowserThemeProvider::COLOR_BOOKMARK_TEXT);
-    gtk_util::SetLabelColor(label, &color);
+    gtk_widget_modify_fg(label, GTK_STATE_NORMAL, &color);
+    gtk_widget_modify_fg(label, GTK_STATE_INSENSITIVE, &color);
+
+    // Because the prelight state is a white image that doesn't change by the
+    // theme, force the text color to black when it would be used.
+    gtk_widget_modify_fg(label, GTK_STATE_ACTIVE, &gtk_util::kGdkBlack);
+    gtk_widget_modify_fg(label, GTK_STATE_PRELIGHT, &gtk_util::kGdkBlack);
   }
 }
 
@@ -314,7 +320,7 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
                                Profile* profile) {
   switch (target_type) {
     case gtk_dnd_util::CHROME_BOOKMARK_ITEM: {
-      BookmarkDragData data(nodes);
+      BookmarkNodeData data(nodes);
       Pickle pickle;
       data.WriteToPickle(profile, &pickle);
 
@@ -386,7 +392,7 @@ std::vector<const BookmarkNode*> GetNodesFromSelection(
           *dnd_success = TRUE;
         Pickle pickle(reinterpret_cast<char*>(selection_data->data),
                       selection_data->length);
-        BookmarkDragData drag_data;
+        BookmarkNodeData drag_data;
         drag_data.ReadFromPickle(&pickle);
         return drag_data.GetNodes(profile);
       }

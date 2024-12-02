@@ -13,6 +13,7 @@
 
 #include "googleurl/src/gurl.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/search_engines/template_url_id.h"
 
 namespace history {
 
@@ -26,6 +27,9 @@ struct HistoryDetails {
 
 // Details for HISTORY_URL_VISITED.
 struct URLVisitedDetails : public HistoryDetails {
+  URLVisitedDetails();
+  virtual ~URLVisitedDetails();
+
   PageTransition::Type transition;
   URLRow row;
 
@@ -38,12 +42,18 @@ struct URLVisitedDetails : public HistoryDetails {
 
 // Details for NOTIFY_HISTORY_TYPED_URLS_MODIFIED.
 struct URLsModifiedDetails : public HistoryDetails {
+  URLsModifiedDetails();
+  virtual ~URLsModifiedDetails();
+
   // Lists the information for each of the URLs affected.
   std::vector<URLRow> changed_urls;
 };
 
 // Details for NOTIFY_HISTORY_URLS_DELETED.
 struct URLsDeletedDetails : public HistoryDetails {
+  URLsDeletedDetails();
+  virtual ~URLsDeletedDetails();
+
   // Set when all history was deleted. False means just a subset was deleted.
   bool all_history;
 
@@ -55,7 +65,8 @@ struct URLsDeletedDetails : public HistoryDetails {
 
 // Details for NOTIFY_URLS_STARRED.
 struct URLsStarredDetails : public HistoryDetails {
-  explicit URLsStarredDetails(bool being_starred) : starred(being_starred) {}
+  explicit URLsStarredDetails(bool being_starred);
+  virtual ~URLsStarredDetails();
 
   // The new starred state of the list of URLs. True when they are being
   // starred, false when they are being unstarred.
@@ -67,7 +78,20 @@ struct URLsStarredDetails : public HistoryDetails {
 
 // Details for NOTIFY_FAVICON_CHANGED.
 struct FavIconChangeDetails : public HistoryDetails {
+  FavIconChangeDetails();
+  virtual ~FavIconChangeDetails();
+
   std::set<GURL> urls;
+};
+
+// Details for HISTORY_KEYWORD_SEARCH_TERM_UPDATED.
+struct KeywordSearchTermDetails : public HistoryDetails {
+  KeywordSearchTermDetails();
+  ~KeywordSearchTermDetails();
+
+  GURL url;
+  TemplateURLID keyword_id;
+  string16 term;
 };
 
 }  // namespace history

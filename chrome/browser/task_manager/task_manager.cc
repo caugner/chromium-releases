@@ -16,8 +16,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile_manager.h"
@@ -70,13 +70,18 @@ string16 FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
 ////////////////////////////////////////////////////////////////////////////////
 
 TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
-    : update_state_(IDLE),
+    : update_requests_(0),
+      update_state_(IDLE),
       goat_salt_(rand()) {
 
   TaskManagerBrowserProcessResourceProvider* browser_provider =
       new TaskManagerBrowserProcessResourceProvider(task_manager);
   browser_provider->AddRef();
   providers_.push_back(browser_provider);
+  TaskManagerBackgroundContentsResourceProvider* bc_provider =
+      new TaskManagerBackgroundContentsResourceProvider(task_manager);
+  bc_provider->AddRef();
+  providers_.push_back(bc_provider);
   TaskManagerTabContentsResourceProvider* wc_provider =
       new TaskManagerTabContentsResourceProvider(task_manager);
   wc_provider->AddRef();
@@ -115,13 +120,17 @@ void TaskManagerModel::RemoveObserver(TaskManagerModelObserver* observer) {
 }
 
 string16 TaskManagerModel::GetResourceTitle(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return WideToUTF16Hack(resources_[index]->GetTitle());
 }
 
+int64 TaskManagerModel::GetNetworkUsage(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return GetNetworkUsage(resources_[index]);
+}
+
 string16 TaskManagerModel::GetResourceNetworkUsage(int index) const {
-  DCHECK(index < ResourceCount());
-  int64 net_usage = GetNetworkUsage(resources_[index]);
+  int64 net_usage = GetNetworkUsage(index);
   if (net_usage == -1)
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   if (net_usage == 0)
@@ -132,8 +141,13 @@ string16 TaskManagerModel::GetResourceNetworkUsage(int index) const {
   return base::i18n::GetDisplayStringInLTRDirectionality(net_byte);
 }
 
+double TaskManagerModel::GetCPUUsage(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return GetCPUUsage(resources_[index]);
+}
+
 string16 TaskManagerModel::GetResourceCPUUsage(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return WideToUTF16Hack(StringPrintf(
 #if defined(OS_MACOSX)
       // Activity Monitor shows %cpu with one decimal digit -- be
@@ -165,19 +179,23 @@ string16 TaskManagerModel::GetResourcePhysicalMemory(int index) const {
   return GetMemCellText(phys_mem);
 }
 
+int TaskManagerModel::GetProcessId(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return base::GetProcId(resources_[index]->GetProcess());
+}
+
 string16 TaskManagerModel::GetResourceProcessId(int index) const {
-  DCHECK(index < ResourceCount());
-  return base::IntToString16(base::GetProcId(resources_[index]->GetProcess()));
+  return base::IntToString16(GetProcessId(index));
 }
 
 string16 TaskManagerModel::GetResourceGoatsTeleported(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return base::FormatNumber(GetGoatsTeleported(index));
 }
 
 string16 TaskManagerModel::GetResourceWebCoreImageCacheSize(
     int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   if (!resources_[index]->ReportsCacheStats())
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   const WebKit::WebCache::ResourceTypeStats stats(
@@ -187,7 +205,7 @@ string16 TaskManagerModel::GetResourceWebCoreImageCacheSize(
 
 string16 TaskManagerModel::GetResourceWebCoreScriptsCacheSize(
     int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   if (!resources_[index]->ReportsCacheStats())
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   const WebKit::WebCache::ResourceTypeStats stats(
@@ -197,7 +215,7 @@ string16 TaskManagerModel::GetResourceWebCoreScriptsCacheSize(
 
 string16 TaskManagerModel::GetResourceWebCoreCSSCacheSize(
     int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   if (!resources_[index]->ReportsCacheStats())
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   const WebKit::WebCache::ResourceTypeStats stats(
@@ -206,7 +224,7 @@ string16 TaskManagerModel::GetResourceWebCoreCSSCacheSize(
 }
 
 string16 TaskManagerModel::GetResourceSqliteMemoryUsed(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   if (!resources_[index]->ReportsSqliteMemoryUsed())
     return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NA_CELL_TEXT);
   return GetMemCellText(resources_[index]->SqliteMemoryUsedBytes());
@@ -226,7 +244,7 @@ string16 TaskManagerModel::GetResourceV8MemoryAllocatedSize(
 }
 
 bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   TaskManager::Resource* resource = resources_[index];
   GroupMap::const_iterator iter = group_map_.find(resource->GetProcess());
   DCHECK(iter != group_map_.end());
@@ -234,8 +252,13 @@ bool TaskManagerModel::IsResourceFirstInGroup(int index) const {
   return ((*group)[0] == resource);
 }
 
+bool TaskManagerModel::IsBackgroundResource(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return resources_[index]->IsBackground();
+}
+
 SkBitmap TaskManagerModel::GetResourceIcon(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   SkBitmap icon = resources_[index]->GetIcon();
   if (!icon.isNull())
     return icon;
@@ -247,7 +270,7 @@ SkBitmap TaskManagerModel::GetResourceIcon(int index) const {
 
 std::pair<int, int> TaskManagerModel::GetGroupRangeForResource(int index)
     const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   TaskManager::Resource* resource = resources_[index];
   GroupMap::const_iterator group_iter =
       group_map_.find(resource->GetProcess());
@@ -267,7 +290,7 @@ std::pair<int, int> TaskManagerModel::GetGroupRangeForResource(int index)
 }
 
 int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
-  DCHECK(row1 < ResourceCount() && row2 < ResourceCount());
+  CHECK(row1 < ResourceCount() && row2 < ResourceCount());
   switch (col_id) {
     case IDS_TASK_MANAGER_PAGE_COLUMN: {
       // Let's do the default, string compare on the resource title.
@@ -374,17 +397,22 @@ int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
 
 base::ProcessHandle TaskManagerModel::GetResourceProcessHandle(int index)
     const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return resources_[index]->GetProcess();
 }
 
+TaskManager::Resource::Type TaskManagerModel::GetResourceType(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return resources_[index]->GetType();
+}
+
 TabContents* TaskManagerModel::GetResourceTabContents(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return resources_[index]->GetTabContents();
 }
 
 const Extension* TaskManagerModel::GetResourceExtension(int index) const {
-  DCHECK(index < ResourceCount());
+  CHECK_LT(index, ResourceCount());
   return resources_[index]->GetExtension();
 }
 
@@ -472,7 +500,7 @@ string16 TaskManagerModel::GetMemCellText(int64 number) const {
   string16 str = base::FormatNumber(number / 1024);
 
   // Adjust number string if necessary.
-  base::i18n::AdjustStringForLocaleDirection(str, &str);
+  base::i18n::AdjustStringForLocaleDirection(&str);
   return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_MEM_CELL_TEXT, str);
 #else
   // System expectation is to show "100 KB", "200 MB", etc.
@@ -482,6 +510,12 @@ string16 TaskManagerModel::GetMemCellText(int64 number) const {
 }
 
 void TaskManagerModel::StartUpdating() {
+  // Multiple StartUpdating requests may come in, and we only need to take
+  // action the first time.
+  update_requests_++;
+  if (update_requests_ > 1)
+    return;
+  DCHECK_EQ(1, update_requests_);
   DCHECK_NE(TASK_PENDING, update_state_);
 
   // If update_state_ is STOPPING, it means a task is still pending.  Setting
@@ -508,6 +542,13 @@ void TaskManagerModel::StartUpdating() {
 }
 
 void TaskManagerModel::StopUpdating() {
+  // Don't actually stop updating until we have heard as many calls as those
+  // to StartUpdating.
+  update_requests_--;
+  if (update_requests_ > 0)
+    return;
+  // Make sure that update_requests_ cannot go negative.
+  CHECK_EQ(0, update_requests_);
   DCHECK_EQ(TASK_PENDING, update_state_);
   update_state_ = STOPPING;
 
@@ -522,6 +563,9 @@ void TaskManagerModel::StopUpdating() {
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
           this, &TaskManagerModel::UnregisterForJobDoneNotifications));
+
+  // Must clear the resources before the next attempt to start updating.
+  Clear();
 }
 
 void TaskManagerModel::AddResourceProvider(
@@ -572,7 +616,7 @@ void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
                   resources_.end(),
                   (*group_entries)[group_entries->size() - 2]);
     DCHECK(iter != resources_.end());
-    new_entry_index = static_cast<int>(iter - resources_.begin());
+    new_entry_index = static_cast<int>(iter - resources_.begin()) + 1;
     resources_.insert(++iter, resource);
   }
 
@@ -674,6 +718,11 @@ void TaskManagerModel::Clear() {
     FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_,
                       OnItemsRemoved(0, size));
   }
+}
+
+void TaskManagerModel::ModelChanged() {
+  // Notify the table that the contents have changed for it to redraw.
+  FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_, OnModelChanged());
 }
 
 void TaskManagerModel::NotifyResourceTypeStats(
@@ -925,7 +974,10 @@ void TaskManager::RemoveResource(Resource* resource) {
 
 void TaskManager::OnWindowClosed() {
   model_->StopUpdating();
-  model_->Clear();
+}
+
+void TaskManager::ModelChanged() {
+  model_->ModelChanged();
 }
 
 // static

@@ -12,7 +12,7 @@
 
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/browser_process_impl.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome_frame/test/test_server.h"
 #include "chrome_frame/test/net/test_automation_provider.h"
 #include "chrome_frame/test/net/process_singleton_subclass.h"
@@ -73,6 +73,9 @@ class CFUrlRequestUnittestRunner
 
   void StartTests();
 
+  // Borrowed from TestSuite::Initialize().
+  static void InitializeLogging();
+
  protected:
   // This is the thread that runs all the UrlRequest tests.
   // Within its context, the Initialize() and Shutdown() routines above
@@ -82,8 +85,6 @@ class CFUrlRequestUnittestRunner
   static void TakeDownBrowser(CFUrlRequestUnittestRunner* me);
 
  protected:
-  // Borrowed from TestSuite::Initialize().
-  void InitializeLogging();
 
  protected:
   ScopedHandle test_thread_;

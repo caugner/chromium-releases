@@ -73,8 +73,8 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         {'_chromium': '1', 'mac_bundle_id': 'com.example.Test'},
         'plist',
         'en')
-    expected_output = \
-        self._GetExpectedOutputs('Chromium', 'com.example.Test', '<array/>')
+    expected_output = self._GetExpectedOutputs(
+        'Chromium', 'com.example.Test', '<array/>')
     self.assertEquals(output.strip(), expected_output.strip())
 
   def testMainPolicy(self):
@@ -88,7 +88,7 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
             'policies': [{
               'name': 'MainPolicy',
               'type': 'main',
-              'annotations': {'platforms': ['mac']},
+              'supported_on': ['chrome.mac:8-'],
             }],
           },
         ],
@@ -107,8 +107,8 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         {'_chromium' : '1', 'mac_bundle_id': 'com.example.Test'},
         'plist',
         'en')
-    expected_output = \
-        self._GetExpectedOutputs('Chromium', 'com.example.Test', '''<array>
+    expected_output = self._GetExpectedOutputs(
+        'Chromium', 'com.example.Test', '''<array>
       <dict>
         <key>pfm_name</key>
         <string>MainPolicy</string>
@@ -137,7 +137,7 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
             'policies': [{
               'name': 'StringPolicy',
               'type': 'string',
-              'annotations': {'platforms': ['mac']},
+              'supported_on': ['chrome.mac:8-'],
             }],
           },
         ],
@@ -156,8 +156,8 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         {'_chromium' : '1', 'mac_bundle_id': 'com.example.Test'},
         'plist',
         'en')
-    expected_output = \
-        self._GetExpectedOutputs('Chromium', 'com.example.Test', '''<array>
+    expected_output = self._GetExpectedOutputs(
+        'Chromium', 'com.example.Test', '''<array>
       <dict>
         <key>pfm_name</key>
         <string>StringPolicy</string>
@@ -190,7 +190,7 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
                 {'name': 'ProxyServerDisabled', 'value': '0'},
                 {'name': 'ProxyServerAutoDetect', 'value': '1'},
               ],
-              'annotations': {'platforms': ['mac']},
+              'supported_on': ['chrome.mac:8-'],
             }],
           },
         ],
@@ -211,8 +211,8 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         {'_google_chrome': '1', 'mac_bundle_id': 'com.example.Test2'},
         'plist',
         'en')
-    expected_output = \
-        self._GetExpectedOutputs('Google Chrome', 'com.example.Test2', '''<array>
+    expected_output = self._GetExpectedOutputs(
+        'Google_Chrome', 'com.example.Test2', '''<array>
       <dict>
         <key>pfm_name</key>
         <string>EnumPolicy</string>
@@ -247,7 +247,7 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
             'policies': [{
               'name': 'NonMacPolicy',
               'type': 'string',
-              'annotations': {'platforms': ['win', 'linux']},
+              'supported_on': ['chrome.linux:8-', 'chrome.win:7-'],
             }],
           },
         ],
@@ -266,8 +266,8 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         {'_google_chrome': '1', 'mac_bundle_id': 'com.example.Test2'},
         'plist',
         'en')
-    expected_output = \
-        self._GetExpectedOutputs('Google Chrome', 'com.example.Test2', '''<array/>''')
+    expected_output = self._GetExpectedOutputs(
+        'Google_Chrome', 'com.example.Test2', '''<array/>''')
     self.assertEquals(output.strip(), expected_output.strip())
 
 

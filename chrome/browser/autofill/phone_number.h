@@ -14,8 +14,8 @@
 // A form group that stores phone number information.
 class PhoneNumber : public FormGroup {
  public:
-  PhoneNumber() {}
-  virtual ~PhoneNumber() {}
+  PhoneNumber();
+  virtual ~PhoneNumber();
 
   // FormGroup implementation:
   virtual FormGroup* Clone() const = 0;
@@ -37,6 +37,12 @@ class PhoneNumber : public FormGroup {
                                string16* number,
                                string16* city_code,
                                string16* country_code);
+
+  // Size and offset of the prefix and suffix portions of phone numbers.
+  static const int kPrefixOffset = 0;
+  static const int kPrefixLength = 3;
+  static const int kSuffixOffset = 3;
+  static const int kSuffixLength = 4;
 
  protected:
   explicit PhoneNumber(const PhoneNumber& phone_number);

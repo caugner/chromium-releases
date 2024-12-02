@@ -17,14 +17,15 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/condition_variable.h"
-#include "base/histogram.h"
 #include "base/lazy_instance.h"
 #include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread.h"
+#include "base/thread_checker.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
@@ -40,15 +41,17 @@ namespace {
 pthread_mutex_t g_request_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static URLRequestContext* g_request_context = NULL;
 
-class OCSPIOLoop : public MessageLoop::DestructionObserver {
- public:
-  // MessageLoop::DestructionObserver:
-  virtual void WillDestroyCurrentMessageLoop();
+class OCSPRequestSession;
 
+class OCSPIOLoop {
+ public:
   void StartUsing() {
     AutoLock autolock(lock_);
     used_ = true;
   }
+
+  // Called on IO loop.
+  void Shutdown();
 
   bool used() const {
     AutoLock autolock(lock_);
@@ -60,68 +63,30 @@ class OCSPIOLoop : public MessageLoop::DestructionObserver {
 
   void EnsureIOLoop();
 
+  void AddRequest(OCSPRequestSession* request);
+  void RemoveRequest(OCSPRequestSession* request);
+
  private:
   friend struct base::DefaultLazyInstanceTraits<OCSPIOLoop>;
 
   OCSPIOLoop();
   ~OCSPIOLoop();
 
+  void CancelAllRequests();
+
   mutable Lock lock_;
+  bool shutdown_;  // Protected by |lock_|.
+  std::set<OCSPRequestSession*> requests_;  // Protected by |lock_|.
   bool used_;  // Protected by |lock_|.
   // This should not be modified after |used_|.
   MessageLoopForIO* io_loop_;  // Protected by |lock_|.
+  ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(OCSPIOLoop);
 };
 
-OCSPIOLoop::OCSPIOLoop()
-    : used_(false),
-      io_loop_(MessageLoopForIO::current()) {
-  DCHECK(io_loop_);
-  io_loop_->AddDestructionObserver(this);
-}
-
-OCSPIOLoop::~OCSPIOLoop() {
-  // IO thread was already deleted before the singleton is deleted
-  // in AtExitManager.
-  {
-    AutoLock autolock(lock_);
-    DCHECK(!io_loop_);
-    DCHECK(!used_);
-  }
-
-  pthread_mutex_lock(&g_request_context_lock);
-  DCHECK(!g_request_context);
-  pthread_mutex_unlock(&g_request_context_lock);
-}
-
-void OCSPIOLoop::WillDestroyCurrentMessageLoop() {
-  // Prevent the worker thread from trying to access |io_loop_|.
-  {
-    AutoLock autolock(lock_);
-    DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
-    io_loop_ = NULL;
-    used_ = false;
-  }
-
-  pthread_mutex_lock(&g_request_context_lock);
-  g_request_context = NULL;
-  pthread_mutex_unlock(&g_request_context_lock);
-}
-
-void OCSPIOLoop::PostTaskToIOLoop(
-    const tracked_objects::Location& from_here, Task* task) {
-  AutoLock autolock(lock_);
-  if (io_loop_)
-    io_loop_->PostTask(from_here, task);
-}
-
-void OCSPIOLoop::EnsureIOLoop() {
-  AutoLock autolock(lock_);
-  DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
-}
-
-base::LazyInstance<OCSPIOLoop> g_ocsp_io_loop(base::LINKER_INITIALIZED);
+base::LazyInstance<OCSPIOLoop, base::LeakyLazyInstanceTraits<OCSPIOLoop> >
+    g_ocsp_io_loop(base::LINKER_INITIALIZED);
 
 const int kRecvBufferSize = 4096;
 
@@ -171,44 +136,6 @@ class OCSPNSSInitialization {
   DISALLOW_COPY_AND_ASSIGN(OCSPNSSInitialization);
 };
 
-OCSPNSSInitialization::OCSPNSSInitialization() {
-  // NSS calls the functions in the function table to download certificates
-  // or CRLs or talk to OCSP responders over HTTP.  These functions must
-  // set an NSS/NSPR error code when they fail.  Otherwise NSS will get the
-  // residual error code from an earlier failed function call.
-  client_fcn_.version = 1;
-  SEC_HttpClientFcnV1Struct *ft = &client_fcn_.fcnTable.ftable1;
-  ft->createSessionFcn = OCSPCreateSession;
-  ft->keepAliveSessionFcn = OCSPKeepAliveSession;
-  ft->freeSessionFcn = OCSPFreeSession;
-  ft->createFcn = OCSPCreate;
-  ft->setPostDataFcn = OCSPSetPostData;
-  ft->addHeaderFcn = OCSPAddHeader;
-  ft->trySendAndReceiveFcn = OCSPTrySendAndReceive;
-  ft->cancelFcn = NULL;
-  ft->freeFcn = OCSPFree;
-  SECStatus status = SEC_RegisterDefaultHttpClient(&client_fcn_);
-  if (status != SECSuccess) {
-    NOTREACHED() << "Error initializing OCSP: " << PR_GetError();
-  }
-
-  // Work around NSS bugs 524013 and 564334.  NSS incorrectly thinks the
-  // CRLs for Network Solutions Certificate Authority have bad signatures,
-  // which causes certificates issued by that CA to be reported as revoked.
-  // By using OCSP for those certificates, which don't have AIA extensions,
-  // we can work around these bugs.  See http://crbug.com/41730.
-  CERT_StringFromCertFcn old_callback = NULL;
-  status = CERT_RegisterAlternateOCSPAIAInfoCallBack(
-      GetAlternateOCSPAIAInfo, &old_callback);
-  if (status == SECSuccess) {
-    DCHECK(!old_callback);
-  } else {
-    NOTREACHED() << "Error initializing OCSP: " << PR_GetError();
-  }
-}
-
-OCSPNSSInitialization::~OCSPNSSInitialization() {}
-
 base::LazyInstance<OCSPNSSInitialization> g_ocsp_nss_initialization(
     base::LINKER_INITIALIZED);
 
@@ -219,8 +146,7 @@ base::LazyInstance<OCSPNSSInitialization> g_ocsp_nss_initialization(
 // on IO thread.
 class OCSPRequestSession
     : public base::RefCountedThreadSafe<OCSPRequestSession>,
-      public URLRequest::Delegate,
-      public MessageLoop::DestructionObserver {
+      public URLRequest::Delegate {
  public:
   OCSPRequestSession(const GURL& url,
                      const char* http_request_method,
@@ -349,7 +275,7 @@ class OCSPRequestSession
     if (!request_->status().is_io_pending()) {
       delete request_;
       request_ = NULL;
-      io_loop_->RemoveDestructionObserver(this);
+      g_ocsp_io_loop.Get().RemoveRequest(this);
       {
         AutoLock autolock(lock_);
         finished_ = true;
@@ -360,13 +286,28 @@ class OCSPRequestSession
     }
   }
 
-  virtual void WillDestroyCurrentMessageLoop() {
-    DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
+  // Must be called on the IO loop thread.
+  void CancelURLRequest() {
+#ifndef NDEBUG
     {
       AutoLock autolock(lock_);
-      io_loop_ = NULL;
+      if (io_loop_)
+        DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
     }
-    CancelURLRequest();
+#endif
+    if (request_) {
+      request_->Cancel();
+      delete request_;
+      request_ = NULL;
+      g_ocsp_io_loop.Get().RemoveRequest(this);
+      {
+        AutoLock autolock(lock_);
+        finished_ = true;
+        io_loop_ = NULL;
+      }
+      cv_.Signal();
+      Release();  // Balanced with StartURLRequest().
+    }
   }
 
  private:
@@ -405,7 +346,7 @@ class OCSPRequestSession
       AutoLock autolock(lock_);
       DCHECK(!io_loop_);
       io_loop_ = MessageLoopForIO::current();
-      io_loop_->AddDestructionObserver(this);
+      g_ocsp_io_loop.Get().AddRequest(this);
     }
 
     request_ = new URLRequest(url_, this);
@@ -430,32 +371,6 @@ class OCSPRequestSession
 
     request_->Start();
     AddRef();  // Release after |request_| deleted.
-  }
-
-  void CancelURLRequest() {
-#ifndef NDEBUG
-    {
-      AutoLock autolock(lock_);
-      if (io_loop_)
-        DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
-    }
-#endif
-    if (request_) {
-      request_->Cancel();
-      delete request_;
-      request_ = NULL;
-      // |io_loop_| may be NULL here if it called from
-      // WillDestroyCurrentMessageLoop().
-      if (io_loop_)
-        io_loop_->RemoveDestructionObserver(this);
-      {
-        AutoLock autolock(lock_);
-        finished_ = true;
-        io_loop_ = NULL;
-      }
-      cv_.Signal();
-      Release();  // Balanced with StartURLRequest().
-    }
   }
 
   GURL url_;                      // The URL we eventually wound up at
@@ -523,13 +438,129 @@ class OCSPServerSession {
   DISALLOW_COPY_AND_ASSIGN(OCSPServerSession);
 };
 
+OCSPIOLoop::OCSPIOLoop()
+    : shutdown_(false),
+      used_(false),
+      io_loop_(MessageLoopForIO::current()) {
+  DCHECK(io_loop_);
+}
+
+OCSPIOLoop::~OCSPIOLoop() {
+  // IO thread was already deleted before the singleton is deleted
+  // in AtExitManager.
+  {
+    AutoLock autolock(lock_);
+    DCHECK(!io_loop_);
+    DCHECK(!used_);
+    DCHECK(shutdown_);
+  }
+
+  pthread_mutex_lock(&g_request_context_lock);
+  DCHECK(!g_request_context);
+  pthread_mutex_unlock(&g_request_context_lock);
+}
+
+void OCSPIOLoop::Shutdown() {
+  // Safe to read outside lock since we only write on IO thread anyway.
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // Prevent the worker thread from trying to access |io_loop_|.
+  {
+    AutoLock autolock(lock_);
+    io_loop_ = NULL;
+    used_ = false;
+    shutdown_ = true;
+  }
+
+  CancelAllRequests();
+
+  pthread_mutex_lock(&g_request_context_lock);
+  g_request_context = NULL;
+  pthread_mutex_unlock(&g_request_context_lock);
+}
+
+void OCSPIOLoop::PostTaskToIOLoop(
+    const tracked_objects::Location& from_here, Task* task) {
+  AutoLock autolock(lock_);
+  if (io_loop_)
+    io_loop_->PostTask(from_here, task);
+}
+
+void OCSPIOLoop::EnsureIOLoop() {
+  AutoLock autolock(lock_);
+  DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
+}
+
+void OCSPIOLoop::AddRequest(OCSPRequestSession* request) {
+  DCHECK(!ContainsKey(requests_, request));
+  requests_.insert(request);
+}
+
+void OCSPIOLoop::RemoveRequest(OCSPRequestSession* request) {
+  {
+    // Ignore if we've already shutdown.
+    AutoLock auto_lock(lock_);
+    if (shutdown_)
+      return;
+  }
+
+  DCHECK(ContainsKey(requests_, request));
+  requests_.erase(request);
+}
+
+void OCSPIOLoop::CancelAllRequests() {
+  std::set<OCSPRequestSession*> requests;
+  requests.swap(requests_);
+
+  for (std::set<OCSPRequestSession*>::iterator it = requests.begin();
+       it != requests.end(); ++it)
+    (*it)->CancelURLRequest();
+}
+
+OCSPNSSInitialization::OCSPNSSInitialization() {
+  // NSS calls the functions in the function table to download certificates
+  // or CRLs or talk to OCSP responders over HTTP.  These functions must
+  // set an NSS/NSPR error code when they fail.  Otherwise NSS will get the
+  // residual error code from an earlier failed function call.
+  client_fcn_.version = 1;
+  SEC_HttpClientFcnV1Struct *ft = &client_fcn_.fcnTable.ftable1;
+  ft->createSessionFcn = OCSPCreateSession;
+  ft->keepAliveSessionFcn = OCSPKeepAliveSession;
+  ft->freeSessionFcn = OCSPFreeSession;
+  ft->createFcn = OCSPCreate;
+  ft->setPostDataFcn = OCSPSetPostData;
+  ft->addHeaderFcn = OCSPAddHeader;
+  ft->trySendAndReceiveFcn = OCSPTrySendAndReceive;
+  ft->cancelFcn = NULL;
+  ft->freeFcn = OCSPFree;
+  SECStatus status = SEC_RegisterDefaultHttpClient(&client_fcn_);
+  if (status != SECSuccess) {
+    NOTREACHED() << "Error initializing OCSP: " << PR_GetError();
+  }
+
+  // Work around NSS bugs 524013 and 564334.  NSS incorrectly thinks the
+  // CRLs for Network Solutions Certificate Authority have bad signatures,
+  // which causes certificates issued by that CA to be reported as revoked.
+  // By using OCSP for those certificates, which don't have AIA extensions,
+  // we can work around these bugs.  See http://crbug.com/41730.
+  CERT_StringFromCertFcn old_callback = NULL;
+  status = CERT_RegisterAlternateOCSPAIAInfoCallBack(
+      GetAlternateOCSPAIAInfo, &old_callback);
+  if (status == SECSuccess) {
+    DCHECK(!old_callback);
+  } else {
+    NOTREACHED() << "Error initializing OCSP: " << PR_GetError();
+  }
+}
+
+OCSPNSSInitialization::~OCSPNSSInitialization() {}
+
 
 // OCSP Http Client functions.
 // Our Http Client functions operate in blocking mode.
 SECStatus OCSPCreateSession(const char* host, PRUint16 portnum,
                             SEC_HTTP_SERVER_SESSION* pSession) {
   VLOG(1) << "OCSP create session: host=" << host << " port=" << portnum;
-  DCHECK(!MessageLoop::current());
   pthread_mutex_lock(&g_request_context_lock);
   URLRequestContext* request_context = g_request_context;
   pthread_mutex_unlock(&g_request_context_lock);
@@ -548,7 +579,6 @@ SECStatus OCSPCreateSession(const char* host, PRUint16 portnum,
 SECStatus OCSPKeepAliveSession(SEC_HTTP_SERVER_SESSION session,
                                PRPollDesc **pPollDesc) {
   VLOG(1) << "OCSP keep alive";
-  DCHECK(!MessageLoop::current());
   if (pPollDesc)
     *pPollDesc = NULL;
   return SECSuccess;
@@ -556,7 +586,6 @@ SECStatus OCSPKeepAliveSession(SEC_HTTP_SERVER_SESSION session,
 
 SECStatus OCSPFreeSession(SEC_HTTP_SERVER_SESSION session) {
   VLOG(1) << "OCSP free session";
-  DCHECK(!MessageLoop::current());
   delete reinterpret_cast<OCSPServerSession*>(session);
   return SECSuccess;
 }
@@ -571,7 +600,6 @@ SECStatus OCSPCreate(SEC_HTTP_SERVER_SESSION session,
           << " path_and_query=" << path_and_query_string
           << " http_request_method=" << http_request_method
           << " timeout=" << timeout;
-  DCHECK(!MessageLoop::current());
   OCSPServerSession* ocsp_session =
       reinterpret_cast<OCSPServerSession*>(session);
 
@@ -593,7 +621,6 @@ SECStatus OCSPSetPostData(SEC_HTTP_REQUEST_SESSION request,
                           const PRUint32 http_data_len,
                           const char* http_content_type) {
   VLOG(1) << "OCSP set post data len=" << http_data_len;
-  DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
 
   req->SetPostData(http_data, http_data_len, http_content_type);
@@ -605,7 +632,6 @@ SECStatus OCSPAddHeader(SEC_HTTP_REQUEST_SESSION request,
                         const char* http_header_value) {
   VLOG(1) << "OCSP add header name=" << http_header_name
           << " value=" << http_header_value;
-  DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
 
   req->AddHeader(http_header_name, http_header_value);
@@ -665,7 +691,6 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
   }
 
   VLOG(1) << "OCSP try send and receive";
-  DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
   // We support blocking mode only.
   if (pPollDesc)
@@ -743,7 +768,6 @@ SECStatus OCSPTrySendAndReceive(SEC_HTTP_REQUEST_SESSION request,
 
 SECStatus OCSPFree(SEC_HTTP_REQUEST_SESSION request) {
   VLOG(1) << "OCSP free";
-  DCHECK(!MessageLoop::current());
   OCSPRequestSession* req = reinterpret_cast<OCSPRequestSession*>(request);
   req->Cancel();
   req->Release();
@@ -855,14 +879,16 @@ void EnsureOCSPInit() {
   g_ocsp_nss_initialization.Get();
 }
 
+void ShutdownOCSP() {
+  g_ocsp_io_loop.Get().Shutdown();
+}
+
 // This function would be called before NSS initialization.
 void SetURLRequestContextForOCSP(URLRequestContext* request_context) {
   pthread_mutex_lock(&g_request_context_lock);
   if (request_context) {
     DCHECK(request_context->is_main());
     DCHECK(!g_request_context);
-  } else {
-    DCHECK(g_request_context);
   }
   g_request_context = request_context;
   pthread_mutex_unlock(&g_request_context_lock);
@@ -872,7 +898,7 @@ URLRequestContext* GetURLRequestContextForOCSP() {
   pthread_mutex_lock(&g_request_context_lock);
   URLRequestContext* request_context = g_request_context;
   pthread_mutex_unlock(&g_request_context_lock);
-  DCHECK(request_context->is_main());
+  DCHECK(!request_context || request_context->is_main());
   return request_context;
 }
 

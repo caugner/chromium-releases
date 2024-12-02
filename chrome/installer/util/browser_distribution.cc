@@ -10,8 +10,10 @@
 #include "chrome/installer/util/browser_distribution.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/path_service.h"
 #include "base/lock.h"
-#include "base/registry.h"
+#include "base/win/registry.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
@@ -22,8 +24,29 @@
 
 #include "installer_util_strings.h"
 
+namespace {
+// Returns true if currently running in npchrome_frame.dll
+bool IsChromeFrameModule() {
+  FilePath module_path;
+  PathService::Get(base::FILE_MODULE, &module_path);
+  return FilePath::CompareEqualIgnoreCase(module_path.BaseName().value(),
+                                          installer_util::kChromeFrameDll);
+}
+
+// Returns true if currently running in ceee_broker.exe
+bool IsCeeeBrokerProcess() {
+  FilePath exe_path;
+  PathService::Get(base::FILE_EXE, &exe_path);
+  return FilePath::CompareEqualIgnoreCase(exe_path.BaseName().value(),
+                                          installer_util::kCeeeBrokerExe);
+}
+
+}  // end namespace
+
 BrowserDistribution* BrowserDistribution::GetDistribution() {
-  return GetDistribution(InstallUtil::IsChromeFrameProcess());
+  return GetDistribution(InstallUtil::IsChromeFrameProcess() ||
+                         IsChromeFrameModule() ||
+                         IsCeeeBrokerProcess());
 }
 
 BrowserDistribution* BrowserDistribution::GetDistribution(bool chrome_frame) {
@@ -122,7 +145,7 @@ std::wstring BrowserDistribution::GetStatsServerURL() {
   return L"";
 }
 
-std::wstring BrowserDistribution::GetDistributionData(RegKey* key) {
+std::wstring BrowserDistribution::GetDistributionData(base::win::RegKey* key) {
   return L"";
 }
 

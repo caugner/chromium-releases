@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 
 namespace WebKit {
@@ -20,13 +19,6 @@ class WebView;
 
 // A collection of operations that access the underlying WebKit DOM directly.
 namespace webkit_glue {
-
-struct PasswordFormFillData;
-
-// Fill matching password forms and trigger autocomplete in the case of multiple
-// matching logins.
-void FillPasswordForm(WebKit::WebView* view,
-                      const PasswordFormFillData& data);
 
 // Structure for storage the result of getting all savable resource links
 // for current page. The consumer of the SavableResourcesResult is responsible
@@ -60,45 +52,6 @@ struct SavableResourcesResult {
 bool GetAllSavableResourceLinksForCurrentPage(WebKit::WebView* view,
     const GURL& page_url, SavableResourcesResult* savable_resources_result,
     const char** savable_schemes);
-
-// Structure used when installing a web page as an app. Populated via
-// GetApplicationInfo.
-struct WebApplicationInfo {
-  struct IconInfo {
-    GURL url;
-    int width;
-    int height;
-  };
-
-  // Title of the application. This is set from the meta tag whose name is
-  // 'application-name'.
-  string16 title;
-
-  // Description of the application. This is set from the meta tag whose name
-  // is 'description'.
-  string16 description;
-
-  // URL for the app. This is set from the meta tag whose name is
-  // 'application-url'.
-  GURL app_url;
-
-  // Set of available icons. This is set for all link tags whose rel=icon. Only
-  // icons that have a non-zero (width and/or height) are added.
-  std::vector<IconInfo> icons;
-};
-
-// Parses the icon's size attribute as defined in the HTML 5 spec. Returns true
-// on success, false on errors. On success either all the sizes specified in
-// the attribute are added to sizes, or is_any is set to true.
-//
-// You shouldn't have a need to invoke this directly, it's public for testing.
-bool ParseIconSizes(const string16& text,
-                    std::vector<gfx::Size>* sizes,
-                    bool* is_any);
-
-// Gets the application info for the specified page. See the description of
-// WebApplicationInfo for details as to where each field comes from.
-void GetApplicationInfo(WebKit::WebView* view, WebApplicationInfo* app_info);
 
 // Invokes pauseAnimationAtTime on the AnimationController associated with the
 // |view|s main frame.
@@ -134,10 +87,11 @@ WebKit::WebString GetSubResourceLinkFromElement(
 
 // Puts the meta-elements of |document| that have the attribute |attribute_name|
 // with a value of |attribute_value| in |meta_elements|.
-void GetMetaElementsWithAttribute(WebKit::WebDocument* document,
-                                  const string16& attribute_name,
-                                  const string16& atribute_value,
-                                  std::vector<WebKit::WebElement>* meta_elements);
+void GetMetaElementsWithAttribute(
+    WebKit::WebDocument* document,
+    const string16& attribute_name,
+    const string16& atribute_value,
+    std::vector<WebKit::WebElement>* meta_elements);
 
 }  // namespace webkit_glue
 

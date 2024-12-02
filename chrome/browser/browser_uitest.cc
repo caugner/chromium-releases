@@ -10,9 +10,9 @@
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
 #include "base/values.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
@@ -43,8 +43,7 @@ class VisibleBrowserTest : public UITest {
 TEST_F(BrowserTest, WindowsSessionEnd) {
 #elif defined(OS_POSIX)
 // The browser should quit gracefully and quickly if it receives a SIGTERM.
-// http://code.google.com/p/chromium/issues/detail?id=39500
-TEST_F(BrowserTest, FLAKY_PosixSessionEnd) {
+TEST_F(BrowserTest, PosixSessionEnd) {
 #endif
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("title1.html");
@@ -159,9 +158,11 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
 
   // Use JavaScript URL to almost fork a new tab, but not quite.  (Leave the
   // opener non-null.)  Should not fork a process.
-  std::string url_prefix("javascript:(function(){w=window.open();");
-  GURL dont_fork_url(url_prefix +
-      "w.document.location=\"http://localhost:1337\";})()");
+  std::string url_str = "javascript:(function(){w=window.open(); ";
+  url_str += "w.document.location=\"";
+  url_str += test_server.GetURL("").spec();
+  url_str += "\";})()";
+  GURL dont_fork_url(url_str);
 
   // Make sure that a new tab but not new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url));
@@ -172,8 +173,11 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
   ASSERT_EQ(orig_tab_count + 1, new_tab_count);
 
   // Same thing if the current tab tries to redirect itself.
-  GURL dont_fork_url2(url_prefix +
-      "document.location=\"http://localhost:1337\";})()");
+  url_str = "javascript:(function(){w=window.open(); ";
+  url_str += "document.location=\"";
+  url_str += test_server.GetURL("").spec();
+  url_str += "\";})()";
+  GURL dont_fork_url2(url_str);
 
   // Make sure that no new process has been created.
   ASSERT_TRUE(tab->NavigateToURLAsync(dont_fork_url2));
@@ -273,7 +277,7 @@ public:
   void SetUp() {
     PathService::Get(base::DIR_TEMP, &tmp_profile_);
     tmp_profile_ = tmp_profile_.AppendASCII("tmp_profile");
-    tmp_profile_ = tmp_profile_.Append(L"Test Chrome Géraldine");
+    tmp_profile_ = tmp_profile_.Append(L"Test Chrome Gï¿½raldine");
 
     // Create a fresh, empty copy of this directory.
     file_util::Delete(tmp_profile_, true);

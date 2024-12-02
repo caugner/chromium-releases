@@ -10,19 +10,19 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "ppapi/c/pp_input_event.h"
+#include "ppapi/cpp/completion_callback.h"
+#include "ppapi/cpp/rect.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/client_util.h"
 #include "remoting/client/chromoting_client.h"
-#include "remoting/client/host_connection.h"
-#include "remoting/client/jingle_host_connection.h"
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_view.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-#include "third_party/ppapi/c/pp_input_event.h"
-#include "third_party/ppapi/cpp/completion_callback.h"
-#include "third_party/ppapi/cpp/rect.h"
+#include "remoting/protocol/connection_to_host.h"
+#include "remoting/protocol/jingle_connection_to_host.h"
 
 namespace remoting {
 
@@ -61,17 +61,19 @@ bool ChromotingInstance::Init(uint32_t argc,
   // TODO(ajwong): See if there is a method for querying what thread we're on
   // from inside the pepper API.
   pepper_main_loop_dont_post_to_me_ = MessageLoop::current();
-  LOG(INFO) << "Started ChromotingInstance::Init";
+  VLOG(1) << "Started ChromotingInstance::Init";
 
   // Start all the threads.
   context_.Start();
 
   // Create the chromoting objects.
-  host_connection_.reset(new JingleHostConnection(&context_));
+  host_connection_.reset(new protocol::JingleConnectionToHost(
+      context_.jingle_thread()));
   view_.reset(new PepperView(this, &context_));
   rectangle_decoder_.reset(
       new RectangleUpdateDecoder(context_.decode_message_loop(), view_.get()));
-  input_handler_.reset(new PepperInputHandler(&context_, host_connection_.get(),
+  input_handler_.reset(new PepperInputHandler(&context_,
+                                              host_connection_.get(),
                                               view_.get()));
 
   // Default to a medium grey.
@@ -114,11 +116,8 @@ void ChromotingInstance::ViewChanged(const pp::Rect& position,
 
   // TODO(ajwong): This is going to be a race condition when the view changes
   // and we're in the middle of a Paint().
-  LOG(INFO) << "ViewChanged "
-            << position.x() << ","
-            << position.y() << ","
-            << position.width() << ","
-            << position.height();
+  VLOG(1) << "ViewChanged " << position.x() << "," << position.y() << ","
+          << position.width() << "," << position.height();
 
   view_->SetViewport(position.x(), position.y(),
                      position.width(), position.height());

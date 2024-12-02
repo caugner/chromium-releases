@@ -9,21 +9,19 @@
 #include "app/l10n_util.h"
 #include "app/l10n_util_mac.h"
 #include "base/mac_util.h"
+#include "app/mac/scoped_nsdisable_screen_updates.h"
 #include "base/nsimage_cache_mac.h"
-#include "base/scoped_nsdisable_screen_updates.h"
 #import "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"  // IDC_*
+#include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/bookmarks/bookmark_editor.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
 #import "chrome/browser/cocoa/background_gradient_view.h"
-#import "chrome/browser/cocoa/bookmark_bar_controller.h"
-#import "chrome/browser/cocoa/bookmark_editor_controller.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_bar_controller.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_editor_controller.h"
 #import "chrome/browser/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/cocoa/browser_window_controller_private.h"
 #import "chrome/browser/cocoa/dev_tools_controller.h"
-#import "chrome/browser/cocoa/download_shelf_controller.h"
+#import "chrome/browser/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/cocoa/event_utils.h"
 #import "chrome/browser/cocoa/fast_resize_view.h"
 #import "chrome/browser/cocoa/find_bar_bridge.h"
@@ -46,6 +44,7 @@
 #import "chrome/browser/cocoa/toolbar_controller.h"
 #include "chrome/browser/dock_info.h"
 #include "chrome/browser/encoding_menu_controller.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
@@ -53,9 +52,13 @@
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/window_sizer.h"
+#include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 
@@ -238,14 +241,15 @@
     // Create a sub-controller for the docked devTools and add its view to the
     // hierarchy.  This must happen before the sidebar controller is
     // instantiated.
-    devToolsController_.reset([[DevToolsController alloc] init]);
+    devToolsController_.reset(
+        [[DevToolsController alloc] initWithDelegate:self]);
     [[devToolsController_ view] setFrame:[[self tabContentArea] bounds]];
     [[self tabContentArea] addSubview:[devToolsController_ view]];
 
     // Create a sub-controller for the docked sidebar and add its view to the
     // hierarchy.  This must happen before the previewable contents controller
     // is instantiated.
-    sidebarController_.reset([[SidebarController alloc] init]);
+    sidebarController_.reset([[SidebarController alloc] initWithDelegate:self]);
     [[sidebarController_ view] setFrame:[[devToolsController_ view] bounds]];
     [[devToolsController_ view] addSubview:[sidebarController_ view]];
 
@@ -440,12 +444,18 @@
   [tabStripController_ removeConstrainedWindow:window];
 }
 
+- (BOOL)canAttachConstrainedWindow {
+  return ![previewableContentsController_ isShowingPreview];
+}
+
 - (void)updateDevToolsForContents:(TabContents*)contents {
   [devToolsController_ updateDevToolsForTabContents:contents];
+  [devToolsController_ ensureContentsVisible];
 }
 
 - (void)updateSidebarForContents:(TabContents*)contents {
   [sidebarController_ updateSidebarForTabContents:contents];
+  [sidebarController_ ensureContentsVisible];
 }
 
 // Called when the user wants to close a window or from the shutdown process.
@@ -456,7 +466,7 @@
 // going away) will again call to close the window when it's finally ready.
 - (BOOL)windowShouldClose:(id)sender {
   // Disable updates while closing all tabs to avoid flickering.
-  base::ScopedNSDisableScreenUpdates disabler;
+  app::mac::ScopedNSDisableScreenUpdates disabler;
   // Give beforeunload handlers the chance to cancel the close before we hide
   // the window below.
   if (!browser_->ShouldCloseWindow())
@@ -611,7 +621,7 @@
       std::max(kProportion * frame.size.width,
                std::min(kProportion * frame.size.height, frame.size.width));
 
-  TabContents* contents = browser_->tabstrip_model()->GetSelectedTabContents();
+  TabContents* contents = browser_->GetSelectedTabContents();
   if (contents) {
     // If the intrinsic width is bigger, then make it the zoomed width.
     const int kScrollbarWidth = 16;  // TODO(viettrungluu): ugh.
@@ -1043,24 +1053,6 @@
   [toolbarController_ setStarredState:isStarred];
 }
 
-// Return the rect, in WebKit coordinates (flipped), of the window's grow box
-// in the coordinate system of the content area of the currently selected tab.
-// |windowGrowBox| needs to be in the window's coordinate system.
-- (NSRect)selectedTabGrowBoxRect {
-  NSWindow* window = [self window];
-  if (![window respondsToSelector:@selector(_growBoxRect)])
-    return NSZeroRect;
-
-  // Before we return a rect, we need to convert it from window coordinates
-  // to tab content area coordinates and flip the coordinate system.
-  NSRect growBoxRect =
-      [[self tabContentArea] convertRect:[window _growBoxRect] fromView:nil];
-  growBoxRect.origin.y =
-      [[self tabContentArea] frame].size.height - growBoxRect.size.height -
-      growBoxRect.origin.y;
-  return growBoxRect;
-}
-
 // Accept tabs from a BrowserWindowController with the same Profile.
 - (BOOL)canReceiveFrom:(TabWindowController*)source {
   if (![source isKindOfClass:[BrowserWindowController class]]) {
@@ -1099,8 +1091,8 @@
     if (!isBrowser) return;
     BrowserWindowController* dragBWC = (BrowserWindowController*)dragController;
     int index = [dragBWC->tabStripController_ modelIndexForTabView:view];
-    TabContents* contents =
-        dragBWC->browser_->tabstrip_model()->GetTabContentsAt(index);
+    TabContentsWrapper* contents =
+        dragBWC->browser_->GetTabContentsWrapperAt(index);
     // The tab contents may have gone away if given a window.close() while it
     // is being dragged. If so, bail, we've got nothing to drop.
     if (!contents)
@@ -1174,11 +1166,11 @@
 
 - (TabWindowController*)detachTabToNewWindow:(TabView*)tabView {
   // Disable screen updates so that this appears as a single visual change.
-  base::ScopedNSDisableScreenUpdates disabler;
+  app::mac::ScopedNSDisableScreenUpdates disabler;
 
   // Fetch the tab contents for the tab being dragged.
   int index = [tabStripController_ modelIndexForTabView:tabView];
-  TabContents* contents = browser_->tabstrip_model()->GetTabContentsAt(index);
+  TabContentsWrapper* contents = browser_->GetTabContentsWrapperAt(index);
 
   // Set the window size. Need to do this before we detach the tab so it's
   // still in the window. We have to flip the coordinates as that's what
@@ -1336,7 +1328,7 @@
 }
 
 - (NSString*)selectedTabTitle {
-  TabContents* contents = browser_->tabstrip_model()->GetSelectedTabContents();
+  TabContents* contents = browser_->GetSelectedTabContents();
   return base::SysUTF16ToNSString(contents->GetTitle());
 }
 
@@ -1350,6 +1342,47 @@
   return [self supportsWindowFeature:Browser::FEATURE_TABSTRIP];
 }
 
+// TabContentsControllerDelegate protocol.
+- (void)tabContentsViewFrameWillChange:(TabContentsController*)source
+                             frameRect:(NSRect)frameRect {
+  TabContents* contents = [source tabContents];
+  RenderWidgetHostView* render_widget_host_view = contents ?
+      contents->GetRenderWidgetHostView() : NULL;
+  if (!render_widget_host_view)
+    return;
+
+  gfx::Rect reserved_rect;
+
+  NSWindow* window = [self window];
+  if ([window respondsToSelector:@selector(_growBoxRect)]) {
+    NSView* view = [source view];
+    if (view && [view superview]) {
+      NSRect windowGrowBoxRect = [window _growBoxRect];
+      NSRect viewRect = [[view superview] convertRect:frameRect toView:nil];
+      NSRect growBoxRect = NSIntersectionRect(windowGrowBoxRect, viewRect);
+      if (!NSIsEmptyRect(growBoxRect)) {
+        // Before we return a rect, we need to convert it from window
+        // coordinates to content area coordinates and flip the coordinate
+        // system.
+        // Superview is used here because, first, it's a frame rect, so it is
+        // specified in the parent's coordinates and, second, view is not
+        // positioned yet.
+        growBoxRect = [[view superview] convertRect:growBoxRect fromView:nil];
+        growBoxRect.origin.y =
+            NSHeight(frameRect) - NSHeight(growBoxRect);
+        growBoxRect =
+            NSOffsetRect(growBoxRect, -frameRect.origin.x, -frameRect.origin.y);
+
+        reserved_rect =
+            gfx::Rect(growBoxRect.origin.x, growBoxRect.origin.y,
+                      growBoxRect.size.width, growBoxRect.size.height);
+      }
+    }
+  }
+
+  render_widget_host_view->set_reserved_contents_rect(reserved_rect);
+}
+
 // TabStripControllerDelegate protocol.
 - (void)onSelectTabWithContents:(TabContents*)contents {
   // Update various elements that are interested in knowing the current
@@ -1358,8 +1391,8 @@
   // Update all the UI bits.
   windowShim_->UpdateTitleBar();
 
-  [self updateSidebarForContents:contents];
-  [self updateDevToolsForContents:contents];
+  [sidebarController_ updateSidebarForTabContents:contents];
+  [devToolsController_ updateDevToolsForTabContents:contents];
 
   // Update the bookmark bar.
   // Must do it after sidebar and devtools update, otherwise bookmark bar might
@@ -1369,6 +1402,10 @@
   [self updateBookmarkBarVisibilityWithAnimation:NO];
 
   [infoBarContainerController_ changeTabContents:contents];
+
+  // Update devTools and sidebar contents after size for all views is set.
+  [sidebarController_ ensureContentsVisible];
+  [devToolsController_ ensureContentsVisible];
 }
 
 - (void)onReplaceTabWithContents:(TabContents*)contents {
@@ -1615,9 +1652,9 @@
     SadTabController* sad_tab = static_cast<SadTabController*>(sender);
     TabContents* tab_contents = [sad_tab tabContents];
     if (tab_contents) {
-      std::string linkUrl = l10n_util::GetStringUTF8(IDS_CRASH_REASON_URL);
-      tab_contents->OpenURL(GURL(linkUrl), GURL(), CURRENT_TAB,
-          PageTransition::LINK);
+      GURL helpUrl =
+          google_util::AppendGoogleLocaleParam(GURL(chrome::kCrashReasonURL));
+      tab_contents->OpenURL(helpUrl, GURL(), CURRENT_TAB, PageTransition::LINK);
     }
   }
 }
@@ -1736,6 +1773,21 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
   [previewableContentsController_ hidePreview];
   [self updateBookmarkBarVisibilityWithAnimation:NO];
+}
+
+- (NSRect)instantFrame {
+  // The view's bounds are in its own coordinate system.  Convert that to the
+  // window base coordinate system, then translate it into the screen's
+  // coordinate system.
+  NSView* view = [previewableContentsController_ view];
+  if (!view)
+    return NSZeroRect;
+
+  NSRect frame = [view convertRect:[view bounds] toView:nil];
+  NSPoint originInScreenCoords =
+      [[view window] convertBaseToScreen:frame.origin];
+  frame.origin = originInScreenCoords;
+  return frame;
 }
 
 - (void)sheetDidEnd:(NSWindow*)sheet
@@ -1871,6 +1923,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   // Move the status bubble over, if we have one.
   if (statusBubble_)
     statusBubble_->SwitchParentWindow(destWindow);
+
+  // Move the title over.
+  [destWindow setTitle:[window title]];
 
   // The window needs to be onscreen before we can set its first responder.
   [destWindow makeKeyAndOrderFront:self];

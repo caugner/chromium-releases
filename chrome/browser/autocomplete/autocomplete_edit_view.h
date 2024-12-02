@@ -14,6 +14,7 @@
 
 #include <string>
 
+#include "base/string16.h"
 #include "chrome/common/page_transition_types.h"
 #include "gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -90,6 +91,9 @@ class AutocompleteEditView {
 
   // Returns true if all text is selected or there is no text at all.
   virtual bool IsSelectAll() = 0;
+
+  // Returns true if the user deleted the suggested text.
+  virtual bool DeleteAtEndPressed() = 0;
 
   // Fills |start| and |end| with the indexes of the current selection's bounds.
   // It is not guaranteed that |*start < *end|, as the selection can be

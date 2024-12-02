@@ -5,16 +5,16 @@
 #include "chrome/browser/net/predictor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <sstream>
 
 #include "base/compiler_specific.h"
-#include "base/histogram.h"
-#include "base/stats_counters.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/preconnect.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
@@ -183,8 +183,9 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
              kMaxSearchKeepaliveSeconds)
           return;  // We've done a preconnect recently.
         last_omnibox_preconnect_ = now;
-
-        Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation);
+        const int kConnectionsNeeded = 1;
+        Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                                         kConnectionsNeeded);
         return;  // Skip pre-resolution, since we'll open a connection.
       }
     } else {
@@ -216,7 +217,9 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url) {
   if (preconnect_enabled()) {
     std::string host = url.HostNoBrackets();
     UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
-    Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation);
+    const int kConnectionsNeeded = 1;
+    Preconnect::PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
+                                     kConnectionsNeeded);
     PredictFrameSubresources(url.GetWithEmptyPath());
   }
 }
@@ -251,11 +254,12 @@ void Predictor::PrepareFrameSubresources(const GURL& url) {
                                 10, 5000, 50);
     future_url->second.ReferrerWasObserved();
     if (preconnect_enabled_ &&
-        kPreconnectWorthyExpectedValue < connection_expectation) {
+        connection_expectation > kPreconnectWorthyExpectedValue) {
       evalution = PRECONNECTION;
       future_url->second.IncrementPreconnectionCount();
-      Preconnect::PreconnectOnIOThread(future_url->first, motivation);
-    } else if (kDNSPreresolutionWorthyExpectedValue < connection_expectation) {
+      int count = static_cast<int>(std::ceil(connection_expectation));
+      Preconnect::PreconnectOnIOThread(future_url->first, motivation, count);
+    } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();
       UrlInfo* queued_info = AppendToResolutionQueue(future_url->first,
@@ -362,14 +366,16 @@ void Predictor::GetHtmlReferrerLists(std::string* output) {
     for (Referrer::iterator future_url = referrer->begin();
          future_url != referrer->end(); ++future_url) {
       output->append("<tr align=right>");
-      if (first_set_of_futures)
-        StringAppendF(output, "<td rowspan=%d>%s</td><td rowspan=%d>%d</td>",
-                      static_cast<int>(referrer->size()),
-                      it->spec().c_str(),
-                      static_cast<int>(referrer->size()),
-                      static_cast<int>(referrer->use_count()));
+      if (first_set_of_futures) {
+        base::StringAppendF(output,
+                            "<td rowspan=%d>%s</td><td rowspan=%d>%d</td>",
+                            static_cast<int>(referrer->size()),
+                            it->spec().c_str(),
+                            static_cast<int>(referrer->size()),
+                            static_cast<int>(referrer->use_count()));
+      }
       first_set_of_futures = false;
-      StringAppendF(output,
+      base::StringAppendF(output,
           "<td>%d</td><td>%d</td><td>%d</td><td>%2.3f</td><td>%s</td></tr>",
           static_cast<int>(future_url->second.navigation_count()),
           static_cast<int>(future_url->second.preconnection_count()),

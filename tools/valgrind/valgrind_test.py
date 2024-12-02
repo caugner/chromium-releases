@@ -25,6 +25,7 @@ import common
 
 import drmemory_analyze
 import memcheck_analyze
+import tempfile
 import tsan_analyze
 
 import logging_utils
@@ -37,15 +38,8 @@ class BaseTool(object):
   tool-specific stuff.
   """
 
-  # Temporary directory for tools to write logs, create some useful files etc.
-  TMP_DIR = "testing.tmp"
-
   def __init__(self):
-    # If we have a testing.tmp directory, we didn't cleanup last time.
-    if os.path.exists(BaseTool.TMP_DIR):
-      shutil.rmtree(BaseTool.TMP_DIR)
-    os.mkdir(BaseTool.TMP_DIR)
-
+    self.temp_dir = tempfile.mkdtemp()
     self.option_parser_hooks = []
 
   def ToolName(self):
@@ -194,7 +188,7 @@ class BaseTool(object):
     if self.Setup(args):
       retcode = self.RunTestsAndAnalyze(check_sanity)
       if not self._nocleanup_on_exit:
-        shutil.rmtree(self.TMP_DIR, ignore_errors=True)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
       self.Cleanup()
     else:
       logging.error("Setup failed")
@@ -388,7 +382,7 @@ class ValgrindTool(BaseTool):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    logfilename = self.TMP_DIR + ("/%s." % tool_name) + "%p"
+    logfilename = self.temp_dir + ("/%s." % tool_name) + "%p"
     if self.UseXML():
       proc += ["--xml=yes", "--xml-file=" + logfilename]
     else:
@@ -418,7 +412,7 @@ class ValgrindTool(BaseTool):
     tell the program to prefix the Chrome commandline
     with a magic wrapper.  Build the magic wrapper here.
     """
-    (fd, indirect_fname) = tempfile.mkstemp(dir=self.TMP_DIR,
+    (fd, indirect_fname) = tempfile.mkstemp(dir=self.temp_dir,
                                             prefix="browser_wrapper.",
                                             text=True)
     f = os.fdopen(fd, "w")
@@ -439,7 +433,7 @@ class ValgrindTool(BaseTool):
 
   def GetAnalyzeResults(self, check_sanity=False):
     # Glob all the files in the "testing.tmp" directory
-    filenames = glob.glob(self.TMP_DIR + "/" + self.ToolName() + ".*")
+    filenames = glob.glob(self.temp_dir + "/" + self.ToolName() + ".*")
 
     # If we have browser wrapper, the logfiles are named as
     # "toolname.wrapper_PID.valgrind_PID".
@@ -506,7 +500,7 @@ class Memcheck(ValgrindTool):
     if self._options.show_all_leaks:
       ret += ["--show-reachable=yes"]
     else:
-      ret += ["--show-possible=no"]
+      ret += ["--show-possibly-lost=no"]
 
     if self._options.track_origins:
       ret += ["--track-origins=yes"]
@@ -697,7 +691,7 @@ class ThreadSanitizerWindows(ThreadSanitizerBase, PinTool):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    logfilename = self.TMP_DIR + "/tsan.%p"
+    logfilename = self.temp_dir + "/tsan.%p"
     proc += ["--log-file=" + logfilename]
 
     # TODO(timurrrr): Add flags for Valgrind trace children analog when we
@@ -706,7 +700,7 @@ class ThreadSanitizerWindows(ThreadSanitizerBase, PinTool):
     return proc
 
   def Analyze(self, check_sanity=False):
-    filenames = glob.glob(self.TMP_DIR + "/tsan.*")
+    filenames = glob.glob(self.temp_dir + "/tsan.*")
     analyzer = tsan_analyze.TsanAnalyzer(self._source_dir)
     ret = analyzer.Report(filenames, check_sanity)
     if ret != 0:
@@ -744,9 +738,6 @@ class DrMemory(BaseTool):
                           "with the path to drmemory.exe"
     proc = pin_cmd.split(" ")
 
-    # Dump Dr.Memory events on error
-    # proc += ["-dr_ops", "dumpcore_mask 0x8bff"]
-
     suppression_count = 0
     for suppression_file in self._options.suppressions:
       if os.path.exists(suppression_file):
@@ -758,7 +749,10 @@ class DrMemory(BaseTool):
     if not suppression_count:
       logging.warning("WARNING: NOT USING SUPPRESSIONS!")
 
-    proc += ["-logdir", (os.getcwd() + "\\" + self.TMP_DIR)]
+    # Un-comment to dump Dr.Memory events on error
+    #proc += ["-dr_ops", "-dumpcore_mask 0x8bff"]
+
+    proc += ["-logdir", self.temp_dir]
     proc += ["-batch", "-quiet"]
     proc += ["-no_check_leaks", "-no_count_leaks"]
 
@@ -766,13 +760,12 @@ class DrMemory(BaseTool):
     proc += ["--"]
 
     # Note that self._args begins with the name of the exe to be run.
-    self._args[0] += ".exe" # HACK
     proc += self._args
     return proc
 
   def Analyze(self, check_sanity=False):
     # Glob all the results files in the "testing.tmp" directory
-    filenames = glob.glob(self.TMP_DIR + "/*/results.txt")
+    filenames = glob.glob(self.temp_dir + "/*/results.txt")
 
     analyzer = drmemory_analyze.DrMemoryAnalyze(self._source_dir, filenames)
     ret = analyzer.Report(check_sanity)

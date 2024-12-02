@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/logging.h"
 #include "base/thread.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/render_messages.h"
@@ -16,27 +16,30 @@ using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
 
+// Negative numbers are never used as sequence numbers.  We explicitly pick a
+// negative number that is "so negative" that even when we add one (as is done
+// when we generated the next sequence number) that it will still be negative.
+// We have code that handles wrapping around on an overflow into negative
+// territory.
+static const int kNeverUsableSequenceNumber = -2;
+
 HistogramSynchronizer::HistogramSynchronizer()
   : lock_(),
-    received_all_renderer_historgrams_(&lock_),
+    received_all_renderer_histograms_(&lock_),
     callback_task_(NULL),
     callback_thread_(NULL),
-    io_message_loop_(NULL),
-    next_available_sequence_number_(0),
-    async_sequence_number_(0),
+    last_used_sequence_number_(kNeverUsableSequenceNumber),
+    async_sequence_number_(kNeverUsableSequenceNumber),
     async_renderers_pending_(0),
-    async_callback_start_time_(TimeTicks::Now()),
-    synchronous_sequence_number_(0),
+    synchronous_sequence_number_(kNeverUsableSequenceNumber),
     synchronous_renderers_pending_(0) {
   DCHECK(histogram_synchronizer_ == NULL);
   histogram_synchronizer_ = this;
 }
 
 HistogramSynchronizer::~HistogramSynchronizer() {
-  // Clean up.
-  delete callback_task_;
-  callback_task_ = NULL;
-  callback_thread_ = NULL;
+  // Just in case we have any pending tasks, clear them out.
+  SetCallbackTaskAndThread(NULL, NULL);
   histogram_synchronizer_ = NULL;
 }
 
@@ -48,29 +51,20 @@ HistogramSynchronizer* HistogramSynchronizer::CurrentSynchronizer() {
 
 void HistogramSynchronizer::FetchRendererHistogramsSynchronously(
     TimeDelta wait_time) {
-  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
-
-  int sequence_number = GetNextAvaibleSequenceNumber(SYNCHRONOUS_HISTOGRAMS);
-  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
-       !it.IsAtEnd(); it.Advance()) {
-    it.GetCurrentValue()->Send(
-        new ViewMsg_GetRendererHistograms(sequence_number));
-    IncrementPendingRenderers(SYNCHRONOUS_HISTOGRAMS);
-  }
+  NotifyAllRenderers(SYNCHRONOUS_HISTOGRAMS);
 
   TimeTicks start = TimeTicks::Now();
   TimeTicks end_time = start + wait_time;
   int unresponsive_renderer_count;
   {
     AutoLock auto_lock(lock_);
-    while (synchronous_renderers_pending_ > 0 &&
-           TimeTicks::Now() < end_time) {
+    while (synchronous_renderers_pending_ > 0 && TimeTicks::Now() < end_time) {
       wait_time = end_time - TimeTicks::Now();
-      received_all_renderer_historgrams_.TimedWait(wait_time);
+      received_all_renderer_histograms_.TimedWait(wait_time);
     }
     unresponsive_renderer_count = synchronous_renderers_pending_;
     synchronous_renderers_pending_ = 0;
-    synchronous_sequence_number_ = 0;
+    synchronous_sequence_number_ = kNeverUsableSequenceNumber;
   }
   UMA_HISTOGRAM_COUNTS("Histogram.RendersNotRespondingSynchronous",
                        unresponsive_renderer_count);
@@ -84,12 +78,10 @@ void HistogramSynchronizer::FetchRendererHistogramsAsynchronously(
     MessageLoop* callback_thread,
     Task* callback_task,
     int wait_time) {
-  DCHECK(MessageLoop::current()->type() == MessageLoop::TYPE_UI);
   DCHECK(callback_thread != NULL);
   DCHECK(callback_task != NULL);
 
-  HistogramSynchronizer* current_synchronizer =
-      HistogramSynchronizer::CurrentSynchronizer();
+  HistogramSynchronizer* current_synchronizer = CurrentSynchronizer();
 
   if (current_synchronizer == NULL) {
     // System teardown is happening.
@@ -97,28 +89,17 @@ void HistogramSynchronizer::FetchRendererHistogramsAsynchronously(
     return;
   }
 
-  // callback_task_ member can only be accessed on IO thread.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(
-          current_synchronizer,
-          &HistogramSynchronizer::SetCallbackTaskToCallAfterGettingHistograms,
-          callback_thread,
-          callback_task));
+  current_synchronizer->SetCallbackTaskAndThread(callback_thread,
+                                                 callback_task);
 
-  // Tell all renderer processes to send their histograms.
   int sequence_number =
-      current_synchronizer->GetNextAvaibleSequenceNumber(ASYNC_HISTOGRAMS);
-  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
-       !it.IsAtEnd(); it.Advance()) {
-    it.GetCurrentValue()->Send(
-        new ViewMsg_GetRendererHistograms(sequence_number));
-    current_synchronizer->IncrementPendingRenderers(ASYNC_HISTOGRAMS);
-  }
+      current_synchronizer->NotifyAllRenderers(ASYNC_HISTOGRAMS);
 
-  // Post a task that would be called after waiting for wait_time.
+  // Post a task that would be called after waiting for wait_time.  This acts
+  // as a watchdog, to ensure that a non-responsive renderer won't block us from
+  // making the callback.
   BrowserThread::PostDelayedTask(
-      BrowserThread::IO, FROM_HERE,
+      BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(
           current_synchronizer,
           &HistogramSynchronizer::ForceHistogramSynchronizationDoneCallback,
@@ -130,148 +111,147 @@ void HistogramSynchronizer::FetchRendererHistogramsAsynchronously(
 void HistogramSynchronizer::DeserializeHistogramList(
     int sequence_number,
     const std::vector<std::string>& histograms) {
-  HistogramSynchronizer* current_synchronizer =
-      HistogramSynchronizer::CurrentSynchronizer();
-  if (current_synchronizer == NULL)
-    return;
-
-  DCHECK(current_synchronizer->IsOnIoThread());
-
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   for (std::vector<std::string>::const_iterator it = histograms.begin();
        it < histograms.end();
        ++it) {
-    Histogram::DeserializeHistogramInfo(*it);
+    base::Histogram::DeserializeHistogramInfo(*it);
   }
+
+  HistogramSynchronizer* current_synchronizer = CurrentSynchronizer();
+  if (current_synchronizer == NULL)
+    return;
 
   // Record that we have received a histogram from renderer process.
-  current_synchronizer->RecordRendererHistogram(sequence_number);
+  current_synchronizer->DecrementPendingRenderers(sequence_number);
 }
 
-bool HistogramSynchronizer::RecordRendererHistogram(int sequence_number) {
-  DCHECK(IsOnIoThread());
+int HistogramSynchronizer::NotifyAllRenderers(
+    RendererHistogramRequester requester) {
+  // To iterate over RenderProcessHosts, or to send messages to the hosts, we
+  // need to be on the UI thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (sequence_number == async_sequence_number_) {
-    if ((async_renderers_pending_ == 0) ||
-        (--async_renderers_pending_ > 0))
-      return false;
-    DCHECK(callback_task_ != NULL);
-    CallCallbackTaskAndResetData();
-    return true;
+  int notification_count = 0;
+  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
+       !it.IsAtEnd(); it.Advance())
+     ++notification_count;
+
+  int sequence_number = GetNextAvailableSequenceNumber(requester,
+                                                       notification_count);
+  for (RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
+       !it.IsAtEnd(); it.Advance()) {
+    if (!it.GetCurrentValue()->Send(
+        new ViewMsg_GetRendererHistograms(sequence_number)))
+      DecrementPendingRenderers(sequence_number);
   }
+
+  return sequence_number;
+}
+
+void HistogramSynchronizer::DecrementPendingRenderers(int sequence_number) {
+  bool synchronous_completed = false;
+  bool asynchronous_completed = false;
 
   {
     AutoLock auto_lock(lock_);
-    if (sequence_number != synchronous_sequence_number_) {
-      // No need to do anything if the sequence_number does not match current
-      // synchronous_sequence_number_ or async_sequence_number_.
-      return true;
+    if (sequence_number == async_sequence_number_) {
+      if (--async_renderers_pending_ <= 0)
+        asynchronous_completed = true;
+    } else if (sequence_number == synchronous_sequence_number_) {
+      if (--synchronous_renderers_pending_ <= 0)
+        synchronous_completed = true;
     }
-    if ((synchronous_renderers_pending_ == 0) ||
-        (--synchronous_renderers_pending_ > 0))
-      return false;
-    DCHECK_EQ(synchronous_renderers_pending_, 0);
   }
 
-  // We could call Signal() without holding the lock.
-  received_all_renderer_historgrams_.Signal();
-  return true;
+  if (asynchronous_completed)
+    ForceHistogramSynchronizationDoneCallback(sequence_number);
+  else if (synchronous_completed)
+    received_all_renderer_histograms_.Signal();
 }
 
-// This method is called on the IO thread.
-void HistogramSynchronizer::SetCallbackTaskToCallAfterGettingHistograms(
+void HistogramSynchronizer::SetCallbackTaskAndThread(
     MessageLoop* callback_thread,
     Task* callback_task) {
-  DCHECK(IsOnIoThread());
-
-  // Test for the existence of a previous task, and post call to post it if it
-  // exists. We promised to post it after some timeout... and at this point, we
-  // should just force the posting.
-  if (callback_task_ != NULL) {
-    CallCallbackTaskAndResetData();
+  Task* old_task = NULL;
+  MessageLoop* old_thread = NULL;
+  TimeTicks old_start_time;
+  int unresponsive_renderers;
+  const TimeTicks now = TimeTicks::Now();
+  {
+    AutoLock auto_lock(lock_);
+    old_task = callback_task_;
+    callback_task_ = callback_task;
+    old_thread = callback_thread_;
+    callback_thread_ = callback_thread;
+    unresponsive_renderers = async_renderers_pending_;
+    old_start_time = async_callback_start_time_;
+    async_callback_start_time_ = now;
+    // Prevent premature calling of our new callbacks.
+    async_sequence_number_ = kNeverUsableSequenceNumber;
   }
-
-  // Assert there was no callback_task_ already.
-  DCHECK(callback_task_ == NULL);
-
-  // Save the thread and the callback_task.
-  DCHECK(callback_thread != NULL);
-  DCHECK(callback_task != NULL);
-  callback_task_ = callback_task;
-  callback_thread_ = callback_thread;
-  async_callback_start_time_ = TimeTicks::Now();
+  // Just in case there was a task pending....
+  InternalPostTask(old_thread, old_task, unresponsive_renderers,
+                   old_start_time);
 }
 
 void HistogramSynchronizer::ForceHistogramSynchronizationDoneCallback(
     int sequence_number) {
-  DCHECK(IsOnIoThread());
-
-  if (sequence_number == async_sequence_number_) {
-     CallCallbackTaskAndResetData();
+  Task* task = NULL;
+  MessageLoop* thread = NULL;
+  TimeTicks started;
+  int unresponsive_renderers;
+  {
+    AutoLock lock(lock_);
+    if (sequence_number != async_sequence_number_)
+      return;
+    task = callback_task_;
+    thread = callback_thread_;
+    callback_task_ = NULL;
+    callback_thread_ = NULL;
+    started = async_callback_start_time_;
+    unresponsive_renderers = async_renderers_pending_;
   }
+  InternalPostTask(thread, task, unresponsive_renderers, started);
 }
 
-// If wait time has elapsed or if we have received all the histograms from all
-// the renderers, call the callback_task if a callback_task exists. This is
-// called on IO Thread.
-void HistogramSynchronizer::CallCallbackTaskAndResetData() {
-  DCHECK(IsOnIoThread());
-
-  // callback_task_ would be set to NULL, if we have heard from all renderers
-  // and we would have called the callback_task already.
-  if (callback_task_ == NULL) {
+void HistogramSynchronizer::InternalPostTask(MessageLoop* thread, Task* task,
+                                             int unresponsive_renderers,
+                                             const base::TimeTicks& started) {
+  if (!task || !thread)
     return;
+  UMA_HISTOGRAM_COUNTS("Histogram.RendersNotRespondingAsynchronous",
+                       unresponsive_renderers);
+  if (!unresponsive_renderers) {
+    UMA_HISTOGRAM_TIMES("Histogram.FetchRendererHistogramsAsynchronously",
+                        TimeTicks::Now() - started);
   }
 
-  UMA_HISTOGRAM_COUNTS("Histogram.RendersNotRespondingAsynchronous",
-                       async_renderers_pending_);
-  if (!async_renderers_pending_)
-    UMA_HISTOGRAM_TIMES("Histogram.FetchRendererHistogramsAsynchronously",
-                        TimeTicks::Now() - async_callback_start_time_);
-
-  DCHECK(callback_thread_ != NULL);
-  DCHECK(callback_task_ != NULL);
-  callback_thread_->PostTask(FROM_HERE, callback_task_);
-  async_renderers_pending_ = 0;
-  async_callback_start_time_ = TimeTicks::Now();
-  callback_task_ = NULL;
-  callback_thread_ = NULL;
+  thread->PostTask(FROM_HERE, task);
 }
 
-int HistogramSynchronizer::GetNextAvaibleSequenceNumber(
-    RendererHistogramRequester requester) {
+int HistogramSynchronizer::GetNextAvailableSequenceNumber(
+    RendererHistogramRequester requester,
+    int renderer_count) {
   AutoLock auto_lock(lock_);
-  ++next_available_sequence_number_;
-  if (0 > next_available_sequence_number_) {
-    // We wrapped around.
-    next_available_sequence_number_ =
+  ++last_used_sequence_number_;
+  // Watch out for wrapping to a negative number.
+  if (last_used_sequence_number_ < 0) {
+    // Bypass the reserved number, which is used when a renderer spontaneously
+    // decides to send some histogram data.
+    last_used_sequence_number_ =
         chrome::kHistogramSynchronizerReservedSequenceNumber + 1;
   }
-  DCHECK_NE(next_available_sequence_number_,
+  DCHECK_NE(last_used_sequence_number_,
             chrome::kHistogramSynchronizerReservedSequenceNumber);
   if (requester == ASYNC_HISTOGRAMS) {
-    async_sequence_number_ = next_available_sequence_number_;
-    async_renderers_pending_ = 0;
+    async_sequence_number_ = last_used_sequence_number_;
+    async_renderers_pending_ = renderer_count;
   } else if (requester == SYNCHRONOUS_HISTOGRAMS) {
-    synchronous_sequence_number_ = next_available_sequence_number_;
-    synchronous_renderers_pending_ = 0;
+    synchronous_sequence_number_ = last_used_sequence_number_;
+    synchronous_renderers_pending_ = renderer_count;
   }
-  return next_available_sequence_number_;
-}
-
-void HistogramSynchronizer::IncrementPendingRenderers(
-    RendererHistogramRequester requester) {
-  if (requester == ASYNC_HISTOGRAMS) {
-    async_renderers_pending_++;
-  } else {
-    synchronous_renderers_pending_++;
-  }
-}
-
-bool HistogramSynchronizer::IsOnIoThread() {
-  if (io_message_loop_ == NULL) {
-    io_message_loop_ = MessageLoop::current();
-  }
-  return (MessageLoop::current() == io_message_loop_);
+  return last_used_sequence_number_;
 }
 
 // static

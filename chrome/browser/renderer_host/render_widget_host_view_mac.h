@@ -13,15 +13,14 @@
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/time.h"
+#include "chrome/browser/accessibility/browser_accessibility_delegate_mac.h"
+#include "chrome/browser/accessibility/browser_accessibility_manager.h"
 #include "chrome/browser/cocoa/base_view.h"
-#include "chrome/browser/cocoa/browser_accessibility.h"
-#include "chrome/browser/cocoa/browser_accessibility_delegate.h"
 #include "chrome/browser/renderer_host/accelerated_surface_container_manager_mac.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/common/edit_command.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "webkit/glue/webcursor.h"
-#include "webkit/glue/webmenuitem.h"
 
 @class AcceleratedPluginView;
 class RenderWidgetHostViewMac;
@@ -41,17 +40,13 @@ class RWHVMEditCommandHelper;
     : BaseView <RenderWidgetHostViewMacOwner,
                 NSTextInput,
                 NSChangeSpelling,
-                BrowserAccessibilityDelegate> {
+                BrowserAccessibilityDelegateCocoa> {
  @private
   scoped_ptr<RenderWidgetHostViewMac> renderWidgetHostView_;
   BOOL canBeKeyView_;
   BOOL takesFocusOnlyOnMouseDown_;
   BOOL closeOnDeactivate_;
-  BOOL rendererAccessible_;
-  BOOL accessibilityRequested_;
-  BOOL accessibilityReceived_;
   scoped_ptr<RWHVMEditCommandHelper> editCommand_helper_;
-  scoped_nsobject<NSArray> accessibilityChildren_;
 
   // These are part of the magic tooltip code from WebKit's WebHTMLView:
   id trackingRectOwner_;              // (not retained)
@@ -144,8 +139,6 @@ class RWHVMEditCommandHelper;
 - (void)renderWidgetHostWasResized;
 // Cancel ongoing composition (abandon the marked text).
 - (void)cancelComposition;
-// Set the new accessibility tree.
-- (void)setAccessibilityTree:(const webkit_glue::WebAccessibility&) tree;
 // Confirm ongoing composition.
 - (void)confirmComposition;
 // Enables or disables plugin IME for the given plugin.
@@ -213,14 +206,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SetTooltipText(const std::wstring& tooltip_text);
   virtual void SelectionChanged(const std::string& text);
   virtual BackingStore* AllocBackingStore(const gfx::Size& size);
-  virtual VideoLayer* AllocVideoLayer(const gfx::Size& size);
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag);
-  virtual void ShowPopupWithItems(gfx::Rect bounds,
-                                  int item_height,
-                                  double item_font_size,
-                                  int selected_item,
-                                  const std::vector<WebMenuItem>& items,
-                                  bool right_aligned);
   virtual gfx::Rect GetWindowRect();
   virtual gfx::Rect GetRootWindowRect();
   virtual void SetActive(bool active);
@@ -228,8 +214,10 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void WindowFrameChanged();
   virtual void SetBackground(const SkBitmap& background);
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
-  virtual void UpdateAccessibilityTree(
-      const webkit_glue::WebAccessibility& tree);
+
+  virtual void OnAccessibilityNotifications(
+      const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params);
+
   virtual void SetPluginImeEnabled(bool enabled, int plugin_id);
   virtual bool PostProcessEventForPluginIme(
       const NativeWebKeyboardEvent& event);
@@ -239,6 +227,10 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(bool opaque,
                                                                  bool root);
   virtual void DestroyFakePluginWindowHandle(gfx::PluginWindowHandle window);
+
+  // Exposed for testing.
+  AcceleratedPluginView* ViewForPluginWindowHandle(
+      gfx::PluginWindowHandle window);
 
   // Helper to do the actual cleanup after a plugin handle has been destroyed.
   // Required because DestroyFakePluginWindowHandle() isn't always called for
@@ -255,7 +247,12 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
       int32 width,
       int32 height,
       TransportDIB::Handle transport_dib);
-  virtual void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      gfx::PluginWindowHandle window,
+      uint64 surface_id,
+      int32 renderer_id,
+      int32 route_id,
+      uint64 swap_buffers_count);
   virtual void GpuRenderingStateDidChange();
   void DrawAcceleratedSurfaceInstance(
       CGLContextObj context,
@@ -265,11 +262,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // to be reloaded.
   void ForceTextureReload();
 
-  virtual void SetVisuallyDeemphasized(bool deemphasized);
+  virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate);
 
   void KillSelf();
-
-  void set_parent_view(NSView* parent_view) { parent_view_ = parent_view; }
 
   void SetTextInputActive(bool active);
 
@@ -277,6 +272,20 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   void PluginImeCompositionConfirmed(const string16& text, int plugin_id);
 
   const std::string& selected_text() const { return selected_text_; }
+
+  void UpdateRootGpuViewVisibility(bool show_gpu_widget);
+
+  // When rendering transitions from gpu to software, the gpu widget can't be
+  // hidden until the software backing store has been updated. This method
+  // checks if the GPU view needs to be hidden and hides it if necessary. It
+  // should be called after the software backing store has been painted to.
+  void HandleDelayedGpuViewHiding();
+
+  // This is called from the display link thread, and provides the GPU
+  // process a notion of how quickly the browser is able to keep up with it.
+  void AcknowledgeSwapBuffers(int renderer_id,
+                              int32 route_id,
+                              uint64 swap_buffers_count);
 
   // These member variables should be private, but the associated ObjC class
   // needs access to them and can't be made a friend.
@@ -288,6 +297,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // This is true when we are currently painting and thus should handle extra
   // paint requests by expanding the invalid rect rather than actually painting.
   bool about_to_validate_and_paint_;
+
+  scoped_ptr<BrowserAccessibilityManager> browser_accessibility_manager_;
 
   // This is true when we have already scheduled a call to
   // |-callSetNeedsDisplayInRect:| but it has not been fulfilled yet.  Used to
@@ -330,11 +341,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   bool IsVoiceOverRunning();
 
   // The associated view. This is weak and is inserted into the view hierarchy
-  // to own this RenderWidgetHostViewMac object unless is_popup_menu_ is true.
-  // In that case, cocoa_view_ is never inserted into the view hierarchy, so
-  // the RenderWidgetHostViewMac will treat it as a strong reference and will
-  // release it when told to destroy (for example, because a pop-up menu has
-  // closed).
+  // to own this RenderWidgetHostViewMac object.
   RenderWidgetHostViewCocoa* cocoa_view_;
 
   // The cursor for the page. This is passed up from the renderer.
@@ -346,24 +353,19 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // true if the View is not visible.
   bool is_hidden_;
 
-  // True if the widget is a native popup menu.  The renderer code calls this
-  // an "external popup."
-  bool is_popup_menu_;
-
   // The text to be shown in the tooltip, supplied by the renderer.
   std::wstring tooltip_text_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   ScopedRunnableMethodFactory<RenderWidgetHostViewMac> shutdown_factory_;
 
-  // Used for positioning a popup menu.
-  NSView* parent_view_;
-
-  // Whether or not web accessibility is enabled.
-  bool renderer_accessible_;
-
   // selected text on the renderer.
   std::string selected_text_;
+
+  // When rendering transitions from gpu to software, the gpu widget can't be
+  // hidden until the software backing store has been updated. This variable is
+  // set when the gpu widget needs to be hidden once a paint is completed.
+  bool needs_gpu_visibility_update_after_repaint_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewMac);
 };

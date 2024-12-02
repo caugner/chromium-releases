@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ void RunTest_PostTask(MessageLoop::Type message_loop_type) {
   MessageLoop loop(message_loop_type);
 
   // Add tests to message loop
-  scoped_refptr<Foo> foo = new Foo();
+  scoped_refptr<Foo> foo(new Foo());
   std::string a("a"), b("b"), c("c"), d("d");
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       foo.get(), &Foo::Test0));
@@ -111,7 +111,7 @@ void RunTest_PostTask(MessageLoop::Type message_loop_type) {
     foo.get(), &Foo::Test2Mixed, a, &d));
 
   // After all tests, post a message that will shut down the message loop
-  scoped_refptr<QuitMsgLoop> quit = new QuitMsgLoop();
+  scoped_refptr<QuitMsgLoop> quit(new QuitMsgLoop());
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       quit.get(), &QuitMsgLoop::QuitNow));
 
@@ -126,7 +126,7 @@ void RunTest_PostTask_SEH(MessageLoop::Type message_loop_type) {
   MessageLoop loop(message_loop_type);
 
   // Add tests to message loop
-  scoped_refptr<Foo> foo = new Foo();
+  scoped_refptr<Foo> foo(new Foo());
   std::string a("a"), b("b"), c("c"), d("d");
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       foo.get(), &Foo::Test0));
@@ -142,7 +142,7 @@ void RunTest_PostTask_SEH(MessageLoop::Type message_loop_type) {
       foo.get(), &Foo::Test2Mixed, a, &d));
 
   // After all tests, post a message that will shut down the message loop
-  scoped_refptr<QuitMsgLoop> quit = new QuitMsgLoop();
+  scoped_refptr<QuitMsgLoop> quit(new QuitMsgLoop());
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
       quit.get(), &QuitMsgLoop::QuitNow));
 
@@ -669,12 +669,12 @@ class OrderedTasks : public Task {
 
   void RunStart() {
     TaskItem item(type_, cookie_, true);
-    DLOG(INFO) << item;
+    DVLOG(1) << item;
     order_->push_back(item);
   }
   void RunEnd() {
     TaskItem item(type_, cookie_, false);
-    DLOG(INFO) << item;
+    DVLOG(1) << item;
     order_->push_back(item);
   }
 
@@ -1488,14 +1488,16 @@ class DummyTaskObserver : public MessageLoop::TaskObserver {
 
   virtual ~DummyTaskObserver() {}
 
-  virtual void WillProcessTask(base::TimeTicks /* birth_time */) {
+  virtual void WillProcessTask(const Task* task) {
     num_tasks_started_++;
+    EXPECT_TRUE(task != NULL);
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_ + 1);
   }
 
-  virtual void DidProcessTask() {
+  virtual void DidProcessTask(const Task* task) {
     num_tasks_processed_++;
+    EXPECT_TRUE(task != NULL);
     EXPECT_LE(num_tasks_started_, num_tasks_);
     EXPECT_EQ(num_tasks_started_, num_tasks_processed_);
   }
@@ -1645,3 +1647,67 @@ TEST(MessageLoopTest, FileDescriptorWatcherDoubleStop) {
 }  // namespace
 
 #endif  // defined(OS_POSIX)
+
+namespace {
+class RunAtDestructionTask : public Task {
+ public:
+  RunAtDestructionTask(bool* task_destroyed, bool* destruction_observer_called)
+      : task_destroyed_(task_destroyed),
+        destruction_observer_called_(destruction_observer_called) {
+  }
+  ~RunAtDestructionTask() {
+    EXPECT_FALSE(*destruction_observer_called_);
+    *task_destroyed_ = true;
+  }
+  virtual void Run() {
+    // This task should never run.
+    ADD_FAILURE();
+  }
+ private:
+  bool* task_destroyed_;
+  bool* destruction_observer_called_;
+};
+
+class MLDestructionObserver : public MessageLoop::DestructionObserver {
+ public:
+  MLDestructionObserver(bool* task_destroyed, bool* destruction_observer_called)
+      : task_destroyed_(task_destroyed),
+        destruction_observer_called_(destruction_observer_called),
+        task_destroyed_before_message_loop_(false) {
+  }
+  virtual void WillDestroyCurrentMessageLoop() {
+    task_destroyed_before_message_loop_ = *task_destroyed_;
+    *destruction_observer_called_ = true;
+  }
+  bool task_destroyed_before_message_loop() const {
+    return task_destroyed_before_message_loop_;
+  }
+ private:
+  bool* task_destroyed_;
+  bool* destruction_observer_called_;
+  bool task_destroyed_before_message_loop_;
+};
+
+}  // namespace
+
+TEST(MessageLoopTest, DestructionObserverTest) {
+  // Verify that the destruction observer gets called at the very end (after
+  // all the pending tasks have been destroyed).
+  MessageLoop* loop = new MessageLoop;
+  const int kDelayMS = 100;
+
+  bool task_destroyed = false;
+  bool destruction_observer_called = false;
+
+  MLDestructionObserver observer(&task_destroyed, &destruction_observer_called);
+  loop->AddDestructionObserver(&observer);
+  loop->PostDelayedTask(
+      FROM_HERE,
+      new RunAtDestructionTask(&task_destroyed, &destruction_observer_called),
+      kDelayMS);
+  delete loop;
+  EXPECT_TRUE(observer.task_destroyed_before_message_loop());
+  // The task should have been destroyed when we deleted the loop.
+  EXPECT_TRUE(task_destroyed);
+  EXPECT_TRUE(destruction_observer_called);
+}

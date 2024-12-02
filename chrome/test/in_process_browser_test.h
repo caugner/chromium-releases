@@ -9,6 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/scoped_temp_dir.h"
+#include "chrome/common/page_transition_types.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -66,14 +68,26 @@ class InProcessBrowserTest : public testing::Test {
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
 
+  // Convenience methods for adding tabs to a Browser.
+  void AddTabAtIndexToBrowser(Browser* browser,
+                              int index,
+                              const GURL& url,
+                              PageTransition::Type transition);
+  void AddTabAtIndex(int index, const GURL& url,
+                     PageTransition::Type transition);
+
+  // Adds a selected tab at |index| to |url| with the specified |transition|.
+  void AddTabAt(int index, const GURL& url, PageTransition::Type transition);
+
   // Override this rather than TestBody.
   virtual void RunTestOnMainThread() = 0;
 
-  // Helper to initialize the user data directory.  Called by SetUp() after
-  // erasing the user data directory, but before any browser is launched.
-  // If a test wishes to set up some initial non-empty state in the user
-  // data directory before the browser starts up, it can do so here.
-  virtual void SetUpUserDataDirectory() {};
+  // Initializes the contents of the user data directory. Called by SetUp()
+  // after creating the user data directory, but before any browser is launched.
+  // If a test wishes to set up some initial non-empty state in the user data
+  // directory before the browser starts up, it can do so here. Returns true if
+  // successful.
+  virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT { return true; }
 
   // We need these special methods because InProcessBrowserTest::SetUp is the
   // bottom of the stack that winds up calling your test method, so it is not
@@ -96,7 +110,7 @@ class InProcessBrowserTest : public testing::Test {
   virtual void CleanUpOnMainThread() {}
 
   // Returns the testing server. Guaranteed to be non-NULL.
-  net::TestServer* test_server() { return &test_server_; }
+  net::TestServer* test_server() { return test_server_.get(); }
 
   // Creates a browser with a single tab (about:blank), waits for the tab to
   // finish loading and shows the browser.
@@ -123,6 +137,10 @@ class InProcessBrowserTest : public testing::Test {
   }
 
  private:
+  // Creates a user data directory for the test if one is needed. Returns true
+  // if successful.
+  virtual bool CreateUserDataDirectory() WARN_UNUSED_RESULT;
+
   // This is invoked from main after browser_init/browser_main have completed.
   // This prepares for the test by creating a new browser, runs the test
   // (RunTestOnMainThread), quits the browsers and returns.
@@ -131,11 +149,15 @@ class InProcessBrowserTest : public testing::Test {
   // Quits all open browsers and waits until there are no more browsers.
   void QuitBrowsers();
 
+  // Prepare command line that will be used to launch the child browser process
+  // with an in-process test.
+  void PrepareTestCommandLine(CommandLine* command_line);
+
   // Browser created from CreateBrowser.
   Browser* browser_;
 
   // Testing server, started on demand.
-  net::TestServer test_server_;
+  scoped_ptr<net::TestServer> test_server_;
 
   // Whether this test requires the browser windows to be shown (interactive
   // tests for example need the windows shown).
@@ -158,6 +180,10 @@ class InProcessBrowserTest : public testing::Test {
 
   // Host resolver to use during the test.
   scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;
+
+  // Temporary user data directory. Used only when a user data directory is not
+  // specified in the command line.
+  ScopedTempDir temp_user_data_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessBrowserTest);
 };

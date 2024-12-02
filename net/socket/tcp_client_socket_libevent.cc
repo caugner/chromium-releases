@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "net/socket/tcp_client_socket_libevent.h"
+#include "net/socket/tcp_client_socket.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -16,7 +16,7 @@
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stats_counters.h"
+#include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "net/base/address_list_net_log_param.h"
 #include "net/base/io_buffer.h"
@@ -86,6 +86,8 @@ int MapPosixError(int os_error) {
 
 int MapConnectError(int os_error) {
   switch (os_error) {
+    case EACCES:
+      return ERR_NETWORK_ACCESS_DENIED;
     case ETIMEDOUT:
       return ERR_CONNECTION_TIMED_OUT;
     default: {
@@ -120,16 +122,34 @@ TCPClientSocketLibevent::TCPClientSocketLibevent(
       write_callback_(NULL),
       next_connect_state_(CONNECT_STATE_NONE),
       connect_os_error_(0),
-      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {
+      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)),
+      previously_disconnected_(false),
+      use_tcp_fastopen_(false),
+      tcp_fastopen_connected_(false) {
   scoped_refptr<NetLog::EventParameters> params;
   if (source.is_valid())
     params = new NetLogSourceParameter("source_dependency", source);
   net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE, params);
+
+  if (is_tcp_fastopen_enabled())
+    use_tcp_fastopen_ = true;
 }
 
 TCPClientSocketLibevent::~TCPClientSocketLibevent() {
   Disconnect();
   net_log_.EndEvent(NetLog::TYPE_SOCKET_ALIVE, NULL);
+}
+
+void TCPClientSocketLibevent::AdoptSocket(int socket) {
+  DCHECK_EQ(socket_, kInvalidSocket);
+  socket_ = socket;
+  int error = SetupSocket();
+  DCHECK_EQ(0, error);
+  // This is to make GetPeerAddress work. It's up to the test that is calling
+  // this function to ensure that address_ contains a reasonable address for
+  // this socket. (i.e. at least match IPv4 vs IPv6!).
+  current_ai_ = addresses_.head();
+  use_history_.set_was_ever_connected();
 }
 
 int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
@@ -139,13 +159,14 @@ int TCPClientSocketLibevent::Connect(CompletionCallback* callback) {
   if (socket_ != kInvalidSocket)
     return OK;
 
-  static StatsCounter connects("tcp.connect");
+  static base::StatsCounter connects("tcp.connect");
   connects.Increment();
 
   DCHECK(!waiting_connect());
 
-  net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT,
-                      new AddressListNetLogParam(addresses_));
+  net_log_.BeginEvent(
+      NetLog::TYPE_TCP_CONNECT,
+      make_scoped_refptr(new AddressListNetLogParam(addresses_)));
 
   // We will try to connect to each address in addresses_. Start with the
   // first one in the list.
@@ -194,9 +215,14 @@ int TCPClientSocketLibevent::DoConnect() {
 
   DCHECK_EQ(0, connect_os_error_);
 
+  if (previously_disconnected_) {
+    use_history_.Reset();
+    previously_disconnected_ = false;
+  }
+
   net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT,
-                      new NetLogStringParameter(
-                          "address", NetAddressToStringWithPort(current_ai_)));
+                      make_scoped_refptr(new NetLogStringParameter(
+                          "address", NetAddressToStringWithPort(current_ai_))));
 
   next_connect_state_ = CONNECT_STATE_CONNECT_COMPLETE;
 
@@ -206,9 +232,15 @@ int TCPClientSocketLibevent::DoConnect() {
     return MapPosixError(connect_os_error_);
 
   // Connect the socket.
-  if (!HANDLE_EINTR(connect(socket_, current_ai_->ai_addr,
-                            static_cast<int>(current_ai_->ai_addrlen)))) {
-    // Connected without waiting!
+  if (!use_tcp_fastopen_) {
+    if (!HANDLE_EINTR(connect(socket_, current_ai_->ai_addr,
+                              static_cast<int>(current_ai_->ai_addrlen)))) {
+      // Connected without waiting!
+      return OK;
+    }
+  } else {
+    // With TCP FastOpen, we pretend that the socket is connected.
+    DCHECK(!tcp_fastopen_connected_);
     return OK;
   }
 
@@ -223,7 +255,7 @@ int TCPClientSocketLibevent::DoConnect() {
           socket_, true, MessageLoopForIO::WATCH_WRITE, &write_socket_watcher_,
           &write_watcher_)) {
     connect_os_error_ = errno;
-    DLOG(INFO) << "WatchFileDescriptor failed: " << connect_os_error_;
+    DVLOG(1) << "WatchFileDescriptor failed: " << connect_os_error_;
     return MapPosixError(connect_os_error_);
   }
 
@@ -278,6 +310,7 @@ void TCPClientSocketLibevent::DoDisconnect() {
   if (HANDLE_EINTR(close(socket_)) < 0)
     PLOG(ERROR) << "close";
   socket_ = kInvalidSocket;
+  previously_disconnected_ = true;
 }
 
 bool TCPClientSocketLibevent::IsConnected() const {
@@ -328,23 +361,23 @@ int TCPClientSocketLibevent::Read(IOBuffer* buf,
 
   int nread = HANDLE_EINTR(read(socket_, buf->data(), buf_len));
   if (nread >= 0) {
-    static StatsCounter read_bytes("tcp.read_bytes");
+    static base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(nread);
     if (nread > 0)
       use_history_.set_was_used_to_convey_data();
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
-                      new NetLogIntegerParameter("num_bytes", nread));
+    LogByteTransfer(
+        net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, nread, buf->data());
     return nread;
   }
   if (errno != EAGAIN && errno != EWOULDBLOCK) {
-    DLOG(INFO) << "read failed, errno " << errno;
+    DVLOG(1) << "read failed, errno " << errno;
     return MapPosixError(errno);
   }
 
   if (!MessageLoopForIO::current()->WatchFileDescriptor(
           socket_, true, MessageLoopForIO::WATCH_READ,
           &read_socket_watcher_, &read_watcher_)) {
-    DLOG(INFO) << "WatchFileDescriptor failed on read, errno " << errno;
+    DVLOG(1) << "WatchFileDescriptor failed on read, errno " << errno;
     return MapPosixError(errno);
   }
 
@@ -365,14 +398,14 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
   DCHECK(callback);
   DCHECK_GT(buf_len, 0);
 
-  int nwrite = HANDLE_EINTR(write(socket_, buf->data(), buf_len));
+  int nwrite = InternalWrite(buf, buf_len);
   if (nwrite >= 0) {
-    static StatsCounter write_bytes("tcp.write_bytes");
+    static base::StatsCounter write_bytes("tcp.write_bytes");
     write_bytes.Add(nwrite);
     if (nwrite > 0)
       use_history_.set_was_used_to_convey_data();
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
-                      new NetLogIntegerParameter("num_bytes", nwrite));
+    LogByteTransfer(
+        net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, nwrite, buf->data());
     return nwrite;
   }
   if (errno != EAGAIN && errno != EWOULDBLOCK)
@@ -381,7 +414,7 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
   if (!MessageLoopForIO::current()->WatchFileDescriptor(
           socket_, true, MessageLoopForIO::WATCH_WRITE,
           &write_socket_watcher_, &write_watcher_)) {
-    DLOG(INFO) << "WatchFileDescriptor failed on write, errno " << errno;
+    DVLOG(1) << "WatchFileDescriptor failed on write, errno " << errno;
     return MapPosixError(errno);
   }
 
@@ -389,6 +422,38 @@ int TCPClientSocketLibevent::Write(IOBuffer* buf,
   write_buf_len_ = buf_len;
   write_callback_ = callback;
   return ERR_IO_PENDING;
+}
+
+int TCPClientSocketLibevent::InternalWrite(IOBuffer* buf, int buf_len) {
+  int nwrite;
+  if (use_tcp_fastopen_ && !tcp_fastopen_connected_) {
+    // We have a limited amount of data to send in the SYN packet.
+    int kMaxFastOpenSendLength = 1420;
+
+    buf_len = std::min(kMaxFastOpenSendLength, buf_len);
+
+    int flags = 0x20000000;  // Magic flag to enable TCP_FASTOPEN
+    nwrite = HANDLE_EINTR(sendto(socket_,
+                                 buf->data(),
+                                 buf_len,
+                                 flags,
+                                 current_ai_->ai_addr,
+                                 static_cast<int>(current_ai_->ai_addrlen)));
+    tcp_fastopen_connected_ = true;
+
+    if (nwrite < 0) {
+      // Non-blocking mode is returning EINPROGRESS rather than EAGAIN.
+      if (errno == EINPROGRESS)
+         errno = EAGAIN;
+
+      // Unlike "normal" nonblocking sockets, the data is already queued,
+      // so tell the app that we've consumed it.
+      return buf_len;
+    }
+  } else {
+    nwrite = HANDLE_EINTR(write(socket_, buf->data(), buf_len));
+  }
+  return nwrite;
 }
 
 bool TCPClientSocketLibevent::SetReceiveBufferSize(int32 size) {
@@ -414,7 +479,10 @@ int TCPClientSocketLibevent::CreateSocket(const addrinfo* ai) {
   socket_ = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
   if (socket_ == kInvalidSocket)
     return errno;
+  return SetupSocket();
+}
 
+int TCPClientSocketLibevent::SetupSocket() {
   if (SetNonBlocking(socket_)) {
     const int err = errno;
     close(socket_);
@@ -487,12 +555,12 @@ void TCPClientSocketLibevent::DidCompleteRead() {
   int result;
   if (bytes_transferred >= 0) {
     result = bytes_transferred;
-    static StatsCounter read_bytes("tcp.read_bytes");
+    static base::StatsCounter read_bytes("tcp.read_bytes");
     read_bytes.Add(bytes_transferred);
     if (bytes_transferred > 0)
       use_history_.set_was_used_to_convey_data();
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED,
-                      new NetLogIntegerParameter("num_bytes", result));
+    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_RECEIVED, result,
+                    read_buf_->data());
   } else {
     result = MapPosixError(errno);
   }
@@ -514,12 +582,12 @@ void TCPClientSocketLibevent::DidCompleteWrite() {
   int result;
   if (bytes_transferred >= 0) {
     result = bytes_transferred;
-    static StatsCounter write_bytes("tcp.write_bytes");
+    static base::StatsCounter write_bytes("tcp.write_bytes");
     write_bytes.Add(bytes_transferred);
     if (bytes_transferred > 0)
       use_history_.set_was_used_to_convey_data();
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_BYTES_SENT,
-                      new NetLogIntegerParameter("num_bytes", result));
+    LogByteTransfer(net_log_, NetLog::TYPE_SOCKET_BYTES_SENT, result,
+                    write_buf_->data());
   } else {
     result = MapPosixError(errno);
   }
@@ -551,6 +619,10 @@ void TCPClientSocketLibevent::SetOmniboxSpeculation() {
 
 bool TCPClientSocketLibevent::WasEverUsed() const {
   return use_history_.was_used_to_convey_data();
+}
+
+bool TCPClientSocketLibevent::UsingTCPFastOpen() const {
+  return use_tcp_fastopen_;
 }
 
 }  // namespace net

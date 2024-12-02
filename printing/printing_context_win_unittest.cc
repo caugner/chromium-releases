@@ -103,7 +103,8 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   return S_OK;
 }
 
-TEST_F(PrintingContextTest, Base) {
+// crbug.com/61509
+TEST_F(PrintingContextTest, FLAKY_Base) {
   printing::PrintSettings settings;
 
   settings.set_device_name(GetDefaultPrinter());
@@ -119,7 +120,8 @@ TEST_F(PrintingContextTest, Base) {
   EXPECT_TRUE(ModifyWorldTransform(context->context(), NULL, MWT_IDENTITY));
 }
 
-TEST_F(PrintingContextTest, PrintAll) {
+// http://crbug.com/61499
+TEST_F(PrintingContextTest, FLAKY_PrintAll) {
   printing::PrintingContextWin context;
   context.SetPrintDialog(&PrintDlgExMock);
   context.AskUserForSettings(

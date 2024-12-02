@@ -10,12 +10,14 @@
 
 namespace remoting {
 
-CapturerMac::CapturerMac() : cgl_context_(NULL) {
+CapturerMac::CapturerMac(MessageLoop* message_loop)
+    : Capturer(message_loop),
+      cgl_context_(NULL) {
   // TODO(dmaclach): move this initialization out into session_manager,
   // or at least have session_manager call into here to initialize it.
-  CGError err
-      = CGRegisterScreenRefreshCallback(CapturerMac::ScreenRefreshCallback,
-                                        this);
+  CGError err =
+      CGRegisterScreenRefreshCallback(CapturerMac::ScreenRefreshCallback,
+                                      this);
   DCHECK_EQ(err, kCGErrorSuccess);
   err = CGScreenRegisterMoveCallback(CapturerMac::ScreenUpdateMoveCallback,
                                      this);
@@ -23,6 +25,7 @@ CapturerMac::CapturerMac() : cgl_context_(NULL) {
   err = CGDisplayRegisterReconfigurationCallback(
       CapturerMac::DisplaysReconfiguredCallback, this);
   DCHECK_EQ(err, kCGErrorSuccess);
+  ScreenConfigurationChanged();
 }
 
 CapturerMac::~CapturerMac() {
@@ -46,8 +49,8 @@ void CapturerMac::ScreenConfigurationChanged() {
 
   width_ = CGDisplayPixelsWide(mainDevice);
   height_ = CGDisplayPixelsHigh(mainDevice);
+  pixel_format_ = media::VideoFrame::RGB32;
   bytes_per_row_ = width_ * sizeof(uint32_t);
-  pixel_format_ = PixelFormatRgb32;
   size_t buffer_size = height() * bytes_per_row_;
   for (int i = 0; i < kNumBuffers; ++i) {
     buffers_[i].reset(new uint8[buffer_size]);
@@ -160,6 +163,11 @@ void CapturerMac::DisplaysReconfiguredCallback(
     CapturerMac *capturer = reinterpret_cast<CapturerMac *>(user_parameter);
     capturer->ScreenConfigurationChanged();
   }
+}
+
+// static
+Capturer* Capturer::Create(MessageLoop* message_loop) {
+  return new CapturerMac(message_loop);
 }
 
 }  // namespace remoting

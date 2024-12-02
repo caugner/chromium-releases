@@ -25,7 +25,7 @@ const int kIconHorizontalPadding = 30;
 const int kButtonBarHorizontalSpacing = 10;
 
 // Use black for text labels since the bubble has white background.
-const GdkColor kLabelTextColor = gfx::kGdkBlack;
+const GdkColor kLabelTextColor = gtk_util::kGdkBlack;
 
 // Implementation of SpeechInputBubble for GTK. This shows a speech input
 // info bubble on screen.
@@ -54,7 +54,6 @@ class SpeechInputBubbleGtk
 
   Delegate* delegate_;
   InfoBubbleGtk* info_bubble_;
-  TabContents* tab_contents_;
   gfx::Rect element_rect_;
   bool did_invoke_close_;
 
@@ -68,9 +67,9 @@ class SpeechInputBubbleGtk
 SpeechInputBubbleGtk::SpeechInputBubbleGtk(TabContents* tab_contents,
                                            Delegate* delegate,
                                            const gfx::Rect& element_rect)
-    : delegate_(delegate),
+    : SpeechInputBubbleBase(tab_contents),
+      delegate_(delegate),
       info_bubble_(NULL),
-      tab_contents_(tab_contents),
       element_rect_(element_rect),
       did_invoke_close_(false),
       label_(NULL),
@@ -145,10 +144,10 @@ void SpeechInputBubbleGtk::Show() {
   gtk_container_add(GTK_CONTAINER(content), vbox);
 
   GtkThemeProvider* theme_provider = GtkThemeProvider::GetFrom(
-      tab_contents_->profile());
+      tab_contents()->profile());
   gfx::Rect rect(element_rect_.x() + kBubbleTargetOffsetX,
                  element_rect_.y() + element_rect_.height(), 1, 1);
-  info_bubble_ = InfoBubbleGtk::Show(tab_contents_->GetNativeView(),
+  info_bubble_ = InfoBubbleGtk::Show(tab_contents()->GetNativeView(),
                                      &rect,
                                      content,
                                      InfoBubbleGtk::ARROW_LOCATION_TOP_LEFT,
@@ -179,14 +178,17 @@ void SpeechInputBubbleGtk::UpdateLayout() {
   } else {
     // Heading text, icon and cancel button are visible, hide the Try Again
     // button.
-    gtk_label_set_text(GTK_LABEL(label_),
-        l10n_util::GetStringUTF8(IDS_SPEECH_INPUT_BUBBLE_HEADING).c_str());
     if (display_mode() == DISPLAY_MODE_RECORDING) {
+      gtk_label_set_text(GTK_LABEL(label_),
+          l10n_util::GetStringUTF8(IDS_SPEECH_INPUT_BUBBLE_HEADING).c_str());
       SkBitmap* image = ResourceBundle::GetSharedInstance().GetBitmapNamed(
           IDR_SPEECH_INPUT_MIC_EMPTY);
       GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(image);
       gtk_image_set_from_pixbuf(GTK_IMAGE(icon_), pixbuf);
       g_object_unref(pixbuf);
+    } else {
+      gtk_label_set_text(GTK_LABEL(label_),
+          l10n_util::GetStringUTF8(IDS_SPEECH_INPUT_BUBBLE_WORKING).c_str());
     }
     gtk_widget_show(icon_);
     gtk_widget_hide(try_again_button_);

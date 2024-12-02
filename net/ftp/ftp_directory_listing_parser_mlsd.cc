@@ -1,6 +1,6 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "net/ftp/ftp_directory_listing_parser_mlsd.h"
 
@@ -28,15 +28,23 @@ bool MlsdDateListingToTime(const string16& text, base::Time* time) {
   if (text.length() < 14)
     return false;
 
-  if (!base::StringToInt(text.substr(0, 4), &time_exploded.year))
+  if (!base::StringToInt(text.begin(), text.begin() + 4, &time_exploded.year))
     return false;
-  if (!base::StringToInt(text.substr(4, 2), &time_exploded.month))
+  if (!base::StringToInt(text.begin() + 4,
+                         text.begin() + 6,
+                         &time_exploded.month))
     return false;
-  if (!base::StringToInt(text.substr(6, 2), &time_exploded.day_of_month))
+  if (!base::StringToInt(text.begin() + 6,
+                         text.begin() + 8,
+                         &time_exploded.day_of_month))
     return false;
-  if (!base::StringToInt(text.substr(8, 2), &time_exploded.hour))
+  if (!base::StringToInt(text.begin() + 8,
+                         text.begin() + 10,
+                         &time_exploded.hour))
     return false;
-  if (!base::StringToInt(text.substr(10, 2), &time_exploded.minute))
+  if (!base::StringToInt(text.begin() + 10,
+                         text.begin() + 12,
+                         &time_exploded.minute))
     return false;
 
   // We don't know the time zone of the server, so just use local time.
@@ -48,8 +56,9 @@ bool MlsdDateListingToTime(const string16& text, base::Time* time) {
 
 namespace net {
 
-FtpDirectoryListingParserMlsd::FtpDirectoryListingParserMlsd() {
-}
+FtpDirectoryListingParserMlsd::FtpDirectoryListingParserMlsd() {}
+
+FtpDirectoryListingParserMlsd::~FtpDirectoryListingParserMlsd() {}
 
 bool FtpDirectoryListingParserMlsd::ConsumeLine(const string16& line) {
   // The first space indicates where the filename begins.
@@ -60,7 +69,7 @@ bool FtpDirectoryListingParserMlsd::ConsumeLine(const string16& line) {
   string16 facts_string = line.substr(0, first_space_pos - 1);
   string16 filename = line.substr(first_space_pos + 1);
   std::vector<string16> facts_split;
-  SplitString(facts_string, ';', &facts_split);
+  base::SplitString(facts_string, ';', &facts_split);
 
   const char* keys[] = {
       "modify",

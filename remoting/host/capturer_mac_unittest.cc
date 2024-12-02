@@ -17,8 +17,7 @@ namespace remoting {
 class CapturerMacTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    capturer_.reset(new CapturerMac());
-    capturer_->ScreenConfigurationChanged();
+    capturer_.reset(new CapturerMac(NULL));
     rects_.insert(gfx::Rect(0, 0, 10, 10));
   }
 
@@ -80,4 +79,3 @@ std::ostream& operator<<(std::ostream& out,
 }
 
 }  // namespace gfx
-

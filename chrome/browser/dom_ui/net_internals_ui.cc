@@ -45,22 +45,13 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
-#include "net/http/http_proxy_client_socket_pool.h"
 #include "net/proxy/proxy_service.h"
-#include "net/socket/socks_client_socket_pool.h"
-#include "net/socket/ssl_client_socket_pool.h"
-#include "net/socket/tcp_client_socket_pool.h"
 #include "net/url_request/url_request_context.h"
 #ifdef OS_WIN
 #include "chrome/browser/net/service_providers_win.h"
 #endif
 
 namespace {
-
-// Formats |t| as a decimal number, in milliseconds.
-std::string TickCountToString(const base::TimeTicks& t) {
-  return base::Int64ToString((t - base::TimeTicks()).InMilliseconds());
-}
 
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
 // there is none.
@@ -214,9 +205,12 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnStartConnectionTests(const ListValue* list);
   void OnGetHttpCacheInfo(const ListValue* list);
   void OnGetSocketPoolInfo(const ListValue* list);
+  void OnGetSpdySessionInfo(const ListValue* list);
 #ifdef OS_WIN
   void OnGetServiceProviders(const ListValue* list);
 #endif
+
+  void OnSetLogLevel(const ListValue* list);
 
   // ChromeNetLog::Observer implementation:
   virtual void OnAddEntry(net::NetLog::EventType type,
@@ -403,11 +397,18 @@ void NetInternalsMessageHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback(
       "getSocketPoolInfo",
       proxy_->CreateCallback(&IOThreadImpl::OnGetSocketPoolInfo));
+  dom_ui_->RegisterMessageCallback(
+      "getSpdySessionInfo",
+      proxy_->CreateCallback(&IOThreadImpl::OnGetSpdySessionInfo));
 #ifdef OS_WIN
   dom_ui_->RegisterMessageCallback(
       "getServiceProviders",
       proxy_->CreateCallback(&IOThreadImpl::OnGetServiceProviders));
 #endif
+
+  dom_ui_->RegisterMessageCallback(
+      "setLogLevel",
+      proxy_->CreateCallback(&IOThreadImpl::OnSetLogLevel));
 }
 
 void NetInternalsMessageHandler::CallJavascriptFunction(
@@ -431,7 +432,7 @@ NetInternalsMessageHandler::IOThreadImpl::IOThreadImpl(
     const base::WeakPtr<NetInternalsMessageHandler>& handler,
     IOThread* io_thread,
     URLRequestContextGetter* context_getter)
-    : Observer(net::NetLog::LOG_ALL),
+    : Observer(net::NetLog::LOG_ALL_BUT_BYTES),
       handler_(handler),
       io_thread_(io_thread),
       context_getter_(context_getter),
@@ -564,6 +565,18 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     CallJavascriptFunction(L"g_browser.receivedLogSourceTypeConstants", dict);
   }
 
+  // Tell the javascript about the relationship between LogLevel enums and their
+  // symbolic names.
+  {
+    DictionaryValue* dict = new DictionaryValue();
+
+    dict->SetInteger("LOG_ALL", net::NetLog::LOG_ALL);
+    dict->SetInteger("LOG_ALL_BUT_BYTES", net::NetLog::LOG_ALL_BUT_BYTES);
+    dict->SetInteger("LOG_BASIC", net::NetLog::LOG_BASIC);
+
+    CallJavascriptFunction(L"g_browser.receivedLogLevelConstants", dict);
+  }
+
   // Tell the javascript about the relationship between address family enums and
   // their symbolic names.
   {
@@ -605,14 +618,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   }
 
   OnGetPassiveLogEntries(NULL);
-  OnGetProxySettings(NULL);
-  OnGetBadProxies(NULL);
-  OnGetHostResolverInfo(NULL);
-  OnGetHttpCacheInfo(NULL);
-  OnGetSocketPoolInfo(NULL);
-#ifdef OS_WIN
-  OnGetServiceProviders(NULL);
-#endif
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
@@ -654,7 +659,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
 
     DictionaryValue* dict = new DictionaryValue();
     dict->SetString("proxy_uri", proxy_uri);
-    dict->SetString("bad_until", TickCountToString(retry_info.bad_until));
+    dict->SetString("bad_until",
+                    net::NetLog::TickCountToString(retry_info.bad_until));
 
     dict_list->Append(dict);
   }
@@ -715,7 +721,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
     entry_dict->SetString("hostname", key.hostname);
     entry_dict->SetInteger("address_family",
         static_cast<int>(key.address_family));
-    entry_dict->SetString("expiration", TickCountToString(entry->expiration));
+    entry_dict->SetString("expiration",
+                          net::NetLog::TickCountToString(entry->expiration));
 
     if (entry->error != net::OK) {
       entry_dict->SetInteger("error", entry->error);
@@ -798,7 +805,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
   // For example, turn "www.google.com" into "http://www.google.com".
   GURL url(URLFixerUpper::FixupURL(UTF16ToUTF8(url_str), std::string()));
 
-  connection_tester_.reset(new ConnectionTester(this));
+  connection_tester_.reset(new ConnectionTester(this, io_thread_));
   connection_tester_->RunAllTests(url);
 }
 
@@ -835,6 +842,19 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetSocketPoolInfo(
     socket_pool_info = http_network_session->SocketPoolInfoToValue();
 
   CallJavascriptFunction(L"g_browser.receivedSocketPoolInfo", socket_pool_info);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::OnGetSpdySessionInfo(
+    const ListValue* list) {
+  net::HttpNetworkSession* http_network_session =
+      GetHttpNetworkSession(context_getter_->GetURLRequestContext());
+
+  Value* spdy_info = NULL;
+  if (http_network_session) {
+    spdy_info = http_network_session->SpdySessionPoolInfoToValue();
+  }
+
+  CallJavascriptFunction(L"g_browser.receivedSpdySessionInfo", spdy_info);
 }
 
 #ifdef OS_WIN
@@ -878,6 +898,21 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetServiceProviders(
                          service_providers);
 }
 #endif
+
+void NetInternalsMessageHandler::IOThreadImpl::OnSetLogLevel(
+    const ListValue* list) {
+  int log_level;
+  std::string log_level_string;
+  if (!list->GetString(0, &log_level_string) ||
+      !base::StringToInt(log_level_string, &log_level)) {
+    NOTREACHED();
+    return;
+  }
+
+  DCHECK_GE(log_level, net::NetLog::LOG_ALL);
+  DCHECK_LE(log_level, net::NetLog::LOG_BASIC);
+  set_log_level(static_cast<net::NetLog::LogLevel>(log_level));
+}
 
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
     net::NetLog::EventType type,

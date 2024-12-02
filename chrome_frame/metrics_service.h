@@ -12,8 +12,9 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/histogram.h"
 #include "base/lazy_instance.h"
+#include "base/lock.h"
+#include "base/metrics/histogram.h"
 #include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "base/thread_local.h"
@@ -49,7 +50,7 @@ class MetricsService : public MetricsServiceBase {
   };
 
   // Maintain a map of histogram names to the sample stats we've sent.
-  typedef std::map<std::string, Histogram::SampleSet> LoggedSampleMap;
+  typedef std::map<std::string, base::Histogram::SampleSet> LoggedSampleMap;
 
   // Sets and gets whether metrics recording is active.
   // SetRecording(false) also forces a persistent save of logging state (if
@@ -146,8 +147,10 @@ class MetricsService : public MetricsServiceBase {
   // The transmission timer id returned by SetTimer
   int transmission_timer_id_;
 
+  // Used to serialize the Start and Stop operations on the metrics service.
+  static Lock metrics_service_lock_;
+
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 
 #endif  // CHROME_FRAME_METRICS_METRICS_SERVICE_H_
-

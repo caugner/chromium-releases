@@ -16,10 +16,12 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/debug_util.h"
-#include "base/histogram.h"
+#include "base/debug/debugger.h"
+#include "base/debug/stack_trace.h"
 #include "base/lock.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -42,6 +44,20 @@ namespace net {
 
 namespace {
 
+// We use a separate histogram name for each platform to facilitate the
+// display of error codes by their symbolic name (since each platform has
+// different mappings).
+const char kOSErrorsForGetAddrinfoHistogramName[] =
+#if defined(OS_WIN)
+    "Net.OSErrorsForGetAddrinfo_Win";
+#elif defined(OS_MACOSX)
+    "Net.OSErrorsForGetAddrinfo_Mac";
+#elif defined(OS_LINUX)
+    "Net.OSErrorsForGetAddrinfo_Linux";
+#else
+    "Net.OSErrorsForGetAddrinfo";
+#endif
+
 HostCache* CreateDefaultCache() {
   static const size_t kMaxHostCacheEntries = 100;
 
@@ -56,16 +72,19 @@ HostCache* CreateDefaultCache() {
 }  // anonymous namespace
 
 HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves,
+                                       HostResolverProc* resolver_proc,
                                        NetLog* net_log) {
-  // Maximum of 50 concurrent threads.
-  // TODO(eroman): Adjust this, do some A/B experiments.
-  static const size_t kDefaultMaxJobs = 50u;
+  // Maximum of 8 concurrent resolver threads.
+  // Some routers (or resolvers) appear to start to provide host-not-found if
+  // too many simultaneous resolutions are pending.  This number needs to be
+  // further optimized, but 8 is what FF currently does.
+  static const size_t kDefaultMaxJobs = 8u;
 
   if (max_concurrent_resolves == HostResolver::kDefaultParallelism)
     max_concurrent_resolves = kDefaultMaxJobs;
 
   HostResolverImpl* resolver =
-      new HostResolverImpl(NULL, CreateDefaultCache(),
+      new HostResolverImpl(resolver_proc, CreateDefaultCache(),
                            max_concurrent_resolves, net_log);
 
   return resolver;
@@ -203,6 +222,8 @@ std::vector<int> GetAllGetAddrinfoOSErrors() {
     WSANOTINITIALISED,
     WSATRY_AGAIN,
     WSATYPE_NOT_FOUND,
+    // The following are not in doc, but might be to appearing in results :-(.
+    WSA_INVALID_HANDLE,
 #endif
   };
 
@@ -308,7 +329,12 @@ class HostResolverImpl::Request {
   DISALLOW_COPY_AND_ASSIGN(Request);
 };
 
-//-----------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+
+// Provide a common macro to simplify code and readability. We must use a
+// macros as the underlying HISTOGRAM macro creates static varibles.
+#define DNS_HISTOGRAM(name, time) UMA_HISTOGRAM_CUSTOM_TIMES(name, time, \
+    base::TimeDelta::FromMicroseconds(1), base::TimeDelta::FromHours(1), 100)
 
 // This class represents a request to the worker pool for a "getaddrinfo()"
 // call.
@@ -330,9 +356,10 @@ class HostResolverImpl::Job
        had_non_speculative_request_(false),
        net_log_(BoundNetLog::Make(net_log,
                                   NetLog::SOURCE_HOST_RESOLVER_IMPL_JOB)) {
-    net_log_.BeginEvent(NetLog::TYPE_HOST_RESOLVER_IMPL_JOB,
-            new JobCreationParameters(key.hostname,
-                                      source_net_log.source()));
+    net_log_.BeginEvent(
+        NetLog::TYPE_HOST_RESOLVER_IMPL_JOB,
+        make_scoped_refptr(
+            new JobCreationParameters(key.hostname, source_net_log.source())));
   }
 
   // Attaches a request to this job. The job takes ownership of |req| and will
@@ -340,7 +367,8 @@ class HostResolverImpl::Job
   void AddRequest(Request* req) {
     req->request_net_log().BeginEvent(
         NetLog::TYPE_HOST_RESOLVER_IMPL_JOB_ATTACH,
-        new NetLogSourceParameter("source_dependency", net_log_.source()));
+        make_scoped_refptr(new NetLogSourceParameter(
+            "source_dependency", net_log_.source())));
 
     req->set_job(this);
     requests_.push_back(req);
@@ -473,21 +501,10 @@ class HostResolverImpl::Job
     // Ideally the following code would be part of host_resolver_proc.cc,
     // however it isn't safe to call NetworkChangeNotifier from worker
     // threads. So we do it here on the IO thread instead.
-    if (error_ == ERR_NAME_NOT_RESOLVED && NetworkChangeNotifier::IsOffline())
+    if (error_ != OK && NetworkChangeNotifier::IsOffline())
       error_ = ERR_INTERNET_DISCONNECTED;
 
-    base::TimeDelta job_duration = base::TimeTicks::Now() - start_time_;
-
-    if (had_non_speculative_request_) {
-      // TODO(eroman): Add histogram for job times of non-speculative
-      // requests.
-    }
-
-    if (error_ != OK) {
-      UMA_HISTOGRAM_CUSTOM_ENUMERATION("Net.OSErrorsForGetAddrinfo",
-                                       std::abs(os_error_),
-                                       GetAllGetAddrinfoOSErrors());
-    }
+    RecordPerformanceHistograms();
 
     if (was_cancelled())
       return;
@@ -511,6 +528,69 @@ class HostResolverImpl::Job
 
     resolver_->OnJobComplete(this, error_, os_error_, results_);
   }
+
+  void RecordPerformanceHistograms() const {
+    enum Category {  // Used in HISTOGRAM_ENUMERATION.
+      RESOLVE_SUCCESS,
+      RESOLVE_FAIL,
+      RESOLVE_SPECULATIVE_SUCCESS,
+      RESOLVE_SPECULATIVE_FAIL,
+      RESOLVE_MAX,  // Bounding value.
+    };
+    int category = RESOLVE_MAX;  // Illegal value for later DCHECK only.
+
+    base::TimeDelta duration = base::TimeTicks::Now() - start_time_;
+    if (error_ == OK) {
+      if (had_non_speculative_request_) {
+        category = RESOLVE_SUCCESS;
+        DNS_HISTOGRAM("DNS.ResolveSuccess", duration);
+      } else {
+        category = RESOLVE_SPECULATIVE_SUCCESS;
+        DNS_HISTOGRAM("DNS.ResolveSpeculativeSuccess", duration);
+      }
+    } else {
+      if (had_non_speculative_request_) {
+        category = RESOLVE_FAIL;
+        DNS_HISTOGRAM("DNS.ResolveFail", duration);
+      } else {
+        category = RESOLVE_SPECULATIVE_FAIL;
+        DNS_HISTOGRAM("DNS.ResolveSpeculativeFail", duration);
+      }
+      UMA_HISTOGRAM_CUSTOM_ENUMERATION(kOSErrorsForGetAddrinfoHistogramName,
+                                       std::abs(os_error_),
+                                       GetAllGetAddrinfoOSErrors());
+    }
+    DCHECK_LT(category, static_cast<int>(RESOLVE_MAX));  // Be sure it was set.
+
+    UMA_HISTOGRAM_ENUMERATION("DNS.ResolveCategory", category, RESOLVE_MAX);
+
+    static bool show_speculative_experiment_histograms =
+        base::FieldTrialList::Find("DnsImpact") &&
+        !base::FieldTrialList::Find("DnsImpact")->group_name().empty();
+    if (show_speculative_experiment_histograms) {
+      UMA_HISTOGRAM_ENUMERATION(
+          base::FieldTrial::MakeName("DNS.ResolveCategory", "DnsImpact"),
+          category, RESOLVE_MAX);
+      if (RESOLVE_SUCCESS == category) {
+        DNS_HISTOGRAM(base::FieldTrial::MakeName("DNS.ResolveSuccess",
+                                                 "DnsImpact"), duration);
+      }
+    }
+    static bool show_parallelism_experiment_histograms =
+        base::FieldTrialList::Find("DnsParallelism") &&
+        !base::FieldTrialList::Find("DnsParallelism")->group_name().empty();
+    if (show_parallelism_experiment_histograms) {
+      UMA_HISTOGRAM_ENUMERATION(
+          base::FieldTrial::MakeName("DNS.ResolveCategory", "DnsParallelism"),
+          category, RESOLVE_MAX);
+      if (RESOLVE_SUCCESS == category) {
+        DNS_HISTOGRAM(base::FieldTrial::MakeName("DNS.ResolveSuccess",
+                                                 "DnsParallelism"), duration);
+      }
+    }
+  }
+
+
 
   // Immutable. Can be read from either thread,
   const int id_;
@@ -991,7 +1071,7 @@ void HostResolverImpl::CancelRequest(RequestHandle req_handle) {
     // Because we destroy outstanding requests during Shutdown(),
     // |req_handle| is already cancelled.
     LOG(ERROR) << "Called HostResolverImpl::CancelRequest() after Shutdown().";
-    StackTrace().PrintBacktrace();
+    base::debug::StackTrace().PrintBacktrace();
     return;
   }
   Request* req = reinterpret_cast<Request*>(req_handle);
@@ -1160,11 +1240,13 @@ void HostResolverImpl::OnStartRequest(const BoundNetLog& source_net_log,
                                       const RequestInfo& info) {
   source_net_log.BeginEvent(
       NetLog::TYPE_HOST_RESOLVER_IMPL,
-      new NetLogSourceParameter("source_dependency", request_net_log.source()));
+      make_scoped_refptr(new NetLogSourceParameter(
+          "source_dependency", request_net_log.source())));
 
   request_net_log.BeginEvent(
       NetLog::TYPE_HOST_RESOLVER_IMPL_REQUEST,
-      new RequestInfoParameters(info, source_net_log.source()));
+      make_scoped_refptr(new RequestInfoParameters(
+          info, source_net_log.source())));
 
   // Notify the observers of the start.
   if (!observers_.empty()) {
@@ -1253,10 +1335,9 @@ void HostResolverImpl::IPv6ProbeSetDefaultAddressFamily(
   DCHECK(address_family == ADDRESS_FAMILY_UNSPECIFIED ||
          address_family == ADDRESS_FAMILY_IPV4);
   if (default_address_family_ != address_family) {
-    LOG(INFO) << "IPv6Probe forced AddressFamily setting to "
-              << ((address_family == ADDRESS_FAMILY_UNSPECIFIED)
-                  ? "ADDRESS_FAMILY_UNSPECIFIED"
-                  : "ADDRESS_FAMILY_IPV4");
+    VLOG(1) << "IPv6Probe forced AddressFamily setting to "
+            << ((address_family == ADDRESS_FAMILY_UNSPECIFIED) ?
+                "ADDRESS_FAMILY_UNSPECIFIED" : "ADDRESS_FAMILY_IPV4");
   }
   default_address_family_ = address_family;
   // Drop reference since the job has called us back.
@@ -1294,7 +1375,7 @@ void HostResolverImpl::ProcessQueuedRequests() {
   if (!top_req)
     return;
 
-  scoped_refptr<Job> job = CreateAndStartJob(top_req);
+  scoped_refptr<Job> job(CreateAndStartJob(top_req));
 
   // Search for any other pending request which can piggy-back off this job.
   for (size_t pool_i = 0; pool_i < POOL_COUNT; ++pool_i) {
@@ -1324,8 +1405,8 @@ HostResolverImpl::Job* HostResolverImpl::CreateAndStartJob(Request* req) {
   req->request_net_log().AddEvent(NetLog::TYPE_HOST_RESOLVER_IMPL_CREATE_JOB,
                                   NULL);
 
-  scoped_refptr<Job> job = new Job(next_job_id_++, this, key,
-                                   req->request_net_log(), net_log_);
+  scoped_refptr<Job> job(new Job(next_job_id_++, this, key,
+                                   req->request_net_log(), net_log_));
   job->AddRequest(req);
   AddOutstandingJob(job);
   job->Start();

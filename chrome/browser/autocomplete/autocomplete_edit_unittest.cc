@@ -35,6 +35,7 @@ class TestingAutocompleteEditView : public AutocompleteEditView {
                                         size_t caret_pos) {}
   virtual void SetForcedQuery() {}
   virtual bool IsSelectAll() { return false; }
+  virtual bool DeleteAtEndPressed() { return false; }
   virtual void GetSelectionBounds(std::wstring::size_type* start,
                                   std::wstring::size_type* end) {}
   virtual void SelectAll(bool reversed) {}
@@ -67,12 +68,14 @@ class TestingAutocompleteEditController : public AutocompleteEditController {
   virtual bool OnCommitSuggestedText(const std::wstring& typed_text) {
     return false;
   }
+  virtual void OnSetSuggestedSearchText(const string16& suggested_text) {}
   virtual void OnPopupBoundsChanged(const gfx::Rect& bounds) {}
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
                                     PageTransition::Type transition,
                                     const GURL& alternate_nav_url) {}
   virtual void OnChanged() {}
+  virtual void OnSelectionBoundsChanged() {}
   virtual void OnInputInProgress(bool in_progress) {}
   virtual void OnKillFocus() {}
   virtual void OnSetFocus() {}

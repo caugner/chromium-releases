@@ -17,6 +17,7 @@
 #include "net/base/request_priority.h"
 #include "net/base/ssl_config_service.h"
 #include "net/http/http_auth.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_transaction.h"
 #include "net/http/stream_factory.h"
@@ -24,17 +25,15 @@
 
 namespace net {
 
-class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
 class HttpStream;
 class HttpStreamRequest;
 class IOBuffer;
-class SSLNonSensitiveHostInfo;
 struct HttpRequestInfo;
 
 class HttpNetworkTransaction : public HttpTransaction,
-                               public StreamFactory::StreamRequestDelegate {
+                               public StreamRequest::Delegate {
  public:
   explicit HttpNetworkTransaction(HttpNetworkSession* session);
 
@@ -57,9 +56,8 @@ class HttpNetworkTransaction : public HttpTransaction,
   virtual const HttpResponseInfo* GetResponseInfo() const;
   virtual LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
-  virtual void SetSSLNonSensitiveHostInfo(SSLNonSensitiveHostInfo* host_info);
 
-  // StreamRequestDelegate methods:
+  // StreamRequest::Delegate methods:
   virtual void OnStreamReady(HttpStream* stream);
   virtual void OnStreamFailed(int status);
   virtual void OnCertificateError(int status, const SSLInfo& ssl_info);
@@ -137,6 +135,11 @@ class HttpNetworkTransaction : public HttpTransaction,
   // Called to handle a client certificate request.
   int HandleCertificateRequest(int error);
 
+  // Called to possibly recover from an SSL handshake error.  Sets next_state_
+  // and returns OK if recovering from the error.  Otherwise, the same error
+  // code is returned.
+  int HandleSSLHandshakeError(int error);
+
   // Called to possibly recover from the given error.  Sets next_state_ and
   // returns OK if recovering from the error.  Otherwise, the same error code
   // is returned.
@@ -168,6 +171,10 @@ class HttpNetworkTransaction : public HttpTransaction,
 
   // Resets the members of the transaction so it can be restarted.
   void ResetStateForRestart();
+
+  // Resets the members of the transaction, except |stream_|, which needs
+  // to be maintained for multi-round auth.
+  void ResetStateForAuthRestart();
 
   // Returns true if we should try to add a Proxy-Authorization header
   bool ShouldApplyProxyAuth() const;
@@ -208,12 +215,8 @@ class HttpNetworkTransaction : public HttpTransaction,
 
   ProxyInfo proxy_info_;
 
-  scoped_refptr<StreamFactory::StreamRequestJob> stream_request_;
+  scoped_ptr<StreamRequest> stream_request_;
   scoped_ptr<HttpStream> stream_;
-
-  // Reuse the same connection for each round of a connection-based HTTP
-  // authentication scheme.
-  scoped_ptr<ClientSocketHandle> auth_connection_;
 
   // True if we've validated the headers that the stream parser has returned.
   bool headers_valid_;
@@ -225,7 +228,7 @@ class HttpNetworkTransaction : public HttpTransaction,
 
   SSLConfig ssl_config_;
 
-  std::string request_headers_;
+  HttpRequestHeaders request_headers_;
 
   // The size in bytes of the buffer we use to drain the response body that
   // we want to throw away.  The response body is typically a small error

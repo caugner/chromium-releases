@@ -11,7 +11,6 @@
 #include "base/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "net/base/net_errors.h"
@@ -385,8 +384,9 @@ std::string DescribeContext(GSSAPILibrary* gssapi_lib,
 
 }  // namespace
 
-GSSAPISharedLibrary::GSSAPISharedLibrary()
+GSSAPISharedLibrary::GSSAPISharedLibrary(const std::string& gssapi_library_name)
     : initialized_(false),
+      gssapi_library_name_(gssapi_library_name),
       gssapi_library_(NULL),
       import_name_(NULL),
       release_name_(NULL),
@@ -422,19 +422,29 @@ bool GSSAPISharedLibrary::InitImpl() {
 }
 
 base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
-  static const char* kLibraryNames[] = {
+  const char** library_names;
+  size_t num_lib_names;
+  const char* user_specified_library[1];
+  if (!gssapi_library_name_.empty()) {
+    user_specified_library[0] = gssapi_library_name_.c_str();
+    library_names = user_specified_library;
+    num_lib_names = 1;
+  } else {
+    static const char* kDefaultLibraryNames[] = {
 #if defined(OS_MACOSX)
-    "libgssapi_krb5.dylib"  // MIT Kerberos
+      "libgssapi_krb5.dylib"  // MIT Kerberos
 #else
-    "libgssapi_krb5.so.2",  // MIT Kerberos - FC, Suse10, Debian
-    "libgssapi.so.4",       // Heimdal - Suse10, MDK
-    "libgssapi.so.1"        // Heimdal - Suse9, CITI - FC, MDK, Suse10
+      "libgssapi_krb5.so.2",  // MIT Kerberos - FC, Suse10, Debian
+      "libgssapi.so.4",       // Heimdal - Suse10, MDK
+      "libgssapi.so.1"        // Heimdal - Suse9, CITI - FC, MDK, Suse10
 #endif
-  };
-  static size_t num_lib_names = arraysize(kLibraryNames);
+    };
+    library_names = kDefaultLibraryNames;
+    num_lib_names = arraysize(kDefaultLibraryNames);
+  }
 
   for (size_t i = 0; i < num_lib_names; ++i) {
-    const char* library_name = kLibraryNames[i];
+    const char* library_name = library_names[i];
     FilePath file_path(library_name);
     base::NativeLibrary lib = base::LoadNativeLibrary(file_path);
     if (lib) {
@@ -613,9 +623,6 @@ OM_uint32 GSSAPISharedLibrary::inquire_context(
                           locally_initiated,
                           open);
 }
-GSSAPILibrary* GSSAPILibrary::GetDefault() {
-  return Singleton<GSSAPISharedLibrary>::get();
-}
 
 ScopedSecurityContext::ScopedSecurityContext(GSSAPILibrary* gssapi_lib)
     : security_context_(GSS_C_NO_CONTEXT),
@@ -736,7 +743,7 @@ namespace {
 // This means a simple switch on the return codes is not sufficient.
 
 int MapImportNameStatusToError(OM_uint32 major_status) {
-  LOG(INFO) << "import_name returned 0x" << std::hex << major_status;
+  VLOG(1) << "import_name returned 0x" << std::hex << major_status;
   if (major_status == GSS_S_COMPLETE)
     return OK;
   if (GSS_CALLING_ERROR(major_status) != 0)
@@ -763,7 +770,7 @@ int MapImportNameStatusToError(OM_uint32 major_status) {
 }
 
 int MapInitSecContextStatusToError(OM_uint32 major_status) {
-  LOG(INFO) << "init_sec_context returned 0x" << std::hex << major_status;
+  VLOG(1) << "init_sec_context returned 0x" << std::hex << major_status;
   // Although GSS_S_CONTINUE_NEEDED is an additional bit, it seems like
   // other code just checks if major_status is equivalent to it to indicate
   // that there are no other errors included.
@@ -840,11 +847,8 @@ int HttpAuthGSSAPI::GetNextSecurityToken(const std::wstring& spn,
   int rv = MapImportNameStatusToError(major_status);
   if (rv != OK) {
     LOG(ERROR) << "Problem importing name from "
-               << "spn \"" << spn_principal << "\""
-               << std::endl
-               << DisplayExtendedStatus(library_,
-                                        major_status,
-                                        minor_status);
+               << "spn \"" << spn_principal << "\"\n"
+               << DisplayExtendedStatus(library_, major_status, minor_status);
     return rv;
   }
   ScopedName scoped_name(principal_name, library_);
@@ -869,17 +873,12 @@ int HttpAuthGSSAPI::GetNextSecurityToken(const std::wstring& spn,
       NULL);
   rv = MapInitSecContextStatusToError(major_status);
   if (rv != OK) {
-    LOG(ERROR) << "Problem initializing context. "
-               << std::endl
-               << DisplayExtendedStatus(library_,
-                                        major_status,
-                                        minor_status)
-               << std::endl
+    LOG(ERROR) << "Problem initializing context. \n"
+               << DisplayExtendedStatus(library_, major_status, minor_status)
+               << '\n'
                << DescribeContext(library_, scoped_sec_context_.get());
-    return rv;
   }
-
-  return OK;
+  return rv;
 }
 
 }  // namespace net

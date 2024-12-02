@@ -15,6 +15,7 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/time.h"
 
 namespace sync_pb {
 class EntitySpecifics;
@@ -50,6 +51,8 @@ enum ModelType {
   PASSWORDS,
   // An autofill folder or an autofill object.
   AUTOFILL,
+  // An autofill Profile Object
+  AUTOFILL_PROFILE,
   // A themes folder or a themes object.
   THEMES,
   // A typed_url folder or a typed_url object.
@@ -89,7 +92,21 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity);
 // prefer using GetModelType where possible.
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics);
 
+// Returns a string that represents the name of |model_type|.
 std::string ModelTypeToString(ModelType model_type);
+
+// Returns the ModelType corresponding to the name |model_type_string|.
+ModelType ModelTypeFromString(const std::string& model_type_string);
+
+// Converts a string into a model type bitset. If successful, returns true. If
+// failed to parse string, returns false and model_types is unspecified.
+bool ModelTypeBitSetFromString(
+    const std::string& model_type_bitset_string,
+    ModelTypeBitSet* model_types);
+
+// Posts timedeltas to histogram of datatypes. Allows tracking of the frequency
+// at which datatypes cause syncs.
+void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time);
 
 // Convert a real model type to a notification type (used for
 // subscribing to server-issued notifications).  Returns true iff

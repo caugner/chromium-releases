@@ -25,11 +25,15 @@
 #include "chrome/common/navigation_gesture.h"
 #include "chrome/common/page_zoom.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/view_types.h"
+#include "chrome/renderer/external_popup_menu.h"
+#include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper_plugin_delegate_impl.h"
 #include "chrome/renderer/render_widget.h"
 #include "chrome/renderer/renderer_webcookiejar_impl.h"
+#include "chrome/renderer/searchbox.h"
 #include "chrome/renderer/translate_helper.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
@@ -59,7 +63,7 @@ class DomAutomationController;
 class DOMUIBindings;
 class ExternalHostBindings;
 class FilePath;
-class GeolocationDispatcher;
+class GeolocationDispatcherOld;
 class GURL;
 class ListValue;
 class NavigationState;
@@ -94,11 +98,16 @@ class PluginInstance;
 class FullscreenContainer;
 }
 
+namespace safe_browsing {
+class PhishingClassifierDelegate;
+}
+
 namespace webkit_glue {
 class ImageResourceFetcher;
 struct FileUploadData;
 struct FormData;
 struct PasswordFormFillData;
+class ResourceFetcher;
 }
 
 namespace WebKit {
@@ -219,6 +228,24 @@ class RenderView : public RenderWidget,
     return page_click_tracker_.get();
   }
 
+  // May be NULL if client-side phishing detection is disabled.
+  safe_browsing::PhishingClassifierDelegate*
+      phishing_classifier_delegate() const {
+    return phishing_delegate_.get();
+  }
+
+  // Returns true if we should display scrollbars for the given view size and
+  // false if the scrollbars should be hidden.
+  bool should_display_scrollbars(int width, int height) const {
+    return (!send_preferred_size_changes_ ||
+            (disable_scrollbars_size_limit_.width() <= width ||
+             disable_scrollbars_size_limit_.height() <= height));
+  }
+
+  const SearchBox& searchbox() const {
+    return search_box_;
+  }
+
   // Called from JavaScript window.external.AddSearchProvider() to add a
   // keyword for a provider described in the given OpenSearch document.
   void AddSearchProvider(const std::string& url,
@@ -229,8 +256,8 @@ class RenderView : public RenderWidget,
       GetSearchProviderInstallState(WebKit::WebFrame* frame,
                                     const std::string& url);
 
-  // Sends ViewHostMsg_SetSuggestResult to the browser.
-  void SetSuggestResult(const std::string& suggest);
+  // Sends ViewHostMsg_SetSuggestions to the browser.
+  void SetSuggestions(const std::vector<std::string>& suggestions);
 
   // Evaluates a string of JavaScript in a particular frame.
   void EvaluateScript(const string16& frame_xpath,
@@ -258,6 +285,13 @@ class RenderView : public RenderWidget,
   // Notifies the browser that the given action has been performed. This is
   // aggregated to the user metrics service.
   void UserMetricsRecordAction(const std::string& action);
+
+  // Starts installation of the page in the specified frame as a web app. The
+  // page must link to an external 'definition file'. This is different from
+  // the 'application shortcuts' feature where we pull the application
+  // definition out of optional meta tags in the page.
+  bool InstallWebApplicationUsingDefinitionFile(WebKit::WebFrame* frame,
+                                                string16* error);
 
   // Extensions ----------------------------------------------------------------
 
@@ -322,7 +356,8 @@ class RenderView : public RenderWidget,
                                          int32 width,
                                          int32 height,
                                          TransportDIB::Handle transport_dib);
-  void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window);
+  void AcceleratedSurfaceBuffersSwapped(gfx::PluginWindowHandle window,
+                                        uint64 surface_id);
 #endif
 
   void RegisterPluginDelegate(WebPluginDelegateProxy* delegate);
@@ -350,6 +385,9 @@ class RenderView : public RenderWidget,
   virtual WebKit::WebWidget* createPopupMenu(WebKit::WebPopupType popup_type);
   virtual WebKit::WebWidget* createPopupMenu(
       const WebKit::WebPopupMenuInfo& info);
+  virtual WebKit::WebExternalPopupMenu* createExternalPopupMenu(
+      const WebKit::WebPopupMenuInfo& popup_menu_info,
+      WebKit::WebExternalPopupMenuClient* popup_menu_client);
   virtual WebKit::WebWidget* createFullscreenWindow(
       WebKit::WebPopupType popup_type);
   virtual WebKit::WebStorageNamespace* createSessionStorageNamespace(
@@ -372,8 +410,6 @@ class RenderView : public RenderWidget,
       const WebKit::WebInputElement& element,
       const WebKit::WebKeyboardEvent& event);
   virtual bool handleCurrentKeyboardEvent();
-  virtual void inputElementClicked(const WebKit::WebInputElement& element,
-                                   bool already_focused);
   virtual void spellCheck(const WebKit::WebString& text,
                           int& offset,
                           int& length);
@@ -422,9 +458,6 @@ class RenderView : public RenderWidget,
       WebKit::WebAccessibilityNotification notification);
   virtual void didUpdateInspectorSetting(const WebKit::WebString& key,
                                          const WebKit::WebString& value);
-  virtual void queryAutofillSuggestions(const WebKit::WebNode& node,
-                                        const WebKit::WebString& name,
-                                        const WebKit::WebString& value);
   virtual void removeAutofillSuggestions(const WebKit::WebString& name,
                                          const WebKit::WebString& value);
   virtual void didAcceptAutoFillSuggestion(const WebKit::WebNode& node,
@@ -462,7 +495,9 @@ class RenderView : public RenderWidget,
   virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
       WebKit::WebFrame* frame,
       WebKit::WebApplicationCacheHostClient* client);
+  // TODO(jochen): remove after roll.
   virtual WebKit::WebCookieJar* cookieJar();
+  virtual WebKit::WebCookieJar* cookieJar(WebKit::WebFrame* frame);
   virtual void frameDetached(WebKit::WebFrame* frame);
   virtual void willClose(WebKit::WebFrame* frame);
   virtual bool allowImages(WebKit::WebFrame* frame, bool enabled_per_settings);
@@ -580,6 +615,7 @@ class RenderView : public RenderWidget,
   virtual void openFileSystem(WebKit::WebFrame* frame,
                               WebKit::WebFileSystem::Type type,
                               long long size,
+                              bool create,
                               WebKit::WebFileSystemCallbacks* callbacks);
 
   // WebKit::WebPageSerializerClient implementation ----------------------------
@@ -631,9 +667,15 @@ class RenderView : public RenderWidget,
 
  private:
   // For unit tests.
-  friend class RenderViewTest;
+  friend class ExternalPopupMenuTest;
   friend class PepperDeviceTest;
+  friend class RenderViewTest;
+
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, NormalCase);
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuTest, ShowPopupThenNavigate);
+  FRIEND_TEST_ALL_PREFIXES(ExternalPopupMenuRemoveTest, RemoveOnChange);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnNavStateChanged);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewTest, LastCommittedUpdateState);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnImeStateChanged);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, ImeComposition);
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, OnSetTextDirection);
@@ -650,6 +692,23 @@ class RenderView : public RenderWidget,
 
   typedef std::map<GURL, ContentSettings> HostContentSettings;
   typedef std::map<GURL, double> HostZoomLevels;
+
+  // Cannot use std::set unfortunately since linked_ptr<> does not support
+  // operator<.
+  typedef std::vector<linked_ptr<webkit_glue::ImageResourceFetcher> >
+      ImageResourceFetcherList;
+
+  // Identifies an accessibility notification from webkit.
+  struct RendererAccessibilityNotification {
+   public:
+    bool ShouldIncludeChildren();
+
+    // The webkit glue id of the accessibility object.
+    int32 id;
+
+    // The accessibility notification type.
+    ViewHostMsg_AccessibilityNotification_Params::NotificationType type;
+  };
 
   enum ErrorPageType {
     DNS_ERROR,
@@ -735,6 +794,9 @@ class RenderView : public RenderWidget,
   // http://bugs.webkit.org/show_bug.cgi?id=16976
   void TextFieldDidChangeImpl(const WebKit::WebInputElement& element);
 
+  // Send queued accessibility notifications from the renderer to the browser.
+  void SendPendingAccessibilityNotifications();
+
   // IPC message handlers ------------------------------------------------------
   //
   // The documentation for these functions should be in
@@ -797,12 +859,20 @@ class RenderView : public RenderWidget,
                             const gfx::Point& screen_pt,
                             WebKit::WebDragOperationsMask operations_allowed);
   void OnEnablePreferredSizeChangedMode(int flags);
+  void OnSearchBoxChange(const string16& value,
+                         bool verbatim,
+                         int selection_start,
+                         int selection_end);
+  void OnSearchBoxSubmit(const string16& value, bool verbatim);
+  void OnSearchBoxCancel();
+  void OnSearchBoxResize(const gfx::Rect& bounds);
+  void OnDetermineIfPageSupportsInstant(const string16& value, bool verbatim);
   void OnEnableViewSourceMode();
   void OnExecuteCode(const ViewMsg_ExecuteCode_Params& params);
   void OnExecuteEditCommand(const std::string& name, const std::string& value);
-  void OnExtensionMessageInvoke(const std::string& function_name,
+  void OnExtensionMessageInvoke(const std::string& extension_id,
+                                const std::string& function_name,
                                 const ListValue& args,
-                                bool cross_incognito,
                                 const GURL& event_url);
   void OnFileChooserResponse(const std::vector<FilePath>& paths);
   void OnFind(int request_id, const string16&, const WebKit::WebFindOptions&);
@@ -832,6 +902,7 @@ class RenderView : public RenderWidget,
 #endif
   void OnPrintingDone(int document_cookie, bool success);
   void OnPrintPages();
+  void OnPrintPreview();
   void OnRedo();
   void OnReloadFrame();
   void OnReplace(const string16& text);
@@ -853,12 +924,14 @@ class RenderView : public RenderWidget,
   void OnSetDOMUIProperty(const std::string& name, const std::string& value);
   void OnSetEditCommandsForNextKeyEvent(const EditCommands& edit_commands);
   void OnSetInitialFocus(bool reverse);
+  void OnScrollFocusedEditableNodeIntoView();
   void OnSetPageEncoding(const std::string& encoding_name);
   void OnSetRendererPrefs(const RendererPreferences& renderer_prefs);
   void OnSetupDevToolsClient();
 #if defined(OS_MACOSX)
   void OnSetWindowVisibility(bool visible);
 #endif
+  void OnSetZoomLevel(double zoom_level);
   void OnSetZoomLevelForLoadingURL(const GURL& url, double zoom_level);
   void OnShouldClose();
   void OnStop();
@@ -877,6 +950,7 @@ class RenderView : public RenderWidget,
 #if defined(OS_MACOSX)
   void OnWindowFrameChanged(const gfx::Rect& window_frame,
                             const gfx::Rect& view_frame);
+  void OnSelectPopupMenuItem(int selected_index);
 #endif
   void OnZoom(PageZoom::Function function);
 
@@ -941,6 +1015,16 @@ class RenderView : public RenderWidget,
   void DidDownloadImage(webkit_glue::ImageResourceFetcher* fetcher,
                         const SkBitmap& image);
 
+  // Callback triggered when we finish downloading the application definition
+  // file.
+  void DidDownloadApplicationDefinition(const WebKit::WebURLResponse& response,
+                                        const std::string& data);
+
+  // Callback triggered after each icon referenced by the application definition
+  // is downloaded.
+  void DidDownloadApplicationIcon(webkit_glue::ImageResourceFetcher* fetcher,
+                                  const SkBitmap& image);
+
   // Requests to download an image. When done, the RenderView is
   // notified by way of DidDownloadImage. Returns true if the request was
   // successfully started, false otherwise. id is used to uniquely identify the
@@ -948,8 +1032,6 @@ class RenderView : public RenderWidget,
   // multiple frames, the frame whose size is image_size is returned. If the
   // image doesn't have a frame at the specified size, the first is returned.
   bool DownloadImage(int id, const GURL& image_url, int image_size);
-
-  void DumpLoadHistograms() const;
 
   // Initializes the document_tag_ member if necessary.
   void EnsureDocumentTag();
@@ -1000,15 +1082,11 @@ class RenderView : public RenderWidget,
                                const std::string& html,
                                bool replace);
 
-  // Logs the navigation state to the console.
-  void LogNavigationState(const NavigationState* state,
-                          const WebKit::WebDataSource* ds) const;
-
   bool MaybeLoadAlternateErrorPage(WebKit::WebFrame* frame,
                                    const WebKit::WebURLError& error,
                                    bool replace);
 
-  void Print(WebKit::WebFrame* frame, bool script_initiated);
+  void Print(WebKit::WebFrame* frame, bool script_initiated, bool is_preview);
 
   // Returns whether the page associated with |document| is a candidate for
   // translation.  Some pages can explictly specify (via a meta-tag) that they
@@ -1031,6 +1109,9 @@ class RenderView : public RenderWidget,
   // Update the target url and tell the browser that the target URL has changed.
   // If |url| is empty, show |fallback_url|.
   void UpdateTargetURL(const GURL& url, const GURL& fallback_url);
+
+  // Helper to add an error message to the root frame's console.
+  void AddErrorToRootConsole(const string16& message);
 
   // ---------------------------------------------------------------------------
   // ADDING NEW FUNCTIONS? Please keep private functions alphabetized and put
@@ -1163,11 +1244,6 @@ class RenderView : public RenderWidget,
 
   int document_tag_;
 
-  // Site isolation metrics flags. These are per-page-load counts, reset to 0
-  // in OnClosePage.
-  int cross_origin_access_count_;
-  int same_origin_access_count_;
-
   // UI state ------------------------------------------------------------------
 
   // The state of our target_url transmissions. When we receive a request to
@@ -1204,6 +1280,8 @@ class RenderView : public RenderWidget,
 
   // The text selection the last time DidChangeSelection got called.
   std::string last_selection_;
+
+  SearchBox search_box_;
 
   // View ----------------------------------------------------------------------
 
@@ -1251,6 +1329,7 @@ class RenderView : public RenderWidget,
 
   ScopedRunnableMethodFactory<RenderView> page_info_method_factory_;
   ScopedRunnableMethodFactory<RenderView> autofill_method_factory_;
+  ScopedRunnableMethodFactory<RenderView> accessibility_method_factory_;
 
   // Responsible for translating the page contents to other languages.
   TranslateHelper translate_helper_;
@@ -1287,7 +1366,7 @@ class RenderView : public RenderWidget,
   scoped_refptr<AudioMessageFilter> audio_message_filter_;
 
   // The geolocation dispatcher attached to this view, lazily initialized.
-  scoped_ptr<GeolocationDispatcher> geolocation_dispatcher_;
+  scoped_ptr<GeolocationDispatcherOld> geolocation_dispatcher_;
 
   // Handles accessibility requests into the renderer side, as well as
   // maintains the cache and other features of the accessibility tree.
@@ -1295,14 +1374,24 @@ class RenderView : public RenderWidget,
 
   // Collect renderer accessibility notifications until they are ready to be
   // sent to the browser.
-  std::vector<ViewHostMsg_AccessibilityNotification_Params>
+  std::vector<RendererAccessibilityNotification>
       pending_accessibility_notifications_;
+
+  // Set if we are waiting for a accessibility notification ack.
+  bool accessibility_ack_pending_;
 
   // The speech dispatcher attached to this view, lazily initialized.
   scoped_ptr<SpeechInputDispatcher> speech_input_dispatcher_;
 
   // Device orientation dispatcher attached to this view; lazily initialized.
   scoped_ptr<DeviceOrientationDispatcher> device_orientation_dispatcher_;
+
+  // Responsible for sending page load related histograms.
+  PageLoadHistograms page_load_histograms_;
+
+  // Handles the interaction between the RenderView and the phishing
+  // classifier.
+  scoped_ptr<safe_browsing::PhishingClassifierDelegate> phishing_delegate_;
 
   // Misc ----------------------------------------------------------------------
 
@@ -1321,8 +1410,22 @@ class RenderView : public RenderWidget,
       pending_code_execution_queue_;
 
   // ImageResourceFetchers schedule via DownloadImage.
-  typedef std::set<webkit_glue::ImageResourceFetcher*> ImageResourceFetcherSet;
-  ImageResourceFetcherSet image_fetchers_;
+  ImageResourceFetcherList image_fetchers_;
+
+  // The app info that we are processing. This is used when installing an app
+  // via application definition. The in-progress web app is stored here while
+  // its manifest and icons are downloaded.
+  scoped_ptr<WebApplicationInfo> pending_app_info_;
+
+  // Used to download the application definition file.
+  scoped_ptr<webkit_glue::ResourceFetcher> app_definition_fetcher_;
+
+  // Used to download the icons for an application.
+  ImageResourceFetcherList app_icon_fetchers_;
+
+  // The number of app icon requests outstanding. When this reaches zero, we're
+  // done processing an app definition file.
+  int pending_app_icon_requests_;
 
   // The SessionStorage namespace that we're assigned to has an ID, and that ID
   // is passed to us upon creation.  WebKit asks for this ID upon first use and
@@ -1358,6 +1461,9 @@ class RenderView : public RenderWidget,
 
   // External host exposed through automation controller.
   scoped_ptr<ExternalHostBindings> external_host_bindings_;
+
+  // The external popup for the currently showing select popup.
+  scoped_ptr<ExternalPopupMenu> external_popup_menu_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

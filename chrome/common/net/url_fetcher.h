@@ -6,12 +6,17 @@
 // low-level details like thread safety, ref counting, and incremental buffer
 // reading.  This is useful for callers who simply want to get the data from a
 // URL and don't care about all the nitty-gritty details.
+//
+// NOTE(willchan): Only one "IO" thread is supported for URLFetcher.  This is a
+// temporary situation.  We will work on allowing support for multiple "io"
+// threads per process.
 
 #ifndef CHROME_COMMON_NET_URL_FETCHER_H_
 #define CHROME_COMMON_NET_URL_FETCHER_H_
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
@@ -148,6 +153,10 @@ class URLFetcher {
   // after backoff_delay() elapses. URLFetcher has it set to true by default.
   void set_automatically_retry_on_5xx(bool retry);
 
+  int max_retries() const { return max_retries_; }
+
+  void set_max_retries(int max_retries) { max_retries_ = max_retries; }
+
   // Returns the back-off delay before the request will be retried,
   // when a 5xx response was received.
   base::TimeDelta backoff_delay() const { return backoff_delay_; }
@@ -170,6 +179,17 @@ class URLFetcher {
   // Return the URL that this fetcher is processing.
   const GURL& url() const;
 
+  // Reports that the received content was malformed.
+  void ReceivedContentWasMalformed();
+
+  // Cancels all existing URLRequests.  Will notify the URLFetcher::Delegates.
+  // Note that any new URLFetchers created while this is running will not be
+  // cancelled.  Typically, one would call this in the CleanUp() method of an IO
+  // thread, so that no new URLRequests would be able to start on the IO thread
+  // anyway.  This doesn't prevent new URLFetchers from trying to post to the IO
+  // thread though, even though the task won't ever run.
+  static void CancelAll();
+
  protected:
   // Returns the delegate.
   Delegate* delegate() const;
@@ -191,6 +211,8 @@ class URLFetcher {
   bool automatically_retry_on_5xx_;
   // Back-off time delay. 0 by default.
   base::TimeDelta backoff_delay_;
+  // Maximum retries allowed.
+  int max_retries_;
 
   static bool g_interception_enabled;
 

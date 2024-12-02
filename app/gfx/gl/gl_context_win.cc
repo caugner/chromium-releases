@@ -333,7 +333,7 @@ std::string BaseWinGLContext::GetExtensions() {
     }
   }
 
-  return GetExtensions();
+  return GLContext::GetExtensions();
 }
 
 bool NativeViewGLContext::Initialize(bool multisampled) {
@@ -490,19 +490,27 @@ bool OSMesaViewGLContext::SwapBuffers() {
   info.bV4Planes = 1;
   info.bV4BitCount = 32;
   info.bV4V4Compression = BI_BITFIELDS;
-  info.bV4RedMask = 0xFF000000;
-  info.bV4GreenMask = 0x00FF0000;
-  info.bV4BlueMask = 0x0000FF00;
-  info.bV4AlphaMask = 0x000000FF;
+  info.bV4RedMask = 0x000000FF;
+  info.bV4GreenMask = 0x0000FF00;
+  info.bV4BlueMask = 0x00FF0000;
+  info.bV4AlphaMask = 0xFF000000;
 
-  // Copy the back buffer to the window's device context.
-  return StretchDIBits(device_context_,
-                       0, 0, size.width(), size.height(),
-                       0, 0, size.width(), size.height(),
-                       osmesa_context_.buffer(),
-                       reinterpret_cast<BITMAPINFO*>(&info),
-                       DIB_RGB_COLORS,
-                       SRCCOPY) != 0;
+  // Copy the back buffer to the window's device context. Do not check whether
+  // StretchDIBits succeeds or not. It will fail if the window has been
+  // destroyed but it is preferable to allow rendering to silently fail if the
+  // window is destroyed. This is because the primary application of this
+  // class of GLContext is for testing and we do not want every GL related ui /
+  // browser test to become flaky if there is a race condition between GL
+  // context destruction and window destruction.
+  StretchDIBits(device_context_,
+                0, 0, size.width(), size.height(),
+                0, 0, size.width(), size.height(),
+                osmesa_context_.buffer(),
+                reinterpret_cast<BITMAPINFO*>(&info),
+                DIB_RGB_COLORS,
+                SRCCOPY);
+
+  return true;
 }
 
 gfx::Size OSMesaViewGLContext::GetSize() {
@@ -520,9 +528,12 @@ void OSMesaViewGLContext::SetSwapInterval(int interval) {
 }
 
 void OSMesaViewGLContext::UpdateSize() {
-  // Change back buffer size to that of window.
+  // Change back buffer size to that of window. If window handle is invalid, do
+  // not change the back buffer size.
   RECT rect;
-  GetClientRect(window_, &rect);
+  if (!GetClientRect(window_, &rect))
+    return;
+
   gfx::Size window_size = gfx::Size(
     std::max(1, static_cast<int>(rect.right - rect.left)),
     std::max(1, static_cast<int>(rect.bottom - rect.top)));

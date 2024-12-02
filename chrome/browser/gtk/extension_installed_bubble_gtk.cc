@@ -9,13 +9,13 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/gtk/browser_actions_toolbar_gtk.h"
 #include "chrome/browser/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/location_bar_view_gtk.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_service.h"
@@ -43,21 +43,23 @@ const int kContentBorder = 7;
 
 }  // namespace
 
-void ExtensionInstalledBubbleGtk::Show(Extension* extension, Browser* browser,
+void ExtensionInstalledBubbleGtk::Show(const Extension* extension,
+                                       Browser* browser,
                                        SkBitmap icon) {
   new ExtensionInstalledBubbleGtk(extension, browser, icon);
 }
 
-ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(Extension *extension,
-                                                         Browser *browser,
-                                                         SkBitmap icon)
+ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(
+    const Extension* extension, Browser *browser, SkBitmap icon)
     : extension_(extension),
       browser_(browser),
       icon_(icon),
       animation_wait_retries_(kAnimationWaitRetries) {
   AddRef();  // Balanced in Close().
 
-  if (extension_->browser_action()) {
+  if (!extension_->omnibox_keyword().empty()) {
+    type_ = OMNIBOX_KEYWORD;
+  } else if (extension_->browser_action()) {
     type_ = BROWSER_ACTION;
   } else if (extension->page_action() &&
              !extension->page_action()->default_icon_path().empty()) {
@@ -72,19 +74,27 @@ ExtensionInstalledBubbleGtk::ExtensionInstalledBubbleGtk(Extension *extension,
   // be sure that a browser action or page action has had views created which we
   // can inspect for the purpose of pointing to them.
   registrar_.Add(this, NotificationType::EXTENSION_LOADED,
-      NotificationService::AllSources());
+      Source<Profile>(browser->profile()));
+  registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+      Source<Profile>(browser->profile()));
 }
+
+ExtensionInstalledBubbleGtk::~ExtensionInstalledBubbleGtk() {}
 
 void ExtensionInstalledBubbleGtk::Observe(NotificationType type,
                                           const NotificationSource& source,
                                           const NotificationDetails& details) {
   if (type == NotificationType::EXTENSION_LOADED) {
-    Extension* extension = Details<Extension>(details).ptr();
+    const Extension* extension = Details<const Extension>(details).ptr();
     if (extension == extension_) {
       // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
       MessageLoopForUI::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
           &ExtensionInstalledBubbleGtk::ShowInternal));
     }
+  } else if (type == NotificationType::EXTENSION_UNLOADED) {
+    const Extension* extension = Details<const Extension>(details).ptr();
+    if (extension == extension_)
+      extension_ = NULL;
   } else {
     NOTREACHED() << L"Received unexpected notification";
   }
@@ -133,7 +143,13 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
     gtk_container_check_resize(GTK_CONTAINER(
         browser_window->GetToolbar()->widget()));
     DCHECK(reference_widget);
+  } else if (type_ == OMNIBOX_KEYWORD) {
+    LocationBarViewGtk* location_bar_view =
+        browser_window->GetToolbar()->GetLocationBarView();
+    reference_widget = location_bar_view->location_entry_widget();
+    DCHECK(reference_widget);
   }
+
   // Default case.
   if (reference_widget == NULL)
     reference_widget = browser_window->GetToolbar()->GetAppMenuButton();
@@ -145,33 +161,35 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   GtkWidget* bubble_content = gtk_hbox_new(FALSE, kHorizontalColumnSpacing);
   gtk_container_set_border_width(GTK_CONTAINER(bubble_content), kContentBorder);
 
-  // Scale icon down to 43x43, but allow smaller icons (don't scale up).
-  GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon_);
-  gfx::Size size(icon_.width(), icon_.height());
-  if (size.width() > kIconSize || size.height() > kIconSize) {
-    if (size.width() > size.height()) {
-      size.set_height(size.height() * kIconSize / size.width());
-      size.set_width(kIconSize);
-    } else {
-      size.set_width(size.width() * kIconSize / size.height());
-      size.set_height(kIconSize);
+  if (!icon_.isNull()) {
+    // Scale icon down to 43x43, but allow smaller icons (don't scale up).
+    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon_);
+    gfx::Size size(icon_.width(), icon_.height());
+    if (size.width() > kIconSize || size.height() > kIconSize) {
+      if (size.width() > size.height()) {
+        size.set_height(size.height() * kIconSize / size.width());
+        size.set_width(kIconSize);
+      } else {
+        size.set_width(size.width() * kIconSize / size.height());
+        size.set_height(kIconSize);
+      }
+
+      GdkPixbuf* old = pixbuf;
+      pixbuf = gdk_pixbuf_scale_simple(pixbuf, size.width(), size.height(),
+                                       GDK_INTERP_BILINEAR);
+      g_object_unref(old);
     }
 
-    GdkPixbuf* old = pixbuf;
-    pixbuf = gdk_pixbuf_scale_simple(pixbuf, size.width(), size.height(),
-        GDK_INTERP_BILINEAR);
-    g_object_unref(old);
+    // Put Icon in top of the left column.
+    GtkWidget* icon_column = gtk_vbox_new(FALSE, 0);
+    // Use 3 pixel padding to get visual balance with InfoBubble border on the
+    // left.
+    gtk_box_pack_start(GTK_BOX(bubble_content), icon_column, FALSE, FALSE,
+                       kIconPadding);
+    GtkWidget* image = gtk_image_new_from_pixbuf(pixbuf);
+    g_object_unref(pixbuf);
+    gtk_box_pack_start(GTK_BOX(icon_column), image, FALSE, FALSE, 0);
   }
-
-  // Put Icon in top of the left column.
-  GtkWidget* icon_column = gtk_vbox_new(FALSE, 0);
-  // Use 3 pixel padding to get visual balance with InfoBubble border on the
-  // left.
-  gtk_box_pack_start(GTK_BOX(bubble_content), icon_column, FALSE, FALSE,
-      kIconPadding);
-  GtkWidget* image = gtk_image_new_from_pixbuf(pixbuf);
-  g_object_unref(pixbuf);
-  gtk_box_pack_start(GTK_BOX(icon_column), image, FALSE, FALSE, 0);
 
   // Center text column.
   GtkWidget* text_column = gtk_vbox_new(FALSE, kTextColumnVerticalSpacing);
@@ -191,9 +209,19 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
   gtk_box_pack_start(GTK_BOX(text_column), heading_label, FALSE, FALSE, 0);
 
   // Page action label
-  if (type_ == ExtensionInstalledBubbleGtk::PAGE_ACTION) {
+  if (type_ == PAGE_ACTION) {
     GtkWidget* info_label = gtk_label_new(l10n_util::GetStringUTF8(
-            IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
+        IDS_EXTENSION_INSTALLED_PAGE_ACTION_INFO).c_str());
+    gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
+    gtk_widget_set_size_request(info_label, kTextColumnWidth, -1);
+    gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
+  }
+
+  // Omnibox keyword label
+  if (type_ == OMNIBOX_KEYWORD) {
+    GtkWidget* info_label = gtk_label_new(l10n_util::GetStringFUTF8(
+        IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
+        UTF8ToUTF16(extension_->omnibox_keyword())).c_str());
     gtk_label_set_line_wrap(GTK_LABEL(info_label), TRUE);
     gtk_widget_set_size_request(info_label, kTextColumnWidth, -1);
     gtk_box_pack_start(GTK_BOX(text_column), info_label, FALSE, FALSE, 0);
@@ -224,8 +252,23 @@ void ExtensionInstalledBubbleGtk::ShowInternal() {
       !base::i18n::IsRTL() ?
       InfoBubbleGtk::ARROW_LOCATION_TOP_RIGHT :
       InfoBubbleGtk::ARROW_LOCATION_TOP_LEFT;
+
+  gfx::Rect bounds = gtk_util::WidgetBounds(reference_widget);
+  if (type_ == OMNIBOX_KEYWORD) {
+    // Reverse the arrow for omnibox keywords, since the bubble will be on the
+    // other side of the window. We also clear the width to avoid centering
+    // the popup on the URL bar.
+    arrow_location =
+        !base::i18n::IsRTL() ?
+        InfoBubbleGtk::ARROW_LOCATION_TOP_LEFT :
+        InfoBubbleGtk::ARROW_LOCATION_TOP_RIGHT;
+    if (base::i18n::IsRTL())
+      bounds.Offset(bounds.width(), 0);
+    bounds.set_width(0);
+  }
+
   info_bubble_ = InfoBubbleGtk::Show(reference_widget,
-      NULL,
+      &bounds,
       bubble_content,
       arrow_location,
       true,  // match_system_theme
@@ -246,7 +289,7 @@ void ExtensionInstalledBubbleGtk::OnButtonClick(GtkWidget* button,
 // InfoBubbleDelegate
 void ExtensionInstalledBubbleGtk::InfoBubbleClosing(InfoBubbleGtk* info_bubble,
                                                     bool closed_by_escape) {
-  if (extension_->page_action()) {
+  if (extension_ && type_ == PAGE_ACTION) {
     // Turn the page action preview off.
     BrowserWindowGtk* browser_window =
           BrowserWindowGtk::GetBrowserWindowForNativeWindow(

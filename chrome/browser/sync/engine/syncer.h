@@ -19,6 +19,7 @@
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_event.h"
+#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/extensions_activity_monitor.h"
 #include "chrome/common/deprecated/event_sys.h"
 #include "chrome/common/deprecated/event_sys-inl.h"
@@ -77,7 +78,7 @@ class Syncer {
 
   // The constructor may be called from a thread that is not the Syncer's
   // dedicated thread, to allow some flexibility in the setup.
-  explicit Syncer(sessions::SyncSessionContext* context);
+  Syncer();
   ~Syncer();
 
   // Called by other threads to tell the syncer to stop what it's doing
@@ -85,38 +86,13 @@ class Syncer {
   bool ExitRequested();
   void RequestEarlyExit();
 
-  // SyncShare(...) variants cause one sync cycle to occur.  The return value
-  // indicates whether we should sync again.  If we should not sync again,
-  // it doesn't necessarily mean everything is OK; we could be throttled for
-  // example.  Like a good parent, it is the caller's responsibility to clean up
-  // after the syncer when it finishes a sync share operation and honor
-  // server mandated throttles.
-  // The zero-argument version of SyncShare is provided for unit tests.
-  // When |sync_process_state| is provided, it is used as the syncer state
-  // for the sync cycle.  It is treated as an input/output parameter.
-  // When |first_step| and |last_step| are provided, this means to perform
-  // a partial sync cycle, stopping after |last_step| is performed.
-  bool SyncShare(sessions::SyncSession::Delegate* delegate);
-  bool SyncShare(SyncerStep first_step, SyncerStep last_step,
-                 sessions::SyncSession::Delegate* delegate);
+  // Cause one sync cycle to occur.  Like a good parent, it is the caller's
+  // responsibility to clean up after the syncer when it finishes a sync share
+  // operation and honor server mandated throttles.
+  void SyncShare(sessions::SyncSession* session);
 
   // Limit the batch size of commit operations to a specified number of items.
   void set_max_commit_batch_size(int x) { max_commit_batch_size_ = x; }
-
-  // Volatile reader for the source member of the syncer session object.  The
-  // value is set to the SYNC_CYCLE_CONTINUATION value to signal that it has
-  // been read.
-  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource TestAndSetUpdatesSource() {
-    sync_pb::GetUpdatesCallerInfo::GetUpdatesSource old_source =
-        updates_source_;
-    set_updates_source(sync_pb::GetUpdatesCallerInfo::SYNC_CYCLE_CONTINUATION);
-    return old_source;
-  }
-
-  void set_updates_source(
-      sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source) {
-    updates_source_ = source;
-  }
 
  private:
   void RequestNudge(int milliseconds);
@@ -124,11 +100,10 @@ class Syncer {
   // Implements the PROCESS_CLIENT_COMMAND syncer step.
   void ProcessClientCommand(sessions::SyncSession *session);
 
-  // Resets transient state and runs from SYNCER_BEGIN to SYNCER_END.
-  bool SyncShare(sessions::SyncSession* session);
-
   // This is the bottom-most SyncShare variant, and does not cause transient
   // state to be reset in session.
+  // Like SyncShare(), but |first_step| and |last_step| are provided to perform
+  // a partial sync cycle, stopping after |last_step| is performed.
   void SyncShare(sessions::SyncSession* session,
                  SyncerStep first_step,
                  SyncerStep last_step);
@@ -139,11 +114,6 @@ class Syncer {
   int32 max_commit_batch_size_;
 
   ConflictResolver resolver_;
-  sessions::ScopedSessionContextConflictResolver resolver_scoper_;
-  sessions::SyncSessionContext* context_;
-
-  // The source of the last nudge.
-  sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source_;
 
   // A callback hook used in unittests to simulate changes between conflict set
   // building and conflict resolution.
@@ -169,6 +139,9 @@ class Syncer {
                            LongChangelistCreatesFakeOrphanedEntries);
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, QuicklyMergeDualCreatedHierarchy);
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, LongChangelistWithApplicationConflict);
+  FRIEND_TEST_ALL_PREFIXES(SyncerTest, DeletingEntryWithLocalEdits);
+  FRIEND_TEST_ALL_PREFIXES(EntryCreatedInNewFolderTest,
+                           EntryCreatedInNewFolderMidSync);
 
   DISALLOW_COPY_AND_ASSIGN(Syncer);
 };

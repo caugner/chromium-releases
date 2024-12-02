@@ -25,6 +25,7 @@
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/http/disk_cache_based_ssl_host_info.h"
 #include "net/http/http_cache_transaction.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
@@ -32,9 +33,27 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/socket/ssl_host_info.h"
 #include "net/spdy/spdy_session_pool.h"
 
 namespace net {
+
+HttpCache::DefaultBackend::DefaultBackend(CacheType type,
+                                          const FilePath& path,
+                                          int max_bytes,
+                                          base::MessageLoopProxy* thread)
+    : type_(type),
+      path_(path),
+      max_bytes_(max_bytes),
+      thread_(thread) {
+}
+
+HttpCache::DefaultBackend::~DefaultBackend() {}
+
+// static
+HttpCache::BackendFactory* HttpCache::DefaultBackend::InMemory(int max_bytes) {
+  return new DefaultBackend(MEMORY_CACHE, FilePath(), max_bytes, NULL);
+}
 
 int HttpCache::DefaultBackend::CreateBackend(disk_cache::Backend** backend,
                                              CompletionCallback* callback) {
@@ -242,8 +261,26 @@ void HttpCache::MetadataWriter::OnIOComplete(int result) {
 
 //-----------------------------------------------------------------------------
 
+class HttpCache::SSLHostInfoFactoryAdaptor : public SSLHostInfoFactory {
+ public:
+  SSLHostInfoFactoryAdaptor(HttpCache* http_cache)
+      : http_cache_(http_cache) {
+  }
+
+  SSLHostInfo* GetForHost(const std::string& hostname,
+                          const SSLConfig& ssl_config) {
+    return new DiskCacheBasedSSLHostInfo(hostname, ssl_config, http_cache_);
+  }
+
+ private:
+  HttpCache* const http_cache_;
+};
+
+//-----------------------------------------------------------------------------
+
 HttpCache::HttpCache(HostResolver* host_resolver,
                      DnsRRResolver* dnsrr_resolver,
+                     DnsCertProvenanceChecker* dns_cert_checker_,
                      ProxyService* proxy_service,
                      SSLConfigService* ssl_config_service,
                      HttpAuthHandlerFactory* http_auth_handler_factory,
@@ -253,8 +290,12 @@ HttpCache::HttpCache(HostResolver* host_resolver,
     : backend_factory_(backend_factory),
       building_backend_(false),
       mode_(NORMAL),
+      ssl_host_info_factory_(new SSLHostInfoFactoryAdaptor(
+            ALLOW_THIS_IN_INITIALIZER_LIST(this))),
       network_layer_(HttpNetworkLayer::CreateFactory(host_resolver,
-          dnsrr_resolver, proxy_service, ssl_config_service,
+          dnsrr_resolver, dns_cert_checker_,
+          ssl_host_info_factory_.get(),
+          proxy_service, ssl_config_service,
           http_auth_handler_factory, network_delegate, net_log)),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
       enable_range_support_(true) {
@@ -366,14 +407,6 @@ void HttpCache::Suspend(bool suspend) {
 bool HttpCache::ParseResponseInfo(const char* data, int len,
                                   HttpResponseInfo* response_info,
                                   bool* response_truncated) {
-  // This block is here just to debug a Linux-only crash (bug 56449).
-  // TODO(rvargas): Remove this.
-  if (len < 4)
-    return false;
-  int payload_size = *reinterpret_cast<const int*>(data);
-  if (payload_size < 4)
-    return false;
-
   Pickle pickle(data, len);
   return response_info->InitFromPickle(pickle, response_truncated);
 }
@@ -563,11 +596,10 @@ HttpCache::ActiveEntry* HttpCache::FindActiveEntry(const std::string& key) {
 }
 
 HttpCache::ActiveEntry* HttpCache::ActivateEntry(
-    const std::string& key,
     disk_cache::Entry* disk_entry) {
-  DCHECK(!FindActiveEntry(key));
+  DCHECK(!FindActiveEntry(disk_entry->GetKey()));
   ActiveEntry* entry = new ActiveEntry(disk_entry);
-  active_entries_[key] = entry;
+  active_entries_[disk_entry->GetKey()] = entry;
   return entry;
 }
 
@@ -952,7 +984,7 @@ void HttpCache::OnIOComplete(int result, PendingOp* pending_op) {
       fail_requests = true;
     } else if (item->IsValid()) {
       key = pending_op->disk_entry->GetKey();
-      entry = ActivateEntry(key, pending_op->disk_entry);
+      entry = ActivateEntry(pending_op->disk_entry);
     } else {
       // The writer transaction is gone.
       if (op == WI_CREATE_ENTRY)

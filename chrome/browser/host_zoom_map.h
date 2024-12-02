@@ -16,6 +16,7 @@
 #include "base/basictypes.h"
 #include "base/lock.h"
 #include "base/ref_counted.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -24,8 +25,12 @@ class GURL;
 class PrefService;
 class Profile;
 
-class HostZoomMap : public NotificationObserver,
-                    public base::RefCountedThreadSafe<HostZoomMap> {
+// HostZoomMap needs to be deleted on the UI thread because it listens
+// to notifications on there (and holds a NotificationRegistrar).
+class HostZoomMap :
+    public NotificationObserver,
+    public base::RefCountedThreadSafe<HostZoomMap,
+                                      BrowserThread::DeleteOnUIThread> {
  public:
   explicit HostZoomMap(Profile* profile);
 
@@ -34,22 +39,22 @@ class HostZoomMap : public NotificationObserver,
   // Returns the zoom level for a given url. The zoom level is determined by
   // the host portion of the URL, or (in the absence of a host) the complete
   // spec of the URL. In most cases, there is no custom zoom level, and this
-  // returns 0.  Otherwise, returns the saved zoom level, which may be positive
-  // (to zoom in) or negative (to zoom out).
+  // returns the user's default zoom level.  Otherwise, returns the saved zoom
+  // level, which may be positive (to zoom in) or negative (to zoom out).
   //
   // This may be called on any thread.
   double GetZoomLevel(const GURL& url) const;
 
-  // Sets the zoom level for a given url to |level|.  If the level is 0,
-  // the host is erased from the saved preferences; otherwise the new value is
-  // written out.
+  // Sets the zoom level for a given url to |level|.  If the level matches the
+  // current default zoom level, the host is erased from the saved preferences;
+  // otherwise the new value is written out.
   //
   // This should only be called on the UI thread.
   void SetZoomLevel(const GURL& url, double level);
 
   // Returns the temporary zoom level that's only valid for the lifetime of
   // the given tab (i.e. isn't saved and doesn't affect other tabs) if it
-  // exists, 0 otherwise.
+  // exists, the default zoom level otherwise.
   //
   // This may be called on any thread.
   double GetTemporaryZoomLevel(int render_process_id,
@@ -74,7 +79,8 @@ class HostZoomMap : public NotificationObserver,
                        const NotificationDetails& details);
 
  private:
-  friend class base::RefCountedThreadSafe<HostZoomMap>;
+  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend class DeleteTask<HostZoomMap>;
 
   typedef std::map<std::string, double> HostZoomLevels;
 
@@ -92,6 +98,7 @@ class HostZoomMap : public NotificationObserver,
 
   // Copy of the pref data, so that we can read it on the IO thread.
   HostZoomLevels host_zoom_levels_;
+  double default_zoom_level_;
 
   struct TemporaryZoomLevel {
     int render_process_id;
@@ -103,8 +110,8 @@ class HostZoomMap : public NotificationObserver,
   // level, so vector is fine for now.
   std::vector<TemporaryZoomLevel> temporary_zoom_levels_;
 
-  // Used around accesses to |host_zoom_levels_| and |temporary_zoom_levels_| to
-  // guarantee thread safety.
+  // Used around accesses to |host_zoom_levels_|, |default_zoom_level_| and
+  // |temporary_zoom_levels_| to guarantee thread safety.
   mutable Lock lock_;
 
   // Whether we are currently updating preferences, this is used to ignore

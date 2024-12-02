@@ -8,7 +8,6 @@
 
 #include <string>
 
-#include "base/message_loop_proxy.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_policy.h"
@@ -22,18 +21,19 @@
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 
+namespace base {
+class MessageLoopProxy;
+}
+
 // Subclass of URLRequestContext which can be used to store extra information
 // for requests. This subclass is meant to be used in the service process where
 // the profile is not available.
 //
 class ServiceURLRequestContext : public URLRequestContext {
  public:
-  ServiceURLRequestContext();
+  explicit ServiceURLRequestContext(const std::string& user_agent);
   void set_cookie_policy(net::CookiePolicy* policy) {
     cookie_policy_ = policy;
-  }
-  void set_user_agent(const std::string& ua) {
-    user_agent_ = ua;
   }
 
   // URLRequestContext overrides
@@ -55,20 +55,17 @@ class ServiceURLRequestContextGetter : public URLRequestContextGetter {
  public:
   ServiceURLRequestContextGetter();
 
-  virtual URLRequestContext* GetURLRequestContext() {
-    if (!url_request_context_)
-      url_request_context_ = new ServiceURLRequestContext();
-    return url_request_context_;
-  }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
-    return io_message_loop_proxy_;
-  }
+  virtual URLRequestContext* GetURLRequestContext();
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
 
   void set_user_agent(const std::string& ua) {
     user_agent_ = ua;
   }
+  std::string user_agent() const {
+    return user_agent_;
+  }
  private:
-  ~ServiceURLRequestContextGetter() {}
+  virtual ~ServiceURLRequestContextGetter();
 
   std::string user_agent_;
   scoped_refptr<URLRequestContext> url_request_context_;

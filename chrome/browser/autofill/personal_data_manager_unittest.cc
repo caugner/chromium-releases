@@ -12,6 +12,7 @@
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/guid.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/common/notification_details.h"
@@ -72,13 +73,6 @@ class PersonalDataManagerTest : public testing::Test {
     personal_data_->SetObserver(&personal_data_observer_);
   }
 
-  AutoFillProfile* MakeProfile() {
-    AutoLock lock(personal_data_->unique_ids_lock_);
-    return new AutoFillProfile(string16(),
-        personal_data_->CreateNextUniqueIDFor(
-            &personal_data_->unique_profile_ids_));
-  }
-
   MessageLoopForUI message_loop_;
   BrowserThread ui_thread_;
   BrowserThread db_thread_;
@@ -91,19 +85,19 @@ class PersonalDataManagerTest : public testing::Test {
 
 // TODO(jhawkins): Test SetProfiles w/out a WebDataService in the profile.
 TEST_F(PersonalDataManagerTest, SetProfiles) {
-  AutoFillProfile profile0(string16(), 0);
+  AutoFillProfile profile0;
   autofill_test::SetProfileInfo(&profile0,
       "Billing", "Marion", "Mitchell", "Morrison",
       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
       "91601", "US", "12345678910", "01987654321");
 
-  AutoFillProfile profile1(string16(), 0);
+  AutoFillProfile profile1;
   autofill_test::SetProfileInfo(&profile1,
       "Home", "Josephine", "Alicia", "Saenz",
       "joewayne@me.xyz", "Fox", "903 Apple Ct.", NULL, "Orlando", "FL", "32801",
       "US", "19482937549", "13502849239");
 
-  AutoFillProfile profile2(string16(), 0);
+  AutoFillProfile profile2;
   autofill_test::SetProfileInfo(&profile2,
       "Work", "Josephine", "Alicia", "Saenz",
       "joewayne@me.xyz", "Fox", "1212 Center.", "Bld. 5", "Orlando", "FL",
@@ -123,18 +117,10 @@ TEST_F(PersonalDataManagerTest, SetProfiles) {
   update.push_back(profile1);
   personal_data_->SetProfiles(&update);
 
-  // The PersonalDataManager will update the unique IDs when saving the
-  // profiles, so we have to update the expectations.
-  // Same for labels.
-  profile0.set_unique_id(update[0].unique_id());
-  profile1.set_unique_id(update[1].unique_id());
-  profile0.set_label(update[0].Label());
-  profile1.set_label(update[1].Label());
-
   const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
   ASSERT_EQ(2U, results1.size());
-  EXPECT_EQ(profile0, *results1.at(0));
-  EXPECT_EQ(profile1, *results1.at(1));
+  EXPECT_EQ(0, profile0.Compare(*results1.at(0)));
+  EXPECT_EQ(0, profile1.Compare(*results1.at(1)));
 
   // Three operations in one:
   //  - Update profile0
@@ -146,20 +132,10 @@ TEST_F(PersonalDataManagerTest, SetProfiles) {
   update.push_back(profile2);
   personal_data_->SetProfiles(&update);
 
-  // Set the expected unique ID for profile2.
-  // Same for labels.
-  profile0.set_label(update[0].Label());
-  profile2.set_unique_id(update[1].unique_id());
-  profile2.set_label(update[1].Label());
-
-  // AutoFillProfile IDs are re-used, so the third profile to be added will have
-  // a unique ID that matches the old unique ID of the removed profile1, even
-  // though that ID has already been used.
   const std::vector<AutoFillProfile*>& results2 = personal_data_->profiles();
   ASSERT_EQ(2U, results2.size());
-  EXPECT_EQ(profile0, *results2.at(0));
-  EXPECT_EQ(profile2, *results2.at(1));
-  EXPECT_EQ(profile1.unique_id(), profile2.unique_id());
+  EXPECT_EQ(0, profile0.Compare(*results2.at(0)));
+  EXPECT_EQ(0, profile2.Compare(*results2.at(1)));
 
   // Reset the PersonalDataManager.  This tests that the personal data was saved
   // to the web database, and that we can load the profiles from the web
@@ -177,25 +153,23 @@ TEST_F(PersonalDataManagerTest, SetProfiles) {
   // Verify that we've loaded the profiles from the web database.
   const std::vector<AutoFillProfile*>& results3 = personal_data_->profiles();
   ASSERT_EQ(2U, results3.size());
-  profile0.set_label(results3.at(0)->Label());
-  EXPECT_EQ(profile0, *results3.at(0));
-  profile2.set_label(results3.at(1)->Label());
-  EXPECT_EQ(profile2, *results3.at(1));
+  EXPECT_EQ(0, profile0.Compare(*results3.at(0)));
+  EXPECT_EQ(0, profile2.Compare(*results3.at(1)));
 }
 
 // TODO(jhawkins): Test SetCreditCards w/out a WebDataService in the profile.
 TEST_F(PersonalDataManagerTest, SetCreditCards) {
-  CreditCard creditcard0(string16(), 0);
+  CreditCard creditcard0;
   autofill_test::SetCreditCardInfo(&creditcard0, "Corporate",
-      "John Dillinger", "Visa", "123456789012", "01", "2010", 1);
+      "John Dillinger", "423456789012" /* Visa */, "01", "2010");
 
-  CreditCard creditcard1(string16(), 0);
+  CreditCard creditcard1;
   autofill_test::SetCreditCardInfo(&creditcard1, "Personal",
-      "Bonnie Parker", "Mastercard", "098765432109", "12", "2012", 2);
+      "Bonnie Parker", "518765432109" /* Mastercard */, "12", "2012");
 
-  CreditCard creditcard2(string16(), 0);
+  CreditCard creditcard2;
   autofill_test::SetCreditCardInfo(&creditcard2, "Savings",
-      "Clyde Barrow", "American Express", "777666888555", "04", "2015", 3);
+      "Clyde Barrow", "347666888555" /* American Express */, "04", "2015");
 
   // This will verify that the web database has been loaded and the notification
   // sent out.
@@ -211,18 +185,10 @@ TEST_F(PersonalDataManagerTest, SetCreditCards) {
   update.push_back(creditcard1);
   personal_data_->SetCreditCards(&update);
 
-  // The PersonalDataManager will update the unique IDs when saving the
-  // credit cards, so we have to update the expectations.
-  // Same for labels.
-  creditcard0.set_unique_id(update[0].unique_id());
-  creditcard1.set_unique_id(update[1].unique_id());
-  creditcard0.set_label(update[0].Label());
-  creditcard1.set_label(update[1].Label());
-
   const std::vector<CreditCard*>& results1 = personal_data_->credit_cards();
   ASSERT_EQ(2U, results1.size());
-  EXPECT_EQ(creditcard0, *results1.at(0));
-  EXPECT_EQ(creditcard1, *results1.at(1));
+  EXPECT_EQ(0, creditcard0.Compare(*results1.at(0)));
+  EXPECT_EQ(0, creditcard1.Compare(*results1.at(1)));
 
   // Three operations in one:
   //  - Update creditcard0
@@ -234,19 +200,10 @@ TEST_F(PersonalDataManagerTest, SetCreditCards) {
   update.push_back(creditcard2);
   personal_data_->SetCreditCards(&update);
 
-  // Set the expected unique ID for creditcard2.
-  // Same for labels.
-  creditcard2.set_unique_id(update[1].unique_id());
-  creditcard2.set_label(update[1].Label());
-
-  // CreditCard IDs are re-used, so the third credit card to be added will have
-  // a unique ID that matches the old unique ID of the removed creditcard1, even
-  // though that ID has already been used.
   const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
   ASSERT_EQ(2U, results2.size());
   EXPECT_EQ(creditcard0, *results2.at(0));
   EXPECT_EQ(creditcard2, *results2.at(1));
-  EXPECT_EQ(creditcard2.unique_id(), creditcard1.unique_id());
 
   // Reset the PersonalDataManager.  This tests that the personal data was saved
   // to the web database, and that we can load the credit cards from the web
@@ -269,25 +226,25 @@ TEST_F(PersonalDataManagerTest, SetCreditCards) {
 }
 
 TEST_F(PersonalDataManagerTest, SetProfilesAndCreditCards) {
-  AutoFillProfile profile0(string16(), 0);
+  AutoFillProfile profile0;
   autofill_test::SetProfileInfo(&profile0,
       "Billing", "Marion", "Mitchell", "Morrison",
       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
       "91601", "US", "12345678910", "01987654321");
 
-  AutoFillProfile profile1(string16(), 0);
+  AutoFillProfile profile1;
   autofill_test::SetProfileInfo(&profile1,
       "Home", "Josephine", "Alicia", "Saenz",
       "joewayne@me.xyz", "Fox", "903 Apple Ct.", NULL, "Orlando", "FL", "32801",
       "US", "19482937549", "13502849239");
 
-  CreditCard creditcard0(string16(), 0);
+  CreditCard creditcard0;
   autofill_test::SetCreditCardInfo(&creditcard0, "Corporate",
-      "John Dillinger", "Visa", "123456789012", "01", "2010", 1);
+      "John Dillinger", "423456789012" /* Visa */, "01", "2010");
 
-  CreditCard creditcard1(string16(), 0);
+  CreditCard creditcard1;
   autofill_test::SetCreditCardInfo(&creditcard1, "Personal",
-      "Bonnie Parker", "Mastercard", "098765432109", "12", "2012", 2);
+      "Bonnie Parker", "518765432109" /* Mastercard */, "12", "2012");
 
   // This will verify that the web database has been loaded and the notification
   // sent out.
@@ -304,18 +261,10 @@ TEST_F(PersonalDataManagerTest, SetProfilesAndCreditCards) {
   update.push_back(profile1);
   personal_data_->SetProfiles(&update);
 
-  // The PersonalDataManager will update the unique IDs when saving the
-  // profiles, so we have to update the expectations.
-  // Same for labels.
-  profile0.set_unique_id(update[0].unique_id());
-  profile1.set_unique_id(update[1].unique_id());
-  profile0.set_label(update[0].Label());
-  profile1.set_label(update[1].Label());
-
   const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
   ASSERT_EQ(2U, results1.size());
-  EXPECT_EQ(profile0, *results1.at(0));
-  EXPECT_EQ(profile1, *results1.at(1));
+  EXPECT_EQ(0, profile0.Compare(*results1.at(0)));
+  EXPECT_EQ(0, profile1.Compare(*results1.at(1)));
 
   // Add two test credit cards to the database.
   std::vector<CreditCard> update_cc;
@@ -323,33 +272,26 @@ TEST_F(PersonalDataManagerTest, SetProfilesAndCreditCards) {
   update_cc.push_back(creditcard1);
   personal_data_->SetCreditCards(&update_cc);
 
-  // The PersonalDataManager will update the unique IDs when saving the
-  // credit cards, so we have to update the expectations.
-  // Same for labels.
-  creditcard0.set_unique_id(update_cc[0].unique_id());
-  creditcard1.set_unique_id(update_cc[1].unique_id());
-  creditcard0.set_label(update_cc[0].Label());
-  creditcard1.set_label(update_cc[1].Label());
 
   const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
   ASSERT_EQ(2U, results2.size());
   EXPECT_EQ(creditcard0, *results2.at(0));
   EXPECT_EQ(creditcard1, *results2.at(1));
 
-  // Determine uniqueness by inserting all of the IDs into a set and verifying
-  // the size of the set matches the number of IDs.
-  std::set<int> ids;
-  ids.insert(profile0.unique_id());
-  ids.insert(profile1.unique_id());
-  ids.insert(creditcard0.unique_id());
-  ids.insert(creditcard1.unique_id());
-  EXPECT_EQ(4U, ids.size());
+  // Determine uniqueness by inserting all of the GUIDs into a set and verifying
+  // the size of the set matches the number of GUIDs.
+  std::set<std::string> guids;
+  guids.insert(profile0.guid());
+  guids.insert(profile1.guid());
+  guids.insert(creditcard0.guid());
+  guids.insert(creditcard1.guid());
+  EXPECT_EQ(4U, guids.size());
 }
 
 // Test care for 50047. Makes sure that unique_ids_ is populated correctly on
 // load.
 TEST_F(PersonalDataManagerTest, PopulateUniqueIDsOnLoad) {
-  AutoFillProfile profile0(string16(), 0);
+  AutoFillProfile profile0;
   autofill_test::SetProfileInfo(&profile0,
       "", "y", "", "", "", "", "", "", "", "", "", "", "", "");
 
@@ -378,7 +320,7 @@ TEST_F(PersonalDataManagerTest, PopulateUniqueIDsOnLoad) {
   ASSERT_EQ(1U, results2.size());
 
   // Add a new profile.
-  AutoFillProfile profile1(string16(), 0);
+  AutoFillProfile profile1;
   autofill_test::SetProfileInfo(&profile1,
       "", "y", "", "", "", "", "", "", "", "", "", "", "", "");
   update.clear();
@@ -390,13 +332,13 @@ TEST_F(PersonalDataManagerTest, PopulateUniqueIDsOnLoad) {
   // which is an invalid id).
   const std::vector<AutoFillProfile*>& results3 = personal_data_->profiles();
   ASSERT_EQ(2U, results3.size());
-  EXPECT_NE(results3[0]->unique_id(), results3[1]->unique_id());
-  EXPECT_NE(0, results3[0]->unique_id());
-  EXPECT_NE(0, results3[1]->unique_id());
+  EXPECT_NE(results3[0]->guid(), results3[1]->guid());
+  EXPECT_TRUE(guid::IsValidGUID(results3[0]->guid()));
+  EXPECT_TRUE(guid::IsValidGUID(results3[1]->guid()));
 }
 
 TEST_F(PersonalDataManagerTest, SetEmptyProfile) {
-  AutoFillProfile profile0(string16(), 0);
+  AutoFillProfile profile0;
   autofill_test::SetProfileInfo(&profile0,
       "", "", "", "", "", "", "", "", "", "", "", "", "", "");
 
@@ -436,9 +378,8 @@ TEST_F(PersonalDataManagerTest, SetEmptyProfile) {
 }
 
 TEST_F(PersonalDataManagerTest, SetEmptyCreditCard) {
-  CreditCard creditcard0(string16(), 0);
-  autofill_test::SetCreditCardInfo(&creditcard0,
-      "", "", "", "", "", "", 0);
+  CreditCard creditcard0;
+  autofill_test::SetCreditCardInfo(&creditcard0, "", "", "", "", "");
 
   // This will verify that the web database has been loaded and the notification
   // sent out.
@@ -476,13 +417,13 @@ TEST_F(PersonalDataManagerTest, SetEmptyCreditCard) {
 }
 
 TEST_F(PersonalDataManagerTest, Refresh) {
-  AutoFillProfile profile0(string16(), 0);
+  AutoFillProfile profile0;
   autofill_test::SetProfileInfo(&profile0,
       "Billing", "Marion", "Mitchell", "Morrison",
       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
       "91601", "US", "12345678910", "01987654321");
 
-  AutoFillProfile profile1(string16(), 0);
+  AutoFillProfile profile1;
   autofill_test::SetProfileInfo(&profile1,
       "Home", "Josephine", "Alicia", "Saenz",
       "joewayne@me.xyz", "Fox", "903 Apple Ct.", NULL, "Orlando", "FL", "32801",
@@ -499,10 +440,11 @@ TEST_F(PersonalDataManagerTest, Refresh) {
   update.push_back(profile1);
   personal_data_->SetProfiles(&update);
 
-  profile0.set_unique_id(update[0].unique_id());
-  profile1.set_unique_id(update[1].unique_id());
-  profile0.set_label(update[0].Label());
-  profile1.set_label(update[1].Label());
+  // Labels depend on other profiles in the list - update labels manually.
+  std::vector<AutoFillProfile *> profile_pointers;
+  profile_pointers.push_back(&profile0);
+  profile_pointers.push_back(&profile1);
+  AutoFillProfile::AdjustInferredLabels(&profile_pointers);
 
   // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
@@ -515,15 +457,19 @@ TEST_F(PersonalDataManagerTest, Refresh) {
   EXPECT_EQ(profile0, *results1.at(0));
   EXPECT_EQ(profile1, *results1.at(1));
 
-  scoped_ptr<AutoFillProfile> profile2(MakeProfile());
-  autofill_test::SetProfileInfo(profile2.get(),
+  AutoFillProfile profile2;
+  autofill_test::SetProfileInfo(&profile2,
       "Work", "Josephine", "Alicia", "Saenz",
       "joewayne@me.xyz", "Fox", "1212 Center.", "Bld. 5", "Orlando", "FL",
       "32801", "US", "19482937549", "13502849239");
 
+  // Adjust all labels.
+  profile_pointers.push_back(&profile2);
+  AutoFillProfile::AdjustInferredLabels(&profile_pointers);
+
   WebDataService* wds = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
   ASSERT_TRUE(wds);
-  wds->AddAutoFillProfile(*profile2.get());
+  wds->AddAutoFillProfileGUID(profile2);
 
   personal_data_->Refresh();
 
@@ -537,24 +483,24 @@ TEST_F(PersonalDataManagerTest, Refresh) {
   ASSERT_EQ(3U, results2.size());
   EXPECT_EQ(profile0, *results2.at(0));
   EXPECT_EQ(profile1, *results2.at(1));
-  EXPECT_EQ(*profile2.get(), *results2.at(2));
+  EXPECT_EQ(profile2, *results2.at(2));
 
-  wds->RemoveAutoFillProfile(profile1.unique_id());
-  wds->RemoveAutoFillProfile(profile2->unique_id());
+  wds->RemoveAutoFillProfileGUID(profile1.guid());
+  wds->RemoveAutoFillProfileGUID(profile2.guid());
 
   // Before telling the PDM to refresh, simulate an edit to one of the profiles
   // via a SetProfile update (this would happen if the AutoFill window was
   // open with a previous snapshot of the profiles, and something [e.g. sync]
   // removed a profile from the browser.  In this edge case, we will end up
   // in a consistent state by dropping the write).
-  profile2->SetInfo(AutoFillType(NAME_FIRST), ASCIIToUTF16("Jo"));
+  profile2.SetInfo(AutoFillType(NAME_FIRST), ASCIIToUTF16("Jo"));
   update.clear();
   update.push_back(profile0);
   update.push_back(profile1);
-  update.push_back(*profile2.get());
+  update.push_back(profile2);
   personal_data_->SetProfiles(&update);
 
-  // And wait for the refresh.
+  // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
       OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
 
@@ -580,36 +526,108 @@ TEST_F(PersonalDataManagerTest, ImportFormData) {
   FormStructure form_structure(form);
   std::vector<FormStructure*> forms;
   forms.push_back(&form_structure);
-  personal_data_->ImportFormData(forms, NULL);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
 
-  // And wait for the refresh.
+  // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
       OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
 
   MessageLoop::current()->Run();
 
-  AutoFillProfile expected(string16(), 1);
+  AutoFillProfile expected;
   autofill_test::SetProfileInfo(&expected, NULL, "George", NULL,
       "Washington", "theprez@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL,
       NULL, NULL, NULL);
   const std::vector<AutoFillProfile*>& results = personal_data_->profiles();
   ASSERT_EQ(1U, results.size());
-  expected.set_label(results[0]->Label());
-  EXPECT_EQ(expected, *results[0]);
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+}
+
+TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
+  FormData form;
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card number:", "card_number", "4111 1111 1111 1111", "text", &field);
+  form.fields.push_back(field);
+  FormStructure form_structure(form);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure);
+  EXPECT_FALSE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  const std::vector<AutoFillProfile*>& profiles = personal_data_->profiles();
+  ASSERT_EQ(0U, profiles.size());
+  const std::vector<CreditCard*>& credit_cards = personal_data_->credit_cards();
+  ASSERT_EQ(0U, credit_cards.size());
+}
+
+TEST_F(PersonalDataManagerTest, ImportPhoneNumberSplitAcrossMultipleFields) {
+  FormData form;
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Phone #:", "home_phone_area_code", "650", "text", &field);
+  field.set_max_length(3);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Phone #:", "home_phone_prefix", "555", "text", &field);
+  field.set_max_length(3);
+  form.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Phone #:", "home_phone_suffix", "0000", "text", &field);
+  field.set_max_length(4);
+  form.fields.push_back(field);
+  FormStructure form_structure(form);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  AutoFillProfile expected;
+  autofill_test::SetProfileInfo(&expected, NULL, "George", NULL, "Washington",
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "6505550000", NULL);
+  const std::vector<AutoFillProfile*>& results = personal_data_->profiles();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
 }
 
 TEST_F(PersonalDataManagerTest, SetUniqueCreditCardLabels) {
-  CreditCard credit_card0(ASCIIToUTF16("Home"), 0);
+  CreditCard credit_card0;
+  credit_card0.set_label(ASCIIToUTF16("Home"));
   credit_card0.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("John"));
-  CreditCard credit_card1(ASCIIToUTF16("Home"), 0);
+  CreditCard credit_card1;
+  credit_card1.set_label(ASCIIToUTF16("Home"));
   credit_card1.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("Paul"));
-  CreditCard credit_card2(ASCIIToUTF16("Home"), 0);
+  CreditCard credit_card2;
+  credit_card2.set_label(ASCIIToUTF16("Home"));
   credit_card2.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("Ringo"));
-  CreditCard credit_card3(ASCIIToUTF16("NotHome"), 0);
+  CreditCard credit_card3;
+  credit_card3.set_label(ASCIIToUTF16("NotHome"));
   credit_card3.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("Other"));
-  CreditCard credit_card4(ASCIIToUTF16("Work"), 0);
+  CreditCard credit_card4;
+  credit_card4.set_label(ASCIIToUTF16("Work"));
   credit_card4.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("Ozzy"));
-  CreditCard credit_card5(ASCIIToUTF16("Work"), 0);
+  CreditCard credit_card5;
+  credit_card5.set_label(ASCIIToUTF16("Work"));
   credit_card5.SetInfo(AutoFillType(CREDIT_CARD_NAME), ASCIIToUTF16("Dio"));
 
   // This will verify that the web database has been loaded and the notification
@@ -630,6 +648,19 @@ TEST_F(PersonalDataManagerTest, SetUniqueCreditCardLabels) {
   update.push_back(credit_card5);
   personal_data_->SetCreditCards(&update);
 
+  // Reset the PersonalDataManager.  This tests that the personal data was saved
+  // to the web database, and that we can load the credit cards from the web
+  // database.
+  ResetPersonalDataManager();
+
+  // This will verify that the web database has been loaded and the notification
+  // sent out.
+  EXPECT_CALL(personal_data_observer_,
+              OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  // The message loop will exit when the mock observer is notified.
+  MessageLoop::current()->Run();
+
   const std::vector<CreditCard*>& results = personal_data_->credit_cards();
   ASSERT_EQ(6U, results.size());
   EXPECT_EQ(ASCIIToUTF16("Home"), results[0]->Label());
@@ -640,128 +671,718 @@ TEST_F(PersonalDataManagerTest, SetUniqueCreditCardLabels) {
   EXPECT_EQ(ASCIIToUTF16("Work2"), results[5]->Label());
 }
 
-TEST_F(PersonalDataManagerTest, AggregateProfileData) {
-  scoped_ptr<FormData> form(new FormData);
-
+TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
+  FormData form1;
   webkit_glue::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
-  form->fields.push_back(field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Last name:", "last_name", "Washington", "text", &field);
-  form->fields.push_back(field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Email:", "email", "theprez@gmail.com", "text", &field);
-  form->fields.push_back(field);
+  form1.fields.push_back(field);
 
-  scoped_ptr<FormStructure> form_structure(new FormStructure(*form));
-  scoped_ptr<std::vector<FormStructure*> > forms(
-      new std::vector<FormStructure*>);
-  forms->push_back(form_structure.get());
-  personal_data_->ImportFormData(*forms, NULL);
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
 
-  // And wait for the refresh.
+  // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
       OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
 
   MessageLoop::current()->Run();
 
-  scoped_ptr<AutoFillProfile> expected(
-      new AutoFillProfile(string16(), 1));
-  autofill_test::SetProfileInfo(expected.get(), NULL, "George", NULL,
+  AutoFillProfile expected;
+  autofill_test::SetProfileInfo(&expected, NULL, "George", NULL,
       "Washington", "theprez@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL,
       NULL, NULL, NULL);
-  const std::vector<AutoFillProfile*>& results = personal_data_->profiles();
-  ASSERT_EQ(1U, results.size());
-  expected->set_label(results[0]->Label());
-  EXPECT_EQ(*expected, *results[0]);
+  const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
+  ASSERT_EQ(1U, results1.size());
+  EXPECT_EQ(0, expected.Compare(*results1[0]));
 
   // Now create a completely different profile.
-  form.reset(new FormData);
+  FormData form2;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "John", "text", &field);
-  form->fields.push_back(field);
+  form2.fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Last name:", "last_name", "Adams", "text", &field);
-  form->fields.push_back(field);
+  form2.fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Email:", "email", "second@gmail.com", "text", &field);
-  form->fields.push_back(field);
+  form2.fields.push_back(field);
 
-  form_structure.reset(new FormStructure(*form));
-  forms.reset(new std::vector<FormStructure*>);
-  forms->push_back(form_structure.get());
-  personal_data_->ImportFormData(*forms, NULL);
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
 
-  // And wait for the refresh.
+  // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
       OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
 
   MessageLoop::current()->Run();
 
   const std::vector<AutoFillProfile*>& results2 = personal_data_->profiles();
-  ASSERT_EQ(2U, results2.size());
 
-  expected.reset(new AutoFillProfile(string16(), 1));
-  autofill_test::SetProfileInfo(expected.get(), NULL, "George", NULL,
-      "Washington", "theprez@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL,
-      NULL, NULL, NULL);
-  expected->set_label(results2[0]->Label());
-  EXPECT_EQ(*expected, *results2[0]);
-
-  expected.reset(new AutoFillProfile(string16(), 2));
-  autofill_test::SetProfileInfo(expected.get(), NULL, "John", NULL,
+  AutoFillProfile expected2;
+  autofill_test::SetProfileInfo(&expected2, NULL, "John", NULL,
       "Adams", "second@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       NULL, NULL);
-  expected->set_label(results2[1]->Label());
-  EXPECT_EQ(*expected, *results2[1]);
+  ASSERT_EQ(2U, results2.size());
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
+  EXPECT_EQ(0, expected2.Compare(*results2[1]));
+}
 
-  // Submit a form with new data for the first profile.
-  form.reset(new FormData);
+TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
+  FormData form1;
+  webkit_glue::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
-  form->fields.push_back(field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
       "Last name:", "last_name", "Washington", "text", &field);
-  form->fields.push_back(field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
-      "Address Line 1:", "address", "190 High Street", "text", &field);
-  form->fields.push_back(field);
+      "Address:", "address", "1600 Pennsylvania Avenue", "text", &field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
-      "City:", "city", "Philadelphia", "text", &field);
-  form->fields.push_back(field);
+      "Address Line 2:", "address2", "Suite A", "text", &field);
+  form1.fields.push_back(field);
   autofill_test::CreateTestFormField(
-      "State:", "state", "Pennsylvania", "text", &field);
-  form->fields.push_back(field);
+      "Email:", "email", "theprez@gmail.com", "text", &field);
+  form1.fields.push_back(field);
+  // Phone gets updated.
   autofill_test::CreateTestFormField(
-      "Zip:", "zipcode", "19106", "text", &field);
-  form->fields.push_back(field);
+      "Phone:", "phone", "4445556666", "text", &field);
+  form1.fields.push_back(field);
 
-  form_structure.reset(new FormStructure(*form));
-  forms.reset(new std::vector<FormStructure*>);
-  forms->push_back(form_structure.get());
-  personal_data_->ImportFormData(*forms, NULL);
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
 
-  // And wait for the refresh.
+  // Wait for the refresh.
   EXPECT_CALL(personal_data_observer_,
       OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
 
   MessageLoop::current()->Run();
 
-  const std::vector<AutoFillProfile*>& results3 = personal_data_->profiles();
-  ASSERT_EQ(2U, results3.size());
+  AutoFillProfile expected;
+  autofill_test::SetProfileInfo(&expected, NULL, "George", NULL,
+      "Washington", "theprez@gmail.com", NULL, "1600 Pennsylvania Avenue",
+      "Suite A", NULL, NULL, NULL, NULL, "4445556666", NULL);
+  const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
+  ASSERT_EQ(1U, results1.size());
+  EXPECT_EQ(0, expected.Compare(*results1[0]));
 
-  expected.reset(new AutoFillProfile(string16(), 1));
-  autofill_test::SetProfileInfo(expected.get(), NULL, "George", NULL,
+  // Now create an updated profile.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Address:", "address", "1600 Pennsylvania Avenue", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Address Line 2:", "address2", "Suite A", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Email:", "email", "theprez@gmail.com", "text", &field);
+  form2.fields.push_back(field);
+  // Country gets added.
+  autofill_test::CreateTestFormField(
+      "Country:", "country", "USA", "text", &field);
+  form2.fields.push_back(field);
+  // Phone gets updated.
+  autofill_test::CreateTestFormField(
+      "Phone:", "phone", "1231231234", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  const std::vector<AutoFillProfile*>& results2 = personal_data_->profiles();
+
+  AutoFillProfile expected2;
+  autofill_test::SetProfileInfo(&expected2, NULL, "George", NULL,
+      "Washington", "theprez@gmail.com", NULL, "1600 Pennsylvania Avenue",
+      "Suite A", NULL, NULL, NULL, "USA", "1231231234", NULL);
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
+  FormData form1;
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Email:", "email", "theprez@gmail.com", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  AutoFillProfile expected;
+  autofill_test::SetProfileInfo(&expected, NULL, "George", NULL,
+      "Washington", "theprez@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL,
+      NULL, NULL, NULL);
+  const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
+  ASSERT_EQ(1U, results1.size());
+  EXPECT_EQ(0, expected.Compare(*results1[0]));
+
+  // Submit a form with new data for the first profile.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Address Line 1:", "address", "190 High Street", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "City:", "city", "Philadelphia", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "State:", "state", "Pennsylvania", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Zip:", "zipcode", "19106", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  const std::vector<AutoFillProfile*>& results2 = personal_data_->profiles();
+
+  AutoFillProfile expected2;
+  autofill_test::SetProfileInfo(&expected2, NULL, "George", NULL,
       "Washington", "theprez@gmail.com", NULL, "190 High Street", NULL,
       "Philadelphia", "Pennsylvania", "19106", NULL, NULL, NULL);
-  expected->set_label(results3[0]->Label());
-  EXPECT_EQ(*expected, *results3[0]);
-
-  expected.reset(new AutoFillProfile(string16(), 2));
-  autofill_test::SetProfileInfo(expected.get(), NULL, "John", NULL,
-      "Adams", "second@gmail.com", NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-      NULL, NULL);
-  expected->set_label(results3[1]->Label());
-  EXPECT_EQ(*expected, *results3[1]);
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
 }
+
+TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
+  FormData form1;
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Company:", "company", "Government", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Email:", "email", "theprez@gmail.com", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  AutoFillProfile expected;
+  autofill_test::SetProfileInfo(&expected, NULL, "George", NULL,
+      "Washington", "theprez@gmail.com", "Government", NULL, NULL, NULL, NULL,
+      NULL, NULL, NULL, NULL);
+  const std::vector<AutoFillProfile*>& results1 = personal_data_->profiles();
+  ASSERT_EQ(1U, results1.size());
+  EXPECT_EQ(0, expected.Compare(*results1[0]));
+
+  // Submit a form with new data for the first profile.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "First name:", "first_name", "George", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Last name:", "last_name", "Washington", "text", &field);
+  form2.fields.push_back(field);
+  // Note missing Company field.
+  autofill_test::CreateTestFormField(
+      "Email:", "email", "theprez@gmail.com", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  const std::vector<AutoFillProfile*>& results2 = personal_data_->profiles();
+
+  // Expect no change.
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second different valid credit card.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Jim Johansen", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "5500 0000 0000 0004", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "02", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2012", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected2;
+  autofill_test::SetCreditCardInfo(&expected2,
+      "L2", "Jim Johansen", "5500000000000004", "02", "2012");
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(2U, results2.size());
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
+  EXPECT_EQ(0, expected2.Compare(*results2[1]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateInvalidCreditCard) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second different invalid credit card.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Jim Johansen", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "1000000000000000", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "02", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2012", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_FALSE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Note: no refresh here.
+
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithConflict) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second different valid credit card where the year is different but
+  // the credit card number matches.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111 1111 1111 1111", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2012", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  // Expect that the newer information is saved.  In this case the year is
+  // updated to "2012".
+  CreditCard expected2;
+  autofill_test::SetCreditCardInfo(&expected2,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2012");
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateEmptyCreditCardWithConflict) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second credit card with no number.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2012", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  personal_data_->ImportFormData(forms);
+  personal_data_->SaveImportedCreditCard();
+
+  // Note: no refresh here.
+
+  // No change is expected.
+  CreditCard expected2;
+  autofill_test::SetCreditCardInfo(&expected2,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second different valid credit card where the name is missing but
+  // the credit card number matches.
+  FormData form2;
+  // Note missing name.
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111111111111111", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  personal_data_->ImportFormData(forms);
+  personal_data_->SaveImportedCreditCard();
+
+  // Note: no refresh here.
+
+  // No change is expected.
+  CreditCard expected2;
+  autofill_test::SetCreditCardInfo(&expected2,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+}
+
+TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInOld) {
+  FormData form1;
+
+  // Start with a single valid credit card form.
+  webkit_glue::FormField field;
+  // Note missing name.
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form1.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form1.fields.push_back(field);
+
+  FormStructure form_structure1(form1);
+  std::vector<FormStructure*> forms;
+  forms.push_back(&form_structure1);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  CreditCard expected;
+  autofill_test::SetCreditCardInfo(&expected,
+      "L1", NULL, "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results.size());
+  EXPECT_EQ(0, expected.Compare(*results[0]));
+
+  // Add a second different valid credit card where the year is different but
+  // the credit card number matches.
+  FormData form2;
+  autofill_test::CreateTestFormField(
+      "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Card Number:", "card_number", "4111-1111-1111-1111", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Month:", "exp_month", "01", "text", &field);
+  form2.fields.push_back(field);
+  autofill_test::CreateTestFormField(
+      "Exp Year:", "exp_year", "2011", "text", &field);
+  form2.fields.push_back(field);
+
+  FormStructure form_structure2(form2);
+  forms.clear();
+  forms.push_back(&form_structure2);
+  EXPECT_TRUE(personal_data_->ImportFormData(forms));
+  personal_data_->SaveImportedCreditCard();
+
+  // Wait for the refresh.
+  EXPECT_CALL(personal_data_observer_,
+      OnPersonalDataLoaded()).WillOnce(QuitUIMessageLoop());
+
+  MessageLoop::current()->Run();
+
+  // Expect that the newer information is saved.  In this case the year is
+  // added to the existing credit card.
+  CreditCard expected2;
+  autofill_test::SetCreditCardInfo(&expected2,
+      "L1", "Biggie Smalls", "4111111111111111", "01", "2011");
+  const std::vector<CreditCard*>& results2 = personal_data_->credit_cards();
+  ASSERT_EQ(1U, results2.size());
+  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+}
+

@@ -7,7 +7,7 @@
 #include <set>
 
 #include "base/hash_tables.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "net/base/mime_sniffer.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
@@ -135,7 +135,7 @@ void SiteIsolationMetrics::LogMimeTypeForCrossOriginRequest(
 
       // Now focus on non-frame, non-plugin requests.
       if (target_type != WebURLRequest::TargetIsMainFrame &&
-          target_type != WebURLRequest::TargetIsSubFrame &&
+          target_type != WebURLRequest::TargetIsSubframe &&
           target_type != WebURLRequest::TargetIsObject) {
         // If it is part of a MIME type we might block, log the MIME type.
         std::string mime_type = response.mimeType().utf8();

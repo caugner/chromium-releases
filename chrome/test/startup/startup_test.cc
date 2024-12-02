@@ -110,13 +110,12 @@ class StartupTest : public UIPerfTest {
     if (env->GetVar(env_vars::kStartupTestsNumCycles, &numCyclesEnv) &&
         base::StringToInt(numCyclesEnv, &numCycles)) {
       if (numCycles <= kNumCyclesMax) {
-        LOG(INFO) << env_vars::kStartupTestsNumCycles
-                  << " set in environment, so setting numCycles to "
-                  << numCycles;
+        VLOG(1) << env_vars::kStartupTestsNumCycles
+                << " set in environment, so setting numCycles to " << numCycles;
       } else {
-        LOG(INFO) << env_vars::kStartupTestsNumCycles
-                  << " is higher than the max, setting numCycles to "
-                  << kNumCyclesMax;
+        VLOG(1) << env_vars::kStartupTestsNumCycles
+                << " is higher than the max, setting numCycles to "
+                << kNumCyclesMax;
         numCycles = kNumCyclesMax;
       }
     }
@@ -160,7 +159,7 @@ class StartupTest : public UIPerfTest {
       {
         std::string server_version = automation()->server_version();
         std::vector<std::string> version_numbers;
-        SplitString(server_version, '.', &version_numbers);
+        base::SplitString(server_version, '.', &version_numbers);
         int chrome_buildnum = 0;
         ASSERT_TRUE(base::StringToInt(version_numbers[2], &chrome_buildnum));
         if (chrome_buildnum < 368) {
@@ -203,8 +202,11 @@ class StartupTest : public UIPerfTest {
     }
 
     std::string times;
-    for (int i = 0; i < numCycles; ++i)
-      StringAppendF(&times, "%.2f,", timings[i].end_to_end.InMillisecondsF());
+    for (int i = 0; i < numCycles; ++i) {
+      base::StringAppendF(&times,
+                          "%.2f,",
+                          timings[i].end_to_end.InMillisecondsF());
+    }
     PrintResultList(graph, "", trace, times, "ms", important);
 
     if (num_tabs > 0) {
@@ -214,13 +216,13 @@ class StartupTest : public UIPerfTest {
       times.clear();
       name = name_base + "-start";
       for (int i = 0; i < numCycles; ++i)
-        StringAppendF(&times, "%.2f,", timings[i].first_start_ms);
+        base::StringAppendF(&times, "%.2f,", timings[i].first_start_ms);
       PrintResultList(graph, "", name.c_str(), times, "ms", important);
 
       times.clear();
       name = name_base + "-first";
       for (int i = 0; i < numCycles; ++i)
-        StringAppendF(&times, "%.2f,", timings[i].first_stop_ms);
+        base::StringAppendF(&times, "%.2f,", timings[i].first_stop_ms);
       PrintResultList(graph, "", name.c_str(), times, "ms", important);
 
       if (nth_timed_tab > 0) {
@@ -228,7 +230,7 @@ class StartupTest : public UIPerfTest {
         times.clear();
         name = name_base + "-" + base::IntToString(nth_timed_tab);
         for (int i = 0; i < numCycles; ++i)
-          StringAppendF(&times, "%.2f,", timings[i].nth_tab_stop_ms);
+          base::StringAppendF(&times, "%.2f,", timings[i].nth_tab_stop_ms);
         PrintResultList(graph, "", name.c_str(), times, "ms", important);
       }
 
@@ -237,7 +239,7 @@ class StartupTest : public UIPerfTest {
         times.clear();
         name = name_base + "-all";
         for (int i = 0; i < numCycles; ++i)
-          StringAppendF(&times, "%.2f,", timings[i].last_stop_ms);
+          base::StringAppendF(&times, "%.2f,", timings[i].last_stop_ms);
         PrintResultList(graph, "", name.c_str(), times, "ms", important);
       }
     }
@@ -278,7 +280,7 @@ void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
     UITest::TearDown();
     // Clear all arguments for session restore, or the number of open tabs
     // will grow with each restore.
-    launch_arguments_ = CommandLine(CommandLine::ARGUMENTS_ONLY);
+    launch_arguments_ = CommandLine(CommandLine::NO_PROGRAM);
     // The session will be restored once per cycle for numCycles test cycles,
     // and each time, UITest::SetUp will wait for |tab_count| tabs to
     // finish loading.
@@ -298,13 +300,7 @@ TEST_F(StartupTest, PerfFewTabsReference) {
   RunPerfTestWithManyTabs("few_tabs", "cmdline-ref", 5, 2, false);
 }
 
-// http://crbug.com/52858
-#if defined(OS_MACOSX)
-#define MAYBE_PerfRestoreFewTabs FLAKY_PerfRestoreFewTabs
-#else
-#define MAYBE_PerfRestoreFewTabs PerfRestoreFewTabs
-#endif
-TEST_F(StartupTest, MAYBE_PerfRestoreFewTabs) {
+TEST_F(StartupTest, PerfRestoreFewTabs) {
   RunPerfTestWithManyTabs("few_tabs", "restore", 5, 2, true);
 }
 

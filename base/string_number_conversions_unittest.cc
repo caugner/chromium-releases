@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <math.h>
+
 #include <limits>
-#include <math.h>  // For HUGE_VAL.
 
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -79,6 +80,8 @@ TEST(StringNumberConversionsTest, StringToInt) {
   } cases[] = {
     {"0", 0, true},
     {"42", 42, true},
+    {"42\x99", 42, false},
+    {"\x99" "42\x99", 0, false},
     {"-2147483648", INT_MIN, true},
     {"2147483647", INT_MAX, true},
     {"", 0, false},
@@ -102,12 +105,33 @@ TEST(StringNumberConversionsTest, StringToInt) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
-    int output;
+    const char* ascii_chars = cases[i].input.c_str();
+    int output = 0;
     EXPECT_EQ(cases[i].success, StringToInt(cases[i].input, &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt(cases[i].input.begin(),
+                                            cases[i].input.end(),
+                                            &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt(
+        ascii_chars, ascii_chars + cases[i].input.length(), &output));
     EXPECT_EQ(cases[i].output, output);
 
     string16 utf16_input = UTF8ToUTF16(cases[i].input);
+    const char16* utf16_chars = utf16_input.c_str();
+    output = 0;
     EXPECT_EQ(cases[i].success, StringToInt(utf16_input, &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt(utf16_input.begin(),
+                                            utf16_input.end(),
+                                            &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt(
+        utf16_chars, utf16_chars + utf16_input.length(), &output));
     EXPECT_EQ(cases[i].output, output);
   }
 
@@ -119,10 +143,31 @@ TEST(StringNumberConversionsTest, StringToInt) {
   int output;
   EXPECT_FALSE(StringToInt(input_string, &output));
   EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt(input_string.begin(), input_string.end(), &output));
+  EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt(input, input + arraysize(input), &output));
+  EXPECT_EQ(6, output);
 
   string16 utf16_input = UTF8ToUTF16(input_string);
+  const char16* utf16_chars = utf16_input.c_str();
+  output = 0;
   EXPECT_FALSE(StringToInt(utf16_input, &output));
   EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt(utf16_input.begin(), utf16_input.end(), &output));
+  EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt(utf16_chars,
+                           utf16_chars + utf16_input.length(),
+                           &output));
+  EXPECT_EQ(6, output);
+
+  output = 0;
+  const char16 negative_wide_input[] = { 0xFF4D, '4', '2', 0};
+  EXPECT_FALSE(StringToInt(string16(negative_wide_input), &output));
+  EXPECT_EQ(0, output);
 }
 
 TEST(StringNumberConversionsTest, StringToInt64) {
@@ -146,6 +191,7 @@ TEST(StringNumberConversionsTest, StringToInt64) {
     {"", 0, false},
     {" 42", 42, false},
     {"42 ", 42, false},
+    {"0x42", 0, false},
     {"\t\n\v\f\r 42", 42, false},
     {"blah42", 0, false},
     {"42blah", 42, false},
@@ -164,12 +210,33 @@ TEST(StringNumberConversionsTest, StringToInt64) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
-    int64 output;
+    const char* ascii_chars = cases[i].input.c_str();
+    int64 output = 0;
     EXPECT_EQ(cases[i].success, StringToInt64(cases[i].input, &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt64(cases[i].input.begin(),
+                                              cases[i].input.end(),
+                                              &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt64(
+        ascii_chars, ascii_chars + cases[i].input.length(), &output));
     EXPECT_EQ(cases[i].output, output);
 
     string16 utf16_input = UTF8ToUTF16(cases[i].input);
+    const char16* utf16_chars = utf16_input.c_str();
+    output = 0;
     EXPECT_EQ(cases[i].success, StringToInt64(utf16_input, &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt64(utf16_input.begin(),
+                                              utf16_input.end(),
+                                              &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, StringToInt64(
+        utf16_chars, utf16_chars + utf16_input.length(), &output));
     EXPECT_EQ(cases[i].output, output);
   }
 
@@ -181,9 +248,27 @@ TEST(StringNumberConversionsTest, StringToInt64) {
   int64 output;
   EXPECT_FALSE(StringToInt64(input_string, &output));
   EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt64(input_string.begin(),
+                             input_string.end(),
+                             &output));
+  EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt64(input, input + arraysize(input), &output));
+  EXPECT_EQ(6, output);
 
   string16 utf16_input = UTF8ToUTF16(input_string);
+  const char16* utf16_chars = utf16_input.c_str();
+  output = 0;
   EXPECT_FALSE(StringToInt64(utf16_input, &output));
+  EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt64(utf16_input.begin(), utf16_input.end(), &output));
+  EXPECT_EQ(6, output);
+  output = 0;
+  EXPECT_FALSE(StringToInt64(utf16_chars,
+                             utf16_chars + utf16_input.length(),
+                             &output));
   EXPECT_EQ(6, output);
 }
 
@@ -214,6 +299,7 @@ TEST(StringNumberConversionsTest, HexStringToInt) {
     {"\t\n\v\f\r 0x45", 0x45, false},
     {" 45", 0x45, false},
     {"45 ", 0x45, false},
+    {"45:", 0x45, false},
     {"efgh", 0xef, false},
     {"0xefgh", 0xef, false},
     {"hgfe", 0, false},
@@ -223,8 +309,18 @@ TEST(StringNumberConversionsTest, HexStringToInt) {
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
-    int output;
+    const char* ascii_chars = cases[i].input.c_str();
+    int output = 0;
     EXPECT_EQ(cases[i].success, HexStringToInt(cases[i].input, &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, HexStringToInt(cases[i].input.begin(),
+                                               cases[i].input.end(),
+                                               &output));
+    EXPECT_EQ(cases[i].output, output);
+    output = 0;
+    EXPECT_EQ(cases[i].success, HexStringToInt(
+        ascii_chars, ascii_chars + cases[i].input.length(), &output));
     EXPECT_EQ(cases[i].output, output);
   }
   // One additional test to verify that conversion of numbers in strings with
@@ -234,6 +330,14 @@ TEST(StringNumberConversionsTest, HexStringToInt) {
   std::string input_string(input, arraysize(input) - 1);
   int output;
   EXPECT_FALSE(HexStringToInt(input_string, &output));
+  EXPECT_EQ(0xc0ffee, output);
+  output = 0;
+  EXPECT_FALSE(HexStringToInt(input_string.begin(),
+                              input_string.end(),
+                              &output));
+  EXPECT_EQ(0xc0ffee, output);
+  output = 0;
+  EXPECT_FALSE(HexStringToInt(input, input + arraysize(input), &output));
   EXPECT_EQ(0xc0ffee, output);
 }
 
@@ -295,6 +399,7 @@ TEST(StringNumberConversionsTest, StringToDouble) {
     {"9e99999999999999999999", HUGE_VAL, false},
     {"-9e99999999999999999999", -HUGE_VAL, false},
     {"1e-2", 0.01, true},
+    {"42 ", 42.0, false},
     {" 1e-2", 0.01, false},
     {"1e-2 ", 0.01, false},
     {"-1E-7", -0.0000001, true},

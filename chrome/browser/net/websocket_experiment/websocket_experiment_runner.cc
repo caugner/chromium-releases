@@ -6,11 +6,11 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/field_trial.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/task.h"
 #include "base/string_util.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/common/chrome_switches.h"
 #include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
@@ -28,16 +28,20 @@ static scoped_refptr<WebSocketExperimentRunner> runner;
 void WebSocketExperimentRunner::Start() {
   DCHECK(!runner.get());
 
-  scoped_refptr<FieldTrial> trial = new FieldTrial("WebSocketExperiment", 1000);
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("WebSocketExperiment", 1000));
   trial->AppendGroup("active", 5);  // 0.5% in active group.
 
-  bool run_experiment = (trial->group() != FieldTrial::kNotParticipating);
+  bool run_experiment =
+      (trial->group() != base::FieldTrial::kNotParticipating);
 #ifndef NDEBUG
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   std::string experiment_host = command_line.GetSwitchValueASCII(
       switches::kWebSocketLiveExperimentHost);
   if (!experiment_host.empty())
     run_experiment = true;
+#else
+  run_experiment = false;
 #endif
   if (!run_experiment)
     return;
@@ -218,7 +222,7 @@ void WebSocketExperimentRunner::OnTaskCompleted(int result) {
   if (next_state_ == STATE_NONE) {
     task_.reset();
     // Task is Canceled.
-    DLOG(INFO) << "WebSocketExperiment Task is canceled.";
+    DVLOG(1) << "WebSocketExperiment Task is canceled.";
     Release();
     return;
   }

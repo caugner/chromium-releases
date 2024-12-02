@@ -10,7 +10,7 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/json_value_serializer.h"
@@ -397,8 +397,6 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
   // Part 1: Build the pack from an extension.
   {
     FilePath star_gazing_path = GetStarGazingPath();
-    Extension extension(star_gazing_path);
-
     FilePath manifest_path =
         star_gazing_path.AppendASCII("manifest.json");
     std::string error;
@@ -407,11 +405,13 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
         static_cast<DictionaryValue*>(serializer.Deserialize(NULL, &error)));
     EXPECT_EQ("", error);
     ASSERT_TRUE(valid_value.get());
-    ASSERT_TRUE(extension.InitFromValue(*valid_value, true, &error));
+    scoped_refptr<Extension> extension(Extension::Create(
+        star_gazing_path, Extension::INVALID, *valid_value, true, &error));
+    ASSERT_TRUE(extension.get());
     ASSERT_EQ("", error);
 
-    scoped_refptr<BrowserThemePack> pack =
-        BrowserThemePack::BuildFromExtension(&extension);
+    scoped_refptr<BrowserThemePack> pack(
+        BrowserThemePack::BuildFromExtension(extension.get()));
     ASSERT_TRUE(pack.get());
     ASSERT_TRUE(pack->WriteToDisk(file));
     VerifyStarGazing(pack.get());

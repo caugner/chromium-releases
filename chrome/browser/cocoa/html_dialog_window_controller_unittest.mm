@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/scoped_nsautorelease_pool.h"
+#import "base/mac/scoped_nsautorelease_pool.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/dom_ui/dom_ui.h"
@@ -35,6 +35,7 @@ public:
   MOCK_METHOD1(OnDialogClosed, void(const std::string& json_retval));
   MOCK_METHOD2(OnCloseContents,
                void(TabContents* source, bool* out_close_dialog));
+  MOCK_CONST_METHOD0(ShouldShowDialogTitle, bool());
 };
 
 class HtmlDialogWindowControllerTest : public BrowserWithTestWindowTest {
@@ -70,7 +71,7 @@ TEST_F(HtmlDialogWindowControllerTest, showDialog) {
   //
   // TODO(dmaclach): Remove this once
   // http://code.google.com/p/chromium/issues/detail?id=26133 is fixed.
-  base::ScopedNSAutoreleasePool release_pool;
+  base::mac::ScopedNSAutoreleasePool release_pool;
 
   EXPECT_CALL(delegate_, GetDialogTitle())
     .WillOnce(Return(title_));

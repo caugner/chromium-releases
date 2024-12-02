@@ -8,12 +8,12 @@
 
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/trace_event.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/native_widget_types.h"
@@ -70,6 +70,7 @@
 #include "webkit/tools/test_shell/mock_spellcheck.h"
 #include "webkit/tools/test_shell/notification_presenter.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
+#include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/test_geolocation_service.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell.h"
@@ -224,7 +225,7 @@ std::string GetErrorDescription(const WebURLError& error) {
     domain = "NSURLErrorDomain";
     switch (error.reason) {
       case net::ERR_ABORTED:
-        code = -999;
+        code = -999;  // NSURLErrorCancelled
         break;
       case net::ERR_UNSAFE_PORT:
         // Our unsafe port checking happens at the network stack level, but we
@@ -234,7 +235,8 @@ std::string GetErrorDescription(const WebURLError& error) {
         break;
       case net::ERR_ADDRESS_INVALID:
       case net::ERR_ADDRESS_UNREACHABLE:
-        code = -1004;
+      case net::ERR_NETWORK_ACCESS_DENIED:
+        code = -1004;  // NSURLErrorCannotConnectToHost
         break;
     }
   } else {
@@ -576,7 +578,14 @@ void TestWebViewDelegate::showContextMenu(
                                    data.mousePosition.x,
                                    data.mousePosition.y);
   captured_context_menu_events_.push_back(context);
+  last_context_menu_data_.reset(new WebContextMenuData(data));
 }
+
+void TestWebViewDelegate::ClearContextMenuData() {
+  last_context_menu_data_.reset();
+}
+
+
 
 
 void TestWebViewDelegate::setStatusText(const WebString& text) {
@@ -716,15 +725,15 @@ WebWorker* TestWebViewDelegate::createWorker(
 
 WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
     WebFrame* frame, WebMediaPlayerClient* client) {
-  scoped_refptr<media::FilterFactoryCollection> factory =
-      new media::FilterFactoryCollection();
+  scoped_ptr<media::MediaFilterCollection> collection(
+      new media::MediaFilterCollection());
 
   appcache::WebApplicationCacheHostImpl* appcache_host =
       appcache::WebApplicationCacheHostImpl::FromFrame(frame);
 
   // TODO(hclam): this is the same piece of code as in RenderView, maybe they
   // should be grouped together.
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory =
+  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_simple =
       new webkit_glue::MediaResourceLoaderBridgeFactory(
           GURL(frame->url()),  // referrer
           "null",  // frame origin
@@ -732,19 +741,28 @@ WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
           base::GetCurrentProcId(),
           appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
           0);
-  // A simple data source that keeps all data in memory.
-  media::FilterFactory* simple_data_source_factory =
-      webkit_glue::SimpleDataSource::CreateFactory(MessageLoop::current(),
-                                                   bridge_factory);
-  // A sophisticated data source that does memory caching.
-  media::FilterFactory* buffered_data_source_factory =
-      webkit_glue::BufferedDataSource::CreateFactory(MessageLoop::current(),
-                                                     bridge_factory);
-  factory->AddFactory(buffered_data_source_factory);
-  factory->AddFactory(simple_data_source_factory);
-  return new webkit_glue::WebMediaPlayerImpl(
-      client, factory,
-      new webkit_glue::VideoRendererImpl::FactoryFactory(false));
+  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_buffered =
+      new webkit_glue::MediaResourceLoaderBridgeFactory(
+          GURL(frame->url()),  // referrer
+          "null",  // frame origin
+          "null",  // main_frame_origin
+          base::GetCurrentProcId(),
+          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
+          0);
+
+  scoped_refptr<webkit_glue::VideoRendererImpl> video_renderer(
+      new webkit_glue::VideoRendererImpl(false));
+  collection->AddVideoRenderer(video_renderer);
+
+  scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
+      new webkit_glue::WebMediaPlayerImpl(client, collection.release()));
+  if (!result->Initialize(bridge_factory_simple,
+                          bridge_factory_buffered,
+                          false,
+                          video_renderer)) {
+    return NULL;
+  }
+  return result.release();
 }
 
 WebApplicationCacheHost* TestWebViewDelegate::createApplicationCacheHost(
@@ -1120,16 +1138,11 @@ bool TestWebViewDelegate::allowScript(WebFrame* frame,
 }
 
 void TestWebViewDelegate::openFileSystem(
-    WebFrame* frame, WebFileSystem::Type type, long long size,
+    WebFrame* frame, WebFileSystem::Type type, long long size, bool create,
     WebFileSystemCallbacks* callbacks) {
-  if (shell_->file_system_root().empty()) {
-    // The FileSystem temp directory was not initialized successfully.
-    callbacks->didFail(WebKit::WebFileErrorSecurity);
-  } else {
-    callbacks->didOpenFileSystem(
-        "TestShellFileSystem",
-        webkit_glue::FilePathToWebString(shell_->file_system_root()));
-  }
+  SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
+      WebKit::webKitClient()->fileSystem());
+  fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
 }
 
 // WebPluginPageDelegate -----------------------------------------------------
@@ -1170,6 +1183,8 @@ void TestWebViewDelegate::Reset() {
   TestShell* shell = shell_;
   this->~TestWebViewDelegate();
   new (this) TestWebViewDelegate(shell);
+  if (shell->speech_input_controller_mock())
+    shell->speech_input_controller_mock()->clearResults();
 }
 
 void TestWebViewDelegate::SetSmartInsertDeleteEnabled(bool enabled) {

@@ -4,7 +4,7 @@
 
 #include "base/file_path.h"
 #include "base/string_util.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/worker_host/worker_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
@@ -202,6 +202,7 @@ TEST_F(WorkerTest, MultipleSharedWorkers) {
 }
 
 #if defined(OS_LINUX)
+// http://crbug.com/30021
 #define IncognitoSharedWorkers FLAKY_IncognitoSharedWorkers
 #endif
 
@@ -270,7 +271,8 @@ TEST_F(WorkerTest, DISABLED_WorkerClonePort) {
   RunWorkerFastLayoutTest("worker-cloneport.html");
 }
 
-TEST_F(WorkerTest, WorkerCloseFast) {
+// Flaky, http://crbug.com/59780.
+TEST_F(WorkerTest, FLAKY_WorkerCloseFast) {
   RunWorkerFastLayoutTest("worker-close.html");
 }
 
@@ -597,7 +599,8 @@ TEST_F(WorkerTest, FLAKY_LimitTotal) {
   ASSERT_TRUE(WaitForProcessCountToBe(tab_count, total_workers));
 }
 
-TEST_F(WorkerTest, WorkerClose) {
+// Flaky, http://crbug.com/59786.
+TEST_F(WorkerTest, FLAKY_WorkerClose) {
   scoped_refptr<TabProxy> tab(GetActiveTab());
   ASSERT_TRUE(tab.get());
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
@@ -626,8 +629,7 @@ TEST_F(WorkerTest, QueuedSharedWorkerShutdown) {
   ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
 }
 
-// Flaky, http://crbug.com/35221.
-TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
+TEST_F(WorkerTest, MultipleTabsQueuedSharedWorker) {
   // Tests to make sure that only one instance of queued shared workers are
   // started up even when those instances are on multiple tabs.
   int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;

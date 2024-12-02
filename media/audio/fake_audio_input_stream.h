@@ -20,8 +20,7 @@ class FakeAudioInputStream :
     public AudioInputStream,
     public base::RefCountedThreadSafe<FakeAudioInputStream> {
  public:
-  static AudioInputStream* MakeFakeStream(AudioParameters params,
-                                          int samples_per_packet);
+  static AudioInputStream* MakeFakeStream(AudioParameters params);
 
   virtual bool Open();
   virtual void Start(AudioInputCallback* callback);
@@ -32,8 +31,8 @@ class FakeAudioInputStream :
   // Give RefCountedThreadSafe access our destructor.
   friend class base::RefCountedThreadSafe<FakeAudioInputStream>;
 
-  FakeAudioInputStream(AudioParameters params, int samples_per_packet);
-  virtual ~FakeAudioInputStream() {}
+  FakeAudioInputStream(AudioParameters params);
+  virtual ~FakeAudioInputStream();
 
   void DoCallback();
 

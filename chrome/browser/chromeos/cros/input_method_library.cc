@@ -58,10 +58,10 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
         should_launch_ime_(false),
         ime_connected_(false),
         defer_ime_startup_(false),
+        enable_auto_ime_shutdown_(true),
         should_change_input_method_(false),
         ibus_daemon_process_id_(0),
-        candidate_window_process_id_(0),
-        failure_count_(0) {
+        candidate_window_process_id_(0) {
     scoped_ptr<InputMethodDescriptors> input_method_descriptors(
         CreateFallbackInputMethodDescriptors());
     current_input_method_ = input_method_descriptors->at(0);
@@ -124,8 +124,7 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
       if (input_method_id != chromeos::GetHardwareKeyboardLayoutName()) {
         StartInputMethodProcesses();
       }
-      chromeos::ChangeInputMethod(
-          input_method_status_connection_, input_method_id.c_str());
+      ChangeInputMethodInternal(input_method_id);
     }
   }
 
@@ -139,7 +138,7 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
 
   bool InputMethodIsActivated(const std::string& input_method_id) {
     scoped_ptr<InputMethodDescriptors> active_input_method_descriptors(
-        CrosLibrary::Get()->GetInputMethodLibrary()->GetActiveInputMethods());
+        GetActiveInputMethods());
     for (size_t i = 0; i < active_input_method_descriptors->size(); ++i) {
       if (active_input_method_descriptors->at(i).id == input_method_id) {
         return true;
@@ -197,13 +196,47 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
             value.string_list_value.size() == 1 &&
             value.string_list_value[0] ==
             chromeos::GetHardwareKeyboardLayoutName()) {
-          StopInputMethodProcesses();
+          if (enable_auto_ime_shutdown_)
+            StopInputMethodProcesses();
         } else if (!defer_ime_startup_) {
           StartInputMethodProcesses();
         }
         chromeos::SetActiveInputMethods(input_method_status_connection_, value);
       }
     }
+  }
+
+  // Changes the current input method to |input_method_id|. If the id is not in
+  // the preload_engine list, this function changes the current method to the
+  // first preloaded engine. Returns true if the current engine is switched to
+  // |input_method_id| or the first one.
+  bool ChangeInputMethodInternal(const std::string& input_method_id) {
+    DCHECK(EnsureLoadedAndStarted());
+    std::string input_method_id_to_switch = input_method_id;
+
+    if (!InputMethodIsActivated(input_method_id)) {
+      // This path might be taken if prefs::kLanguageCurrentInputMethod (NOT
+      // synced with cloud) and kLanguagePreloadEngines (synced with cloud) are
+      // mismatched. e.g. the former is 'xkb:us::eng' and the latter (on the
+      // sync server) is 'xkb:jp::jpn,mozc'.
+      scoped_ptr<InputMethodDescriptors> input_methods(GetActiveInputMethods());
+      DCHECK(!input_methods->empty());
+      if (!input_methods->empty()) {
+        input_method_id_to_switch = input_methods->at(0).id;
+        LOG(INFO) << "Can't change the current input method to "
+                  << input_method_id << " since the engine is not preloaded. "
+                  << "Switch to " << input_method_id_to_switch << " instead.";
+      }
+    }
+
+    if (chromeos::ChangeInputMethod(input_method_status_connection_,
+                                    input_method_id_to_switch.c_str())) {
+      return true;
+    }
+
+    // Not reached.
+    LOG(ERROR) << "Can't switch input method to " << input_method_id_to_switch;
+    return false;
   }
 
   // Flushes the input method config data. The config data is queued up in
@@ -213,7 +246,6 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
   // config data to the config backend.
   void FlushImeConfig() {
     bool active_input_methods_are_changed = false;
-    bool completed = false;
     if (EnsureLoadedAndStarted()) {
       InputMethodConfigRequests::iterator iter =
           pending_config_requests_.begin();
@@ -241,41 +273,22 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
         // yet been added to preload_engines.  As such, the call is deferred
         // until after all config values have been sent to the IME process.
         if (should_change_input_method_) {
-          if (chromeos::ChangeInputMethod(input_method_status_connection_,
-                                          current_input_method_id_.c_str())) {
-            should_change_input_method_ = false;
-            completed = true;
-            active_input_methods_are_changed = true;
-          }
-        } else {
-          completed = true;
+          ChangeInputMethodInternal(current_input_method_id_);
+          should_change_input_method_ = false;
+          active_input_methods_are_changed = true;
         }
       }
     }
 
-    if (completed) {
+    if (pending_config_requests_.empty()) {
       timer_.Stop();  // no-op if it's not running.
-    } else {
+    } else if (!timer_.IsRunning()) {
       // Flush is not completed. Start a timer if it's not yet running.
-      if (!timer_.IsRunning()) {
-        static const int64 kTimerIntervalInMsec = 100;
-        failure_count_ = 0;
-        timer_.Start(base::TimeDelta::FromMilliseconds(kTimerIntervalInMsec),
-                     this, &InputMethodLibraryImpl::FlushImeConfig);
-      } else {
-        // The timer is already running. We'll give up if it reaches the
-        // max retry count.
-        static const int kMaxRetries = 15;
-        ++failure_count_;
-        if (failure_count_ > kMaxRetries) {
-          LOG(ERROR) << "FlushImeConfig: Max retries exceeded. "
-                     << "current_input_method_id: " << current_input_method_id_
-                     << " pending_config_requests.size: "
-                     << pending_config_requests_.size();
-          timer_.Stop();
-        }
-      }
+      static const int64 kTimerIntervalInMsec = 100;
+      timer_.Start(base::TimeDelta::FromMilliseconds(kTimerIntervalInMsec),
+                   this, &InputMethodLibraryImpl::FlushImeConfig);
     }
+
     if (active_input_methods_are_changed) {
       FOR_EACH_OBSERVER(Observer, observers_, ActiveInputMethodsChanged(this));
     }
@@ -495,8 +508,12 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
   }
 
   void SetDeferImeStartup(bool defer) {
-    LOG(INFO) << "Setting DeferImeStartup to " << defer;
+    VLOG(1) << "Setting DeferImeStartup to " << defer;
     defer_ime_startup_ = defer;
+  }
+
+  void SetEnableAutoImeShutdown(bool enable) {
+    enable_auto_ime_shutdown_ = enable;
   }
 
   // NotificationObserver implementation:
@@ -549,6 +566,7 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
   // If true, we'll defer the startup until a non-default method is
   // activated.
   bool defer_ime_startup_;
+  bool enable_auto_ime_shutdown_;
   // The ID of the current input method (ex. "mozc").
   std::string current_input_method_id_;
   // True if we should change the input method once the queue of the
@@ -560,8 +578,6 @@ class InputMethodLibraryImpl : public InputMethodLibrary,
   int ibus_daemon_process_id_;
   // The process id of the candidate window. 0 if it's not running.
   int candidate_window_process_id_;
-  // The failure count of config flush attempts.
-  int failure_count_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodLibraryImpl);
 };
@@ -628,6 +644,7 @@ class InputMethodLibraryStubImpl : public InputMethodLibrary {
   virtual void StartInputMethodProcesses() {}
   virtual void StopInputMethodProcesses() {}
   virtual void SetDeferImeStartup(bool defer) {}
+  virtual void SetEnableAutoImeShutdown(bool enable) {}
 
  private:
   // Creates realistic input method descriptors that can be used for

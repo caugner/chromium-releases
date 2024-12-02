@@ -22,6 +22,7 @@ const char kNewPositionKey[] = "newPosition";
 const char kNewWindowIdKey[] = "newWindowId";
 const char kOldPositionKey[] = "oldPosition";
 const char kOldWindowIdKey[] = "oldWindowId";
+const char kPinnedKey[] = "pinned";
 const char kPopulateKey[] = "populate";
 const char kQualityKey[] = "quality";
 const char kSelectedKey[] = "selected";
@@ -33,6 +34,7 @@ const char kTitleKey[] = "title";
 const char kToIndexKey[] = "toIndex";
 const char kTopKey[] = "top";
 const char kUrlKey[] = "url";
+const char kWindowClosing[] = "isWindowClosing";
 const char kWidthKey[] = "width";
 const char kWindowIdKey[] = "windowId";
 const char kWindowTypeKey[] = "type";
@@ -67,7 +69,6 @@ const char kNoCodeOrFileToExecuteError[] = "No source code or file specified.";
 const char kMoreThanOneValuesError[] = "Code and file should not be specified "
     "at the same time in the second argument.";
 const char kLoadFileError[] = "Failed to load file: \"*\". ";
-const char kCannotUpdatePinnedTab[] = "Cannot update pinned tabs";
 const char kCannotDetermineLanguageOfUnloadedTab[] =
     "Cannot determine language: tab not loaded";
 

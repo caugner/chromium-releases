@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/renderer_host/site_instance.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_type.h"
 
 // A class which represents a notification waiting to be shown.
 class QueuedNotification {
@@ -38,6 +40,8 @@ class QueuedNotification {
 
 NotificationUIManager::NotificationUIManager()
     : balloon_collection_(NULL) {
+  registrar_.Add(this, NotificationType::APP_TERMINATING,
+                 NotificationService::AllSources());
 }
 
 NotificationUIManager::~NotificationUIManager() {
@@ -59,24 +63,46 @@ void NotificationUIManager::Add(const Notification& notification,
     return;
   }
 
-  LOG(INFO) << "Added notification. URL: "
-            << notification.content_url().spec().c_str();
+  VLOG(1) << "Added notification. URL: "
+          << notification.content_url().spec();
   show_queue_.push_back(
       new QueuedNotification(notification, profile));
   CheckAndShowNotifications();
 }
 
-bool NotificationUIManager::Cancel(const Notification& notification) {
-  // First look through the notifications that haven't been shown.  If not
-  // found there, call to the active balloon collection to tear it down.
+bool NotificationUIManager::CancelById(const std::string& id) {
+  // See if this ID hasn't been shown yet.
   NotificationDeque::iterator iter;
   for (iter = show_queue_.begin(); iter != show_queue_.end(); ++iter) {
-    if (notification.IsSame((*iter)->notification())) {
+    if ((*iter)->notification().notification_id() == id) {
       show_queue_.erase(iter);
       return true;
     }
   }
-  return balloon_collection_->Remove(notification);
+  // If it has been shown, remove it from the balloon collections.
+  return balloon_collection_->RemoveById(id);
+}
+
+bool NotificationUIManager::CancelAllBySourceOrigin(const GURL& source) {
+  // Same pattern as CancelById, but more complicated than the above
+  // because there may be multiple notifications from the same source.
+  bool removed = false;
+  NotificationDeque::iterator iter;
+  for (iter = show_queue_.begin(); iter != show_queue_.end();) {
+    if ((*iter)->notification().origin_url() == source) {
+      iter = show_queue_.erase(iter);
+      removed = true;
+    } else {
+      ++iter;
+    }
+  }
+
+  return balloon_collection_->RemoveBySourceOrigin(source) || removed;
+}
+
+void NotificationUIManager::CancelAll() {
+  STLDeleteElements(&show_queue_);
+  balloon_collection_->RemoveAll();
 }
 
 void NotificationUIManager::CheckAndShowNotifications() {
@@ -129,4 +155,13 @@ bool NotificationUIManager::TryReplacement(const Notification& notification) {
   }
 
   return false;
+}
+
+void NotificationUIManager::Observe(NotificationType type,
+                                    const NotificationSource& source,
+                                    const NotificationDetails& details) {
+  if (type == NotificationType::APP_TERMINATING)
+    CancelAll();
+  else
+    NOTREACHED();
 }

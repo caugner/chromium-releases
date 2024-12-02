@@ -76,6 +76,8 @@ enum IPCMessageStart {
   GpuVideoDecoderMsgStart,
   ServiceMsgStart,
   ServiceHostMsgStart,
+  PpapiMsgStart,
+  PpapiHostMsgStart,
   // NOTE: When you add a new message class, also update
   // IPCStatusView::IPCStatusView to ensure logging works.
   LastMsgIndex
@@ -88,6 +90,7 @@ class NullableString16;
 
 namespace base {
 class Time;
+class TimeDelta;
 struct FileDescriptor;
 }
 
@@ -238,6 +241,14 @@ struct ParamTraits<unsigned long long> {
   static void Log(const param_type& p, std::string* l);
 };
 
+template <>
+struct ParamTraits<unsigned short> {
+  typedef unsigned short param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
 // Note that the IPC layer doesn't sanitize NaNs and +/- INF values.  Clients
 // should be sure to check the sanity of these values after receiving them over
 // IPC.
@@ -288,6 +299,14 @@ struct ParamTraits<double> {
 template <>
 struct ParamTraits<base::Time> {
   typedef base::Time param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<base::TimeDelta> {
+  typedef base::TimeDelta param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);

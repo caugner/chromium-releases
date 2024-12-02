@@ -11,7 +11,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/platform_thread.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/chrome_constants.h"
@@ -73,10 +73,6 @@ TEST_F(MetricsServiceTest, CloseRenderersNormally) {
   EXPECT_EQ(0, local_state->GetInteger(prefs::kStabilityRendererCrashCount));
 }
 
-#if defined(OS_WIN)
-// http://crbug.com/32048
-#define CrashRenderers FLAKY_CrashRenders
-#endif
 TEST_F(MetricsServiceTest, CrashRenderers) {
   // This doesn't make sense to test in single process mode.
   if (in_process_renderer_)

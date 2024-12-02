@@ -17,6 +17,7 @@
 #include "app/surface/transport_dib.h"
 #include "base/callback.h"
 #include "base/file_path.h"
+#include "base/linked_ptr.h"
 #include "base/process.h"
 #include "base/ref_counted.h"
 #include "base/string16.h"
@@ -39,10 +40,12 @@ class DOMStorageDispatcherHost;
 class FileSystemDispatcherHost;
 class FileUtilitiesDispatcherHost;
 struct FontDescriptor;
-class GeolocationDispatcherHost;
+class GeolocationDispatcherHostOld;
 class HostZoomMap;
 class IndexedDBDispatcherHost;
+class MimeRegistryDispatcher;
 class NotificationsPrefsCache;
+class PpapiPluginProcessHost;
 class Profile;
 class RenderWidgetHelper;
 class SearchProviderInstallStateDispatcherHost;
@@ -107,7 +110,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   virtual void OnChannelError();
   virtual void OnChannelClosing();
   virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void OnDestruct();
+  virtual void OnDestruct() const;
 
   // ResourceDispatcherHost::Receiver methods:
   virtual bool Send(IPC::Message* message);
@@ -129,7 +132,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   ChromeURLRequestContext* GetRequestContextForURL(const GURL& url);
 
  private:
-  friend class ChromeThread;
+  friend class BrowserThread;
   friend class DeleteTask<ResourceMessageFilter>;
 
   virtual ~ResourceMessageFilter();
@@ -155,6 +158,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                        IPC::Message* reply_msg);
   void OnDeleteCookie(const GURL& url,
                       const std::string& cookieName);
+  void OnCookiesEnabled(const GURL& url,
+                        const GURL& first_party_for_cookies,
+                        IPC::Message* reply_msg);
   void OnPluginFileDialog(const IPC::Message& msg,
                           bool multiple_files,
                           const std::wstring& title,
@@ -188,13 +194,15 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                    const std::string& mime_type,
                                    IPC::Message* reply_msg);
   void OnGotPluginInfo(bool found,
-                       WebPluginInfo info,
+                       const WebPluginInfo& info,
                        const std::string& actual_mime_type,
                        const GURL& policy_url,
                        IPC::Message* reply_msg);
   void OnOpenChannelToPlugin(const GURL& url,
                              const std::string& mime_type,
                              IPC::Message* reply_msg);
+  void OnOpenChannelToPepperPlugin(const FilePath& path,
+                                   IPC::Message* reply_msg);
   void OnLaunchNaCl(const std::wstring& url,
                     int channel_descriptor,
                     IPC::Message* reply_msg);
@@ -252,12 +260,8 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   void OnGetWindowRect(gfx::NativeViewId window, IPC::Message* reply);
   void OnGetRootWindowRect(gfx::NativeViewId window, IPC::Message* reply);
 #endif
-  void OnGetMimeTypeFromExtension(const FilePath::StringType& ext,
-                                  std::string* mime_type);
-  void OnGetMimeTypeFromFile(const FilePath& file_path,
-                             std::string* mime_type);
-  void OnGetPreferredExtensionForMimeType(const std::string& mime_type,
-                                          FilePath::StringType* ext);
+
+  void OnRevealFolderInOS(const FilePath& path);
   void OnGetCPBrowsingContext(uint32* context);
 
 #if defined(OS_WIN)
@@ -282,8 +286,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 #endif
 
   void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);
-  static void OnResourceTypeStatsOnUIThread(WebKit::WebCache::ResourceTypeStats,
-                                            base::ProcessId renderer_id);
+  static void OnResourceTypeStatsOnUIThread(
+      const WebKit::WebCache::ResourceTypeStats&,
+      base::ProcessId renderer_id);
 
   void OnV8HeapStats(int v8_memory_allocated, int v8_memory_used);
   static void OnV8HeapStatsOnUIThread(int v8_memory_allocated,
@@ -471,6 +476,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
 
   base::TimeTicks last_plugin_refresh_time_;  // Initialized to 0.
 
+  // A list of all Ppapi plugin processes for this renderer.
+  std::vector<linked_ptr<PpapiPluginProcessHost> > ppapi_plugin_hosts_;
+
   // A callback to create a routing id for the associated renderer process.
   scoped_ptr<CallbackWithReturnValue<int>::Type> next_route_id_callback_;
 
@@ -479,7 +487,7 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
       speech_input_dispatcher_host_;
 
   // Used to handle geolocation-related messages.
-  scoped_refptr<GeolocationDispatcherHost> geolocation_dispatcher_host_;
+  scoped_refptr<GeolocationDispatcherHostOld> geolocation_dispatcher_host_;
 
   // Used to handle search provider related messages.
   scoped_ptr<SearchProviderInstallStateDispatcherHost>
@@ -498,6 +506,9 @@ class ResourceMessageFilter : public IPC::ChannelProxy::MessageFilter,
   // Handles file utilities messages.
   scoped_refptr<FileUtilitiesDispatcherHost> file_utilities_dispatcher_host_;
 
+  // Handles mime registry requests.
+  scoped_refptr<MimeRegistryDispatcher> mime_registry_dispatcher_;
+
   DISALLOW_COPY_AND_ASSIGN(ResourceMessageFilter);
 };
 
@@ -510,6 +521,7 @@ class SetCookieCompletion : public net::CompletionCallback {
                       const GURL& url,
                       const std::string& cookie_line,
                       ChromeURLRequestContext* context);
+  virtual ~SetCookieCompletion();
 
   virtual void RunWithParams(const Tuple1<int>& params);
 
@@ -537,6 +549,7 @@ class GetCookiesCompletion : public net::CompletionCallback {
                        ResourceMessageFilter* filter,
                        URLRequestContext* context,
                        bool raw_cookies);
+  virtual ~GetCookiesCompletion();
 
   virtual void RunWithParams(const Tuple1<int>& params);
 
@@ -563,6 +576,19 @@ class GetCookiesCompletion : public net::CompletionCallback {
   int render_view_id_;
   bool raw_cookies_;
   scoped_refptr<net::CookieStore> cookie_store_;
+};
+
+class CookiesEnabledCompletion : public net::CompletionCallback {
+ public:
+  CookiesEnabledCompletion(IPC::Message* reply_msg,
+                           ResourceMessageFilter* filter);
+  virtual ~CookiesEnabledCompletion();
+
+  virtual void RunWithParams(const Tuple1<int>& params);
+
+ private:
+  IPC::Message* reply_msg_;
+  scoped_refptr<ResourceMessageFilter> filter_;
 };
 
 #endif  // CHROME_BROWSER_RENDERER_HOST_RESOURCE_MESSAGE_FILTER_H_

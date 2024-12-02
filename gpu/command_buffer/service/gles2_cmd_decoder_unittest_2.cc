@@ -4,7 +4,7 @@
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
-#include "app/gfx/gl/gl_mock.h"
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
@@ -43,8 +43,8 @@ void GLES2DecoderTestBase::SpecializedSetup<LinkProgram, 0>(bool /* valid */) {
   DoCreateShader(
       GL_FRAGMENT_SHADER, kClientFragmentShaderId, kServiceFragmentShaderId);
 
-  GetShaderInfo(kClientVertexShaderId)->SetStatus(true, "");
-  GetShaderInfo(kClientFragmentShaderId)->SetStatus(true, "");
+  GetShaderInfo(kClientVertexShaderId)->SetStatus(true, "", NULL);
+  GetShaderInfo(kClientFragmentShaderId)->SetStatus(true, "", NULL);
 
   InSequence dummy;
   EXPECT_CALL(*gl_,

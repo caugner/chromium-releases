@@ -7,13 +7,14 @@
 #include "base/callback.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/file_reader.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -50,7 +51,7 @@ bool ExecuteCodeInTabFunction::RunImpl() {
 
   execute_tab_id_ = -1;
   Browser* browser = NULL;
-  TabContents* contents = NULL;
+  TabContentsWrapper* contents = NULL;
 
   // If |tab_id| is specified, look for it. Otherwise default to selected tab
   // in the current window.
@@ -78,11 +79,11 @@ bool ExecuteCodeInTabFunction::RunImpl() {
 
   // NOTE: This can give the wrong answer due to race conditions, but it is OK,
   // we check again in the renderer.
-  Extension* extension = GetExtension();
+  const Extension* extension = GetExtension();
   const std::vector<URLPattern> host_permissions =
       extension->host_permissions();
   if (!Extension::CanExecuteScriptOnPage(
-        contents->GetURL(),
+        contents->tab_contents()->GetURL(),
         extension->CanExecuteScriptEverywhere(),
         &host_permissions,
         NULL,
@@ -146,7 +147,7 @@ void ExecuteCodeInTabFunction::DidLoadFile(bool success,
 }
 
 bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
-  TabContents* contents = NULL;
+  TabContentsWrapper* contents = NULL;
   Browser* browser = NULL;
 
   bool success = ExtensionTabUtil::GetTabById(
@@ -158,7 +159,7 @@ bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
     return false;
   }
 
-  Extension* extension = GetExtension();
+  const Extension* extension = GetExtension();
   if (!extension) {
     SendResponse(false);
     return false;
@@ -171,8 +172,8 @@ bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {
   } else if (function_name != TabsExecuteScriptFunction::function_name()) {
     DCHECK(false);
   }
-  if (!contents->ExecuteCode(request_id(), extension->id(),
-                             is_js_code, code_string, all_frames_)) {
+  if (!contents->tab_contents()->ExecuteCode(request_id(), extension->id(),
+      is_js_code, code_string, all_frames_)) {
     SendResponse(false);
     return false;
   }

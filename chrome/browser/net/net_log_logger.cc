@@ -7,7 +7,7 @@
 #include "base/json/json_writer.h"
 #include "base/values.h"
 
-NetLogLogger::NetLogLogger() : Observer(net::NetLog::LOG_ALL) {}
+NetLogLogger::NetLogLogger() : Observer(net::NetLog::LOG_ALL_BUT_BYTES) {}
 
 NetLogLogger::~NetLogLogger() {}
 
@@ -21,6 +21,6 @@ void NetLogLogger::OnAddEntry(net::NetLog::EventType type,
                                                               params, true));
   std::string json;
   base::JSONWriter::Write(value.get(), true, &json);
-  LOG(INFO) << json;
+  VLOG(1) << json;
 }
 

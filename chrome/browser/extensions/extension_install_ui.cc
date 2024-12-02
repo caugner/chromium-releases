@@ -37,7 +37,6 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/app_launcher.h"
 #include "chrome/browser/views/extensions/extension_installed_bubble.h"
 #endif
 
@@ -77,26 +76,12 @@ ExtensionInstallUI::ExtensionInstallUI(Profile* profile)
       extension_(NULL),
       delegate_(NULL),
       prompt_type_(NUM_PROMPT_TYPES),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {}
-
-ExtensionInstallUI::~ExtensionInstallUI() {
-}
-
-void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
-                                        Extension* extension) {
-  DCHECK(ui_loop_ == MessageLoop::current());
-  extension_ = extension;
-  delegate_ = delegate;
-
-  // We special-case themes to not show any confirm UI. Instead they are
-  // immediately installed, and then we show an infobar (see OnInstallSuccess)
-  // to allow the user to revert if they don't like it.
-  if (extension->is_theme()) {
-    // Remember the current theme in case the user pressed undo.
-    Extension* previous_theme = profile_->GetTheme();
+      ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
+  // Remember the current theme in case the user presses undo.
+  if (profile_) {
+    const Extension* previous_theme = profile_->GetTheme();
     if (previous_theme)
       previous_theme_id_ = previous_theme->id();
-
 #if defined(TOOLKIT_GTK)
     // On Linux, we also need to take the user's system settings into account
     // to undo theme installation.
@@ -105,7 +90,22 @@ void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
 #else
     DCHECK(!previous_use_system_theme_);
 #endif
+  }
+}
 
+ExtensionInstallUI::~ExtensionInstallUI() {
+}
+
+void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
+                                        const Extension* extension) {
+  DCHECK(ui_loop_ == MessageLoop::current());
+  extension_ = extension;
+  delegate_ = delegate;
+
+  // We special-case themes to not show any confirm UI. Instead they are
+  // immediately installed, and then we show an infobar (see OnInstallSuccess)
+  // to allow the user to revert if they don't like it.
+  if (extension->is_theme()) {
     delegate->InstallUIProceed();
     return;
   }
@@ -114,7 +114,7 @@ void ExtensionInstallUI::ConfirmInstall(Delegate* delegate,
 }
 
 void ExtensionInstallUI::ConfirmUninstall(Delegate* delegate,
-                                          Extension* extension) {
+                                          const Extension* extension) {
   DCHECK(ui_loop_ == MessageLoop::current());
   extension_ = extension;
   delegate_ = delegate;
@@ -122,62 +122,53 @@ void ExtensionInstallUI::ConfirmUninstall(Delegate* delegate,
   ShowConfirmation(UNINSTALL_PROMPT);
 }
 
-void ExtensionInstallUI::OnInstallSuccess(Extension* extension) {
+void ExtensionInstallUI::OnInstallSuccess(const Extension* extension,
+                                          SkBitmap* icon) {
+  extension_ = extension;
+  SetIcon(icon);
+
   if (extension->is_theme()) {
     ShowThemeInfoBar(previous_theme_id_, previous_use_system_theme_,
                      extension, profile_);
     return;
   }
 
-  // GetLastActiveWithProfile will fail on the build bots. This needs to be
-  // implemented differently if any test is created which depends on
-  // ExtensionInstalledBubble showing.
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  // Extensions aren't enabled by default in incognito so we confirm
+  // the install in a normal window.
+  Profile* profile = profile_->GetOriginalProfile();
+  Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
+  if (browser->tab_count() == 0)
+    browser->AddBlankTab(true);
+  browser->window()->Show();
 
   if (extension->GetFullLaunchURL().is_valid()) {
     std::string hash_params = "app-id=";
     hash_params += extension->id();
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppsPanel)) {
-#if defined(TOOLKIT_VIEWS)
-      AppLauncher::ShowForNewTab(browser, hash_params);
-#else
-      NOTREACHED();
-#endif
-    } else {
-      std::string url(chrome::kChromeUINewTabURL);
-      url += "/#";
-      url += hash_params;
-      browser->AddSelectedTabWithURL(GURL(url), PageTransition::TYPED);
-    }
+    std::string url(chrome::kChromeUINewTabURL);
+    url += "/#";
+    url += hash_params;
+    browser->AddSelectedTabWithURL(GURL(url), PageTransition::TYPED);
 
     return;
   }
 
 #if defined(TOOLKIT_VIEWS)
-  if (!browser)
-    return;
-
   ExtensionInstalledBubble::Show(extension, browser, icon_);
 #elif defined(OS_MACOSX)
-  DCHECK(browser);
-  // Note that browser actions don't appear in incognito mode initially,
-  // so fall back to the generic case.
-  if ((extension->browser_action() && !browser->profile()->IsOffTheRecord()) ||
+  if ((extension->browser_action()) || !extension->omnibox_keyword().empty() ||
       (extension->page_action() &&
       !extension->page_action()->default_icon_path().empty())) {
     ExtensionInstalledBubbleCocoa::ShowExtensionInstalledBubble(
         browser->window()->GetNativeHandle(),
         extension, browser, icon_);
-  }  else {
+  } else {
     // If the extension is of type GENERIC, meaning it doesn't have a UI
     // surface to display for this window, launch infobar instead of popup
     // bubble, because we have no guaranteed wrench menu button to point to.
     ShowGenericExtensionInstalledInfoBar(extension);
   }
 #elif defined(TOOLKIT_GTK)
-  if (!browser)
-    return;
   ExtensionInstalledBubbleGtk::Show(extension, browser, icon_);
 #endif  // TOOLKIT_VIEWS
 }
@@ -192,8 +183,7 @@ void ExtensionInstallUI::OnInstallFailure(const std::string& error) {
       UTF8ToUTF16(error));
 }
 
-void ExtensionInstallUI::OnImageLoaded(
-    SkBitmap* image, ExtensionResource resource, int index) {
+void ExtensionInstallUI::SetIcon(SkBitmap* image) {
   if (image)
     icon_ = *image;
   else
@@ -207,6 +197,11 @@ void ExtensionInstallUI::OnImageLoaded(
           IDR_EXTENSION_DEFAULT_ICON);
     }
   }
+}
+
+void ExtensionInstallUI::OnImageLoaded(
+    SkBitmap* image, ExtensionResource resource, int index) {
+  SetIcon(image);
 
   switch (prompt_type_) {
     case INSTALL_PROMPT: {
@@ -235,7 +230,7 @@ void ExtensionInstallUI::OnImageLoaded(
 
 void ExtensionInstallUI::ShowThemeInfoBar(
     const std::string& previous_theme_id, bool previous_use_system_theme,
-    Extension* new_theme, Profile* profile) {
+    const Extension* new_theme, Profile* profile) {
   if (!new_theme->is_theme())
     return;
 
@@ -292,7 +287,7 @@ void ExtensionInstallUI::ShowConfirmation(PromptType prompt_type) {
 
 #if defined(OS_MACOSX)
 void ExtensionInstallUI::ShowGenericExtensionInstalledInfoBar(
-    Extension* new_extension) {
+    const Extension* new_extension) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   if (!browser)
     return;
@@ -313,7 +308,7 @@ void ExtensionInstallUI::ShowGenericExtensionInstalledInfoBar(
 #endif
 
 InfoBarDelegate* ExtensionInstallUI::GetNewThemeInstalledInfoBarDelegate(
-    TabContents* tab_contents, Extension* new_theme,
+    TabContents* tab_contents, const Extension* new_theme,
     const std::string& previous_theme_id, bool previous_use_system_theme) {
 #if defined(TOOLKIT_GTK)
   return new GtkThemeInstalledInfoBarDelegate(tab_contents, new_theme,

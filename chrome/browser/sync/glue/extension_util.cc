@@ -72,10 +72,8 @@ bool IsExtensionValid(const Extension& extension) {
   // TODO(akalin): Relax this restriction once we've put in UI to
   // approve synced extensions.
   if (!extension.update_url().is_empty() &&
-      (extension.update_url() !=
-       GURL(extension_urls::kGalleryUpdateHttpUrl)) &&
-      (extension.update_url() !=
-       GURL(extension_urls::kGalleryUpdateHttpsUrl))) {
+      (extension.update_url() != Extension::GalleryUpdateUrl(false)) &&
+      (extension.update_url() != Extension::GalleryUpdateUrl(true))) {
     return false;
   }
 
@@ -232,7 +230,7 @@ bool IsExtensionOutdated(const Extension& extension,
 
 void SetExtensionProperties(
     const sync_pb::ExtensionSpecifics& specifics,
-    ExtensionsService* extensions_service, Extension* extension) {
+    ExtensionsService* extensions_service, const Extension* extension) {
   DcheckIsExtensionSpecificsValid(specifics);
   CHECK(extensions_service);
   CHECK(extension);

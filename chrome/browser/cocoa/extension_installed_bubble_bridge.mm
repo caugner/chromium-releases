@@ -6,13 +6,13 @@
 
 #import "extension_installed_bubble_bridge.h"
 
-#include "chrome/browser/browser.h"
 #import "chrome/browser/cocoa/extension_installed_bubble_controller.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 
 void ExtensionInstalledBubbleCocoa::ShowExtensionInstalledBubble(
     gfx::NativeWindow window,
-    Extension* extension,
+    const Extension* extension,
     Browser* browser,
     SkBitmap icon) {
   // The controller is deallocated when the window is closed, so no need to

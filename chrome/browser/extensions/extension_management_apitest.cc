@@ -2,19 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/browser.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
 
 class ExtensionManagementApiTest : public ExtensionApiTest {
  public:
   virtual void InstallExtensions() {
     FilePath basedir = test_data_dir_.AppendASCII("management");
 
-    // Load 2 enabled items.
+    // Load 4 enabled items.
     ASSERT_TRUE(LoadExtension(basedir.AppendASCII("enabled_extension")));
     ASSERT_TRUE(LoadExtension(basedir.AppendASCII("enabled_app")));
+    ASSERT_TRUE(LoadExtension(basedir.AppendASCII("description")));
+    ASSERT_TRUE(LoadExtension(basedir.AppendASCII("permissions")));
 
     // Load 2 disabled items.
     ExtensionsService* service = browser()->profile()->GetExtensionsService();

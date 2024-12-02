@@ -5,22 +5,23 @@
 #ifndef CHROME_FRAME_UTILS_H_
 #define CHROME_FRAME_UTILS_H_
 
-#include <shdeprecated.h>
-#include <urlmon.h>
+#include <OAidl.h>
+#include <windows.h>
 #include <wininet.h>
 
-#include <atlbase.h>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "base/histogram.h"
 #include "base/lock.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/thread.h"
 #include "gfx/rect.h"
 #include "googleurl/src/gurl.h"
 
 class FilePath;
+interface IBrowserService;
 
 // utils.h : Various utility functions and classes
 
@@ -32,6 +33,7 @@ extern const wchar_t kChromeFrameAccessibleMode[];
 extern const wchar_t kChromeFrameUnpinnedMode[];
 extern const wchar_t kAllowUnsafeURLs[];
 extern const wchar_t kEnableBuggyBhoIntercept[];
+extern const wchar_t kEnableFirefoxPrivilegeMode[];
 extern const wchar_t kChromeMimeType[];
 extern const wchar_t kChromeFrameAttachTabPattern[];
 extern const wchar_t kChromeFrameConfigKey[];
@@ -40,20 +42,6 @@ extern const wchar_t kRenderInHostUrlList[];
 extern const wchar_t kEnableGCFRendererByDefault[];
 extern const wchar_t kIexploreProfileName[];
 extern const wchar_t kRundllProfileName[];
-
-typedef enum ProtocolPatchMethod {
-  PATCH_METHOD_IBROWSER = 0,
-  PATCH_METHOD_INET_PROTOCOL,  // 1
-  PATCH_METHOD_MONIKER,  // 2
-};
-
-// A REG_DWORD config value that maps to the ProtocolPatchMethod enum.
-// To get the config value, call:
-// ProtocolPatchMethod patch_method =
-//     static_cast<ProtocolPatchMethod>(
-//          GetConfigInt(PATCH_METHOD_IBROWSER, kPatchProtocols));
-extern const wchar_t kPatchProtocols[];
-
 
 // This function is very similar to the AtlRegisterTypeLib function except
 // that it takes a parameter that specifies whether to register the typelib
@@ -213,7 +201,14 @@ bool IsChrome(RendererType renderer_type);
 // To get the IE version when Chrome Frame is hosted in IE.  Make sure that
 // the hosting browser is IE before calling this function, otherwise NON_IE
 // will be returned.
+//
+// Versions newer than the newest supported version are reported as the newest
+// supported version.
 IEVersion GetIEVersion();
+
+// Returns the actual major version of the IE in which the current process is
+// hosted. Returns 0 if the current process is not IE or any other error occurs.
+uint32 GetIEMajorVersion();
 
 FilePath GetIETemporaryFilesFolder();
 
@@ -221,10 +216,10 @@ FilePath GetIETemporaryFilesFolder();
 // to the disk (as happens with the regular GetFileVersionInfo API).
 //
 // @param module A handle to the module for which to retrieve the version info.
-// @param high On successful return holds the most significant part of the
-// file version.  Must be non-null.
-// @param low On successful return holds the least significant part of the
-// file version.  May be NULL.
+// @param high On successful return holds the most significant part of the file
+// version.  Must be non-null.
+// @param low On successful return holds the least significant part of the file
+// version.  May be NULL.
 // @returns true if the version info was successfully retrieved.
 bool GetModuleVersion(HMODULE module, uint32* high, uint32* low);
 
@@ -350,8 +345,8 @@ STDMETHODIMP CheckOutgoingInterface(void* obj, REFIID iid, void** ret,
     if (SUCCEEDED(hr)) {
       wchar_t iid_string[64] = {0};
       StringFromGUID2(iid, iid_string, arraysize(iid_string));
-      DLOG(INFO) << __FUNCTION__ << " Giving out wrapped interface: "
-          << iid_string;
+      DVLOG(1) << __FUNCTION__ << " Giving out wrapped interface: "
+               << iid_string;
     }
 #endif
   }
@@ -433,8 +428,8 @@ extern Lock g_ChromeFrameHistogramLock;
 
 // Thread safe versions of the UMA histogram macros we use for ChromeFrame.
 // These should be used for histograms in ChromeFrame. If other histogram
-// macros from base/histogram.h are needed then thread safe versions of those
-// should be defined and used.
+// macros from base/metrics/histogram.h are needed then thread safe versions of
+// those should be defined and used.
 #define THREAD_SAFE_UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, min, max, \
                                                 bucket_count) { \
   AutoLock lock(g_ChromeFrameHistogramLock); \
@@ -489,13 +484,6 @@ bool IsTextHtmlMimeType(const wchar_t* mime_type);
 
 // Returns true iff the clipboard format is text/html.
 bool IsTextHtmlClipFormat(CLIPFORMAT cf);
-
-// Returns the desired patch method (moniker, http_equiv, protocol sink).
-// Defaults to moniker patch.
-ProtocolPatchMethod GetPatchMethod();
-
-// Returns true if the IMoniker patch is enabled.
-bool IsIBrowserServicePatchEnabled();
 
 // Returns true if we can detect that we are running as SYSTEM, false otherwise.
 bool IsSystemProcess();
@@ -595,5 +583,32 @@ void WaitWithMessageLoop(HANDLE* handles, int count, DWORD timeout);
 // The names of the values are not returned.
 void EnumerateKeyValues(HKEY parent_key, const wchar_t* sub_key_name,
                         std::vector<std::wstring>* values);
+
+// Interprets the value of an X-UA-Compatible header (or <meta> tag equivalent)
+// and indicates whether the header value contains a Chrome Frame directive
+// matching a given host browser version.
+//
+// The header is a series of name-value pairs, with the names being HTTP tokens
+// and the values being either tokens or quoted-strings. Names and values are
+// joined by '=' and pairs are delimited by either ';' or ','. LWS may be used
+// liberally before and between names, values, '=', and ';' or ','. See RFC 2616
+// for definitions of token, quoted-string, and LWS. See Microsoft's
+// documentation of the X-UA-COMPATIBLE header here:
+// http://msdn.microsoft.com/en-us/library/cc288325(VS.85).aspx
+//
+// At most one 'Chrome=<FILTER>' entry is expected in the header value. The
+// first valid instance is used. The value of "<FILTER>" (possibly after
+// unquoting) is interpreted as follows:
+//
+// "1"   - Always active
+// "IE7" - Active for IE major version 7 or lower
+//
+// For example:
+// X-UA-Compatible: IE=8; Chrome=IE6
+//
+// The string is first interpreted using ';' as a delimiter. It is reevaluated
+// using ',' iff no valid 'chrome=' value is found.
+bool CheckXUaCompatibleDirective(const std::string& directive,
+                                 int ie_major_version);
 
 #endif  // CHROME_FRAME_UTILS_H_

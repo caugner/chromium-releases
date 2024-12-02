@@ -54,8 +54,9 @@ PlatformFile CreatePlatformFile(const FilePath& name, int flags,
     open_flags |= O_RDWR;
   } else if (flags & PLATFORM_FILE_WRITE) {
     open_flags |= O_WRONLY;
-  } else if (!(flags & PLATFORM_FILE_READ ||
-               flags & PLATFORM_FILE_WRITE_ATTRIBUTES)) {
+  } else if (!(flags & PLATFORM_FILE_READ) &&
+             !(flags & PLATFORM_FILE_WRITE_ATTRIBUTES) &&
+             !(flags & PLATFORM_FILE_OPEN_ALWAYS)) {
     NOTREACHED();
   }
 
@@ -84,7 +85,8 @@ PlatformFile CreatePlatformFile(const FilePath& name, int flags,
     }
   }
 
-  if (created && (descriptor > 0) && (flags & PLATFORM_FILE_CREATE_ALWAYS))
+  if (created && (descriptor > 0) &&
+      (flags & (PLATFORM_FILE_CREATE_ALWAYS | PLATFORM_FILE_CREATE)))
     *created = true;
 
   if ((descriptor > 0) && (flags & PLATFORM_FILE_DELETE_ON_CLOSE)) {
@@ -185,6 +187,7 @@ bool GetPlatformFileInfo(PlatformFile file, PlatformFileInfo* info) {
     return false;
 
   info->is_directory = S_ISDIR(file_info.st_mode);
+  info->is_symbolic_link = S_ISLNK(file_info.st_mode);
   info->size = file_info.st_size;
   info->last_modified = base::Time::FromTimeT(file_info.st_mtime);
   info->last_accessed = base::Time::FromTimeT(file_info.st_atime);

@@ -48,6 +48,7 @@ enum {
 class ClientSocket;
 class MockClientSocket;
 class SSLClientSocket;
+class SSLHostInfo;
 
 struct MockConnect {
   // Asynchronous connection success.
@@ -90,6 +91,11 @@ struct MockRead {
   // Read success.
   MockRead(bool async, const char* data, int data_len) : async(async),
       result(0), data(data), data_len(data_len), sequence_number(0),
+      time_stamp(base::Time::Now()) { }
+
+  // Read success (inferred data length) with sequence information.
+  MockRead(bool async, int seq, const char* data) : async(async),
+      result(0), data(data), data_len(strlen(data)), sequence_number(seq),
       time_stamp(base::Time::Now()) { }
 
   // Read success with sequence information.
@@ -157,23 +163,16 @@ class SocketDataProvider {
 // writes.
 class StaticSocketDataProvider : public SocketDataProvider {
  public:
-  StaticSocketDataProvider() : reads_(NULL), read_index_(0), read_count_(0),
-      writes_(NULL), write_index_(0), write_count_(0) {}
+  StaticSocketDataProvider();
   StaticSocketDataProvider(MockRead* reads, size_t reads_count,
-                           MockWrite* writes, size_t writes_count)
-      : reads_(reads),
-        read_index_(0),
-        read_count_(reads_count),
-        writes_(writes),
-        write_index_(0),
-        write_count_(writes_count) {
-  }
-  virtual ~StaticSocketDataProvider() {}
+                           MockWrite* writes, size_t writes_count);
+  virtual ~StaticSocketDataProvider();
 
   // SocketDataProvider methods:
   virtual MockRead GetNextRead();
   virtual MockWriteResult OnWrite(const std::string& data);
   virtual void Reset();
+  virtual void CompleteRead() {}
 
   // These functions get access to the next available read and write data.
   const MockRead& PeekRead() const;
@@ -207,6 +206,7 @@ class StaticSocketDataProvider : public SocketDataProvider {
 class DynamicSocketDataProvider : public SocketDataProvider {
  public:
   DynamicSocketDataProvider();
+  virtual ~DynamicSocketDataProvider();
 
   // SocketDataProvider methods:
   virtual MockRead GetNextRead();
@@ -245,12 +245,14 @@ struct SSLSocketDataProvider {
   SSLSocketDataProvider(bool async, int result)
       : connect(async, result),
         next_proto_status(SSLClientSocket::kNextProtoUnsupported),
-        was_npn_negotiated(false) { }
+        was_npn_negotiated(false),
+        cert_request_info(NULL) { }
 
   MockConnect connect;
   SSLClientSocket::NextProtoStatus next_proto_status;
   std::string next_proto;
   bool was_npn_negotiated;
+  net::SSLCertRequestInfo* cert_request_info;
 };
 
 // A DataProvider where the client must write a request before the reads (e.g.
@@ -285,7 +287,7 @@ class DelayedSocketData : public StaticSocketDataProvider,
   virtual MockRead GetNextRead();
   virtual MockWriteResult OnWrite(const std::string& data);
   virtual void Reset();
-  void CompleteRead();
+  virtual void CompleteRead();
   void ForceNextRead();
 
  private:
@@ -328,6 +330,8 @@ class OrderedSocketData : public StaticSocketDataProvider,
   virtual MockRead GetNextRead();
   virtual MockWriteResult OnWrite(const std::string& data);
   virtual void Reset();
+  virtual void CompleteRead();
+
   void SetCompletionCallback(CompletionCallback* callback) {
     callback_ = callback;
   }
@@ -335,9 +339,10 @@ class OrderedSocketData : public StaticSocketDataProvider,
   // Posts a quit message to the current message loop, if one is running.
   void EndLoop();
 
-  void CompleteRead();
-
  private:
+  friend class base::RefCounted<OrderedSocketData>;
+  virtual ~OrderedSocketData();
+
   int sequence_number_;
   int loop_stop_stage_;
   CompletionCallback* callback_;
@@ -423,6 +428,8 @@ class DeterministicSocketData : public StaticSocketDataProvider,
 
   virtual void Reset();
 
+  virtual void CompleteRead() {}
+
   // Consume all the data up to the give stop point (via SetStop()).
   void Run();
 
@@ -440,7 +447,6 @@ class DeterministicSocketData : public StaticSocketDataProvider,
   virtual void StopAfter(int seq) {
     SetStop(sequence_number_ + seq);
   }
-  void CompleteRead();
   bool stopped() const { return stopped_; }
   void SetStopped(bool val) { stopped_ = val; }
   MockRead& current_read() { return current_read_; }
@@ -508,6 +514,9 @@ class MockSSLClientSocket;
 // socket types.
 class MockClientSocketFactory : public ClientSocketFactory {
  public:
+  MockClientSocketFactory();
+  virtual ~MockClientSocketFactory();
+
   void AddSocketDataProvider(SocketDataProvider* socket);
   void AddSSLSocketDataProvider(SSLSocketDataProvider* socket);
   void ResetNextMockIndexes();
@@ -527,8 +536,10 @@ class MockClientSocketFactory : public ClientSocketFactory {
       const NetLog::Source& source);
   virtual SSLClientSocket* CreateSSLClientSocket(
       ClientSocketHandle* transport_socket,
-      const std::string& hostname,
-      const SSLConfig& ssl_config);
+      const HostPortPair& host_and_port,
+      const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
+      DnsCertProvenanceChecker* dns_cert_checker);
   SocketDataProviderArray<SocketDataProvider>& mock_data() {
     return mock_data_;
   }
@@ -603,6 +614,7 @@ class MockTCPClientSocket : public MockClientSocket {
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const { return IsConnected(); }
   virtual bool WasEverUsed() const { return was_used_to_convey_data_; }
+  virtual bool UsingTCPFastOpen() const { return false; }
 
   // Socket methods:
   virtual int Read(net::IOBuffer* buf, int buf_len,
@@ -648,6 +660,7 @@ class DeterministicMockTCPClientSocket : public MockClientSocket,
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const { return IsConnected(); }
   virtual bool WasEverUsed() const { return was_used_to_convey_data_; }
+  virtual bool UsingTCPFastOpen() const { return false; }
 
   // Socket methods:
   virtual int Write(net::IOBuffer* buf, int buf_len,
@@ -681,8 +694,9 @@ class MockSSLClientSocket : public MockClientSocket {
  public:
   MockSSLClientSocket(
       net::ClientSocketHandle* transport_socket,
-      const std::string& hostname,
+      const HostPortPair& host_and_port,
       const net::SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
       net::SSLSocketDataProvider* socket);
   ~MockSSLClientSocket();
 
@@ -691,6 +705,7 @@ class MockSSLClientSocket : public MockClientSocket {
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool WasEverUsed() const;
+  virtual bool UsingTCPFastOpen() const;
 
   // Socket methods:
   virtual int Read(net::IOBuffer* buf, int buf_len,
@@ -700,6 +715,8 @@ class MockSSLClientSocket : public MockClientSocket {
 
   // SSLClientSocket methods:
   virtual void GetSSLInfo(net::SSLInfo* ssl_info);
+  virtual void GetSSLCertRequestInfo(
+      net::SSLCertRequestInfo* cert_request_info);
   virtual NextProtoStatus GetNextProto(std::string* proto);
   virtual bool was_npn_negotiated() const;
   virtual bool set_was_npn_negotiated(bool negotiated);
@@ -798,6 +815,7 @@ class MockTCPClientSocketPool : public TCPClientSocketPool {
    public:
     MockConnectJob(ClientSocket* socket, ClientSocketHandle* handle,
                    CompletionCallback* callback);
+    ~MockConnectJob();
 
     int Connect();
     bool CancelHandle(const ClientSocketHandle* handle);
@@ -848,6 +866,9 @@ class MockTCPClientSocketPool : public TCPClientSocketPool {
 
 class DeterministicMockClientSocketFactory : public ClientSocketFactory {
  public:
+  DeterministicMockClientSocketFactory();
+  virtual ~DeterministicMockClientSocketFactory();
+
   void AddSocketDataProvider(DeterministicSocketData* socket);
   void AddSSLSocketDataProvider(SSLSocketDataProvider* socket);
   void ResetNextMockIndexes();
@@ -862,8 +883,10 @@ class DeterministicMockClientSocketFactory : public ClientSocketFactory {
                                               const NetLog::Source& source);
   virtual SSLClientSocket* CreateSSLClientSocket(
       ClientSocketHandle* transport_socket,
-      const std::string& hostname,
-      const SSLConfig& ssl_config);
+      const HostPortPair& host_and_port,
+      const SSLConfig& ssl_config,
+      SSLHostInfo* ssl_host_info,
+      DnsCertProvenanceChecker* dns_cert_checker);
 
   SocketDataProviderArray<DeterministicSocketData>& mock_data() {
     return mock_data_;
@@ -922,62 +945,6 @@ extern const int kSOCKS5OkRequestLength;
 
 extern const char kSOCKS5OkResponse[];
 extern const int kSOCKS5OkResponseLength;
-
-class MockSSLClientSocketPool : public SSLClientSocketPool {
- public:
-  class MockConnectJob {
-   public:
-    MockConnectJob(ClientSocket* socket, ClientSocketHandle* handle,
-                   CompletionCallback* callback);
-
-    int Connect();
-    bool CancelHandle(const ClientSocketHandle* handle);
-
-   private:
-    void OnConnect(int rv);
-
-    scoped_ptr<ClientSocket> socket_;
-    ClientSocketHandle* handle_;
-    CompletionCallback* user_callback_;
-    CompletionCallbackImpl<MockConnectJob> connect_callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(MockConnectJob);
-  };
-
-  MockSSLClientSocketPool(
-      int max_sockets,
-      int max_sockets_per_group,
-      ClientSocketPoolHistograms* histograms,
-      ClientSocketFactory* socket_factory,
-      TCPClientSocketPool* tcp_pool);
-
-  virtual ~MockSSLClientSocketPool();
-
-  int release_count() const { return release_count_; }
-  int cancel_count() const { return cancel_count_; }
-
-  // SSLClientSocketPool methods.
-  virtual int RequestSocket(const std::string& group_name,
-                            const void* socket_params,
-                            RequestPriority priority,
-                            ClientSocketHandle* handle,
-                            CompletionCallback* callback,
-                            const BoundNetLog& net_log);
-
-  virtual void CancelRequest(const std::string& group_name,
-                             ClientSocketHandle* handle);
-  virtual void ReleaseSocket(const std::string& group_name,
-                             ClientSocket* socket, int id);
-
- private:
-  ClientSocketFactory* client_socket_factory_;
-  int release_count_;
-  int cancel_count_;
-  ScopedVector<MockConnectJob> job_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockSSLClientSocketPool);
-};
-
 
 }  // namespace net
 

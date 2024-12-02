@@ -10,7 +10,6 @@
 #include <deque>
 
 #include "base/callback.h"
-#include "base/lock.h"
 #include "base/stl_util-inl.h"
 #include "base/task.h"
 #include "base/thread.h"
@@ -30,21 +29,26 @@ class DecoderBase : public Decoder {
 
   // MediaFilter implementation.
   virtual void Stop(FilterCallback* callback) {
-    this->message_loop()->PostTask(FROM_HERE,
+    this->message_loop()->PostTask(
+        FROM_HERE,
         NewRunnableMethod(this, &DecoderBase::StopTask, callback));
   }
 
   virtual void Seek(base::TimeDelta time,
                     FilterCallback* callback) {
-    this->message_loop()->PostTask(FROM_HERE,
+    this->message_loop()->PostTask(
+        FROM_HERE,
         NewRunnableMethod(this, &DecoderBase::SeekTask, time, callback));
   }
 
   // Decoder implementation.
   virtual void Initialize(DemuxerStream* demuxer_stream,
                           FilterCallback* callback) {
-    this->message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &DecoderBase::InitializeTask, demuxer_stream,
+    this->message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this,
+                          &DecoderBase::InitializeTask,
+                          make_scoped_refptr(demuxer_stream),
                           callback));
   }
 
@@ -62,7 +66,6 @@ class DecoderBase : public Decoder {
   DecoderBase()
       : pending_reads_(0),
         pending_requests_(0),
-        expecting_discontinuous_(false),
         state_(kUninitialized) {
   }
 
@@ -171,22 +174,13 @@ class DecoderBase : public Decoder {
     DCHECK_EQ(0u, pending_requests_) << "Pending requests should be empty";
 
     // Delegate to the subclass first.
-    //
-    // TODO(scherkus): if we have the strong assertion that there are no pending
-    // reads in the entire pipeline when we receive Seek(), subclasses could
-    // either flush their buffers here or wait for IsDiscontinuous().  I'm
-    // inclined to say that they should still wait for IsDiscontinuous() so they
-    // don't have duplicated logic for Seek() and actual discontinuous frames.
     DoSeek(time,
            NewRunnableMethod(this, &DecoderBase::OnSeekComplete, callback));
   }
 
   void OnSeekComplete(FilterCallback* callback) {
-    // Flush our decoded results.  We'll set a boolean that we can DCHECK to
-    // verify our assertion that the first buffer received after a Seek() should
-    // always be discontinuous.
+    // Flush our decoded results.
     result_queue_.clear();
-    expecting_discontinuous_ = true;
 
     // Signal that we're done seeking.
     if (callback) {
@@ -252,13 +246,6 @@ class DecoderBase : public Decoder {
       return;
     }
 
-    // TODO(scherkus): remove this when we're less paranoid about our seeking
-    // invariants.
-    if (buffer->IsDiscontinuous()) {
-      DCHECK(expecting_discontinuous_);
-      expecting_discontinuous_ = false;
-    }
-
     // Decode the frame right away.
     DoDecode(buffer);
   }
@@ -292,9 +279,6 @@ class DecoderBase : public Decoder {
   size_t pending_reads_;
   // Tracks the number of asynchronous reads issued from renderer.
   size_t pending_requests_;
-
-  // A flag used for debugging that we expect our next read to be discontinuous.
-  bool expecting_discontinuous_;
 
   // Pointer to the demuxer stream that will feed us compressed buffers.
   scoped_refptr<DemuxerStream> demuxer_stream_;

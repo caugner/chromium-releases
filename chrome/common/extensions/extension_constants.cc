@@ -19,6 +19,7 @@ const char* kDefaultLocale = "default_locale";
 const char* kDescription = "description";
 const char* kDevToolsPage = "devtools_page";
 const char* kExcludeGlobs = "exclude_globs";
+const char* kHomepageURL = "homepage_url";
 const char* kIcons = "icons";
 const char* kIncognito = "incognito";
 const char* kIncludeGlobs = "include_globs";
@@ -32,7 +33,8 @@ const char* kLaunchWidth = "app.launch.width";
 const char* kMatches = "matches";
 const char* kMinimumChromeVersion = "minimum_chrome_version";
 const char* kName = "name";
-const char* kOmniboxKeyword = "omnibox_keyword";
+const char* kOmnibox = "omnibox";
+const char* kOmniboxKeyword = "omnibox.keyword";
 const char* kOptionsPage = "options_page";
 const char* kPageAction = "page_action";
 const char* kPageActionDefaultIcon = "default_icon";
@@ -124,6 +126,8 @@ const char* kInvalidGlob =
     "Invalid value for 'content_scripts[*].*[*]'.";
 const char* kInvalidGlobList =
     "Invalid value for 'content_scripts[*].*'.";
+const char* kInvalidHomepageURL =
+    "Invalid value for homepage url: '[*]'.";
 const char* kInvalidIconPath =
     "Invalid value for 'icons[\"*\"]'.";
 const char* kInvalidIcons =
@@ -164,7 +168,7 @@ const char* kInvalidMinimumChromeVersion =
 const char* kInvalidName =
     "Required value 'name' is missing or invalid.";
 const char* kInvalidOmniboxKeyword =
-    "Invalid value for 'omnibox_keyword'.";
+    "Invalid value for 'omnibox.keyword'.";
 const char* kInvalidOptionsPage =
     "Invalid value for 'options_page'.";
 const char* kInvalidOptionsPageExpectUrlInPackage =
@@ -260,9 +264,6 @@ const char* kMissingFile =
     "At least one js or css file is required for 'content_scripts[*]'.";
 const char* kMultipleOverrides =
     "An extension cannot override more than one page.";
-const char* kOmniboxExperimental =
-    "You must request the 'experimental' permission in order to use the"
-    " omnibox API.";
 const char* kOneUISurfaceOnly =
     "Only one of 'browser_action', 'page_action', and 'app' can be specified.";
 const char* kReservedMessageFound =
@@ -276,13 +277,7 @@ const char* kIllegalPlugins =
 }  // namespace extension_manifest_errors
 
 namespace extension_urls {
-const char* kGalleryBrowsePrefix = "https://chrome.google.com/extensions";
-const char* kGalleryDownloadPrefix =
-    "https://clients2.googleusercontent.com/crx/download";
-const char* kGalleryUpdateHttpUrl =
-    "http://clients2.google.com/service/update2/crx";
-const char* kGalleryUpdateHttpsUrl =
-    "https://clients2.google.com/service/update2/crx";
+const char* kGalleryBrowsePrefix = "https://chrome.google.com/webstore";
 const char* kMiniGalleryBrowsePrefix = "https://tools.google.com/chrome/";
 const char* kMiniGalleryDownloadPrefix = "https://dl-ssl.google.com/chrome/";
 }
@@ -301,4 +296,5 @@ const char* kDecodedMessageCatalogsFilename = "DECODED_MESSAGE_CATALOGS";
 namespace extension_misc {
 const char* kBookmarkManagerId = "eemcgdkfndhakfknompkggombfjjjeno";
 const char* kWebStoreAppId = "ahfgeienlihckogmohjhadlkjgocpleb";
+const char* kAppsPromoHistogram = "Extensions.AppsPromo";
 }

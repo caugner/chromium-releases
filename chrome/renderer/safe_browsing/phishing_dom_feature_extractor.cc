@@ -6,9 +6,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/hash_tables.h"
-#include "base/histogram.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "chrome/renderer/render_view.h"
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
@@ -243,7 +243,7 @@ void PhishingDOMFeatureExtractor::HandleLink(
     const WebKit::WebElement& element) {
   // Count the number of times we link to a different host.
   if (!element.hasAttribute("href")) {
-    DLOG(INFO) << "Skipping anchor tag with no href";
+    DVLOG(1) << "Skipping anchor tag with no href";
     return;
   }
 
@@ -254,7 +254,7 @@ void PhishingDOMFeatureExtractor::HandleLink(
   std::string domain;
   bool is_external = IsExternalDomain(full_url, &domain);
   if (domain.empty()) {
-    DLOG(INFO) << "Could not extract domain from link: " << full_url;
+    DVLOG(1) << "Could not extract domain from link: " << full_url;
     return;
   }
 
@@ -289,7 +289,7 @@ void PhishingDOMFeatureExtractor::HandleForm(
   std::string domain;
   bool is_external = IsExternalDomain(full_url, &domain);
   if (domain.empty()) {
-    DLOG(INFO) << "Could not extract domain from form action: " << full_url;
+    DVLOG(1) << "Could not extract domain from form action: " << full_url;
     return;
   }
 
@@ -302,7 +302,7 @@ void PhishingDOMFeatureExtractor::HandleForm(
 void PhishingDOMFeatureExtractor::HandleImage(
     const WebKit::WebElement& element) {
   if (!element.hasAttribute("src")) {
-    DLOG(INFO) << "Skipping img tag with no src";
+    DVLOG(1) << "Skipping img tag with no src";
   }
 
   // Record whether the image points to a different domain.
@@ -311,7 +311,7 @@ void PhishingDOMFeatureExtractor::HandleImage(
   std::string domain;
   bool is_external = IsExternalDomain(full_url, &domain);
   if (domain.empty()) {
-    DLOG(INFO) << "Could not extract domain from image src: " << full_url;
+    DVLOG(1) << "Could not extract domain from image src: " << full_url;
     return;
   }
 

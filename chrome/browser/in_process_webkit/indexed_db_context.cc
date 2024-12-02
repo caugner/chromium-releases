@@ -4,10 +4,12 @@
 
 #include "chrome/browser/in_process_webkit/indexed_db_context.h"
 
+#include "base/file_util.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
-#include "googleurl/src/url_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBDatabase.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebIDBFactory.h"
@@ -40,39 +42,43 @@ WebIDBFactory* IndexedDBContext::GetIDBFactory() {
 }
 
 FilePath IndexedDBContext::GetIndexedDBFilePath(
-    const string16& database_name,
-    const WebSecurityOrigin& origin) const {
+    const string16& origin_id) const {
   FilePath storage_dir = webkit_context_->data_path().Append(
       kIndexedDBDirectory);
-  FilePath::StringType id = webkit_glue::WebStringToFilePathString(
-      WebIDBFactory::databaseFileName(database_name, origin));
-  return storage_dir.Append(id);
+  FilePath::StringType id = webkit_glue::WebStringToFilePathString(origin_id);
+  return storage_dir.Append(id.append(kIndexedDBExtension));
 }
 
 // static
-bool IndexedDBContext::SplitIndexedDBFileName(
-    const FilePath& file_name,
-    std::string* database_name,
-    WebSecurityOrigin* security_origin) {
-  FilePath::StringType base_name =
-      file_name.BaseName().RemoveExtension().value();
-  size_t db_name_separator = base_name.find(FILE_PATH_LITERAL("@"));
-  if (db_name_separator == FilePath::StringType::npos ||
-      db_name_separator == 0) {
-    return false;
+void IndexedDBContext::ClearLocalState(const FilePath& profile_path,
+                                       const char* url_scheme_to_be_skipped) {
+  file_util::FileEnumerator file_enumerator(profile_path.Append(
+      kIndexedDBDirectory), false, file_util::FileEnumerator::FILES);
+  // TODO(pastarmovj): We might need to consider exchanging this loop for
+  // something more efficient in the future.
+  for (FilePath file_path = file_enumerator.Next(); !file_path.empty();
+       file_path = file_enumerator.Next()) {
+    if (file_path.Extension() != IndexedDBContext::kIndexedDBExtension)
+      continue;
+    WebSecurityOrigin origin =
+        WebSecurityOrigin::createFromDatabaseIdentifier(
+            webkit_glue::FilePathToWebString(file_path.BaseName()));
+    if (!EqualsASCII(origin.protocol(), url_scheme_to_be_skipped))
+      file_util::Delete(file_path, false);
   }
+}
 
-  *security_origin =
-      WebSecurityOrigin::createFromDatabaseIdentifier(
-          webkit_glue::FilePathStringToWebString(
-              base_name.substr(0, db_name_separator)));
-#if defined(OS_POSIX)
-  std::string name = base_name.substr(db_name_separator + 1);
-#elif defined(OS_WIN)
-  std::string name = WideToUTF8(base_name.substr(db_name_separator + 1));
-#endif
-  url_canon::RawCanonOutputT<char16> output;
-  url_util::DecodeURLEscapeSequences(name.c_str(), name.length(), &output);
-  *database_name = UTF16ToUTF8(string16(output.data(), output.length()));
-  return true;
+void IndexedDBContext::DeleteIndexedDBFile(const FilePath& file_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  // TODO(pastarmovj): Close all database connections that use that file.
+  file_util::Delete(file_path, false);
+}
+
+void IndexedDBContext::DeleteIndexedDBForOrigin(const string16& origin_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  // TODO(pastarmovj): Remove this check once we are safe to delete any time.
+  FilePath idb_file = GetIndexedDBFilePath(origin_id);
+  DCHECK_EQ(idb_file.BaseName().value().substr(0, strlen("chrome-extension")),
+            FILE_PATH_LITERAL("chrome-extension"));
+  DeleteIndexedDBFile(GetIndexedDBFilePath(origin_id));
 }

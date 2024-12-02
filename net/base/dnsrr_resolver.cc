@@ -109,12 +109,11 @@ class RRResolverHandle {
   // Post copies the contents of |response| to the caller's RRResponse and
   // calls the callback.
   void Post(int rv, const RRResponse* response) {
-    if (!callback_)
-      return;  // we were canceled.
-
-    if (response_ && response)
-      *response_ = *response;
-    callback_->Run(rv);
+    if (callback_) {
+      if (response_ && response)
+        *response_ = *response;
+      callback_->Run(rv);
+    }
     delete this;
   }
 
@@ -138,7 +137,8 @@ class RRResolverWorker {
         flags_(flags),
         origin_loop_(MessageLoop::current()),
         dnsrr_resolver_(dnsrr_resolver),
-        canceled_(false) {
+        canceled_(false),
+        result_(ERR_UNEXPECTED) {
   }
 
   bool Start() {
@@ -161,7 +161,7 @@ class RRResolverWorker {
 
 #if defined(OS_POSIX)
 
-  virtual void Run() {
+  void Run() {
     // Runs on a worker thread.
 
     if (HandleTestCases()) {
@@ -181,7 +181,11 @@ class RRResolverWorker {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
       if (!r && DnsReloadTimerHasExpired()) {
-        res_nclose(&_res);
+        // When there's no network connection, _res may not be initialized by
+        // getaddrinfo. Therefore, we call res_nclose only when there are ns
+        // entries.
+        if (_res.nscount > 0)
+          res_nclose(&_res);
         if (res_ninit(&_res) == 0)
           r = Do();
       }
@@ -232,7 +236,7 @@ class RRResolverWorker {
 
 #else  // OS_WIN
 
-  virtual void Run() {
+  void Run() {
     if (HandleTestCases()) {
       Finish();
       return;

@@ -10,30 +10,40 @@
 #include <map>
 #include <set>
 
+#include "base/scoped_ptr.h"
+#include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/search_engines/template_url_model_observer.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
-#include "chrome/test/automation/automation_messages.h"
 
 class AutocompleteEditModel;
 class AutomationProvider;
+class BalloonCollection;
 class Browser;
 class Extension;
 class ExtensionProcessManager;
 class NavigationController;
+class RenderViewHost;
 class SavePackage;
 class TabContents;
 class TranslateInfoBarDelegate;
+
+namespace history {
+class TopSites;
+}
 
 namespace IPC {
 class Message;
@@ -201,10 +211,10 @@ class TabCountChangeObserver : public TabStripModelObserver {
                          IPC::Message* reply_message,
                          int target_tab_count);
   // Implementation of TabStripModelObserver.
-  virtual void TabInsertedAt(TabContents* contents,
+  virtual void TabInsertedAt(TabContentsWrapper* contents,
                              int index,
                              bool foreground);
-  virtual void TabDetachedAt(TabContents* contents, int index);
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index);
   virtual void TabStripModelDeleted();
 
  private:
@@ -271,7 +281,7 @@ class ExtensionReadyNotificationObserver : public NotificationObserver {
   scoped_refptr<AutomationProvider> automation_;
   int id_;
   IPC::Message* reply_message_;
-  Extension* extension_;
+  const Extension* extension_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionReadyNotificationObserver);
 };
@@ -470,20 +480,34 @@ class FindInPageNotificationObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(FindInPageNotificationObserver);
 };
 
-class DomOperationNotificationObserver : public NotificationObserver {
+class DomOperationObserver : public NotificationObserver {
  public:
-  explicit DomOperationNotificationObserver(AutomationProvider* automation);
-  ~DomOperationNotificationObserver();
+  DomOperationObserver();
+  virtual ~DomOperationObserver() {}
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
+  virtual void OnDomOperationCompleted(const std::string& json) = 0;
+
  private:
   NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(DomOperationObserver);
+};
+
+class DomOperationMessageSender : public DomOperationObserver {
+ public:
+  explicit DomOperationMessageSender(AutomationProvider* automation)
+      : automation_(automation) {}
+
+  virtual void OnDomOperationCompleted(const std::string& json);
+
+ private:
   AutomationProvider* automation_;
 
-  DISALLOW_COPY_AND_ASSIGN(DomOperationNotificationObserver);
+  DISALLOW_COPY_AND_ASSIGN(DomOperationMessageSender);
 };
 
 class DocumentPrintedNotificationObserver : public NotificationObserver {
@@ -508,6 +532,7 @@ class DocumentPrintedNotificationObserver : public NotificationObserver {
 class MetricEventDurationObserver : public NotificationObserver {
  public:
   MetricEventDurationObserver();
+  virtual ~MetricEventDurationObserver();
 
   // Get the duration of an event.  Returns -1 if we haven't seen the event.
   int GetEventDurationMs(const std::string& event_name);
@@ -530,6 +555,7 @@ class PageTranslatedObserver : public NotificationObserver {
   PageTranslatedObserver(AutomationProvider* automation,
                          IPC::Message* reply_message,
                          TabContents* tab_contents);
+  virtual ~PageTranslatedObserver();
 
   // NotificationObserver interface.
   virtual void Observe(NotificationType type,
@@ -865,6 +891,67 @@ class SavePackageNotificationObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(SavePackageNotificationObserver);
 };
 
+// This class manages taking a snapshot of a page. This requires waiting on
+// asynchronous callbacks and notifications.
+class PageSnapshotTaker : public DomOperationObserver {
+ public:
+  PageSnapshotTaker(AutomationProvider* automation,
+                    IPC::Message* reply_message,
+                    RenderViewHost* render_view,
+                    const FilePath& path);
+
+  // Start the process of taking a snapshot of the entire page.
+  void Start();
+
+ private:
+  // Overriden from DomOperationObserver.
+  virtual void OnDomOperationCompleted(const std::string& json);
+
+  // Called by the ThumbnailGenerator when the requested snapshot has been
+  // generated.
+  void OnSnapshotTaken(const SkBitmap& bitmap);
+
+  // Helper method to send arbitrary javascript to the renderer for evaluation.
+  void ExecuteScript(const std::wstring& javascript);
+
+  // Helper method to send a response back to the client. Deletes this.
+  void SendMessage(bool success);
+
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  RenderViewHost* render_view_;
+  FilePath image_path_;
+  bool received_width_;
+  gfx::Size entire_page_size_;
+
+  DISALLOW_COPY_AND_ASSIGN(PageSnapshotTaker);
+};
+
+class NTPInfoObserver : public NotificationObserver {
+ public:
+  NTPInfoObserver(AutomationProvider* automation,
+                  IPC::Message* reply_message,
+                  CancelableRequestConsumer* consumer);
+
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  void OnTopSitesLoaded();
+  void OnTopSitesReceived(const history::MostVisitedURLList& visited_list);
+
+  AutomationProvider* automation_;
+  IPC::Message* reply_message_;
+  CancelableRequestConsumer* consumer_;
+  CancelableRequestProvider::Handle request_;
+  scoped_ptr<DictionaryValue> ntp_info_;
+  history::TopSites* top_sites_;
+  NotificationRegistrar registrar_;
+
+  DISALLOW_COPY_AND_ASSIGN(NTPInfoObserver);
+};
+
 // Allows automation provider to wait until the autocomplete edit
 // has received focus
 class AutocompleteEditFocusedObserver : public NotificationObserver {
@@ -885,5 +972,25 @@ class AutocompleteEditFocusedObserver : public NotificationObserver {
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditFocusedObserver);
 };
+
+// Allows the automation provider to wait for a given number of
+// notification balloons.
+class OnNotificationBalloonCountObserver {
+ public:
+  OnNotificationBalloonCountObserver(AutomationProvider* provider,
+                                     IPC::Message* reply_message,
+                                     BalloonCollection* collection,
+                                     int count);
+
+  void OnBalloonCollectionChanged();
+
+ private:
+  AutomationJSONReply reply_;
+  BalloonCollection* collection_;
+  int count_;
+
+  DISALLOW_COPY_AND_ASSIGN(OnNotificationBalloonCountObserver);
+};
+
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_

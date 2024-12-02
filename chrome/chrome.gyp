@@ -24,6 +24,7 @@
       'common',
       'browser',
       'chrome_gpu',
+      'ppapi_plugin',
       'profile_import',
       'renderer',
       'syncapi',
@@ -136,6 +137,7 @@
     # Note on Win64 targets: targets that end with win64 be used
     # on 64-bit Windows only. Targets that end with nacl_win64 should be used
     # by Native Client only.
+    'app/policy/policy_templates.gypi',
     'chrome_browser.gypi',
     'chrome_common.gypi',
     'chrome_dll.gypi',
@@ -519,7 +521,7 @@
             {
               'destination': '<(PRODUCT_DIR)/extensions',
               'files': [
-                'browser/extensions/default_extensions/chromeos/external_extensions.json'
+                '>!@(ls browser/extensions/default_extensions/chromeos/cache/*)'
               ]
             }
           ],
@@ -701,8 +703,6 @@
         '../skia/skia.gyp:skia',
       ],
       'sources': [
-        'gpu/gpu_backing_store_win.cc',
-        'gpu/gpu_backing_store_win.h',
         'gpu/gpu_channel.cc',
         'gpu/gpu_channel.h',
         'gpu/gpu_command_buffer_stub.cc',
@@ -722,8 +722,8 @@
         'gpu/gpu_video_decoder.h',
         'gpu/gpu_video_service.cc',
         'gpu/gpu_video_service.h',
-        'gpu/gpu_view_win.cc',
-        'gpu/gpu_view_win.h',
+        'gpu/gpu_watchdog_thread.cc',
+        'gpu/gpu_watchdog_thread.h',
         'gpu/media/gpu_video_device.h',
         'gpu/media/fake_gl_video_decode_engine.cc',
         'gpu/media/fake_gl_video_decode_engine.h',
@@ -739,6 +739,7 @@
             '<(DEPTH)/third_party/angle/include',
             '<(DEPTH)/third_party/angle/src',
             '<(DEPTH)/third_party/wtl/include',
+            '$(DXSDK_DIR)/include',
           ],
           'dependencies': [
             '../third_party/angle/src/build_angle.gyp:libEGL',
@@ -795,16 +796,8 @@
         }],
         ['OS=="linux" and target_arch!="arm"', {
           'sources': [
-            'gpu/gpu_backing_store_glx.cc',
-            'gpu/gpu_backing_store_glx.h',
-            'gpu/gpu_backing_store_glx_context.cc',
-            'gpu/gpu_backing_store_glx_context.h',
-            'gpu/gpu_view_x.cc',
-            'gpu/gpu_view_x.h',
             'gpu/x_util.cc',
             'gpu/x_util.h',
-            'gpu/gpu_video_layer_glx.cc',
-            'gpu/gpu_video_layer_glx.h',
           ],
         }],
         ['enable_gpu==1', {
@@ -812,6 +805,24 @@
             '../gpu/gpu.gyp:command_buffer_service',
           ],
         }],
+      ],
+    },
+    {
+      'target_name': 'ppapi_plugin',
+      'type': '<(library)',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../ppapi/ppapi.gyp:ppapi_proxy',
+      ],
+      'sources': [
+        'ppapi_plugin/ppapi_plugin_main.cc',
+        'ppapi_plugin/ppapi_process.cc',
+        'ppapi_plugin/ppapi_process.h',
+        'ppapi_plugin/ppapi_thread.cc',
+        'ppapi_plugin/ppapi_thread.h',
+      ],
+      'include_dirs': [
+        '..',
       ],
     },
     {
@@ -1032,9 +1043,7 @@
         '../skia/skia.gyp:skia',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         'browser/sync/protocol/sync_proto.gyp:sync_proto_cpp',
-        # TODO(akalin): Change back to protobuf_lite once it supports
-        # preserving unknown fields.
-        '../third_party/protobuf/protobuf.gyp:protobuf#target',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite#target',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -1133,9 +1142,12 @@
         'service/cloud_print/cloud_print_proxy.h',
         'service/cloud_print/cloud_print_proxy_backend.cc',
         'service/cloud_print/cloud_print_proxy_backend.h',
+        'service/cloud_print/cloud_print_url_fetcher.cc',
+        'service/cloud_print/cloud_print_url_fetcher.h',
         'service/cloud_print/job_status_updater.cc',
         'service/cloud_print/job_status_updater.h',
         'service/cloud_print/print_system_dummy.cc',
+        'service/cloud_print/print_system.cc',
         'service/cloud_print/print_system.h',
         'service/cloud_print/printer_job_handler.cc',
         'service/cloud_print/printer_job_handler.h',
@@ -1149,15 +1161,6 @@
       'include_dirs': [
         '..',
       ],
-      'variables': {
-        'conditions': [
-          ['OS=="linux" and chromeos==0 and target_arch!="arm"', {
-            'use_cups%': 1,
-          }, {
-            'use_cups%': 0,
-          }],
-        ],
-      },
       'conditions': [
         ['OS=="win"', {
           'defines': [
@@ -1175,12 +1178,6 @@
           ],
         }],
         ['use_cups==1', {
-          'link_settings': {
-            'libraries': [
-              '-lcups',
-              '-lgcrypt',
-            ],
-          },
           'defines': [
             # CP_PRINT_SYSTEM_AVAILABLE disables default dummy implementation
             # of cloud print system, and allows to use custom implementaiton.
@@ -1188,6 +1185,22 @@
           ],
           'sources': [
             'service/cloud_print/print_system_cups.cc',
+          ],
+          'conditions': [
+            ['OS=="mac"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/usr/lib/libcups.dylib',
+                ]
+              },
+            }, {
+              'link_settings': {
+                'libraries': [
+                  '-lcups',
+                  '-lgcrypt',
+                ],
+              },
+            }],
           ],
         }],
         ['remoting==1', {
@@ -1214,14 +1227,15 @@
             'infoplist_strings_tool',
           ],
           'sources': [
-            # chrome_exe_main.mm's main() is the entry point for the "chrome"
-            # (browser app) target.  All it does is jump to chrome_dll's
-            # ChromeMain.  This is appropriate for helper processes too,
-            # because the logic to discriminate between process types at run
-            # time is actually directed by the --type command line argument
-            # processed by ChromeMain.  Sharing chrome_exe_main.mm with the
+            # chrome_exe_main_mac.mm's main() is the entry point for
+            # the "chrome" (browser app) target.  All it does is jump
+            # to chrome_dll's ChromeMain.  This is appropriate for
+            # helper processes too, because the logic to discriminate
+            # between process types at run time is actually directed
+            # by the --type command line argument processed by
+            # ChromeMain.  Sharing chrome_exe_main_mac.mm with the
             # browser app will suffice for now.
-            'app/chrome_exe_main.mm',
+            'app/chrome_exe_main_mac.mm',
             'app/helper-Info.plist',
           ],
           # TODO(mark): Come up with a fancier way to do this.  It should only
@@ -1611,13 +1625,16 @@
           'type': 'none',
           'dependencies': [
             'installer/mini_installer.gyp:*',
+            'installer/upgrade_test.gyp:*',
             '../app/app.gyp:*',
             '../base/base.gyp:*',
+            '../ceee/ceee.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
             '../gfx/gfx.gyp:*',
             '../ipc/ipc.gyp:*',
             '../media/media.gyp:*',
             '../net/net.gyp:*',
+            '../ppapi/ppapi.gyp:*',
             '../printing/printing.gyp:*',
             '../sdch/sdch.gyp:*',
             '../skia/skia.gyp:*',
@@ -1627,15 +1644,16 @@
             '../third_party/bspatch/bspatch.gyp:*',
             '../third_party/bzip2/bzip2.gyp:*',
             '../third_party/codesighs/codesighs.gyp:*',
+            '../third_party/iccjpeg/iccjpeg.gyp:*',
             '../third_party/icu/icu.gyp:*',
             '../third_party/libjpeg/libjpeg.gyp:*',
-            '../third_party/libwebp/libwebp.gyp:*',
             '../third_party/libpng/libpng.gyp:*',
+            '../third_party/libwebp/libwebp.gyp:*',
             '../third_party/libxslt/libxslt.gyp:*',
             '../third_party/lzma_sdk/lzma_sdk.gyp:*',
             '../third_party/modp_b64/modp_b64.gyp:*',
             '../third_party/npapi/npapi.gyp:*',
-            '../third_party/ppapi/ppapi.gyp:*',
+            '../third_party/qcms/qcms.gyp:*',
             '../third_party/sqlite/sqlite.gyp:*',
             '../third_party/zlib/zlib.gyp:*',
             '../webkit/support/webkit_support.gyp:*',
@@ -1715,6 +1733,7 @@
         {
           'target_name': 'chrome_version_header',
           'type': 'none',
+          'hard_dependency': 1,
           'dependencies': [
             '../build/util/build_util.gyp:lastchange',
           ],
@@ -1773,12 +1792,8 @@
           'sources': [
              'test/automation/autocomplete_edit_proxy.cc',
              'test/automation/autocomplete_edit_proxy.h',
-             'test/automation/automation_constants.h',
              'test/automation/automation_handle_tracker.cc',
              'test/automation/automation_handle_tracker.h',
-             'test/automation/automation_messages.cc',
-             'test/automation/automation_messages.h',
-             'test/automation/automation_messages_internal.h',
              'test/automation/automation_proxy.cc',
              'test/automation/automation_proxy.h',
              'test/automation/browser_proxy.cc',
@@ -1820,142 +1835,8 @@
             },
           },
         },
-        {
-          'target_name': 'generate_profile',
-          'type': 'executable',
-          'msvs_guid': '2E969AE9-7B12-4EDB-8E8B-48C7AE7BE357',
-          'dependencies': [
-            'browser',
-            'renderer',
-            'syncapi',
-            '../base/base.gyp:base',
-            '../skia/skia.gyp:skia',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'tools/profiles/generate_profile.cc',
-            'tools/profiles/thumbnail-inl.h',
-          ],
-          'conditions': [
-            ['OS=="win"', {
-              'conditions': [
-                ['win_use_allocator_shim==1', {
-                  'dependencies': [
-                    '<(allocator_target)',
-                  ],
-                }],
-              ],
-              'configurations': {
-                'Debug_Base': {
-                  'msvs_settings': {
-                    'VCLinkerTool': {
-                      'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
-                    },
-                  },
-                },
-              },
-            }],
-          ],
-        },
       ]},  # 'targets'
     ],  # OS=="win"
-    ['OS=="win" or OS=="mac" or OS=="linux"',
-      { 'targets': [
-        {
-          # policy_templates has different inputs and outputs, so it can't use
-          # the rules of chrome_strings
-          'target_name': 'policy_templates',
-          'type': 'none',
-          'variables': {
-            'grd_path': 'app/policy/policy_templates.grd',
-            'template_files': [
-              '<!@(<(grit_info_cmd) --outputs \'<(grit_out_dir)\' <(grd_path))'
-            ]
-          },
-          'actions': [
-            {
-              'action_name': 'policy_templates',
-              'variables': {
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    # TODO(mmoss) The .grd files look for _google_chrome, but for
-                    # consistency they should look for GOOGLE_CHROME_BUILD like C++.
-                    # Clean this up when Windows moves to gyp.
-                    'chrome_build': '_google_chrome',
-                  }, {  # else: branding!="Chrome"
-                    'chrome_build': '_chromium',
-                  }],
-                ],
-              },
-              'inputs': [
-                '<!@(<(grit_info_cmd) --inputs <(grd_path))',
-              ],
-              'outputs': [
-                '<@(template_files)'
-              ],
-              'action': [
-                '<@(grit_cmd)',
-                '-i', '<(grd_path)', 'build',
-                '-o', '<(grit_out_dir)',
-                '-D', '<(chrome_build)'
-              ],
-              'conditions': [
-                ['chromeos==1', {
-                  'action': ['-D', 'chromeos'],
-                }],
-                ['use_titlecase_in_grd_files==1', {
-                  'action': ['-D', 'use_titlecase'],
-                }],
-                ['OS == "mac"', {
-                  'action': ['-D', 'mac_bundle_id=<(mac_bundle_id)'],
-                }],
-              ],
-              'message': 'Generating policy templates from <(grd_path)',
-            },
-          ],
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '<(grit_out_dir)',
-            ],
-          },
-          'conditions': [
-            ['OS=="win"', {
-              'actions': [
-                {
-                  # Add all the templates generated at the previous step into
-                  # a zip archive.
-                  'action_name': 'pack_templates',
-                  'variables': {
-                    'zip_script':
-                        'tools/build/win/make_zip_with_relative_entries.py'
-                  },
-                  'inputs': [
-                    '<@(template_files)',
-                    '<(zip_script)'
-                  ],
-                  'outputs': [
-                    '<(PRODUCT_DIR)/policy_templates.zip'
-                  ],
-                  'action': [
-                    'python',
-                    '<(zip_script)',
-                    '<@(_outputs)',
-                    '<(grit_out_dir)/app/policy',
-                    '<@(template_files)'
-                  ],
-                  'message': 'Packing generated templates into <(_outputs)',
-                }
-              ]
-            }],
-            ['OS=="win"', {
-              'dependencies': ['../build/win/system.gyp:cygwin'],
-            }],
-          ],
-        },
-      ]},  # 'targets'
-    ],  # OS=="win" or OS=="mac" or OS=="linux"
     ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
       'targets': [{
         'target_name': 'packed_resources',

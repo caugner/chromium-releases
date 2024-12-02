@@ -31,21 +31,26 @@
 
 
 #include "core/cross/cairo/layer.h"
+
 #include "core/cross/error.h"
 #include "core/cross/renderer.h"
 #include "core/cross/cairo/renderer_cairo.h"
-#include "core/cross/cairo/texture_cairo.h"
 
 namespace o3d {
 
 namespace o2d {
 
-O3D_DEFN_CLASS(Layer, ParamObject);
+O3D_DEFN_CLASS(Layer, ObjectBase);
 
 Layer::Layer(ServiceLocator* service_locator)
-    : ParamObject(service_locator), texture_(NULL),
-      weak_pointer_manager_(this), alpha_(0), scale_x_(0), scale_y_(0),
-      translate_x_(0), translate_y_(0) {
+    : ObjectBase(service_locator),
+      alpha_(1.0),
+      x_(0),
+      y_(0),
+      width_(0),
+      height_(0),
+      scale_x_(1.0),
+      scale_y_(1.0) {
   DLOG(INFO) << "Create Layer";
 }
 

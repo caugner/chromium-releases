@@ -4,9 +4,10 @@
 
 #include "webkit/tools/test_shell/test_shell_webkit_init.h"
 
+#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
-#include "base/stats_counters.h"
 #include "media/base/media.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
@@ -20,7 +21,7 @@
 #endif
 
 TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
-  v8::V8::SetCounterFunction(StatsTable::FindLocation);
+  v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
 
   WebKit::initialize(this);
   WebKit::setLayoutTestMode(layout_test_mode);
@@ -71,6 +72,12 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
 
   file_utilities_.set_sandbox_enabled(false);
 
+  // Restrict the supported media types when running in layout test mode.
+  if (layout_test_mode)
+    mime_registry_.reset(new TestShellWebMimeRegistryImpl());
+  else
+    mime_registry_.reset(new webkit_glue::SimpleWebMimeRegistryImpl());
+
 #if defined(OS_WIN)
   // Ensure we pick up the default theme engine.
   SetThemeEngine(NULL);
@@ -78,6 +85,8 @@ TestShellWebKitInit::TestShellWebKitInit(bool layout_test_mode) {
 }
 
 TestShellWebKitInit::~TestShellWebKitInit() {
+  if (RunningOnValgrind())
+    WebKit::WebCache::clear();
   WebKit::shutdown();
 }
 
@@ -110,3 +119,54 @@ WebKit::WebData TestShellWebKitInit::loadResource(const char* name) {
   }
   return webkit_glue::WebKitClientImpl::loadResource(name);
 }
+
+WebKit::WebString TestShellWebKitInit::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name) {
+  switch (name) {
+    case WebKit::WebLocalizedString::ValidationValueMissing:
+    case WebKit::WebLocalizedString::ValidationValueMissingForCheckbox:
+    case WebKit::WebLocalizedString::ValidationValueMissingForFile:
+    case WebKit::WebLocalizedString::ValidationValueMissingForMultipleFile:
+    case WebKit::WebLocalizedString::ValidationValueMissingForRadio:
+    case WebKit::WebLocalizedString::ValidationValueMissingForSelect:
+      return ASCIIToUTF16("value missing");
+    case WebKit::WebLocalizedString::ValidationTypeMismatch:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForEmail:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForMultipleEmail:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForURL:
+      return ASCIIToUTF16("type mismatch");
+    case WebKit::WebLocalizedString::ValidationPatternMismatch:
+      return ASCIIToUTF16("pattern mismatch");
+    case WebKit::WebLocalizedString::ValidationTooLong:
+      return ASCIIToUTF16("too long");
+    case WebKit::WebLocalizedString::ValidationRangeUnderflow:
+      return ASCIIToUTF16("range underflow");
+    case WebKit::WebLocalizedString::ValidationRangeOverflow:
+      return ASCIIToUTF16("range overflow");
+    case WebKit::WebLocalizedString::ValidationStepMismatch:
+      return ASCIIToUTF16("step mismatch");
+    default:
+      return WebKitClientImpl::queryLocalizedString(name);
+  }
+}
+
+WebKit::WebString TestShellWebKitInit::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name, const WebKit::WebString& value) {
+  if (name == WebKit::WebLocalizedString::ValidationRangeUnderflow)
+    return ASCIIToUTF16("range underflow");
+  if (name == WebKit::WebLocalizedString::ValidationRangeOverflow)
+    return ASCIIToUTF16("range overflow");
+  return WebKitClientImpl::queryLocalizedString(name, value);
+}
+
+WebKit::WebString TestShellWebKitInit::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name,
+    const WebKit::WebString& value1,
+    const WebKit::WebString& value2) {
+  if (name == WebKit::WebLocalizedString::ValidationTooLong)
+    return ASCIIToUTF16("too long");
+  if (name == WebKit::WebLocalizedString::ValidationStepMismatch)
+    return ASCIIToUTF16("step mismatch");
+  return WebKitClientImpl::queryLocalizedString(name, value1, value2);
+}
+

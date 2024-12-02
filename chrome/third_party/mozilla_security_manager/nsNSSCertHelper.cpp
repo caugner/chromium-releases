@@ -47,6 +47,7 @@
 #include "app/l10n_util.h"
 #include "base/i18n/number_formatting.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "grit/generated_resources.h"
@@ -86,6 +87,11 @@ SECOidTag RegisterDynamicOid(const char* oid_string) {
   }
   DCHECK_NE(rv, SEC_OID_UNKNOWN) << oid_string;
   return rv;
+}
+
+// Format a SECItem as a space separated string, with 16 bytes on each line.
+std::string ProcessRawBytes(SECItem* data) {
+  return x509_certificate_model::ProcessRawBytes(data->data, data->len);
 }
 
 }  // namespace
@@ -139,34 +145,6 @@ void RegisterDynamicOids() {
   eku_ms_key_recovery_agent = RegisterDynamicOid("1.3.6.1.4.1.311.21.6");
   eku_netscape_international_step_up = RegisterDynamicOid(
       "2.16.840.1.113730.4.1");
-}
-
-std::string ProcessRawBytes(SECItem* data) {
-  static const char kHexChars[] = "0123456789ABCDEF";
-
-  // Each input byte creates two output hex characters + a space or newline,
-  // except for the last byte.
-  std::string ret(std::max(0u, data->len * 3 - 1), '\0');
-
-  for (size_t i = 0; i < data->len; ++i) {
-    unsigned char b = data->data[i];
-    ret[i * 3] = kHexChars[(b >> 4) & 0xf];
-    ret[i * 3 + 1] = kHexChars[b & 0xf];
-    if (i + 1 < data->len) {
-      if ((i + 1) % 16 == 0)
-        ret[i * 3 + 2] = '\n';
-      else
-        ret[i * 3 + 2] = ' ';
-    }
-  }
-  return ret;
-}
-
-std::string ProcessRawBits(SECItem* data) {
-  SECItem bytedata;
-  bytedata.data = data->data;
-  bytedata.len = data->len / 8;
-  return ProcessRawBytes(&bytedata);
 }
 
 std::string DumpOidString(SECItem* oid) {
@@ -489,11 +467,12 @@ std::string ProcessGeneralName(PRArenaPool* arena,
                                &current->name.OthName.name) == SECSuccess &&
             guid.len == 16) {
           unsigned char* d = guid.data;
-          SStringPrintf(&value,
-                        "{%.2x%.2x%.2x%.2x-%.2x%.2x-%.2x%.2x-"
-                        "%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x}",
-                        d[3], d[2], d[1], d[0], d[5], d[4], d[7], d[6],
-                        d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]);
+          base::SStringPrintf(
+              &value,
+              "{%.2x%.2x%.2x%.2x-%.2x%.2x-%.2x%.2x-"
+              "%.2x%.2x-%.2x%.2x%.2x%.2x%.2x%.2x}",
+              d[3], d[2], d[1], d[0], d[5], d[4], d[7], d[6],
+              d[8], d[9], d[10], d[11], d[12], d[13], d[14], d[15]);
         } else {
           value = ProcessRawBytes(&current->name.OthName.name);
         }
@@ -1045,7 +1024,8 @@ std::string ProcessSubjectPublicKeyInfo(CERTSubjectPublicKeyInfo* spki) {
         break;
       }
       default:
-        rv = ProcessRawBits(&spki->subjectPublicKey);
+        rv = x509_certificate_model::ProcessRawBits(
+            spki->subjectPublicKey.data, spki->subjectPublicKey.len);
         break;
     }
     SECKEY_DestroyPublicKey(key);
@@ -1061,12 +1041,8 @@ net::CertType GetCertType(CERTCertificate *cert) {
     return net::CA_CERT;
   if (trust.HasPeer(PR_TRUE, PR_FALSE, PR_FALSE))
     return net::SERVER_CERT;
-  if (trust.HasPeer(PR_FALSE, PR_TRUE, PR_FALSE) && cert->emailAddr)
-    return net::EMAIL_CERT;
   if (CERT_IsCACert(cert, NULL))
     return net::CA_CERT;
-  if (cert->emailAddr)
-    return net::EMAIL_CERT;
   return net::UNKNOWN_CERT;
 }
 
