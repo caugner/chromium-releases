@@ -468,6 +468,7 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
       IgnoredReasons* = nullptr) const;
   bool IsInert() const;
   bool IsAriaHidden() const;
+  bool CachedIsAriaHidden() { return cached_is_aria_hidden_; }
   const AXObject* AriaHiddenRoot() const;
   bool ComputeIsInert(IgnoredReasons* = nullptr) const;
   bool ComputeIsAriaHidden(IgnoredReasons* = nullptr) const;
@@ -795,6 +796,12 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
   virtual int SetSize() const { return 0; }
   bool SupportsARIASetSizeAndPosInSet() const;
 
+  // Returns true if the attribute is prohibited (e.g. by ARIA), and we plan
+  // to enforce that prohibition. An example of something prohibited that we
+  // do not enforce is aria-label/aria-labelledby on certain text containers.
+  bool IsProhibited(ax::mojom::blink::StringAttribute attribute) const;
+  bool IsProhibited(ax::mojom::blink::IntAttribute attribute) const;
+
   // ARIA live-region features.
   bool IsLiveRegionRoot() const;  // Any live region, including polite="off".
   bool IsActiveLiveRegionRoot() const;  // Live region that is not polite="off".
@@ -1085,6 +1092,8 @@ class MODULES_EXPORT AXObject : public GarbageCollected<AXObject> {
 
   AXObject* ContainerWidget() const;
   bool IsContainerWidget() const;
+
+  AXObject* ContainerListMarkerIncludingIgnored() const;
 
   // There are two types of traversal for obtaining children:
   // 1. LayoutTreeBuilderTraversal. Despite the name, this traverses a flattened

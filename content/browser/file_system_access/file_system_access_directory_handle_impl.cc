@@ -76,7 +76,7 @@ void FileSystemAccessDirectoryHandleImpl::GetFile(const std::string& basename,
   }
 
   if (create) {
-    // If |create| is true, write permission is required unconditionally, i.e.
+    // If `create` is true, write permission is required unconditionally, i.e.
     // even if the file already exists. This is intentional, and matches the
     // behavior that is specified in the spec.
     RunWithWritePermission(
@@ -121,7 +121,7 @@ void FileSystemAccessDirectoryHandleImpl::GetDirectory(
   }
 
   if (create) {
-    // If |create| is true, write permission is required unconditionally, i.e.
+    // If `create` is true, write permission is required unconditionally, i.e.
     // even if the file already exists. This is intentional, and matches the
     // behavior that is specified in the spec.
     RunWithWritePermission(
@@ -172,6 +172,39 @@ void FileSystemAccessDirectoryHandleImpl::GetEntries(
           &FileSystemAccessDirectoryHandleImpl::DidReadDirectory,
           weak_factory_.GetWeakPtr(), base::Owned(std::move(listener))),
       url());
+}
+
+void FileSystemAccessDirectoryHandleImpl::Move(
+    mojo::PendingRemote<blink::mojom::FileSystemAccessTransferToken>
+        destination_directory,
+    const std::string& new_entry_name,
+    MoveCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  RunWithWritePermission(
+      base::BindOnce(&FileSystemAccessHandleBase::DoMove,
+                     weak_factory_.GetWeakPtr(),
+                     std::move(destination_directory), new_entry_name),
+      base::BindOnce([](blink::mojom::FileSystemAccessErrorPtr result,
+                        MoveCallback callback) {
+        std::move(callback).Run(std::move(result));
+      }),
+      std::move(callback));
+}
+
+void FileSystemAccessDirectoryHandleImpl::Rename(
+    const std::string& new_entry_name,
+    RenameCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  RunWithWritePermission(
+      base::BindOnce(&FileSystemAccessHandleBase::DoRename,
+                     weak_factory_.GetWeakPtr(), new_entry_name),
+      base::BindOnce([](blink::mojom::FileSystemAccessErrorPtr result,
+                        RenameCallback callback) {
+        std::move(callback).Run(std::move(result));
+      }),
+      std::move(callback));
 }
 
 void FileSystemAccessDirectoryHandleImpl::Remove(bool recurse,

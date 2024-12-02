@@ -91,9 +91,9 @@ namespace chromeos {
 class BulkPrintersCalculatorFactory;
 class DebugdNotificationHandler;
 class FastTransitionObserver;
+class LoginApiDataForNextLoginAttemptPrefCleaner;
 class LoginScreenExtensionsLifetimeManager;
 class LoginScreenExtensionsStorageCleaner;
-class MemoryAblationStudy;
 class NetworkChangeManagerClient;
 class NetworkPrefStateObserver;
 class NetworkThrottlingObserver;
@@ -219,6 +219,8 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
       login_screen_extensions_lifetime_manager_;
   std::unique_ptr<LoginScreenExtensionsStorageCleaner>
       login_screen_extensions_storage_cleaner_;
+  std::unique_ptr<LoginApiDataForNextLoginAttemptPrefCleaner>
+      login_api_data_for_next_login_attempt_pref_cleaner_;
 
   std::unique_ptr<GnubbyNotification> gnubby_notification_;
   std::unique_ptr<system::BreakpadConsentWatcher> breakpad_consent_watcher_;
@@ -228,7 +230,6 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
 
   std::unique_ptr<platform_keys::KeyPermissionsManager>
       system_token_key_permissions_manager_;
-  std::unique_ptr<MemoryAblationStudy> memory_ablation_study_;
 
   std::unique_ptr<ash::quick_pair::QuickPairBrowserDelegateImpl>
       quick_pair_delegate_;

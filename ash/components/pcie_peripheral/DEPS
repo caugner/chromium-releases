@@ -6,7 +6,6 @@ include_rules = [
   "+testing",
   "+services/device/public",
   "+ash/test",
-  "+ash/constants",
 ]
 
 specific_include_rules = {

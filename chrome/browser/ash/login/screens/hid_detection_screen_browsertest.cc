@@ -15,7 +15,6 @@
 #include "chrome/browser/ash/login/test/device_state_mixin.h"
 #include "chrome/browser/ash/login/test/hid_controller_mixin.h"
 #include "chrome/browser/ash/login/test/js_checker.h"
-#include "chrome/browser/ash/login/test/local_state_mixin.h"
 #include "chrome/browser/ash/login/test/oobe_base_test.h"
 #include "chrome/browser/ash/login/test/oobe_screen_waiter.h"
 #include "chrome/browser/ash/login/test/oobe_screens_utils.h"
@@ -252,11 +251,10 @@ IN_PROC_BROWSER_TEST_F(HIDDetectionOobeCompletedUnowned, ShowScreen) {
 }
 
 class HIDDetectionScreenDisabledAfterRestartTest
-    : public HIDDetectionScreenChromeboxTest,
-      public LocalStateMixin::Delegate {
+    : public HIDDetectionScreenChromeboxTest {
  public:
   HIDDetectionScreenDisabledAfterRestartTest() = default;
-  // HIDDetectionScreenChromeboxTest:
+  // HidDetectionTest:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     HIDDetectionScreenChromeboxTest::SetUpCommandLine(command_line);
     // Emulating Chrome restart without the flag.
@@ -265,33 +263,7 @@ class HIDDetectionScreenDisabledAfterRestartTest
           switches::kDisableHIDDetectionOnOOBEForTesting);
     }
   }
-  // We need to check local state flag before welcome screen is shown.
-  void SetUpLocalState() override {
-    if (content::IsPreTest()) {
-      // Pref should be false by default.
-      EXPECT_FALSE(StartupUtils::IsHIDDetectionScreenDisabledForTests());
-    }
-  }
-
- private:
-  LocalStateMixin local_state_mixin_{&mixin_host_, this};
 };
-
-IN_PROC_BROWSER_TEST_F(HIDDetectionScreenDisabledAfterRestartTest,
-                       PRE_SkipToUpdate) {
-  OobeScreenWaiter(chromeos::WelcomeView::kScreenId).Wait();
-
-  EXPECT_TRUE(StartupUtils::IsHIDDetectionScreenDisabledForTests());
-  EXPECT_EQ(GetExitResult(), HIDDetectionScreen::Result::SKIPPED_FOR_TESTS);
-}
-
-IN_PROC_BROWSER_TEST_F(HIDDetectionScreenDisabledAfterRestartTest,
-                       SkipToUpdate) {
-  OobeScreenWaiter(chromeos::WelcomeView::kScreenId).Wait();
-  // The pref should persist restart.
-  EXPECT_TRUE(StartupUtils::IsHIDDetectionScreenDisabledForTests());
-  EXPECT_EQ(GetExitResult(), HIDDetectionScreen::Result::SKIPPED_FOR_TESTS);
-}
 
 class HIDDetectionScreenChromebookTest : public OobeBaseTest {
  private:
