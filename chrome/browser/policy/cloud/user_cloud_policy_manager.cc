@@ -21,7 +21,7 @@ UserCloudPolicyManager::UserCloudPolicyManager(
     Profile* profile,
     scoped_ptr<UserCloudPolicyStore> store)
     : CloudPolicyManager(
-          PolicyNamespaceKey(dm_protocol::kChromeUserPolicyType, std::string()),
+          PolicyNamespaceKey(GetChromeUserPolicyType(), std::string()),
           store.get()),
       profile_(profile),
       store_(store.Pass()) {
@@ -35,7 +35,7 @@ UserCloudPolicyManager::~UserCloudPolicyManager() {
 void UserCloudPolicyManager::Connect(
     PrefService* local_state, scoped_ptr<CloudPolicyClient> client) {
   core()->Connect(client.Pass());
-  core()->StartRefreshScheduler();
+  StartRefreshScheduler();
   core()->TrackRefreshDelayPref(local_state, prefs::kUserPolicyRefreshRate);
 }
 
@@ -56,15 +56,6 @@ void UserCloudPolicyManager::DisconnectAndRemovePolicy() {
 
 bool UserCloudPolicyManager::IsClientRegistered() const {
   return client() && client()->is_registered();
-}
-
-void UserCloudPolicyManager::RegisterClient(const std::string& access_token) {
-  DCHECK(client()) << "Callers must invoke Initialize() first";
-  if (!client()->is_registered()) {
-    DVLOG(1) << "Registering client with access token: " << access_token;
-    client()->Register(em::DeviceRegisterRequest::BROWSER,
-                       access_token, std::string(), false, std::string());
-  }
 }
 
 }  // namespace policy

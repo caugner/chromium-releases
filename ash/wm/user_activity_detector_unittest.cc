@@ -9,7 +9,7 @@
 #include "ash/wm/user_activity_observer.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
@@ -39,7 +39,9 @@ class TestUserActivityObserver : public UserActivityObserver {
   void reset_stats() { num_invocations_ = 0; }
 
   // UserActivityObserver implementation.
-  virtual void OnUserActivity() OVERRIDE { num_invocations_++; }
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE {
+    num_invocations_++;
+  }
 
  private:
   // Number of times that OnUserActivity() has been called.

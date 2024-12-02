@@ -53,19 +53,15 @@ class GL_EXPORT SurfaceTextureBridge
   // by calling ANativeWindow_release().
   ANativeWindow* CreateSurface();
 
-  int texture_id() const {
-    return texture_id_;
-  }
-
   const base::android::JavaRef<jobject>& j_surface_texture() const {
     return j_surface_texture_;
   }
 
+  static bool RegisterSurfaceTextureBridge(JNIEnv* env);
+
  private:
   friend class base::RefCountedThreadSafe<SurfaceTextureBridge>;
   ~SurfaceTextureBridge();
-
-  const int texture_id_;
 
   // Java SurfaceTexture instance.
   base::android::ScopedJavaGlobalRef<jobject> j_surface_texture_;

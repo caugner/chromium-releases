@@ -10,11 +10,11 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/widevine_cdm_constants.h"
-#include "components/breakpad/common/breakpad_paths.h"
 #include "ui/base/ui_base_paths.h"
 
 #if defined(OS_ANDROID)
@@ -190,6 +190,24 @@ bool PathProvider(int key, base::FilePath* result) {
       // Do not create the download directory here, we have done it twice now
       // and annoyed a lot of users.
 #endif
+      break;
+    case chrome::DIR_CRASH_DUMPS:
+#if defined(OS_CHROMEOS)
+      // ChromeOS uses a separate directory. See http://crosbug.com/25089
+      cur = base::FilePath("/var/log/chrome");
+#elif defined(OS_ANDROID)
+      if (!base::android::GetCacheDirectory(&cur))
+        return false;
+#else
+      // The crash reports are always stored relative to the default user data
+      // directory.  This avoids the problem of having to re-initialize the
+      // exception handler after parsing command line options, which may
+      // override the location of the app's profile directory.
+      if (!GetDefaultUserDataDirectory(&cur))
+        return false;
+#endif
+      cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
+      create_dir = true;
       break;
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
@@ -391,7 +409,7 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!PathService::Get(base::DIR_MODULE, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("test_data"));
-      if (!file_util::PathExists(cur))  // We don't want to create this.
+      if (!base::PathExists(cur))  // We don't want to create this.
         return false;
       break;
     case chrome::DIR_TEST_DATA:
@@ -400,7 +418,7 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("chrome"));
       cur = cur.Append(FILE_PATH_LITERAL("test"));
       cur = cur.Append(FILE_PATH_LITERAL("data"));
-      if (!file_util::PathExists(cur))  // We don't want to create this.
+      if (!base::PathExists(cur))  // We don't want to create this.
         return false;
       break;
     case chrome::DIR_TEST_TOOLS:
@@ -409,7 +427,7 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("chrome"));
       cur = cur.Append(FILE_PATH_LITERAL("tools"));
       cur = cur.Append(FILE_PATH_LITERAL("test"));
-      if (!file_util::PathExists(cur))  // We don't want to create this
+      if (!base::PathExists(cur))  // We don't want to create this
         return false;
       break;
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
@@ -431,7 +449,7 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!login)
         return false;
       cur = cur.AppendASCII(login);
-      if (!file_util::PathExists(cur))  // We don't want to create this.
+      if (!base::PathExists(cur))  // We don't want to create this.
         return false;
       break;
     }
@@ -479,30 +497,13 @@ bool PathProvider(int key, base::FilePath* result) {
 #endif
       break;
 
-    case breakpad::DIR_CRASH_DUMPS:
-#if defined(OS_CHROMEOS)
-      // ChromeOS uses a separate directory. See http://crosbug.com/25089
-      cur = base::FilePath("/var/log/chrome");
-#elif defined(OS_ANDROID)
-      if (!base::android::GetCacheDirectory(&cur))
-        return false;
-#else
-      // The crash reports are always stored relative to the default user data
-      // directory.  This avoids the problem of having to re-initialize the
-      // exception handler after parsing command line options, which may
-      // override the location of the app's profile directory.
-      if (!GetDefaultUserDataDirectory(&cur))
-        return false;
-#endif
-      cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
-      create_dir = true;
-      break;
-
     default:
       return false;
   }
 
-  if (create_dir && !file_util::PathExists(cur) &&
+  // TODO(bauerb): http://crbug.com/259796
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  if (create_dir && !base::PathExists(cur) &&
       !file_util::CreateDirectory(cur))
     return false;
 
@@ -514,8 +515,6 @@ bool PathProvider(int key, base::FilePath* result) {
 // eliminate this object file if there is no direct entry point into it.
 void RegisterPathProvider() {
   PathService::RegisterProvider(PathProvider, PATH_START, PATH_END);
-  PathService::RegisterProvider(
-      PathProvider, breakpad::PATH_START, breakpad::PATH_END);
 }
 
 }  // namespace chrome

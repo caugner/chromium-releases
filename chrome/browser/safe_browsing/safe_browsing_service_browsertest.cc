@@ -17,8 +17,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
 #include "base/test/thread_test_helper.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -142,6 +142,9 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
   virtual void CacheHashResults(const std::vector<SBPrefix>& prefixes,
       const std::vector<SBFullHashResult>& full_hits) OVERRIDE {
     // Do nothing for the cache.
+  }
+  virtual bool IsMalwareIPMatchKillSwitchOn() OVERRIDE {
+    return false;
   }
 
   // Fill up the database with test URL.
@@ -853,7 +856,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceShutdownTest,
       temp_profile_dir_.path(),
       base::Bind(&SafeBrowsingServiceShutdownTest::OnUnblockOnProfileCreation,
                  this),
-      string16(), string16(), false);
+      string16(), string16(), std::string());
 
   // Spin to allow profile creation to take place, loop is terminated
   // by OnUnblockOnProfileCreation when the profile is created.
@@ -895,7 +898,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
   virtual bool SetUpUserDataDirectory() OVERRIDE {
     base::FilePath cookie_path(
         SafeBrowsingService::GetCookieFilePathForTesting());
-    EXPECT_FALSE(file_util::PathExists(cookie_path));
+    EXPECT_FALSE(base::PathExists(cookie_path));
 
     base::FilePath test_dir;
     if (!PathService::Get(chrome::DIR_TEST_DATA, &test_dir)) {
@@ -908,7 +911,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
     // expires in 2038.
     base::FilePath initial_cookies = test_dir.AppendASCII("safe_browsing")
         .AppendASCII("Safe Browsing Cookies");
-    if (!file_util::CopyFile(initial_cookies, cookie_path)) {
+    if (!base::CopyFile(initial_cookies, cookie_path)) {
       EXPECT_TRUE(false);
       return false;
     }

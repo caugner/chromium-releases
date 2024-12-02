@@ -17,7 +17,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_settings_pattern.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -39,6 +39,8 @@ const char* kTypeNames[] = {
   "media-stream-camera",
   "register-protocol-handler",
   "ppapi-broker",
+  "multiple-automatic-downloads",
+  "midi-sysex",
 #if defined(OS_WIN)
   "metro-switch-to-desktop",
 #endif

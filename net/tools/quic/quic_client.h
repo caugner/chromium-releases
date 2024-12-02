@@ -23,7 +23,12 @@
 #include "net/tools/quic/quic_reliable_client_stream.h"
 
 namespace net {
+
+class ProofVerifier;
+
 namespace tools {
+
+class QuicEpollConnectionHelper;
 
 namespace test {
 class QuicClientPeer;
@@ -31,10 +36,12 @@ class QuicClientPeer;
 
 class QuicClient : public EpollCallbackInterface {
  public:
-  QuicClient(IPEndPoint server_address, const std::string& server_hostname);
+  QuicClient(IPEndPoint server_address, const std::string& server_hostname,
+             const QuicVersion version);
   QuicClient(IPEndPoint server_address,
              const std::string& server_hostname,
-             const QuicConfig& config);
+             const QuicConfig& config,
+             const QuicVersion version);
 
   virtual ~QuicClient();
 
@@ -120,6 +127,23 @@ class QuicClient : public EpollCallbackInterface {
     server_hostname_ = hostname;
   }
 
+  // SetProofVerifier sets the ProofVerifier that will be used to verify the
+  // server's certificate and takes ownership of |verifier|.
+  void SetProofVerifier(ProofVerifier* verifier) {
+    // TODO(rtenneti): We should set ProofVerifier in QuicClientSession.
+    crypto_config_.SetProofVerifier(verifier);
+  }
+
+  // SetChannelIDSigner sets a ChannelIDSigner that will be called when the
+  // server supports channel IDs to sign a message proving possession of the
+  // given ChannelID. This object takes ownership of |signer|.
+  void SetChannelIDSigner(ChannelIDSigner* signer) {
+    crypto_config_.SetChannelIDSigner(signer);
+  }
+
+ protected:
+  virtual QuicEpollConnectionHelper* CreateQuicConnectionHelper();
+
  private:
   friend class net::tools::test::QuicClientPeer;
 
@@ -166,6 +190,9 @@ class QuicClient : public EpollCallbackInterface {
   // True if the kernel supports SO_RXQ_OVFL, the number of packets dropped
   // because the socket would otherwise overflow.
   bool overflow_supported_;
+
+  // Which QUIC version does this client talk?
+  QuicVersion version_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicClient);
 };

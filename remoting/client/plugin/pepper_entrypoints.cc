@@ -4,7 +4,7 @@
 
 #include "remoting/client/plugin/pepper_entrypoints.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
@@ -44,8 +44,10 @@ int32_t PPP_InitializeModule(PP_Module module_id,
     return PP_ERROR_FAILED;
   }
 
-  // Register a global log handler.
+#if !defined(NDEBUG)
+  // Register a global log handler, but only in Debug builds.
   ChromotingInstance::RegisterLogMessageHandler();
+#endif
 
   g_module_singleton = module;
   return PP_OK;

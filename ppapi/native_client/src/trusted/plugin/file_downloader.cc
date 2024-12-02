@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "native_client/src/trusted/plugin/file_downloader.h"
+#include "ppapi/native_client/src/trusted/plugin/file_downloader.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -11,15 +11,15 @@
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/shared/platform/nacl_check.h"
 #include "native_client/src/shared/platform/nacl_time.h"
-#include "native_client/src/trusted/plugin/callback_source.h"
-#include "native_client/src/trusted/plugin/plugin.h"
-#include "native_client/src/trusted/plugin/utility.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/cpp/file_io.h"
 #include "ppapi/cpp/file_ref.h"
 #include "ppapi/cpp/url_request_info.h"
 #include "ppapi/cpp/url_response_info.h"
+#include "ppapi/native_client/src/trusted/plugin/callback_source.h"
+#include "ppapi/native_client/src/trusted/plugin/plugin.h"
+#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 namespace {
 
@@ -150,7 +150,8 @@ bool FileDownloader::Open(
   pp::CompletionCallback onload_callback =
       callback_factory_.NewCallback(start_notify);
   int32_t pp_error = url_loader_.Open(url_request, onload_callback);
-  PLUGIN_PRINTF(("FileDownloader::Open (pp_error=%"NACL_PRId32")\n", pp_error));
+  PLUGIN_PRINTF(("FileDownloader::Open (pp_error=%" NACL_PRId32 ")\n",
+                 pp_error));
   CHECK(pp_error == PP_OK_COMPLETIONPENDING);
   return true;
 }
@@ -250,17 +251,17 @@ bool FileDownloader::InitialResponseIsValid(int32_t pp_error) {
   switch (url_scheme_) {
     case SCHEME_CHROME_EXTENSION:
       PLUGIN_PRINTF(("FileDownloader::InitialResponseIsValid (chrome-extension "
-                     "response status_code=%"NACL_PRId32")\n", status_code_));
+                     "response status_code=%" NACL_PRId32 ")\n", status_code_));
       status_ok = (status_code_ == kExtensionUrlRequestStatusOk);
       break;
     case SCHEME_DATA:
       PLUGIN_PRINTF(("FileDownloader::InitialResponseIsValid (data URI "
-                     "response status_code=%"NACL_PRId32")\n", status_code_));
+                     "response status_code=%" NACL_PRId32 ")\n", status_code_));
       status_ok = (status_code_ == kDataUriRequestStatusOk);
       break;
     case SCHEME_OTHER:
       PLUGIN_PRINTF(("FileDownloader::InitialResponseIsValid (HTTP response "
-                     "status_code=%"NACL_PRId32")\n", status_code_));
+                     "status_code=%" NACL_PRId32 ")\n", status_code_));
       status_ok = (status_code_ == NACL_HTTP_STATUS_OK);
       break;
   }
@@ -439,7 +440,7 @@ nacl::string FileDownloader::GetResponseHeaders() const {
 
 void FileDownloader::StreamFinishNotify(int32_t pp_error) {
   PLUGIN_PRINTF((
-      "FileDownloader::StreamFinishNotify (pp_error=%"NACL_PRId32")\n",
+      "FileDownloader::StreamFinishNotify (pp_error=%" NACL_PRId32 ")\n",
       pp_error));
   stream_finish_callback_.RunAndClear(pp_error);
 }

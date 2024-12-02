@@ -18,8 +18,7 @@ FakeLayerUpdater::Resource::~Resource() {}
 void FakeLayerUpdater::Resource::Update(ResourceUpdateQueue* queue,
                                         gfx::Rect source_rect,
                                         gfx::Vector2d dest_offset,
-                                        bool partial_update,
-                                        RenderingStats* stats) {
+                                        bool partial_update) {
   const gfx::Rect kRect(0, 0, 10, 10);
   ResourceUpdate upload = ResourceUpdate::Create(
       texture(), &bitmap_, kRect, kRect, gfx::Vector2d());
@@ -39,8 +38,7 @@ void FakeLayerUpdater::PrepareToUpdate(gfx::Rect content_rect,
                                        gfx::Size tile_size,
                                        float contents_width_scale,
                                        float contents_height_scale,
-                                       gfx::Rect* resulting_opaque_rect,
-                                       RenderingStats* stats) {
+                                       gfx::Rect* resulting_opaque_rect) {
   prepare_count_++;
   last_update_rect_ = content_rect;
   if (!rect_to_invalidate_.IsEmpty()) {
@@ -123,6 +121,26 @@ void FakeTiledLayer::UpdateContentsScale(float ideal_contents_scale) {
                          &draw_properties().contents_scale_x,
                          &draw_properties().contents_scale_y,
                          &draw_properties().content_bounds);
+}
+
+void FakeTiledLayer::ResetNumDependentsNeedPushProperties() {
+  size_t num = 0;
+  if (mask_layer()) {
+    if (mask_layer()->needs_push_properties() ||
+        mask_layer()->descendant_needs_push_properties())
+      ++num;
+  }
+  if (replica_layer()) {
+    if (replica_layer()->needs_push_properties() ||
+        replica_layer()->descendant_needs_push_properties())
+      ++num;
+  }
+  for (size_t i = 0; i < children().size(); ++i) {
+    if (children()[i]->needs_push_properties() ||
+        children()[i]->descendant_needs_push_properties())
+      ++num;
+  }
+  num_dependents_need_push_properties_ = num;
 }
 
 LayerUpdater* FakeTiledLayer::Updater() const {

@@ -29,13 +29,6 @@ cr.define('options', function() {
     signedIn_: false,
 
     /**
-     * Keeps track of whether the user has completed sync setup or not.
-     * @type {boolean}
-     * @private
-     */
-    setupCompleted_: false,
-
-    /**
      * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
      * |onShowHomeButtonChanged_|.
      * @type {boolean}
@@ -148,6 +141,16 @@ cr.define('options', function() {
         chrome.send('themesReset');
       };
 
+      if (loadTimeData.getBoolean('profileIsManaged')) {
+        if ($('themes-native-button')) {
+          $('themes-native-button').disabled = true;
+          $('themes-native-button').hidden = true;
+        }
+        // Supervised users have just one default theme, even on Linux. So use
+        // the same button for Linux as for the other platforms.
+        $('themes-reset').textContent = loadTimeData.getString('themesReset');
+      }
+
       // Device section (ChromeOS only).
       if (cr.isChromeOS) {
         $('keyboard-settings-button').onclick = function(evt) {
@@ -175,7 +178,9 @@ cr.define('options', function() {
         options.browser_options.ProfileList.decorate(profilesList);
         profilesList.autoExpands = true;
 
+        // The profiles info data in |loadTimeData| might be stale.
         this.setProfilesInfo_(loadTimeData.getValue('profilesInfo'));
+        chrome.send('requestProfilesInfo');
 
         profilesList.addEventListener('change',
             this.setProfileViewButtonsStatus_);
@@ -200,10 +205,6 @@ cr.define('options', function() {
           $('profiles-create').disabled = true;
           $('profiles-delete').disabled = true;
           $('profiles-list').canDeleteItems = false;
-          if ($('themes-GTK-button'))
-            $('themes-GTK-button').disabled = true;
-          $('themes-reset').disabled = true;
-          $('themes-gallery').disabled = true;
         }
       }
 
@@ -372,6 +373,9 @@ cr.define('options', function() {
       $('language-button').onclick = showLanguageOptions;
       $('manage-languages').onclick = showLanguageOptions;
 
+      if (!loadTimeData.getBoolean('enableTranslateSettings'))
+        $('manage-languages').hidden = true;
+
       // Downloads section.
       Preferences.getInstance().addEventListener('download.default_directory',
           this.onDefaultDownloadDirectoryChanged_.bind(this));
@@ -382,6 +386,9 @@ cr.define('options', function() {
         $('autoOpenFileTypesResetToDefault').onclick = function(event) {
           chrome.send('autoOpenFileTypesAction');
         };
+      } else {
+        $('disable-drive-row').hidden =
+            UIAccountTweaks.loggedInAsLocallyManagedUser();
       }
 
       // HTTPS/SSL section.
@@ -428,6 +435,8 @@ cr.define('options', function() {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
+        $('accessibility-sticky-keys').hidden =
+            !loadTimeData.getBoolean('enableStickyKeys');
       }
 
       // Display management section (CrOS only).
@@ -686,51 +695,42 @@ cr.define('options', function() {
     },
 
     /**
-     * Updates the Instant checkbox section.
-     * @param {boolean} visible Is the checkbox visible?
-     * @param {boolean} enabled Is the checkbox enabled?
-     * @param {boolean} checked Is the checkbox checked?
-     * @param {string} checkboxLabel Label to show next to the checkbox.
-     * @private
-     */
-    updateInstantCheckboxState_: function(visible, enabled, checked,
-                                          checkboxLabel) {
-      var checkboxSection = $('instant-enabled-setting');
-      var checkbox = $('instant-enabled-control');
-      if (visible) {
-        $('instant-enabled-setting').style.display = 'block';
-        checkbox.disabled = !enabled;
-        checkbox.checked = checked;
-        $('instant-enabled-label').textContent = checkboxLabel;
-      } else {
-        $('instant-enabled-setting').style.display = 'none';
-      }
-    },
-
-    /**
      * Updates the sync section with the given state.
      * @param {Object} syncData A bunch of data records that describe the status
      *     of the sync system.
      * @private
      */
     updateSyncState_: function(syncData) {
-      if (!syncData.signinAllowed) {
+      if (!syncData.signinAllowed &&
+          (!syncData.supervisedUser || !cr.isChromeOS)) {
         $('sync-section').hidden = true;
         return;
       }
 
       $('sync-section').hidden = false;
 
-      // If the user gets signed out or if sync gets disabled while the advanced
-      // sync settings dialog is visible, say, due to a dashboard clear, close
-      // the dialog.
-      if ((this.signedIn_ && !syncData.signedIn) ||
-          (this.setupCompleted_ && !syncData.setupCompleted)) {
-        SyncSetupOverlay.closeOverlay();
+      var subSection = $('sync-section').firstChild;
+      while (subSection) {
+        if (subSection.nodeType == Node.ELEMENT_NODE)
+          subSection.hidden = syncData.supervisedUser;
+        subSection = subSection.nextSibling;
       }
 
+      if (syncData.supervisedUser) {
+        $('account-picture-wrapper').hidden = false;
+        $('sync-general').hidden = false;
+        $('sync-status').hidden = true;
+        return;
+      }
+
+      // If the user gets signed out while the advanced sync settings dialog is
+      // visible, say, due to a dashboard clear, close the dialog.
+      // Note: SyncSetupOverlay.closeOverlay is a no-op if the overlay is
+      // already hidden.
+      if (this.signedIn_ && !syncData.signedIn)
+        SyncSetupOverlay.closeOverlay();
+
       this.signedIn_ = syncData.signedIn;
-      this.setupCompleted_ = syncData.setupCompleted;
 
       // Display the "advanced settings" button if we're signed in and sync is
       // not managed/disabled. If the user is signed in, but sync is disabled,
@@ -739,9 +739,15 @@ cr.define('options', function() {
       customizeSyncButton.hidden = !this.signedIn_ ||
                                    syncData.managed ||
                                    !syncData.syncSystemEnabled;
-      customizeSyncButton.textContent = syncData.setupCompleted ?
+
+      // Only modify the customize button's text if the new text is different.
+      // Otherwise, it can affect search-highlighting in the settings page.
+      // See http://crbug.com/268265.
+      var customizeSyncButtonNewText = syncData.setupCompleted ?
           loadTimeData.getString('customizeSync') :
           loadTimeData.getString('syncButtonTextStart');
+      if (customizeSyncButton.textContent != customizeSyncButtonNewText)
+        customizeSyncButton.textContent = customizeSyncButtonNewText;
 
       // Disable the "sign in" button if we're currently signing in, or if we're
       // already signed in and signout is not allowed.
@@ -782,7 +788,7 @@ cr.define('options', function() {
         if (cr.isChromeOS && syncData.hasError)
           SyncSetupOverlay.doSignOutOnAuthError();
         else
-          SyncSetupOverlay.showErrorUI();
+          SyncSetupOverlay.showSetupUI();
       };
 
       if (syncData.hasError)
@@ -1487,7 +1493,6 @@ cr.define('options', function() {
     'updateAccountPicture',
     'updateAutoLaunchState',
     'updateDefaultBrowserState',
-    'updateInstantCheckboxState',
     'updateSearchEngines',
     'updateStartupPages',
     'updateSyncState',

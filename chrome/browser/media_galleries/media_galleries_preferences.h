@@ -14,7 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/storage_monitor/removable_storage_observer.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
@@ -199,7 +199,7 @@ class MediaGalleriesPreferences : public BrowserContextKeyedService,
   // BrowserContextKeyedService implementation:
   virtual void Shutdown() OVERRIDE;
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Returns true if the media gallery preferences system has ever been used
   // for this profile. To be exact, it checks if a gallery has ever been added

@@ -22,22 +22,11 @@
 // TranslateInfoBarDelegate ---------------------------------------------------
 
 InfoBar* TranslateInfoBarDelegate::CreateInfoBar(InfoBarService* owner) {
-  TranslateInfoBarBase* infobar = NULL;
-  switch (infobar_type_) {
-    case BEFORE_TRANSLATE:
-      infobar = new BeforeTranslateInfoBar(owner, this);
-      break;
-    case AFTER_TRANSLATE:
-      infobar = new AfterTranslateInfoBar(owner, this);
-      break;
-    case TRANSLATING:
-    case TRANSLATION_ERROR:
-      infobar = new TranslateMessageInfoBar(owner, this);
-      break;
-    default:
-      NOTREACHED();
-  }
-  return infobar;
+  if (infobar_type_ == BEFORE_TRANSLATE)
+    return new BeforeTranslateInfoBar(owner, this);
+  if (infobar_type_ == AFTER_TRANSLATE)
+    return new AfterTranslateInfoBar(owner, this);
+  return new TranslateMessageInfoBar(owner, this);
 }
 
 
@@ -63,7 +52,7 @@ TranslateInfoBarBase::TranslateInfoBarBase(InfoBarService* owner,
       background_color_animation_->Hide();
     }
   } else {
-    background_error_percent_ = delegate->IsError() ? 1 : 0;
+    background_error_percent_ = delegate->is_error() ? 1 : 0;
   }
 }
 
@@ -138,13 +127,13 @@ void TranslateInfoBarBase::InitWidgets() {
     return;
 
   // The options button sits outside the translate_box so that it can be end
-  // packed in hbox_.
+  // packed in hbox().
   GtkWidget* options_menu_button = CreateMenuButton(
       l10n_util::GetStringUTF8(IDS_TRANSLATE_INFOBAR_OPTIONS));
-  Signals()->Connect(options_menu_button, "clicked",
+  signals()->Connect(options_menu_button, "clicked",
                      G_CALLBACK(&OnOptionsClickedThunk), this);
   gtk_widget_show_all(options_menu_button);
-  gtk_util::CenterWidgetInHBox(hbox_, options_menu_button, true, 0);
+  gtk_util::CenterWidgetInHBox(hbox(), options_menu_button, true, 0);
 }
 
 bool TranslateInfoBarBase::ShowOptionsMenuButton() const {

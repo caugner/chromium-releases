@@ -98,6 +98,11 @@ class CHROMEOS_EXPORT InputMethodManager {
   // extension input methods.
   virtual scoped_ptr<InputMethodDescriptors> GetActiveInputMethods() const = 0;
 
+  // Returns the list of input methods we can select (i.e. active) including
+  // extension input methods.
+  // The same as GetActiveInputMethods but returns reference to internal list.
+  virtual const std::vector<std::string>& GetActiveInputMethodIds() const = 0;
+
   // Returns the number of active input methods including extension input
   // methods.
   virtual size_t GetNumActiveInputMethods() const = 0;
@@ -125,11 +130,19 @@ class CHROMEOS_EXPORT InputMethodManager {
   virtual bool EnableInputMethods(
       const std::vector<std::string>& new_active_input_method_ids) = 0;
 
+  // Adds one entry to the list of active input method IDs, and then starts or
+  // stops the system input method framework as needed.
+  virtual bool EnableInputMethod(
+      const std::string& new_active_input_method_id) = 0;
+
   // Remaps old input methods like "mozc" to new input methods. Return true if
   // at least one IME is migrated.
   // TODO(nona): Remove this function after few milestones are passed.
   //             (http://crbug.com/236747)
   virtual bool MigrateOldInputMethods(
+      std::vector<std::string>* input_method_ids) = 0;
+  virtual bool MigrateKoreanKeyboard(
+      const std::string& keyboard_id,
       std::vector<std::string>* input_method_ids) = 0;
 
   // Updates a configuration of a system input method engine with |value|.
@@ -157,6 +170,9 @@ class CHROMEOS_EXPORT InputMethodManager {
   // Sets the list of extension IME ids which should be enabled.
   virtual void SetEnabledExtensionImes(std::vector<std::string>* ids) = 0;
 
+  // Sets current input method to default (first owners, then hardware).
+  virtual void SetInputMethodDefault() = 0;
+
   // Gets the descriptor of the input method which is currently selected.
   virtual InputMethodDescriptor GetCurrentInputMethod() const = 0;
 
@@ -177,11 +193,15 @@ class CHROMEOS_EXPORT InputMethodManager {
   virtual bool SwitchToNextInputMethod() = 0;
 
   // Switches the current input method (or keyboard layout) to the previous one.
-  virtual bool SwitchToPreviousInputMethod() = 0;
+  virtual bool SwitchToPreviousInputMethod(
+      const ui::Accelerator& accelerator) = 0;
 
   // Switches to an input method (or keyboard layout) which is associated with
   // the |accelerator|.
   virtual bool SwitchInputMethod(const ui::Accelerator& accelerator) = 0;
+
+  // If keyboard layout can be uset at login screen
+  virtual bool IsFullLatinKeyboard(const std::string& layout) const = 0;
 };
 
 }  // namespace input_method

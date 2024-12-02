@@ -10,9 +10,9 @@
 #include "base/json/json_reader.h"
 #include "base/prefs/pref_service.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
@@ -42,6 +42,8 @@ const char* kPrefToManageType[] = {
   NULL,  // No policy for default value of media stream camera
   NULL,  // No policy for default value of protocol handlers
   NULL,  // No policy for default value of PPAPI broker
+  NULL,  // No policy for default value of multiple automatic downloads
+  NULL,  // No policy for default value of MIDI system exclusive requests
 #if defined(OS_WIN)
   NULL,  // No policy for default value of "switch to desktop"
 #endif
@@ -117,7 +119,7 @@ const PrefsForManagedContentSettingsMapEntry
 namespace content_settings {
 
 // static
-void PolicyProvider::RegisterUserPrefs(
+void PolicyProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(prefs::kManagedAutoSelectCertificateForUrls,
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
@@ -347,9 +349,8 @@ void PolicyProvider::GetAutoSelectCertificateSettingsFromPreferences(
         static_cast<base::DictionaryValue*>(value.release()));
     std::string pattern_str;
     bool pattern_read = pattern_filter_pair->GetString("pattern", &pattern_str);
-    base::Value* cert_filter_ptr = NULL;
-    bool filter_read = pattern_filter_pair->Remove("filter", &cert_filter_ptr);
-    scoped_ptr<base::Value> cert_filter(cert_filter_ptr);
+    scoped_ptr<base::Value> cert_filter;
+    bool filter_read = pattern_filter_pair->Remove("filter", &cert_filter);
     if (!pattern_read || !filter_read ||
         !cert_filter->IsType(base::Value::TYPE_DICTIONARY)) {
       VLOG(1) << "Ignoring invalid certificate auto select setting. Reason:"

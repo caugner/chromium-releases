@@ -5,7 +5,7 @@
 #ifndef UI_UI_VIEWS_TOUCHUI_TOUCH_SELECTION_CONTROLLER_IMPL_H_
 #define UI_UI_VIEWS_TOUCHUI_TOUCH_SELECTION_CONTROLLER_IMPL_H_
 
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "ui/base/touch/touch_editing_controller.h"
 #include "ui/gfx/point.h"
 #include "ui/views/touchui/touch_editing_menu.h"
@@ -91,6 +91,9 @@ class VIEWS_EXPORT TouchSelectionControllerImpl
 
   // Pointer to the SelectionHandleView being dragged during a drag session.
   EditingHandleView* dragging_handle_;
+
+  gfx::Rect selection_end_point_1;
+  gfx::Rect selection_end_point_2;
 
   DISALLOW_COPY_AND_ASSIGN(TouchSelectionControllerImpl);
 };

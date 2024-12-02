@@ -16,7 +16,7 @@
 #include "base/strings/string16.h"
 #include "components/autofill/content/browser/wallet/required_action.h"
 #include "components/autofill/content/browser/wallet/wallet_address.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace base {
 class DictionaryValue;
@@ -27,6 +27,8 @@ class Image;
 }
 
 namespace autofill {
+
+class AutofillType;
 
 FORWARD_DECLARE_TEST(WalletInstrumentWrapperTest, GetInfoCreditCardExpMonth);
 FORWARD_DECLARE_TEST(WalletInstrumentWrapperTest,
@@ -88,8 +90,8 @@ class WalletItems {
     base::string16 DisplayNameDetail() const;
 
     // Gets info that corresponds with |type|.
-    base::string16 GetInfo(AutofillFieldType type,
-                     const std::string& app_locale) const;
+    base::string16 GetInfo(const AutofillType& type,
+                           const std::string& app_locale) const;
 
     // Returns the display type of the and last four digits (e.g. Visa - 4444).
     base::string16 TypeAndLastFourDigits() const;
@@ -118,7 +120,7 @@ class WalletItems {
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateMaskedInstrument);
     FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
 
-    MaskedInstrument(const base::string16& descriptve_name,
+    MaskedInstrument(const base::string16& descriptive_name,
                      const Type& type,
                      const std::vector<base::string16>& supported_currencies,
                      const base::string16& last_four_digits,

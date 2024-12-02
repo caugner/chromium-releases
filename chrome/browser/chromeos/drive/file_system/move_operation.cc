@@ -148,33 +148,33 @@ void MoveOperation::Rename(const std::string& src_id,
   // Drop the .g<something> extension from |new_name| if the file being
   // renamed is a hosted document and |new_name| has the same .g<something>
   // extension as the file.
-  const base::FilePath& new_name_arg(
-      new_name_has_hosted_extension ? new_name.RemoveExtension() : new_name);
+  const std::string new_title = new_name_has_hosted_extension ?
+      new_name.RemoveExtension().AsUTF8Unsafe() :
+      new_name.AsUTF8Unsafe();
 
   // Rename on the server.
   scheduler_->RenameResource(src_id,
-                             new_name_arg.AsUTF8Unsafe(),
+                             new_title,
                              base::Bind(&MoveOperation::RenameLocally,
                                         weak_ptr_factory_.GetWeakPtr(),
                                         src_path,
-                                        new_name_arg,
+                                        new_title,
                                         callback));
 }
 
 void MoveOperation::RenameLocally(const base::FilePath& src_path,
-                                  const base::FilePath& new_name,
+                                  const std::string& new_title,
                                   const FileMoveCallback& callback,
                                   google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  const FileError error = util::GDataToFileError(status);
+  const FileError error = GDataToFileError(status);
   if (error != FILE_ERROR_OK) {
     callback.Run(error, base::FilePath());
     return;
   }
-  metadata_->RenameEntryOnUIThread(src_path, new_name.AsUTF8Unsafe(), callback);
+  metadata_->RenameEntryOnUIThread(src_path, new_title, callback);
 }
-
 
 void MoveOperation::AddToDirectory(const std::string& src_id,
                                    const std::string& dest_dir_id,
@@ -198,7 +198,7 @@ void MoveOperation::AddToDirectoryLocally(const base::FilePath& src_path,
                                           google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  const FileError error = util::GDataToFileError(status);
+  const FileError error = GDataToFileError(status);
   if (error != FILE_ERROR_OK) {
     callback.Run(error, base::FilePath());
     return;
@@ -231,7 +231,7 @@ void MoveOperation::RemoveFromDirectoryCompleted(
     const FileOperationCallback& callback,
     google_apis::GDataErrorCode status) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  callback.Run(util::GDataToFileError(status));
+  callback.Run(GDataToFileError(status));
 }
 
 }  // namespace file_system

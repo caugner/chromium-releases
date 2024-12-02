@@ -8,7 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
@@ -148,6 +148,11 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     virtual std::string GetUILanguage() OVERRIDE;
     virtual void PreCacheFont(const void* logfontw) OVERRIDE;
     virtual void SetActiveURL(const std::string& url) OVERRIDE;
+    virtual PP_Resource CreateBrowserFont(
+        Connection connection,
+        PP_Instance instance,
+        const PP_BrowserFont_Trusted_Description& desc,
+        const Preferences& prefs) OVERRIDE;
 
    private:
     base::MessageLoopProxy* ipc_message_loop_;  // Weak

@@ -5,6 +5,9 @@
 #ifndef NET_SPDY_SPDY_TEST_UTIL_COMMON_H_
 #define NET_SPDY_SPDY_TEST_UTIL_COMMON_H_
 
+#include <string>
+#include <vector>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "crypto/ec_private_key.h"
@@ -34,6 +37,8 @@ namespace net {
 
 class BoundNetLog;
 class SpdySession;
+class SpdySessionKey;
+class SpdySessionPool;
 class SpdyStream;
 class SpdyStreamRequest;
 
@@ -42,6 +47,10 @@ class SpdyStreamRequest;
 const char kDefaultURL[] = "http://www.google.com";
 const char kUploadData[] = "hello!";
 const int kUploadDataSize = arraysize(kUploadData)-1;
+
+// SpdyNextProtos returns a vector of next protocols for negotiating
+// SPDY.
+std::vector<NextProto> SpdyNextProtos();
 
 // Chop a frame into an array of MockWrites.
 // |data| is the frame to chop.
@@ -105,7 +114,7 @@ bool GetSpdyPriority(SpdyMajorVersion version,
 // on failure.
 base::WeakPtr<SpdyStream> CreateStreamSynchronously(
     SpdyStreamType type,
-    const scoped_refptr<SpdySession>& session,
+    const base::WeakPtr<SpdySession>& session,
     const GURL& url,
     RequestPriority priority,
     const BoundNetLog& net_log);
@@ -225,28 +234,59 @@ class SpdyURLRequestContext : public URLRequestContext {
   net::URLRequestContextStorage storage_;
 };
 
+// Equivalent to pool->GetIfExists(spdy_session_key, BoundNetLog()) != NULL.
+bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key);
+
+// Creates a SPDY session for the given key and puts it in the SPDY
+// session pool in |http_session|. A SPDY session for |key| must not
+// already exist.
+base::WeakPtr<SpdySession> CreateInsecureSpdySession(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    const BoundNetLog& net_log);
+
+// Tries to create a SPDY session for the given key but expects the
+// attempt to fail with the given error. A SPDY session for |key| must
+// not already exist.
+void TryCreateInsecureSpdySessionExpectingFailure(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    Error expected_error,
+    const BoundNetLog& net_log);
+
+// Like CreateInsecureSpdySession(), but uses TLS.
+base::WeakPtr<SpdySession> CreateSecureSpdySession(
+    const scoped_refptr<HttpNetworkSession>& http_session,
+    const SpdySessionKey& key,
+    const BoundNetLog& net_log);
+
+// Creates an insecure SPDY session for the given key and puts it in
+// |pool|. The returned session will neither receive nor send any
+// data. A SPDY session for |key| must not already exist.
+base::WeakPtr<SpdySession> CreateFakeSpdySession(SpdySessionPool* pool,
+                                                 const SpdySessionKey& key);
+
+// Tries to create an insecure SPDY session for the given key but
+// expects the attempt to fail with the given error. The session will
+// neither receive nor send any data. A SPDY session for |key| must
+// not already exist.
+void TryCreateFakeSpdySessionExpectingFailure(SpdySessionPool* pool,
+                                              const SpdySessionKey& key,
+                                              Error expected_error);
+
 class SpdySessionPoolPeer {
  public:
   explicit SpdySessionPoolPeer(SpdySessionPool* pool);
 
-  void AddAlias(const IPEndPoint& address, const SpdySessionKey& key);
   void RemoveAliases(const SpdySessionKey& key);
-  void RemoveSpdySession(const scoped_refptr<SpdySession>& session);
   void DisableDomainAuthenticationVerification();
-  void EnableSendingInitialSettings(bool enabled);
+  void SetEnableSendingInitialData(bool enabled);
 
  private:
   SpdySessionPool* const pool_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPoolPeer);
 };
-
-// TODO(ttuttle): Move these somewhere more widely-accessible; surely this is
-// not the only place that needs such functions.
-NextProto NextProtoFromSpdyVersion(SpdyMajorVersion spdy_version);
-// TODO(akalin): Merge this with NPNToSpdyVersion() in
-// spdy_session.cc.
-SpdyMajorVersion SpdyVersionFromNextProto(NextProto next_proto);
 
 class SpdyTestUtil {
  public:

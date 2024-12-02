@@ -10,9 +10,34 @@
 #include "cc/resources/raster_worker_pool.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/resource_provider.h"
-#include "cc/resources/tile_manager.h"
 
 namespace cc {
+
+class TileManager;
+
+// Tile manager classifying tiles into a few basic bins:
+enum ManagedTileBin {
+  NOW_AND_READY_TO_DRAW_BIN = 0,  // Ready to draw and within viewport.
+  NOW_BIN = 1,                    // Needed ASAP.
+  SOON_BIN = 2,                   // Impl-side version of prepainting.
+  EVENTUALLY_AND_ACTIVE_BIN = 3,  // Nice to have, and has a task or resource.
+  EVENTUALLY_BIN = 4,             // Nice to have, if we've got memory and time.
+  NEVER_AND_ACTIVE_BIN = 5,       // Dont bother, but has a task or resource.
+  NEVER_BIN = 6,                  // Dont bother.
+  NUM_BINS = 7
+  // NOTE: Be sure to update ManagedTileBinAsValue and kBinPolicyMap when adding
+  // or reordering fields.
+};
+scoped_ptr<base::Value> ManagedTileBinAsValue(
+    ManagedTileBin bin);
+
+enum ManagedTileBinPriority {
+  HIGH_PRIORITY_BIN = 0,
+  LOW_PRIORITY_BIN = 1,
+  NUM_BIN_PRIORITIES = 2
+};
+scoped_ptr<base::Value> ManagedTileBinPriorityAsValue(
+    ManagedTileBinPriority bin);
 
 // This is state that is specific to a tile that is
 // managed by the TileManager.
@@ -64,13 +89,19 @@ class CC_EXPORT ManagedTileState {
       void SetResourceForTesting(scoped_ptr<ResourcePool::Resource> resource) {
         resource_ = resource.Pass();
       }
-
       const ResourcePool::Resource* GetResourceForTesting() const {
         return resource_.get();
+      }
+      void SetSolidColorForTesting(SkColor color) {
+        set_solid_color(color);
+      }
+      void SetHasTextForTesting(bool has_text) {
+        has_text_ = has_text;
       }
 
     private:
       friend class TileManager;
+      friend class PrioritizedTileSet;
       friend class Tile;
       friend class ManagedTileState;
 
@@ -109,25 +140,27 @@ class CC_EXPORT ManagedTileState {
 
   // Ephemeral state, valid only during TileManager::ManageTiles.
   bool is_in_never_bin_on_both_trees() const {
-    return bin[HIGH_PRIORITY_BIN] == NEVER_BIN &&
-           bin[LOW_PRIORITY_BIN] == NEVER_BIN;
-  }
-  bool is_in_now_bin_on_either_tree() const {
-    return bin[HIGH_PRIORITY_BIN] == NOW_BIN ||
-           bin[LOW_PRIORITY_BIN] == NOW_BIN;
+    return (bin[HIGH_PRIORITY_BIN] == NEVER_BIN ||
+            bin[HIGH_PRIORITY_BIN] == NEVER_AND_ACTIVE_BIN) &&
+           (bin[LOW_PRIORITY_BIN] == NEVER_BIN ||
+            bin[LOW_PRIORITY_BIN] == NEVER_AND_ACTIVE_BIN);
   }
 
-  TileManagerBin bin[NUM_BIN_PRIORITIES];
-  TileManagerBin tree_bin[NUM_TREES];
+  ManagedTileBin bin[NUM_BIN_PRIORITIES];
+  ManagedTileBin tree_bin[NUM_TREES];
 
   // The bin that the tile would have if the GPU memory manager had
   // a maximally permissive policy, send to the GPU memory manager
   // to determine policy.
-  TileManagerBin gpu_memmgr_stats_bin;
+  ManagedTileBin gpu_memmgr_stats_bin;
   TileResolution resolution;
   bool required_for_activation;
   float time_to_needed_in_seconds;
   float distance_to_visible_in_pixels;
+  bool visible_and_ready_to_draw;
+
+  // Priority for this state from the last time we assigned memory.
+  unsigned scheduled_priority;
 };
 
 }  // namespace cc

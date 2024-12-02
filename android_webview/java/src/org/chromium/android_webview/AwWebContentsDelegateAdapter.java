@@ -10,7 +10,9 @@ import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.webkit.ConsoleMessage;
+import android.webkit.ValueCallback;
 
 import org.chromium.content.browser.ContentViewCore;
 
@@ -36,11 +38,14 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
     final AwContentsClient mContentsClient;
     final PreferredSizeChangedListener mPreferredSizeChangedListener;
+    final View mContainerView;
 
     public AwWebContentsDelegateAdapter(AwContentsClient contentsClient,
-            PreferredSizeChangedListener preferredSizeChangedListener) {
+            PreferredSizeChangedListener preferredSizeChangedListener,
+            View containerView) {
         mContentsClient = contentsClient;
         mPreferredSizeChangedListener = preferredSizeChangedListener;
+        mContainerView = containerView;
     }
 
     @Override
@@ -50,7 +55,43 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
     @Override
     public void handleKeyboardEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            int direction;
+            switch (event.getKeyCode()) {
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    direction = View.FOCUS_DOWN;
+                    break;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    direction = View.FOCUS_UP;
+                    break;
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                    direction = View.FOCUS_LEFT;
+                    break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    direction = View.FOCUS_RIGHT;
+                    break;
+                default:
+                    direction = 0;
+                    break;
+            }
+            if (direction != 0 && tryToMoveFocus(direction)) return;
+        }
         mContentsClient.onUnhandledKeyEvent(event);
+    }
+
+    @Override
+    public boolean takeFocus(boolean reverse) {
+        int direction =
+            (reverse == (mContainerView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL)) ?
+            View.FOCUS_RIGHT : View.FOCUS_LEFT;
+        if (tryToMoveFocus(direction)) return true;
+        direction = reverse ? View.FOCUS_UP : View.FOCUS_DOWN;
+        return tryToMoveFocus(direction);
+    }
+
+    private boolean tryToMoveFocus(int direction) {
+        View focus = mContainerView.focusSearch(direction);
+        return focus != null && focus != mContainerView && focus.requestFocus();
     }
 
     @Override
@@ -85,15 +126,16 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
-    public void openNewTab(String url, boolean incognito) {
-        // TODO: implement
+    public void openNewTab(String url, String extraHeaders, byte[] postData, int disposition) {
+        // This is only called in chrome layers.
+        assert false;
     }
 
     @Override
     public boolean addNewContents(int nativeSourceWebContents, int nativeWebContents,
             int disposition, Rect initialPosition, boolean userGesture) {
-        // TODO: implement
-        return false;
+        // This is overridden native side; see the other addNewContents overload.
+        throw new RuntimeException("Impossible");
     }
 
     @Override
@@ -133,6 +175,29 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         Message resend = handler.obtainMessage(MSG_CONTINUE_PENDING_RELOAD);
         Message dontResend = handler.obtainMessage(MSG_CANCEL_PENDING_RELOAD);
         mContentsClient.onFormResubmission(dontResend, resend);
+    }
+
+    @Override
+    public void runFileChooser(final int processId, final int renderId, final int mode_flags,
+            String acceptTypes, String title, String defaultFilename, boolean capture) {
+        AwContentsClient.FileChooserParams params = new AwContentsClient.FileChooserParams();
+        params.mode = mode_flags;
+        params.acceptTypes = acceptTypes;
+        params.title = title;
+        params.defaultFilename = defaultFilename;
+        params.capture = capture;
+
+        mContentsClient.showFileChooser(new ValueCallback<String[]>() {
+            boolean completed = false;
+            @Override
+            public void onReceiveValue(String[] results) {
+                if (completed) {
+                    throw new IllegalStateException("Duplicate showFileChooser result");
+                }
+                completed = true;
+                nativeFilesSelectedInChooser(processId, renderId, mode_flags, results);
+            }
+        }, params);
     }
 
     @Override

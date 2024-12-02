@@ -3,12 +3,15 @@
 // found in the LICENSE file.
 
 #include "base/base_paths.h"
+#include "base/command_line.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(ENABLE_RLZ)
@@ -41,7 +44,6 @@ TestSearchTermsData::TestSearchTermsData(const std::string& google_base_url)
 std::string TestSearchTermsData::GoogleBaseURLValue() const {
   return google_base_url_;
 }
-
 
 // TemplateURLTest ------------------------------------------------------------
 
@@ -164,6 +166,101 @@ TEST_F(TemplateURLTest, URLRefTestEncoding) {
   EXPECT_EQ("http://fooxxutf-8ya/", result.spec());
 }
 
+TEST_F(TemplateURLTest, URLRefTestImageURLWithPOST) {
+  const char kInvalidPostParamsString[] =
+      "unknown_template={UnknownTemplate},bad_value=bad{value},"
+      "{google:sbiSource}";
+  // List all accpectable parameter format in valid_post_params_string. it is
+  // expected like: "name0=,name1=value1,name2={template1}"
+  const char kValidPostParamsString[] =
+      "image_content={google:imageThumbnail},image_url={google:imageURL},"
+      "sbisrc={google:imageSearchSource},language={language},empty_param=,"
+      "constant_param=constant";
+  const char KImageSearchURL[] = "http://foo.com/sbi";
+
+  TemplateURLData data;
+  data.image_url = KImageSearchURL;
+
+  // Try to parse invalid post parameters.
+  data.image_url_post_params = kInvalidPostParamsString;
+  TemplateURL url_bad(NULL, data);
+  ASSERT_FALSE(url_bad.image_url_ref().IsValid());
+  const TemplateURLRef::PostParams& bad_post_params =
+      url_bad.image_url_ref().post_params_;
+  ASSERT_EQ(2U, bad_post_params.size());
+  EXPECT_EQ("unknown_template", bad_post_params[0].first);
+  EXPECT_EQ("{UnknownTemplate}", bad_post_params[0].second);
+  EXPECT_EQ("bad_value", bad_post_params[1].first);
+  EXPECT_EQ("bad{value}", bad_post_params[1].second);
+
+  // Try to parse valid post parameters.
+  data.image_url_post_params = kValidPostParamsString;
+  TemplateURL url(NULL, data);
+  ASSERT_TRUE(url.image_url_ref().IsValid());
+  ASSERT_FALSE(url.image_url_ref().SupportsReplacement());
+
+  // Check term replacement.
+  TemplateURLRef::SearchTermsArgs search_args(ASCIIToUTF16("X"));
+  search_args.image_thumbnail_content = "dummy-image-thumbnail";
+  search_args.image_url = GURL("http://dummyimage.com/dummy.jpg");
+  // Replacement operation with no post_data buffer should still return
+  // the parsed URL.
+  GURL result(url.image_url_ref().ReplaceSearchTerms(search_args));
+  ASSERT_TRUE(result.is_valid());
+  EXPECT_EQ(KImageSearchURL, result.spec());
+  TemplateURLRef::PostContent post_content;
+  TestSearchTermsData search_terms_data("http://X");
+  result = GURL(url.image_url_ref().ReplaceSearchTermsUsingTermsData(
+      search_args, search_terms_data, &post_content));
+  ASSERT_TRUE(result.is_valid());
+  EXPECT_EQ(KImageSearchURL, result.spec());
+  ASSERT_FALSE(post_content.first.empty());
+  ASSERT_FALSE(post_content.second.empty());
+
+  // Check parsed result of post parameters.
+  const TemplateURLRef::Replacements& replacements =
+      url.image_url_ref().replacements_;
+  const TemplateURLRef::PostParams& post_params =
+      url.image_url_ref().post_params_;
+  EXPECT_EQ(6U, post_params.size());
+  for (TemplateURLRef::PostParams::const_iterator i = post_params.begin();
+       i != post_params.end(); ++i) {
+    TemplateURLRef::Replacements::const_iterator j = replacements.begin();
+    for (; j != replacements.end(); ++j) {
+      if (j->is_post_param && j->index ==
+          static_cast<size_t>(i - post_params.begin())) {
+        switch (j->type) {
+          case TemplateURLRef::GOOGLE_IMAGE_THUMBNAIL:
+            EXPECT_EQ("image_content", i->first);
+            EXPECT_EQ(search_args.image_thumbnail_content, i->second);
+            break;
+          case TemplateURLRef::GOOGLE_IMAGE_URL:
+            EXPECT_EQ("image_url", i->first);
+            EXPECT_EQ(search_args.image_url.spec(), i->second);
+            break;
+          case TemplateURLRef::LANGUAGE:
+            EXPECT_EQ("language", i->first);
+            EXPECT_EQ("en", i->second);
+            break;
+          default:
+            ADD_FAILURE();  // Should never go here.
+        }
+        break;
+      }
+    }
+    if (j != replacements.end())
+      continue;
+    if (i->first == "empty_param") {
+      EXPECT_TRUE(i->second.empty());
+    } else if (i->first == "sbisrc") {
+      EXPECT_FALSE(i->second.empty());
+    } else {
+      EXPECT_EQ("constant_param", i->first);
+      EXPECT_EQ("constant", i->second);
+    }
+  }
+}
+
 // Test that setting the prepopulate ID from TemplateURL causes the stored
 // TemplateURLRef to handle parsing the URL parameters differently.
 TEST_F(TemplateURLTest, SetPrepopulatedAndParse) {
@@ -173,14 +270,15 @@ TEST_F(TemplateURLTest, SetPrepopulatedAndParse) {
   TemplateURLRef::Replacements replacements;
   bool valid = false;
   EXPECT_EQ("http://foo{fhqwhgads}bar", url.url_ref().ParseURL(
-      "http://foo{fhqwhgads}bar", &replacements, &valid));
+      "http://foo{fhqwhgads}bar", &replacements, NULL, &valid));
   EXPECT_TRUE(replacements.empty());
   EXPECT_TRUE(valid);
 
   data.prepopulate_id = 123;
   TemplateURL url2(NULL, data);
   EXPECT_EQ("http://foobar", url2.url_ref().ParseURL("http://foo{fhqwhgads}bar",
-                                                     &replacements, &valid));
+                                                     &replacements, NULL,
+                                                     &valid));
   EXPECT_TRUE(replacements.empty());
   EXPECT_TRUE(valid);
 }
@@ -230,7 +328,7 @@ TEST_F(TemplateURLTest, URLRefTestSearchTermsUsingTermsData) {
     EXPECT_TRUE(url.url_ref().IsValid());
     ASSERT_TRUE(url.url_ref().SupportsReplacement());
     GURL result(url.url_ref().ReplaceSearchTermsUsingTermsData(
-        TemplateURLRef::SearchTermsArgs(value.terms), search_terms_data));
+        TemplateURLRef::SearchTermsArgs(value.terms), search_terms_data, NULL));
     ASSERT_TRUE(result.is_valid());
     EXPECT_EQ(value.output, result.spec());
   }
@@ -666,7 +764,7 @@ TEST_F(TemplateURLTest, ParseURLEmpty) {
   TemplateURLRef::Replacements replacements;
   bool valid = false;
   EXPECT_EQ(std::string(),
-            url.url_ref().ParseURL(std::string(), &replacements, &valid));
+            url.url_ref().ParseURL(std::string(), &replacements, NULL, &valid));
   EXPECT_TRUE(replacements.empty());
   EXPECT_TRUE(valid);
 }
@@ -677,7 +775,8 @@ TEST_F(TemplateURLTest, ParseURLNoTemplateEnd) {
   TemplateURL url(NULL, data);
   TemplateURLRef::Replacements replacements;
   bool valid = false;
-  EXPECT_EQ(std::string(), url.url_ref().ParseURL("{", &replacements, &valid));
+  EXPECT_EQ(std::string(), url.url_ref().ParseURL("{", &replacements, NULL,
+                                                  &valid));
   EXPECT_TRUE(replacements.empty());
   EXPECT_FALSE(valid);
 }
@@ -688,7 +787,7 @@ TEST_F(TemplateURLTest, ParseURLNoKnownParameters) {
   TemplateURL url(NULL, data);
   TemplateURLRef::Replacements replacements;
   bool valid = false;
-  EXPECT_EQ("{}", url.url_ref().ParseURL("{}", &replacements, &valid));
+  EXPECT_EQ("{}", url.url_ref().ParseURL("{}", &replacements, NULL, &valid));
   EXPECT_TRUE(replacements.empty());
   EXPECT_TRUE(valid);
 }
@@ -700,7 +799,8 @@ TEST_F(TemplateURLTest, ParseURLTwoParameters) {
   TemplateURLRef::Replacements replacements;
   bool valid = false;
   EXPECT_EQ("{}{}",
-            url.url_ref().ParseURL("{}{{searchTerms}}", &replacements, &valid));
+            url.url_ref().ParseURL("{}{{searchTerms}}", &replacements, NULL,
+                                   &valid));
   ASSERT_EQ(1U, replacements.size());
   EXPECT_EQ(3U, replacements[0].index);
   EXPECT_EQ(TemplateURLRef::SEARCH_TERMS, replacements[0].type);
@@ -714,7 +814,8 @@ TEST_F(TemplateURLTest, ParseURLNestedParameter) {
   TemplateURLRef::Replacements replacements;
   bool valid = false;
   EXPECT_EQ("{",
-            url.url_ref().ParseURL("{{searchTerms}", &replacements, &valid));
+            url.url_ref().ParseURL("{{searchTerms}", &replacements, NULL,
+                                   &valid));
   ASSERT_EQ(1U, replacements.size());
   EXPECT_EQ(1U, replacements[0].index);
   EXPECT_EQ(TemplateURLRef::SEARCH_TERMS, replacements[0].type);
@@ -1031,4 +1132,94 @@ TEST_F(TemplateURLTest, ReplaceSearchTermsInURL) {
   EXPECT_TRUE(url.ReplaceSearchTermsInURL(
       GURL("http://google.com/alt/?q=#q=123"), search_terms, &result));
   EXPECT_EQ(GURL("http://google.com/alt/?q=#q=Bob Morane"), result);
+}
+
+// Test the |append_extra_query_params| field of SearchTermsArgs.
+TEST_F(TemplateURLTest, ExtraQueryParams) {
+  UIThreadSearchTermsData::SetGoogleBaseURL("http://www.google.com/");
+  TemplateURLData data;
+  // Pick a URL with replacements before, during, and after the query, to ensure
+  // we don't goof up any of them.
+  data.SetURL("{google:baseURL}search?q={searchTerms}"
+      "#{google:originalQueryForSuggestion}x");
+  TemplateURL url(NULL, data);
+
+  // Baseline: no command-line args, no |append_extra_query_params| flag.
+  TemplateURLRef::SearchTermsArgs search_terms(ASCIIToUTF16("abc"));
+  search_terms.original_query = ASCIIToUTF16("def");
+  search_terms.accepted_suggestion = 0;
+  EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
+            url.url_ref().ReplaceSearchTerms(search_terms));
+
+  // Set the flag.  Since there are no command-line args, this should have no
+  // effect.
+  search_terms.append_extra_query_params = true;
+  EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
+            url.url_ref().ReplaceSearchTerms(search_terms));
+
+  // Now append the command-line arg.  This should be inserted into the query.
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kExtraSearchQueryParams, "a=b");
+  EXPECT_EQ("http://www.google.com/search?a=b&q=abc#oq=def&x",
+            url.url_ref().ReplaceSearchTerms(search_terms));
+
+  // Turn off the flag.  Now the command-line arg should be ignored again.
+  search_terms.append_extra_query_params = false;
+  EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
+            url.url_ref().ReplaceSearchTerms(search_terms));
+}
+
+// Tests replacing pageClassification.
+TEST_F(TemplateURLTest, ReplacePageClassification) {
+  TemplateURLData data;
+  data.input_encodings.push_back("UTF-8");
+  data.SetURL("{google:baseURL}?{google:pageClassification}q={searchTerms}");
+  TemplateURL url(NULL, data);
+  EXPECT_TRUE(url.url_ref().IsValid());
+  ASSERT_TRUE(url.url_ref().SupportsReplacement());
+  TemplateURLRef::SearchTermsArgs search_terms_args(ASCIIToUTF16("foo"));
+
+  std::string result = url.url_ref().ReplaceSearchTerms(search_terms_args);
+  EXPECT_EQ("http://www.google.com/?q=foo", result);
+
+  search_terms_args.page_classification = AutocompleteInput::NEW_TAB_PAGE;
+  result = url.url_ref().ReplaceSearchTerms(search_terms_args);
+  EXPECT_EQ("http://www.google.com/?pgcl=1&q=foo", result);
+
+  search_terms_args.page_classification =
+      AutocompleteInput::HOMEPAGE;
+  result = url.url_ref().ReplaceSearchTerms(search_terms_args);
+  EXPECT_EQ("http://www.google.com/?pgcl=3&q=foo", result);
+}
+
+// Test the IsSearchResults function.
+TEST_F(TemplateURLTest, IsSearchResults) {
+  TemplateURLData data;
+  data.SetURL("http://bar/search?q={searchTerms}");
+  data.instant_url = "http://bar/instant#q={searchTerms}";
+  data.alternate_urls.push_back("http://bar/?q={searchTerms}");
+  data.alternate_urls.push_back("http://bar/#q={searchTerms}");
+  data.alternate_urls.push_back("http://bar/search#q{searchTerms}");
+  data.alternate_urls.push_back("http://bar/webhp#q={searchTerms}");
+  TemplateURL search_provider(NULL, data);
+
+  const struct {
+    const char* const url;
+    bool result;
+  } url_data[] = {
+    { "http://bar/search?q=foo&oq=foo", true, },
+    { "http://bar/?q=foo&oq=foo", true, },
+    { "http://bar/#output=search&q=foo&oq=foo", true, },
+    { "http://bar/webhp#q=foo&oq=foo", true, },
+    { "http://bar/#q=foo&oq=foo", true, },
+    { "http://bar/?ext=foo&q=foo#ref=bar", true, },
+    { "http://bar/url?url=http://www.foo.com/&q=foo#ref=bar", false, },
+    { "http://bar/", false, },
+    { "http://foo/", false, },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(url_data); ++i) {
+    EXPECT_EQ(url_data[i].result,
+              search_provider.IsSearchURL(GURL(url_data[i].url)));
+  }
 }

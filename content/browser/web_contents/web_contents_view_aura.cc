@@ -5,6 +5,7 @@
 #include "content/browser/web_contents/web_contents_view_aura.h"
 
 #include "base/auto_reset.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/renderer_host/dip_util.h"
@@ -32,6 +33,8 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view_delegate.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/drop_data.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
@@ -55,7 +58,6 @@
 #include "ui/gfx/image/image_png_rep.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
-#include "webkit/common/webdropdata.h"
 
 namespace content {
 WebContentsViewPort* CreateWebContentsView(
@@ -68,6 +70,11 @@ WebContentsViewPort* CreateWebContentsView(
 }
 
 namespace {
+
+bool IsScrollEndEffectEnabled() {
+  return CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kScrollEndEffect) == "1";
+}
 
 bool ShouldNavigateForward(const NavigationController& controller,
                            OverscrollMode mode) {
@@ -112,7 +119,7 @@ class OverscrollWindowDelegate : public ImageWindowDelegate {
     }
 
     gfx::Image image;
-    if (entry && entry->screenshot()) {
+    if (entry && entry->screenshot().get()) {
       std::vector<gfx::ImagePNGRep> image_reps;
       image_reps.push_back(gfx::ImagePNGRep(entry->screenshot(),
             ui::GetScaleFactorForNativeView(web_contents_window())));
@@ -228,8 +235,8 @@ class WebDragSourceAura : public base::MessageLoopForUI::Observer,
   DISALLOW_COPY_AND_ASSIGN(WebDragSourceAura);
 };
 
-// Utility to fill a ui::OSExchangeDataProvider object from WebDropData.
-void PrepareDragData(const WebDropData& drop_data,
+// Utility to fill a ui::OSExchangeDataProvider object from DropData.
+void PrepareDragData(const DropData& drop_data,
                      ui::OSExchangeData::Provider* provider) {
   if (!drop_data.text.string().empty())
     provider->SetString(drop_data.text.string());
@@ -239,7 +246,7 @@ void PrepareDragData(const WebDropData& drop_data,
     provider->SetHtml(drop_data.html.string(), drop_data.html_base_url);
   if (!drop_data.filenames.empty()) {
     std::vector<ui::OSExchangeData::FileInfo> filenames;
-    for (std::vector<WebDropData::FileInfo>::const_iterator it =
+    for (std::vector<DropData::FileInfo>::const_iterator it =
              drop_data.filenames.begin();
          it != drop_data.filenames.end(); ++it) {
       filenames.push_back(
@@ -257,9 +264,8 @@ void PrepareDragData(const WebDropData& drop_data,
   }
 }
 
-// Utility to fill a WebDropData object from ui::OSExchangeData.
-void PrepareWebDropData(WebDropData* drop_data,
-                        const ui::OSExchangeData& data) {
+// Utility to fill a DropData object from ui::OSExchangeData.
+void PrepareDropData(DropData* drop_data, const ui::OSExchangeData& data) {
   string16 plain_text;
   data.GetString(&plain_text);
   if (!plain_text.empty())
@@ -286,7 +292,7 @@ void PrepareWebDropData(WebDropData* drop_data,
     for (std::vector<ui::OSExchangeData::FileInfo>::const_iterator
              it = files.begin(); it != files.end(); ++it) {
       drop_data->filenames.push_back(
-          WebDropData::FileInfo(
+          DropData::FileInfo(
               UTF8ToUTF16(it->path.AsUTF8Unsafe()),
               UTF8ToUTF16(it->display_name.AsUTF8Unsafe())));
     }
@@ -480,7 +486,7 @@ class OverscrollNavigationOverlay :
         controller.GetEntryAtOffset(offset));
 
     gfx::Image image;
-    if (entry && entry->screenshot()) {
+    if (entry && entry->screenshot().get()) {
       std::vector<gfx::ImagePNGRep> image_reps;
       image_reps.push_back(gfx::ImagePNGRep(entry->screenshot(),
             ui::GetScaleFactorForNativeView(window_.get())));
@@ -960,10 +966,8 @@ gfx::Vector2d WebContentsViewAura::GetTranslationForOverscroll(int delta_x,
                                                                int delta_y) {
   if (current_overscroll_gesture_ == OVERSCROLL_NORTH ||
       current_overscroll_gesture_ == OVERSCROLL_SOUTH) {
-    // Ignore vertical overscroll.
-    return gfx::Vector2d();
+    return gfx::Vector2d(0, delta_y);
   }
-
   // For horizontal overscroll, scroll freely if a navigation is possible. Do a
   // resistive scroll otherwise.
   const NavigationControllerImpl& controller = web_contents_->GetController();
@@ -972,7 +976,6 @@ gfx::Vector2d WebContentsViewAura::GetTranslationForOverscroll(int delta_x,
     return gfx::Vector2d(std::max(-bounds.width(), delta_x), 0);
   else if (ShouldNavigateBack(controller, current_overscroll_gesture_))
     return gfx::Vector2d(std::min(bounds.width(), delta_x), 0);
-
   return gfx::Vector2d();
 }
 
@@ -1015,6 +1018,11 @@ void WebContentsViewAura::AttachTouchEditableToRenderView() {
   RenderWidgetHostViewAura* rwhva = ToRenderWidgetHostViewAura(
       web_contents_->GetRenderWidgetHostView());
   touch_editable_->AttachToView(rwhva);
+}
+
+void WebContentsViewAura::OverscrollUpdateForWebContentsDelegate(int delta_y) {
+  if (web_contents_->GetDelegate() && IsScrollEndEffectEnabled())
+    web_contents_->GetDelegate()->OverscrollUpdate(delta_y);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1088,7 +1096,7 @@ void WebContentsViewAura::RestoreFocus() {
     delegate_->RestoreFocus();
 }
 
-WebDropData* WebContentsViewAura::GetDropData() const {
+DropData* WebContentsViewAura::GetDropData() const {
   return current_drop_data_.get();
 }
 
@@ -1230,7 +1238,7 @@ void WebContentsViewAura::ShowPopupMenu(const gfx::Rect& bounds,
                                         int item_height,
                                         double item_font_size,
                                         int selected_item,
-                                        const std::vector<WebMenuItem>& items,
+                                        const std::vector<MenuItem>& items,
                                         bool right_aligned,
                                         bool allow_multiple_selection) {
   // External popup menus are only used on Mac and Android.
@@ -1238,7 +1246,7 @@ void WebContentsViewAura::ShowPopupMenu(const gfx::Rect& bounds,
 }
 
 void WebContentsViewAura::StartDragging(
-    const WebDropData& drop_data,
+    const DropData& drop_data,
     WebKit::WebDragOperationsMask operations,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,
@@ -1324,15 +1332,21 @@ void WebContentsViewAura::OnOverscrollUpdate(float delta_x, float delta_y) {
   settings.SetPreemptionStrategy(ui::LayerAnimator::IMMEDIATELY_SET_NEW_TARGET);
   gfx::Vector2d translate = GetTranslationForOverscroll(delta_x, delta_y);
   gfx::Transform transform;
-  transform.Translate(translate.x(), translate.y());
-  target->SetTransform(transform);
 
-  UpdateOverscrollWindowBrightness(delta_x);
+  // Vertical overscrolls don't participate in the navigation gesture.
+  if (current_overscroll_gesture_ != OVERSCROLL_NORTH &&
+      current_overscroll_gesture_ != OVERSCROLL_SOUTH) {
+    transform.Translate(translate.x(), translate.y());
+    target->SetTransform(transform);
+    UpdateOverscrollWindowBrightness(delta_x);
+  }
+
+  OverscrollUpdateForWebContentsDelegate(translate.y());
 }
 
 void WebContentsViewAura::OnOverscrollComplete(OverscrollMode mode) {
   UMA_HISTOGRAM_ENUMERATION("Overscroll.Completed", mode, OVERSCROLL_COUNT);
-
+  OverscrollUpdateForWebContentsDelegate(0);
   NavigationControllerImpl& controller = web_contents_->GetController();
   if (ShouldNavigateForward(controller, mode) ||
       ShouldNavigateBack(controller, mode)) {
@@ -1348,10 +1362,15 @@ void WebContentsViewAura::OnOverscrollModeChange(OverscrollMode old_mode,
   // Reset any in-progress overscroll animation first.
   ResetOverscrollTransform();
 
+  if (new_mode != OVERSCROLL_NONE && touch_editable_)
+    touch_editable_->OverscrollStarted();
+
   if (new_mode == OVERSCROLL_NONE ||
       !GetContentNativeView() ||
-      (navigation_overlay_.get() && navigation_overlay_->has_window())) {
+      ((new_mode == OVERSCROLL_EAST || new_mode == OVERSCROLL_WEST) &&
+       navigation_overlay_.get() && navigation_overlay_->has_window())) {
     current_overscroll_gesture_ = OVERSCROLL_NONE;
+    OverscrollUpdateForWebContentsDelegate(0);
   } else {
     aura::Window* target = GetWindowToAnimateForOverscroll();
     if (target) {
@@ -1363,7 +1382,9 @@ void WebContentsViewAura::OnOverscrollModeChange(OverscrollMode old_mode,
     PrepareContentWindowForOverscroll();
 
     current_overscroll_gesture_ = new_mode;
-    PrepareOverscrollWindow();
+    if (current_overscroll_gesture_ == OVERSCROLL_EAST ||
+        current_overscroll_gesture_ == OVERSCROLL_WEST)
+      PrepareOverscrollWindow();
 
     UMA_HISTOGRAM_ENUMERATION("Overscroll.Started", new_mode, OVERSCROLL_COUNT);
   }
@@ -1384,6 +1405,9 @@ void WebContentsViewAura::OnImplicitAnimationsCompleted() {
                                 completed_overscroll_gesture_)) {
     PrepareOverscrollNavigationOverlay();
     web_contents_->GetController().GoBack();
+  } else {
+    if (touch_editable_)
+      touch_editable_->OverscrollCompleted();
   }
 
   aura::Window* content = GetContentNativeView();
@@ -1505,10 +1529,11 @@ void WebContentsViewAura::OnMouseEvent(ui::MouseEvent* event) {
       web_contents_->GetDelegate()->ActivateContents(web_contents_);
       break;
     case ui::ET_MOUSE_MOVED:
+    case ui::ET_MOUSE_EXITED:
       web_contents_->GetDelegate()->ContentsMouseEvent(
           web_contents_,
           gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint(),
-          true);
+          event->type() == ui::ET_MOUSE_MOVED);
       break;
     default:
       break;
@@ -1522,9 +1547,9 @@ void WebContentsViewAura::OnDragEntered(const ui::DropTargetEvent& event) {
   if (drag_dest_delegate_)
     drag_dest_delegate_->DragInitialize(web_contents_);
 
-  current_drop_data_.reset(new WebDropData());
+  current_drop_data_.reset(new DropData());
 
-  PrepareWebDropData(current_drop_data_.get(), event.data());
+  PrepareDropData(current_drop_data_.get(), event.data());
   WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
 
   gfx::Point screen_pt =

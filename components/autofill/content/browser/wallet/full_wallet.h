@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/strings/string16.h"
 #include "components/autofill/content/browser/wallet/required_action.h"
 #include "components/autofill/content/browser/wallet/wallet_address.h"
 
@@ -19,6 +20,9 @@ class DictionaryValue;
 }
 
 namespace autofill {
+
+class AutofillType;
+
 namespace wallet {
 
 class FullWalletTest;
@@ -37,11 +41,25 @@ class FullWallet {
   static scoped_ptr<FullWallet>
       CreateFullWallet(const base::DictionaryValue& dictionary);
 
+  // Returns a wallet built from the provided clear-text data.
+  // Data is not validated; |pan|, |cvn| and |billing_address| must be set.
+  static scoped_ptr<FullWallet>
+      CreateFullWalletFromClearText(int expiration_month,
+                                    int expiration_year,
+                                    const std::string& pan,
+                                    const std::string& cvn,
+                                    scoped_ptr<Address> billing_address,
+                                    scoped_ptr<Address> shipping_address);
+
   // Returns corresponding data for |type|.
-  base::string16 GetInfo(AutofillFieldType type);
+  base::string16 GetInfo(const AutofillType& type);
 
   // Whether or not |action| is in |required_actions_|.
   bool HasRequiredAction(RequiredAction action) const;
+
+  // The type of the card that this FullWallet contains and the last four digits
+  // like this "Visa - 4111".
+  base::string16 TypeAndLastFourDigits();
 
   bool operator==(const FullWallet& other) const;
   bool operator!=(const FullWallet& other) const;
@@ -66,11 +84,13 @@ class FullWallet {
  private:
   friend class FullWalletTest;
   friend scoped_ptr<FullWallet> GetTestFullWallet();
+  friend scoped_ptr<FullWallet> GetTestFullWalletInstrumentOnly();
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, CreateFullWallet);
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, CreateFullWalletWithRequiredActions);
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, RestLengthCorrectDecryptionTest);
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, RestLengthUnderDecryptionTest);
   FRIEND_TEST_ALL_PREFIXES(FullWalletTest, GetCreditCardInfo);
+
   FullWallet(int expiration_month,
              int expiration_year,
              const std::string& iin,

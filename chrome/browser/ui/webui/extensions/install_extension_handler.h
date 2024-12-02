@@ -14,6 +14,8 @@ namespace content {
 class WebUIDataSource;
 }
 
+namespace extensions {
+
 // Handles installing an extension when its file is dragged onto the page.
 class InstallExtensionHandler : public content::WebUIMessageHandler {
  public:
@@ -43,6 +45,10 @@ class InstallExtensionHandler : public content::WebUIMessageHandler {
   // getting XSS'd.
   void HandleInstallMessage(const ListValue* args);
 
+  // Handles a notification from the JavaScript to install the directory
+  // currently being dragged.
+  void HandleInstallDirectoryMessage(const ListValue* args);
+
   // The path to the file that will be installed when HandleInstallMessage() is
   // called.
   base::FilePath file_to_install_;
@@ -50,5 +56,7 @@ class InstallExtensionHandler : public content::WebUIMessageHandler {
 
   DISALLOW_COPY_AND_ASSIGN(InstallExtensionHandler);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_UI_WEBUI_EXTENSIONS_INSTALL_EXTENSION_HANDLER_H_

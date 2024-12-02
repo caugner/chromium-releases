@@ -4,19 +4,18 @@
 
 #include "chrome/browser/extensions/extension_tab_util.h"
 
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension.h"
@@ -24,15 +23,17 @@
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace keys = extensions::tabs_constants;
 namespace tabs = extensions::api::tabs;
 
+using apps::ShellWindow;
 using content::NavigationEntry;
 using content::WebContents;
 using extensions::APIPermission;
@@ -43,8 +44,8 @@ namespace {
 extensions::WindowController* GetShellWindowController(
     const WebContents* contents) {
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  extensions::ShellWindowRegistry* registry =
-      extensions::ShellWindowRegistry::Get(profile);
+  apps::ShellWindowRegistry* registry =
+      apps::ShellWindowRegistry::Get(profile);
   if (!registry)
     return NULL;
   ShellWindow* shell_window =

@@ -5,10 +5,12 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/memory/weak_ptr.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
 #include "chrome/browser/ui/autofill/data_model_wrapper.h"
@@ -18,6 +20,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/autofill/content/browser/wallet/mock_wallet_client.h"
 #include "components/autofill/content/browser/wallet/wallet_test_util.h"
 #include "components/autofill/core/browser/autofill_common_test.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
@@ -31,6 +34,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 
@@ -78,6 +82,9 @@ class MockAutofillMetrics : public AutofillMetrics {
     return autocheckout_status_;
   }
 
+  MOCK_CONST_METHOD2(LogDialogDismissalState,
+                     void(DialogType dialog_type, DialogDismissalState state));
+
  private:
   DialogType dialog_type_;
   AutofillMetrics::DialogDismissalAction dialog_dismissal_action_;
@@ -99,8 +106,12 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
                                      dialog_type,
                                      base::Bind(&MockCallback)),
         metric_logger_(metric_logger),
+        mock_wallet_client_(
+            Profile::FromBrowserContext(contents->GetBrowserContext())->
+                GetRequestContext(), this),
         message_loop_runner_(runner),
-        use_validation_(false) {}
+        use_validation_(false),
+        weak_ptr_factory_(this) {}
 
   virtual ~TestAutofillDialogController() {}
 
@@ -111,7 +122,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   virtual string16 InputValidityMessage(
       DialogSection section,
-      AutofillFieldType type,
+      ServerFieldType type,
       const string16& value) OVERRIDE {
     if (!use_validation_)
       return string16();
@@ -129,7 +140,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
         section, inputs, validation_type);
   }
 
-  // Saving to Chrome is tested in AutofillDialogController unit tests.
+  // Saving to Chrome is tested in AutofillDialogControllerImpl unit tests.
   // TODO(estade): test that the view defaults to saving to Chrome.
   virtual bool ShouldOfferToSaveInChrome() const OVERRIDE {
     return false;
@@ -151,16 +162,24 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
     return &test_manager_;
   }
 
-  using AutofillDialogControllerImpl::DisableWallet;
   using AutofillDialogControllerImpl::IsEditingExistingData;
+  using AutofillDialogControllerImpl::IsManuallyEditingSection;
 
   void set_use_validation(bool use_validation) {
     use_validation_ = use_validation;
   }
 
+  base::WeakPtr<TestAutofillDialogController> AsWeakPtr() {
+    return weak_ptr_factory_.GetWeakPtr();
+  }
+
  protected:
   virtual PersonalDataManager* GetManager() OVERRIDE {
     return &test_manager_;
+  }
+
+  virtual wallet::WalletClient* GetWalletClient() OVERRIDE {
+    return &mock_wallet_client_;
   }
 
  private:
@@ -171,12 +190,16 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   const AutofillMetrics& metric_logger_;
   TestPersonalDataManager test_manager_;
+  testing::NiceMock<wallet::MockWalletClient> mock_wallet_client_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
   bool use_validation_;
 
   // A list of notifications to show in the notification area of the dialog.
   // This is used to control what |CurrentNotifications()| returns for testing.
   std::vector<DialogNotification> notifications_;
+
+  // Allows generation of WeakPtrs, so controller liveness can be tested.
+  base::WeakPtrFactory<TestAutofillDialogController> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillDialogController);
 };
@@ -188,8 +211,13 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
   AutofillDialogControllerTest() {}
   virtual ~AutofillDialogControllerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* cl) OVERRIDE {
-    cl->AppendSwitch(autofill::switches::kEnableInteractiveAutocomplete);
+  virtual void SetUpOnMainThread() OVERRIDE {
+    autofill::test::DisableSystemServices(browser()->profile());
+  }
+
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableInteractiveAutocomplete);
   }
 
   void InitializeControllerOfType(DialogType dialog_type) {
@@ -201,7 +229,7 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     form.user_submitted = true;
 
     FormFieldData field;
-    field.autocomplete_attribute = "email";
+    field.autocomplete_attribute = "shipping tel";
     form.fields.push_back(field);
 
     message_loop_runner_ = new content::MessageLoopRunner;
@@ -269,7 +297,8 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     ExpectDomMessage("clicked");
 
     AutofillDialogControllerImpl* controller =
-        delegate->GetDialogControllerForTesting();
+        static_cast<AutofillDialogControllerImpl*>(
+            delegate->GetDialogControllerForTesting());
     DCHECK(controller);
     return controller;
   }
@@ -295,11 +324,11 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     WaitForWebDB();
   }
 
+ private:
   void WaitForWebDB() {
     content::RunAllPendingInMessageLoop(content::BrowserThread::DB);
   }
 
- private:
   MockAutofillMetrics metric_logger_;
   TestAutofillDialogController* controller_;  // Weak reference.
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
@@ -307,9 +336,7 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(AutofillDialogControllerTest);
 };
 
-// TODO(isherman): Enable these tests on other platforms once the UI is
-// implemented on those platforms.
-#if defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS) || defined(OS_MACOSX)
 // Submit the form data.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Submit) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
@@ -338,6 +365,42 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Cancel) {
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Hide) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
   controller()->Hide();
+
+  RunMessageLoop();
+
+  EXPECT_EQ(AutofillMetrics::DIALOG_CANCELED,
+            metric_logger().dialog_dismissal_action());
+  EXPECT_EQ(DIALOG_TYPE_REQUEST_AUTOCOMPLETE, metric_logger().dialog_type());
+}
+
+// Ensure that Hide() will only destroy the controller object after the
+// message loop has run. Otherwise, there may be read-after-free issues
+// during some tests.
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, DeferredDestruction) {
+  InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
+
+  base::WeakPtr<TestAutofillDialogController> weak_ptr =
+      controller()->AsWeakPtr();
+  EXPECT_TRUE(weak_ptr.get());
+
+  controller()->Hide();
+  EXPECT_TRUE(weak_ptr.get());
+
+  RunMessageLoop();
+  EXPECT_FALSE(weak_ptr.get());
+}
+
+// Ensure that the expected metric is logged when the dialog is closed during
+// signin.
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, CloseDuringSignin) {
+  InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
+  controller()->SignInLinkClicked();
+
+  EXPECT_CALL(metric_logger(),
+              LogDialogDismissalState(
+                  DIALOG_TYPE_REQUEST_AUTOCOMPLETE,
+                  AutofillMetrics::DIALOG_CANCELED_DURING_SIGNIN));
+  controller()->GetTestableView()->CancelForTesting();
 
   RunMessageLoop();
 
@@ -412,7 +475,6 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AutocheckoutCancelled) {
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
-  controller()->DisableWallet(wallet::WalletClient::UNKNOWN_ERROR);
 
   AutofillProfile full_profile(test::GetFullProfile());
   controller()->GetTestingManager()->AddTestingProfile(&full_profile);
@@ -432,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
   // All inputs should be filled.
   AutofillProfileWrapper wrapper(&full_profile, 0);
   for (size_t i = 0; i < inputs.size(); ++i) {
-    EXPECT_EQ(wrapper.GetInfo(inputs[i].type),
+    EXPECT_EQ(wrapper.GetInfo(AutofillType(inputs[i].type)),
               view->GetTextContentsOfInput(inputs[i]));
   }
 
@@ -444,7 +506,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
     // Empty inputs should be filled, others should be left alone.
     string16 expectation =
         &inputs[i] == &triggering_input || users_input.empty() ?
-        wrapper.GetInfo(inputs[i].type) :
+        wrapper.GetInfo(AutofillType(inputs[i].type)) :
         users_input;
     expectations.push_back(expectation);
   }
@@ -462,8 +524,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
 
 // Test that Autocheckout steps are shown after submitting the
 // dialog for controller with type DIALOG_TYPE_AUTOCHECKOUT.
-IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
-                       AutocheckoutShowsSteps) {
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AutocheckoutShowsSteps) {
   InitializeControllerOfType(DIALOG_TYPE_AUTOCHECKOUT);
   controller()->AddAutocheckoutStep(AUTOCHECKOUT_STEP_PROXY_CARD);
 
@@ -475,6 +536,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   EXPECT_FALSE(controller()->ShouldShowDetailArea());
   EXPECT_FALSE(controller()->CurrentAutocheckoutSteps().empty());
   EXPECT_TRUE(controller()->ShouldShowProgressBar());
+  controller()->GetTestableView()->CancelForTesting();
+  RunMessageLoop();
 }
 
 // Test that Autocheckout steps are not showing after submitting the
@@ -496,9 +559,18 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
 
 // Tests that changing the value of a CC expiration date combobox works as
 // expected when Autofill is used to fill text inputs.
-IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillComboboxFromAutofill) {
+//
+// Flaky on Win7, WinXP, and Win Aura.  http://crbug.com/270314.
+// TODO(groby): Enable this test on mac once AutofillDialogCocoa handles
+// comboboxes for GetTextContentsForInput. http://crbug.com/270205
+#if defined(OS_MACOSX) || defined(OS_WIN)
+#define MAYBE_FillComboboxFromAutofill DISABLED_FillComboboxFromAutofill
+#else
+#define MAYBE_FillComboboxFromAutofill FillComboboxFromAutofill
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
+                       MAYBE_FillComboboxFromAutofill) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
-  controller()->DisableWallet(wallet::WalletClient::UNKNOWN_ERROR);
 
   CreditCard card1;
   test::SetCreditCardInfo(&card1, "JJ Smith", "4111111111111111", "12", "2018");
@@ -524,7 +596,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillComboboxFromAutofill) {
   // All inputs should be filled.
   AutofillCreditCardWrapper wrapper1(&card1);
   for (size_t i = 0; i < inputs.size(); ++i) {
-    EXPECT_EQ(wrapper1.GetInfo(inputs[i].type),
+    EXPECT_EQ(wrapper1.GetInfo(AutofillType(inputs[i].type)),
               view->GetTextContentsOfInput(inputs[i]));
   }
 
@@ -543,12 +615,12 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillComboboxFromAutofill) {
     if (&input == &triggering_input ||
         input.type == CREDIT_CARD_EXP_MONTH ||
         input.type == CREDIT_CARD_EXP_4_DIGIT_YEAR) {
-      EXPECT_EQ(wrapper2.GetInfo(input.type),
+      EXPECT_EQ(wrapper2.GetInfo(AutofillType(input.type)),
                 view->GetTextContentsOfInput(input));
     } else if (input.type == CREDIT_CARD_VERIFICATION_CODE) {
       EXPECT_TRUE(view->GetTextContentsOfInput(input).empty());
     } else {
-      EXPECT_EQ(wrapper1.GetInfo(input.type),
+      EXPECT_EQ(wrapper1.GetInfo(AutofillType(input.type)),
                 view->GetTextContentsOfInput(input));
     }
   }
@@ -570,12 +642,12 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillComboboxFromAutofill) {
     if (&input == &triggering_input ||
         input.type == CREDIT_CARD_EXP_MONTH ||
         input.type == CREDIT_CARD_EXP_4_DIGIT_YEAR) {
-      EXPECT_EQ(wrapper2.GetInfo(input.type),
+      EXPECT_EQ(wrapper2.GetInfo(AutofillType(input.type)),
                 view->GetTextContentsOfInput(input));
     } else if (input.type == CREDIT_CARD_VERIFICATION_CODE) {
       EXPECT_TRUE(view->GetTextContentsOfInput(input).empty());
     } else {
-      EXPECT_EQ(wrapper1.GetInfo(input.type),
+      EXPECT_EQ(wrapper1.GetInfo(AutofillType(input.type)),
                 view->GetTextContentsOfInput(input));
     }
   }
@@ -622,7 +694,6 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, WalletCreditCardDisabled) {
 // Ensure that expired cards trigger invalid suggestions.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, ExpiredCard) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
-  controller()->DisableWallet(wallet::WalletClient::UNKNOWN_ERROR);
 
   CreditCard verified_card(test::GetCreditCard());
   verified_card.set_origin("Chrome settings");
@@ -718,7 +789,6 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, NoCvcSegfault) {
   InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
-  controller()->DisableWallet(wallet::WalletClient::UNKNOWN_ERROR);
   controller()->set_use_validation(true);
 
   CreditCard credit_card(test::GetVerifiedCreditCard());
@@ -728,6 +798,92 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, NoCvcSegfault) {
   ASSERT_NO_FATAL_FAILURE(
       controller()->GetTestableView()->SubmitForTesting());
 }
-#endif  // defined(TOOLKIT_VIEWS)
+
+// Flaky on Win7, WinXP, and Win Aura.  http://crbug.com/270314.
+#if defined(OS_WIN)
+#define MAYBE_PreservedSections DISABLED_PreservedSections
+#else
+#define MAYBE_PreservedSections PreservedSections
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, MAYBE_PreservedSections) {
+  InitializeControllerOfType(DIALOG_TYPE_REQUEST_AUTOCOMPLETE);
+  controller()->set_use_validation(true);
+
+  // Set up some Autofill state.
+  CreditCard credit_card(test::GetVerifiedCreditCard());
+  controller()->GetTestingManager()->AddTestingCreditCard(&credit_card);
+
+  AutofillProfile profile(test::GetVerifiedProfile());
+  controller()->GetTestingManager()->AddTestingProfile(&profile);
+
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_CC));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_BILLING));
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_CC_BILLING));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_SHIPPING));
+
+  EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_CC));
+  EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_BILLING));
+  EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_SHIPPING));
+
+  // Set up some Wallet state.
+  controller()->OnUserNameFetchSuccess("user@example.com");
+  controller()->OnDidGetWalletItems(wallet::GetTestWalletItems());
+
+  ui::MenuModel* account_chooser = controller()->MenuModelForAccountChooser();
+  ASSERT_TRUE(account_chooser->IsItemCheckedAt(0));
+
+  // Check that the view's in the state we expect before starting to simulate
+  // user input.
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_CC));
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_BILLING));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_CC_BILLING));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_SHIPPING));
+
+  EXPECT_TRUE(controller()->IsManuallyEditingSection(SECTION_CC_BILLING));
+
+  // Create some valid inputted billing data.
+  const DetailInput& cc_number =
+      controller()->RequestedFieldsForSection(SECTION_CC_BILLING)[0];
+  EXPECT_EQ(CREDIT_CARD_NUMBER, cc_number.type);
+  TestableAutofillDialogView* view = controller()->GetTestableView();
+  view->SetTextContentsOfInput(cc_number, ASCIIToUTF16("4111111111111111"));
+
+  // Select "Add new shipping info..." from suggestions menu.
+  ui::MenuModel* shipping_model =
+      controller()->MenuModelForSection(SECTION_SHIPPING);
+  shipping_model->ActivatedAt(shipping_model->GetItemCount() - 2);
+
+  EXPECT_TRUE(controller()->IsManuallyEditingSection(SECTION_SHIPPING));
+
+  // Create some invalid, manually inputted shipping data.
+  const DetailInput& shipping_zip =
+      controller()->RequestedFieldsForSection(SECTION_SHIPPING)[5];
+  ASSERT_EQ(ADDRESS_HOME_ZIP, shipping_zip.type);
+  view->SetTextContentsOfInput(shipping_zip, ASCIIToUTF16("shipping zip"));
+
+  // Switch to using Autofill.
+  account_chooser->ActivatedAt(1);
+
+  // Check that appropriate sections are preserved and in manually editing mode
+  // (or disabled, in the case of the combined cc + billing section).
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_CC));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_BILLING));
+  EXPECT_FALSE(controller()->SectionIsActive(SECTION_CC_BILLING));
+  EXPECT_TRUE(controller()->SectionIsActive(SECTION_SHIPPING));
+
+  EXPECT_TRUE(controller()->IsManuallyEditingSection(SECTION_CC));
+  EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_BILLING));
+  EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_SHIPPING));
+
+  const DetailInput& new_cc_number =
+      controller()->RequestedFieldsForSection(SECTION_CC).front();
+  EXPECT_EQ(cc_number.type, new_cc_number.type);
+  EXPECT_EQ(ASCIIToUTF16("4111111111111111"),
+            view->GetTextContentsOfInput(new_cc_number));
+
+  EXPECT_NE(ASCIIToUTF16("shipping name"),
+            view->GetTextContentsOfInput(shipping_zip));
+}
+#endif  // defined(TOOLKIT_VIEWS) || defined(OS_MACOSX)
 
 }  // namespace autofill

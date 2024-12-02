@@ -5,8 +5,8 @@
 #include "chrome/browser/sync/sync_prefs.h"
 
 #include "base/command_line.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
@@ -24,7 +24,7 @@ using ::testing::StrictMock;
 class SyncPrefsTest : public testing::Test {
  protected:
   virtual void SetUp() OVERRIDE {
-    SyncPrefs::RegisterUserPrefs(pref_service_.registry());
+    SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
   }
 
   TestingPrefServiceSyncable pref_service_;

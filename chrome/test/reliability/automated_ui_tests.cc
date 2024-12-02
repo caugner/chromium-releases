@@ -21,11 +21,12 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/url_constants.h"
@@ -35,9 +36,8 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/reliability/automated_ui_tests.h"
 #include "chrome/test/ui/ui_test.h"
-#include "components/breakpad/common/breakpad_paths.h"
-#include "googleurl/src/gurl.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "url/gurl.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/view.h"
@@ -388,8 +388,6 @@ bool AutomatedUITest::DoAction(const std::string& action) {
     did_complete_action = ForceCrash();
   } else if (LowerCaseEqualsASCII(action, "dialog")) {
     did_complete_action = ExerciseDialog();
-  } else if (LowerCaseEqualsASCII(action, "downarrow")) {
-    did_complete_action = PressDownArrow();
   } else if (LowerCaseEqualsASCII(action, "downloads")) {
     did_complete_action = ShowDownloads();
   } else if (LowerCaseEqualsASCII(action, "duplicatetab")) {
@@ -423,18 +421,6 @@ bool AutomatedUITest::DoAction(const std::string& action) {
     did_complete_action = OpenAndActivateNewBrowserWindow(NULL);
   } else if (LowerCaseEqualsASCII(action, "options")) {
     did_complete_action = Options();
-  } else if (LowerCaseEqualsASCII(action, "pagedown")) {
-    did_complete_action = PressPageDown();
-  } else if (LowerCaseEqualsASCII(action, "pageup")) {
-    did_complete_action = PressPageUp();
-  } else if (LowerCaseEqualsASCII(action, "pressenterkey")) {
-    did_complete_action = PressEnterKey();
-  } else if (LowerCaseEqualsASCII(action, "pressescapekey")) {
-    did_complete_action = PressEscapeKey();
-  } else if (LowerCaseEqualsASCII(action, "pressspacebar")) {
-    did_complete_action = PressSpaceBar();
-  } else if (LowerCaseEqualsASCII(action, "presstabkey")) {
-    did_complete_action = PressTabKey();
   } else if (LowerCaseEqualsASCII(action, "reload")) {
     did_complete_action = ReloadPage();
   } else if (LowerCaseEqualsASCII(action, "restoretab")) {
@@ -472,8 +458,6 @@ bool AutomatedUITest::DoAction(const std::string& action) {
     did_complete_action = TestTaskManager();
   } else if (LowerCaseEqualsASCII(action, "testviewpasswords")) {
     did_complete_action = TestViewPasswords();
-  } else if (LowerCaseEqualsASCII(action, "uparrow")) {
-    did_complete_action = PressUpArrow();
   } else if (LowerCaseEqualsASCII(action, "viewpasswords")) {
     did_complete_action = OpenViewPasswordsDialog();
   } else if (LowerCaseEqualsASCII(action, "viewsource")) {
@@ -551,38 +535,6 @@ bool AutomatedUITest::OpenViewPasswordsDialog() {
 
 bool AutomatedUITest::Options() {
   return RunCommandAsync(IDC_OPTIONS);
-}
-
-bool AutomatedUITest::PressDownArrow() {
-  return SimulateKeyPress(ui::VKEY_DOWN);
-}
-
-bool AutomatedUITest::PressEnterKey() {
-  return SimulateKeyPress(ui::VKEY_RETURN);
-}
-
-bool AutomatedUITest::PressEscapeKey() {
-  return SimulateKeyPress(ui::VKEY_ESCAPE);
-}
-
-bool AutomatedUITest::PressPageDown() {
-  return SimulateKeyPress(ui::VKEY_PRIOR);
-}
-
-bool AutomatedUITest::PressPageUp() {
-  return SimulateKeyPress(ui::VKEY_NEXT);
-}
-
-bool AutomatedUITest::PressSpaceBar() {
-  return SimulateKeyPress(ui::VKEY_SPACE);
-}
-
-bool AutomatedUITest::PressTabKey() {
-  return SimulateKeyPress(ui::VKEY_TAB);
-}
-
-bool AutomatedUITest::PressUpArrow() {
-  return SimulateKeyPress(ui::VKEY_UP);
 }
 
 bool AutomatedUITest::StarPage() {
@@ -669,12 +621,6 @@ bool AutomatedUITest::ForceCrash() {
     AddErrorAttribute("navigation_failed");
     return false;
   }
-  return true;
-}
-
-bool AutomatedUITest::SimulateKeyPress(ui::KeyboardCode key) {
-  scoped_refptr<TabProxy> tab(GetActiveTab());
-  tab->SimulateKeyPress(key);
   return true;
 }
 
@@ -767,7 +713,7 @@ void AutomatedUITest::LogInfoMessage(const std::string& info) {
 base::FilePath AutomatedUITest::GetMostRecentCrashDump() {
   base::FilePath crash_dump_path;
   base::FilePath most_recent_file_name;
-  PathService::Get(breakpad::DIR_CRASH_DUMPS, &crash_dump_path);
+  PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
   base::Time most_recent_file_time;
 
   bool first_file = true;

@@ -5,11 +5,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #include "base/basictypes.h"
+#include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/common/password_form.h"
@@ -40,9 +41,9 @@ class LoginDatabaseTest : public testing::Test {
     db_.public_suffix_domain_matching_ = enabled;
   }
 
-  LoginDatabase db_;
-  base::FilePath file_;
   base::ScopedTempDir temp_dir_;
+  base::FilePath file_;
+  LoginDatabase db_;
 };
 
 TEST_F(LoginDatabaseTest, Logins) {
@@ -229,6 +230,53 @@ TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatching) {
   EXPECT_EQ("https://foo.com/", result[0]->original_signon_realm);
   delete result[0];
   result.clear();
+}
+
+TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatchingShouldMatchingApply) {
+  SetPublicSuffixMatching(true);
+  std::vector<PasswordForm*> result;
+
+  // Verify the database is empty.
+  EXPECT_TRUE(db_.GetAutofillableLogins(&result));
+  EXPECT_EQ(0U, result.size());
+
+  // Example password form.
+  PasswordForm form;
+  form.origin = GURL("https://accounts.google.com/");
+  form.action = GURL("https://accounts.google.com/login");
+  form.username_element = ASCIIToUTF16("username");
+  form.username_value = ASCIIToUTF16("test@gmail.com");
+  form.password_element = ASCIIToUTF16("password");
+  form.password_value = ASCIIToUTF16("test");
+  form.submit_element = ASCIIToUTF16("");
+  form.signon_realm = "https://accounts.google.com/";
+  form.ssl_valid = true;
+  form.preferred = false;
+  form.scheme = PasswordForm::SCHEME_HTML;
+
+  // Add it and make sure it is there.
+  EXPECT_TRUE(db_.AddLogin(form));
+  EXPECT_TRUE(db_.GetAutofillableLogins(&result));
+  EXPECT_EQ(1U, result.size());
+  delete result[0];
+  result.clear();
+
+  // Match against an exact copy.
+  EXPECT_TRUE(db_.GetLogins(form, &result));
+  EXPECT_EQ(1U, result.size());
+  delete result[0];
+  result.clear();
+
+  // We go to a different site on the same domain where feature is not needed.
+  PasswordForm form2(form);
+  form2.origin = GURL("https://some.other.google.com/");
+  form2.action = GURL("https://some.other.google.com/login");
+  form2.signon_realm = "https://some.other.google.com/";
+
+  // Match against the other site. Should not match since feature should not be
+  // enabled for this domain.
+  EXPECT_TRUE(db_.GetLogins(form2, &result));
+  EXPECT_EQ(0U, result.size());
 }
 
 // This test fails if the implementation of GetLogins uses GetCachedStatement
@@ -567,3 +615,16 @@ TEST_F(LoginDatabaseTest, VectorSerialization) {
   output = DeserializeVector(temp);
   EXPECT_THAT(output, Eq(vec));
 }
+
+#if defined(OS_POSIX)
+// Only the current user has permission to read the database.
+//
+// Only POSIX because GetPosixFilePermissions() only exists on POSIX.
+// This tests that sql::Connection::set_restrict_to_user() was called,
+// and that function is a noop on non-POSIX platforms in any case.
+TEST_F(LoginDatabaseTest, FilePermissions) {
+  int mode = file_util::FILE_PERMISSION_MASK;
+  EXPECT_TRUE(file_util::GetPosixFilePermissions(file_, &mode));
+  EXPECT_EQ((mode & file_util::FILE_PERMISSION_USER_MASK), mode);
+}
+#endif  // defined(OS_POSIX)

@@ -2,16 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Creates and starts downloading and then resizing of the image. Finally,
  * returns the image using the callback.
  *
+ * @param {string} id Request ID.
  * @param {Cache} cache Cache object.
  * @param {Object} request Request message as a hash array.
  * @param {function} callback Callback used to send the response.
  * @constructor
  */
-function Request(cache, request, callback) {
+function Request(id, cache, request, callback) {
+  /**
+   * @type {string}
+   * @private
+   */
+  this.id_ = id;
+
   /**
    * @type {Cache}
    * @private
@@ -36,6 +45,13 @@ function Request(cache, request, callback) {
    * @private
    */
   this.image_ = new Image();
+
+  /**
+   * MIME type of the fetched image.
+   * @type {string}
+   * @private
+   */
+  this.contentType_ = null;
 
   /**
    * Used to download remote images using http:// or https:// protocols.
@@ -64,6 +80,14 @@ function Request(cache, request, callback) {
    */
   this.downloadCallback_ = null;
 }
+
+/**
+ * Returns ID of the request.
+ * @return {string} Request ID.
+ */
+Request.prototype.getId = function() {
+  return this.id_;
+};
 
 /**
  * Returns priority of the request. The higher priority, the faster it will
@@ -162,9 +186,11 @@ Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
   this.image_.onload = onSuccess;
   this.image_.onerror = onFailure;
 
-  if (!this.request_.url.match(/^https?:/)) {
-    // Download directly.
+  // Download data urls directly since they are not supported by XmlHttpRequest.
+  var dataUrlMatches = this.request_.url.match(/^data:([^,;]*)[,;]/);
+  if (dataUrlMatches) {
     this.image_.src = this.request_.url;
+    this.contentType_ = dataUrlMatches[1];
     return;
   }
 
@@ -178,7 +204,8 @@ Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
       return;
     }
 
-    // Process returnes data.
+    // Process returned data, including the mime type.
+    this.contentType_ = this.xhr_.getResponseHeader('Content-Type');
     var reader = new FileReader();
     reader.onerror = this.image_.onerror;
     reader.onload = function(e) {
@@ -199,15 +226,33 @@ Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
 };
 
 /**
- * Sends the resized image via the callback.
+ * Sends the resized image via the callback. If the image has been changed,
+ * then packs the canvas contents, otherwise sends the raw image data.
+ *
+ * @param {boolean} imageChanged Whether the image has been changed.
  * @private
  */
-Request.prototype.sendImage_ = function() {
-  // TODO(mtomasz): Keep format. Never compress using jpeg codec for lossless
-  // images such as png, gif.
-  var pngData = this.canvas_.toDataURL('image/png');
-  var jpegData = this.canvas_.toDataURL('image/jpeg', 0.9);
-  var imageData = pngData.length < jpegData.length * 2 ? pngData : jpegData;
+Request.prototype.sendImage_ = function(imageChanged) {
+  var imageData;
+  if (!imageChanged) {
+    // The image hasn't been processed, so the raw data can be directly
+    // forwarded for speed (no need to encode the image again).
+    imageData = this.image_.src;
+  } else {
+    // The image has been resized or rotated, therefore the canvas has to be
+    // encoded to get the correct compressed image data.
+    switch (this.contentType_) {
+      case 'image/gif':
+      case 'image/png':
+      case 'image/svg':
+      case 'image/bmp':
+        imageData = this.canvas_.toDataURL('image/png');
+        break;
+      case 'image/jpeg':
+      default:
+        imageData = this.canvas_.toDataURL('image/jpeg', 0.9);
+    }
+  }
 
   // Send and store in the persistent cache.
   this.sendImageData_(imageData);
@@ -233,8 +278,17 @@ Request.prototype.sendImageData_ = function(data) {
  * @private
  */
 Request.prototype.onImageLoad_ = function(callback) {
-  ImageLoader.resize(this.image_, this.canvas_, this.request_);
-  this.sendImage_();
+  // Perform processing if the url is not a data url, or if there are some
+  // operations requested.
+  if (!this.request_.url.match(/^data/) ||
+      ImageLoader.shouldProcess(this.image_.width,
+                                this.image_.height,
+                                this.request_)) {
+    ImageLoader.resize(this.image_, this.canvas_, this.request_);
+    this.sendImage_(true);  // Image changed.
+  } else {
+    this.sendImage_(false);  // Image not changed.
+  }
   this.cleanup_();
   this.downloadCallback_();
 };

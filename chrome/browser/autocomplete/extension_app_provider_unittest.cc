@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
@@ -42,7 +42,7 @@ class ExtensionAppProviderTest : public testing::Test {
 
 void ExtensionAppProviderTest::SetUp() {
   profile_.reset(new TestingProfile());
-  profile_->CreateHistoryService(true, false);
+  ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->BlockUntilHistoryProcessesPendingRequests();
   history_service_ =
       HistoryServiceFactory::GetForProfile(profile_.get(),
@@ -87,8 +87,8 @@ void ExtensionAppProviderTest::RunTest(
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
     AutocompleteInput input(keyword_cases[i].input, string16::npos, string16(),
-                            GURL(), true, false, true,
-                            AutocompleteInput::ALL_MATCHES);
+                            GURL(), AutocompleteInput::INVALID_SPEC, true,
+                            false, true, AutocompleteInput::ALL_MATCHES);
     app_provider_->Start(input, false);
     EXPECT_TRUE(app_provider_->done());
     matches = app_provider_->matches();
@@ -137,8 +137,8 @@ TEST_F(ExtensionAppProviderTest, CreateMatchSanitize) {
   };
 
   AutocompleteInput input(ASCIIToUTF16("Test"), string16::npos, string16(),
-                          GURL(), true, true, true,
-                          AutocompleteInput::BEST_MATCH);
+                          GURL(), AutocompleteInput::INVALID_SPEC, true, true,
+                          true, AutocompleteInput::BEST_MATCH);
   string16 url(ASCIIToUTF16("http://example.com"));
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
     ExtensionAppProvider::ExtensionApp extension_app =

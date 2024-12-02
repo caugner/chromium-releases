@@ -18,18 +18,16 @@
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "components/autofill/content/browser/autocheckout_manager.h"
 #include "components/autofill/core/browser/autocomplete_history_manager.h"
 #include "components/autofill/core/browser/autofill_download.h"
 #include "components/autofill/core/browser/autofill_manager_delegate.h"
-#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/common/autocheckout_status.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/forms_seen_state.h"
-#include "content/public/common/ssl_status.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
 
 class GURL;
@@ -55,10 +53,11 @@ class AutofillDataModel;
 class AutofillDownloadManager;
 class AutofillExternalDelegate;
 class AutofillField;
-class AutofillProfile;
 class AutofillManagerDelegate;
 class AutofillManagerTestDelegate;
 class AutofillMetrics;
+class AutofillProfile;
+class AutofillType;
 class CreditCard;
 class FormStructureBrowserTest;
 
@@ -76,7 +75,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   };
 
   // Registers our Enable/Disable Autofill pref.
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   AutofillManager(AutofillDriver* driver,
                   autofill::AutofillManagerDelegate* delegate,
@@ -86,9 +85,6 @@ class AutofillManager : public AutofillDownloadManager::Observer {
 
   // Sets an external delegate.
   void SetExternalDelegate(AutofillExternalDelegate* delegate);
-
-  // Whether browser process will create and own the Autofill popup UI.
-  bool IsNativeUiEnabled();
 
   // Called from our external delegate so they cannot be private.
   virtual void OnFillAutofillFormData(int query_id,
@@ -155,7 +151,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
                                 const gfx::RectF& bounding_box,
                                 bool display_warning);
   void OnDidEndTextFieldEditing();
-  void OnHideAutofillUi();
+  void OnHideAutofillUI();
   void OnAddPasswordFormMapping(
       const FormFieldData& form,
       const PasswordFormFillData& fill_data);
@@ -165,17 +161,14 @@ class AutofillManager : public AutofillDownloadManager::Observer {
       const std::vector<base::string16>& suggestions,
       const std::vector<base::string16>& realms);
   void OnSetDataList(const std::vector<base::string16>& values,
-                     const std::vector<base::string16>& labels,
-                     const std::vector<base::string16>& icons,
-                     const std::vector<int>& unique_ids);
+                     const std::vector<base::string16>& labels);
 
   // Requests an interactive autocomplete UI be shown.
   void OnRequestAutocomplete(const FormData& form,
                              const GURL& frame_url);
 
-  // Called to signal clicking an element failed in some way during an
-  // Autocheckout flow.
-  void OnClickFailed(autofill::AutocheckoutStatus status);
+  // Called to signal a page is completed in renderer in the Autocheckout flow.
+  void OnAutocheckoutPageCompleted(autofill::AutocheckoutStatus status);
 
   // Shows the Autocheckout bubble if conditions are right. See comments for
   // AutocheckoutManager::MaybeShowAutocheckoutBubble. Input element requesting
@@ -186,6 +179,10 @@ class AutofillManager : public AutofillDownloadManager::Observer {
 
   // Resets cache.
   virtual void Reset();
+
+  autofill::AutocheckoutManager* autocheckout_manager() {
+    return &autocheckout_manager_;
+  }
 
  protected:
   // Test code should prefer to use this constructor.
@@ -228,11 +225,6 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Exposed for testing.
   AutofillExternalDelegate* external_delegate() {
     return external_delegate_;
-  }
-
-  // Exposed for testing.
-  autofill::AutocheckoutManager* autocheckout_manager() {
-    return &autocheckout_manager_;
   }
 
   // Tell the renderer the current interactive autocomplete finished.
@@ -291,7 +283,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // is filled with the Profile label.
   void GetProfileSuggestions(FormStructure* form,
                              const FormFieldData& field,
-                             AutofillFieldType type,
+                             const AutofillType& type,
                              std::vector<base::string16>* values,
                              std::vector<base::string16>* labels,
                              std::vector<base::string16>* icons,
@@ -300,7 +292,7 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // Returns a list of values from the stored credit cards that match |type| and
   // the value of |field| and returns the labels of the matching credit cards.
   void GetCreditCardSuggestions(const FormFieldData& field,
-                                AutofillFieldType type,
+                                const AutofillType& type,
                                 std::vector<base::string16>* values,
                                 std::vector<base::string16>* labels,
                                 std::vector<base::string16>* icons,
@@ -317,11 +309,6 @@ class AutofillManager : public AutofillDownloadManager::Observer {
   // needed because IPC messages can arrive out of order.
   void UpdateInitialInteractionTimestamp(
       const base::TimeTicks& interaction_timestamp);
-
-  // Send our current field type predictions to the renderer. This is a no-op if
-  // the appropriate command-line flag is not set.
-  void SendAutofillTypePredictions(
-      const std::vector<FormStructure*>& forms) const;
 
   // Provides driver-level context to the shared code of the component. Must
   // outlive this object.

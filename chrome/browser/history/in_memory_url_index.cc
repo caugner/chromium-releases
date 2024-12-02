@@ -10,13 +10,13 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/history/url_index_private_data.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -31,7 +31,7 @@ namespace history {
 // there is no private data to save. Runs on the FILE thread.
 void DeleteCacheFile(const base::FilePath& path) {
   DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  file_util::Delete(path, false);
+  base::DeleteFile(path, false);
 }
 
 // Initializes a whitelist of URL schemes.
@@ -45,7 +45,7 @@ void InitializeSchemeWhitelist(std::set<std::string>* whitelist) {
   whitelist->insert(std::string(chrome::kFtpScheme));
   whitelist->insert(std::string(chrome::kHttpScheme));
   whitelist->insert(std::string(chrome::kHttpsScheme));
-  whitelist->insert(std::string(chrome::kMailToScheme));
+  whitelist->insert(std::string(content::kMailToScheme));
 }
 
 // Restore/SaveCacheObserver ---------------------------------------------------

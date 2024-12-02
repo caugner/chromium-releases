@@ -67,10 +67,14 @@ typedef scoped_ptr_malloc<
 // and cert_po_certList types, but doesn't release the array itself.
 class ScopedCERTValOutParam {
  public:
-  explicit ScopedCERTValOutParam(CERTValOutParam* cvout)
-      : cvout_(cvout) {}
+  explicit ScopedCERTValOutParam(CERTValOutParam* cvout) : cvout_(cvout) {}
 
   ~ScopedCERTValOutParam() {
+    Clear();
+  }
+
+  // Free the internal resources, but do not release the array itself.
+  void Clear() {
     if (cvout_ == NULL)
       return;
     for (CERTValOutParam *p = cvout_; p->type != cert_po_end; p++) {
@@ -158,10 +162,6 @@ CertStatus MapCertErrorToCertStatus(int err) {
 void GetCertChainInfo(CERTCertList* cert_list,
                       CERTCertificate* root_cert,
                       CertVerifyResult* verify_result) {
-  // NOTE: Using a NSS library before 3.12.3.1 will crash below.  To see the
-  // NSS version currently in use:
-  // 1. use ldd on the chrome executable for NSS's location (ie. libnss3.so*)
-  // 2. use ident libnss3.so* for the library's version
   DCHECK(cert_list);
 
   CERTCertificate* verified_cert = NULL;
@@ -204,13 +204,9 @@ void GetCertChainInfo(CERTCertList* cert_list,
     switch (oid_tag) {
       case SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION:
         verify_result->has_md5 = true;
-        if (i != 0)
-          verify_result->has_md5_ca = true;
         break;
       case SEC_OID_PKCS1_MD2_WITH_RSA_ENCRYPTION:
         verify_result->has_md2 = true;
-        if (i != 0)
-          verify_result->has_md2_ca = true;
         break;
       case SEC_OID_PKCS1_MD4_WITH_RSA_ENCRYPTION:
         verify_result->has_md4 = true;
@@ -258,16 +254,18 @@ bool IsAdditionalTrustAnchor(CERTCertList* additional_trust_anchors,
 }
 
 enum CRLSetResult {
-  kCRLSetRevoked,
   kCRLSetOk,
-  kCRLSetError,
+  kCRLSetRevoked,
+  kCRLSetUnknown,
 };
 
 // CheckRevocationWithCRLSet attempts to check each element of |cert_list|
 // against |crl_set|. It returns:
 //   kCRLSetRevoked: if any element of the chain is known to have been revoked.
-//   kCRLSetError: if an error occurs in processing.
-//   kCRLSetOk: if no element in the chain is known to have been revoked.
+//   kCRLSetUnknown: if there is no fresh information about some element in
+//       the chain.
+//   kCRLSetOk: if every element in the chain is covered by a fresh CRLSet and
+//       is unrevoked.
 CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
                                        CERTCertificate* root,
                                        CRLSet* crl_set) {
@@ -283,6 +281,8 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
   if (root)
     certs.push_back(root);
 
+  bool covered = true;
+
   // We iterate from the root certificate down to the leaf, keeping track of
   // the issuer's SPKI at each step.
   std::string issuer_spki_hash;
@@ -296,7 +296,8 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
     base::StringPiece spki;
     if (!asn1::ExtractSPKIFromDERCert(der, &spki)) {
       NOTREACHED();
-      return kCRLSetError;
+      covered = false;
+      continue;
     }
     const std::string spki_hash = crypto::SHA256HashString(spki);
 
@@ -315,14 +316,19 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
       case CRLSet::REVOKED:
         return kCRLSetRevoked;
       case CRLSet::UNKNOWN:
+        covered = false;
+        continue;
       case CRLSet::GOOD:
         continue;
       default:
         NOTREACHED();
-        return kCRLSetError;
+        covered = false;
+        continue;
     }
   }
 
+  if (!covered || crl_set->IsExpired())
+    return kCRLSetUnknown;
   return kCRLSetOk;
 }
 
@@ -335,6 +341,12 @@ SECOidTag GetFirstCertPolicy(CERTCertificate* cert_handle);
 
 // Call CERT_PKIXVerifyCert for the cert_handle.
 // Verification results are stored in an array of CERTValOutParam.
+// If |hard_fail| is true, and no policy_oids are supplied (eg: EV is NOT being
+// checked), then the failure to obtain valid CRL/OCSP information for all
+// certificates that contain CRL/OCSP URLs will cause the certificate to be
+// treated as if it was revoked. Since failures may be caused by transient
+// network failures or by malicious attackers, in general, hard_fail should be
+// false.
 // If policy_oids is not NULL and num_policy_oids is positive, policies
 // are also checked.
 // additional_trust_anchors is an optional list of certificates that can be
@@ -342,6 +354,7 @@ SECOidTag GetFirstCertPolicy(CERTCertificate* cert_handle);
 // Caller must initialize cvout before calling this function.
 SECStatus PKIXVerifyCert(CERTCertificate* cert_handle,
                          bool check_revocation,
+                         bool hard_fail,
                          bool cert_io_enabled,
                          const SECOidTag* policy_oids,
                          int num_policy_oids,
@@ -349,31 +362,6 @@ SECStatus PKIXVerifyCert(CERTCertificate* cert_handle,
                          CERTValOutParam* cvout) {
   bool use_crl = check_revocation;
   bool use_ocsp = check_revocation;
-
-  // These CAs have multiple keys, which trigger two bugs in NSS's CRL code.
-  // 1. NSS may use one key to verify a CRL signed with another key,
-  //    incorrectly concluding that the CRL's signature is invalid.
-  //    Hopefully this bug will be fixed in NSS 3.12.9.
-  // 2. NSS considers all certificates issued by the CA as revoked when it
-  //    receives a CRL with an invalid signature.  This overly strict policy
-  //    has been relaxed in NSS 3.12.7.  See
-  //    https://bugzilla.mozilla.org/show_bug.cgi?id=562542.
-  // So we have to turn off CRL checking for these CAs.  See
-  // http://crbug.com/55695.
-  static const char* const kMultipleKeyCA[] = {
-    "CN=Microsoft Secure Server Authority,"
-    "DC=redmond,DC=corp,DC=microsoft,DC=com",
-    "CN=Microsoft Secure Server Authority",
-  };
-
-  if (!NSS_VersionCheck("3.12.7")) {
-    for (size_t i = 0; i < arraysize(kMultipleKeyCA); ++i) {
-      if (strcmp(cert_handle->issuerName, kMultipleKeyCA[i]) == 0) {
-        use_crl = false;
-        break;
-      }
-    }
-  }
 
   PRUint64 revocation_method_flags =
       CERT_REV_M_DO_NOT_TEST_USING_THIS_METHOD |
@@ -389,6 +377,10 @@ SECStatus PKIXVerifyCert(CERTCertificate* cert_handle,
     // TODO(wtc): Add a bool parameter to expressly specify we're doing EV
     // verification or we want strict revocation flags.
     revocation_method_flags |= CERT_REV_M_REQUIRE_INFO_ON_MISSING_SOURCE;
+    revocation_method_independent_flags |=
+        CERT_REV_MI_REQUIRE_SOME_FRESH_INFO_AVAILABLE;
+  } else if (check_revocation && hard_fail) {
+    revocation_method_flags |= CERT_REV_M_FAIL_ON_MISSING_FRESH_INFO;
     revocation_method_independent_flags |=
         CERT_REV_MI_REQUIRE_SOME_FRESH_INFO_AVAILABLE;
   } else {
@@ -673,6 +665,7 @@ bool IsEVCandidate(EVRootCAMetadata* metadata,
 bool VerifyEV(CERTCertificate* cert_handle,
               int flags,
               CRLSet* crl_set,
+              bool rev_checking_enabled,
               EVRootCAMetadata* metadata,
               SECOidTag ev_policy_oid,
               CERTCertList* additional_trust_anchors) {
@@ -689,13 +682,10 @@ bool VerifyEV(CERTCertificate* cert_handle,
   cvout[cvout_index].type = cert_po_end;
   ScopedCERTValOutParam scoped_cvout(cvout);
 
-  bool rev_checking_enabled =
-      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) ||
-      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY);
-
   SECStatus status = PKIXVerifyCert(
       cert_handle,
       rev_checking_enabled,
+      true, /* hard fail is implied in EV. */
       flags & CertVerifier::VERIFY_CERT_IO_ENABLED,
       &ev_policy_oid,
       1,
@@ -805,9 +795,7 @@ int CertVerifyProcNSS::VerifyInternal(
   bool cert_io_enabled = flags & CertVerifier::VERIFY_CERT_IO_ENABLED;
   bool check_revocation =
       cert_io_enabled &&
-      ((flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) ||
-       ((flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY) &&
-        is_ev_candidate));
+      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED);
   if (check_revocation)
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
 
@@ -817,8 +805,22 @@ int CertVerifyProcNSS::VerifyInternal(
         CertificateListToCERTCertList(additional_trust_anchors));
   }
 
-  status = PKIXVerifyCert(cert_handle, check_revocation, cert_io_enabled,
-                          NULL, 0, trust_anchors.get(), cvout);
+  status = PKIXVerifyCert(cert_handle, check_revocation, false,
+                          cert_io_enabled, NULL, 0, trust_anchors.get(),
+                          cvout);
+
+  if (status == SECSuccess &&
+      (flags & CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS) &&
+      !IsKnownRoot(cvout[cvout_trust_anchor_index].value.pointer.cert)) {
+    // TODO(rsleevi): Optimize this by supplying the constructed chain to
+    // libpkix via cvin. Omitting for now, due to lack of coverage in upstream
+    // NSS tests for that feature.
+    scoped_cvout.Clear();
+    verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
+    status = PKIXVerifyCert(cert_handle, true, true,
+                            cert_io_enabled, NULL, 0, trust_anchors.get(),
+                            cvout);
+  }
 
   if (status == SECSuccess) {
     AppendPublicKeyHashes(cvout[cvout_cert_list_index].value.pointer.chain,
@@ -837,8 +839,9 @@ int CertVerifyProcNSS::VerifyInternal(
                      verify_result);
   }
 
+  CRLSetResult crl_set_result = kCRLSetUnknown;
   if (crl_set) {
-    CRLSetResult crl_set_result = CheckRevocationWithCRLSet(
+    crl_set_result = CheckRevocationWithCRLSet(
         cvout[cvout_cert_list_index].value.pointer.chain,
         cvout[cvout_trust_anchor_index].value.pointer.cert,
         crl_set);
@@ -869,10 +872,18 @@ int CertVerifyProcNSS::VerifyInternal(
   if (IsCertStatusError(verify_result->cert_status))
     return MapCertStatusToNetError(verify_result->cert_status);
 
-  if ((flags & CertVerifier::VERIFY_EV_CERT) && is_ev_candidate &&
-      VerifyEV(cert_handle, flags, crl_set, metadata, ev_policy_oid,
-               trust_anchors.get())) {
-    verify_result->cert_status |= CERT_STATUS_IS_EV;
+  if ((flags & CertVerifier::VERIFY_EV_CERT) && is_ev_candidate) {
+    check_revocation |=
+        crl_set_result != kCRLSetOk &&
+        cert_io_enabled &&
+        (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY);
+    if (check_revocation)
+      verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
+
+    if (VerifyEV(cert_handle, flags, crl_set, check_revocation, metadata,
+                 ev_policy_oid, trust_anchors.get())) {
+      verify_result->cert_status |= CERT_STATUS_IS_EV;
+    }
   }
 
   return OK;

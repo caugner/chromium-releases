@@ -15,8 +15,6 @@
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/password_form_fill_data.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
 
 namespace gfx {
@@ -30,6 +28,7 @@ class WebContents;
 
 namespace autofill {
 
+class AutofillDriver;
 class AutofillManager;
 
 // TODO(csharp): A lot of the logic in this class is copied from autofillagent.
@@ -38,13 +37,13 @@ class AutofillManager;
 
 // Delegate for in-browser Autocomplete and Autofill display and selection.
 class AutofillExternalDelegate
-    : public content::NotificationObserver,
-      public AutofillPopupDelegate {
+    : public AutofillPopupDelegate {
  public:
-  // Creates an AutofillExternalDelegate for the specified contents; the second
-  // argument is an AutofillManager managing Autofill for that WebContents.
+  // Creates an AutofillExternalDelegate for the specified contents,
+  // AutofillManager, and AutofillDriver.
   AutofillExternalDelegate(content::WebContents* web_contents,
-                           AutofillManager* autofill_manager);
+                           AutofillManager* autofill_manager,
+                           AutofillDriver* autofill_driver);
   virtual ~AutofillExternalDelegate();
 
   // AutofillPopupDelegate implementation.
@@ -87,10 +86,8 @@ class AutofillExternalDelegate
 
   // Set the data list value associated with the current field.
   void SetCurrentDataListValues(
-      const std::vector<base::string16>& autofill_values,
-      const std::vector<base::string16>& autofill_labels,
-      const std::vector<base::string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids);
+      const std::vector<base::string16>& data_list_values,
+      const std::vector<base::string16>& data_list_labels);
 
   // Inform the delegate that the text field editing has ended. This is
   // used to help record the metrics of when a new popup is shown.
@@ -138,14 +135,13 @@ class AutofillExternalDelegate
                             std::vector<base::string16>* autofill_icons,
                             std::vector<int>* autofill_unique_ids);
 
-  // content::NotificationObserver method override.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   // The web_contents associated with this delegate.
   content::WebContents* web_contents_;  // weak; owns me.
   AutofillManager* autofill_manager_;  // weak.
+
+  // Provides driver-level context to the shared code of the component. Must
+  // outlive this object.
+  AutofillDriver* autofill_driver_;  // weak
 
   // Password Autofill manager, handles all password-related Autofilling.
   PasswordAutofillManager password_autofill_manager_;
@@ -153,9 +149,6 @@ class AutofillExternalDelegate
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.
   int autofill_query_id_;
-
-  // A scoped container for notification registries.
-  content::NotificationRegistrar registrar_;
 
   // The current form and field selected by Autofill.
   FormData autofill_query_form_;
@@ -181,8 +174,6 @@ class AutofillExternalDelegate
   // The current data list values.
   std::vector<base::string16> data_list_values_;
   std::vector<base::string16> data_list_labels_;
-  std::vector<base::string16> data_list_icons_;
-  std::vector<int> data_list_unique_ids_;
 
   base::WeakPtrFactory<AutofillExternalDelegate> weak_ptr_factory_;
 

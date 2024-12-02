@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_service_client.h"
@@ -19,6 +19,13 @@
 namespace {
 
 const char* kSuccessResult = "success";
+
+void ConfigureCallback(const dbus::ObjectPath& result) {
+}
+
+void ConfigureErrorCallback(const std::string& error_name,
+                            const std::string& error_message) {
+}
 
 }  // namespace
 
@@ -45,8 +52,7 @@ class NetworkConnectionHandlerTest : public testing::Test {
             network_state_handler_.get()));
     network_connection_handler_.reset(new NetworkConnectionHandler);
     // TODO(stevenjb): Test integration with CertLoader using a stub or mock.
-    network_connection_handler_->Init(NULL /* cert_loader */,
-                                      network_state_handler_.get(),
+    network_connection_handler_->Init(network_state_handler_.get(),
                                       network_configuration_handler_.get());
   }
 
@@ -68,20 +74,21 @@ class NetworkConnectionHandlerTest : public testing::Test {
     }
     DBusThreadManager::Get()->GetShillManagerClient()->ConfigureService(
         *json_dict,
-        ObjectPathCallback(), ShillManagerClient::ErrorCallback());
+        base::Bind(&ConfigureCallback),
+        base::Bind(&ConfigureErrorCallback));
     message_loop_.RunUntilIdle();
     return true;
   }
 
   void Connect(const std::string& service_path) {
-    const bool ignore_error_state = false;
+    const bool check_error_state = true;
     network_connection_handler_->ConnectToNetwork(
         service_path,
         base::Bind(&NetworkConnectionHandlerTest::SuccessCallback,
                    base::Unretained(this)),
         base::Bind(&NetworkConnectionHandlerTest::ErrorCallback,
                    base::Unretained(this)),
-        ignore_error_state);
+        check_error_state);
     message_loop_.RunUntilIdle();
   }
 
@@ -134,14 +141,15 @@ class NetworkConnectionHandlerTest : public testing::Test {
 namespace {
 
 const char* kConfigConnectable =
-    "{ \"GUID\": \"wifi0\", \"Type\": \"wifi\", \"State\": \"idle\" }";
+    "{ \"GUID\": \"wifi0\", \"Type\": \"wifi\", \"State\": \"idle\", "
+    "  \"Connectable\": true }";
 const char* kConfigConnected =
     "{ \"GUID\": \"wifi1\", \"Type\": \"wifi\", \"State\": \"online\" }";
 const char* kConfigConnecting =
     "{ \"GUID\": \"wifi2\", \"Type\": \"wifi\", \"State\": \"association\" }";
 const char* kConfigRequiresPassphrase =
     "{ \"GUID\": \"wifi3\", \"Type\": \"wifi\", "
-    "\"PassphraseRequired\": true }";
+    "  \"PassphraseRequired\": true }";
 const char* kConfigRequiresActivation =
     "{ \"GUID\": \"cellular1\", \"Type\": \"cellular\","
     "  \"Cellular.ActivationState\": \"not-activated\" }";
@@ -159,7 +167,8 @@ TEST_F(NetworkConnectionHandlerTest, NetworkConnectionHandlerConnectSuccess) {
 // Handles basic failure cases.
 TEST_F(NetworkConnectionHandlerTest, NetworkConnectionHandlerConnectFailure) {
   Connect("no-network");
-  EXPECT_EQ(NetworkConnectionHandler::kErrorNotFound, GetResultAndReset());
+  EXPECT_EQ(NetworkConnectionHandler::kErrorConfigureFailed,
+            GetResultAndReset());
 
   EXPECT_TRUE(Configure(kConfigConnected));
   Connect("wifi1");
@@ -213,7 +222,8 @@ TEST_F(NetworkConnectionHandlerTest,
 TEST_F(NetworkConnectionHandlerTest,
        NetworkConnectionHandlerDisconnectFailure) {
   Connect("no-network");
-  EXPECT_EQ(NetworkConnectionHandler::kErrorNotFound, GetResultAndReset());
+  EXPECT_EQ(NetworkConnectionHandler::kErrorConfigureFailed,
+            GetResultAndReset());
 
   EXPECT_TRUE(Configure(kConfigConnectable));
   Disconnect("wifi0");

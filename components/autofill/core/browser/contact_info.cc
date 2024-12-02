@@ -13,11 +13,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_type.h"
-#include "components/autofill/core/browser/field_types.h"
 
 namespace autofill {
 
-static const AutofillFieldType kAutofillNameInfoTypes[] = {
+static const ServerFieldType kAutofillNameInfoTypes[] = {
   NAME_FIRST,
   NAME_MIDDLE,
   NAME_LAST
@@ -44,7 +43,7 @@ NameInfo& NameInfo::operator=(const NameInfo& info) {
   return *this;
 }
 
-void NameInfo::GetSupportedTypes(FieldTypeSet* supported_types) const {
+void NameInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
   supported_types->insert(NAME_FIRST);
   supported_types->insert(NAME_MIDDLE);
   supported_types->insert(NAME_LAST);
@@ -52,37 +51,54 @@ void NameInfo::GetSupportedTypes(FieldTypeSet* supported_types) const {
   supported_types->insert(NAME_FULL);
 }
 
-base::string16 NameInfo::GetRawInfo(AutofillFieldType type) const {
-  if (type == NAME_FIRST)
-    return first();
+base::string16 NameInfo::GetRawInfo(ServerFieldType type) const {
+  // TODO(isherman): Is GetStorableType even necessary?
+  switch (AutofillType(type).GetStorableType()) {
+    case NAME_FIRST:
+      return first();
 
-  if (type == NAME_MIDDLE)
-    return middle();
+    case NAME_MIDDLE:
+      return middle();
 
-  if (type == NAME_LAST)
-    return last();
+    case NAME_LAST:
+      return last();
 
-  if (type == NAME_MIDDLE_INITIAL)
-    return MiddleInitial();
+    case NAME_MIDDLE_INITIAL:
+      return MiddleInitial();
 
-  if (type == NAME_FULL)
-    return FullName();
+    case NAME_FULL:
+      return FullName();
 
-  return base::string16();
+    default:
+      return base::string16();
+  }
 }
 
-void NameInfo::SetRawInfo(AutofillFieldType type, const base::string16& value) {
-  DCHECK_EQ(AutofillType::NAME, AutofillType(type).group());
-  if (type == NAME_FIRST)
-    first_ = value;
-  else if (type == NAME_MIDDLE || type == NAME_MIDDLE_INITIAL)
-    middle_ = value;
-  else if (type == NAME_LAST)
-    last_ = value;
-  else if (type == NAME_FULL)
-    SetFullName(value);
-  else
-    NOTREACHED();
+void NameInfo::SetRawInfo(ServerFieldType type, const base::string16& value) {
+  // TODO(isherman): Is GetStorableType even necessary?
+  ServerFieldType storable_type = AutofillType(type).GetStorableType();
+  DCHECK_EQ(NAME, AutofillType(storable_type).group());
+  switch (storable_type) {
+    case NAME_FIRST:
+      first_ = value;
+      break;
+
+    case NAME_MIDDLE:
+    case NAME_MIDDLE_INITIAL:
+      middle_ = value;
+      break;
+
+    case NAME_LAST:
+      last_ = value;
+      break;
+
+    case NAME_FULL:
+      SetFullName(value);
+      break;
+
+    default:
+      NOTREACHED();
+  }
 }
 
 base::string16 NameInfo::FullName() const {
@@ -149,19 +165,18 @@ EmailInfo& EmailInfo::operator=(const EmailInfo& info) {
   return *this;
 }
 
-void EmailInfo::GetSupportedTypes(FieldTypeSet* supported_types) const {
+void EmailInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
   supported_types->insert(EMAIL_ADDRESS);
 }
 
-base::string16 EmailInfo::GetRawInfo(AutofillFieldType type) const {
+base::string16 EmailInfo::GetRawInfo(ServerFieldType type) const {
   if (type == EMAIL_ADDRESS)
     return email_;
 
   return base::string16();
 }
 
-void EmailInfo::SetRawInfo(AutofillFieldType type,
-                           const base::string16& value) {
+void EmailInfo::SetRawInfo(ServerFieldType type, const base::string16& value) {
   DCHECK_EQ(EMAIL_ADDRESS, type);
   email_ = value;
 }
@@ -182,18 +197,18 @@ CompanyInfo& CompanyInfo::operator=(const CompanyInfo& info) {
   return *this;
 }
 
-void CompanyInfo::GetSupportedTypes(FieldTypeSet* supported_types) const {
+void CompanyInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
   supported_types->insert(COMPANY_NAME);
 }
 
-base::string16 CompanyInfo::GetRawInfo(AutofillFieldType type) const {
+base::string16 CompanyInfo::GetRawInfo(ServerFieldType type) const {
   if (type == COMPANY_NAME)
     return company_name_;
 
   return base::string16();
 }
 
-void CompanyInfo::SetRawInfo(AutofillFieldType type,
+void CompanyInfo::SetRawInfo(ServerFieldType type,
                              const base::string16& value) {
   DCHECK_EQ(COMPANY_NAME, type);
   company_name_ = value;

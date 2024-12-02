@@ -7,11 +7,12 @@
 #include "base/command_line.h"
 #include "chrome/browser/drive/drive_notification_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync_file_system/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
+#include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
-#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
 
 namespace sync_file_system {
 
@@ -40,7 +41,8 @@ SyncFileSystemServiceFactory::SyncFileSystemServiceFactory()
     : BrowserContextKeyedServiceFactory(
         "SyncFileSystemService",
         BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(::drive::DriveNotificationManagerFactory::GetInstance());
+  DependsOn(drive::DriveNotificationManagerFactory::GetInstance());
+  DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
 }
 
 SyncFileSystemServiceFactory::~SyncFileSystemServiceFactory() {}
@@ -68,7 +70,7 @@ SyncFileSystemServiceFactory::BuildServiceInstanceFor(
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(kDisableLastWriteWin)) {
     remote_file_service->SetConflictResolutionPolicy(
-        CONFLICT_RESOLUTION_MANUAL);
+        CONFLICT_RESOLUTION_POLICY_MANUAL);
   }
 
   service->Initialize(local_file_service.Pass(),

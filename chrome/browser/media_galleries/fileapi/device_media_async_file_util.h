@@ -34,64 +34,68 @@ class DeviceMediaAsyncFileUtil : public fileapi::AsyncFileUtil {
   static DeviceMediaAsyncFileUtil* Create(const base::FilePath& profile_path);
 
   // AsyncFileUtil overrides.
-  virtual bool CreateOrOpen(
+  virtual void CreateOrOpen(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       int file_flags,
       const CreateOrOpenCallback& callback) OVERRIDE;
-  virtual bool EnsureFileExists(
+  virtual void EnsureFileExists(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const EnsureFileExistsCallback& callback) OVERRIDE;
-  virtual bool CreateDirectory(
+  virtual void CreateDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       bool exclusive,
       bool recursive,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool GetFileInfo(
+  virtual void GetFileInfo(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const GetFileInfoCallback& callback) OVERRIDE;
-  virtual bool ReadDirectory(
+  virtual void ReadDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const ReadDirectoryCallback& callback) OVERRIDE;
-  virtual bool Touch(
+  virtual void Touch(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const base::Time& last_access_time,
       const base::Time& last_modified_time,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool Truncate(
+  virtual void Truncate(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       int64 length,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CopyFileLocal(
+  virtual void CopyFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool MoveFileLocal(
+  virtual void MoveFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CopyInForeignFile(
+  virtual void CopyInForeignFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const base::FilePath& src_file_path,
       const fileapi::FileSystemURL& dest_url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool DeleteFile(
+  virtual void DeleteFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool DeleteDirectory(
+  virtual void DeleteDirectory(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const StatusCallback& callback) OVERRIDE;
-  virtual bool CreateSnapshotFile(
+  virtual void DeleteRecursively(
+      scoped_ptr<fileapi::FileSystemOperationContext> context,
+      const fileapi::FileSystemURL& url,
+      const StatusCallback& callback) OVERRIDE;
+  virtual void CreateSnapshotFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& url,
       const CreateSnapshotFileCallback& callback) OVERRIDE;
@@ -100,20 +104,18 @@ class DeviceMediaAsyncFileUtil : public fileapi::AsyncFileUtil {
   // Use Create() to get an instance of DeviceMediaAsyncFileUtil.
   explicit DeviceMediaAsyncFileUtil(const base::FilePath& profile_path);
 
-  // Called when GetFileInfo method call succeeds. |file_info|
-  // contains the |platform_path| file details. |callback| is invoked
-  // to complete the GetFileInfo request.
+  // Called when GetFileInfo method call succeeds. |file_info| contains the
+  // file details of the requested url. |callback| is invoked to complete the
+  // GetFileInfo request.
   void OnDidGetFileInfo(
       const AsyncFileUtil::GetFileInfoCallback& callback,
-      const base::FilePath& platform_path,
       const base::PlatformFileInfo& file_info);
 
   // Called when GetFileInfo method call failed to get the details of file
-  // specified by the |platform_path|. |callback| is invoked to notify the
+  // specified by the requested url. |callback| is invoked to notify the
   // caller about the platform file |error|.
   void OnGetFileInfoError(
       const AsyncFileUtil::GetFileInfoCallback& callback,
-      const base::FilePath& platform_path,
       base::PlatformFileError error);
 
   // Called when ReadDirectory method call succeeds. |callback| is invoked to
@@ -163,15 +165,15 @@ class DeviceMediaAsyncFileUtil : public fileapi::AsyncFileUtil {
       base::PlatformFileError error);
 
   // Called when the snapshot file specified by the |snapshot_file_path| is
-  // created to hold the contents of the |device_file_path|. If the snapshot
+  // created to hold the contents of the url.path(). If the snapshot
   // file is successfully created, |snapshot_file_path| will be an non-empty
   // file path. In case of failure, |snapshot_file_path| will be an empty file
   // path. Forwards the CreateSnapshot request to the delegate to copy the
-  // contents of |device_file_path| to |snapshot_file_path|.
+  // contents of url.path() to |snapshot_file_path|.
   void OnSnapshotFileCreatedRunTask(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const AsyncFileUtil::CreateSnapshotFileCallback& callback,
-      const base::FilePath& device_file_path,
+      const fileapi::FileSystemURL& url,
       base::FilePath* snapshot_file_path);
 
   // Profile path.

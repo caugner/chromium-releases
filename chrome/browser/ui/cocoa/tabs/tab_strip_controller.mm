@@ -23,7 +23,6 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -54,6 +53,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
@@ -539,7 +539,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                                                        controller:self]);
     [self addSubviewToPermanentList:dragBlockingView_];
 
-    newTabTargetFrame_ = NSMakeRect(0, 0, 0, 0);
+    newTabTargetFrame_ = NSZeroRect;
     availableResizeWidth_ = kUseFullAvailableWidth;
 
     closingControllers_.reset([[NSMutableSet alloc] init]);
@@ -1622,8 +1622,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
         ui::ThemeProvider* theme = [[tabStripView_ window] themeProvider];
         if (theme && [tabController projecting]) {
           NSImage* projectorGlow =
-              theme->GetNSImageNamed(IDR_TAB_CAPTURE_GLOW, true);
-          NSImage* projector = theme->GetNSImageNamed(IDR_TAB_CAPTURE, true);
+              theme->GetNSImageNamed(IDR_TAB_CAPTURE_GLOW);
+          NSImage* projector = theme->GetNSImageNamed(IDR_TAB_CAPTURE);
 
           NSRect frame = NSMakeRect(0,
                                     0,
@@ -1636,13 +1636,13 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                  projectorImage:projector
                      throbImage:projectorGlow
                      durationMS:kRecordingDurationMs
-             animationContainer:animationContainer_] autorelease];
+             animationContainer:animationContainer_.get()] autorelease];
 
           iconView = projectingView;
         } else if (theme && chrome::ShouldShowRecordingIndicator(contents)) {
           // Create a masked favicon.
-          NSImage* mask = theme->GetNSImageNamed(IDR_TAB_RECORDING_MASK, true);
-          NSImage* recording = theme->GetNSImageNamed(IDR_TAB_RECORDING, true);
+          NSImage* mask = theme->GetNSImageNamed(IDR_TAB_RECORDING_MASK);
+          NSImage* recording = theme->GetNSImageNamed(IDR_TAB_RECORDING);
           NSImage* favIconMasked = CreateMaskedFaviconForRecording(
                                        [imageView image], mask, recording);
 
@@ -1655,7 +1655,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
                      throbImage:recording
                      durationMS:kRecordingDurationMs
                   throbPosition:kThrobPositionBottomRight
-             animationContainer:animationContainer_] autorelease];
+             animationContainer:animationContainer_.get()] autorelease];
 
           iconView = recordingView;
         } else if (chrome::IsPlayingAudio(contents) ||
@@ -1666,7 +1666,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
             tabAudioIndicatorViewMac = [[[TabAudioIndicatorViewMac alloc]
                 initWithFrame:frame] autorelease];
             [tabAudioIndicatorViewMac
-                setAnimationContainer:animationContainer_];
+                setAnimationContainer:animationContainer_.get()];
           }
           [tabAudioIndicatorViewMac
               setIsPlayingAudio:chrome::IsPlayingAudio(contents)];
@@ -2044,6 +2044,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (activeTabView) {
     [subviews addObject:activeTabView];
   }
+  WithNoAnimation noAnimation;
   [tabStripView_ setSubviews:subviews];
   [self setTabTrackingAreasEnabled:mouseInside_];
 }
@@ -2269,7 +2270,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   NSImage* pressed = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_P).ToNSImage();
 
   NSImage* foreground = ApplyMask(
-      theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND, true), mask);
+      theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND), mask);
 
   [[newTabButton_ cell] setImage:Overlay(foreground, normal, 1.0)
                   forButtonState:image_button_cell::kDefaultState];
@@ -2282,7 +2283,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (theme->UsingDefaultTheme()) {
     const CGFloat alpha = tabs::kImageNoFocusAlpha;
     NSImage* background = ApplyMask(
-        theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND_INACTIVE, true), mask);
+        theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND_INACTIVE), mask);
     [[newTabButton_ cell] setImage:Overlay(background, normal, alpha)
                     forButtonState:image_button_cell::kDefaultStateBackground];
     [[newTabButton_ cell] setImage:Overlay(background, hover, alpha)

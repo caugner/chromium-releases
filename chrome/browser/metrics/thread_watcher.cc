@@ -63,10 +63,6 @@ NOINLINE void ThreadUnresponsive_DB() {
   NullPointerCrash(__LINE__);
 }
 
-NOINLINE void ThreadUnresponsive_WEBKIT() {
-  NullPointerCrash(__LINE__);
-}
-
 NOINLINE void ThreadUnresponsive_FILE() {
   NullPointerCrash(__LINE__);
 }
@@ -98,8 +94,6 @@ void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
       return ThreadUnresponsive_UI();
     case BrowserThread::DB:
       return ThreadUnresponsive_DB();
-    case BrowserThread::WEBKIT_DEPRECATED:
-      return ThreadUnresponsive_WEBKIT();
     case BrowserThread::FILE:
       return ThreadUnresponsive_FILE();
     case BrowserThread::FILE_USER_BLOCKING:
@@ -575,7 +569,7 @@ void ThreadWatcherList::ParseCommandLine(
   scoped_refptr<base::FieldTrial> field_trial(
       base::FieldTrialList::FactoryGetFieldTrial(
           "ThreadWatcher", 100, "default_hung_threads",
-          2013, 10, 30, NULL));
+          2013, 10, 30, base::FieldTrial::SESSION_RANDOMIZED, NULL));
   int hung_thread_group = field_trial->AppendGroup("hung_thread", 100);
   if (field_trial->group() == hung_thread_group) {
     for (CrashOnHangThreadMap::iterator it = crash_on_hang_threads->begin();

@@ -11,6 +11,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -113,8 +113,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
  public:
   BookmarkBarViewEventTestBase()
       : ViewEventTestBase(),
-        model_(NULL),
-        file_thread_(BrowserThread::FILE, base::MessageLoop::current()) {}
+        model_(NULL) {}
 
   virtual void SetUp() OVERRIDE {
     views::MenuController::TurnOffContextMenuSelectionHoldForTest();
@@ -127,7 +126,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     profile_->GetPrefs()->SetBoolean(prefs::kShowBookmarkBar, true);
 
     Browser::CreateParams native_params(profile_.get(),
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
+                                        chrome::GetActiveDesktop());
     browser_.reset(
         chrome::CreateBrowserWithTestWindowForParams(&native_params));
 
@@ -243,7 +242,6 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<Browser> browser_;
   scoped_ptr<ScopedTestingLocalState> local_state_;
-  content::TestBrowserThread file_thread_;
   ChromeViewsDelegate views_delegate_;
 };
 

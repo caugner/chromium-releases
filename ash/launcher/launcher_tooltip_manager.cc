@@ -10,9 +10,9 @@
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_animations.h"
 #include "base/bind.h"
-#include "base/message_loop.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
@@ -75,6 +75,8 @@ LauncherTooltipManager::LauncherTooltipBubble::LauncherTooltipBubble(
     LauncherTooltipManager* host)
     : views::BubbleDelegateView(anchor, arrow),
       host_(host) {
+  // Make sure that the bubble follows the animation of the shelf.
+  set_move_with_anchor(true);
   gfx::Insets insets = gfx::Insets(kArrowOffsetTopBottom,
                                    kArrowOffsetLeftRight,
                                    kArrowOffsetTopBottom,
@@ -142,7 +144,8 @@ LauncherTooltipManager::LauncherTooltipManager(
       widget_(NULL),
       anchor_(NULL),
       shelf_layout_manager_(shelf_layout_manager),
-      launcher_view_(launcher_view) {
+      launcher_view_(launcher_view),
+      weak_factory_(this) {
   if (shelf_layout_manager)
     shelf_layout_manager->AddObserver(this);
   if (Shell::HasInstance())
@@ -324,7 +327,7 @@ void LauncherTooltipManager::CancelHidingAnimation() {
 void LauncherTooltipManager::CloseSoon() {
   base::MessageLoopForUI::current()->PostTask(
       FROM_HERE,
-      base::Bind(&LauncherTooltipManager::Close, base::Unretained(this)));
+      base::Bind(&LauncherTooltipManager::Close, weak_factory_.GetWeakPtr()));
 }
 
 void LauncherTooltipManager::ShowInternal() {

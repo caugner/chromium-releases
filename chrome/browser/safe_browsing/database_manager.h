@@ -19,10 +19,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class SafeBrowsingService;
 class SafeBrowsingDatabase;
@@ -171,6 +171,9 @@ class SafeBrowsingDatabaseManager
   // To make sure we are conservative we will return true if an error occurs.
   // This method is expected to be called on the IO thread.
   virtual bool MatchDownloadWhitelistString(const std::string& str);
+
+  // Check if the CSD malware IP matching kill switch is turned on.
+  virtual bool IsMalwareKillSwitchOn();
 
   // Called on the IO thread to cancel a pending check if the result is no
   // longer needed.

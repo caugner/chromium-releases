@@ -6,12 +6,12 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/profile_mock.h"
 #include "components/sessions/serialized_navigation_entry_test_helper.h"
@@ -20,11 +20,11 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/test/test_browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/util/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using sessions::SerializedNavigationEntry;
@@ -190,6 +190,8 @@ class SyncedTabDelegateMock : public SyncedTabDelegate {
                      const std::vector<const content::NavigationEntry*>*());
   MOCK_CONST_METHOD0(IsPinned, bool());
   MOCK_CONST_METHOD0(HasWebContents, bool());
+  MOCK_CONST_METHOD0(GetSyncId, int());
+  MOCK_METHOD1(SetSyncId, void(int));
 };
 
 class SyncRefreshListener : public content::NotificationObserver {

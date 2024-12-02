@@ -23,7 +23,7 @@ class ResourceMetadataStorageTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     storage_.reset(new ResourceMetadataStorage(
-        temp_dir_.path(), base::MessageLoopProxy::current()));
+        temp_dir_.path(), base::MessageLoopProxy::current().get()));
     ASSERT_TRUE(storage_->Initialize());
   }
 
@@ -151,24 +151,39 @@ TEST_F(ResourceMetadataStorageTest, Iterator) {
   for (size_t i = 0; i < entries.size(); ++i)
     EXPECT_TRUE(storage_->PutEntry(entries[i]));
 
-  // Insert some dummy cache entries.
-  FileCacheEntry cache_entry;
-  EXPECT_TRUE(storage_->PutCacheEntry(entries[0].resource_id(), cache_entry));
-  EXPECT_TRUE(storage_->PutCacheEntry(entries[1].resource_id(), cache_entry));
+  // Insert some cache entries.
+  std::map<std::string, FileCacheEntry> cache_entries;
+  cache_entries[entries[0].resource_id()].set_md5("aaaaaa");
+  cache_entries[entries[1].resource_id()].set_md5("bbbbbb");
+  for (std::map<std::string, FileCacheEntry>::iterator it =
+           cache_entries.begin(); it != cache_entries.end(); ++it)
+    EXPECT_TRUE(storage_->PutCacheEntry(it->first, it->second));
 
   // Iterate and check the result.
-  std::map<std::string, ResourceEntry> result;
+  std::map<std::string, ResourceEntry> found_entries;
+  std::map<std::string, FileCacheEntry> found_cache_entries;
   scoped_ptr<ResourceMetadataStorage::Iterator> it = storage_->GetIterator();
   ASSERT_TRUE(it);
   for (; !it->IsAtEnd(); it->Advance()) {
     const ResourceEntry& entry = it->Get();
-    result[entry.resource_id()] = entry;
+    found_entries[entry.resource_id()] = entry;
+
+    FileCacheEntry cache_entry;
+    if (it->GetCacheEntry(&cache_entry))
+      found_cache_entries[entry.resource_id()] = cache_entry;
   }
   EXPECT_FALSE(it->HasError());
 
-  EXPECT_EQ(entries.size(), result.size());
+  EXPECT_EQ(entries.size(), found_entries.size());
   for (size_t i = 0; i < entries.size(); ++i)
-    EXPECT_EQ(1U, result.count(entries[i].resource_id()));
+    EXPECT_EQ(1U, found_entries.count(entries[i].resource_id()));
+
+  EXPECT_EQ(cache_entries.size(), found_cache_entries.size());
+  for (std::map<std::string, FileCacheEntry>::iterator it =
+           cache_entries.begin(); it != cache_entries.end(); ++it) {
+    ASSERT_EQ(1U, found_cache_entries.count(it->first));
+    EXPECT_EQ(it->second.md5(), found_cache_entries[it->first].md5());
+  }
 }
 
 TEST_F(ResourceMetadataStorageTest, PutCacheEntry) {
@@ -312,7 +327,7 @@ TEST_F(ResourceMetadataStorageTest, OpenExistingDB) {
 
   // Close DB and reopen.
   storage_.reset(new ResourceMetadataStorage(
-      temp_dir_.path(), base::MessageLoopProxy::current()));
+      temp_dir_.path(), base::MessageLoopProxy::current().get()));
   ASSERT_TRUE(storage_->Initialize());
 
   // Can read data.
@@ -344,7 +359,7 @@ TEST_F(ResourceMetadataStorageTest, IncompatibleDB) {
   // Set incompatible version and reopen DB.
   SetDBVersion(ResourceMetadataStorage::kDBVersion - 1);
   storage_.reset(new ResourceMetadataStorage(
-      temp_dir_.path(), base::MessageLoopProxy::current()));
+      temp_dir_.path(), base::MessageLoopProxy::current().get()));
   ASSERT_TRUE(storage_->Initialize());
 
   // Data is erased because of the incompatible version.
@@ -358,7 +373,7 @@ TEST_F(ResourceMetadataStorageTest, WrongPath) {
   ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(), &path));
 
   storage_.reset(new ResourceMetadataStorage(
-      path, base::MessageLoopProxy::current()));
+      path, base::MessageLoopProxy::current().get()));
   // Cannot initialize DB beacause the path does not point a directory.
   ASSERT_FALSE(storage_->Initialize());
 }

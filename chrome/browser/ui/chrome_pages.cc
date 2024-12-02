@@ -21,8 +21,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/user_metrics.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/url_util.h"
+#include "url/gurl.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
@@ -147,6 +147,12 @@ void ShowPolicy(Browser* browser) {
   ShowSingletonTab(browser, GURL(kChromeUIPolicyURL));
 }
 
+void ShowSlow(Browser* browser) {
+#if defined(OS_CHROMEOS)
+  ShowSingletonTab(browser, GURL(kChromeUISlowURL));
+#endif
+}
+
 void ShowSettings(Browser* browser) {
   content::RecordAction(UserMetricsAction("ShowOptions"));
   ShowSettingsSubPage(browser, std::string());
@@ -204,7 +210,7 @@ void ShowSearchEngineSettings(Browser* browser) {
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 
-void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source) {
+void ShowBrowserSignin(Browser* browser, signin::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
   SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(original_profile);
@@ -223,8 +229,7 @@ void ShowBrowserSignin(Browser* browser, SyncPromoUI::Source source) {
     }
 
     NavigateToSingletonTab(browser,
-                            GURL(SyncPromoUI::GetSyncPromoURL(source,
-                                                              false)));
+                           GURL(signin::GetPromoURL(source, false)));
     DCHECK_GT(browser->tab_strip_model()->count(), 0);
   }
 }

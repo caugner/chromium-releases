@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/extensions/crx_installer_error.h"
+#include "chrome/browser/signin/oauth2_token_service.h"
 #include "extensions/common/url_pattern.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -47,6 +48,7 @@ class PermissionSet;
 // Displays all the UI around extension installation.
 class ExtensionInstallPrompt
     : public OAuth2MintTokenFlow::Delegate,
+      public OAuth2TokenService::Consumer,
       public base::SupportsWeakPtr<ExtensionInstallPrompt> {
  public:
   enum PromptType {
@@ -70,8 +72,12 @@ class ExtensionInstallPrompt
     explicit Prompt(PromptType type);
     ~Prompt();
 
+    // Sets the permission list for this prompt.
     void SetPermissions(const std::vector<string16>& permissions);
+    // Sets the permission list details for this prompt.
+    void SetPermissionsDetails(const std::vector<string16>& details);
     void SetInlineInstallWebstoreData(const std::string& localized_user_count,
+                                      bool show_user_count,
                                       double average_rating,
                                       int rating_count);
     void SetOAuthIssueAdvice(const IssueAdviceInfo& issue_advice);
@@ -91,6 +97,8 @@ class ExtensionInstallPrompt
     string16 GetPermissionsHeading() const;
     string16 GetOAuthHeading() const;
     string16 GetRetainedFilesHeading() const;
+    string16 GetRetainedFilesHeadingWithCount() const;
+
     bool ShouldShowPermissions() const;
 
     // Getters for webstore metadata. Only populated when the type is
@@ -105,7 +113,9 @@ class ExtensionInstallPrompt
     string16 GetRatingCount() const;
     string16 GetUserCount() const;
     size_t GetPermissionCount() const;
+    size_t GetPermissionsDetailsCount() const;
     string16 GetPermission(size_t index) const;
+    string16 GetPermissionsDetails(size_t index) const;
     size_t GetOAuthIssueCount() const;
     const IssueAdviceInfoEntry& GetOAuthIssue(size_t index) const;
     size_t GetRetainedFileCount() const;
@@ -139,6 +149,7 @@ class ExtensionInstallPrompt
     // Permissions that are being requested (may not be all of an extension's
     // permissions if only additional ones are being requested)
     std::vector<string16> permissions_;
+    std::vector<string16> details_;
 
     // Descriptions and details for OAuth2 permissions to display to the user.
     // These correspond to permission scopes.
@@ -161,6 +172,10 @@ class ExtensionInstallPrompt
     // Range is kMinExtensionRating to kMaxExtensionRating
     double average_rating_;
     int rating_count_;
+
+    // Whether we should display the user count (we anticipate this will be
+    // false if localized_user_count_ represents the number zero).
+    bool show_user_count_;
 
     std::vector<base::FilePath> retained_files_;
   };
@@ -345,6 +360,13 @@ class ExtensionInstallPrompt
   // Starts fetching warnings for OAuth2 scopes, if there are any.
   void FetchOAuthIssueAdviceIfNeeded();
 
+  // OAuth2TokenService::Consumer implementation:
+  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                                 const std::string& access_token,
+                                 const base::Time& expiration_time) OVERRIDE;
+  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                                 const GoogleServiceAuthError& error) OVERRIDE;
+
   // OAuth2MintTokenFlow::Delegate implementation:
   virtual void OnIssueAdviceSuccess(
       const IssueAdviceInfo& issue_advice) OVERRIDE;
@@ -381,6 +403,7 @@ class ExtensionInstallPrompt
   // A pre-filled prompt.
   Prompt prompt_;
 
+  scoped_ptr<OAuth2TokenService::Request> login_token_request_;
   scoped_ptr<OAuth2MintTokenFlow> token_flow_;
 
   // Used to show the confirm dialog.

@@ -8,7 +8,6 @@
 #include <sys/sysctl.h>
 
 #include "base/command_line.h"
-#include "base/debug/debugger.h"
 #include "base/files/file_path.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
@@ -17,12 +16,12 @@
 #include "base/path_service.h"
 #include "chrome/app/breakpad_mac.h"
 #import "chrome/browser/app_controller_mac.h"
+#include "chrome/browser/browser_process.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/mac/install_from_dmg.h"
 #include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/metrics/metrics_service.h"
-#include "chrome/browser/storage_monitor/storage_monitor_mac.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/main_function_params.h"
@@ -150,21 +149,6 @@ void RecordCatSixtyFour() {
 
 }  // namespace
 
-void RecordBreakpadStatusUMA(MetricsService* metrics) {
-  metrics->RecordBreakpadRegistration(IsCrashReporterEnabled());
-  metrics->RecordBreakpadHasDebugger(base::debug::BeingDebugged());
-}
-
-void WarnAboutMinimumSystemRequirements() {
-  // Nothing to check for on Mac right now.
-}
-
-// From browser_main_win.h, stubs until we figure out the right thing...
-
-int DoUninstallTasks(bool chrome_still_running) {
-  return content::RESULT_CODE_NORMAL_EXIT;
-}
-
 // ChromeBrowserMainPartsMac ---------------------------------------------------
 
 ChromeBrowserMainPartsMac::ChromeBrowserMainPartsMac(
@@ -245,7 +229,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   [[KeystoneGlue defaultKeystoneGlue] registerWithKeystone];
 
   // Disk image installation is sort of a first-run task, so it shares the
-  // kNoFirstRun switch.
+  // no first run switches.
   //
   // This needs to be done after the resource bundle is initialized (for
   // access to localizations in the UI) and after Keystone is initialized
@@ -256,7 +240,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // anyone tries doing anything silly like firing off an import job, and
   // before anything creating preferences like Local State in order for the
   // relaunched installed application to still consider itself as first-run.
-  if (!parsed_command_line().HasSwitch(switches::kNoFirstRun)) {
+  if (!first_run::IsFirstRunSuppressed(parsed_command_line())) {
     if (MaybeInstallFromDiskImage()) {
       // The application was installed and the installed copy has been
       // launched.  This process is now obsolete.  Exit.
@@ -280,10 +264,10 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
       setObject:@"NO" forKey:@"NSTreatUnknownArgumentsAsOpen"];
 }
 
-void ChromeBrowserMainPartsMac::PreProfileInit() {
-  storage_monitor_.reset(new chrome::StorageMonitorMac());
-
-  ChromeBrowserMainPartsPosix::PreProfileInit();
+void ChromeBrowserMainPartsMac::PostProfileInit() {
+  ChromeBrowserMainPartsPosix::PostProfileInit();
+  g_browser_process->metrics_service()->RecordBreakpadRegistration(
+      IsCrashReporterEnabled());
 }
 
 void ChromeBrowserMainPartsMac::DidEndMainMessageLoop() {

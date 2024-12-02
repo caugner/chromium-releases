@@ -7,6 +7,7 @@
 
 import glob
 import logging
+import multiprocessing
 import optparse
 import os
 import stat
@@ -28,7 +29,7 @@ class BuildDirAmbiguous(Exception): pass
 
 class ChromeTests:
   SLOW_TOOLS = ["memcheck", "tsan", "tsan_rv", "drmemory"]
-  LAYOUT_TESTS_DEFAULT_CHUNK_SIZE = 1500
+  LAYOUT_TESTS_DEFAULT_CHUNK_SIZE = 500
 
   def __init__(self, options, args, test):
     if ':' in test:
@@ -244,6 +245,9 @@ class ChromeTests:
     self.SetupLdPath(False)
     return tool.Run(cmd, None)
 
+  def TestAppList(self):
+    return self.SimpleTest("app_list", "app_list_unittests")
+
   def TestAsh(self):
     return self.SimpleTest("ash", "ash_unittests")
 
@@ -286,12 +290,6 @@ class ChromeTests:
   def TestGPU(self):
     return self.SimpleTest("gpu", "gpu_unittests")
 
-  def TestGURL(self):
-    return self.SimpleTest("chrome", "googleurl_unittests")
-
-  def TestURL(self):
-    return self.SimpleTest("chrome", "url_unittests")
-
   def TestIpc(self):
     return self.SimpleTest("ipc", "ipc_tests",
                            valgrind_test_args=["--trace_children"])
@@ -301,6 +299,9 @@ class ChromeTests:
 
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
+
+  def TestMessageCenter(self):
+    return self.SimpleTest("message_center", "message_center_unittests")
 
   def TestNet(self):
     return self.SimpleTest("net", "net_unittests")
@@ -341,6 +342,9 @@ class ChromeTests:
   def TestUIUnit(self):
     return self.SimpleTest("chrome", "ui_unittests")
 
+  def TestURL(self):
+    return self.SimpleTest("chrome", "url_unittests")
+
   def TestViews(self):
     return self.SimpleTest("views", "views_unittests")
 
@@ -355,8 +359,8 @@ class ChromeTests:
   # Valgrind timeouts are in seconds.
   BROWSER_VALGRIND_ARGS = ["--timeout=50000", "--trace_children", "--indirect"]
   # Browser test timeouts are in milliseconds.
-  BROWSER_TEST_ARGS = ["--ui-test-action-timeout=200000",
-                       "--ui-test-action-max-timeout=400000",
+  BROWSER_TEST_ARGS = ["--ui-test-action-timeout=400000",
+                       "--ui-test-action-max-timeout=800000",
                        "--no-sandbox"]
 
   def TestAutomatedUI(self):
@@ -422,9 +426,14 @@ class ChromeTests:
       os.makedirs(out_dir)
     script = os.path.join(self._source_dir, "webkit", "tools", "layout_tests",
                           "run_webkit_tests.py")
+    # http://crbug.com/260627: After the switch to content_shell from DRT, each
+    # test now brings up 3 processes.  Under Valgrind, they become memory bound
+    # and can eventually OOM if we don't reduce the total count.
+    jobs = int(multiprocessing.cpu_count() * 0.3)
     script_cmd = ["python", script, "-v",
                   "--run-singly",  # run a separate DumpRenderTree for each test
                   "--fully-parallel",
+                  "--child-processes=%d" % jobs,
                   "--time-out-ms=200000",
                   "--no-retry-failures",  # retrying takes too much time
                   # http://crbug.com/176908: Don't launch a browser when done.
@@ -509,6 +518,7 @@ class ChromeTests:
   # Recognise the original abbreviations as well as full executable names.
   _test_list = {
     "cmdline" : RunCmdLine,
+    "app_list": TestAppList,     "app_list_unittests": TestAppList,
     "ash": TestAsh,              "ash_unittests": TestAsh,
     "aura": TestAura,            "aura_unittests": TestAura,
     "automated_ui" : TestAutomatedUI,
@@ -524,17 +534,17 @@ class ChromeTests:
     "device": TestDevice,        "device_unittests": TestDevice,
     "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
     "ffmpeg_regression_tests": TestFFmpegRegressions,
-    "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
-    "url": TestURL,              "url_unittests": TestURL,
     "gpu": TestGPU,              "gpu_unittests": TestGPU,
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "interactive_ui": TestInteractiveUI,
+    "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "layout": TestLayout,        "layout_tests": TestLayout,
     "webkit": TestLayout,
     "media": TestMedia,          "media_unittests": TestMedia,
+    "message_center": TestMessageCenter,
+    "message_center_unittests" : TestMessageCenter,
     "net": TestNet,              "net_unittests": TestNet,
     "net_perf": TestNetPerf,     "net_perftests": TestNetPerf,
-    "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "ppapi": TestPPAPI,          "ppapi_unittests": TestPPAPI,
     "printing": TestPrinting,    "printing_unittests": TestPrinting,
     "reliability": TestReliability, "reliability_tests": TestReliability,
@@ -547,6 +557,7 @@ class ChromeTests:
     "sync_integration": TestSyncIntegration,
     "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
     "unit": TestUnit,            "unit_tests": TestUnit,
+    "url": TestURL,              "url_unittests": TestURL,
     "views": TestViews,          "views_unittests": TestViews,
   }
 

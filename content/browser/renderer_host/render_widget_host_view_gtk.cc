@@ -17,12 +17,12 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/browser/accessibility/browser_accessibility_gtk.h"
 #include "content/browser/accessibility/browser_accessibility_manager_gtk.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
@@ -34,6 +34,7 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
+#include "content/common/webplugin_geometry.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/content_switches.h"
 #include "skia/ext/platform_canvas.h"
@@ -48,7 +49,6 @@
 #include "ui/gfx/gtk_native_view_id_manager.h"
 #include "ui/gfx/gtk_preserve_window.h"
 #include "webkit/common/cursors/webcursor_gtk_data.h"
-#include "webkit/plugins/npapi/webplugin.h"
 
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseWheelEvent;
@@ -753,7 +753,7 @@ gfx::NativeViewAccessible RenderWidgetHostViewGtk::GetNativeViewAccessible() {
 
 void RenderWidgetHostViewGtk::MovePluginWindows(
     const gfx::Vector2d& scroll_offset,
-    const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
+    const std::vector<WebPluginGeometry>& moves) {
   for (size_t i = 0; i < moves.size(); ++i) {
     plugin_container_manager_.MovePluginContainer(moves[i]);
   }
@@ -835,18 +835,15 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
     ShowCurrentCursor();
 }
 
-void RenderWidgetHostViewGtk::TextInputTypeChanged(ui::TextInputType type,
-                                                   bool can_compose_inline) {
+void RenderWidgetHostViewGtk::TextInputTypeChanged(
+    ui::TextInputType type,
+    bool can_compose_inline,
+    ui::TextInputMode input_mode) {
   im_context_->UpdateInputMethodState(type, can_compose_inline);
 }
 
 void RenderWidgetHostViewGtk::ImeCancelComposition() {
   im_context_->CancelComposition();
-}
-
-void RenderWidgetHostViewGtk::ImeCompositionRangeChanged(
-    const ui::Range& range,
-    const std::vector<gfx::Rect>& character_bounds) {
 }
 
 void RenderWidgetHostViewGtk::DidUpdateBackingStore(
@@ -882,8 +879,8 @@ void RenderWidgetHostViewGtk::DidUpdateBackingStore(
   }
 }
 
-void RenderWidgetHostViewGtk::RenderViewGone(base::TerminationStatus status,
-                                             int error_code) {
+void RenderWidgetHostViewGtk::RenderProcessGone(base::TerminationStatus status,
+                                                int error_code) {
   Destroy();
   plugin_container_manager_.set_host_widget(NULL);
 }
@@ -1547,28 +1544,28 @@ void RenderWidgetHostViewGtk::FatalAccessibilityTreeError() {
 
 void RenderWidgetHostViewGtk::OnAccessibilityNotifications(
     const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
-  if (!browser_accessibility_manager_) {
+  if (!GetBrowserAccessibilityManager()) {
     GtkWidget* parent = gtk_widget_get_parent(view_.get());
-    browser_accessibility_manager_.reset(
+    SetBrowserAccessibilityManager(
         new BrowserAccessibilityManagerGtk(
             parent,
             BrowserAccessibilityManagerGtk::GetEmptyDocument(),
             this));
   }
-  browser_accessibility_manager_->OnAccessibilityNotifications(params);
+  GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);
 }
 
 AtkObject* RenderWidgetHostViewGtk::GetAccessible() {
-  if (!browser_accessibility_manager_) {
+  if (!GetBrowserAccessibilityManager()) {
     GtkWidget* parent = gtk_widget_get_parent(view_.get());
-    browser_accessibility_manager_.reset(
+    SetBrowserAccessibilityManager(
         new BrowserAccessibilityManagerGtk(
             parent,
             BrowserAccessibilityManagerGtk::GetEmptyDocument(),
             this));
   }
   BrowserAccessibilityGtk* root =
-      browser_accessibility_manager_->GetRoot()->ToBrowserAccessibilityGtk();
+      GetBrowserAccessibilityManager()->GetRoot()->ToBrowserAccessibilityGtk();
 
   atk_object_set_role(root->GetAtkObject(), ATK_ROLE_HTML_CONTAINER);
   return root->GetAtkObject();

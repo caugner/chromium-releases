@@ -12,18 +12,26 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
-#include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/importer/profile_writer.h"
+#include "chrome/common/importer/importer_bridge.h"
 
 class GURL;
 struct ImportedBookmarkEntry;
 struct ImportedFaviconUsage;
-class ImporterHost;
+class ExternalProcessImporterHost;
+
+namespace importer {
+#if defined(OS_WIN)
+struct ImporterIE7PasswordInfo;
+#endif
+struct ImporterURlRow;
+struct URLKeywordInfo;
+}
 
 class InProcessImporterBridge : public ImporterBridge {
  public:
   InProcessImporterBridge(ProfileWriter* writer,
-                          base::WeakPtr<ImporterHost> host);
+                          base::WeakPtr<ExternalProcessImporterHost> host);
 
   // Begin ImporterBridge implementation:
   virtual void AddBookmarks(
@@ -34,17 +42,21 @@ class InProcessImporterBridge : public ImporterBridge {
 
 #if defined(OS_WIN)
   virtual void AddIE7PasswordInfo(
-      const IE7PasswordInfo& password_info) OVERRIDE;
+      const importer::ImporterIE7PasswordInfo& password_info) OVERRIDE;
 #endif
 
   virtual void SetFavicons(
       const std::vector<ImportedFaviconUsage>& favicons) OVERRIDE;
 
-  virtual void SetHistoryItems(const history::URLRows& rows,
-                               history::VisitSource visit_source) OVERRIDE;
+  virtual void SetHistoryItems(const std::vector<ImporterURLRow>& rows,
+                               importer::VisitSource visit_source) OVERRIDE;
 
-  virtual void SetKeywords(const std::vector<TemplateURL*>& template_urls,
-                           bool unique_on_host_and_path) OVERRIDE;
+  virtual void SetKeywords(
+      const std::vector<importer::URLKeywordInfo>& url_keywords,
+      bool unique_on_host_and_path) OVERRIDE;
+
+  virtual void SetFirefoxSearchEnginesXMLData(
+      const std::vector<std::string>& search_engine_data) OVERRIDE;
 
   virtual void SetPasswordForm(
       const content::PasswordForm& form) OVERRIDE;
@@ -61,7 +73,7 @@ class InProcessImporterBridge : public ImporterBridge {
   virtual ~InProcessImporterBridge();
 
   ProfileWriter* const writer_;  // weak
-  const base::WeakPtr<ImporterHost> host_;
+  const base::WeakPtr<ExternalProcessImporterHost> host_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessImporterBridge);
 };

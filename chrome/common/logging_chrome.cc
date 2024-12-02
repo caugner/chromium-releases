@@ -43,7 +43,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -167,7 +167,7 @@ base::FilePath SetUpSymlinkIfNeeded(const base::FilePath& symlink_path,
   // starting a new log, then delete the old symlink and make a new
   // one to a fresh log file.
   base::FilePath target_path;
-  bool symlink_exists = file_util::PathExists(symlink_path);
+  bool symlink_exists = base::PathExists(symlink_path);
   if (new_log || !symlink_exists) {
     target_path = GenerateTimestampedName(symlink_path, base::Time::Now());
 

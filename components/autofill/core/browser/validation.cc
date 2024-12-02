@@ -8,7 +8,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "components/autofill/core/browser/autofill_regexes.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/state_names.h"
@@ -78,10 +78,17 @@ bool IsValidCreditCardNumber(const base::string16& text) {
     return false;
   if (type == kMasterCard && number.size() != 16)
     return false;
+  if (type == kUnionPay && (number.size() < 16 || number.size() > 19))
+    return false;
   if (type == kVisaCard && number.size() != 13 && number.size() != 16)
     return false;
   if (type == kGenericCard && (number.size() < 12 || number.size() > 19))
     return false;
+
+  // Unlike all the other supported types, UnionPay cards lack Luhn checksum
+  // validation.
+  if (type == kUnionPay)
+    return true;
 
   // Use the Luhn formula [3] to validate the number.
   // [3] http://en.wikipedia.org/wiki/Luhn_algorithm

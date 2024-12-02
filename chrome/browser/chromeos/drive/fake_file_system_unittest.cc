@@ -21,9 +21,9 @@ class FakeFileSystemTest : public ::testing::Test {
     // Initialize FakeDriveService.
     fake_drive_service_.reset(new FakeDriveService);
     fake_drive_service_->LoadResourceListForWapi(
-        "chromeos/gdata/root_feed.json");
+        "gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "chromeos/gdata/account_metadata.json");
+        "gdata/account_metadata.json");
 
     // Create a testee instance.
     fake_file_system_.reset(new FakeFileSystem(fake_drive_service_.get()));
@@ -34,20 +34,6 @@ class FakeFileSystemTest : public ::testing::Test {
   scoped_ptr<FakeDriveService> fake_drive_service_;
   scoped_ptr<FakeFileSystem> fake_file_system_;
 };
-
-TEST_F(FakeFileSystemTest, GetResourceEntryById) {
-  FileError error = FILE_ERROR_FAILED;
-  scoped_ptr<ResourceEntry> entry;
-  const std::string resource_id = "folder:sub_dir_folder_resource_id";
-
-  fake_file_system_->GetResourceEntryById(
-      resource_id,
-      google_apis::test_util::CreateCopyResultCallback(&error, &entry));
-  base::RunLoop().RunUntilIdle();
-
-  ASSERT_EQ(FILE_ERROR_OK, error);
-  EXPECT_EQ(resource_id, entry->resource_id());
-}
 
 TEST_F(FakeFileSystemTest, GetFileContentByPath) {
   FileError initialize_error = FILE_ERROR_FAILED;

@@ -11,16 +11,17 @@
 
 #include "ash/launcher/launcher.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace_controller.h"
-#include "ash/wm/workspace/workspace_animations.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -71,33 +72,18 @@ int64 Round64(float f) {
 
 }  // namespace
 
-gfx::Rect GetMinimizeRectForWindow(aura::Window* window) {
-  Launcher* launcher = Launcher::ForWindow(window);
-  // Launcher is created lazily and can be NULL.
-  if (!launcher)
-    return gfx::Rect();
-  gfx::Rect target_bounds = Launcher::ForWindow(window)->
-      GetScreenBoundsOfItemIconForWindow(window);
-  if (target_bounds.IsEmpty()) {
-    // Assume the launcher is overflowed, zoom off to the bottom right of the
-    // work area.
-    gfx::Rect work_area =
-        Shell::GetScreen()->GetDisplayNearestWindow(window).work_area();
-    target_bounds.SetRect(work_area.right(), work_area.bottom(), 0, 0);
-  }
-  target_bounds =
-      ScreenAsh::ConvertRectFromScreen(window->parent(), target_bounds);
-  return target_bounds;
-}
+const int kCrossFadeDurationMS = 200;
 
 void AddLayerAnimationsForMinimize(aura::Window* window, bool show) {
   // Recalculate the transform at restore time since the launcher item may have
   // moved while the window was minimized.
   gfx::Rect bounds = window->bounds();
-  gfx::Rect target_bounds = GetMinimizeRectForWindow(window);
+  gfx::Rect target_bounds = GetMinimizeAnimationTargetBoundsInScreen(window);
+  target_bounds =
+      ScreenAsh::ConvertRectFromScreen(window->parent(), target_bounds);
 
-  float scale_x = static_cast<float>(target_bounds.height()) / bounds.width();
-  float scale_y = static_cast<float>(target_bounds.width()) / bounds.height();
+  float scale_x = static_cast<float>(target_bounds.width()) / bounds.width();
+  float scale_y = static_cast<float>(target_bounds.height()) / bounds.height();
 
   scoped_ptr<ui::InterpolatedTransform> scale(
       new ui::InterpolatedScale(gfx::Point3F(1, 1, 1),
@@ -309,6 +295,9 @@ class CrossFadeObserver : public ui::CompositorObserver,
     // Triggers OnImplicitAnimationsCompleted() to be called and deletes us.
     layer_->GetAnimator()->StopAnimating();
   }
+  virtual void OnWindowRemovingFromRootWindow(aura::Window* window) OVERRIDE {
+    layer_->GetAnimator()->StopAnimating();
+  }
 
   // ui::ImplicitAnimationObserver overrides:
   virtual void OnImplicitAnimationsCompleted() OVERRIDE {
@@ -396,13 +385,22 @@ base::TimeDelta CrossFadeImpl(aura::Window* window,
 }
 
 void CrossFadeToBounds(aura::Window* window, const gfx::Rect& new_bounds) {
-  DCHECK(window->TargetVisibility());
+  // Some test results in invoking CrossFadeToBounds when window is not visible.
+  // No animation is necessary in that case, thus just change the bounds and
+  // quit.
+  if (!window->TargetVisibility()) {
+    window->SetBounds(new_bounds);
+    return;
+  }
+
   const gfx::Rect old_bounds = window->bounds();
 
   // Create fresh layers for the window and all its children to paint into.
   // Takes ownership of the old layer and all its children, which will be
   // cleaned up after the animation completes.
-  ui::Layer* old_layer = views::corewm::RecreateWindowLayers(window, false);
+  // Specify |set_bounds| to true here to keep the old bounds in the child
+  // windows of |window|.
+  ui::Layer* old_layer = views::corewm::RecreateWindowLayers(window, true);
   ui::Layer* new_layer = window->layer();
 
   // Resize the window to the new size, which will force a layout and paint.
@@ -442,12 +440,12 @@ base::TimeDelta GetCrossFadeDuration(const gfx::Rect& old_bounds,
   int max_area = std::max(old_area, new_area);
   // Avoid divide by zero.
   if (max_area == 0)
-    return base::TimeDelta::FromMilliseconds(internal::kWorkspaceSwitchTimeMS);
+    return base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS);
 
   int delta_area = std::abs(old_area - new_area);
   // If the area didn't change, the animation is instantaneous.
   if (delta_area == 0)
-    return base::TimeDelta::FromMilliseconds(internal::kWorkspaceSwitchTimeMS);
+    return base::TimeDelta::FromMilliseconds(kCrossFadeDurationMS);
 
   float factor =
       static_cast<float>(delta_area) / static_cast<float>(max_area);
@@ -511,6 +509,55 @@ void SetTransformForScaleAnimation(ui::Layer* layer,
                       -layer->bounds().height() * (scale - 1.0f) / 2);
   transform.Scale(scale, scale);
   layer->SetTransform(transform);
+}
+
+gfx::Rect GetMinimizeAnimationTargetBoundsInScreen(aura::Window* window) {
+  Launcher* launcher = Launcher::ForWindow(window);
+  // Launcher is created lazily and can be NULL.
+  if (!launcher)
+    return gfx::Rect();
+  gfx::Rect item_rect = launcher->
+      GetScreenBoundsOfItemIconForWindow(window);
+
+  // The launcher item is visible and has an icon.
+  if (!item_rect.IsEmpty())
+    return item_rect;
+
+  // If both the icon width and height are 0, then there is no icon in the
+  // launcher for |window| or the icon is hidden in the overflow menu. If the
+  // launcher is auto hidden, one of the height or width will be 0 but the
+  // position in the launcher and the major dimension are still reported
+  // correctly and the window can be animated to the launcher item's light
+  // bar.
+  if (item_rect.width() != 0 || item_rect.height() != 0) {
+    internal::ShelfLayoutManager* layout_manager =
+        internal::ShelfLayoutManager::ForLauncher(window);
+    if (layout_manager->visibility_state() == SHELF_AUTO_HIDE) {
+      gfx::Rect shelf_bounds =
+          launcher->shelf_widget()->GetWindowBoundsInScreen();
+      switch (layout_manager->GetAlignment()) {
+        case SHELF_ALIGNMENT_BOTTOM:
+          item_rect.set_y(shelf_bounds.y());
+          break;
+        case SHELF_ALIGNMENT_LEFT:
+          item_rect.set_x(shelf_bounds.right());
+          break;
+        case SHELF_ALIGNMENT_RIGHT:
+          item_rect.set_x(shelf_bounds.x());
+          break;
+        case SHELF_ALIGNMENT_TOP:
+          item_rect.set_y(shelf_bounds.bottom());
+          break;
+      }
+      return item_rect;
+    }
+  }
+
+  // Assume the launcher is overflowed, zoom off to the bottom right of the
+  // work area.
+  gfx::Rect work_area =
+      Shell::GetScreen()->GetDisplayNearestWindow(window).work_area();
+  return gfx::Rect(work_area.right(), work_area.bottom(), 0, 0);
 }
 
 }  // namespace ash

@@ -10,13 +10,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/sandboxed_zip_analyzer.h"
@@ -388,6 +389,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
             << item_->GetUrlChain().back() << ": success="
             << source->GetStatus().is_success() << " response_code="
             << source->GetResponseCode();
+    if (source->GetStatus().is_success()) {
+      UMA_HISTOGRAM_SPARSE_SLOWLY(
+          "SBClientDownload.DownloadRequestResponseCode",
+          source->GetResponseCode());
+    }
+    UMA_HISTOGRAM_SPARSE_SLOWLY(
+        "SBClientDownload.DownloadRequestNetError",
+        -source->GetStatus().error());
     DownloadCheckResultReason reason = REASON_SERVER_PING_FAILED;
     DownloadCheckResult result = SAFE;
     if (source->GetStatus().is_success() &&
@@ -417,6 +426,10 @@ class DownloadProtectionService::CheckClientDownloadRequest
       } else if (response.verdict() == ClientDownloadResponse::DANGEROUS_HOST) {
         reason = REASON_DOWNLOAD_DANGEROUS_HOST;
         result = DANGEROUS_HOST;
+      } else if (
+          response.verdict() == ClientDownloadResponse::POTENTIALLY_UNWANTED) {
+        reason = REASON_DOWNLOAD_POTENTIALLY_UNWANTED;
+        result = POTENTIALLY_UNWANTED;
       } else {
         LOG(DFATAL) << "Unknown download response verdict: "
                     << response.verdict();
@@ -655,6 +668,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
     fetcher_->SetUploadData("application/octet-stream",
                             client_download_request_data_);
+    UMA_HISTOGRAM_COUNTS("SBClientDownload.DownloadRequestPayloadSize",
+                         client_download_request_data_.size());
     fetcher_->Start();
   }
 
@@ -864,8 +879,12 @@ void DownloadProtectionService::RequestFinished(
 void DownloadProtectionService::ShowDetailsForDownload(
     const content::DownloadItem& item,
     content::PageNavigator* navigator) {
+  GURL learn_more_url(chrome::kDownloadScanningLearnMoreURL);
+  if (item.GetDangerType() ==
+      content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED)
+    learn_more_url = GURL(chrome::kDownloadPotentiallyUnwantedLearnMoreURL);
   navigator->OpenURL(
-      content::OpenURLParams(GURL(chrome::kDownloadScanningLearnMoreURL),
+      content::OpenURLParams(learn_more_url,
                              content::Referrer(),
                              NEW_FOREGROUND_TAB,
                              content::PAGE_TRANSITION_LINK,

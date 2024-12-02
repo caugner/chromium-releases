@@ -13,8 +13,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/time.h"
-#include "googleurl/src/gurl.h"
+#include "base/time/time.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -23,7 +23,7 @@ class Value;
 }  // namespace base
 
 namespace google_apis {
-class AuthService;
+class AuthServiceInterface;
 class RequestSender;
 }  // namespace google_apis
 
@@ -44,8 +44,6 @@ class GDataContactsServiceInterface {
   typedef base::Closure FailureCallback;
 
   virtual ~GDataContactsServiceInterface() {}
-
-  virtual void Initialize() = 0;
 
   // Downloads all contacts changed at or after |min_update_time| and invokes
   // the appropriate callback asynchronously on the UI thread when complete.  If
@@ -68,10 +66,8 @@ class GDataContactsService : public GDataContactsServiceInterface {
 
   GDataContactsService(
       net::URLRequestContextGetter* url_request_context_getter,
-      Profile* profile);
+      google_apis::AuthServiceInterface* auth_service);
   virtual ~GDataContactsService();
-
-  google_apis::AuthService* auth_service_for_testing();
 
   const std::string& cached_my_contacts_group_id_for_testing() const {
     return cached_my_contacts_group_id_;
@@ -97,7 +93,6 @@ class GDataContactsService : public GDataContactsServiceInterface {
   }
 
   // Overridden from GDataContactsServiceInterface:
-  virtual void Initialize() OVERRIDE;
   virtual void DownloadContacts(SuccessCallback success_callback,
                                 FailureCallback failure_callback,
                                 const base::Time& min_update_time) OVERRIDE;
@@ -108,8 +103,6 @@ class GDataContactsService : public GDataContactsServiceInterface {
   // Invoked by a download request once it's finished (either successfully or
   // unsuccessfully).
   void OnRequestComplete(DownloadContactsRequest* request);
-
-  net::URLRequestContextGetter* url_request_context_getter_;  // not owned
 
   scoped_ptr<google_apis::RequestSender> sender_;
 

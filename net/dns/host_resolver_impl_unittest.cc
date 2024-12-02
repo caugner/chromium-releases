@@ -11,13 +11,13 @@
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/test/test_timeouts.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -507,6 +507,11 @@ class HostResolverImplTest : public testing::Test {
   size_t num_running_jobs() const {
     DCHECK(resolver_.get());
     return resolver_->num_running_jobs_for_tests();
+  }
+
+  void set_fallback_to_proctask(bool fallback_to_proctask) {
+    DCHECK(resolver_.get());
+    resolver_->fallback_to_proctask_ = fallback_to_proctask;
   }
 
   scoped_refptr<MockHostResolverProc> proc_;
@@ -1252,10 +1257,8 @@ DnsConfig CreateValidDnsConfig() {
 class HostResolverImplDnsTest : public HostResolverImplTest {
  protected:
   virtual void SetUp() OVERRIDE {
-    AddDnsRule("er", dns_protocol::kTypeA, MockDnsClientRule::FAIL_SYNC);
-    AddDnsRule("er", dns_protocol::kTypeAAAA, MockDnsClientRule::FAIL_SYNC);
-    AddDnsRule("nx", dns_protocol::kTypeA, MockDnsClientRule::FAIL_ASYNC);
-    AddDnsRule("nx", dns_protocol::kTypeAAAA, MockDnsClientRule::FAIL_ASYNC);
+    AddDnsRule("nx", dns_protocol::kTypeA, MockDnsClientRule::FAIL);
+    AddDnsRule("nx", dns_protocol::kTypeAAAA, MockDnsClientRule::FAIL);
     AddDnsRule("ok", dns_protocol::kTypeA, MockDnsClientRule::OK);
     AddDnsRule("ok", dns_protocol::kTypeAAAA, MockDnsClientRule::OK);
     AddDnsRule("4ok", dns_protocol::kTypeA, MockDnsClientRule::OK);
@@ -1263,7 +1266,7 @@ class HostResolverImplDnsTest : public HostResolverImplTest {
     AddDnsRule("6ok", dns_protocol::kTypeA, MockDnsClientRule::EMPTY);
     AddDnsRule("6ok", dns_protocol::kTypeAAAA, MockDnsClientRule::OK);
     AddDnsRule("4nx", dns_protocol::kTypeA, MockDnsClientRule::OK);
-    AddDnsRule("4nx", dns_protocol::kTypeAAAA, MockDnsClientRule::FAIL_ASYNC);
+    AddDnsRule("4nx", dns_protocol::kTypeAAAA, MockDnsClientRule::FAIL);
     CreateResolver();
   }
 
@@ -1272,6 +1275,8 @@ class HostResolverImplDnsTest : public HostResolverImplTest {
                                          DefaultLimits(),
                                          DefaultParams(proc_.get()),
                                          NULL));
+    // Disable IPv6 support probing.
+    resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_UNSPECIFIED);
     resolver_->SetDnsClient(CreateMockDnsClient(DnsConfig(), dns_rules_));
   }
 
@@ -1299,7 +1304,6 @@ class HostResolverImplDnsTest : public HostResolverImplTest {
 TEST_F(HostResolverImplDnsTest, DnsTask) {
   resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
 
-  proc_->AddRuleForAllFamilies("er_succeed", "192.168.1.101");
   proc_->AddRuleForAllFamilies("nx_succeed", "192.168.1.102");
   // All other hostnames will fail in proc_.
 
@@ -1312,9 +1316,7 @@ TEST_F(HostResolverImplDnsTest, DnsTask) {
   ChangeDnsConfig(CreateValidDnsConfig());
 
   EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok_fail", 80)->Resolve());
-  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("er_fail", 80)->Resolve());
   EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_fail", 80)->Resolve());
-  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("er_succeed", 80)->Resolve());
   EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_succeed", 80)->Resolve());
 
   proc_->SignalMultiple(requests_.size());
@@ -1327,11 +1329,81 @@ TEST_F(HostResolverImplDnsTest, DnsTask) {
   EXPECT_TRUE(requests_[1]->HasOneAddress("127.0.0.1", 80));
   // Fallback to ProcTask.
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[2]->result());
-  EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[3]->result());
-  EXPECT_EQ(OK, requests_[4]->result());
-  EXPECT_TRUE(requests_[4]->HasOneAddress("192.168.1.101", 80));
-  EXPECT_EQ(OK, requests_[5]->result());
-  EXPECT_TRUE(requests_[5]->HasOneAddress("192.168.1.102", 80));
+  EXPECT_EQ(OK, requests_[3]->result());
+  EXPECT_TRUE(requests_[3]->HasOneAddress("192.168.1.102", 80));
+}
+
+// Test successful and failing resolutions in HostResolverImpl::DnsTask when
+// fallback to ProcTask is disabled.
+TEST_F(HostResolverImplDnsTest, NoFallbackToProcTask) {
+  resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+  set_fallback_to_proctask(false);
+
+  proc_->AddRuleForAllFamilies("nx_succeed", "192.168.1.102");
+  // All other hostnames will fail in proc_.
+
+  // Set empty DnsConfig.
+  ChangeDnsConfig(DnsConfig());
+  // Initially there is no config, so client should not be invoked.
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok_fail", 80)->Resolve());
+  // There is no config, so fallback to ProcTask must work.
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_succeed", 80)->Resolve());
+  proc_->SignalMultiple(requests_.size());
+
+  EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[0]->WaitForResult());
+  EXPECT_EQ(OK, requests_[1]->WaitForResult());
+  EXPECT_TRUE(requests_[1]->HasOneAddress("192.168.1.102", 80));
+
+  ChangeDnsConfig(CreateValidDnsConfig());
+
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok_abort", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_abort", 80)->Resolve());
+
+  // Simulate the case when the preference or policy has disabled the DNS client
+  // causing AbortDnsTasks.
+  resolver_->SetDnsClient(CreateMockDnsClient(DnsConfig(), dns_rules_));
+  ChangeDnsConfig(CreateValidDnsConfig());
+
+  // First request is resolved by MockDnsClient, others should fail due to
+  // disabled fallback to ProcTask.
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("ok_fail", 80)->Resolve());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_fail", 80)->Resolve());
+  proc_->SignalMultiple(requests_.size());
+
+  // Aborted due to Network Change.
+  EXPECT_EQ(ERR_NETWORK_CHANGED, requests_[2]->WaitForResult());
+  EXPECT_EQ(ERR_NETWORK_CHANGED, requests_[3]->WaitForResult());
+  // Resolved by MockDnsClient.
+  EXPECT_EQ(OK, requests_[4]->WaitForResult());
+  EXPECT_TRUE(requests_[4]->HasOneAddress("127.0.0.1", 80));
+  // Fallback to ProcTask is disabled.
+  EXPECT_EQ(ERR_NAME_NOT_RESOLVED, requests_[5]->WaitForResult());
+}
+
+// Test behavior of OnDnsTaskFailure when Job is aborted.
+TEST_F(HostResolverImplDnsTest, OnDnsTaskFailureAbortedJob) {
+  resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+  ChangeDnsConfig(CreateValidDnsConfig());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_abort", 80)->Resolve());
+  // Abort all jobs here.
+  CreateResolver();
+  proc_->SignalMultiple(requests_.size());
+  // Run to completion.
+  base::MessageLoop::current()->RunUntilIdle();  // Notification happens async.
+  // It shouldn't crash during OnDnsTaskFailure callbacks.
+  EXPECT_EQ(ERR_IO_PENDING, requests_[0]->result());
+
+  // Repeat test with Fallback to ProcTask disabled
+  resolver_->SetDefaultAddressFamily(ADDRESS_FAMILY_IPV4);
+  set_fallback_to_proctask(false);
+  ChangeDnsConfig(CreateValidDnsConfig());
+  EXPECT_EQ(ERR_IO_PENDING, CreateRequest("nx_abort", 80)->Resolve());
+  // Abort all jobs here.
+  CreateResolver();
+  // Run to completion.
+  base::MessageLoop::current()->RunUntilIdle();  // Notification happens async.
+  // It shouldn't crash during OnDnsTaskFailure callbacks.
+  EXPECT_EQ(ERR_IO_PENDING, requests_[1]->result());
 }
 
 TEST_F(HostResolverImplDnsTest, DnsTaskUnspec) {
@@ -1370,7 +1442,7 @@ TEST_F(HostResolverImplDnsTest, ServeFromHosts) {
                                std::string());  // Default to failures.
   proc_->SignalMultiple(1u);  // For the first request which misses.
 
-  Request* req0 = CreateRequest("er_ipv4", 80);
+  Request* req0 = CreateRequest("nx_ipv4", 80);
   EXPECT_EQ(ERR_IO_PENDING, req0->Resolve());
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, req0->WaitForResult());
 
@@ -1379,39 +1451,39 @@ TEST_F(HostResolverImplDnsTest, ServeFromHosts) {
   ASSERT_TRUE(ParseIPLiteralToNumber("::1", &local_ipv6));
 
   DnsHosts hosts;
-  hosts[DnsHostsKey("er_ipv4", ADDRESS_FAMILY_IPV4)] = local_ipv4;
-  hosts[DnsHostsKey("er_ipv6", ADDRESS_FAMILY_IPV6)] = local_ipv6;
-  hosts[DnsHostsKey("er_both", ADDRESS_FAMILY_IPV4)] = local_ipv4;
-  hosts[DnsHostsKey("er_both", ADDRESS_FAMILY_IPV6)] = local_ipv6;
+  hosts[DnsHostsKey("nx_ipv4", ADDRESS_FAMILY_IPV4)] = local_ipv4;
+  hosts[DnsHostsKey("nx_ipv6", ADDRESS_FAMILY_IPV6)] = local_ipv6;
+  hosts[DnsHostsKey("nx_both", ADDRESS_FAMILY_IPV4)] = local_ipv4;
+  hosts[DnsHostsKey("nx_both", ADDRESS_FAMILY_IPV6)] = local_ipv6;
 
   // Update HOSTS file.
   config.hosts = hosts;
   ChangeDnsConfig(config);
 
-  Request* req1 = CreateRequest("er_ipv4", 80);
+  Request* req1 = CreateRequest("nx_ipv4", 80);
   EXPECT_EQ(OK, req1->Resolve());
   EXPECT_TRUE(req1->HasOneAddress("127.0.0.1", 80));
 
-  Request* req2 = CreateRequest("er_ipv6", 80);
+  Request* req2 = CreateRequest("nx_ipv6", 80);
   EXPECT_EQ(OK, req2->Resolve());
   EXPECT_TRUE(req2->HasOneAddress("::1", 80));
 
-  Request* req3 = CreateRequest("er_both", 80);
+  Request* req3 = CreateRequest("nx_both", 80);
   EXPECT_EQ(OK, req3->Resolve());
   EXPECT_TRUE(req3->HasAddress("127.0.0.1", 80) &&
               req3->HasAddress("::1", 80));
 
   // Requests with specified AddressFamily.
-  Request* req4 = CreateRequest("er_ipv4", 80, MEDIUM, ADDRESS_FAMILY_IPV4);
+  Request* req4 = CreateRequest("nx_ipv4", 80, MEDIUM, ADDRESS_FAMILY_IPV4);
   EXPECT_EQ(OK, req4->Resolve());
   EXPECT_TRUE(req4->HasOneAddress("127.0.0.1", 80));
 
-  Request* req5 = CreateRequest("er_ipv6", 80, MEDIUM, ADDRESS_FAMILY_IPV6);
+  Request* req5 = CreateRequest("nx_ipv6", 80, MEDIUM, ADDRESS_FAMILY_IPV6);
   EXPECT_EQ(OK, req5->Resolve());
   EXPECT_TRUE(req5->HasOneAddress("::1", 80));
 
   // Request with upper case.
-  Request* req6 = CreateRequest("er_IPV4", 80);
+  Request* req6 = CreateRequest("nx_IPV4", 80);
   EXPECT_EQ(OK, req6->Resolve());
   EXPECT_TRUE(req6->HasOneAddress("127.0.0.1", 80));
 }
@@ -1450,7 +1522,7 @@ TEST_F(HostResolverImplDnsTest, DisableDnsClientOnPersistentFailure) {
 
   for (unsigned i = 0; i < 20; ++i) {
     // Use custom names to require separate Jobs.
-    std::string hostname = base::StringPrintf("err_%u", i);
+    std::string hostname = base::StringPrintf("nx_%u", i);
     // Ensure fallback to ProcTask succeeds.
     proc_->AddRuleForAllFamilies(hostname, "192.168.1.101");
     EXPECT_EQ(ERR_IO_PENDING, CreateRequest(hostname, 80)->Resolve()) << i;
@@ -1484,7 +1556,7 @@ TEST_F(HostResolverImplDnsTest, DontDisableDnsClientOnSporadicFailure) {
   // 20 failures interleaved with 20 successes.
   for (unsigned i = 0; i < 40; ++i) {
     // Use custom names to require separate Jobs.
-    std::string hostname = (i % 2) == 0 ? base::StringPrintf("err_%u", i)
+    std::string hostname = (i % 2) == 0 ? base::StringPrintf("nx_%u", i)
                                         : base::StringPrintf("ok_%u", i);
     EXPECT_EQ(ERR_IO_PENDING, CreateRequest(hostname, 80)->Resolve()) << i;
   }

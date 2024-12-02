@@ -8,12 +8,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_test_util.h"
-#include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
@@ -21,6 +20,7 @@
 #include "content/public/common/socket_permission_request.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/id_util.h"
+#include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -117,8 +117,7 @@ TEST(ExtensionPermissionsTest, EffectiveHostPermissions) {
 
 TEST(ExtensionPermissionsTest, SocketPermissions) {
   // Set feature current channel to appropriate value.
-  Feature::ScopedCurrentChannel scoped_channel(
-      chrome::VersionInfo::CHANNEL_DEV);
+  ScopedCurrentChannel scoped_channel(chrome::VersionInfo::CHANNEL_DEV);
   scoped_refptr<Extension> extension;
   std::string error;
 
@@ -151,53 +150,6 @@ TEST(ExtensionPermissionsTest, SocketPermissions) {
         "239.255.255.250", 1900));
 }
 
-// This tests the API permissions with an empty manifest (one that just
-// specifies a name and a version and nothing else).
-TEST(ExtensionPermissionsTest, ApiPermissions) {
-  const struct {
-    const char* permission_name;
-    bool expect_success;
-  } kTests[] = {
-    // Negative test.
-    { "non_existing_permission", false },
-    // Test default module/package permission.
-    { "browserAction",  true },
-    { "devtools",       true },
-    { "extension",      true },
-    { "i18n",           true },
-    { "pageAction",     true },
-    { "pageActions",    true },
-    { "test",           true },
-    // Some negative tests.
-    { "bookmarks",      false },
-    { "cookies",        false },
-    { "history",        false },
-    // Make sure we find the module name after stripping '.' and '/'.
-    { "browserAction/abcd/onClick",  true },
-    { "browserAction.abcd.onClick",  true },
-    // Test Tabs functions.
-    { "tabs.create",      true},
-    { "tabs.duplicate",   true},
-    { "tabs.onRemoved",   true},
-    { "tabs.remove",      true},
-    { "tabs.update",      true},
-    { "tabs.getSelected", true},
-    { "tabs.onUpdated",   true },
-    // Test getPermissionWarnings functions. Only one requires permissions.
-    { "management.getPermissionWarningsById", false },
-    { "management.getPermissionWarningsByManifest", true },
-  };
-
-  scoped_refptr<Extension> extension;
-  extension = LoadManifest("empty_manifest", "empty.json");
-
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
-    EXPECT_EQ(kTests[i].expect_success,
-              extension->HasAPIPermission(kTests[i].permission_name))
-                  << "Permission being tested: " << kTests[i].permission_name;
-  }
-}
-
 TEST(ExtensionPermissionsTest, GetPermissionMessages_ManyAPIPermissions) {
   scoped_refptr<Extension> extension;
   extension = LoadManifest("permissions", "many-apis.json");
@@ -212,6 +164,27 @@ TEST(ExtensionPermissionsTest, GetPermissionMessages_ManyAPIPermissions) {
   EXPECT_EQ("Access your tabs and browsing activity", UTF16ToUTF8(warnings[4]));
   EXPECT_EQ("Manage your apps, extensions, and themes",
             UTF16ToUTF8(warnings[5]));
+}
+
+TEST(ExtensionPermissionsTest, GetPermissionMessages_ManyHostsPermissions) {
+  scoped_refptr<Extension> extension;
+  extension = LoadManifest("permissions", "more-than-3-hosts.json");
+  std::vector<string16> warnings =
+      PermissionsData::GetPermissionMessageStrings(extension.get());
+  std::vector<string16> warnings_details =
+      PermissionsData::GetPermissionMessageDetailsStrings(extension.get());
+  ASSERT_EQ(1u, warnings.size());
+  ASSERT_EQ(1u, warnings_details.size());
+#if defined(TOOLKIT_VIEWS)
+  EXPECT_EQ("Access your data on 5 website(s)", UTF16ToUTF8(warnings[0]));
+  EXPECT_EQ("- www.a.com\n- www.b.com\n- www.c.com\n- www.d.com\n- www.e.com",
+            UTF16ToUTF8(warnings_details[0]));
+#else
+  // TODO(finnur): Remove once other platforms support expandable sections.
+  EXPECT_EQ("Access your data on www.a.com, www.b.com, and 3 other websites",
+            UTF16ToUTF8(warnings[0]));
+  EXPECT_TRUE(warnings_details[0].empty());
+#endif
 }
 
 TEST(ExtensionPermissionsTest, GetPermissionMessages_LocationApiPermission) {
@@ -242,7 +215,7 @@ TEST(ExtensionPermissionsTest, GetPermissionMessages_Plugins) {
   std::vector<string16> warnings =
       PermissionsData::GetPermissionMessageStrings(extension.get());
 // We don't parse the plugins key on Chrome OS, so it should not ask for any
-  // permissions.
+// permissions.
 #if defined(OS_CHROMEOS)
   ASSERT_EQ(0u, warnings.size());
 #else

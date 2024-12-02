@@ -8,7 +8,7 @@
 
 #include "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_sending_event.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/browser/renderer_host/webmenurunner_mac.h"
@@ -36,7 +36,7 @@ void PopupMenuHelper::ShowPopupMenu(
     int item_height,
     double item_font_size,
     int selected_item,
-    const std::vector<WebMenuItem>& items,
+    const std::vector<MenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
   // Only single selection list boxes show a popup on Mac.

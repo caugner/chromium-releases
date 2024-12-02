@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/shill_client_helper.h"
 #include "chromeos/dbus/shill_property_changed_observer.h"
@@ -142,6 +142,15 @@ class ShillClientUnittestBase : public testing::Test {
   static void ExpectStringAndValueArguments(const std::string& expected_string,
                                             const base::Value* expected_value,
                                             dbus::MessageReader* reader);
+
+  // Expects the reader to have a string-to-variant dictionary.
+  static void ExpectDictionaryValueArgument(
+      const base::DictionaryValue* expected_dictionary,
+      dbus::MessageReader* reader);
+
+  // Creates a DictionaryValue with example Service properties. The caller owns
+  // the result.
+  static base::DictionaryValue* CreateExampleServiceProperties();
 
   // Expects the call status to be SUCCESS.
   static void ExpectNoResultValue(DBusMethodCallStatus call_status);

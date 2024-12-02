@@ -12,7 +12,7 @@
 
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -151,7 +151,7 @@ class HistoryQuickProviderTest : public testing::Test,
 
 void HistoryQuickProviderTest::SetUp() {
   profile_.reset(new TestingProfile());
-  profile_->CreateHistoryService(true, false);
+  ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->CreateBookmarkModel(true);
   ui_test_utils::WaitForBookmarkModelToLoad(profile_.get());
   profile_->BlockUntilHistoryIndexIsRefreshed();
@@ -212,7 +212,7 @@ void HistoryQuickProviderTest::FillData() {
       // Mark the most recent |cur.typed_count| visits as typed.
       std::string sql_cmd_line = base::StringPrintf(
           "INSERT INTO \"visits\" VALUES(%" PRIuS ", %" PRIuS ", %" PRId64
-          ", 0, %d, 0, 0, 1)",
+          ", 0, %d, 0, 1)",
           visit_id++, i + 1, visit_time.ToInternalValue(),
           (j < cur.typed_count) ? content::PAGE_TRANSITION_TYPED :
                                   content::PAGE_TRANSITION_LINK);
@@ -245,8 +245,9 @@ void HistoryQuickProviderTest::RunTest(const string16 text,
                                        string16 expected_fill_into_edit) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
   base::MessageLoop::current()->RunUntilIdle();
-  AutocompleteInput input(text, string16::npos, string16(), GURL(),false, false,
-                          true, AutocompleteInput::ALL_MATCHES);
+  AutocompleteInput input(text, string16::npos, string16(), GURL(),
+                          AutocompleteInput::INVALID_SPEC, false, false, true,
+                          AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
   EXPECT_TRUE(provider_->done());
 
@@ -287,6 +288,7 @@ void HistoryQuickProviderTest::RunTest(const string16 text,
     best_score = actual->relevance;
   }
 
+  EXPECT_EQ(can_inline_top_result, ac_matches_[0].allowed_to_be_default_match);
   if (can_inline_top_result) {
     // When the top scorer is inline-able make sure we get the expected
     // fill_into_edit and autocomplete offset.
@@ -295,12 +297,15 @@ void HistoryQuickProviderTest::RunTest(const string16 text,
         << "' but we expected '" << expected_fill_into_edit << "'.";
     size_t text_pos = expected_fill_into_edit.find(text);
     ASSERT_NE(string16::npos, text_pos);
-    EXPECT_EQ(text_pos + text.size(),
-              ac_matches_[0].inline_autocomplete_offset);
+    EXPECT_EQ(ac_matches_[0].fill_into_edit.substr(text_pos + text.size()),
+              ac_matches_[0].inline_autocompletion);
   } else {
     // When the top scorer is not inline-able autocomplete offset must be npos.
-    EXPECT_EQ(string16::npos, ac_matches_[0].inline_autocomplete_offset);
+    EXPECT_TRUE(ac_matches_[0].inline_autocompletion.empty());
     // Also, the score must be too low to be inlineable.
+    // TODO(mpearson): when the controller reorders for inlining, there's no
+    // longer any connection between scores and what's inlineable / allowed
+    // to be the default match.  Remove this test.
     EXPECT_LT(ac_matches_[0].relevance,
               AutocompleteResult::kLowestDefaultScore);
   }

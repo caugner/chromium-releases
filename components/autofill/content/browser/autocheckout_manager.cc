@@ -8,14 +8,15 @@
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/browser/autocheckout_request_manager.h"
+#include "components/autofill/content/browser/autocheckout_statistic.h"
 #include "components/autofill/content/browser/autocheckout_steps.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
-#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/autofill_messages.h"
 #include "components/autofill/core/common/form_data.h"
@@ -25,16 +26,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/ssl_status.h"
-#include "googleurl/src/gurl.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 using content::RenderViewHost;
-using content::SSLStatus;
 using content::WebContents;
 
 namespace autofill {
@@ -143,8 +142,9 @@ void GetGoogleCookies(
 }
 
 bool IsBillingGroup(FieldTypeGroup group) {
-  return group == AutofillType::ADDRESS_BILLING ||
-         group == AutofillType::PHONE_BILLING;
+  return group == ADDRESS_BILLING ||
+         group == PHONE_BILLING ||
+         group == NAME_BILLING;
 }
 
 const char kTransactionIdNotSet[] = "transaction id not set";
@@ -154,9 +154,10 @@ const char kTransactionIdNotSet[] = "transaction id not set";
 AutocheckoutManager::AutocheckoutManager(AutofillManager* autofill_manager)
     : autofill_manager_(autofill_manager),
       metric_logger_(new AutofillMetrics),
-      autocheckout_offered_(false),
+      should_show_bubble_(true),
       is_autocheckout_bubble_showing_(false),
       in_autocheckout_flow_(false),
+      should_preserve_dialog_(false),
       google_transaction_id_(kTransactionIdNotSet),
       weak_ptr_factory_(this) {}
 
@@ -198,25 +199,47 @@ void AutocheckoutManager::FillForms() {
       page_meta_data_->click_elements_before_form_fill,
       page_meta_data_->click_elements_after_form_fill,
       page_meta_data_->proceed_element_descriptor));
+  // Record time taken for navigating current page.
+  RecordTimeTaken(page_meta_data_->current_page_number);
 }
 
-void AutocheckoutManager::OnClickFailed(AutocheckoutStatus status) {
-  DCHECK(in_autocheckout_flow_);
+void AutocheckoutManager::OnAutocheckoutPageCompleted(
+    AutocheckoutStatus status) {
+  if (!in_autocheckout_flow_)
+    return;
+
+  DVLOG(2) << "OnAutocheckoutPageCompleted, page_no: "
+           << page_meta_data_->current_page_number
+           << " status: "
+           << status;
+
   DCHECK_NE(MISSING_FIELDMAPPING, status);
 
-  SendAutocheckoutStatus(status);
-  SetStepProgressForPage(page_meta_data_->current_page_number,
-                         AUTOCHECKOUT_STEP_FAILED);
+  SetStepProgressForPage(
+      page_meta_data_->current_page_number,
+      (status == SUCCESS) ? AUTOCHECKOUT_STEP_COMPLETED :
+          AUTOCHECKOUT_STEP_FAILED);
 
-  autofill_manager_->delegate()->OnAutocheckoutError();
-  in_autocheckout_flow_ = false;
+  if (page_meta_data_->IsEndOfAutofillableFlow() || status != SUCCESS)
+    EndAutocheckout(status);
 }
 
 void AutocheckoutManager::OnLoadedPageMetaData(
     scoped_ptr<AutocheckoutPageMetaData> page_meta_data) {
-  scoped_ptr<AutocheckoutPageMetaData> old_meta_data =
-      page_meta_data_.Pass();
+  scoped_ptr<AutocheckoutPageMetaData> old_meta_data = page_meta_data_.Pass();
   page_meta_data_ = page_meta_data.Pass();
+
+  // If there is no click element in the last page, then it's the real last page
+  // of the flow, and the dialog will be closed when the page navigates.
+  // Otherwise, the dialog should be preserved for the page loaded by the click
+  // element on the last page of the flow.
+  // Note, |should_preserve_dialog_| has to be computed at this point because
+  // |in_autocheckout_flow_| may change after |OnLoadedPageMetaData| is called.
+  should_preserve_dialog_ = in_autocheckout_flow_ ||
+      (old_meta_data.get() &&
+       old_meta_data->IsEndOfAutofillableFlow() &&
+       old_meta_data->proceed_element_descriptor.retrieval_method !=
+           WebElementDescriptor::NONE);
 
   // Don't log that the bubble could be displayed if the user entered an
   // Autocheckout flow and sees the first page of the flow again due to an
@@ -234,55 +257,37 @@ void AutocheckoutManager::OnLoadedPageMetaData(
   AutocheckoutStatus status = SUCCESS;
 
   // Missing Autofill server results.
-  if (!page_meta_data_) {
-    in_autocheckout_flow_ = false;
+  if (!page_meta_data_.get()) {
     status = MISSING_FIELDMAPPING;
-  } else if (page_meta_data_->IsStartOfAutofillableFlow()) {
+  } else if (IsStartOfAutofillableFlow()) {
     // Not possible unless Autocheckout failed to proceed.
-    in_autocheckout_flow_ = false;
     status = CANNOT_PROCEED;
   } else if (!page_meta_data_->IsInAutofillableFlow()) {
     // Missing Autocheckout meta data in the Autofill server results.
-    in_autocheckout_flow_ = false;
     status = MISSING_FIELDMAPPING;
   } else if (page_meta_data_->current_page_number <=
                  old_meta_data->current_page_number) {
     // Not possible unless Autocheckout failed to proceed.
-    in_autocheckout_flow_ = false;
     status = CANNOT_PROCEED;
   }
 
   // Encountered an error during the Autocheckout flow, probably to
   // do with a problem on the previous page.
-  if (!in_autocheckout_flow_) {
-    if (old_meta_data) {
-      SetStepProgressForPage(old_meta_data->current_page_number,
-                             AUTOCHECKOUT_STEP_FAILED);
-    }
-    SendAutocheckoutStatus(status);
-    autofill_manager_->delegate()->OnAutocheckoutError();
+  if (status != SUCCESS) {
+    SetStepProgressForPage(old_meta_data->current_page_number,
+                           AUTOCHECKOUT_STEP_FAILED);
+    EndAutocheckout(status);
     return;
   }
 
-  SetStepProgressForPage(old_meta_data->current_page_number,
-                         AUTOCHECKOUT_STEP_COMPLETED);
   SetStepProgressForPage(page_meta_data_->current_page_number,
                          AUTOCHECKOUT_STEP_STARTED);
 
   FillForms();
-  // If the current page is the last page in the flow, set in-progress
-  // steps to 'completed', and send status.
-  if (page_meta_data_->IsEndOfAutofillableFlow()) {
-    SetStepProgressForPage(page_meta_data_->current_page_number,
-                           AUTOCHECKOUT_STEP_COMPLETED);
-    SendAutocheckoutStatus(status);
-    autofill_manager_->delegate()->OnAutocheckoutSuccess();
-    in_autocheckout_flow_ = false;
-  }
 }
 
 void AutocheckoutManager::OnFormsSeen() {
-  autocheckout_offered_ = false;
+  should_show_bubble_ = true;
 }
 
 bool AutocheckoutManager::ShouldIgnoreAjax() {
@@ -291,9 +296,8 @@ bool AutocheckoutManager::ShouldIgnoreAjax() {
 
 void AutocheckoutManager::MaybeShowAutocheckoutBubble(
     const GURL& frame_url,
-    const content::SSLStatus& ssl_status,
     const gfx::RectF& bounding_box) {
-  if (autocheckout_offered_ ||
+  if (!should_show_bubble_ ||
       is_autocheckout_bubble_showing_ ||
       !IsStartOfAutofillableFlow())
     return;
@@ -302,7 +306,6 @@ void AutocheckoutManager::MaybeShowAutocheckoutBubble(
       &AutocheckoutManager::ShowAutocheckoutBubble,
       weak_ptr_factory_.GetWeakPtr(),
       frame_url,
-      ssl_status,
       bounding_box);
 
   content::WebContents* web_contents = autofill_manager_->GetWebContents();
@@ -331,12 +334,18 @@ void AutocheckoutManager::ReturnAutocheckoutData(
     const FormStructure* result,
     const std::string& google_transaction_id) {
   if (!result) {
+    // When user cancels the dialog, |result| is NULL.
+    // TODO(): add AutocheckoutStatus.USER_CANCELLED, and call
+    //         EndAutocheckout(USER_CANCELLED) instead.
     in_autocheckout_flow_ = false;
     return;
   }
 
+  latency_statistics_.clear();
+  last_step_completion_timestamp_ = base::TimeTicks().Now();
   google_transaction_id_ = google_transaction_id;
   in_autocheckout_flow_ = true;
+  should_preserve_dialog_ = true;
   metric_logger_->LogAutocheckoutBuyFlowMetric(
       AutofillMetrics::AUTOCHECKOUT_BUY_FLOW_STARTED);
 
@@ -345,23 +354,29 @@ void AutocheckoutManager::ReturnAutocheckoutData(
   billing_address_.reset(new AutofillProfile());
 
   for (size_t i = 0; i < result->field_count(); ++i) {
-    AutofillFieldType type = result->field(i)->type();
+    const AutofillType& type = result->field(i)->Type();
     const base::string16& value = result->field(i)->value;
-    if (type == CREDIT_CARD_VERIFICATION_CODE) {
+    ServerFieldType server_type = type.GetStorableType();
+    if (server_type == CREDIT_CARD_VERIFICATION_CODE) {
       cvv_ = result->field(i)->value;
       continue;
     }
-    FieldTypeGroup group = AutofillType(type).group();
-    if (group == AutofillType::CREDIT_CARD) {
-      credit_card_->SetRawInfo(type, value);
-    } else if (type == ADDRESS_HOME_COUNTRY) {
-      profile_->SetInfo(type, value, autofill_manager_->app_locale());
-    } else if (type == ADDRESS_BILLING_COUNTRY) {
-      billing_address_->SetInfo(type, value, autofill_manager_->app_locale());
+    FieldTypeGroup group = type.group();
+    if (group == CREDIT_CARD) {
+      credit_card_->SetRawInfo(server_type, value);
+      // TODO(dgwallinga): Find a way of cleanly deprecating CREDIT_CARD_NAME.
+      // code.google.com/p/chromium/issues/detail?id=263498
+      if (server_type == CREDIT_CARD_NAME)
+        billing_address_->SetRawInfo(NAME_BILLING_FULL, value);
+    } else if (server_type == ADDRESS_HOME_COUNTRY) {
+      if (IsBillingGroup(group))
+        billing_address_->SetInfo(type, value, autofill_manager_->app_locale());
+      else
+        profile_->SetInfo(type, value, autofill_manager_->app_locale());
     } else if (IsBillingGroup(group)) {
-      billing_address_->SetRawInfo(type, value);
+      billing_address_->SetRawInfo(server_type, value);
     } else {
-      profile_->SetRawInfo(type, value);
+      profile_->SetRawInfo(server_type, value);
     }
   }
 
@@ -372,16 +387,6 @@ void AutocheckoutManager::ReturnAutocheckoutData(
                          AUTOCHECKOUT_STEP_STARTED);
 
   FillForms();
-
-  // If the current page is the last page in the flow, set in-progress
-  // steps to 'completed', and send status.
-  if (page_meta_data_->IsEndOfAutofillableFlow()) {
-    SetStepProgressForPage(page_meta_data_->current_page_number,
-                           AUTOCHECKOUT_STEP_COMPLETED);
-    SendAutocheckoutStatus(SUCCESS);
-    autofill_manager_->delegate()->OnAutocheckoutSuccess();
-    in_autocheckout_flow_ = false;
-  }
 }
 
 void AutocheckoutManager::set_metric_logger(
@@ -391,20 +396,23 @@ void AutocheckoutManager::set_metric_logger(
 
 void AutocheckoutManager::MaybeShowAutocheckoutDialog(
     const GURL& frame_url,
-    const SSLStatus& ssl_status,
-    bool show_dialog) {
+    AutocheckoutBubbleState state) {
   is_autocheckout_bubble_showing_ = false;
-  if (!show_dialog)
-    return;
 
-  FormData form = BuildAutocheckoutFormData();
-  form.ssl_status = ssl_status;
+  // User has taken action on the bubble, don't offer bubble again.
+  if (state != AUTOCHECKOUT_BUBBLE_IGNORED)
+    should_show_bubble_ = false;
+
+  if (state != AUTOCHECKOUT_BUBBLE_ACCEPTED)
+    return;
 
   base::Callback<void(const FormStructure*, const std::string&)> callback =
       base::Bind(&AutocheckoutManager::ReturnAutocheckoutData,
                  weak_ptr_factory_.GetWeakPtr());
-  autofill_manager_->ShowRequestAutocompleteDialog(
-      form, frame_url, DIALOG_TYPE_AUTOCHECKOUT, callback);
+  autofill_manager_->ShowRequestAutocompleteDialog(BuildAutocheckoutFormData(),
+                                                   frame_url,
+                                                   DIALOG_TYPE_AUTOCHECKOUT,
+                                                   callback);
 
   for (std::map<int, std::vector<AutocheckoutStepType> >::const_iterator
           it = page_meta_data_->page_types.begin();
@@ -417,22 +425,19 @@ void AutocheckoutManager::MaybeShowAutocheckoutDialog(
 
 void AutocheckoutManager::ShowAutocheckoutBubble(
     const GURL& frame_url,
-    const content::SSLStatus& ssl_status,
     const gfx::RectF& bounding_box,
     const std::string& cookies) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  base::Callback<void(bool)> callback = base::Bind(
+  base::Callback<void(AutocheckoutBubbleState)> callback = base::Bind(
       &AutocheckoutManager::MaybeShowAutocheckoutDialog,
       weak_ptr_factory_.GetWeakPtr(),
-      frame_url,
-      ssl_status);
-  autofill_manager_->delegate()->ShowAutocheckoutBubble(
-      bounding_box,
-      cookies.find("LSID") != std::string::npos,
-      callback);
-  is_autocheckout_bubble_showing_ = true;
-  autocheckout_offered_ = true;
+      frame_url);
+  is_autocheckout_bubble_showing_ =
+      autofill_manager_->delegate()->ShowAutocheckoutBubble(
+          bounding_box,
+          cookies.find("LSID") != std::string::npos,
+          callback);
 }
 
 bool AutocheckoutManager::IsStartOfAutofillableFlow() const {
@@ -449,10 +454,10 @@ void AutocheckoutManager::SetValue(const AutofillField& field,
   if (field.server_type() == NO_SERVER_DATA)
     return;
 
-  AutofillFieldType type = field.type();
+  const AutofillType& type = field.Type();
 
-  if (type == FIELD_WITH_DEFAULT_VALUE) {
-    DCHECK(field.is_checkable);
+  ServerFieldType server_type = type.GetStorableType();
+  if (server_type == FIELD_WITH_DEFAULT_VALUE) {
     // For a form with radio buttons, like:
     // <form>
     //   <input type="radio" name="sex" value="male">Male<br>
@@ -464,23 +469,37 @@ void AutocheckoutManager::SetValue(const AutofillField& field,
     //   (fieldtype: FIELD_WITH_DEFAULT_VALUE, value: "female")
     // Note that, the field mapping is repeated twice to respond to both the
     // input elements with the same name/signature in the form.
+    //
+    // FIELD_WITH_DEFAULT_VALUE can also be used for selects, the correspondent
+    // example of the radio buttons example above is:
+    // <SELECT name="sex">
+    //   <OPTION value="female">Female</OPTION>
+    //   <OPTION value="male">Male</OPTION>
+    // </SELECT>
     base::string16 default_value = UTF8ToUTF16(field.default_value());
-    // Mark the field checked if server says the default value of the field
-    // to be this field's value.
-    field_to_fill->is_checked = (field.value == default_value);
+    if (field.is_checkable) {
+      // Mark the field checked if server says the default value of the field
+      // to be this field's value.
+      field_to_fill->is_checked = (field.value == default_value);
+    } else if (field.form_control_type == "select-one") {
+      field_to_fill->value = default_value;
+    } else {
+      // FIELD_WITH_DEFAULT_VALUE should not be used for other type of fields.
+      NOTREACHED();
+    }
     return;
   }
 
   // Handle verification code directly.
-  if (type == CREDIT_CARD_VERIFICATION_CODE) {
+  if (server_type == CREDIT_CARD_VERIFICATION_CODE) {
     field_to_fill->value = cvv_;
     return;
   }
 
-  if (AutofillType(type).group() == AutofillType::CREDIT_CARD) {
+  if (type.group() == CREDIT_CARD) {
     credit_card_->FillFormField(
         field, 0, autofill_manager_->app_locale(), field_to_fill);
-  } else if (IsBillingGroup(AutofillType(type).group())) {
+  } else if (IsBillingGroup(type.group())) {
     billing_address_->FillFormField(
         field, 0, autofill_manager_->app_locale(), field_to_fill);
   } else {
@@ -505,6 +524,7 @@ void AutocheckoutManager::SendAutocheckoutStatus(AutocheckoutStatus status) {
   autocheckout_request_manager->SendAutocheckoutStatus(
       status,
       autofill_manager_->GetWebContents()->GetURL(),
+      latency_statistics_,
       google_transaction_id_);
 
   // Log the result of this Autocheckout flow to UMA.
@@ -523,6 +543,39 @@ void AutocheckoutManager::SetStepProgressForPage(
           page_types_[page_number][i], status);
     }
   }
+}
+
+void AutocheckoutManager::RecordTimeTaken(int page_number) {
+  AutocheckoutStatistic statistic;
+  statistic.page_number = page_number;
+  if (page_types_.count(page_number) == 1) {
+    for (size_t i = 0; i < page_types_[page_number].size(); ++i) {
+      statistic.steps.push_back(page_types_[page_number][i]);
+    }
+  }
+
+  statistic.time_taken =
+      base::TimeTicks().Now() - last_step_completion_timestamp_;
+  latency_statistics_.push_back(statistic);
+
+  // Reset timestamp.
+  last_step_completion_timestamp_ = base::TimeTicks().Now();
+}
+
+void AutocheckoutManager::EndAutocheckout(AutocheckoutStatus status) {
+  DCHECK(in_autocheckout_flow_);
+
+  DVLOG(2) << "EndAutocheckout at step: "
+           << page_meta_data_->current_page_number
+           << " with status: "
+           << status;
+
+  SendAutocheckoutStatus(status);
+  if (status == SUCCESS)
+    autofill_manager_->delegate()->OnAutocheckoutSuccess();
+  else
+    autofill_manager_->delegate()->OnAutocheckoutError();
+  in_autocheckout_flow_ = false;
 }
 
 }  // namespace autofill

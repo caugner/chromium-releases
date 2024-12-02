@@ -4,6 +4,7 @@
 import unittest
 
 from telemetry.core.timeline import inspector_importer
+from telemetry.core.timeline import model
 
 _SAMPLE_MESSAGE = {
   'children': [
@@ -50,7 +51,7 @@ class InspectorEventParsingTest(unittest.TestCase):
         .RawEventToTimelineEvent(_SAMPLE_MESSAGE))
     self.assertTrue(root_event)
     decode_image_event = [
-      child for child in root_event.GetAllChildrenRecursive()
+      child for child in root_event.IterEventsInThisContainerRecrusively()
       if child.name == 'DecodeImage'][0]
     self.assertEquals(decode_image_event.args['data']['imageType'], 'PNG')
     self.assertTrue(decode_image_event.duration > 0)
@@ -66,7 +67,7 @@ class InspectorEventParsingTest(unittest.TestCase):
     self.assertEquals(1, event.start)
     self.assertEquals(3, event.end)
     self.assertEquals(2, event.duration)
-    self.assertEquals([], event.children)
+    self.assertEquals([], event.sub_slices)
 
   def testParsingWithArgs(self):
     raw_event = {'type': 'Foo',
@@ -80,7 +81,7 @@ class InspectorEventParsingTest(unittest.TestCase):
     self.assertEquals(1, event.start)
     self.assertEquals(3, event.end)
     self.assertEquals(2, event.duration)
-    self.assertEquals([], event.children)
+    self.assertEquals([], event.sub_slices)
     self.assertEquals(7, event.args['foo'])
     self.assertEquals(1, event.args['bar']['x'])
 
@@ -99,3 +100,13 @@ class InspectorEventParsingTest(unittest.TestCase):
     event = (inspector_importer.InspectorTimelineImporter.
         RawEventToTimelineEvent(raw_event))
     self.assertEquals(None, event)
+
+class InspectorImporterTest(unittest.TestCase):
+  def testImport(self):
+    m = model.TimelineModel([_SAMPLE_MESSAGE], shift_world_to_zero=False)
+    self.assertEquals(1, len(m.processes))
+    self.assertEquals(1, len(m.processes.values()[0].threads))
+    renderer_thread = m.GetAllThreads()[0]
+    self.assertEquals(1, len(renderer_thread.toplevel_slices))
+    self.assertEquals('Program',
+                      renderer_thread.toplevel_slices[0].name)

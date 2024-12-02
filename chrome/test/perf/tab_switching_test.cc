@@ -11,7 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -21,8 +21,8 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "url/gurl.h"
 
 using base::TimeDelta;
 

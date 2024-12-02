@@ -5,14 +5,15 @@
 #include "chrome/renderer/pepper/pepper_shared_memory_message_filter.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/process_util.h"
-#include "base/shared_memory.h"
+#include "base/memory/shared_memory.h"
+#include "base/process/process_handle.h"
 #include "content/public/common/content_client.h"
+#include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "webkit/plugins/ppapi/host_globals.h"
+#include "ppapi/shared_impl/var_tracker.h"
 
 namespace chrome {
 
@@ -54,8 +55,8 @@ void PepperSharedMemoryMessageFilter::OnHostMsgCreateSharedMemory(
 
   base::SharedMemoryHandle host_shm_handle;
   shm->ShareToProcess(base::GetCurrentProcessHandle(), &host_shm_handle);
-  *host_handle_id = content::GetHostGlobals()->GetVarTracker()->
-      TrackSharedMemoryHandle(instance, host_shm_handle, size);
+  *host_handle_id = content::PepperPluginInstance::Get(instance)->
+      GetVarTracker()->TrackSharedMemoryHandle(instance, host_shm_handle, size);
 
   base::PlatformFile host_handle =
 #if defined(OS_WIN)

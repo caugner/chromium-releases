@@ -5,14 +5,15 @@
 #import "chrome/browser/ui/cocoa/one_click_signin_dialog_controller.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_window.h"
 #import "chrome/browser/ui/cocoa/one_click_signin_view_controller.h"
 
 OneClickSigninDialogController::OneClickSigninDialogController(
     content::WebContents* web_contents,
-    const BrowserWindow::StartSyncCallback& sync_callback) {
+    const BrowserWindow::StartSyncCallback& sync_callback,
+    const string16& email) {
   base::Closure close_callback = base::Bind(
       &OneClickSigninDialogController::PerformClose, base::Unretained(this));
   view_controller_.reset([[OneClickSigninViewController alloc]
@@ -21,6 +22,7 @@ OneClickSigninDialogController::OneClickSigninDialogController(
          syncCallback:sync_callback
         closeCallback:close_callback
          isSyncDialog:YES
+                email:email
          errorMessage:nil]);
   base::scoped_nsobject<NSWindow> window([[ConstrainedWindowCustomWindow alloc]
       initWithContentRect:[[view_controller_ view] bounds]]);

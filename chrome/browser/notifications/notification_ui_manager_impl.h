@@ -12,7 +12,7 @@
 #include "base/id_map.h"
 #include "base/memory/linked_ptr.h"
 #include "base/prefs/pref_member.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -34,7 +34,10 @@ class NotificationUIManagerImpl
   // NotificationUIManager:
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE;
-  virtual bool DoesIdExist(const std::string& notification_id) OVERRIDE;
+  virtual bool Update(const Notification& notification,
+                      Profile* profile) OVERRIDE;
+  virtual const Notification* FindById(
+      const std::string& notification_id) const OVERRIDE;
   virtual bool CancelById(const std::string& notification_id) OVERRIDE;
   virtual std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
       Profile* profile,
@@ -54,30 +57,26 @@ class NotificationUIManagerImpl
   virtual bool ShowNotification(const Notification& notification,
                                 Profile* profile) = 0;
 
- // Replace an existing notification of the same id with this one if applicable;
- // subclass returns 'true' if the replacement happened.
- virtual bool UpdateNotification(const Notification& notification,
-                                 Profile* profile) = 0;
+  // Replace an existing notification of the same id with this one if
+  // applicable. Subclass returns 'true' if the replacement happened.
+  virtual bool UpdateNotification(const Notification& notification,
+                                  Profile* profile) = 0;
 
- // Attempts to display notifications from the show_queue. Invoked by subclasses
- // if they previously returned 'false' from ShowNotifications, which may happen
- // when there is no room to show another notification. When room appears, the
- // subclass should call this method to cause an attempt to show more
- // notifications from the waiting queue.
- void CheckAndShowNotifications();
+  // Attempts to display notifications from the show_queue. Invoked by
+  // subclasses if they previously returned 'false' from ShowNotifications,
+  // which may happen when there is no room to show another notification. When
+  // room appears, the subclass should call this method to cause an attempt to
+  // show more notifications from the waiting queue.
+  void CheckAndShowNotifications();
 
- private:
   // content::NotificationObserver override.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+ private:
   // Attempts to display notifications from the show_queue.
   void ShowNotifications();
-
-  // Replace an existing notification with this one if applicable;
-  // returns true if the replacement happened.
-  bool TryReplacement(const Notification& notification, Profile* profile);
 
   // Checks the user state to decide if we want to show the notification.
   void CheckUserState();

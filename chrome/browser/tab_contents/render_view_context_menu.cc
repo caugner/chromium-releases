@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,36 +16,34 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/printing/print_preview_context_menu_observer.h"
-#include "chrome/browser/printing/print_preview_dialog_controller.h"
-#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/browser/search/instant_extended_context_menu_observer.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/speech/chrome_speech_recognition_preferences.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
@@ -60,12 +58,12 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/content_restriction.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/print_messages.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -80,7 +78,7 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_restriction.h"
+#include "content/public/common/menu_item.h"
 #include "content/public/common/ssl_status.h"
 #include "content/public/common/url_utils.h"
 #include "extensions/browser/view_type_utils.h"
@@ -93,7 +91,20 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
-#include "webkit/common/webmenuitem.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
+
+#if defined(ENABLE_PRINTING)
+#include "chrome/common/print_messages.h"
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/printing/print_preview_context_menu_observer.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
+#include "chrome/browser/printing/print_view_manager.h"
+#else
+#include "chrome/browser/printing/print_view_manager_basic.h"
+#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINTING)
 
 using WebKit::WebContextMenuData;
 using WebKit::WebMediaPlayerAction;
@@ -116,6 +127,10 @@ using extensions::MenuItem;
 using extensions::MenuManager;
 
 namespace {
+
+const int kImageSearchThumbnailMinSize = 300 * 300;
+const int kImageSearchThumbnailMaxWidth = 600;
+const int kImageSearchThumbnailMaxHeight = 600;
 
 // Maps UMA enumeration to IDC. IDC could be changed so we can't use
 // just them and |UMA_HISTOGRAM_CUSTOM_ENUMERATION|.
@@ -183,8 +198,9 @@ const struct UmaEnumCommandIdPair {
   { 54, IDC_SPELLCHECK_MENU },
   { 55, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE },
   { 56, IDC_SPELLCHECK_LANGUAGES_FIRST },
+  { 57, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE },
   // Add new items here and use |enum_id| from the next line.
-  { 57, 0 },  // Must be the last. Increment |enum_id| when new IDC was added.
+  { 58, 0 },  // Must be the last. Increment |enum_id| when new IDC was added.
 };
 
 // Collapses large ranges of ids before looking for UMA enum.
@@ -260,14 +276,14 @@ WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
   return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
 }
 
-bool IsCustomItemEnabled(const std::vector<WebMenuItem>& items, int id) {
+bool IsCustomItemEnabled(const std::vector<content::MenuItem>& items, int id) {
   DCHECK(id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
          id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST);
   for (size_t i = 0; i < items.size(); ++i) {
     int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + items[i].action;
     if (action_id == id)
       return items[i].enabled;
-    if (items[i].type == WebMenuItem::SUBMENU) {
+    if (items[i].type == content::MenuItem::SUBMENU) {
       if (IsCustomItemEnabled(items[i].submenu, id))
         return true;
     }
@@ -275,14 +291,14 @@ bool IsCustomItemEnabled(const std::vector<WebMenuItem>& items, int id) {
   return false;
 }
 
-bool IsCustomItemChecked(const std::vector<WebMenuItem>& items, int id) {
+bool IsCustomItemChecked(const std::vector<content::MenuItem>& items, int id) {
   DCHECK(id >= IDC_CONTENT_CONTEXT_CUSTOM_FIRST &&
          id <= IDC_CONTENT_CONTEXT_CUSTOM_LAST);
   for (size_t i = 0; i < items.size(); ++i) {
     int action_id = IDC_CONTENT_CONTEXT_CUSTOM_FIRST + items[i].action;
     if (action_id == id)
       return items[i].checked;
-    if (items[i].type == WebMenuItem::SUBMENU) {
+    if (items[i].type == content::MenuItem::SUBMENU) {
       if (IsCustomItemChecked(items[i].submenu, id))
         return true;
     }
@@ -293,7 +309,7 @@ bool IsCustomItemChecked(const std::vector<WebMenuItem>& items, int id) {
 const size_t kMaxCustomMenuDepth = 5;
 const size_t kMaxCustomMenuTotalItems = 1000;
 
-void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
+void AddCustomItemsToMenu(const std::vector<content::MenuItem>& items,
                           size_t depth,
                           size_t* total_items,
                           ui::SimpleMenuModel::Delegate* delegate,
@@ -314,24 +330,24 @@ void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
     }
     (*total_items)++;
     switch (items[i].type) {
-      case WebMenuItem::OPTION:
+      case content::MenuItem::OPTION:
         menu_model->AddItem(
             items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
             items[i].label);
         break;
-      case WebMenuItem::CHECKABLE_OPTION:
+      case content::MenuItem::CHECKABLE_OPTION:
         menu_model->AddCheckItem(
             items[i].action + IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
             items[i].label);
         break;
-      case WebMenuItem::GROUP:
+      case content::MenuItem::GROUP:
         // TODO(viettrungluu): I don't know what this is supposed to do.
         NOTREACHED();
         break;
-      case WebMenuItem::SEPARATOR:
+      case content::MenuItem::SEPARATOR:
         menu_model->AddSeparator(ui::NORMAL_SEPARATOR);
         break;
-      case WebMenuItem::SUBMENU: {
+      case content::MenuItem::SUBMENU: {
         ui::SimpleMenuModel* submenu = new ui::SimpleMenuModel(delegate);
         AddCustomItemsToMenu(items[i].submenu, depth + 1, total_items, delegate,
                              submenu);
@@ -641,17 +657,14 @@ void RenderViewContextMenu::InitMenu() {
   AppendDeveloperItems();
 
   if (!is_guest_) {
+#if defined(ENABLE_FULL_PRINTING)
     if (!print_preview_menu_observer_.get()) {
       print_preview_menu_observer_.reset(
           new PrintPreviewContextMenuObserver(source_web_contents_));
     }
-    if (!instant_extended_observer_.get()) {
-      instant_extended_observer_.reset(
-          new InstantExtendedContextMenuObserver(source_web_contents_));
-    }
 
     observers_.AddObserver(print_preview_menu_observer_.get());
-    observers_.AddObserver(instant_extended_observer_.get());
+#endif
   }
 }
 
@@ -835,7 +848,7 @@ void RenderViewContextMenu::AppendLinkItems() {
 
   menu_model_.AddItemWithStringId(
       IDC_CONTENT_CONTEXT_COPYLINKLOCATION,
-      params_.link_url.SchemeIs(chrome::kMailToScheme) ?
+      params_.link_url.SchemeIs(content::kMailToScheme) ?
           IDS_CONTENT_CONTEXT_COPYEMAILADDRESS :
           IDS_CONTENT_CONTEXT_COPYLINKLOCATION);
 }
@@ -849,6 +862,17 @@ void RenderViewContextMenu::AppendImageItems() {
                                   IDS_CONTENT_CONTEXT_COPYIMAGE);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
                                   IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
+  const TemplateURL* const default_provider =
+      TemplateURLServiceFactory::GetForProfile(profile_)->
+          GetDefaultSearchProvider();
+  if (default_provider && !default_provider->image_url().empty() &&
+      default_provider->image_url_ref().IsValid()) {
+    menu_model_.AddItem(
+        IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE,
+        l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE,
+                                   default_provider->short_name()));
+  }
+  AppendPrintItem();
 }
 
 void RenderViewContextMenu::AppendAudioItems() {
@@ -1129,15 +1153,16 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return observer->IsCommandIdEnabled(id);
   }
 
-  if (id == IDC_PRINT &&
-      (source_web_contents_->GetContentRestrictions() &
-          content::CONTENT_RESTRICTION_PRINT)) {
+  CoreTabHelper* core_tab_helper =
+      CoreTabHelper::FromWebContents(source_web_contents_);
+  int content_restrictions = 0;
+  if (core_tab_helper)
+    content_restrictions = core_tab_helper->content_restrictions();
+  if (id == IDC_PRINT && (content_restrictions & CONTENT_RESTRICTION_PRINT))
     return false;
-  }
 
   if (id == IDC_SAVE_PAGE &&
-      (source_web_contents_->GetContentRestrictions() &
-          content::CONTENT_RESTRICTION_SAVE)) {
+      (content_restrictions & CONTENT_RESTRICTION_SAVE)) {
     return false;
   }
 
@@ -1255,15 +1280,12 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
           ProfileIOData::IsHandledProtocol(params_.src_url.scheme());
     }
 
+    // The images shown in the most visited thumbnails can't be opened or
+    // searched for conventionally.
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
-      // The images shown in the most visited thumbnails do not currently open
-      // in a new tab as they should. Disabling this context menu option for
-      // now, as a quick hack, before we resolve this issue (Issue = 2608).
-      // TODO(sidchat): Enable this option once this issue is resolved.
-      if (params_.src_url.scheme() == chrome::kChromeUIScheme ||
-          !params_.src_url.is_valid())
-        return false;
-      return true;
+    case IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE:
+      return params_.src_url.is_valid() &&
+          (params_.src_url.scheme() != chrome::kChromeUIScheme);
 
     case IDC_CONTENT_CONTEXT_COPYIMAGE:
       return !params_.is_image_blocked;
@@ -1306,10 +1328,15 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
         return false;
 
       const GURL& url = params_.src_url;
-      return (params_.media_flags & WebContextMenuData::MediaCanSave) &&
-          url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme()) &&
+      bool can_save =
+          (params_.media_flags & WebContextMenuData::MediaCanSave) &&
+          url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme());
+#if defined(ENABLE_FULL_PRINTING)
           // Do not save the preview PDF on the print preview page.
+      can_save = can_save &&
           !(printing::PrintPreviewDialogController::IsPrintPreviewURL(url));
+#endif
+      return can_save;
     }
 
     case IDC_CONTENT_CONTEXT_OPENAVNEWTAB:
@@ -1336,6 +1363,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       // the page) from the NavigationEntry because its reflects their origin
       // rather than the display one (returned by GetURL) which may be
       // different (like having "view-source:" on the front).
+      // TODO(nasko): Audit all GetActiveEntry calls in this file.
       NavigationEntry* active_entry =
           source_web_contents_->GetController().GetActiveEntry();
       return content::IsSavableURL(
@@ -1456,8 +1484,8 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 #if defined(ENABLE_INPUT_SPEECH)
   // Check box for menu item 'Block offensive words'.
   if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES) {
-    return ChromeSpeechRecognitionPreferences::GetForProfile(profile_)->
-        FilterProfanities();
+    return profile_->GetPrefs()->GetBoolean(
+        prefs::kSpeechRecognitionFilterProfanities);
   }
 #endif
 
@@ -1552,8 +1580,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_SAVELINKAS: {
-      download_util::RecordDownloadSource(
-          download_util::INITIATED_BY_CONTEXT_MENU);
+      RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
       const GURL& url = params_.link_url;
@@ -1570,8 +1597,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_SAVEAVAS:
     case IDC_CONTENT_CONTEXT_SAVEIMAGEAS: {
-      download_util::RecordDownloadSource(
-          download_util::INITIATED_BY_CONTEXT_MENU);
+      RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
       const GURL& url = params_.src_url;
@@ -1607,6 +1633,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_COPYIMAGE:
       CopyImageAt(params_.x, params_.y);
+      break;
+
+    case IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE:
+      GetImageThumbnailForSearch();
       break;
 
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
@@ -1720,9 +1750,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_PRINT:
+#if defined(ENABLE_PRINTING)
       if (params_.media_type == WebContextMenuData::MediaTypeNone) {
+#if defined(ENABLE_FULL_PRINTING)
         printing::PrintViewManager* print_view_manager =
             printing::PrintViewManager::FromWebContents(source_web_contents_);
+
         if (!print_view_manager)
           break;
         if (profile_->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
@@ -1730,9 +1763,18 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         } else {
           print_view_manager->PrintPreviewNow(!params_.selection_text.empty());
         }
+#else
+        printing::PrintViewManagerBasic* print_view_manager =
+            printing::PrintViewManagerBasic::FromWebContents(
+                source_web_contents_);
+        if (!print_view_manager)
+          break;
+        print_view_manager->PrintNow();
+#endif  // defined(ENABLE_FULL_PRINTING)
       } else {
         rvh->Send(new PrintMsg_PrintNodeUnderContextMenu(rvh->GetRoutingID()));
       }
+#endif  // defined(ENABLE_PRINTING)
       break;
 
     case IDC_VIEW_SOURCE:
@@ -1755,12 +1797,13 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO: {
       NavigationController* controller = &source_web_contents_->GetController();
-      NavigationEntry* nav_entry = controller->GetActiveEntry();
+      // Important to use GetVisibleEntry to match what's showing in the
+      // omnibox.
+      NavigationEntry* nav_entry = controller->GetVisibleEntry();
       Browser* browser =
           chrome::FindBrowserWithWebContents(source_web_contents_);
       chrome::ShowWebsiteSettings(browser, source_web_contents_,
-                                  nav_entry->GetURL(), nav_entry->GetSSL(),
-                                  true);
+                                  nav_entry->GetURL(), nav_entry->GetSSL());
       break;
     }
 
@@ -1781,7 +1824,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       // Since the user decided to translate for that language and site, clears
       // any preferences for not translating them.
       TranslatePrefs prefs(profile_->GetPrefs());
-      prefs.RemoveLanguageFromBlacklist(original_lang);
+      prefs.UnblockLanguage(original_lang);
       prefs.RemoveSiteFromBlacklist(params_.page_url.HostNoBrackets());
       TranslateManager::GetInstance()->TranslatePage(
           source_web_contents_, original_lang, target_lang);
@@ -1801,8 +1844,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       Browser* browser = chrome::FindBrowserWithWebContents(
           source_web_contents_);
       chrome::ShowWebsiteSettings(browser, source_web_contents_,
-                                  params_.frame_url, params_.security_info,
-                                  false);
+                                  params_.frame_url, params_.security_info);
       break;
     }
 
@@ -1897,8 +1939,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
 #if defined(ENABLE_INPUT_SPEECH)
     case IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES: {
-      ChromeSpeechRecognitionPreferences::GetForProfile(profile_)->
-          ToggleFilterProfanities();
+      profile_->GetPrefs()->SetBoolean(
+          prefs::kSpeechRecognitionFilterProfanities,
+          !profile_->GetPrefs()->GetBoolean(
+              prefs::kSpeechRecognitionFilterProfanities));
       break;
     }
 #endif
@@ -1961,11 +2005,6 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
   if (rvh) {
     rvh->NotifyContextMenuClosed(params_.custom_context);
   }
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_RENDER_VIEW_CONTEXT_MENU_CLOSED,
-      content::Source<RenderViewContextMenu>(this),
-      content::NotificationService::NoDetails());
 
   if (!command_executed_) {
     FOR_EACH_OBSERVER(RenderViewContextMenuObserver,
@@ -2035,6 +2074,15 @@ void RenderViewContextMenu::OpenURL(
 
 void RenderViewContextMenu::CopyImageAt(int x, int y) {
   source_web_contents_->GetRenderViewHost()->CopyImageAt(x, y);
+}
+
+void RenderViewContextMenu::GetImageThumbnailForSearch() {
+  source_web_contents_->GetRenderViewHost()->Send(
+       new ChromeViewMsg_RequestThumbnailForContextNode(
+           source_web_contents_->GetRenderViewHost()->GetRoutingID(),
+           kImageSearchThumbnailMinSize,
+           gfx::Size(kImageSearchThumbnailMaxWidth,
+                     kImageSearchThumbnailMaxHeight)));
 }
 
 void RenderViewContextMenu::Inspect(int x, int y) {

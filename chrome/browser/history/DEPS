@@ -3,6 +3,7 @@ include_rules = [
   # basic rules followed by temporary exceptions.  Please don't
   # add to the list of exceptions!
   "-chrome/browser",
+  "+chrome/browser/chrome_notification_types.h",
   "+chrome/browser/common",
   "+chrome/browser/favicon",
   "+chrome/browser/history",
@@ -43,7 +44,6 @@ include_rules = [
   "!chrome/browser/ui/browser_finder.h",
   "!chrome/browser/search_engines/template_url_id.h",
   "!chrome/browser/ui/profile_error_dialog.h",
-  "!chrome/browser/ui/search/instant_overlay.h",
   "!chrome/browser/ui/webui/ntp/most_visited_handler.h",
   "!chrome/browser/ui/webui/ntp/new_tab_ui.h",
 ]

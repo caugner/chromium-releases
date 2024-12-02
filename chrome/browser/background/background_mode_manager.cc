@@ -18,6 +18,7 @@
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -33,7 +34,6 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -309,7 +309,12 @@ void BackgroundModeManager::Observe(
           // treated as new installs.
           if (extensions::ExtensionSystem::Get(profile)->extension_service()->
                   is_ready()) {
-            OnBackgroundAppInstalled(extension);
+            bool is_being_reloaded = false;
+            CheckReloadStatus(extension, &is_being_reloaded);
+            // No need to show the notification if we showed to the user
+            // previously for this app.
+            if (!is_being_reloaded)
+              OnBackgroundAppInstalled(extension);
           }
         }
       }
@@ -623,8 +628,25 @@ void BackgroundModeManager::OnBackgroundAppInstalled(
   CreateStatusTrayIcon();
 
   // Notify the user that a background app has been installed.
-  if (extension)  // NULL when called by unit tests.
+  if (extension) {  // NULL when called by unit tests.
     DisplayAppInstalledNotification(extension);
+  }
+}
+
+void BackgroundModeManager::CheckReloadStatus(
+    const Extension* extension,
+    bool* is_being_reloaded) {
+    // Walk the BackgroundModeData for all profiles to see if one of their
+    // extensions is being reloaded.
+    for (BackgroundModeInfoMap::const_iterator it =
+             background_mode_data_.begin();
+         it != background_mode_data_.end();
+         ++it) {
+      Profile* profile = it->first;
+      // If the extension is being reloaded, no need to show a notification.
+      if (profile->GetExtensionService()->IsBeingReloaded(extension->id()))
+        *is_being_reloaded = true;
+    }
 }
 
 void BackgroundModeManager::CreateStatusTrayIcon() {
@@ -643,16 +665,16 @@ void BackgroundModeManager::CreateStatusTrayIcon() {
   if (!status_tray_ || status_icon_)
     return;
 
-  status_icon_ = status_tray_->CreateStatusIcon();
-  if (!status_icon_)
-    return;
-
-  // Set the image and add ourselves as a click observer on it.
   // TODO(rlp): Status tray icon should have submenus for each profile.
   gfx::ImageSkia* image_skia = ui::ResourceBundle::GetSharedInstance().
       GetImageSkiaNamed(IDR_STATUS_TRAY_ICON);
-  status_icon_->SetImage(*image_skia);
-  status_icon_->SetToolTip(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+
+  status_icon_ = status_tray_->CreateStatusIcon(
+      StatusTray::BACKGROUND_MODE_ICON,
+      *image_skia,
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+  if (!status_icon_)
+    return;
   UpdateStatusTrayIconContextMenu();
 }
 

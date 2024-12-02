@@ -9,10 +9,10 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/test/test_timeouts.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
+#include "base/test/test_timeouts.h"
+#include "base/time/time.h"
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
@@ -22,8 +22,8 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/seekable_buffer.h"
 #include "media/base/test_data_util.h"
-#include "testing/gmock_mutant.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
@@ -134,7 +134,7 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
     int frames = max_size / (audio_bus->channels() * kBitsPerSample / 8);
     if (max_size) {
       audio_bus->FromInterleaved(
-          file_->GetData() + pos_, frames, kBitsPerSample / 8);
+          file_->data() + pos_, frames, kBitsPerSample / 8);
       pos_ += max_size;
     }
     return frames;
@@ -149,7 +149,7 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
 
   virtual void OnError(AudioOutputStream* stream) {}
 
-  int file_size() { return file_->GetDataSize(); }
+  int file_size() { return file_->data_size(); }
 
  private:
   scoped_refptr<DecoderBuffer> file_;

@@ -826,6 +826,7 @@ _ENUM_LISTS = {
       'GL_COMMANDS_ISSUED_CHROMIUM',
       'GL_LATENCY_QUERY_CHROMIUM',
       'GL_ASYNC_PIXEL_TRANSFERS_COMPLETED_CHROMIUM',
+      'GL_ASYNC_READ_PIXELS_COMPLETED_CHROMIUM',
     ],
   },
   'RenderBufferParameter': {
@@ -1534,6 +1535,13 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoFramebufferTexture2D',
     'gl_test_func': 'glFramebufferTexture2DEXT',
   },
+  'FramebufferTexture2DMultisampleEXT': {
+    'decoder_func': 'DoFramebufferTexture2DMultisample',
+    'gl_test_func': 'glFramebufferTexture2DMultisampleEXT',
+    'expectation': False,
+    'unit_test': False,
+    'extension': True,
+  },
   'GenerateMipmap': {
     'decoder_func': 'DoGenerateMipmap',
     'gl_test_func': 'glGenerateMipmapEXT',
@@ -1901,7 +1909,8 @@ _FUNCTION_INFO = {
         'GLint x, GLint y, GLsizei width, GLsizei height, '
         'GLenumReadPixelFormat format, GLenumReadPixelType type, '
         'uint32 pixels_shm_id, uint32 pixels_shm_offset, '
-        'uint32 result_shm_id, uint32 result_shm_offset',
+        'uint32 result_shm_id, uint32 result_shm_offset, '
+        'GLboolean async',
     'result': ['uint32'],
     'defer_reads': True,
   },
@@ -4779,17 +4788,18 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     """Writes the GLES2 Implemention unit test."""
     code = """
 TEST_F(GLES2ImplementationTest, %(name)s) {
+  %(type)s data[%(count)d] = {0};
   struct Cmds {
     cmds::%(name)sImmediate cmd;
     %(type)s data[%(count)d];
   };
 
-  Cmds expected;
   for (int jj = 0; jj < %(count)d; ++jj) {
-    expected.data[jj] = static_cast<%(type)s>(jj);
+    data[jj] = static_cast<%(type)s>(jj);
   }
-  expected.cmd.Init(%(cmd_args)s, &expected.data[0]);
-  gl_->%(name)s(%(args)s, &expected.data[0]);
+  Cmds expected;
+  expected.cmd.Init(%(cmd_args)s, &data[0]);
+  gl_->%(name)s(%(args)s, &data[0]);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 """
@@ -5045,6 +5055,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     """Writes the GLES2 Implemention unit test."""
     code = """
 TEST_F(GLES2ImplementationTest, %(name)s) {
+  %(type)s data[%(count_param)d][%(count)d] = {{0}};
   struct Cmds {
     cmds::%(name)sImmediate cmd;
     %(type)s data[%(count_param)d][%(count)d];
@@ -5053,11 +5064,11 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
   Cmds expected;
   for (int ii = 0; ii < %(count_param)d; ++ii) {
     for (int jj = 0; jj < %(count)d; ++jj) {
-      expected.data[ii][jj] = static_cast<%(type)s>(ii * %(count)d + jj);
+      data[ii][jj] = static_cast<%(type)s>(ii * %(count)d + jj);
     }
   }
-  expected.cmd.Init(%(cmd_args)s, &expected.data[0][0]);
-  gl_->%(name)s(%(args)s, &expected.data[0][0]);
+  expected.cmd.Init(%(cmd_args)s, &data[0][0]);
+  gl_->%(name)s(%(args)s, &data[0][0]);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 """
@@ -7355,7 +7366,7 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
     file.Write("""
 namespace gles2 {
 
-NameToFunc g_gles2_function_table[] = {
+extern const NameToFunc g_gles2_function_table[] = {
 """)
     for func in self.original_functions:
       file.Write(
@@ -7459,7 +7470,7 @@ NameToFunc g_gles2_function_table[] = {
     enums = sorted(_ENUM_LISTS.keys())
     for enum in enums:
       if len(_ENUM_LISTS[enum]['valid']) > 0:
-        file.Write("static %s valid_%s_table[] = {\n" %
+        file.Write("static const %s valid_%s_table[] = {\n" %
                    (_ENUM_LISTS[enum]['type'], ToUnderscore(enum)))
         for value in _ENUM_LISTS[enum]['valid']:
           file.Write("  %s,\n" % value)
@@ -7515,12 +7526,13 @@ NameToFunc g_gles2_function_table[] = {
             dict[value] = name
 
     file = CHeaderWriter(filename)
-    file.Write("static GLES2Util::EnumToString enum_to_string_table[] = {\n")
+    file.Write("static const GLES2Util::EnumToString "
+               "enum_to_string_table[] = {\n")
     for value in dict:
       file.Write('  { %s, "%s", },\n' % (value, dict[value]))
     file.Write("""};
 
-const GLES2Util::EnumToString* GLES2Util::enum_to_string_table_ =
+const GLES2Util::EnumToString* const GLES2Util::enum_to_string_table_ =
     enum_to_string_table;
 const size_t GLES2Util::enum_to_string_table_len_ =
     sizeof(enum_to_string_table) / sizeof(enum_to_string_table[0]);
@@ -7533,7 +7545,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
         file.Write("std::string GLES2Util::GetString%s(uint32 value) {\n" %
                    enum)
         if len(_ENUM_LISTS[enum]['valid']) > 0:
-          file.Write("  static EnumToString string_table[] = {\n")
+          file.Write("  static const EnumToString string_table[] = {\n")
           for value in _ENUM_LISTS[enum]['valid']:
             file.Write('    { %s, "%s" },\n' % (value, value))
           file.Write("""  };

@@ -4,9 +4,9 @@
 
 #include <vector>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_table.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"

@@ -12,7 +12,7 @@
 
 namespace net {
 
-static const char kT1ResponseWithCacheFlushBit[] = {
+static const uint8 kT1ResponseWithCacheFlushBit[] = {
   0x0a, 'c', 'o', 'd', 'e', 'r', 'e', 'v', 'i', 'e', 'w',
   0x08, 'c', 'h', 'r', 'o', 'm', 'i', 'u', 'm',
   0x03, 'o', 'r', 'g',

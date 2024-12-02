@@ -5,8 +5,12 @@
 #ifndef REMOTING_PROTOCOL_PROTOCOL_MOCK_OBJECTS_H_
 #define REMOTING_PROTOCOL_PROTOCOL_MOCK_OBJECTS_H_
 
+#include <map>
 #include <string>
 
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/values.h"
 #include "net/base/ip_endpoint.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/proto/video.pb.h"
@@ -110,6 +114,7 @@ class MockHostStub : public HostStub {
   MOCK_METHOD1(SetCapabilities, void(const Capabilities& capabilities));
   MOCK_METHOD1(RequestPairing,
                void(const PairingRequest& pairing_request));
+  MOCK_METHOD1(DeliverClientMessage, void(const ExtensionMessage& message));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockHostStub);
@@ -124,6 +129,7 @@ class MockClientStub : public ClientStub {
   MOCK_METHOD1(SetCapabilities, void(const Capabilities& capabilities));
   MOCK_METHOD1(SetPairingResponse,
                void(const PairingResponse& pairing_response));
+  MOCK_METHOD1(DeliverHostMessage, void(const ExtensionMessage& message));
 
   // ClipboardStub mock implementation.
   MOCK_METHOD1(InjectClipboardEvent, void(const ClipboardEvent& event));
@@ -211,22 +217,31 @@ class MockPairingRegistryDelegate : public PairingRegistry::Delegate {
   MockPairingRegistryDelegate();
   virtual ~MockPairingRegistryDelegate();
 
-  const std::string& pairings_json() const {
-    return pairings_json_;
-  }
-
   // PairingRegistry::Delegate implementation.
-  virtual void Save(
-      const std::string& pairings_json,
-      const PairingRegistry::SaveCallback& callback) OVERRIDE;
-  virtual void Load(
-      const PairingRegistry::LoadCallback& callback) OVERRIDE;
-
-  void RunCallback();
+  virtual scoped_ptr<base::ListValue> LoadAll() OVERRIDE;
+  virtual bool DeleteAll() OVERRIDE;
+  virtual protocol::PairingRegistry::Pairing Load(
+      const std::string& client_id) OVERRIDE;
+  virtual bool Save(const protocol::PairingRegistry::Pairing& pairing) OVERRIDE;
+  virtual bool Delete(const std::string& client_id) OVERRIDE;
 
  private:
-  base::Closure load_callback_;
-  std::string pairings_json_;
+  typedef std::map<std::string, protocol::PairingRegistry::Pairing> Pairings;
+  Pairings pairings_;
+};
+
+class SynchronousPairingRegistry : public PairingRegistry {
+ public:
+  explicit SynchronousPairingRegistry(scoped_ptr<Delegate> delegate);
+
+ protected:
+  virtual ~SynchronousPairingRegistry();
+
+  // Runs tasks synchronously instead of posting them to |task_runner|.
+  virtual void PostTask(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      const tracked_objects::Location& from_here,
+      const base::Closure& task) OVERRIDE;
 };
 
 }  // namespace protocol

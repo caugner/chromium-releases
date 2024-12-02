@@ -10,7 +10,7 @@
 
 #include "ash/wm/user_activity_observer.h"
 #include "base/compiler_specific.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
@@ -86,7 +86,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void Signout() OVERRIDE;
 
   // UserActivityDetector implementation:
-  virtual void OnUserActivity() OVERRIDE;
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE;
 
  private:
   void StartPasswordClearTimer();

@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CROS_NETWORK_LIBRARY_IMPL_CROS_H_
 #define CHROME_BROWSER_CHROMEOS_CROS_NETWORK_LIBRARY_IMPL_CROS_H_
 
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/cros/network_library_impl_base.h"
 
 namespace chromeos {
@@ -58,27 +58,18 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE;
   virtual void SetCarrier(const std::string& carrier,
                           const NetworkOperationCallback& completed) OVERRIDE;
-  virtual void ResetModem() OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
-
-  virtual void RefreshIPConfig(Network* network) OVERRIDE;
 
   virtual void DisconnectFromNetwork(const Network* network) OVERRIDE;
   virtual void CallEnableNetworkDeviceType(
       ConnectionType device, bool enable) OVERRIDE;
   virtual void CallRemoveNetwork(const Network* network) OVERRIDE;
 
-  virtual void EnableOfflineMode(bool enable) OVERRIDE;
-
   virtual void GetIPConfigs(
       const std::string& device_path,
       HardwareAddressFormat format,
       const NetworkGetIPConfigsCallback& callback) OVERRIDE;
-  virtual NetworkIPConfigVector GetIPConfigsAndBlock(
-      const std::string& device_path,
-      std::string* hardware_address,
-      HardwareAddressFormat format) OVERRIDE;
   virtual void SetIPParameters(const std::string& service_path,
                                const std::string& address,
                                const std::string& netmask,
@@ -141,6 +132,10 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   // since Bind only takes up to six parameters.
   struct IPParameterInfo;
 
+  // Refresh the IP configuration of the given network after changes.  Puts
+  // newly configured properties into effect and renews DHCP lease.
+  void RefreshIPConfig(Network* network);
+
   // Second half of setting IP Parameters.  SetIPParameters above kicks off
   // an async information fetch, and this completes the operation when that
   // fetch is complete.
@@ -187,8 +182,6 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   class NetworkLibraryDeviceObserver : public NetworkDeviceObserver {
    public:
     virtual ~NetworkLibraryDeviceObserver() {}
-    virtual void OnNetworkDeviceChanged(
-        NetworkLibrary* cros, const NetworkDevice* device) OVERRIDE {}
   };
 
   typedef std::map<std::string, CrosNetworkWatcher*> NetworkWatcherMap;

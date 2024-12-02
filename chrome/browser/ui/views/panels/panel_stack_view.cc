@@ -52,6 +52,9 @@ PanelStackView::PanelStackView(NativePanelStackWindowDelegate* delegate)
 }
 
 PanelStackView::~PanelStackView() {
+#if defined(OS_WIN)
+  ui::HWNDSubclass::RemoveFilterFromAllTargets(this);
+#endif
 }
 
 void PanelStackView::Close() {
@@ -218,6 +221,11 @@ void PanelStackView::DrawSystemAttention(bool draw_attention) {
     // To work around this problem, we recreate the underlying window.
     views::Widget* old_window = window_;
     window_ = CreateWindowWithBounds(GetStackWindowBounds());
+
+    // New background window should also be minimized if the old one is.
+    if (old_window->IsMinimized())
+      window_->Minimize();
+
     // Make sure the new background window stays at the same z-order as the old
     // one.
     ::SetWindowPos(views::HWNDForWidget(window_),
@@ -228,6 +236,11 @@ void PanelStackView::DrawSystemAttention(bool draw_attention) {
          iter != panels_.end(); ++iter) {
       MakeStackWindowOwnPanelWindow(*iter, this);
     }
+
+    // Serve the snapshot to the new backgroud window.
+    if (thumbnailer_.get())
+      thumbnailer_->ReplaceWindow(views::HWNDForWidget(window_));
+
     window_->UpdateWindowTitle();
     window_->UpdateWindowIcon();
     old_window->Close();
@@ -451,11 +464,13 @@ views::Widget* PanelStackView::CreateWindowWithBounds(const gfx::Rect& bounds) {
                                                 panel->profile()->GetPath()),
       views::HWNDForWidget(window));
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
-    HWND native_window = views::HWNDForWidget(window);
-    thumbnailer_.reset(new TaskbarWindowThumbnailerWin(native_window, this));
-    thumbnailer_->Start();
-  }
+  // Remove the filter for old window in case that we're recreating the window.
+  ui::HWNDSubclass::RemoveFilterFromAllTargets(this);
+
+  // Listen to WM_MOVING message in order to move all panels windows on top of
+  // the background window altogether when the background window is being moved
+  // by the user.
+  ui::HWNDSubclass::AddFilterToTarget(views::HWNDForWidget(window), this);
 #endif
 
   return window;
@@ -468,9 +483,34 @@ void PanelStackView::EnsureWindowCreated() {
   // Empty size is not allowed so a temporary small size is passed. SetBounds
   // will be called later to update the bounds.
   window_ = CreateWindowWithBounds(gfx::Rect(0, 0, 1, 1));
+
+#if defined(OS_WIN)
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
+    HWND native_window = views::HWNDForWidget(window_);
+    thumbnailer_.reset(new TaskbarWindowThumbnailerWin(native_window, this));
+    thumbnailer_->Start();
+  }
+#endif
 }
 
 #if defined(OS_WIN)
+bool PanelStackView::FilterMessage(HWND hwnd,
+                                   UINT message,
+                                   WPARAM w_param,
+                                   LPARAM l_param,
+                                   LRESULT* l_result) {
+  switch (message) {
+    case WM_MOVING:
+      // When the background window is being moved by the user, all panels
+      // should also move.
+      gfx::Rect new_stack_bounds(*(reinterpret_cast<LPRECT>(l_param)));
+      MovePanelsBy(
+          new_stack_bounds.origin() - panels_.front()->GetBounds().origin());
+      break;
+  }
+  return false;
+}
+
 std::vector<HWND> PanelStackView::GetSnapshotWindowHandles() const {
   std::vector<HWND> native_panel_windows;
   for (Panels::const_iterator iter = panels_.begin();
@@ -484,7 +524,9 @@ std::vector<HWND> PanelStackView::GetSnapshotWindowHandles() const {
 }
 
 void PanelStackView::RefreshLivePreviewThumbnail() {
-  if (!thumbnailer_.get())
+  // Don't refresh the thumbnail when the stack window is system minimized
+  // because the snapshot could not be retrieved.
+  if (!thumbnailer_.get() || IsMinimized())
     return;
   thumbnailer_->InvalidateSnapshot();
 }

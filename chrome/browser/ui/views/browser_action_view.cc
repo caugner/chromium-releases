@@ -5,15 +5,17 @@
 #include "chrome/browser/ui/views/browser_action_view.h"
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "grit/generated_resources.h"
@@ -134,6 +136,14 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
                  notification_source);
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_COMMAND_REMOVED,
                  notification_source);
+
+  // We also listen for browser theme changes on linux because a switch from or
+  // to GTK requires that we regrab our browser action images.
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+      content::Source<ThemeService>(
+          ThemeServiceFactory::GetForProfile(browser->profile())));
 }
 
 void BrowserActionButton::Destroy() {
@@ -225,15 +235,16 @@ void BrowserActionButton::UpdateState() {
     if (!browser_action()->GetIsVisible(tab_id))
       icon = gfx::ImageSkiaOperations::CreateTransparentImage(icon, .25);
 
-    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    ThemeService* theme =
+        ThemeServiceFactory::GetForProfile(browser_->profile());
 
-    gfx::ImageSkia bg = *rb.GetImageSkiaNamed(IDR_BROWSER_ACTION);
+    gfx::ImageSkia bg = *theme->GetImageSkiaNamed(IDR_BROWSER_ACTION);
     SetIcon(gfx::ImageSkiaOperations::CreateSuperimposedImage(bg, icon));
 
-    gfx::ImageSkia bg_h = *rb.GetImageSkiaNamed(IDR_BROWSER_ACTION_H);
+    gfx::ImageSkia bg_h = *theme->GetImageSkiaNamed(IDR_BROWSER_ACTION_H);
     SetHoverIcon(gfx::ImageSkiaOperations::CreateSuperimposedImage(bg_h, icon));
 
-    gfx::ImageSkia bg_p = *rb.GetImageSkiaNamed(IDR_BROWSER_ACTION_P);
+    gfx::ImageSkia bg_p = *theme->GetImageSkiaNamed(IDR_BROWSER_ACTION_P);
     SetPushedIcon(
         gfx::ImageSkiaOperations::CreateSuperimposedImage(bg_p, icon));
   }
@@ -282,6 +293,9 @@ void BrowserActionButton::Observe(int type,
       }
       break;
     }
+    case chrome::NOTIFICATION_BROWSER_THEME_CHANGED:
+      UpdateState();
+      break;
     default:
       NOTREACHED();
       break;

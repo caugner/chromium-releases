@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -18,6 +18,7 @@
 #include "net/base/net_util.h"
 #include "remoting/base/auth_token_util.h"
 #include "remoting/base/auto_thread.h"
+#include "remoting/base/resources.h"
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -26,6 +27,7 @@
 #include "remoting/host/host_secret.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/it2me_desktop_environment.h"
+#include "remoting/host/pairing_registry_delegate.h"
 #include "remoting/host/pin_hash.h"
 #include "remoting/host/plugin/host_log_handler.h"
 #include "remoting/host/policy_hack/policy_watcher.h"
@@ -56,15 +58,19 @@ const char* kAttrNameOnStateChanged = "onStateChanged";
 const char* kAttrNameXmppServerAddress = "xmppServerAddress";
 const char* kAttrNameXmppServerUseTls = "xmppServerUseTls";
 const char* kAttrNameDirectoryBotJid = "directoryBotJid";
+const char* kAttrNameSupportedFeatures = "supportedFeatures";
 const char* kFuncNameConnect = "connect";
 const char* kFuncNameDisconnect = "disconnect";
 const char* kFuncNameLocalize = "localize";
+const char* kFuncNameClearPairedClients = "clearPairedClients";
+const char* kFuncNameDeletePairedClient = "deletePairedClient";
 const char* kFuncNameGetHostName = "getHostName";
 const char* kFuncNameGetPinHash = "getPinHash";
 const char* kFuncNameGenerateKeyPair = "generateKeyPair";
 const char* kFuncNameUpdateDaemonConfig = "updateDaemonConfig";
 const char* kFuncNameGetDaemonConfig = "getDaemonConfig";
 const char* kFuncNameGetDaemonVersion = "getDaemonVersion";
+const char* kFuncNameGetPairedClients = "getPairedClients";
 const char* kFuncNameGetUsageStatsConsent = "getUsageStatsConsent";
 const char* kFuncNameStartDaemon = "startDaemon";
 const char* kFuncNameStopDaemon = "stopDaemon";
@@ -80,6 +86,9 @@ const char* kAttrNameError = "ERROR";
 const char* kAttrNameInvalidDomainError = "INVALID_DOMAIN_ERROR";
 
 const int kMaxLoginAttempts = 5;
+
+// Space separated list of features supported in addition to the base protocol.
+const char* kSupportedFeatures = "pairingRegistry";
 
 }  // namespace
 
@@ -100,8 +109,7 @@ class HostNPScriptObject::It2MeImpl
   // Creates It2Me host structures and starts the host.
   void Connect(const std::string& uid,
                const std::string& auth_token,
-               const std::string& auth_service,
-               const UiStrings& ui_strings);
+               const std::string& auth_service);
 
   // Disconnects the host, ready for tear-down.
   // Also called internally, from the network thread.
@@ -218,22 +226,19 @@ HostNPScriptObject::It2MeImpl::It2MeImpl(
 void HostNPScriptObject::It2MeImpl::Connect(
     const std::string& uid,
     const std::string& auth_token,
-    const std::string& auth_service,
-    const UiStrings& ui_strings) {
+    const std::string& auth_service) {
   if (!host_context_->ui_task_runner()->BelongsToCurrentThread()) {
     DCHECK(plugin_task_runner_->BelongsToCurrentThread());
     host_context_->ui_task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&It2MeImpl::Connect, this, uid, auth_token, auth_service,
-                   ui_strings));
+        base::Bind(&It2MeImpl::Connect, this, uid, auth_token, auth_service));
     return;
   }
 
   desktop_environment_factory_.reset(new It2MeDesktopEnvironmentFactory(
       host_context_->network_task_runner(),
       host_context_->input_task_runner(),
-      host_context_->ui_task_runner(),
-      ui_strings));
+      host_context_->ui_task_runner()));
 
   // Start monitoring configured policies.
   policy_watcher_.reset(
@@ -685,9 +690,12 @@ HostNPScriptObject::HostNPScriptObject(
   xmpp_server_config_.use_tls = service_urls->xmpp_server_use_tls();
   directory_bot_jid_ = service_urls->directory_bot_jid();
 
-  // Create worker thread for encryption key generation.
+  // Create worker thread for encryption key generation and loading the paired
+  // clients.
   worker_thread_ = AutoThread::Create("ChromotingWorkerThread",
                                       plugin_task_runner_);
+
+  pairing_registry_ = CreatePairingRegistry(worker_thread_);
 }
 
 HostNPScriptObject::~HostNPScriptObject() {
@@ -708,12 +716,15 @@ bool HostNPScriptObject::HasMethod(const std::string& method_name) {
   return (method_name == kFuncNameConnect ||
           method_name == kFuncNameDisconnect ||
           method_name == kFuncNameLocalize ||
+          method_name == kFuncNameClearPairedClients ||
+          method_name == kFuncNameDeletePairedClient ||
           method_name == kFuncNameGetHostName ||
           method_name == kFuncNameGetPinHash ||
           method_name == kFuncNameGenerateKeyPair ||
           method_name == kFuncNameUpdateDaemonConfig ||
           method_name == kFuncNameGetDaemonConfig ||
           method_name == kFuncNameGetDaemonVersion ||
+          method_name == kFuncNameGetPairedClients ||
           method_name == kFuncNameGetUsageStatsConsent ||
           method_name == kFuncNameStartDaemon ||
           method_name == kFuncNameStopDaemon);
@@ -740,6 +751,10 @@ bool HostNPScriptObject::Invoke(const std::string& method_name,
     return Disconnect(args, arg_count, result);
   } else if (method_name == kFuncNameLocalize) {
     return Localize(args, arg_count, result);
+  } else if (method_name == kFuncNameClearPairedClients) {
+    return ClearPairedClients(args, arg_count, result);
+  } else if (method_name == kFuncNameDeletePairedClient) {
+    return DeletePairedClient(args, arg_count, result);
   } else if (method_name == kFuncNameGetHostName) {
     return GetHostName(args, arg_count, result);
   } else if (method_name == kFuncNameGetPinHash) {
@@ -752,6 +767,8 @@ bool HostNPScriptObject::Invoke(const std::string& method_name,
     return GetDaemonConfig(args, arg_count, result);
   } else if (method_name == kFuncNameGetDaemonVersion) {
     return GetDaemonVersion(args, arg_count, result);
+  } else if (method_name == kFuncNameGetPairedClients) {
+    return GetPairedClients(args, arg_count, result);
   } else if (method_name == kFuncNameGetUsageStatsConsent) {
     return GetUsageStatsConsent(args, arg_count, result);
   } else if (method_name == kFuncNameStartDaemon) {
@@ -784,7 +801,8 @@ bool HostNPScriptObject::HasProperty(const std::string& property_name) {
           property_name == kAttrNameError ||
           property_name == kAttrNameXmppServerAddress ||
           property_name == kAttrNameXmppServerUseTls ||
-          property_name == kAttrNameDirectoryBotJid);
+          property_name == kAttrNameDirectoryBotJid ||
+          property_name == kAttrNameSupportedFeatures);
 }
 
 bool HostNPScriptObject::GetProperty(const std::string& property_name,
@@ -853,6 +871,9 @@ bool HostNPScriptObject::GetProperty(const std::string& property_name,
     return true;
   } else if (property_name == kAttrNameDirectoryBotJid) {
     *result = NPVariantFromString(directory_bot_jid_);
+    return true;
+  } else if (property_name == kAttrNameSupportedFeatures) {
+    *result = NPVariantFromString(kSupportedFeatures);
     return true;
   } else {
     SetException("GetProperty: unsupported property " + property_name);
@@ -975,12 +996,15 @@ bool HostNPScriptObject::Enumerate(std::vector<std::string>* values) {
     kFuncNameConnect,
     kFuncNameDisconnect,
     kFuncNameLocalize,
+    kFuncNameClearPairedClients,
+    kFuncNameDeletePairedClient,
     kFuncNameGetHostName,
     kFuncNameGetPinHash,
     kFuncNameGenerateKeyPair,
     kFuncNameUpdateDaemonConfig,
     kFuncNameGetDaemonConfig,
     kFuncNameGetDaemonVersion,
+    kFuncNameGetPairedClients,
     kFuncNameGetUsageStatsConsent,
     kFuncNameStartDaemon,
     kFuncNameStopDaemon
@@ -1037,7 +1061,7 @@ bool HostNPScriptObject::Connect(const NPVariant* args,
   it2me_impl_ = new It2MeImpl(
       host_context.Pass(), plugin_task_runner_, weak_ptr_,
       xmpp_server_config_, directory_bot_jid_);
-  it2me_impl_->Connect(uid, auth_token, auth_service, ui_strings_);
+  it2me_impl_->Connect(uid, auth_token, auth_service);
 
   return true;
 }
@@ -1076,6 +1100,63 @@ bool HostNPScriptObject::Localize(const NPVariant* args,
     SetException("localize: unexpected type for argument 1");
     return false;
   }
+}
+
+bool HostNPScriptObject::ClearPairedClients(const NPVariant* args,
+                                            uint32_t arg_count,
+                                            NPVariant* result) {
+  if (arg_count != 1) {
+    SetException("clearPairedClients: bad number of arguments");
+    return false;
+  }
+
+  if (!NPVARIANT_IS_OBJECT(args[0])) {
+    SetException("clearPairedClients: invalid callback parameter");
+    return false;
+  }
+
+  ScopedRefNPObject callback_obj(ObjectFromNPVariant(args[0]));
+  if (pairing_registry_) {
+    pairing_registry_->ClearAllPairings(
+        base::Bind(&HostNPScriptObject::InvokeBooleanCallback, weak_ptr_,
+                   callback_obj));
+  } else {
+    InvokeBooleanCallback(callback_obj, false);
+  }
+
+  return true;
+}
+
+bool HostNPScriptObject::DeletePairedClient(const NPVariant* args,
+                                            uint32_t arg_count,
+                                            NPVariant* result) {
+  if (arg_count != 2) {
+    SetException("deletePairedClient: bad number of arguments");
+    return false;
+  }
+
+  if (!NPVARIANT_IS_STRING(args[0])) {
+    SetException("deletePairedClient: bad clientId parameter");
+    return false;
+  }
+
+  if (!NPVARIANT_IS_OBJECT(args[1])) {
+    SetException("deletePairedClient: invalid callback parameter");
+    return false;
+  }
+
+  std::string client_id = StringFromNPVariant(args[0]);
+  ScopedRefNPObject callback_obj(ObjectFromNPVariant(args[1]));
+  if (pairing_registry_) {
+    pairing_registry_->DeletePairing(
+        client_id,
+        base::Bind(&HostNPScriptObject::InvokeBooleanCallback,
+                   weak_ptr_, callback_obj));
+  } else {
+    InvokeBooleanCallback(callback_obj, false);
+  }
+
+  return true;
 }
 
 bool HostNPScriptObject::GetHostName(const NPVariant* args,
@@ -1243,6 +1324,31 @@ bool HostNPScriptObject::GetDaemonVersion(const NPVariant* args,
   return true;
 }
 
+bool HostNPScriptObject::GetPairedClients(const NPVariant* args,
+                                          uint32_t arg_count,
+                                          NPVariant* result) {
+  if (arg_count != 1) {
+    SetException("getPairedClients: bad number of arguments");
+    return false;
+  }
+
+  ScopedRefNPObject callback_obj(ObjectFromNPVariant(args[0]));
+  if (!callback_obj.get()) {
+    SetException("getPairedClients: invalid callback parameter");
+    return false;
+  }
+
+  if (pairing_registry_) {
+    pairing_registry_->GetAllPairings(
+        base::Bind(&HostNPScriptObject::InvokeGetPairedClientsCallback,
+                   weak_ptr_, callback_obj));
+  } else {
+    scoped_ptr<base::ListValue> no_paired_clients(new base::ListValue);
+    InvokeGetPairedClientsCallback(callback_obj, no_paired_clients.Pass());
+  }
+  return true;
+}
+
 bool HostNPScriptObject::GetUsageStatsConsent(const NPVariant* args,
                                               uint32_t arg_count,
                                               NPVariant* result) {
@@ -1395,23 +1501,13 @@ void HostNPScriptObject::SetWindow(NPWindow* np_window) {
 void HostNPScriptObject::LocalizeStrings(NPObject* localize_func) {
   DCHECK(plugin_task_runner_->BelongsToCurrentThread());
 
-  string16 direction;
-  LocalizeString(localize_func, "@@bidi_dir", &direction);
-  ui_strings_.direction = UTF16ToUTF8(direction) == "rtl" ?
-      remoting::UiStrings::RTL : remoting::UiStrings::LTR;
-  LocalizeString(localize_func, /*i18n-content*/"PRODUCT_NAME",
-                 &ui_strings_.product_name);
-  LocalizeString(localize_func, /*i18n-content*/"DISCONNECT_OTHER_BUTTON",
-                 &ui_strings_.disconnect_button_text);
-  LocalizeString(localize_func, /*i18n-content*/"CONTINUE_PROMPT",
-                 &ui_strings_.continue_prompt);
-  LocalizeString(localize_func, /*i18n-content*/"CONTINUE_BUTTON",
-                 &ui_strings_.continue_button_text);
-  LocalizeString(localize_func, /*i18n-content*/"STOP_SHARING_BUTTON",
-                 &ui_strings_.stop_sharing_button_text);
-  LocalizeStringWithSubstitution(localize_func,
-                                 /*i18n-content*/"MESSAGE_SHARED", "$1",
-                                 &ui_strings_.disconnect_message);
+  // Reload resources for the current locale. The default UI locale is used on
+  // Windows.
+#if !defined(OS_WIN)
+  string16 ui_locale;
+  LocalizeString(localize_func, "@@ui_locale", &ui_locale);
+  remoting::LoadResources(UTF16ToUTF8(ui_locale));
+#endif  // !defined(OS_WIN)
 }
 
 bool HostNPScriptObject::LocalizeString(NPObject* localize_func,
@@ -1490,6 +1586,22 @@ void HostNPScriptObject::InvokeAsyncResultCallback(
   g_npnetscape_funcs->releasevariantvalue(&result_var);
 }
 
+void HostNPScriptObject::InvokeBooleanCallback(
+    const ScopedRefNPObject& callback, bool result) {
+  if (!plugin_task_runner_->BelongsToCurrentThread()) {
+    plugin_task_runner_->PostTask(
+        FROM_HERE, base::Bind(
+            &HostNPScriptObject::InvokeBooleanCallback,
+            weak_ptr_, callback, result));
+    return;
+  }
+
+  NPVariant result_var;
+  BOOLEAN_TO_NPVARIANT(result, result_var);
+  InvokeAndIgnoreResult(callback.get(), &result_var, 1);
+  g_npnetscape_funcs->releasevariantvalue(&result_var);
+}
+
 void HostNPScriptObject::InvokeGetDaemonConfigCallback(
     const ScopedRefNPObject& callback,
     scoped_ptr<base::DictionaryValue> config) {
@@ -1525,6 +1637,25 @@ void HostNPScriptObject::InvokeGetDaemonVersionCallback(
   NPVariant version_val = NPVariantFromString(version);
   InvokeAndIgnoreResult(callback.get(), &version_val, 1);
   g_npnetscape_funcs->releasevariantvalue(&version_val);
+}
+
+void HostNPScriptObject::InvokeGetPairedClientsCallback(
+    const ScopedRefNPObject& callback,
+    scoped_ptr<base::ListValue> paired_clients) {
+  if (!plugin_task_runner_->BelongsToCurrentThread()) {
+    plugin_task_runner_->PostTask(
+        FROM_HERE, base::Bind(
+            &HostNPScriptObject::InvokeGetPairedClientsCallback,
+            weak_ptr_, callback, base::Passed(&paired_clients)));
+    return;
+  }
+
+  std::string paired_clients_json;
+  base::JSONWriter::Write(paired_clients.get(), &paired_clients_json);
+
+  NPVariant paired_clients_val = NPVariantFromString(paired_clients_json);
+  InvokeAndIgnoreResult(callback.get(), &paired_clients_val, 1);
+  g_npnetscape_funcs->releasevariantvalue(&paired_clients_val);
 }
 
 void HostNPScriptObject::InvokeGetUsageStatsConsentCallback(

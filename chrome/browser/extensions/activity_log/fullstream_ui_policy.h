@@ -6,31 +6,27 @@
 #define CHROME_BROWSER_EXTENSIONS_ACTIVITY_LOG_FULLSTREAM_UI_POLICY_H_
 
 #include <string>
-#include <vector>
+
+#include "chrome/browser/extensions/activity_log/activity_database.h"
 #include "chrome/browser/extensions/activity_log/activity_log_policy.h"
 
 class GURL;
 
 namespace extensions {
 
-class ActivityDatabase;
-
 // A policy for logging the full stream of actions, including all arguments.
 // It's mostly intended to be used in testing and analysis.
-class FullStreamUIPolicy : public ActivityLogPolicy {
+//
+// NOTE: The FullStreamUIPolicy deliberately keeps almost all information,
+// including some data that could be privacy sensitive (full URLs including
+// incognito URLs, full headers when WebRequest is used, etc.).  It should not
+// be used during normal browsing if users care about privacy.
+class FullStreamUIPolicy : public ActivityLogDatabasePolicy {
  public:
   // For more info about these member functions, see the super class.
   explicit FullStreamUIPolicy(Profile* profile);
 
-  virtual ~FullStreamUIPolicy();
-
-  virtual void ProcessAction(ActionType action_type,
-                             const std::string& extension_id,
-                             const std::string& name, const GURL& gurl,
-                             const base::ListValue* args,
-                             const base::DictionaryValue* details) OVERRIDE;
-
-  virtual void SaveState() OVERRIDE {}
+  virtual void ProcessAction(scoped_refptr<Action> action) OVERRIDE;
 
   // TODO(felt,dbabic) This is overly specific to FullStreamUIPolicy.
   // It assumes that the callback can return a sorted vector of actions.  Some
@@ -41,29 +37,46 @@ class FullStreamUIPolicy : public ActivityLogPolicy {
       const std::string& extension_id,
       const int day,
       const base::Callback
-          <void(scoped_ptr<std::vector<scoped_refptr<Action> > >)>& callback)
-      const OVERRIDE;
+          <void(scoped_ptr<Action::ActionVector>)>& callback) OVERRIDE;
 
-  virtual void SetSaveStateOnRequestOnly() OVERRIDE;
+  virtual void Close() OVERRIDE;
 
-  // Returns the actual key for a given key type
-  virtual std::string GetKey(ActivityLogPolicy::KeyType key_id) const OVERRIDE;
+  // Database table schema.
+  static const char* kTableName;
+  static const char* kTableContentFields[];
+  static const char* kTableFieldTypes[];
+  static const int kTableFieldCount;
 
  protected:
-  // Concatenates arguments
-  virtual std::string ProcessArguments(ActionType action_type,
-                                       const std::string& name,
-                                       const base::ListValue* args) const;
+  // Only ever run by OnDatabaseClose() below; see the comments on the
+  // ActivityDatabase class for an overall discussion of how cleanup works.
+  virtual ~FullStreamUIPolicy();
 
-  virtual void ProcessWebRequestModifications(
-      base::DictionaryValue& details,
-      std::string& details_string) const;
+  // The ActivityDatabase::Delegate interface.  These are always called from
+  // the database thread.
+  virtual bool InitDatabase(sql::Connection* db) OVERRIDE;
+  virtual bool FlushDatabase(sql::Connection* db) OVERRIDE;
+  virtual void OnDatabaseFailure() OVERRIDE;
+  virtual void OnDatabaseClose() OVERRIDE;
 
-  // We initialize this on the same thread as the ActivityLog and policy, but
-  // then subsequent operations occur on the DB thread. Instead of destructing
-  // the ActivityDatabase, we call its Close() method on the DB thread and it
-  // commits suicide.
-  ActivityDatabase* db_;
+  // Strips arguments if needed by policy.  May return the original object (if
+  // unmodified), or a copy (if modifications were made).  The implementation
+  // in FullStreamUIPolicy returns the action unmodified.
+  virtual scoped_refptr<Action> ProcessArguments(
+      scoped_refptr<Action> action) const;
+
+  // Tracks any pending updates to be written to the database, if write
+  // batching is turned on.  Should only be accessed from the database thread.
+  Action::ActionVector queued_actions_;
+
+ private:
+  // Adds an Action to queued_actions_; this should be invoked only on the
+  // database thread.
+  void QueueAction(scoped_refptr<Action> action);
+
+  // The implementation of ReadData; this must only run on the database thread.
+  scoped_ptr<Action::ActionVector> DoReadData(const std::string& extension_id,
+                                              const int days_ago);
 };
 
 }  // namespace extensions

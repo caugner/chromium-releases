@@ -33,6 +33,7 @@
 #include "chrome/browser/ui/webui/inline_login_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
+#include "chrome/browser/ui/webui/local_discovery/local_discovery_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -41,10 +42,10 @@
 #include "chrome/browser/ui/webui/performance_monitor/performance_monitor_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
-#include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/quota_internals/quota_internals_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
+#include "chrome/browser/ui/webui/signin/user_manager_ui.h"
 #include "chrome/browser/ui/webui/signin_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
@@ -60,9 +61,9 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
 #include "extensions/common/constants.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
+#include "url/gurl.h"
 
 #if !defined(DISABLE_NACL)
 #include "chrome/browser/ui/webui/nacl_ui.h"
@@ -70,6 +71,14 @@
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/ui/webui/policy_ui.h"
+#endif
+
+#if defined(ENABLE_WEBRTC)
+#include "chrome/browser/ui/webui/media/webrtc_logs_ui.h"
+#endif
+
+#if defined(ENABLE_FULL_PRINTING)
+#include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -96,7 +105,9 @@
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_ui.h"
 #include "chrome/browser/ui/webui/chromeos/proxy_settings_ui.h"
+#include "chrome/browser/ui/webui/chromeos/salsa_ui.h"
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
+#include "chrome/browser/ui/webui/chromeos/slow_ui.h"
 #include "chrome/browser/ui/webui/chromeos/system_info_ui.h"
 #endif
 
@@ -145,9 +156,9 @@ WebUIController* NewWebUI<ExtensionWebUI>(WebUI* web_ui,
 }
 
 template<>
-WebUIController* NewWebUI<ExtensionInfoUI>(WebUI* web_ui,
-                                           const GURL& url) {
-  return new ExtensionInfoUI(web_ui, url);
+WebUIController* NewWebUI<extensions::ExtensionInfoUI>(WebUI* web_ui,
+                                                       const GURL& url) {
+  return new extensions::ExtensionInfoUI(web_ui, url);
 }
 
 // Special case for older about: handlers.
@@ -208,6 +219,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ConstrainedWebDialogUI>;
   if (url.host() == chrome::kChromeUICrashesHost)
     return &NewWebUI<CrashesUI>;
+  if (url.host() == chrome::kChromeUIDevicesHost &&
+      CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableDeviceDiscovery)) {
+    return &NewWebUI<LocalDiscoveryUI>;
+  }
   if (url.host() == chrome::kChromeUIFlagsHost)
     return &NewWebUI<FlagsUI>;
   if (url.host() == chrome::kChromeUIHistoryFrameHost)
@@ -250,6 +266,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<UserActionsUI>;
   if (url.host() == chrome::kChromeUIVersionHost)
     return &NewWebUI<VersionUI>;
+#if defined(ENABLE_WEBRTC)
+  if (url.host() == chrome::kChromeUIWebRtcLogsHost)
+    return &NewWebUI<WebRtcLogsUI>;
+#endif
 
   /****************************************************************************
    * OS Specific #defines
@@ -341,8 +361,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::OobeUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
     return &NewWebUI<chromeos::ProxySettingsUI>;
+  if (url.host() == chrome::kChromeUISalsaHost)
+    return &NewWebUI<SalsaUI>;
   if (url.host() == chrome::kChromeUISimUnlockHost)
     return &NewWebUI<chromeos::SimUnlockUI>;
+  if (url.host() == chrome::kChromeUISlowHost)
+    return &NewWebUI<chromeos::SlowUI>;
   if (url.host() == chrome::kChromeUISystemInfoHost)
     return &NewWebUI<chromeos::SystemInfoUI>;
 #endif  // defined(OS_CHROMEOS)
@@ -374,6 +398,13 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<keyboard::KeyboardUIController>;
 #endif
 
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+  if (url.host() == chrome::kChromeUIUserManagerHost &&
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNewProfileManagement))
+    return &NewWebUI<UserManagerUI>;
+#endif
+
   if (url.host() == chrome::kChromeUIChromeURLsHost ||
       url.host() == chrome::kChromeUICreditsHost ||
       url.host() == chrome::kChromeUIDNSHost ||
@@ -401,12 +432,12 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(ENABLE_EXTENSIONS)
   if (url.host() == chrome::kChromeUIExtensionInfoHost &&
       extensions::FeatureSwitch::script_badges()->IsEnabled()) {
-    return &NewWebUI<ExtensionInfoUI>;
+    return &NewWebUI<extensions::ExtensionInfoUI>;
   }
   if (url.host() == chrome::kChromeUIExtensionsFrameHost)
-    return &NewWebUI<ExtensionsUI>;
+    return &NewWebUI<extensions::ExtensionsUI>;
 #endif
-#if defined(ENABLE_PRINTING)
+#if defined(ENABLE_FULL_PRINTING)
   if (url.host() == chrome::kChromeUIPrintHost &&
       !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled))
     return &NewWebUI<PrintPreviewUI>;
@@ -564,8 +595,15 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     return DownloadsUI::GetFaviconResourceBytes(scale_factor);
 
   // Android doesn't use the Options pages.
-  if (page_url.host() == chrome::kChromeUISettingsFrameHost)
+  if (page_url.host() == chrome::kChromeUISettingsHost ||
+      page_url.host() == chrome::kChromeUISettingsFrameHost)
     return options::OptionsUI::GetFaviconResourceBytes(scale_factor);
+
+#if defined(ENABLE_EXTENSIONS)
+  if (page_url.host() == chrome::kChromeUIExtensionsHost ||
+      page_url.host() == chrome::kChromeUIExtensionsFrameHost)
+    return extensions::ExtensionsUI::GetFaviconResourceBytes(scale_factor);
+#endif
 
   // Android doesn't use the plugins pages.
   if (page_url.host() == chrome::kChromeUIPluginsHost)

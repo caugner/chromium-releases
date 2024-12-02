@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "ui/base/base_window.h"
 #include "ui/gfx/rect.h"
@@ -18,18 +18,20 @@
 #include "content/public/test/test_utils.h"
 #endif
 
+using apps::ShellWindow;
+
 namespace {
 
 class TestShellWindowRegistryObserver
-    : public extensions::ShellWindowRegistry::Observer {
+    : public apps::ShellWindowRegistry::Observer {
  public:
   explicit TestShellWindowRegistryObserver(Profile* profile)
       : profile_(profile),
         icon_updates_(0) {
-    extensions::ShellWindowRegistry::Get(profile_)->AddObserver(this);
+    apps::ShellWindowRegistry::Get(profile_)->AddObserver(this);
   }
   virtual ~TestShellWindowRegistryObserver() {
-    extensions::ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
+    apps::ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
   }
 
   // Overridden from ShellWindowRegistry::Observer:

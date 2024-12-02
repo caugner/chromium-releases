@@ -8,7 +8,8 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
-#include "chrome/browser/ui/autofill/mock_autofill_dialog_controller.h"
+#include "chrome/browser/ui/autofill/mock_autofill_dialog_view_delegate.h"
+#import "chrome/browser/ui/cocoa/autofill/autofill_input_field.h"
 #import "chrome/browser/ui/cocoa/autofill/layout_view.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
 #include "grit/generated_resources.h"
@@ -23,26 +24,24 @@ namespace {
 
 class AutofillSectionContainerTest : public ui::CocoaTest {
  public:
+  AutofillSectionContainerTest() : section_(autofill::SECTION_BILLING) {}
   virtual void SetUp() {
     CocoaTest::SetUp();
-    container_.reset(
-        [[AutofillSectionContainer alloc]
-            initWithController:&controller_
-                    forSection:autofill::SECTION_CC]);
-    [[test_window() contentView] addSubview:[container_ view]];
+    ResetContainer();
   }
 
   void ResetContainer() {
     container_.reset(
         [[AutofillSectionContainer alloc]
-            initWithController:&controller_
-                    forSection:autofill::SECTION_CC]);
+            initWithDelegate:&delegate_
+                    forSection:section_]);
     [[test_window() contentView] setSubviews:@[ [container_ view] ]];
   }
 
  protected:
   base::scoped_nsobject<AutofillSectionContainer> container_;
-  testing::NiceMock<autofill::MockAutofillDialogController> controller_;
+  testing::NiceMock<autofill::MockAutofillDialogViewDelegate> delegate_;
+  autofill::DialogSection section_;
 };
 
 }  // namespace
@@ -79,27 +78,38 @@ TEST_F(AutofillSectionContainerTest, ModelsPopulateComboboxes) {
   using namespace testing;
 
   const DetailInput kTestInputs[] = {
-    { 2, CREDIT_CARD_EXP_MONTH }
+    { 2, CREDIT_CARD_EXP_MONTH },
+    { 3, CREDIT_CARD_EXP_4_DIGIT_YEAR }
   };
 
   DetailInputs inputs;
   inputs.push_back(kTestInputs[0]);
+  inputs.push_back(kTestInputs[1]);
 
-  autofill::MonthComboboxModel comboModel;
-  EXPECT_CALL(controller_, RequestedFieldsForSection(autofill::SECTION_CC))
+  autofill::MonthComboboxModel monthComboModel;
+  autofill::YearComboboxModel yearComboModel;
+  EXPECT_CALL(delegate_, RequestedFieldsForSection(section_))
       .WillOnce(ReturnRef(inputs));
-  EXPECT_CALL(controller_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
-      .WillRepeatedly(Return(&comboModel));
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
+      .WillRepeatedly(Return(&monthComboModel));
+  EXPECT_CALL(
+    delegate_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_4_DIGIT_YEAR))
+      .WillRepeatedly(Return(&yearComboModel));
   ResetContainer();
 
   NSPopUpButton* popup = base::mac::ObjCCastStrict<NSPopUpButton>(
       [container_ getField:CREDIT_CARD_EXP_MONTH]);
   EXPECT_EQ(13, [popup numberOfItems]);
-  EXPECT_NSEQ(@"", [popup itemTitleAtIndex:0]);
+  EXPECT_NSEQ(@"Month", [popup itemTitleAtIndex:0]);
   EXPECT_NSEQ(@"01", [popup itemTitleAtIndex:1]);
   EXPECT_NSEQ(@"02", [popup itemTitleAtIndex:2]);
   EXPECT_NSEQ(@"03", [popup itemTitleAtIndex:3]);
   EXPECT_NSEQ(@"12", [popup itemTitleAtIndex:12]);
+
+  NSPopUpButton* yearPopup = base::mac::ObjCCastStrict<NSPopUpButton>(
+      [container_ getField:CREDIT_CARD_EXP_4_DIGIT_YEAR]);
+  EXPECT_EQ(11, [yearPopup numberOfItems]);
+  EXPECT_NSEQ(@"Year", [yearPopup itemTitleAtIndex:0]);
 };
 
 TEST_F(AutofillSectionContainerTest, OutputMatchesDefinition) {
@@ -115,11 +125,11 @@ TEST_F(AutofillSectionContainerTest, OutputMatchesDefinition) {
   inputs.push_back(kTestInputs[0]);
   inputs.push_back(kTestInputs[1]);
 
-  EXPECT_CALL(controller_, RequestedFieldsForSection(autofill::SECTION_CC))
+  EXPECT_CALL(delegate_, RequestedFieldsForSection(section_))
       .WillOnce(ReturnRef(inputs));
-  EXPECT_CALL(controller_, ComboboxModelForAutofillType(EMAIL_ADDRESS))
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(EMAIL_ADDRESS))
       .WillRepeatedly(ReturnNull());
-  EXPECT_CALL(controller_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
       .WillRepeatedly(Return(&comboModel));
 
   ResetContainer();
@@ -145,7 +155,7 @@ TEST_F(AutofillSectionContainerTest, SuggestionsPopulatedByController) {
   using namespace autofill;
   using namespace testing;
 
-  EXPECT_CALL(controller_, MenuModelForSection(autofill::SECTION_CC))
+  EXPECT_CALL(delegate_, MenuModelForSection(section_))
       .WillOnce(Return(&model));
 
   ResetContainer();
@@ -163,4 +173,78 @@ TEST_F(AutofillSectionContainerTest, SuggestionsPopulatedByController) {
 
   EXPECT_NSEQ(@"a", [[menu itemAtIndex:1] title]);
   EXPECT_NSEQ(@"b", [[menu itemAtIndex:2] title]);
+}
+
+TEST_F(AutofillSectionContainerTest, FieldsAreInitiallyValid) {
+  using namespace autofill;
+  using namespace testing;
+
+  const DetailInput kTestInputs[] = {
+    { 1, EMAIL_ADDRESS, IDS_AUTOFILL_DIALOG_PLACEHOLDER_EMAIL },
+    { 2, CREDIT_CARD_EXP_MONTH }
+  };
+
+  MonthComboboxModel comboModel;
+  DetailInputs inputs;
+  inputs.push_back(kTestInputs[0]);
+  inputs.push_back(kTestInputs[1]);
+
+  EXPECT_CALL(delegate_, RequestedFieldsForSection(section_))
+      .WillOnce(ReturnRef(inputs));
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(EMAIL_ADDRESS))
+      .WillRepeatedly(ReturnNull());
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
+      .WillRepeatedly(Return(&comboModel));
+
+  ResetContainer();
+  NSControl<AutofillInputField>* field = [container_ getField:EMAIL_ADDRESS];
+  EXPECT_FALSE([field invalid]);
+  field = [container_ getField:CREDIT_CARD_EXP_MONTH];
+  EXPECT_FALSE([field invalid]);
+}
+
+TEST_F(AutofillSectionContainerTest, ControllerInformsValidity) {
+  using namespace autofill;
+  using namespace testing;
+
+  const DetailInput kTestInputs[] = {
+    { 1, EMAIL_ADDRESS, IDS_AUTOFILL_DIALOG_PLACEHOLDER_EMAIL },
+    { 2, CREDIT_CARD_EXP_MONTH }
+  };
+
+  MonthComboboxModel comboModel;
+  DetailInputs inputs;
+  inputs.push_back(kTestInputs[0]);
+  inputs.push_back(kTestInputs[1]);
+
+  DetailOutputMap output;
+  ValidityData validity, validity2;
+
+  validity[EMAIL_ADDRESS] = ASCIIToUTF16("Some error message");
+  validity2[CREDIT_CARD_EXP_MONTH ] = ASCIIToUTF16("Some other error message");
+  EXPECT_CALL(delegate_, RequestedFieldsForSection(section_))
+      .WillOnce(ReturnRef(inputs));
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(EMAIL_ADDRESS))
+      .WillRepeatedly(ReturnNull());
+  EXPECT_CALL(delegate_, ComboboxModelForAutofillType(CREDIT_CARD_EXP_MONTH))
+      .WillRepeatedly(Return(&comboModel));
+
+  ResetContainer();
+  [container_ getInputs:&output];
+  EXPECT_CALL(delegate_, InputsAreValid(section_, output, VALIDATE_FINAL))
+      .WillOnce(Return(validity))
+      .WillOnce(Return(validity2));
+
+  [container_ validateFor:VALIDATE_FINAL];
+  NSControl<AutofillInputField>* field = [container_ getField:EMAIL_ADDRESS];
+  EXPECT_TRUE([field invalid]);
+  field = [container_ getField:CREDIT_CARD_EXP_MONTH];
+  EXPECT_FALSE([field invalid]);
+
+
+  [container_ validateFor:VALIDATE_FINAL];
+  field = [container_ getField:EMAIL_ADDRESS];
+  EXPECT_FALSE([field invalid]);
+  field = [container_ getField:CREDIT_CARD_EXP_MONTH];
+  EXPECT_TRUE([field invalid]);
 }

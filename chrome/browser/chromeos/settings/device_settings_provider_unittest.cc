@@ -12,7 +12,6 @@
 #include "base/path_service.h"
 #include "base/test/scoped_path_override.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
@@ -57,8 +56,6 @@ class DeviceSettingsProviderTest : public DeviceSettingsTestBase {
   virtual void TearDown() OVERRIDE {
     DeviceSettingsTestBase::TearDown();
   }
-
-  ScopedStubCrosEnabler stub_cros_enabler_;
 
   ScopedTestingLocalState local_state_;
 
@@ -141,7 +138,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefFailed) {
 }
 
 TEST_F(DeviceSettingsProviderTest, SetPrefSucceed) {
-  owner_key_util_->SetPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
   device_settings_service_.SetUsername(device_policy_.policy_data().username());
   FlushDeviceSettings();
 
@@ -169,7 +166,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefSucceed) {
 }
 
 TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
-  owner_key_util_->SetPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPrivateKey(device_policy_.GetSigningKey());
   device_settings_service_.SetUsername(device_policy_.policy_data().username());
   FlushDeviceSettings();
 
@@ -192,7 +189,7 @@ TEST_F(DeviceSettingsProviderTest, SetPrefTwice) {
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   device_policy_.policy().set_policy_data_signature("bad signature");
   device_settings_test_helper_.set_policy_blob(device_policy_.GetBlob());
   ReloadDeviceSettings();
@@ -205,7 +202,7 @@ TEST_F(DeviceSettingsProviderTest, PolicyRetrievalFailedBadSignature) {
 }
 
 TEST_F(DeviceSettingsProviderTest, PolicyRetrievalNoPolicy) {
-  owner_key_util_->SetPublicKeyFromPrivateKey(device_policy_.signing_key());
+  owner_key_util_->SetPublicKeyFromPrivateKey(*device_policy_.GetSigningKey());
   device_settings_test_helper_.set_policy_blob(std::string());
   ReloadDeviceSettings();
 

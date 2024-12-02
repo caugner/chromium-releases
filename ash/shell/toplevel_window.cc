@@ -5,7 +5,7 @@
 #include "ash/shell/toplevel_window.h"
 
 #include "ash/display/display_controller.h"
-#include "ash/display/display_manager.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/wm/property_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,8 +19,7 @@ namespace shell {
 
 ToplevelWindow::CreateParams::CreateParams()
     : can_resize(false),
-      can_maximize(false),
-      persist_across_all_workspaces(false) {
+      can_maximize(false) {
 }
 
 // static
@@ -31,17 +30,12 @@ void ToplevelWindow::CreateToplevelWindow(const CreateParams& params) {
 
   gfx::Rect bounds(x, 150, 300, 300);
   gfx::Display display =
-      ash::Shell::GetInstance()->display_manager()->GetDisplayMatching(bounds);
+      ash::Shell::GetScreen()->GetDisplayMatching(bounds);
   aura::RootWindow* root = ash::Shell::GetInstance()->display_controller()->
       GetRootWindowForDisplayId(display.id());
   views::Widget* widget = views::Widget::CreateWindowWithContextAndBounds(
       new ToplevelWindow(params), root, bounds);
   widget->GetNativeView()->SetName("Examples:ToplevelWindow");
-  if (params.persist_across_all_workspaces) {
-    SetPersistsAcrossAllWorkspaces(
-        widget->GetNativeView(),
-        WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_YES);
-  }
   widget->Show();
 }
 
@@ -56,9 +50,7 @@ void ToplevelWindow::OnPaint(gfx::Canvas* canvas) {
 }
 
 base::string16 ToplevelWindow::GetWindowTitle() const {
-  return params_.persist_across_all_workspaces ?
-      ASCIIToUTF16("Examples: Toplevel Window (P)") :
-      ASCIIToUTF16("Examples: Toplevel Window");
+  return ASCIIToUTF16("Examples: Toplevel Window");
 }
 
 views::View* ToplevelWindow::GetContentsView() {

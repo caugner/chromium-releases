@@ -187,6 +187,7 @@
         'proxy/serialized_var_unittest.cc',
         'proxy/talk_resource_unittest.cc',
         'proxy/websocket_resource_unittest.cc',
+        'shared_impl/proxy_lock_unittest.cc',
         'shared_impl/resource_tracker_unittest.cc',
         'shared_impl/thread_aware_callback_unittest.cc',
         'shared_impl/time_conversion_unittest.cc',
@@ -442,7 +443,6 @@
         'ppapi_example_skeleton',
         'ppapi.gyp:ppapi_cpp',
         'ppapi.gyp:ppapi_gles2',
-        'ppapi.gyp:ppapi_egl',
       ],
       'include_dirs': [
         'lib/gl/include',
@@ -457,7 +457,6 @@
         'ppapi_example_skeleton',
         'ppapi.gyp:ppapi_cpp',
         'ppapi.gyp:ppapi_gles2',
-        'ppapi.gyp:ppapi_egl',
       ],
       'include_dirs': [
         'lib/gl/include',
@@ -475,7 +474,6 @@
         'ppapi_example_skeleton',
         'ppapi.gyp:ppapi_cpp',
         'ppapi.gyp:ppapi_gles2',
-        'ppapi.gyp:ppapi_egl',
       ],
       'include_dirs': [
         'lib/gl/include',

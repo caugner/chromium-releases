@@ -8,8 +8,9 @@
 #include "ui/gfx/display.h"
 #include "ui/gfx/point_conversions.h"
 #include "ui/gfx/screen.h"
-
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+
+namespace views {
 
 namespace {
 
@@ -22,9 +23,18 @@ gfx::Point GetOrigin(const aura::RootWindow* root_window) {
       gfx::ScalePoint(origin_in_pixels, 1 / scale));
 }
 
-}  // namespace
+// Returns true if bounds passed to window are treated as though they are in
+// screen coordinates.
+bool PositionWindowInScreenCoordinates(aura::Window* window) {
+  if (window->type() == aura::client::WINDOW_TYPE_POPUP ||
+      window->type() == aura::client::WINDOW_TYPE_TOOLTIP)
+    return true;
 
-namespace views {
+  Widget* widget = Widget::GetWidgetForNativeView(window);
+  return widget && widget->is_top_level();
+}
+
+}  // namespace
 
 DesktopScreenPositionClient::DesktopScreenPositionClient() {
 }
@@ -58,23 +68,22 @@ void DesktopScreenPositionClient::SetBounds(
     const gfx::Rect& bounds,
     const gfx::Display& display) {
   // TODO: Use the 3rd parameter, |display|.
-  gfx::Point origin = bounds.origin();
   aura::RootWindow* root = window->GetRootWindow();
-  aura::Window::ConvertPointToTarget(window->parent(), root, &origin);
 
-  if  (window->type() == aura::client::WINDOW_TYPE_CONTROL) {
-    window->SetBounds(gfx::Rect(origin, bounds.size()));
-    return;
-  } else if (window->type() == aura::client::WINDOW_TYPE_POPUP ||
-             window->type() == aura::client::WINDOW_TYPE_TOOLTIP) {
+  if (PositionWindowInScreenCoordinates(window)) {
     // The caller expects windows we consider "embedded" to be placed in the
     // screen coordinate system. So we need to offset the root window's
     // position (which is in screen coordinates) from these bounds.
+
+    gfx::Point origin = bounds.origin();
+    aura::Window::ConvertPointToTarget(window->parent(), root, &origin);
+
     gfx::Point host_origin = GetOrigin(root);
     origin.Offset(-host_origin.x(), -host_origin.y());
     window->SetBounds(gfx::Rect(origin, bounds.size()));
     return;
   }
+
   DesktopNativeWidgetAura* desktop_native_widget =
       DesktopNativeWidgetAura::ForWindow(window);
   if (desktop_native_widget) {

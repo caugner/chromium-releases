@@ -7,11 +7,11 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "chrome/browser/password_manager/password_store_default.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
@@ -152,7 +152,7 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
       true, true, cutoff - 1 },
     // A form on https://www.google.com/ older than the cutoff. Will be ignored.
     { PasswordForm::SCHEME_HTML,
-      "https://www.google.com/",
+      "https://www.google.com",
       "https://www.google.com/origin",
       "https://www.google.com/action",
       L"submit_element",

@@ -10,6 +10,10 @@
     "dependencies": ["permission:activityLogPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "adview": {
+    "dependencies": ["permission:adview"],
+    "contexts": ["blessed_extension"]
+  },
   "alarms": {
     "dependencies": ["permission:alarms"],
     "contexts": ["blessed_extension"]
@@ -39,6 +43,26 @@
     "internal": true,
     "channel": "stable",
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
+  },
+  "app.getDetails": {
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
+    "matches": []
+  },
+  "app.getDetailsForFrame": {
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
+    "matches": []
+  },
+  "app.getIsInstalled": {
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
+    "matches": []
+  },
+  "app.installState": {
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
+    "matches": []
+  },
+  "app.runningState": {
+    "contexts": ["blessed_extension", "unblessed_extension", "content_script"],
+    "matches": []
   },
   "audio": {
     "dependencies": ["permission:audio"],
@@ -181,10 +205,6 @@
     "dependencies": ["permission:experimental"],
     "contexts": ["blessed_extension"]
   },
-  "experimental.infobars": {
-    "dependencies": ["permission:experimental"],
-    "contexts": ["blessed_extension"]
-  },
   "experimental.input.virtualKeyboard": {
     "dependencies": ["permission:experimental"],
     "contexts": ["blessed_extension"]
@@ -193,19 +213,7 @@
     "dependencies": ["permission:experimental"],
     "contexts": ["blessed_extension"]
   },
-  "experimental.mediaGalleries": {
-    "dependencies": ["permission:experimental"],
-    "contexts": ["blessed_extension"]
-  },
-  "experimental.record": {
-    "dependencies": ["permission:experimental"],
-    "contexts": ["blessed_extension"]
-  },
   "experimental.rlz": {
-    "dependencies": ["permission:experimental"],
-    "contexts": ["blessed_extension"]
-  },
-  "experimental.systemInfo.storage": {
     "dependencies": ["permission:experimental"],
     "contexts": ["blessed_extension"]
   },
@@ -231,6 +239,11 @@
   },
   "extension.sendRequest": {
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
+  },
+  "feedbackPrivate": {
+    "platform": "chromeos",
+    "dependencies": ["permission:feedbackPrivate"],
+    "contexts": ["blessed_extension"]
   },
   "fileBrowserHandler": {
     "platform": "chromeos",
@@ -277,6 +290,10 @@
     "dependencies": ["permission:idle"],
     "contexts": ["blessed_extension"]
   },
+  "infobars": {
+    "dependencies": ["permission:infobars"],
+    "contexts": ["blessed_extension"]
+  },
   "input.ime": {
     "platform": "chromeos",
     "dependencies": ["permission:input"],
@@ -291,13 +308,24 @@
     "dependencies": ["permission:location"],
     "contexts": ["blessed_extension"]
   },
-  "managedModePrivate": {
-    "dependencies": ["permission:managedModePrivate"],
+  "logPrivate": {
+    "dependencies": ["permission:logPrivate"],
+    "extension_types": ["extension", "packaged_app"],
     "contexts": ["blessed_extension"]
   },
   "management": {
     "dependencies": ["permission:management"],
     "contexts": ["blessed_extension"]
+  },
+  "management.getPermissionWarningsByManifest": {
+    "dependencies": [],
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
+  },
+  "management.uninstallSelf": {
+    "dependencies": [],
+    "channel": "stable",
+    "extension_types": ["extension", "packaged_app", "platform_app"]
   },
   "mediaGalleries": {
     "dependencies": ["permission:mediaGalleries"],
@@ -345,10 +373,6 @@
     "dependencies": ["permission:pageCapture"],
     "contexts": ["blessed_extension"]
   },
-  "pageLauncher": {
-    "dependencies": ["manifest:page_launcher"],
-    "contexts": ["blessed_extension"]
-  },
   "permissions": {
     "channel": "stable",
     "extension_types": ["extension", "packaged_app", "platform_app"],
@@ -375,6 +399,11 @@
     "dependencies": ["permission:pushMessaging"],
     "contexts": ["blessed_extension"]
   },
+  "recoveryPrivate": {
+    "dependencies": ["permission:recoveryPrivate"],
+    "extension_types": ["platform_app"],
+    "contexts": ["blessed_extension"]
+  },
   "rtcPrivate": {
     "dependencies": ["permission:rtcPrivate"],
     "contexts": ["blessed_extension"]
@@ -398,7 +427,8 @@
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
   "runtime.lastError": {
-    "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
+    "contexts": "all",
+    "matches": ["<all_urls>"]
   },
   "runtime.onConnect": {
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
@@ -452,16 +482,20 @@
     "dependencies": ["manifest:system_indicator"],
     "contexts": ["blessed_extension"]
   },
-  "systemInfo.cpu": {
-    "dependencies": ["permission:systemInfo.cpu"],
+  "system.cpu": {
+    "dependencies": ["permission:system.cpu"],
     "contexts": ["blessed_extension"]
   },
-  "systemInfo.display": {
-    "dependencies": ["permission:systemInfo.display"],
+  "system.display": {
+    "dependencies": ["permission:system.display"],
     "contexts": ["blessed_extension"]
   },
-  "systemInfo.memory": {
-    "dependencies": ["permission:systemInfo.memory"],
+  "system.memory": {
+    "dependencies": ["permission:system.memory"],
+    "contexts": ["blessed_extension"]
+  },
+  "system.storage": {
+    "dependencies": ["permission:system.storage"],
     "contexts": ["blessed_extension"]
   },
   "systemPrivate": {
@@ -504,6 +538,11 @@
     "extension_types": ["extension", "packaged_app", "platform_app"],
     "contexts": ["blessed_extension"]
   },
+  "types.private": {
+    "channel": "dev",
+    "extension_types": ["extension"],
+    "location": "component"
+  },
   "usb": {
     "dependencies": ["permission:usb"],
     "contexts": ["blessed_extension"]
@@ -526,10 +565,6 @@
     "channel": "stable",
     "contexts": ["blessed_extension", "unblessed_extension", "content_script"]
   },
-  "webSocketProxyPrivate": {
-    "dependencies": ["permission:webSocketProxyPrivate"],
-    "contexts": ["blessed_extension"]
-  },
   "webstore": {
     // Hosted apps can use the webstore API from within a blessed context.
     "channel": "stable",
@@ -547,7 +582,7 @@
     "contexts": ["blessed_extension"]
   },
   "windows": {
-    "dependencies": ["permission:tabs"],
+    "dependencies": ["api:tabs"],
     "contexts": ["blessed_extension"]
   }
 }

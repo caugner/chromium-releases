@@ -17,12 +17,12 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/process_util.h"
+#include "base/message_loop/message_loop.h"
+#include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/test/test_reg_util_win.h"
-#include "base/time.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "chrome_frame/chrome_tab.h"
@@ -302,6 +302,10 @@ bool AddCFMetaTag(std::string* html_data);
 
 // Get text data from the clipboard.
 std::wstring GetClipboardText();
+
+// Destroys the clipboard for the current thread. This function must be called
+// if GetClipboardText() or SetClipboardText() have been invoked.
+void DestroyClipboard();
 
 // Puts the given text data on the clipboard. All previous items on the
 // clipboard are removed.

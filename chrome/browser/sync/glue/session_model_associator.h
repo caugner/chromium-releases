@@ -16,7 +16,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_types.h"
@@ -46,6 +46,7 @@ class TabNavigation;
 namespace browser_sync {
 
 class DataTypeErrorHandler;
+class DeviceInfo;
 class SyncedTabDelegate;
 class SyncedWindowDelegate;
 
@@ -54,7 +55,6 @@ class SyncedWindowDelegate;
 class SessionModelAssociator
     : public AssociatorInterface,
       public base::SupportsWeakPtr<SessionModelAssociator>,
-      public FaviconCacheObserver,
       public base::NonThreadSafe {
  public:
   // Does not take ownership of sync_service.
@@ -82,10 +82,6 @@ class SessionModelAssociator
   // tag
   virtual int64 GetSyncIdFromSessionTag(const std::string& tag);
 
-  // FaviconCacheObserver interface.
-  virtual void OnFaviconUpdated(const GURL& page_url,
-                                const GURL& icon_url) OVERRIDE;
-
   // Resync local window information. Updates the local sessions header node
   // with the status of open windows and the order of tabs they contain. Should
   // only be called for changes that affect a window, not a change within a
@@ -108,10 +104,10 @@ class SessionModelAssociator
   // Reassociates a single tab with the sync model. Will check if the tab
   // already is associated with a sync node and allocate one if necessary.
   // |error| gets set if any association error occurred.
+  // |tab| will be updated with sync id if necessary.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateTab(const SyncedTabDelegate& tab,
-                    syncer::SyncError* error);
+  bool AssociateTab(SyncedTabDelegate* const tab, syncer::SyncError* error);
 
   // Load any foreign session info stored in sync db and update the sync db
   // with local client data. Processes/reuses any sync nodes owned by this
@@ -186,7 +182,7 @@ class SessionModelAssociator
   // entries.
   bool ShouldSyncTab(const SyncedTabDelegate& tab) const;
 
-  // Compare |urls| against |tab_map_|'s urls to see if any tabs with
+  // Compare |urls| against |local_tab_map_|'s urls to see if any tabs with
   // outstanding favicon loads can be fulfilled.
   void FaviconsUpdated(const std::set<GURL>& urls);
 
@@ -208,6 +204,10 @@ class SessionModelAssociator
     current_machine_tag_ = machine_tag;
   }
 
+  // Gets the device info for a given session tag.
+  scoped_ptr<browser_sync::DeviceInfo> GetDeviceInfoForSessionTag(
+      const std::string& session_tag);
+
   FaviconCache* GetFaviconCache();
 
  private:
@@ -222,6 +222,10 @@ class SessionModelAssociator
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ValidTabs);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ExistingTabs);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, MissingLocalTabNode);
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest,
+                           TabPoolFreeNodeLimits);
+  FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest,
+                           TabNodePoolDeleteUnassociatedNodes);
   FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
                            PopulateSessionHeader);
   FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
@@ -230,19 +234,19 @@ class SessionModelAssociator
   FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
                            TabNodePool);
 
-  // Keep all the links to local tab data in one place. A sync_id and tab must
-  // be passed at creation. The sync_id is not mutable after, although all other
-  // fields are.
+  // Keep all the links to local tab data in one place. A tab_node_id and tab
+  // must be passed at creation. The tab_node_id is not mutable after, although
+  // all other fields are.
   class TabLink {
    public:
-    TabLink(int64 sync_id, const SyncedTabDelegate* tab)
-      : sync_id_(sync_id),
+    TabLink(int tab_node_id, const SyncedTabDelegate* tab)
+      : tab_node_id_(tab_node_id),
         tab_(tab) {}
 
     void set_tab(const SyncedTabDelegate* tab) { tab_ = tab; }
     void set_url(const GURL& url) { url_ = url; }
 
-    int64 sync_id() const { return sync_id_; }
+    int tab_node_id() const { return tab_node_id_; }
     const SyncedTabDelegate* tab() const { return tab_; }
     const GURL& url() const { return url_; }
 
@@ -250,7 +254,7 @@ class SessionModelAssociator
     DISALLOW_COPY_AND_ASSIGN(TabLink);
 
     // The id for the sync node this tab is stored in.
-    const int64 sync_id_;
+    const int tab_node_id_;
 
     // The tab object itself.
     const SyncedTabDelegate* tab_;
@@ -329,6 +333,11 @@ class SessionModelAssociator
   // invalid url's.
   bool TabHasValidEntry(const SyncedTabDelegate& tab) const;
 
+  // Update the tab id of the node associated with |tab_node_id| to
+  // |new_tab_id|.
+  void UpdateTabIdIfNecessary(int tab_node_id,
+                              SessionID::id_type new_tab_id);
+
   // For testing only.
   void QuitLoopForSubtleTesting();
 
@@ -338,15 +347,15 @@ class SessionModelAssociator
   // User-visible machine name.
   std::string current_session_name_;
 
-  // Pool of all used/available sync nodes associated with tabs.
-  TabNodePool tab_pool_;
+  // Pool of all used/available sync nodes associated with local tabs.
+  TabNodePool local_tab_pool_;
 
   // SyncID for the sync node containing all the window information for this
   // client.
   int64 local_session_syncid_;
 
   // Mapping of current open (local) tabs to their sync identifiers.
-  TabLinksMap tab_map_;
+  TabLinksMap local_tab_map_;
 
   SyncedSessionTracker synced_session_tracker_;
 

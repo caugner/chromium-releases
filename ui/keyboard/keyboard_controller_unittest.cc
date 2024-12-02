@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/root_window.h"
@@ -123,6 +123,9 @@ class TestTextInputClient : public ui::TextInputClient {
   virtual ui::TextInputType GetTextInputType() const OVERRIDE {
     return type_;
   }
+  virtual ui::TextInputMode GetTextInputMode() const OVERRIDE {
+    return ui::TEXT_INPUT_MODE_DEFAULT;
+  }
   virtual bool CanComposeInline() const OVERRIDE { return false; }
   virtual gfx::Rect GetCaretBounds() OVERRIDE { return gfx::Rect(); }
 
@@ -170,6 +173,7 @@ class KeyboardControllerTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
+    focus_controller_.reset();
     aura_test_helper_->TearDown();
   }
 

@@ -5,9 +5,9 @@
 #include <deque>
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
-#include "media/base/data_buffer.h"
+#include "media/base/audio_buffer.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_data_util.h"
@@ -41,12 +41,12 @@ class FFmpegAudioDecoderTest : public testing::Test {
           ReadTestDataFile(base::StringPrintf("vorbis-packet-%d", i));
 
       if (i < 3) {
-        buffer->SetTimestamp(base::TimeDelta());
+        buffer->set_timestamp(base::TimeDelta());
       } else {
-        buffer->SetTimestamp(base::TimeDelta::FromMicroseconds(2902));
+        buffer->set_timestamp(base::TimeDelta::FromMicroseconds(2902));
       }
 
-      buffer->SetDuration(base::TimeDelta());
+      buffer->set_duration(base::TimeDelta());
       encoded_audio_.push_back(buffer);
     }
 
@@ -61,8 +61,8 @@ class FFmpegAudioDecoderTest : public testing::Test {
                               kSampleFormatPlanarF32,
                               CHANNEL_LAYOUT_STEREO,
                               44100,
-                              vorbis_extradata_->GetData(),
-                              vorbis_extradata_->GetDataSize(),
+                              vorbis_extradata_->data(),
+                              vorbis_extradata_->data_size(),
                               false);  // Not encrypted.
     demuxer_->set_audio_decoder_config(config);
     decoder_->Initialize(demuxer_.get(),
@@ -90,20 +90,20 @@ class FFmpegAudioDecoderTest : public testing::Test {
   }
 
   void DecodeFinished(AudioDecoder::Status status,
-                      const scoped_refptr<DataBuffer>& buffer) {
+                      const scoped_refptr<AudioBuffer>& buffer) {
     decoded_audio_.push_back(buffer);
   }
 
   void ExpectDecodedAudio(size_t i, int64 timestamp, int64 duration) {
     EXPECT_LT(i, decoded_audio_.size());
-    EXPECT_EQ(timestamp, decoded_audio_[i]->GetTimestamp().InMicroseconds());
-    EXPECT_EQ(duration, decoded_audio_[i]->GetDuration().InMicroseconds());
-    EXPECT_FALSE(decoded_audio_[i]->IsEndOfStream());
+    EXPECT_EQ(timestamp, decoded_audio_[i]->timestamp().InMicroseconds());
+    EXPECT_EQ(duration, decoded_audio_[i]->duration().InMicroseconds());
+    EXPECT_FALSE(decoded_audio_[i]->end_of_stream());
   }
 
   void ExpectEndOfStream(size_t i) {
     EXPECT_LT(i, decoded_audio_.size());
-    EXPECT_TRUE(decoded_audio_[i]->IsEndOfStream());
+    EXPECT_TRUE(decoded_audio_[i]->end_of_stream());
   }
 
   base::MessageLoop message_loop_;
@@ -114,7 +114,7 @@ class FFmpegAudioDecoderTest : public testing::Test {
   scoped_refptr<DecoderBuffer> vorbis_extradata_;
 
   std::deque<scoped_refptr<DecoderBuffer> > encoded_audio_;
-  std::deque<scoped_refptr<DataBuffer> > decoded_audio_;
+  std::deque<scoped_refptr<AudioBuffer> > decoded_audio_;
 };
 
 TEST_F(FFmpegAudioDecoderTest, Initialize) {

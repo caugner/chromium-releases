@@ -1,6 +1,7 @@
 <div id=quic-view-tab-content class=content-box>
   <ul style='margin-top:0'>
     <li>QUIC Enabled: <span jscontent="!!quic_enabled"></span></li>
+    <li>HTTPS Over QUIC Enabled: <span jscontent="!!quic_enabled_https"></span></li>
     <li>Origin To Force QUIC On: <span jscontent="origin_to_force_quic_on"></span></li>
   </ul>
 
@@ -14,6 +15,7 @@
           <thead>
             <tr>
               <th>Host</th>
+              <th>Version</th>
               <th>Peer address</th>
               <th>GUID</th>
               <th>Active streams</th>
@@ -25,6 +27,7 @@
               <td><span jscontent="host_port_pair"></span>
                 <span jscontent="$this.aliases ? $this.aliases.join(' ') : ''"></span>
               </td>
+              <td jscontent="version"></td>
               <td jscontent="peer_address"></td>
               <td jscontent="guid"></td>
               <td jscontent="open_streams"></td>

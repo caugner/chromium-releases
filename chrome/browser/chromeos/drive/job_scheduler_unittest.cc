@@ -8,7 +8,8 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
-#include "base/prefs/pref_service.h"
+#include "base/files/scoped_temp_dir.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -88,7 +88,8 @@ class JobListLogger : public JobListObserver {
 class JobSchedulerTest : public testing::Test {
  public:
   JobSchedulerTest()
-      : profile_(new TestingProfile) {
+      : pref_service_(new TestingPrefServiceSimple) {
+    test_util::RegisterDrivePrefs(pref_service_->registry());
   }
 
   virtual void SetUp() OVERRIDE {
@@ -97,25 +98,16 @@ class JobSchedulerTest : public testing::Test {
 
     fake_drive_service_.reset(new FakeDriveService());
     fake_drive_service_->LoadResourceListForWapi(
-        "chromeos/gdata/root_feed.json");
+        "gdata/root_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "chromeos/gdata/account_metadata.json");
+        "gdata/account_metadata.json");
     fake_drive_service_->LoadAppListForDriveApi(
-        "chromeos/drive/applist.json");
+        "drive/applist.json");
 
-    scheduler_.reset(new JobScheduler(profile_.get(),
+    scheduler_.reset(new JobScheduler(pref_service_.get(),
                                       fake_drive_service_.get(),
-                                      base::MessageLoopProxy::current()));
+                                      base::MessageLoopProxy::current().get()));
     scheduler_->SetDisableThrottling(true);
-  }
-
-  virtual void TearDown() OVERRIDE {
-    // The scheduler should be deleted before NetworkLibrary, as it
-    // registers itself as observer of NetworkLibrary.
-    scheduler_.reset();
-    base::RunLoop().RunUntilIdle();
-    fake_drive_service_.reset();
-    fake_network_change_notifier_.reset();
   }
 
  protected:
@@ -123,10 +115,6 @@ class JobSchedulerTest : public testing::Test {
   // the specified connection type.
   void ChangeConnectionType(net::NetworkChangeNotifier::ConnectionType type) {
     fake_network_change_notifier_->SetConnectionType(type);
-    // Notify the sync client that the network is changed. This is done via
-    // NetworkChangeNotifier in production, but here, we simulate the behavior
-    // by directly calling OnConnectionTypeChanged().
-    scheduler_->OnConnectionTypeChanged(type);
   }
 
   // Sets up FakeNetworkChangeNotifier as if it's connected to wifi network.
@@ -149,8 +137,12 @@ class JobSchedulerTest : public testing::Test {
     ChangeConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
   }
 
+  static int GetMetadataQueueMaxJobCount() {
+    return JobScheduler::kMaxJobCount[JobScheduler::METADATA_QUEUE];
+  }
+
   content::TestBrowserThreadBundle thread_bundle_;
-  scoped_ptr<TestingProfile> profile_;
+  scoped_ptr<TestingPrefServiceSimple> pref_service_;
   scoped_ptr<test_util::FakeNetworkChangeNotifier>
       fake_network_change_notifier_;
   scoped_ptr<FakeDriveService> fake_drive_service_;
@@ -312,6 +304,23 @@ TEST_F(JobSchedulerTest, GetResourceEntry) {
   ASSERT_TRUE(entry);
 }
 
+TEST_F(JobSchedulerTest, GetShareUrl) {
+  ConnectToWifi();
+
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  GURL share_url;
+
+  scheduler_->GetShareUrl(
+      "file:2_file_resource_id",  // resource ID
+      GURL("chrome-extension://test-id/"), // embed origin
+      ClientContext(USER_INITIATED),
+      google_apis::test_util::CreateCopyResultCallback(&error, &share_url));
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_FALSE(share_url.is_empty());
+}
+
 TEST_F(JobSchedulerTest, DeleteResource) {
   ConnectToWifi();
 
@@ -334,7 +343,7 @@ TEST_F(JobSchedulerTest, CopyResource) {
   scheduler_->CopyResource(
       "file:2_file_resource_id",  // resource ID
       "folder:1_folder_resource_id",  // parent resource ID
-      "New Document",  // new name
+      "New Document",  // new title
       google_apis::test_util::CreateCopyResultCallback(&error, &entry));
   base::RunLoop().RunUntilIdle();
 
@@ -350,7 +359,7 @@ TEST_F(JobSchedulerTest, CopyHostedDocument) {
 
   scheduler_->CopyHostedDocument(
       "document:5_document_resource_id",  // resource ID
-      "New Document",  // new name
+      "New Document",  // new title
       google_apis::test_util::CreateCopyResultCallback(&error, &entry));
   base::RunLoop().RunUntilIdle();
 
@@ -365,7 +374,7 @@ TEST_F(JobSchedulerTest, RenameResource) {
 
   scheduler_->RenameResource(
       "file:2_file_resource_id",
-      "New Name",
+      "New Title",
       google_apis::test_util::CreateCopyResultCallback(&error));
   base::RunLoop().RunUntilIdle();
 
@@ -417,9 +426,19 @@ TEST_F(JobSchedulerTest, AddNewDirectory) {
 }
 
 TEST_F(JobSchedulerTest, GetResourceEntryPriority) {
-  // Disconnect from the network to prevent jobs from starting.
-  ConnectToNone();
+  // Saturate the metadata job queue with uninteresting jobs to prevent
+  // following jobs from starting.
+  google_apis::GDataErrorCode error_dontcare = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::ResourceEntry> entry_dontcare;
+  for (int i = 0; i < GetMetadataQueueMaxJobCount(); ++i) {
+    scheduler_->GetResourceEntry(
+        "uninteresting_resource_id",
+        ClientContext(USER_INITIATED),
+        google_apis::test_util::CreateCopyResultCallback(&error_dontcare,
+                                                         &entry_dontcare));
+  }
 
+  // Start jobs with different priorities.
   std::string resource_1("file:1_file_resource_id");
   std::string resource_2("file:2_file_resource_id");
   std::string resource_3("file:3_file_resource_id");
@@ -451,53 +470,66 @@ TEST_F(JobSchedulerTest, GetResourceEntryPriority) {
                  &resource_ids,
                  resource_4));
 
-  // Reconnect to the network to start all jobs.
-  ConnectToWifi();
   base::RunLoop().RunUntilIdle();
 
   ASSERT_EQ(resource_ids.size(), 4ul);
-  ASSERT_EQ(resource_ids[0], resource_1);
-  ASSERT_EQ(resource_ids[1], resource_4);
-  ASSERT_EQ(resource_ids[2], resource_2);
-  ASSERT_EQ(resource_ids[3], resource_3);
+  EXPECT_EQ(resource_ids[0], resource_1);
+  EXPECT_EQ(resource_ids[1], resource_4);
+  EXPECT_EQ(resource_ids[2], resource_2);
+  EXPECT_EQ(resource_ids[3], resource_3);
 }
 
-TEST_F(JobSchedulerTest, GetResourceEntryNoConnection) {
+TEST_F(JobSchedulerTest, GetResourceEntryNoConnectionUserInitiated) {
   ConnectToNone();
 
-  std::string resource("file:1_file_resource_id");
-  std::vector<std::string> resource_ids;
+  std::string resource_id("file:2_file_resource_id");
 
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::ResourceEntry> entry;
   scheduler_->GetResourceEntry(
-      resource,  // resource ID
-      ClientContext(BACKGROUND),
-      base::Bind(&CopyResourceIdFromGetResourceEntryCallback,
-                 &resource_ids,
-                 resource));
+      resource_id,
+      ClientContext(USER_INITIATED),
+      google_apis::test_util::CreateCopyResultCallback(&error, &entry));
   base::RunLoop().RunUntilIdle();
 
-  ASSERT_EQ(resource_ids.size(), 0ul);
+  EXPECT_EQ(google_apis::GDATA_NO_CONNECTION, error);
+}
+
+TEST_F(JobSchedulerTest, GetResourceEntryNoConnectionBackground) {
+  ConnectToNone();
+
+  std::string resource_id("file:2_file_resource_id");
+
+  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  scoped_ptr<google_apis::ResourceEntry> entry;
+  scheduler_->GetResourceEntry(
+      resource_id,
+      ClientContext(BACKGROUND),
+      google_apis::test_util::CreateCopyResultCallback(&error, &entry));
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_FALSE(entry);
 
   // Reconnect to the net.
   ConnectToWifi();
 
   base::RunLoop().RunUntilIdle();
 
-  ASSERT_EQ(resource_ids.size(), 1ul);
-  ASSERT_EQ(resource_ids[0], resource);
+  EXPECT_EQ(google_apis::HTTP_SUCCESS, error);
+  ASSERT_TRUE(entry);
+  EXPECT_EQ(resource_id, entry->resource_id());
 }
 
 TEST_F(JobSchedulerTest, DownloadFileCellularDisabled) {
   ConnectToCellular();
 
   // Disable fetching over cellular network.
-  profile_->GetPrefs()->SetBoolean(prefs::kDisableDriveOverCellular, true);
+  pref_service_->SetBoolean(prefs::kDisableDriveOverCellular, true);
 
   // Try to get a file in the background
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   google_apis::GDataErrorCode download_error = google_apis::GDATA_OTHER_ERROR;
@@ -505,7 +537,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularDisabled) {
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(
           &download_error, &output_file_path),
@@ -544,13 +576,12 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxDisabled) {
   ConnectToWimax();
 
   // Disable fetching over cellular network.
-  profile_->GetPrefs()->SetBoolean(prefs::kDisableDriveOverCellular, true);
+  pref_service_->SetBoolean(prefs::kDisableDriveOverCellular, true);
 
   // Try to get a file in the background
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   google_apis::GDataErrorCode download_error = google_apis::GDATA_OTHER_ERROR;
@@ -558,7 +589,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxDisabled) {
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(
           &download_error, &output_file_path),
@@ -597,13 +628,12 @@ TEST_F(JobSchedulerTest, DownloadFileCellularEnabled) {
   ConnectToCellular();
 
   // Enable fetching over cellular network.
-  profile_->GetPrefs()->SetBoolean(prefs::kDisableDriveOverCellular, false);
+  pref_service_->SetBoolean(prefs::kDisableDriveOverCellular, false);
 
   // Try to get a file in the background
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   google_apis::GDataErrorCode download_error = google_apis::GDATA_OTHER_ERROR;
@@ -611,7 +641,7 @@ TEST_F(JobSchedulerTest, DownloadFileCellularEnabled) {
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(
           &download_error, &output_file_path),
@@ -642,13 +672,12 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxEnabled) {
   ConnectToWimax();
 
   // Enable fetching over cellular network.
-  profile_->GetPrefs()->SetBoolean(prefs::kDisableDriveOverCellular, false);
+  pref_service_->SetBoolean(prefs::kDisableDriveOverCellular, false);
 
   // Try to get a file in the background
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  const GURL kContentUrl("https://file_content_url/");
   const base::FilePath kOutputFilePath =
       temp_dir.path().AppendASCII("whatever.txt");
   google_apis::GDataErrorCode download_error = google_apis::GDATA_OTHER_ERROR;
@@ -656,7 +685,7 @@ TEST_F(JobSchedulerTest, DownloadFileWimaxEnabled) {
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       kOutputFilePath,
-      kContentUrl,
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(
           &download_error, &output_file_path),
@@ -689,7 +718,7 @@ TEST_F(JobSchedulerTest, JobInfo) {
 
   // Disable background upload/download.
   ConnectToWimax();
-  profile_->GetPrefs()->SetBoolean(prefs::kDisableDriveOverCellular, true);
+  pref_service_->SetBoolean(prefs::kDisableDriveOverCellular, true);
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -714,13 +743,13 @@ TEST_F(JobSchedulerTest, JobInfo) {
   expected_types.insert(TYPE_RENAME_RESOURCE);
   scheduler_->RenameResource(
       "file:2_file_resource_id",
-      "New Name",
+      "New Title",
       google_apis::test_util::CreateCopyResultCallback(&error));
   expected_types.insert(TYPE_DOWNLOAD_FILE);
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       temp_dir.path().AppendASCII("whatever.txt"),
-      GURL("https://file_content_url/"),
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(&error, &path),
       google_apis::GetContentCallback());
@@ -815,7 +844,7 @@ TEST_F(JobSchedulerTest, JobInfoProgress) {
   scheduler_->DownloadFile(
       base::FilePath::FromUTF8Unsafe("drive/whatever.txt"),  // virtual path
       temp_dir.path().AppendASCII("whatever.txt"),
-      GURL("https://file_content_url/"),
+      "file:2_file_resource_id",
       ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(&error, &path),
       google_apis::GetContentCallback());

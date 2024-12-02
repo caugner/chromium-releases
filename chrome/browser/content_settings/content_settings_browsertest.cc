@@ -6,6 +6,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -15,10 +16,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
@@ -496,7 +497,7 @@ class PepperContentSettingsTest : public ContentSettingsTest {
     base::FilePath plugin_dir;
     EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
     base::FilePath plugin_lib = plugin_dir.AppendASCII(kLibraryName);
-    EXPECT_TRUE(file_util::PathExists(plugin_lib));
+    EXPECT_TRUE(base::PathExists(plugin_lib));
     base::FilePath::StringType pepper_plugin = plugin_lib.value();
     pepper_plugin.append(FILE_PATH_LITERAL(
         "#Clear Key CDM#Clear Key CDM 0.1.0.0#0.1.0.0;"));
@@ -562,6 +563,12 @@ const char* const PepperContentSettingsTest::kExternalClearKeyMimeType =
 
 // Tests Pepper plugins that use JavaScript instead of Plug-ins settings.
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsTest, PluginSpecialCases) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   HostContentSettingsMap* content_settings =
       browser()->profile()->GetHostContentSettingsMap();
 

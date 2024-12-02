@@ -67,7 +67,8 @@ scoped_ptr<DeviceInfo> SyncedDeviceTracker::ReadLocalDeviceInfo(
 
   const sync_pb::DeviceInfoSpecifics& specifics = node.GetDeviceInfoSpecifics();
   return scoped_ptr<DeviceInfo> (
-      new DeviceInfo(specifics.client_name(),
+      new DeviceInfo(specifics.cache_guid(),
+                     specifics.client_name(),
                      specifics.chrome_version(),
                      specifics.sync_user_agent(),
                      specifics.device_type()));
@@ -85,14 +86,55 @@ scoped_ptr<DeviceInfo> SyncedDeviceTracker::ReadDeviceInfo(
 
   const sync_pb::DeviceInfoSpecifics& specifics = node.GetDeviceInfoSpecifics();
   return scoped_ptr<DeviceInfo> (
-      new DeviceInfo(specifics.client_name(),
+      new DeviceInfo(specifics.cache_guid(),
+                     specifics.client_name(),
                      specifics.chrome_version(),
                      specifics.sync_user_agent(),
                      specifics.device_type()));
 }
 
+void SyncedDeviceTracker::GetAllSyncedDeviceInfo(
+    ScopedVector<DeviceInfo>* device_info) const {
+  if (device_info == NULL)
+    return;
+
+  device_info->clear();
+
+  syncer::ReadTransaction trans(FROM_HERE, user_share_);
+  syncer::ReadNode root_node(&trans);
+
+  if (root_node.InitByTagLookup(
+          syncer::ModelTypeToRootTag(syncer::DEVICE_INFO)) !=
+      syncer::BaseNode::INIT_OK) {
+    return;
+  }
+
+  // Get all the children of the root node and use the child id to read
+  // device info for devices.
+  std::vector<int64> children;
+  root_node.GetChildIds(&children);
+
+  for (std::vector<int64>::const_iterator it = children.begin();
+       it != children.end(); ++it) {
+    syncer::ReadNode node(&trans);
+    if (node.InitByIdLookup(*it) != syncer::BaseNode::INIT_OK)
+      return;
+
+    const sync_pb::DeviceInfoSpecifics& specifics =
+        node.GetDeviceInfoSpecifics();
+    device_info->push_back(
+        new DeviceInfo(specifics.cache_guid(),
+                       specifics.client_name(),
+                       specifics.chrome_version(),
+                       specifics.sync_user_agent(),
+                       specifics.device_type()));
+
+  }
+}
+
 void SyncedDeviceTracker::InitLocalDeviceInfo(const base::Closure& callback) {
   DeviceInfo::CreateLocalDeviceInfo(
+      cache_guid_,
       base::Bind(&SyncedDeviceTracker::InitLocalDeviceInfoContinuation,
                  weak_factory_.GetWeakPtr(), callback));
 }
@@ -105,16 +147,23 @@ void SyncedDeviceTracker::InitLocalDeviceInfoContinuation(
 
 void SyncedDeviceTracker::WriteLocalDeviceInfo(const DeviceInfo& info) {
   sync_pb::DeviceInfoSpecifics specifics;
+  DCHECK_EQ(cache_guid_, info.guid());
   specifics.set_cache_guid(cache_guid_);
   specifics.set_client_name(info.client_name());
   specifics.set_chrome_version(info.chrome_version());
   specifics.set_sync_user_agent(info.sync_user_agent());
   specifics.set_device_type(info.device_type());
 
+  WriteDeviceInfo(specifics, local_device_info_tag_);
+}
+
+void SyncedDeviceTracker::WriteDeviceInfo(
+    const sync_pb::DeviceInfoSpecifics& specifics,
+    const std::string& tag) {
   syncer::WriteTransaction trans(FROM_HERE, user_share_);
   syncer::WriteNode node(&trans);
 
-  if (node.InitByClientTagLookup(syncer::DEVICE_INFO, local_device_info_tag_) ==
+  if (node.InitByClientTagLookup(syncer::DEVICE_INFO, tag) ==
       syncer::BaseNode::INIT_OK) {
     node.SetDeviceInfoSpecifics(specifics);
     node.SetTitle(UTF8ToWide(specifics.client_name()));
@@ -128,7 +177,7 @@ void SyncedDeviceTracker::WriteLocalDeviceInfo(const DeviceInfo& info) {
     syncer::WriteNode::InitUniqueByCreationResult create_result =
         new_node.InitUniqueByCreation(syncer::DEVICE_INFO,
                                       type_root,
-                                      local_device_info_tag_);
+                                      tag);
     DCHECK_EQ(syncer::WriteNode::INIT_SUCCESS, create_result);
     new_node.SetDeviceInfoSpecifics(specifics);
     new_node.SetTitle(UTF8ToWide(specifics.client_name()));

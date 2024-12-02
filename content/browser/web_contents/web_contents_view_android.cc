@@ -124,7 +124,7 @@ void WebContentsViewAndroid::RestoreFocus() {
   NOTIMPLEMENTED();
 }
 
-WebDropData* WebContentsViewAndroid::GetDropData() const {
+DropData* WebContentsViewAndroid::GetDropData() const {
   NOTIMPLEMENTED();
   return NULL;
 }
@@ -188,7 +188,7 @@ void WebContentsViewAndroid::ShowPopupMenu(
     int item_height,
     double item_font_size,
     int selected_item,
-    const std::vector<WebMenuItem>& items,
+    const std::vector<MenuItem>& items,
     bool right_aligned,
     bool allow_multiple_selection) {
   if (content_view_core_) {
@@ -198,7 +198,7 @@ void WebContentsViewAndroid::ShowPopupMenu(
 }
 
 void WebContentsViewAndroid::StartDragging(
-    const WebDropData& drop_data,
+    const DropData& drop_data,
     WebKit::WebDragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,

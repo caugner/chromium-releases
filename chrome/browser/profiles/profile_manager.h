@@ -16,13 +16,11 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/ui/browser_list_observer.h"
-#include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/startup/startup_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -87,7 +85,7 @@ class ProfileManager : public base::NonThreadSafe,
                           const CreateCallback& callback,
                           const string16& name,
                           const string16& icon_url,
-                          bool is_managed);
+                          const std::string& managed_user_id);
 
   // Initiates profile creation identified by |active_profile_username_hash_|.
   // If profile has already been created then the callback is called
@@ -143,40 +141,10 @@ class ProfileManager : public base::NonThreadSafe,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Indicate that an import process will run for the next created Profile.
-  void SetWillImport();
-  bool will_import() { return will_import_; }
-
-  // Indicate that the import process for |profile| has completed.
-  void OnImportFinished(Profile* profile);
-
-  // ------------------ static utility functions -------------------
-
-  // Returns the path to the default profile directory, based on the given
-  // user data directory.
-  static base::FilePath GetDefaultProfileDir(
-      const base::FilePath& user_data_dir);
-
-  // Returns the path to the preferences file given the user profile directory.
-  static base::FilePath GetProfilePrefsPath(const base::FilePath& profile_dir);
-
   // If a profile with the given path is currently managed by this object,
   // return a pointer to the corresponding Profile object;
   // otherwise return NULL.
   Profile* GetProfileByPath(const base::FilePath& path) const;
-
-  // Activates a window for |profile| on the desktop specified by
-  // |desktop_type|. If no such window yet exists, or if |always_create| is
-  // true, this first creates a new window, then activates
-  // that. If activating an exiting window and multiple windows exists then the
-  // window that was most recently active is activated. This is used for
-  // creation of a window from the multi-profile dropdown menu.
-  static void FindOrCreateNewWindowForProfile(
-      Profile* profile,
-      chrome::startup::IsProcessStartup process_startup,
-      chrome::startup::IsFirstRun is_first_run,
-      chrome::HostDesktopType desktop_type,
-      bool always_create);
 
   // Profile::Delegate implementation:
   virtual void OnProfileCreated(Profile* profile,
@@ -200,10 +168,10 @@ class ProfileManager : public base::NonThreadSafe,
       const string16& name,
       const string16& icon_url,
       const CreateCallback& callback,
-      bool is_managed);
+      const std::string& managed_user_id);
 
-  // Register multi-profile related preferences in Local State.
-  static void RegisterPrefs(PrefRegistrySimple* registry);
+  // Returns the full path to be used for guest profiles.
+  static base::FilePath GetGuestProfilePath();
 
   // Returns a ProfileInfoCache object which can be used to get information
   // about profiles without having to load them from disk.
@@ -218,9 +186,6 @@ class ProfileManager : public base::NonThreadSafe,
   // that case the callback will be called when profile creation is complete.
   void ScheduleProfileForDeletion(const base::FilePath& profile_dir,
                                   const CreateCallback& callback);
-
-  // Checks if multiple profiles is enabled.
-  static bool IsMultipleProfilesEnabled();
 
   // Autoloads profiles if they are running background apps.
   void AutoloadProfiles();
@@ -262,6 +227,7 @@ class ProfileManager : public base::NonThreadSafe,
  private:
   friend class TestingProfileManager;
   FRIEND_TEST_ALL_PREFIXES(ProfileManagerBrowserTest, DeleteAllProfiles);
+  FRIEND_TEST_ALL_PREFIXES(ProfileManagerBrowserTest, SwitchToProfile);
 
   // This struct contains information about profiles which are being loaded or
   // were loaded.
@@ -288,6 +254,9 @@ class ProfileManager : public base::NonThreadSafe,
   // The Profile should not already be managed by this ProfileManager.
   // Returns true if the profile was added, false otherwise.
   bool AddProfile(Profile* profile);
+
+  // Schedules the profile at the given path to be deleted on shutdown.
+  void FinishDeletingProfile(const base::FilePath& profile_dir);
 
   // Registers profile with given info. Returns pointer to created ProfileInfo
   // entry.
@@ -326,6 +295,17 @@ class ProfileManager : public base::NonThreadSafe,
                     Profile* profile,
                     Profile::CreateStatus status);
 
+  // If the |loaded_profile| has been loaded succesfully (according to |status|)
+  // and isn't already scheduled for deletion, then finishes adding
+  // |profile_to_delete_dir| to the queue of profiles to be deleted, and updates
+  // the kProfileLastUsed preference based on |last_non_managed_profile_path|.
+  void OnNewActiveProfileLoaded(
+      const base::FilePath& profile_to_delete_path,
+      const base::FilePath& last_non_managed_profile_path,
+      const CreateCallback& original_callback,
+      Profile* loaded_profile,
+      Profile::CreateStatus status);
+
   content::NotificationRegistrar registrar_;
 
   // The path to the user data directory (DIR_USER_DATA).
@@ -335,9 +315,6 @@ class ProfileManager : public base::NonThreadSafe,
   // in the --login-profile command line argument should be used as the
   // default.
   bool logged_in_;
-
-  // True if an import process will be run.
-  bool will_import_;
 
   // Maps profile path to ProfileInfo (if profile has been created). Use
   // RegisterProfile() to add into this map. This map owns all loaded profile

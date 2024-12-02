@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -27,6 +28,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -65,6 +67,12 @@ class AutocompleteBrowserTest : public ExtensionBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   WaitForTemplateURLServiceToLoad();
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* location_entry = location_bar->GetLocationEntry();
@@ -109,6 +117,12 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   WaitForTemplateURLServiceToLoad();
   // The results depend on the history backend being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
@@ -123,8 +137,9 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
     OmniboxView* location_entry = location_bar->GetLocationEntry();
     location_entry->model()->SetInputInProgress(true);
     autocomplete_controller->Start(AutocompleteInput(
-        ASCIIToUTF16("chrome"), string16::npos, string16(), GURL(), true, false,
-        true, AutocompleteInput::SYNCHRONOUS_MATCHES));
+        ASCIIToUTF16("chrome"), string16::npos, string16(), GURL(),
+        AutocompleteInput::NEW_TAB_PAGE, true, false, true,
+        AutocompleteInput::SYNCHRONOUS_MATCHES));
 
     EXPECT_TRUE(autocomplete_controller->done());
     EXPECT_TRUE(location_bar->GetInputString().empty());
@@ -153,9 +168,15 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, MAYBE_Autocomplete) {
 }
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   WaitForTemplateURLServiceToLoad();
   // http://code.google.com/p/chromium/issues/detail?id=38385
-  // Make sure that tabbing away from an empty omnibar causes a revert
+  // Make sure that tabbing away from an empty omnibox causes a revert
   // and select all.
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* location_entry = location_bar->GetLocationEntry();
@@ -174,6 +195,12 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
 }
 
 IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, FocusSearch) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   WaitForTemplateURLServiceToLoad();
   LocationBar* location_bar = GetLocationBar();
   OmniboxView* location_entry = location_bar->GetLocationEntry();

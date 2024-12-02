@@ -10,13 +10,10 @@
 
 ChromeAndroidImpl::ChromeAndroidImpl(
     scoped_ptr<DevToolsHttpClient> client,
-    const std::string& version,
-    int build_no,
     ScopedVector<DevToolsEventListener>& devtools_event_listeners,
     scoped_ptr<Device> device,
     Log* log)
-    : ChromeImpl(client.Pass(), version, build_no, devtools_event_listeners,
-                 log),
+    : ChromeImpl(client.Pass(), devtools_event_listeners, log),
       device_(device.Pass()) {}
 
 ChromeAndroidImpl::~ChromeAndroidImpl() {}
@@ -26,6 +23,6 @@ std::string ChromeAndroidImpl::GetOperatingSystemName() {
 }
 
 Status ChromeAndroidImpl::Quit() {
-  return device_->StopChrome();
+  return device_->StopApp();
 }
 

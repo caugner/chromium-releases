@@ -34,6 +34,15 @@ using google_apis::UploadRangeResponse;
 
 namespace drive {
 
+namespace {
+// Upload data is split to multiple HTTP request each conveying kUploadChunkSize
+// bytes (except the request for uploading the last chunk of data).
+// The value must be a multiple of 512KB according to the spec of GData WAPI and
+// Drive API v2. It is set to a smaller value than 2^31 for working around
+// server side error (crbug.com/264089).
+const int64 kUploadChunkSize = (1LL << 30);  // 1GB
+}  // namespace
+
 // Structure containing current upload information of file, passed between
 // DriveServiceInterface methods and callbacks.
 struct DriveUploader::UploadFileInfo {
@@ -46,6 +55,7 @@ struct DriveUploader::UploadFileInfo {
         completion_callback(callback),
         progress_callback(progress_callback),
         content_length(0),
+        next_start_position(-1),
         power_save_blocker(content::PowerSaveBlocker::Create(
             content::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
             "Upload in progress")),
@@ -87,6 +97,8 @@ struct DriveUploader::UploadFileInfo {
 
   // Header content-Length.
   int64 content_length;
+
+  int64 next_start_position;
 
   // Blocks system suspend while upload is in progress.
   scoped_ptr<content::PowerSaveBlocker> power_save_blocker;
@@ -200,9 +212,10 @@ CancelCallback DriveUploader::StartUploadFile(
 
   UploadFileInfo* info_ptr = upload_file_info.get();
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_,
+      blocking_task_runner_.get(),
       FROM_HERE,
-      base::Bind(&file_util::GetFileSize, info_ptr->file_path,
+      base::Bind(&file_util::GetFileSize,
+                 info_ptr->file_path,
                  &info_ptr->content_length),
       base::Bind(&DriveUploader::StartUploadFileAfterGetFileSize,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -285,7 +298,8 @@ void DriveUploader::OnUploadLocationReceived(
   }
 
   upload_file_info->upload_location = upload_location;
-  UploadNextChunk(upload_file_info.Pass(), 0);  // start_position
+  upload_file_info->next_start_position = 0;
+  UploadNextChunk(upload_file_info.Pass());
 }
 
 void DriveUploader::StartGetUploadStatus(
@@ -303,23 +317,28 @@ void DriveUploader::StartGetUploadStatus(
 }
 
 void DriveUploader::UploadNextChunk(
-    scoped_ptr<UploadFileInfo> upload_file_info,
-    int64 start_position) {
+    scoped_ptr<UploadFileInfo> upload_file_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(upload_file_info);
-  DCHECK_GE(start_position, 0);
-  DCHECK_LE(start_position, upload_file_info->content_length);
+  DCHECK_GE(upload_file_info->next_start_position, 0);
+  DCHECK_LE(upload_file_info->next_start_position,
+            upload_file_info->content_length);
 
   if (upload_file_info->cancelled) {
     UploadFailed(upload_file_info.Pass(), GDATA_CANCELLED);
     return;
   }
 
+  // Limit the size of data uploaded per each request by kUploadChunkSize.
+  const int64 end_position = std::min(
+      upload_file_info->content_length,
+      upload_file_info->next_start_position + kUploadChunkSize);
+
   UploadFileInfo* info_ptr = upload_file_info.get();
   info_ptr->cancel_callback = drive_service_->ResumeUpload(
       info_ptr->upload_location,
-      start_position,
-      info_ptr->content_length,
+      info_ptr->next_start_position,
+      end_position,
       info_ptr->content_length,
       info_ptr->content_type,
       info_ptr->file_path,
@@ -329,7 +348,7 @@ void DriveUploader::UploadNextChunk(
       base::Bind(&DriveUploader::OnUploadProgress,
                  weak_ptr_factory_.GetWeakPtr(),
                  info_ptr->progress_callback,
-                 start_position,
+                 info_ptr->next_start_position,
                  info_ptr->content_length));
 }
 
@@ -383,7 +402,8 @@ void DriveUploader::OnUploadRangeResponseReceived(
            << "-" << response.end_position_received
            << " for [" << upload_file_info->file_path.value() << "]";
 
-  UploadNextChunk(upload_file_info.Pass(), response.end_position_received);
+  upload_file_info->next_start_position = response.end_position_received;
+  UploadNextChunk(upload_file_info.Pass());
 }
 
 void DriveUploader::OnUploadProgress(const ProgressCallback& callback,
@@ -400,6 +420,12 @@ void DriveUploader::UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   LOG(ERROR) << "Upload failed " << upload_file_info->DebugString();
+
+  if (upload_file_info->next_start_position < 0) {
+    // Discard the upload location because no request could succeed with it.
+    // Maybe it's obsolete.
+    upload_file_info->upload_location = GURL();
+  }
 
   upload_file_info->completion_callback.Run(
       error, upload_file_info->upload_location, scoped_ptr<ResourceEntry>());

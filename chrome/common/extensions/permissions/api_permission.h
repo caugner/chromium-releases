@@ -47,7 +47,6 @@ class APIPermission {
     kAutoTestPrivate,
     kBackground,
     kBluetooth,
-    kBluetoothDevice,
     kBookmark,
     kBookmarkManagerPrivate,
     kBrowsingData,
@@ -69,6 +68,8 @@ class APIPermission {
     kDevtools,
     kDownloads,
     kDownloadsInternal,
+    kDownloadsOpen,
+    kDownloadsShelf,
     kEchoPrivate,
     kEnterprisePlatformKeysPrivate,
     kExperimental,
@@ -77,7 +78,7 @@ class APIPermission {
     kFileBrowserHandlerInternal,
     kFileBrowserPrivate,
     kFileSystem,
-    kFileSystemRetainFiles,
+    kFileSystemRetainEntries,
     kFileSystemWrite,
     kFontSettings,
     kFullscreen,
@@ -86,10 +87,11 @@ class APIPermission {
     kIdentity,
     kIdentityPrivate,
     kIdle,
+    kInfobars,
     kInput,
     kInputMethodPrivate,
     kLocation,
-    kManagedModePrivate,
+    kLogPrivate,
     kManagement,
     kMediaGalleries,
     kMediaGalleriesPrivate,
@@ -107,6 +109,7 @@ class APIPermission {
     kPrivacy,
     kProxy,
     kPushMessaging,
+    kRecoveryPrivate,
     kRtcPrivate,
     kScreensaver,
     kSerial,
@@ -117,7 +120,8 @@ class APIPermission {
     kSyncFileSystem,
     kSystemPrivate,
     kSystemIndicator,
-    kSystemInfoDisplay,
+    kSystemDisplay,
+    kSystemStorage,
     kTab,
     kTabCapture,
     kTerminalPrivate,
@@ -134,9 +138,10 @@ class APIPermission {
     kWebRequest,
     kWebRequestBlocking,
     kWebRequestInternal,
-    kWebSocketProxyPrivate,
     kWebstorePrivate,
     kWebView,
+    kSystemCpu,
+    kSystemMemory,
     kSystemInfoCpu,
     kSystemInfoMemory,
     kEnumBoundary
@@ -231,7 +236,11 @@ class APIPermissionInfo {
     kFlagImpliesFullURLAccess = 1 << 1,
 
     // Indicates that extensions cannot specify the permission as optional.
-    kFlagCannotBeOptional = 1 << 3
+    kFlagCannotBeOptional = 1 << 3,
+
+    // Indicates that the permission is internal to the extensions
+    // system and cannot be specified in the "permissions" list.
+    kFlagInternal = 1 << 4,
   };
 
   typedef APIPermission* (*APIPermissionConstructor)(const APIPermissionInfo*);
@@ -269,6 +278,12 @@ class APIPermissionInfo {
   // optional permissions extension API.
   bool supports_optional() const {
     return (flags_ & kFlagCannotBeOptional) == 0;
+  }
+
+  // Returns true if this permission is internal rather than a
+  // "permissions" list entry.
+  bool is_internal() const {
+    return (flags_ & kFlagInternal) != 0;
   }
 
  private:

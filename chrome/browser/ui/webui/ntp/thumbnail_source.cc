@@ -6,18 +6,16 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_io_context.h"
-#include "chrome/browser/search/instant_service.h"
-#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_service.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 

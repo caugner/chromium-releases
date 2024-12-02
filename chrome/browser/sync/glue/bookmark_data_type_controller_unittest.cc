@@ -8,10 +8,11 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/profile_mock.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/browser_context_keyed_service/refcounted_browser_context_keyed_service.h"
@@ -259,8 +259,9 @@ TEST_F(SyncBookmarkDataTypeControllerTest, StartAssociationFailed) {
       WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
   EXPECT_CALL(*model_associator_, AssociateModels(_, _)).
       WillRepeatedly(Return(syncer::SyncError(FROM_HERE,
-                                     "error",
-                                     syncer::BOOKMARKS)));
+                                              syncer::SyncError::DATATYPE_ERROR,
+                                              "error",
+                                              syncer::BOOKMARKS)));
 
   EXPECT_CALL(start_callback_,
               Run(DataTypeController::ASSOCIATION_FAILED, _, _));

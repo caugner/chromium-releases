@@ -25,6 +25,10 @@ namespace {
 internal::DisplayManager* GetDisplayManager() {
   return Shell::GetInstance()->display_manager();
 }
+
+DisplayController* GetDisplayController() {
+  return Shell::GetInstance()->display_controller();
+}
 }  // namespace
 
 ScreenAsh::ScreenAsh() {
@@ -80,7 +84,11 @@ gfx::Rect ScreenAsh::ConvertRectFromScreen(aura::Window* window,
 
 // static
 const gfx::Display& ScreenAsh::GetSecondaryDisplay() {
-  return *(Shell::GetInstance()->display_controller()->GetSecondaryDisplay());
+  internal::DisplayManager* display_manager = GetDisplayManager();
+  CHECK_EQ(2U, display_manager->GetNumDisplays());
+  return display_manager->GetDisplayAt(0).id() ==
+      DisplayController::GetPrimaryDisplay().id() ?
+      display_manager->GetDisplayAt(1) : display_manager->GetDisplayAt(0);
 }
 
 // static
@@ -120,15 +128,15 @@ int ScreenAsh::GetNumDisplays() {
 }
 
 gfx::Display ScreenAsh::GetDisplayNearestWindow(gfx::NativeView window) const {
-  return GetDisplayManager()->GetDisplayNearestWindow(window);
+  return GetDisplayController()->GetDisplayNearestWindow(window);
 }
 
 gfx::Display ScreenAsh::GetDisplayNearestPoint(const gfx::Point& point) const {
-  return GetDisplayManager()->GetDisplayNearestPoint(point);
+  return GetDisplayController()->GetDisplayNearestPoint(point);
 }
 
 gfx::Display ScreenAsh::GetDisplayMatching(const gfx::Rect& match_rect) const {
-  return GetDisplayManager()->GetDisplayMatching(match_rect);
+  return GetDisplayController()->GetDisplayMatching(match_rect);
 }
 
 gfx::Display ScreenAsh::GetPrimaryDisplay() const {

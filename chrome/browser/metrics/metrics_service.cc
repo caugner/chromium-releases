@@ -171,10 +171,13 @@
 #include "base/tracked_objects.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/memory_details.h"
+#include "chrome/browser/metrics/compression_utils.h"
+#include "chrome/browser/metrics/gzipped_protobufs_field_trial.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_log_serializer.h"
 #include "chrome/browser/metrics/metrics_reporting_scheduler.h"
@@ -185,15 +188,13 @@
 #include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/metrics/caching_permuted_entropy_provider.h"
 #include "chrome/common/metrics/entropy_provider.h"
 #include "chrome/common/metrics/metrics_log_manager.h"
 #include "chrome/common/net/test_server_locations.h"
@@ -207,9 +208,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/process_type.h"
+#include "content/public/common/webplugininfo.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
-#include "webkit/plugins/webplugininfo.h"
 
 // TODO(port): port browser_distribution.h.
 #if !defined(OS_POSIX)
@@ -217,7 +219,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/external_metrics.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #endif
@@ -425,8 +426,6 @@ void MetricsService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kStabilitySystemUncleanShutdownCount, 0);
 #endif  // OS_CHROMEOS
 
-  registry->RegisterDictionaryPref(prefs::kProfileMetrics);
-  registry->RegisterIntegerPref(prefs::kNumKeywords, 0);
   registry->RegisterListPref(prefs::kMetricsInitialLogs);
   registry->RegisterListPref(prefs::kMetricsOngoingLogs);
 
@@ -645,8 +644,6 @@ void MetricsService::SetUpNotifications(
                  content::NotificationService::AllSources());
   registrar->Add(observer, content::NOTIFICATION_RENDERER_PROCESS_HANG,
                  content::NotificationService::AllSources());
-  registrar->Add(observer, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-                 content::NotificationService::AllSources());
   registrar->Add(observer, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                  content::NotificationService::AllSources());
 }
@@ -681,29 +678,11 @@ void MetricsService::Observe(int type,
 
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED:
-    case chrome::NOTIFICATION_BROWSER_CLOSED: {
-      Browser* browser = content::Source<Browser>(source).ptr();
-      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(browser));
-      break;
-    }
-
-    case chrome::NOTIFICATION_TAB_PARENTED: {
-      content::WebContents* web_contents =
-          content::Source<content::WebContents>(source).ptr();
-      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(web_contents));
-      break;
-    }
-
-    case chrome::NOTIFICATION_TAB_CLOSING: {
-      content::NavigationController* controller =
-          content::Source<content::NavigationController>(source).ptr();
-      content::WebContents* web_contents = controller->GetWebContents();
-      LogWindowOrTabChange(type, reinterpret_cast<uintptr_t>(web_contents));
-      break;
-    }
-
+    case chrome::NOTIFICATION_BROWSER_CLOSED:
+    case chrome::NOTIFICATION_TAB_PARENTED:
+    case chrome::NOTIFICATION_TAB_CLOSING:
     case content::NOTIFICATION_LOAD_STOP:
-      LogLoadComplete(type, source, details);
+      // These notifications are currently used only to break out of idle mode.
       break;
 
     case content::NOTIFICATION_LOAD_START: {
@@ -728,11 +707,6 @@ void MetricsService::Observe(int type,
 
     case content::NOTIFICATION_RENDERER_PROCESS_HANG:
       LogRendererHang();
-      break;
-
-    case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
-      LogKeywordCount(content::Source<TemplateURLService>(
-          source)->GetTemplateURLs().size());
       break;
 
     case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
@@ -885,22 +859,6 @@ void MetricsService::InitializeMetricsState() {
   // Bookkeeping for the uninstall metrics.
   IncrementLongPrefsValue(prefs::kUninstallLaunchCount);
 
-  // Save profile metrics.
-  PrefService* prefs = g_browser_process->local_state();
-  if (prefs) {
-    // Remove the current dictionary and store it for use when sending data to
-    // server. By removing the value we prune potentially dead profiles
-    // (and keys). All valid values are added back once services startup.
-    const DictionaryValue* profile_dictionary =
-        prefs->GetDictionary(prefs::kProfileMetrics);
-    if (profile_dictionary) {
-      // Do a deep copy of profile_dictionary since ClearPref will delete it.
-      profile_dictionary_.reset(static_cast<DictionaryValue*>(
-          profile_dictionary->DeepCopy()));
-      prefs->ClearPref(prefs::kProfileMetrics);
-    }
-  }
-
   // Get stats on use of command line.
   const CommandLine* command_line(CommandLine::ForCurrentProcess());
   size_t common_commands = 0;
@@ -952,13 +910,13 @@ void MetricsService::OnInitTaskGotHardwareClass(
       base::Bind(&MetricsService::OnInitTaskGotPluginInfo,
           self_ptr_factory_.GetWeakPtr()));
 #else
-  std::vector<webkit::WebPluginInfo> plugin_list_empty;
+  std::vector<content::WebPluginInfo> plugin_list_empty;
   OnInitTaskGotPluginInfo(plugin_list_empty);
 #endif  // defined(ENABLE_PLUGINS)
 }
 
 void MetricsService::OnInitTaskGotPluginInfo(
-    const std::vector<webkit::WebPluginInfo>& plugins) {
+    const std::vector<content::WebPluginInfo>& plugins) {
   DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
   plugins_ = plugins;
 
@@ -1361,8 +1319,7 @@ void MetricsService::PrepareInitialLog() {
 
   DCHECK(initial_log_.get());
   initial_log_->set_hardware_class(hardware_class_);
-  initial_log_->RecordEnvironment(plugins_, google_update_metrics_,
-                                  profile_dictionary_.get());
+  initial_log_->RecordEnvironment(plugins_, google_update_metrics_);
 
   // Histograms only get written to the current log, so make the new log current
   // before writing them.
@@ -1417,7 +1374,36 @@ void MetricsService::PrepareFetchWithStagedLog() {
         GURL(kServerUrl), net::URLFetcher::POST, this));
     current_fetch_->SetRequestContext(
         g_browser_process->system_request_context());
-    current_fetch_->SetUploadData(kMimeType, log_manager_.staged_log_text());
+
+    // Compress the protobufs 50% of the time. This can be used to see if
+    // compressed protobufs are being mishandled by machines between the
+    // client/server or monitoring programs/firewalls on the client.
+    bool gzip_protobuf_before_uploading =
+        metrics::ShouldGzipProtobufsBeforeUploading();
+    if (gzip_protobuf_before_uploading) {
+      std::string log_text = log_manager_.staged_log_text();
+      std::string compressed_log_text;
+      bool compression_successful = chrome::GzipCompress(log_text,
+                                                         &compressed_log_text);
+      DCHECK(compression_successful);
+      if (compression_successful) {
+        current_fetch_->SetUploadData(kMimeType, compressed_log_text);
+        // Tell the server that we're uploading gzipped protobufs.
+        current_fetch_->SetExtraRequestHeaders("content-encoding: gzip");
+        UMA_HISTOGRAM_PERCENTAGE(
+            "UMA.ProtoCompressionRatio",
+            100 * compressed_log_text.size() / log_text.size());
+        UMA_HISTOGRAM_CUSTOM_COUNTS(
+            "UMA.ProtoGzippedKBSaved",
+            (log_text.size() - compressed_log_text.size()) / 1024,
+            1, 2000, 50);
+      }
+    } else {
+      current_fetch_->SetUploadData(kMimeType, log_manager_.staged_log_text());
+    }
+    UMA_HISTOGRAM_BOOLEAN("UMA.ProtoGzipped",
+                          gzip_protobuf_before_uploading);
+
     // We already drop cookies server-side, but we might as well strip them out
     // client-side as well.
     current_fetch_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -1507,63 +1493,6 @@ void MetricsService::OnURLFetchComplete(const net::URLFetcher* source) {
   }
 }
 
-void MetricsService::LogWindowOrTabChange(int type, uintptr_t window_or_tab) {
-  int controller_id = -1;
-  MetricsLog::WindowEventType window_type;
-
-  // Note: since we stop all logging when a single OTR session is active, it is
-  // possible that we start getting notifications about a window that we don't
-  // know about.
-  if (window_map_.find(window_or_tab) == window_map_.end()) {
-    controller_id = next_window_id_++;
-    window_map_[window_or_tab] = controller_id;
-  } else {
-    controller_id = window_map_[window_or_tab];
-  }
-  DCHECK_NE(controller_id, -1);
-
-  switch (type) {
-    case chrome::NOTIFICATION_TAB_PARENTED:
-    case chrome::NOTIFICATION_BROWSER_OPENED:
-      window_type = MetricsLog::WINDOW_CREATE;
-      break;
-
-    case chrome::NOTIFICATION_TAB_CLOSING:
-    case chrome::NOTIFICATION_BROWSER_CLOSED:
-      window_map_.erase(window_map_.find(window_or_tab));
-      window_type = MetricsLog::WINDOW_DESTROY;
-      break;
-
-    default:
-      NOTREACHED();
-      return;
-  }
-
-  // TODO(brettw) we should have some kind of ID for the parent.
-  log_manager_.current_log()->RecordWindowEvent(window_type, controller_id, 0);
-}
-
-void MetricsService::LogLoadComplete(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (details == content::NotificationService::NoDetails())
-    return;
-
-  // TODO(jar): There is a bug causing this to be called too many times, and
-  // the log overflows.  For now, we won't record these events.
-  UMA_HISTOGRAM_COUNTS("UMA.LogLoadComplete called", 1);
-  return;
-
-  const content::Details<LoadNotificationDetails> load_details(details);
-  int controller_id = window_map_[details.map_key()];
-  log_manager_.current_log()->RecordLoadEvent(controller_id,
-                                              load_details->url,
-                                              load_details->origin,
-                                              load_details->session_index,
-                                              load_details->load_time);
-}
-
 void MetricsService::IncrementPrefValue(const char* path) {
   PrefService* pref = g_browser_process->local_state();
   DCHECK(pref);
@@ -1585,16 +1514,6 @@ void MetricsService::LogLoadStarted(content::WebContents* web_contents) {
   IncrementLongPrefsValue(prefs::kUninstallMetricsPageLoadCount);
   // We need to save the prefs, as page load count is a critical stat, and it
   // might be lost due to a crash :-(.
-
-  // Track whether the page loaded is a search results page.
-  if (web_contents) {
-    SearchTabHelper* search_tab_helper =
-        SearchTabHelper::FromWebContents(web_contents);
-    if (search_tab_helper) {
-      if (search_tab_helper->model()->mode().is_search_results())
-        content::RecordAction(content::UserMetricsAction("PageLoadSRP"));
-    }
-  }
 }
 
 void MetricsService::LogRendererCrash(content::RenderProcessHost* host,
@@ -1667,7 +1586,7 @@ void MetricsService::LogChromeOSCrash(const std::string &crash_type) {
 #endif  // OS_CHROMEOS
 
 void MetricsService::LogPluginLoadingError(const base::FilePath& plugin_path) {
-  webkit::WebPluginInfo plugin;
+  content::WebPluginInfo plugin;
   bool success =
       content::PluginService::GetInstance()->GetPluginInfoByPath(plugin_path,
                                                                  &plugin);
@@ -1692,13 +1611,6 @@ MetricsService::ChildProcessStats& MetricsService::GetChildProcessStats(
         ChildProcessStats(data.process_type);
   }
   return child_process_stats_buffer_[child_name];
-}
-
-void MetricsService::LogKeywordCount(size_t keyword_count) {
-  PrefService* pref = g_browser_process->local_state();
-  DCHECK(pref);
-  pref->SetInteger(prefs::kNumKeywords, static_cast<int>(keyword_count));
-  ScheduleNextStateSave();
 }
 
 void MetricsService::RecordPluginChanges(PrefService* pref) {

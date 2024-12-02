@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
+#include "apps/native_app_window.h"
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "ash/ash_switches.h"
 #include "ash/launcher/launcher.h"
 #include "ash/launcher/launcher_model.h"
@@ -15,6 +18,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/automation/automation_util.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
@@ -22,17 +26,13 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -43,14 +43,9 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 
+using apps::ShellWindow;
 using extensions::Extension;
 using content::WebContents;
-
-namespace {
-// TODO(skuhne): Remove this temporary fix once M28 is out and CL 11596003
-// has landed. See also launcher.cc for the offset introduction.
-const int kChromeItemOffset = 1;
-}
 
 class LauncherPlatformAppBrowserTest
     : public extensions::PlatformAppBrowserTest {
@@ -92,11 +87,6 @@ class LauncherPlatformAppBrowserTest
     // Panels show up on the right side of the launcher, so the desired item
     // will be the last one.
     return launcher_model()->items()[launcher_model()->item_count() - 1];
-  }
-
-  // Activate the launcher item with the given |id|.
-  void ActivateLauncherItem(int id) {
-    launcher_->ActivateLauncherItem(id + kChromeItemOffset);
   }
 
   ash::Launcher* launcher_;
@@ -169,11 +159,6 @@ class LauncherAppBrowserTest : public ExtensionBrowserTest {
         static_cast<ChromeLauncherController*>(launcher_->delegate());
     return controller->CreateAppShortcutLauncherItem(
         name, model_->item_count());
-  }
-
-  // Activate the launcher item with the given |id|.
-  void ActivateLauncherItem(int id) {
-    launcher_->ActivateLauncherItem(id);
   }
 
   ash::Launcher* launcher_;
@@ -442,7 +427,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, MAYBE_WindowActivation) {
             launcher_model()->ItemByID(item_id1)->status);
 
   // Activate first one.
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
   EXPECT_EQ(ash::STATUS_ACTIVE, launcher_model()->ItemByID(item_id1)->status);
   EXPECT_EQ(ash::STATUS_RUNNING,
             launcher_model()->ItemByID(item_id2)->status);
@@ -450,7 +435,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, MAYBE_WindowActivation) {
   EXPECT_FALSE(ash::wm::IsActiveWindow(window2->GetNativeWindow()));
 
   // Activate second one.
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id2));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id2));
   EXPECT_EQ(ash::STATUS_RUNNING,
             launcher_model()->ItemByID(item_id1)->status);
   EXPECT_EQ(ash::STATUS_ACTIVE, launcher_model()->ItemByID(item_id2)->status);
@@ -465,20 +450,20 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, MAYBE_WindowActivation) {
   EXPECT_TRUE(ash::wm::IsActiveWindow(window1b->GetNativeWindow()));
 
   // Activate launcher item for app1, this will activate the first app window.
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
   EXPECT_TRUE(ash::wm::IsActiveWindow(window1->GetNativeWindow()));
   EXPECT_FALSE(ash::wm::IsActiveWindow(window1b->GetNativeWindow()));
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
   EXPECT_TRUE(ash::wm::IsActiveWindow(window1->GetNativeWindow()));
 
   // Activate the second app again
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id2));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id2));
   EXPECT_FALSE(ash::wm::IsActiveWindow(window1->GetNativeWindow()));
   EXPECT_TRUE(ash::wm::IsActiveWindow(window2->GetNativeWindow()));
   EXPECT_FALSE(ash::wm::IsActiveWindow(window1b->GetNativeWindow()));
 
   // Activate the first app again
-  ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
+  launcher_->ActivateLauncherItem(launcher_model()->ItemIndexByID(item_id1));
   EXPECT_TRUE(ash::wm::IsActiveWindow(window1->GetNativeWindow()));
   EXPECT_FALSE(ash::wm::IsActiveWindow(window2->GetNativeWindow()));
   EXPECT_FALSE(ash::wm::IsActiveWindow(window1b->GetNativeWindow()));
@@ -541,7 +526,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchPinned) {
   int tab_count = tab_strip->count();
   ash::LauncherID shortcut_id = CreateShortcut("app1");
   EXPECT_EQ(ash::STATUS_CLOSED, (*model_->ItemByID(shortcut_id)).status);
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(++tab_count, tab_strip->count());
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
   WebContents* tab = tab_strip->GetActiveWebContents();
@@ -601,7 +586,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchMaximized) {
   ash::wm::MaximizeWindow(window2);
 
   ash::LauncherID shortcut_id = CreateShortcut("app1");
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(++tab_count, tab_strip->count());
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
 
@@ -609,7 +594,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, LaunchMaximized) {
   ash::wm::ActivateWindow(window1);
   EXPECT_EQ(ash::STATUS_RUNNING, (*model_->ItemByID(shortcut_id)).status);
 
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
 }
 
@@ -650,13 +635,13 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleApps) {
   EXPECT_EQ(++item_count, model_->item_count());
 
   // Launch first app.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
   EXPECT_EQ(++tab_count, tab_strip->count());
   WebContents* tab1 = tab_strip->GetActiveWebContents();
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut1)).status);
 
   // Launch second app.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut2));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut2));
   EXPECT_EQ(++tab_count, tab_strip->count());
   WebContents* tab2 = tab_strip->GetActiveWebContents();
   ASSERT_NE(tab1, tab2);
@@ -664,7 +649,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleApps) {
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut2)).status);
 
   // Reactivate first app.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
   EXPECT_EQ(tab_count, tab_strip->count());
   EXPECT_EQ(tab_strip->GetActiveWebContents(), tab1);
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut1)).status);
@@ -682,14 +667,14 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleApps) {
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut2)).status);
 
   // Reactivate first app.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut1));
   EXPECT_EQ(tab_count, tab_strip->count());
   EXPECT_EQ(tab_strip->GetActiveWebContents(), tab1);
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut1)).status);
   EXPECT_EQ(ash::STATUS_RUNNING, (*model_->ItemByID(shortcut2)).status);
 
   // And second again. This time the second tab should become active.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut2));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut2));
   EXPECT_EQ(tab_count, tab_strip->count());
   EXPECT_EQ(tab_strip->GetActiveWebContents(), tab3);
   EXPECT_EQ(ash::STATUS_RUNNING, (*model_->ItemByID(shortcut1)).status);
@@ -701,7 +686,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleApps) {
 IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, Navigation) {
   ash::LauncherID shortcut_id = CreateShortcut("app1");
   EXPECT_EQ(ash::STATUS_CLOSED, (*model_->ItemByID(shortcut_id)).status);
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(ash::STATUS_ACTIVE, (*model_->ItemByID(shortcut_id)).status);
 
   // Navigate away.
@@ -719,7 +704,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleOwnedTabs) {
   TabStripModel* tab_strip = browser()->tab_strip_model();
   int tab_count = tab_strip->count();
   ash::LauncherID shortcut_id = CreateShortcut("app1");
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(++tab_count, tab_strip->count());
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);
 
@@ -745,7 +730,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, MultipleOwnedTabs) {
   EXPECT_EQ(ash::STATUS_RUNNING, model_->ItemByID(shortcut_id)->status);
 
   // Activating app makes second tab active again.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);
   EXPECT_EQ(tab_strip->GetActiveWebContents(), second_tab);
 }
@@ -756,7 +741,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, RefocusFilter) {
   TabStripModel* tab_strip = browser()->tab_strip_model();
   int tab_count = tab_strip->count();
   ash::LauncherID shortcut_id = CreateShortcut("app1");
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(++tab_count, tab_strip->count());
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);
   WebContents* first_tab = tab_strip->GetActiveWebContents();
@@ -785,7 +770,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, RefocusFilter) {
 
   // Activating app makes first tab active again, because second tab isn't
   // in its refocus url path.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);
   EXPECT_EQ(tab_strip->GetActiveWebContents(), first_tab);
 }
@@ -812,7 +797,7 @@ IN_PROC_BROWSER_TEST_F(LauncherAppBrowserTest, RefocusFilterLaunch) {
 
   // Activating app should launch new tab, because second tab isn't
   // in its refocus url path.
-  ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
+  launcher_->ActivateLauncherItem(model_->ItemIndexByID(shortcut_id));
   EXPECT_EQ(++tab_count, tab_strip->count());
   WebContents* second_tab = tab_strip->GetActiveWebContents();
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(shortcut_id)->status);

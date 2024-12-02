@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_pump.h"
 #include "base/observer_list.h"
-#include "base/time.h"
+#include "base/time/time.h"
 
 typedef struct _GMainContext GMainContext;
 typedef struct _GPollFD GPollFD;
@@ -35,6 +35,7 @@ class MessagePumpDispatcher;
 class BASE_EXPORT MessagePumpGlib : public MessagePump {
  public:
   MessagePumpGlib();
+  virtual ~MessagePumpGlib();
 
   // Like MessagePump::Run, but events are routed through dispatcher.
   virtual void RunWithDispatcher(Delegate* delegate,
@@ -64,8 +65,6 @@ class BASE_EXPORT MessagePumpGlib : public MessagePump {
   virtual void ScheduleDelayedWork(const TimeTicks& delayed_work_time) OVERRIDE;
 
  protected:
-  virtual ~MessagePumpGlib();
-
   // Returns the dispatcher for the current run state (|state_->dispatcher|).
   MessagePumpDispatcher* GetDispatcher();
 

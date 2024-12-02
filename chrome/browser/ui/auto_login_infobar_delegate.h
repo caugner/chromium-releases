@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_AUTO_LOGIN_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_UI_AUTO_LOGIN_INFOBAR_DELEGATE_H_
 
+#include <string>
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 #include "components/auto_login_parser/auto_login_parser.h"
 #include "content/public/browser/notification_observer.h"
@@ -22,9 +23,6 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
                                  public content::NotificationObserver {
  public:
   struct Params {
-    Params();
-    ~Params();
-
     // Information from a parsed header.
     auto_login_parser::HeaderData header;
 
@@ -34,26 +32,23 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
     std::string username;
   };
 
-  // Creates an autologin delegate and adds it to |infobar_service|.
+  // Creates an autologin infobar delegate and adds it to |infobar_service|.
   static void Create(InfoBarService* infobar_service, const Params& params);
 
  protected:
   AutoLoginInfoBarDelegate(InfoBarService* owner, const Params& params);
   virtual ~AutoLoginInfoBarDelegate();
 
-  // ConfirmInfoBarDelegate:
-  virtual string16 GetMessageText() const OVERRIDE;
-
  private:
   // Enum values used for UMA histograms.
   enum Actions {
-    HISTOGRAM_SHOWN,       // The infobar was shown to the user.
-    HISTOGRAM_ACCEPTED,    // The user pressed the accept button.
-    HISTOGRAM_REJECTED,    // The user pressed the reject button.
-    HISTOGRAM_DISMISSED,   // The user pressed the close button.
-    HISTOGRAM_IGNORED,     // The user ignored the infobar.
-    HISTOGRAM_LEARN_MORE,  // The user clicked on the learn more link.
-    HISTOGRAM_MAX
+    SHOWN,       // The infobar was shown to the user.
+    ACCEPTED,    // The user pressed the accept button.
+    REJECTED,    // The user pressed the reject button.
+    DISMISSED,   // The user pressed the close button.
+    IGNORED,     // The user ignored the infobar.
+    LEARN_MORE,  // The user clicked on the learn more link.
+    HISTOGRAM_BOUNDING_VALUE
   };
 
   // ConfirmInfoBarDelegate:
@@ -61,6 +56,7 @@ class AutoLoginInfoBarDelegate : public ConfirmInfoBarDelegate,
   virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual AutoLoginInfoBarDelegate* AsAutoLoginInfoBarDelegate() OVERRIDE;
+  virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;

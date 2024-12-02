@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/shill_service_client.h"
 
 namespace chromeos {
@@ -22,6 +23,11 @@ class ShillServiceClientStub : public ShillServiceClient,
  public:
   ShillServiceClientStub();
   virtual ~ShillServiceClientStub();
+
+  // Returns true when stub portalled wifi is enabled and it's service
+  // path equals to |path|.
+  CHROMEOS_EXPORT static bool IsStubPortalledWifiEnabled(
+      const std::string& path);
 
   // ShillServiceClient overrides.
   virtual void AddPropertyChangedObserver(
@@ -37,6 +43,10 @@ class ShillServiceClientStub : public ShillServiceClient,
                            const base::Value& value,
                            const base::Closure& callback,
                            const ErrorCallback& error_callback) OVERRIDE;
+  virtual void SetProperties(const dbus::ObjectPath& service_path,
+                             const base::DictionaryValue& properties,
+                             const base::Closure& callback,
+                             const ErrorCallback& error_callback) OVERRIDE;
   virtual void ClearProperty(const dbus::ObjectPath& service_path,
                              const std::string& name,
                              const base::Closure& callback,
@@ -66,22 +76,28 @@ class ShillServiceClientStub : public ShillServiceClient,
   virtual bool CallActivateCellularModemAndBlock(
       const dbus::ObjectPath& service_path,
       const std::string& carrier) OVERRIDE;
+  virtual void GetLoadableProfileEntries(
+      const dbus::ObjectPath& service_path,
+      const DictionaryValueCallback& callback) OVERRIDE;
   virtual ShillServiceClient::TestInterface* GetTestInterface() OVERRIDE;
 
   // ShillServiceClient::TestInterface overrides.
+  virtual void AddDefaultServices() OVERRIDE;
   virtual void AddService(const std::string& service_path,
                           const std::string& name,
                           const std::string& type,
                           const std::string& state,
+                          bool add_to_visible_list,
                           bool add_to_watch_list) OVERRIDE;
   virtual void AddServiceWithIPConfig(const std::string& service_path,
                                       const std::string& name,
                                       const std::string& type,
                                       const std::string& state,
                                       const std::string& ipconfig_path,
+                                      bool add_to_visible_list,
                                       bool add_to_watch_list) OVERRIDE;
   virtual void RemoveService(const std::string& service_path) OVERRIDE;
-  virtual void SetServiceProperty(const std::string& service_path,
+  virtual bool SetServiceProperty(const std::string& service_path,
                                   const std::string& property,
                                   const base::Value& value) OVERRIDE;
   virtual const base::DictionaryValue* GetServiceProperties(
@@ -91,12 +107,12 @@ class ShillServiceClientStub : public ShillServiceClient,
  private:
   typedef ObserverList<ShillPropertyChangedObserver> PropertyObserverList;
 
-  void SetDefaultProperties();
   void NotifyObserversPropertyChanged(const dbus::ObjectPath& service_path,
                                       const std::string& property);
   base::DictionaryValue* GetModifiableServiceProperties(
       const std::string& service_path);
   PropertyObserverList& GetObserverList(const dbus::ObjectPath& device_path);
+  void SetOtherServicesOffline(const std::string& service_path);
 
   base::DictionaryValue stub_services_;
   // Observer list for each service.

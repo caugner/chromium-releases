@@ -13,12 +13,14 @@
 
 GeolocationInfoBarDelegateAndroid::GeolocationInfoBarDelegateAndroid(
     InfoBarService* infobar_service,
-    GeolocationInfoBarQueueController* controller,
-    const GeolocationPermissionRequestID& id,
+    PermissionQueueController* controller,
+    const PermissionRequestID& id,
     const GURL& requesting_frame_url,
+    int contents_unique_id,
     const std::string& display_languages)
     : GeolocationInfoBarDelegate(infobar_service, controller, id,
-                                 requesting_frame_url, display_languages),
+                                 requesting_frame_url, contents_unique_id,
+                                 display_languages),
       google_location_settings_helper_(
           GoogleLocationSettingsHelper::Create()) {
 }
@@ -41,9 +43,7 @@ bool GeolocationInfoBarDelegateAndroid::Accept() {
 
 string16 GeolocationInfoBarDelegateAndroid::GetButtonLabel(
     InfoBarButton button) const {
-  if (button == BUTTON_OK) {
-    return UTF8ToUTF16(
-        google_location_settings_helper_->GetAcceptButtonLabel());
-  }
-  return l10n_util::GetStringUTF16(IDS_GEOLOCATION_DENY_BUTTON);
+  return (button == BUTTON_OK) ?
+      UTF8ToUTF16(google_location_settings_helper_->GetAcceptButtonLabel()) :
+      l10n_util::GetStringUTF16(IDS_GEOLOCATION_DENY_BUTTON);
 }

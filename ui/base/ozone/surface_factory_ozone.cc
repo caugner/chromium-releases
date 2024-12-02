@@ -4,14 +4,36 @@
 
 #include "ui/base/ozone/surface_factory_ozone.h"
 
-#include "base/lazy_instance.h"
-#include "base/memory/scoped_ptr.h"
+#include <stdlib.h>
 
 namespace ui {
 
-// Implementation.
-static base::LazyInstance<scoped_ptr<SurfaceFactoryOzone> > impl_ =
-    LAZY_INSTANCE_INITIALIZER;
+// static
+SurfaceFactoryOzone* SurfaceFactoryOzone::impl_ = NULL;
+
+class SurfaceFactoryOzoneStub : public SurfaceFactoryOzone {
+ public:
+  SurfaceFactoryOzoneStub() {}
+  virtual ~SurfaceFactoryOzoneStub() {}
+
+  virtual void InitializeHardware() OVERRIDE {}
+  virtual void ShutdownHardware() OVERRIDE {}
+  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE { return 0; }
+  virtual gfx::AcceleratedWidget RealizeAcceleratedWidget(
+      gfx::AcceleratedWidget w) OVERRIDE {
+    return 0;
+  }
+  virtual bool LoadEGLGLES2Bindings() OVERRIDE { return true; }
+  virtual bool AttemptToResizeAcceleratedWidget(
+      gfx::AcceleratedWidget w,
+      const gfx::Rect& bounds) OVERRIDE {
+    return false;
+  }
+  virtual gfx::VSyncProvider* GetVSyncProvider(
+      gfx::AcceleratedWidget w) OVERRIDE {
+    return NULL;
+  }
+};
 
 SurfaceFactoryOzone::SurfaceFactoryOzone() {
 }
@@ -20,11 +42,12 @@ SurfaceFactoryOzone::~SurfaceFactoryOzone() {
 }
 
 SurfaceFactoryOzone* SurfaceFactoryOzone::GetInstance() {
-  return impl_.Get().get();
+  CHECK(impl_) << "SurfaceFactoryOzone accessed before constructed";
+  return impl_;
 }
 
 void SurfaceFactoryOzone::SetInstance(SurfaceFactoryOzone* impl) {
-  impl_.Get().reset(impl);
+  impl_ = impl;
 }
 
 const char* SurfaceFactoryOzone::DefaultDisplaySpec() {
@@ -32,6 +55,11 @@ const char* SurfaceFactoryOzone::DefaultDisplaySpec() {
   if (envvar)
     return envvar;
   return  "720x1280*2";
+}
+
+// static
+SurfaceFactoryOzone* SurfaceFactoryOzone::CreateTestHelper() {
+  return new SurfaceFactoryOzoneStub;
 }
 
 }  // namespace ui

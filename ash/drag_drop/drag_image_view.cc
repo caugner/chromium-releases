@@ -26,10 +26,11 @@ Widget* CreateDragWidget(gfx::NativeView context) {
   params.context = context;
   params.accept_events = false;
   params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.transparent = true;
+  params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
   drag_widget->Init(params);
   drag_widget->SetOpacity(0xFF);
   drag_widget->GetNativeWindow()->set_owned_by_parent(false);
+  drag_widget->GetNativeWindow()->SetName("DragWidget");
   SetShadowType(drag_widget->GetNativeView(), views::corewm::SHADOW_TYPE_NONE);
   return drag_widget;
 }

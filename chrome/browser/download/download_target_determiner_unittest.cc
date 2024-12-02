@@ -4,7 +4,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
@@ -1087,7 +1087,7 @@ TEST_F(DownloadTargetDeterminerTest, TargetDeterminer_VisitedReferrer) {
                 base::FilePath(FILE_PATH_LITERAL("foo.html"))));
 
   // First the history service must exist.
-  profile()->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(false, false));
 
   GURL url("http://visited.example.com/visited-link.html");
   // The time of visit is picked to be several seconds prior to the most recent

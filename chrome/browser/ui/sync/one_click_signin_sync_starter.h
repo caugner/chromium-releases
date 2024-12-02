@@ -7,15 +7,24 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/signin/signin_tracker.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/profile_signin_confirmation_helper.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class Browser;
 class ProfileSyncService;
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 namespace policy {
 class CloudPolicyClient;
@@ -25,7 +34,8 @@ class CloudPolicyClient;
 // starts the sync machine.  Instances of this class delete themselves once
 // the job is done.
 class OneClickSigninSyncStarter : public SigninTracker::Observer,
-                                  public chrome::BrowserListObserver {
+                                  public chrome::BrowserListObserver,
+                                  public content::WebContentsObserver {
  public:
   enum StartSyncMode {
     // Starts the process of signing the user in with the SigninManager, and
@@ -36,6 +46,11 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
     // once completed redirects the user to the settings page to allow them
     // to configure which data types to sync before sync is enabled.
     CONFIGURE_SYNC_FIRST,
+
+    // Starts the process of re-authenticating the user via SigninManager,
+    // and once completed, redirects the user to the settings page, but doesn't
+    // display the configure sync UI.
+    SHOW_SETTINGS_WITHOUT_CONFIGURE,
 
     // The process should be aborted because the undo button has been pressed.
     UNDO_SYNC
@@ -54,23 +69,46 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
     CONFIRM_AFTER_SIGNIN
   };
 
+  // Result of the sync setup.
+  enum SyncSetupResult {
+    SYNC_SETUP_SUCCESS,
+    SYNC_SETUP_FAILURE
+  };
+
+  typedef base::Callback<void(SyncSetupResult)> Callback;
+
   // |profile| must not be NULL, however |browser| can be. When using the
   // OneClickSigninSyncStarter from a browser, provide both.
   // If |display_confirmation| is true, the user will be prompted to confirm the
   // signin before signin completes.
+  // |web_contents| is used to show the sync setup page, if necessary. If NULL,
+  // the sync setup page will be loaded in either a new tab or a tab that is
+  // already showing it.
+  // |callback| is always executed before OneClickSigninSyncStarter is deleted.
+  // It can be empty.
   OneClickSigninSyncStarter(Profile* profile,
                             Browser* browser,
                             const std::string& session_index,
                             const std::string& email,
                             const std::string& password,
                             StartSyncMode start_mode,
-                            bool force_same_tab_navigation,
-                            ConfirmationRequired display_confirmation);
+                            content::WebContents* web_contents,
+                            ConfirmationRequired display_confirmation,
+                            signin::Source source,
+                            Callback callback);
 
   // chrome::BrowserListObserver override.
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
  private:
+  friend class OneClickSigninSyncStarterTest;
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
+                           CallbackSigninFailed);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
+                           CallbackSigninSucceeded);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninSyncStarterTest,
+                           CallbackNull);
+
   virtual ~OneClickSigninSyncStarter();
 
   // Initializes the internals of the OneClickSigninSyncStarter object. Can also
@@ -145,9 +183,12 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
 
   void FinishProfileSyncServiceSetup();
 
-  // Displays the sync configuration UI.
-  void ConfigureSync();
-  void ShowSyncSettingsPageOnSameTab();
+  // Displays the settings UI in a new tab. Brings up the advanced sync settings
+  // dialog if |configure_sync| is true.
+  void ShowSettingsPageInNewTab(bool configure_sync);
+
+  // Displays the sync configuration UI in the provided web contents.
+  void ShowSyncSettingsPageInWebContents(content::WebContents* contents);
 
   // Shows the post-signin confirmation bubble. If |custom_message| is empty,
   // the default "You are signed in" message is displayed.
@@ -165,6 +206,11 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer,
   chrome::HostDesktopType desktop_type_;
   bool force_same_tab_navigation_;
   ConfirmationRequired confirmation_required_;
+  signin::Source source_;
+
+  // Callback executed when sync setup succeeds or fails.
+  Callback sync_setup_completed_callback_;
+
   base::WeakPtrFactory<OneClickSigninSyncStarter> weak_pointer_factory_;
 
 #if defined(ENABLE_CONFIGURATION_POLICY)

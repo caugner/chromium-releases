@@ -56,7 +56,6 @@ class DesktopRootWindowHost;
 class InputMethod;
 class NativeWidget;
 class NonClientFrameView;
-class ScopedEvent;
 class View;
 class WidgetDelegate;
 class WidgetObserver;
@@ -133,6 +132,17 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       TYPE_BUBBLE,
     };
 
+    enum WindowOpacity {
+      // Infer fully opaque or not. For WinAura, top-level windows that are not
+      // of TYPE_WINDOW are translucent so that they can be made to fade in. In
+      // all other cases, windows are fully opaque.
+      INFER_OPACITY,
+      // Fully opaque.
+      OPAQUE_WINDOW,
+      // Possibly translucent/transparent.
+      TRANSLUCENT_WINDOW,
+    };
+
     enum Ownership {
       // Default. Creator is not responsible for managing the lifetime of the
       // Widget, it is destroyed when the corresponding NativeWidget is
@@ -155,12 +165,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // If NULL, a default implementation will be constructed.
     WidgetDelegate* delegate;
     bool child;
-    bool transient;
-    // If true, the widget may be fully or partially transparent.  If false,
-    // we can perform optimizations based on the widget being fully opaque.
-    // For window widgets, defaults to ViewsDelegate::UseTransparentWindows().
-    // Defaults to false for non-window widgets.
-    bool transparent;
+    // If TRANSLUCENT_WINDOW, the widget may be fully or partially transparent.
+    // If OPAQUE_WINDOW, we can perform optimizations based on the widget being
+    // fully opaque.  Defaults to TRANSLUCENT_WINDOW if
+    // ViewsDelegate::UseTransparentWindows().  Defaults to OPAQUE_WINDOW for
+    // non-window widgets.
+    WindowOpacity opacity;
     bool accept_events;
     bool can_activate;
     bool keep_on_top;
@@ -390,6 +400,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // any code that expects it to be valid beyond this call.
   void CloseNow();
 
+  // Whether the widget has been asked to close itself. In particular this is
+  // set to true after Close() has been invoked on the NativeWidget.
+  bool IsClosed() const;
+
   // Shows or hides the widget, without changing activation state.
   virtual void Show();
   void Hide();
@@ -477,6 +491,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Returns the InputMethod for this widget.
   // Note that all widgets in a widget hierarchy share the same input method.
   InputMethod* GetInputMethod();
+  const InputMethod* GetInputMethod() const;
 
   // Starts a drag operation for the specified view. This blocks until the drag
   // operation completes. |view| can be NULL.
@@ -609,12 +624,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Returns true if the widget has capture.
   bool HasCapture();
 
-  // Returns the current event being processed. If there are multiple events
-  // being processed at the same time (e.g. one event triggers another event),
-  // then the most recent event is returned. Returns NULL if no event is being
-  // processed.
-  const ui::Event* GetCurrentEvent();
-
   // Invoked when the tooltip text changes for the specified views.
   void TooltipTextChanged(View* view);
 
@@ -713,7 +722,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
  private:
   friend class NativeTextfieldViewsTest;
   friend class NativeComboboxViewsTest;
-  friend class ScopedEvent;
 
   // Returns whether capture should be released on mouse release.
   virtual bool ShouldReleaseCaptureOnMouseReleased() const;
@@ -736,6 +744,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // the delegate wants to use a specified bounds.
   bool GetSavedWindowPlacement(gfx::Rect* bounds,
                                ui::WindowShowState* show_state);
+
+  // Creates and initializes a new InputMethod and returns it, otherwise null.
+  scoped_ptr<InputMethod> CreateInputMethod();
 
   // Sets a different InputMethod instance to this widget. The instance
   // must not be initialized, the ownership will be assumed by the widget.
@@ -774,9 +785,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // started from.
   View* dragged_view_;
 
-  // The event stack.
-  std::stack<ScopedEvent*> event_stack_;
-
   // See class documentation for Widget above for a note about ownership.
   InitParams::Ownership ownership_;
 
@@ -807,7 +815,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // initial focus for the widget.
   bool focus_on_creation_;
 
-  scoped_ptr<InputMethod> input_method_;
+  mutable scoped_ptr<InputMethod> input_method_;
 
   // See |is_top_level()| accessor.
   bool is_top_level_;

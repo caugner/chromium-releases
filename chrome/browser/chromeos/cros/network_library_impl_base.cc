@@ -12,7 +12,6 @@
 #include "chrome/browser/chromeos/cros/network_constants.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/net/onc_utils.h"
-#include "chrome/browser/chromeos/network_login_observer.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/network_ui_data.h"
 #include "chromeos/network/onc/onc_constants.h"
@@ -63,19 +62,15 @@ NetworkLibraryImplBase::NetworkLibraryImplBase()
       enabled_devices_(0),
       busy_devices_(0),
       wifi_scanning_(false),
-      offline_mode_(false),
       is_locked_(false),
       sim_operation_(SIM_OPERATION_NONE),
       notify_manager_weak_factory_(this) {
-  network_login_observer_.reset(new NetworkLoginObserver());
-  AddNetworkManagerObserver(network_login_observer_.get());
 }
 
 NetworkLibraryImplBase::~NetworkLibraryImplBase() {
   network_profile_observers_.Clear();
   network_manager_observers_.Clear();
   pin_operation_observers_.Clear();
-  user_action_observers_.Clear();
   STLDeleteValues(&network_map_);
   ClearNetworks();
   DeleteRememberedNetworks();
@@ -207,17 +202,6 @@ void NetworkLibraryImplBase::RemovePinOperationObserver(
   pin_operation_observers_.RemoveObserver(observer);
 }
 
-void NetworkLibraryImplBase::AddUserActionObserver(
-    UserActionObserver* observer) {
-  if (!user_action_observers_.HasObserver(observer))
-    user_action_observers_.AddObserver(observer);
-}
-
-void NetworkLibraryImplBase::RemoveUserActionObserver(
-    UserActionObserver* observer) {
-  user_action_observers_.RemoveObserver(observer);
-}
-
 const EthernetNetwork* NetworkLibraryImplBase::ethernet_network() const {
   return ethernet_;
 }
@@ -254,17 +238,6 @@ bool NetworkLibraryImplBase::wimax_connecting() const {
 }
 bool NetworkLibraryImplBase::wimax_connected() const {
   return active_wimax_ ? active_wimax_->connected() : false;
-}
-const Network* NetworkLibraryImplBase::mobile_network() const {
-  return active_cellular_ ?
-      static_cast<Network*>(active_cellular_) :
-      static_cast<Network*>(active_wimax_);
-}
-bool NetworkLibraryImplBase::mobile_connecting() const {
-  return cellular_connecting() || wimax_connecting();
-}
-bool NetworkLibraryImplBase::mobile_connected() const {
-  return wimax_connecting() || wimax_connected();
 }
 const VirtualNetwork* NetworkLibraryImplBase::virtual_network() const {
   return active_virtual_;
@@ -304,10 +277,11 @@ const VirtualNetworkVector&
   return remembered_virtual_networks_;
 }
 
+namespace {
+
 // Use shill's ordering of the services to determine which type of
 // network to return (i.e. don't assume priority of network types).
 // Note: This does not include any virtual networks.
-namespace {
 const Network* highest_priority(const Network* a, const Network*b) {
   if (!a)
     return b;
@@ -317,7 +291,8 @@ const Network* highest_priority(const Network* a, const Network*b) {
     return b;
   return a;
 }
-}
+
+}  // namespace
 
 const Network* NetworkLibraryImplBase::active_network() const {
   const Network* result = active_nonvirtual_network();
@@ -381,10 +356,6 @@ bool NetworkLibraryImplBase::cellular_available() const {
   return available_devices_ & (1 << TYPE_CELLULAR);
 }
 
-bool NetworkLibraryImplBase::mobile_available() const {
-  return cellular_available() || wimax_available();
-}
-
 bool NetworkLibraryImplBase::ethernet_enabled() const {
   return enabled_devices_ & (1 << TYPE_ETHERNET);
 }
@@ -401,10 +372,6 @@ bool NetworkLibraryImplBase::cellular_enabled() const {
   return enabled_devices_ & (1 << TYPE_CELLULAR);
 }
 
-bool NetworkLibraryImplBase::mobile_enabled() const {
-  return cellular_enabled() || wimax_enabled();
-}
-
 bool NetworkLibraryImplBase::wifi_scanning() const {
   return wifi_scanning_;
 }
@@ -416,22 +383,6 @@ bool NetworkLibraryImplBase::cellular_initializing() const {
   if (device && device->scanning())
     return true;
   return false;
-}
-
-bool NetworkLibraryImplBase::offline_mode() const { return offline_mode_; }
-
-// Returns the IP address for the active network.
-// TODO(stevenjb): Fix this for VPNs. See chromium-os:13972.
-const std::string& NetworkLibraryImplBase::IPAddress() const {
-  const Network* result = active_network();
-  if (!result)
-    result = connected_network();  // happens if we are connected to a VPN.
-  if (!result)
-    result = ethernet_;  // Use non active ethernet addr if no active network.
-  if (result)
-    return result->ip_address();
-  CR_DEFINE_STATIC_LOCAL(std::string, null_address, ("0.0.0.0"));
-  return null_address;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -456,18 +407,6 @@ NetworkDevice* NetworkLibraryImplBase::FindNetworkDeviceByPath(
 
 const NetworkDevice* NetworkLibraryImplBase::FindCellularDevice() const {
   return FindDeviceByType(TYPE_CELLULAR);
-}
-
-const NetworkDevice* NetworkLibraryImplBase::FindEthernetDevice() const {
-  return FindDeviceByType(TYPE_ETHERNET);
-}
-
-const NetworkDevice* NetworkLibraryImplBase::FindWifiDevice() const {
-  return FindDeviceByType(TYPE_WIFI);
-}
-
-const NetworkDevice* NetworkLibraryImplBase::FindWimaxDevice() const {
-  return FindDeviceByType(TYPE_WIMAX);
 }
 
 const NetworkDevice* NetworkLibraryImplBase::FindMobileDevice() const {
@@ -778,7 +717,6 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
 
   // Notify observers.
   NotifyNetworkManagerChanged(true);  // Forced update.
-  NotifyUserConnectionInitiated(network);
   NotifyNetworkChanged(network);
 }
 
@@ -806,8 +744,7 @@ void NetworkLibraryImplBase::ConnectToUnconfiguredWifiNetwork(
     connect_data_.service_name = ssid;
     connect_data_.eap_method = eap_config->method;
     connect_data_.eap_auth = eap_config->auth;
-    connect_data_.server_ca_cert_nss_nickname =
-        eap_config->server_ca_cert_nss_nickname;
+    connect_data_.server_ca_cert_pem = eap_config->server_ca_cert_pem;
     connect_data_.eap_use_system_cas = eap_config->use_system_cas;
     connect_data_.client_cert_pkcs11_id =
         eap_config->client_cert_pkcs11_id;
@@ -828,8 +765,7 @@ void NetworkLibraryImplBase::ConnectToUnconfiguredVirtualNetwork(
   connect_data_.service_name = service_name;
   connect_data_.server_hostname = server_hostname;
   connect_data_.psk_key = config.psk;
-  connect_data_.server_ca_cert_nss_nickname =
-      config.server_ca_cert_nss_nickname;
+  connect_data_.server_ca_cert_pem = config.server_ca_cert_pem;
   connect_data_.client_cert_pkcs11_id = config.client_cert_pkcs11_id;
   connect_data_.username = config.username;
   connect_data_.passphrase = config.user_passphrase;
@@ -867,7 +803,7 @@ void NetworkLibraryImplBase::ConnectToWifiNetworkUsingConnectData(
     // Enterprise 802.1X EAP network.
     wifi->SetEAPMethod(data.eap_method);
     wifi->SetEAPPhase2Auth(data.eap_auth);
-    wifi->SetEAPServerCaCertNssNickname(data.server_ca_cert_nss_nickname);
+    wifi->SetEAPServerCaCertPEM(data.server_ca_cert_pem);
     wifi->SetEAPUseSystemCAs(data.eap_use_system_cas);
     wifi->SetEAPClientCertPkcs11Id(data.client_cert_pkcs11_id);
     wifi->SetEAPIdentity(data.eap_identity);
@@ -913,7 +849,7 @@ void NetworkLibraryImplBase::ConnectToVirtualNetworkUsingConnectData(
   if (!data.server_hostname.empty())
     vpn->set_server_hostname(data.server_hostname);
 
-  vpn->SetCACertNSS(data.server_ca_cert_nss_nickname);
+  vpn->SetCACertPEM(data.server_ca_cert_pem);
   switch (vpn->provider_type()) {
     case PROVIDER_TYPE_L2TP_IPSEC_PSK:
       vpn->SetL2TPIPsecPSKCredentials(
@@ -962,11 +898,6 @@ void NetworkLibraryImplBase::EnableWifiNetworkDevice(bool enable) {
   CallEnableNetworkDeviceType(TYPE_WIFI, enable);
 }
 
-void NetworkLibraryImplBase::EnableMobileNetworkDevice(bool enable) {
-  EnableWimaxNetworkDevice(enable);
-  EnableCellularNetworkDevice(enable);
-}
-
 void NetworkLibraryImplBase::EnableWimaxNetworkDevice(bool enable) {
   if (is_locked_)
     return;
@@ -1004,7 +935,7 @@ namespace {
 class UserStringSubstitution : public onc::StringSubstitution {
  public:
   UserStringSubstitution() {}
-  virtual bool GetSubstitute(std::string placeholder,
+  virtual bool GetSubstitute(const std::string& placeholder,
                              std::string* substitute) const OVERRIDE {
     if (!UserManager::Get()->IsUserLoggedIn())
       return false;
@@ -1104,20 +1035,6 @@ void NetworkLibraryImplBase::LoadOncNetworks(
     scoped_ptr<base::DictionaryValue> shill_dict =
         onc::TranslateONCObjectToShill(&onc::kNetworkConfigurationSignature,
                                        *normalized_network);
-
-    // Set the ProxyConfig.
-    const base::DictionaryValue* proxy_settings;
-    if (normalized_network->GetDictionaryWithoutPathExpansion(
-            onc::network_config::kProxySettings,
-            &proxy_settings)) {
-      scoped_ptr<base::DictionaryValue> proxy_config =
-          onc::ConvertOncProxySettingsToProxyConfig(*proxy_settings);
-      std::string proxy_json;
-      base::JSONWriter::Write(proxy_config.get(), &proxy_json);
-      shill_dict->SetStringWithoutPathExpansion(
-          flimflam::kProxyConfigProperty,
-          proxy_json);
-    }
 
     // Set the UIData.
     scoped_ptr<NetworkUIData> ui_data =
@@ -1629,9 +1546,6 @@ void NetworkLibraryImplBase::NotifyNetworkDeviceChanged(
                         *device_observer_list,
                         OnNetworkDeviceSimLockChanged(this, device));
     }
-    FOR_EACH_OBSERVER(NetworkDeviceObserver,
-                      *device_observer_list,
-                      OnNetworkDeviceChanged(this, device));
   } else {
     LOG(ERROR) << "Unexpected signal for unobserved device: "
                << device->name();
@@ -1644,13 +1558,6 @@ void NetworkLibraryImplBase::NotifyPinOperationCompleted(
                     pin_operation_observers_,
                     OnPinOperationCompleted(this, error));
   sim_operation_ = SIM_OPERATION_NONE;
-}
-
-void NetworkLibraryImplBase::NotifyUserConnectionInitiated(
-    const Network* network) {
-  FOR_EACH_OBSERVER(UserActionObserver,
-                    user_action_observers_,
-                    OnConnectionInitiated(this, network));
 }
 
 //////////////////////////////////////////////////////////////////////////////

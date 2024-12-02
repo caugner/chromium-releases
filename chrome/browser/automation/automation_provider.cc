@@ -15,10 +15,9 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/json/string_escape.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/process_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -351,6 +350,9 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST:
       download_danger_type_string = "DANGEROUS_HOST";
       break;
+    case content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED:
+      download_danger_type_string = "POTENTIALLY_UNWANTED";
+      break;
     case content::DOWNLOAD_DANGER_TYPE_MAX:
       NOTREACHED();
       download_danger_type_string = "UNKNOWN";
@@ -417,7 +419,6 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_Cut, Cut)
     IPC_MESSAGE_HANDLER(AutomationMsg_Copy, Copy)
     IPC_MESSAGE_HANDLER(AutomationMsg_Paste, Paste)
-    IPC_MESSAGE_HANDLER(AutomationMsg_KeyPress, KeyPress)
     IPC_MESSAGE_HANDLER(AutomationMsg_ReloadAsync, ReloadAsync)
     IPC_MESSAGE_HANDLER(AutomationMsg_StopAsync, StopAsync)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetPageFontSize, OnSetPageFontSize)
@@ -664,38 +665,6 @@ void AutomationProvider::Paste(int tab_handle) {
   }
 
   view->Paste();
-}
-
-
-
-void AutomationProvider::KeyPress(int tab_handle, int key) {
-  RenderViewHost* view = GetViewForTab(tab_handle);
-  if (!view) {
-    NOTREACHED();
-    return;
-  }
-
-  content::NativeWebKeyboardEvent event;
-  event.nativeKeyCode = 0;
-  event.windowsKeyCode = key;
-  event.setKeyIdentifierFromWindowsKeyCode();
-  event.modifiers = 0;
-  event.isSystemKey = false;
-  event.timeStampSeconds = base::Time::Now().ToDoubleT();
-  event.skip_in_browser = true;
-
-  event.text[0] = key;
-  event.unmodifiedText[0] = key;
-  event.type = WebKit::WebInputEvent::RawKeyDown;
-  view->ForwardKeyboardEvent(event);
-
-  event.type = WebKit::WebInputEvent::Char;
-  view->ForwardKeyboardEvent(event);
-
-  event.type = WebKit::WebInputEvent::KeyUp;
-  event.text[0] = 0;
-  event.unmodifiedText[0] = 0;
-  view->ForwardKeyboardEvent(event);
 }
 
 void AutomationProvider::ReloadAsync(int tab_handle) {

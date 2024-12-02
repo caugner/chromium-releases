@@ -19,7 +19,6 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/screen.h"
@@ -34,9 +33,6 @@ namespace chromeos {
 internal::AppLaunchView* g_instance = NULL;
 
 void ShowAppLaunchSplashScreen(const std::string& app_id) {
-  // Disables the default white rendering from RenderWidgetHostViewAura.
-  aura::Env::GetInstance()->set_render_white_bg(false);
-
   // TODO(zelidrag): Come up with a better UI for this purpose.
   internal::AppLaunchView::ShowAppLaunchSplashScreen(app_id);
 }
@@ -47,9 +43,6 @@ void UpdateAppLaunchSplashScreenState(AppLaunchState state) {
 
 void CloseAppLaunchSplashScreen() {
   internal::AppLaunchView::CloseAppLaunchSplashScreen();
-
-  // Re-enables the default white rendering from RenderWidgetHostViewAura.
-  aura::Env::GetInstance()->set_render_white_bg(true);
 }
 
 namespace internal {
@@ -85,7 +78,7 @@ void AppLaunchView::UpdateAppLaunchState(AppLaunchState state) {
 // static
 void AppLaunchView::CloseAppLaunchSplashScreen() {
   if (g_instance) {
-    g_instance->Close();
+    g_instance->GetWidget()->Close();
     g_instance = NULL;
   }
 }
@@ -98,7 +91,7 @@ views::View* AppLaunchView::GetContentsView() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // AppLaunchView, content::WebContentsObserver implementation.
-void AppLaunchView::RenderViewGone(
+void AppLaunchView::RenderProcessGone(
     base::TerminationStatus status) {
   LOG(ERROR) << "Splash screen terminated with status " << status;
   AppLaunchView::CloseAppLaunchSplashScreen();
@@ -125,11 +118,6 @@ void AppLaunchView::Show() {
   InitializeWindow();
   // Show the window.
   ShowWindow();
-}
-
-void AppLaunchView::Close() {
-  DCHECK(GetWidget());
-  GetWidget()->Close();
 }
 
 void AppLaunchView::AddChildWebContents() {

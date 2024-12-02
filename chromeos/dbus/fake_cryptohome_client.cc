@@ -5,7 +5,7 @@
 #include "chromeos/dbus/fake_cryptohome_client.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
@@ -114,6 +114,12 @@ void FakeCryptohomeClient::AsyncAddKey(const std::string& username,
 }
 
 void FakeCryptohomeClient::AsyncMountGuest(
+    const AsyncMethodCallback& callback) {
+}
+
+void FakeCryptohomeClient::AsyncMountPublic(
+    const std::string& public_mount_id,
+    int flags,
     const AsyncMethodCallback& callback) {
 }
 
@@ -257,6 +263,11 @@ void FakeCryptohomeClient::GetSanitizedUsername(
                    1,     // async_id
                    true,  // return_status
                    username));
+}
+
+std::string FakeCryptohomeClient::BlockingGetSanitizedUsername(
+    const std::string& username) {
+  return username;
 }
 
 void FakeCryptohomeClient::TpmAttestationSignEnterpriseChallenge(

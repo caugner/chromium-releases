@@ -24,7 +24,7 @@ namespace {
 
 class NetworkEventLog;
 NetworkEventLog* g_network_event_log = NULL;
-size_t g_max_network_event_log_entries = 1000;
+size_t g_max_network_event_log_entries = 4000;
 
 struct LogEntry {
   LogEntry(const std::string& file,
@@ -74,7 +74,7 @@ std::string LogEntry::ToString(bool show_time,
                                bool format_html) const {
   std::string line;
   if (show_time)
-    line += "[" + UTF16ToUTF8(base::TimeFormatShortDateAndTime(time)) + "] ";
+    line += "[" + UTF16ToUTF8(base::TimeFormatTimeOfDay(time)) + "] ";
   if (show_file) {
     std::string filestr = format_html ? net::EscapeForHTML(file) : file;
     line += base::StringPrintf("%s:%d ", filestr.c_str(), file_line);
@@ -82,7 +82,6 @@ std::string LogEntry::ToString(bool show_time,
   line += format_html ? GetHtmlText(show_desc) : GetNormalText(show_desc);
   if (count > 1)
     line += base::StringPrintf(" (%d)", count);
-  line += "\n";
   return line;
 }
 
@@ -249,6 +248,7 @@ std::string NetworkEventLog::GetAsString(StringOrder order,
       if (iter->log_level > max_level)
         continue;
       result += (*iter).ToString(show_time, show_file, show_desc, format_html);
+      result += "\n";
     }
   } else {
     size_t nlines = 0;
@@ -258,6 +258,7 @@ std::string NetworkEventLog::GetAsString(StringOrder order,
       if (riter->log_level > max_level)
         continue;
       result += (*riter).ToString(show_time, show_file, show_desc, format_html);
+      result += "\n";
       if (max_events > 0 && ++nlines >= max_events)
         break;
     }

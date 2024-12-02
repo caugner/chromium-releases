@@ -105,10 +105,14 @@
   margin: 0;
 }
 
-#passphrase-encryption-message,
 #encryption-section-message {
   color: gray;
   margin-bottom: 5px;
+}
+
+#basic-encryption-body,
+#full-encryption-body {
+  display: table;
 }
 
 #passphrase-input {

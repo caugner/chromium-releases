@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_HISTORY_UI_H_
 
 #include "base/strings/string16.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_service.h"
@@ -162,11 +162,6 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
 
   // Sets the query options for a monthly query, |offset| months ago.
   void SetQueryTimeInMonths(int offset, history::QueryOptions* options);
-
-#if defined(ENABLE_MANAGED_USERS)
-  // Updates the UI according to the elevation state of the managed user.
-  void ManagedUserSetElevated();
-#endif
 
   content::NotificationRegistrar registrar_;
 

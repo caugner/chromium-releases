@@ -4,11 +4,11 @@
 
 #include "chrome/browser/ui/omnibox/alternate_nav_url_fetcher.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/omnibox/alternate_nav_infobar_delegate.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -28,8 +28,6 @@ AlternateNavURLFetcher::AlternateNavURLFetcher(
       state_(NOT_STARTED),
       navigated_to_entry_(false) {
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
                  content::NotificationService::AllSources());
 }
 
@@ -55,19 +53,6 @@ void AlternateNavURLFetcher::Observe(
         registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                        content::Source<NavigationController>(
                           controller));
-        StartFetch(controller);
-      }
-      break;
-    }
-
-    case chrome::NOTIFICATION_INSTANT_COMMITTED: {
-      // See above.
-      NavigationController* controller =
-          &content::Source<content::WebContents>(source)->GetController();
-      if (controller_ == controller) {
-        delete this;
-      } else if (!controller_) {
-        navigated_to_entry_ = true;
         StartFetch(controller);
       }
       break;

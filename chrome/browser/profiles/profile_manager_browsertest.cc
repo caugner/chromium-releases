@@ -3,16 +3,20 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
 
@@ -62,7 +66,6 @@ class ProfileRemovalObserver : public ProfileInfoCacheObserver {
 
   DISALLOW_COPY_AND_ASSIGN(ProfileRemovalObserver);
 };
-
 
 } // namespace
 
@@ -121,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest, DISABLED_DeleteAllProfiles) {
   base::FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
   profile_manager->CreateProfileAsync(new_path,
                                       base::Bind(&OnUnblockOnProfileCreation),
-                                      string16(), string16(), false);
+                                      string16(), string16(), std::string());
 
   // Spin to allow profile creation to take place, loop is terminated
   // by OnUnblockOnProfileCreation when the profile is created.
@@ -168,7 +171,7 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest,
       string16(), // name
       string16(), // icon url
       base::Bind(ProfileCreationComplete),
-      false);
+      std::string());
   // Wait for profile to finish loading.
   content::RunMessageLoop();
   EXPECT_EQ(profile_manager->GetNumberOfProfiles(), 2U);
@@ -180,4 +183,60 @@ IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest,
        it != profiles.end(); ++it) {
     BrowserList::CloseAllBrowsersWithProfile(*it);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(ProfileManagerBrowserTest,
+                       SwitchToProfile) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
+  // If multiprofile mode is not enabled, you can't switch between profiles.
+  if (!profiles::IsMultipleProfilesEnabled())
+    return;
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
+  base::FilePath path_profile1 = cache.GetPathOfProfileAtIndex(0);
+
+  ASSERT_EQ(profile_manager->GetNumberOfProfiles(), 1U);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 1U);
+
+  // Create an additional profile.
+  base::FilePath path_profile2 =
+      profile_manager->GenerateNextProfileDirectoryPath();
+  profile_manager->CreateProfileAsync(path_profile2,
+                                      base::Bind(&OnUnblockOnProfileCreation),
+                                      string16(), string16(), std::string());
+
+  // Spin to allow profile creation to take place, loop is terminated
+  // by OnUnblockOnProfileCreation when the profile is created.
+  content::RunMessageLoop();
+
+  chrome::HostDesktopType desktop_type = chrome::GetActiveDesktop();
+  BrowserList* browser_list = BrowserList::GetInstance(desktop_type);
+  ASSERT_EQ(cache.GetNumberOfProfiles(), 2U);
+  EXPECT_EQ(1U, browser_list->size());
+
+  // Open a browser window for the first profile.
+  profiles::SwitchToProfile(path_profile1, desktop_type, false);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 1U);
+  EXPECT_EQ(1U, browser_list->size());
+  EXPECT_EQ(path_profile1, browser_list->get(0)->profile()->GetPath());
+
+  // Open a browser window for the second profile.
+  profiles::SwitchToProfile(path_profile2, desktop_type, false);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 2U);
+  EXPECT_EQ(2U, browser_list->size());
+  EXPECT_EQ(path_profile2, browser_list->get(1)->profile()->GetPath());
+
+  // Switch to the first profile without opening a new window.
+  profiles::SwitchToProfile(path_profile1, desktop_type, false);
+  EXPECT_EQ(chrome::GetTotalBrowserCount(), 2U);
+  EXPECT_EQ(2U, browser_list->size());
+
+  EXPECT_EQ(path_profile1, browser_list->get(0)->profile()->GetPath());
+  EXPECT_EQ(path_profile2, browser_list->get(1)->profile()->GetPath());
 }

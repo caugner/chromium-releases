@@ -17,7 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/tracking_synchronizer_observer.h"
 #include "chrome/common/metrics/metrics_service_base.h"
@@ -46,6 +46,7 @@ class MessageLoopProxy;
 namespace content {
 class RenderProcessHost;
 class WebContents;
+struct WebPluginInfo;
 }
 
 namespace extensions {
@@ -63,10 +64,6 @@ bool IsOmniboxEnabled(Profile* profile);
 
 namespace tracked_objects {
 struct ProcessDataSnapshot;
-}
-
-namespace webkit {
-struct WebPluginInfo;
 }
 
 class MetricsService
@@ -236,7 +233,7 @@ class MetricsService
   // Callback from PluginService::GetPlugins() that continues the init task by
   // launching a task to gather Google Update statistics.
   void OnInitTaskGotPluginInfo(
-      const std::vector<webkit::WebPluginInfo>& plugins);
+      const std::vector<content::WebPluginInfo>& plugins);
 
   // Task launched by OnInitTaskGotPluginInfo() that continues the init task by
   // loading Google Update statistics.  Called on a blocking pool thread.
@@ -349,10 +346,6 @@ class MetricsService
   // completes (either successfully or with failure).
   virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
-  // Records a window-related notification. |window_or_tab| is either a pointer
-  // to a WebContents (for a tab) or a Browser (for a window).
-  void LogWindowOrTabChange(int type, uintptr_t window_or_tab);
-
   // Reads, increments and then sets the specified integer preference.
   void IncrementPrefValue(const char* path);
 
@@ -375,9 +368,6 @@ class MetricsService
   ChildProcessStats& GetChildProcessStats(
       const content::ChildProcessData& data);
 
-  // Logs the number of keywords.
-  void LogKeywordCount(size_t keyword_count);
-
   // Saves plugin-related updates from the in-object buffer to Local State
   // for retrieval next time we send a Profile log (generally next launch).
   void RecordPluginChanges(PrefService* pref);
@@ -389,11 +379,6 @@ class MetricsService
   // Logs the initiation of a page load and uses |web_contents| to do
   // additional logging of the type of page loaded.
   void LogLoadStarted(content::WebContents* web_contents);
-
-  // Records a page load notification.
-  void LogLoadComplete(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details);
 
   // Checks whether a notification can be logged.
   bool CanLogNotification();
@@ -430,7 +415,7 @@ class MetricsService
   std::string hardware_class_;
 
   // The list of plugins which was retrieved on the file thread.
-  std::vector<webkit::WebPluginInfo> plugins_;
+  std::vector<content::WebPluginInfo> plugins_;
 
   // Google Update statistics, which were retrieved on a blocking pool thread.
   GoogleUpdateMetrics google_update_metrics_;
@@ -477,10 +462,6 @@ class MetricsService
   // Weak pointers factory used for saving state. All weak pointers managed by
   // this factory are invalidated in ScheduleNextStateSave.
   base::WeakPtrFactory<MetricsService> state_saver_factory_;
-
-  // Dictionary containing all the profile specific metrics. This is set
-  // at creation time from the prefs.
-  scoped_ptr<base::DictionaryValue> profile_dictionary_;
 
   // The scheduler for determining when uploads should happen.
   scoped_ptr<MetricsReportingScheduler> scheduler_;

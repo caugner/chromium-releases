@@ -7,6 +7,9 @@ import logging
 import os
 from collections import defaultdict, Mapping
 
+from branch_utility import BranchUtility
+import svn_constants
+from third_party.handlebar import Handlebar
 import third_party.json_schema_compiler.json_parse as json_parse
 import third_party.json_schema_compiler.model as model
 import third_party.json_schema_compiler.idl_schema as idl_schema
@@ -103,9 +106,22 @@ class _JSCModel(object):
   """Uses a Model from the JSON Schema Compiler and generates a dict that
   a Handlebar template can use for a data source.
   """
-  def __init__(self, json, ref_resolver, disable_refs, idl=False):
+  def __init__(self,
+               json,
+               ref_resolver,
+               disable_refs,
+               availability_finder,
+               parse_cache,
+               template_data_source,
+               idl=False):
     self._ref_resolver = ref_resolver
     self._disable_refs = disable_refs
+    self._availability_finder = availability_finder
+    self._intro_tables = parse_cache.GetFromFile(
+        '%s/intro_tables.json' % svn_constants.JSON_PATH)
+    self._api_features = parse_cache.GetFromFile(
+        '%s/_api_features.json' % svn_constants.API_PATH)
+    self._template_data_source = template_data_source
     clean_json = copy.deepcopy(json)
     if _RemoveNoDocs(clean_json):
       self._namespace = None
@@ -132,12 +148,144 @@ class _JSCModel(object):
       return {}
     return {
       'name': self._namespace.name,
-      'description': self._namespace.description,
       'types': self._GenerateTypes(self._namespace.types.values()),
       'functions': self._GenerateFunctions(self._namespace.functions),
       'events': self._GenerateEvents(self._namespace.events),
-      'properties': self._GenerateProperties(self._namespace.properties)
+      'properties': self._GenerateProperties(self._namespace.properties),
+      'intro_list': self._GetIntroTableList(),
+      'channel_warning': self._GetChannelWarning()
     }
+
+  def _GetIntroTableList(self):
+    """Create a generic data structure that can be traversed by the templates
+    to create an API intro table.
+    """
+    intro_rows = [
+      self._GetIntroDescriptionRow(),
+      self._GetIntroAvailabilityRow()
+    ] + self._GetIntroDependencyRows()
+
+    # Add rows using data from intro_tables.json, overriding any existing rows
+    # if they share the same 'title' attribute.
+    row_titles = [row['title'] for row in intro_rows]
+    for misc_row in self._GetMiscIntroRows():
+      if misc_row['title'] in row_titles:
+        intro_rows[row_titles.index(misc_row['title'])] = misc_row
+      else:
+        intro_rows.append(misc_row)
+
+    return intro_rows
+
+  def _GetIntroDescriptionRow(self):
+    """ Generates the 'Description' row data for an API intro table.
+    """
+    return {
+      'title': 'Description',
+      'content': [
+        { 'text': self._FormatDescription(self._namespace.description) }
+      ]
+    }
+
+  def _GetIntroAvailabilityRow(self):
+    """ Generates the 'Availability' row data for an API intro table.
+    """
+    if self._IsExperimental():
+      status = 'experimental'
+      version = None
+    else:
+      availability = self._GetApiAvailability()
+      status = availability.channel
+      version = availability.version
+    return {
+      'title': 'Availability',
+      'content': [{
+        'partial': self._template_data_source.get(
+            'intro_tables/%s_message.html' % status),
+        'version': version
+      }]
+    }
+
+  def _GetIntroDependencyRows(self):
+    # Devtools aren't in _api_features. If we're dealing with devtools, bail.
+    if 'devtools' in self._namespace.name:
+      return []
+    feature = self._api_features.get(self._namespace.name)
+    assert feature, ('"%s" not found in _api_features.json.'
+                     % self._namespace.name)
+
+    dependencies = feature.get('dependencies')
+    if dependencies is None:
+      return []
+
+    def make_code_node(text):
+      return { 'class': 'code', 'text': text }
+
+    permissions_content = []
+    manifest_content = []
+
+    def categorize_dependency(dependency):
+      context, name = dependency.split(':', 1)
+      if context == 'permission':
+        permissions_content.append(make_code_node('"%s"' % name))
+      elif context == 'manifest':
+        manifest_content.append(make_code_node('"%s": {...}' % name))
+      elif context == 'api':
+        transitive_dependencies = (
+            self._api_features.get(context, {}).get('dependencies', []))
+        for transitive_dependency in transitive_dependencies:
+          categorize_dependency(transitive_dependency)
+      else:
+        raise ValueError('Unrecognized dependency for %s: %s' % (
+            self._namespace.name, context))
+
+    for dependency in dependencies:
+      categorize_dependency(dependency)
+
+    dependency_rows = []
+    if permissions_content:
+      dependency_rows.append({
+        'title': 'Permissions',
+        'content': permissions_content
+      })
+    if manifest_content:
+      dependency_rows.append({
+        'title': 'Manifest',
+        'content': manifest_content
+      })
+    return dependency_rows
+
+  def _GetMiscIntroRows(self):
+    """ Generates miscellaneous intro table row data, such as 'Permissions',
+    'Samples', and 'Learn More', using intro_tables.json.
+    """
+    misc_rows = []
+    # Look up the API name in intro_tables.json, which is structured
+    # similarly to the data structure being created. If the name is found, loop
+    # through the attributes and add them to this structure.
+    table_info = self._intro_tables.get(self._namespace.name)
+    if table_info is None:
+      return misc_rows
+
+    for category in table_info.keys():
+      content = copy.deepcopy(table_info[category])
+      for node in content:
+        # If there is a 'partial' argument and it hasn't already been
+        # converted to a Handlebar object, transform it to a template.
+        if 'partial' in node:
+          node['partial'] = self._template_data_source.get(node['partial'])
+      misc_rows.append({ 'title': category, 'content': content })
+    return misc_rows
+
+  def _GetApiAvailability(self):
+    return self._availability_finder.GetApiAvailability(self._namespace.name)
+
+  def _GetChannelWarning(self):
+    if not self._IsExperimental():
+      return { self._GetApiAvailability().channel: True }
+    return None
+
+  def _IsExperimental(self):
+     return self._namespace.name.startswith('experimental')
 
   def _GenerateTypes(self, types):
     return [self._GenerateType(t) for t in types]
@@ -168,7 +316,7 @@ class _JSCModel(object):
     }
     if (function.parent is not None and
         not isinstance(function.parent, model.Namespace)):
-      function_dict['parent_name'] = function.parent.simple_name
+      function_dict['parentName'] = function.parent.simple_name
     if function.returns:
       function_dict['returns'] = self._GenerateType(function.returns)
     for param in function.params:
@@ -199,7 +347,7 @@ class _JSCModel(object):
     }
     if (event.parent is not None and
         not isinstance(event.parent, model.Namespace)):
-      event_dict['parent_name'] = event.parent.simple_name
+      event_dict['parentName'] = event.parent.simple_name
     if event.callback is not None:
       # Show the callback as an extra parameter.
       event_dict['parameters'].append(
@@ -260,7 +408,7 @@ class _JSCModel(object):
 
     if (property_.parent is not None and
         not isinstance(property_.parent, model.Namespace)):
-      property_dict['parent_name'] = property_.parent.simple_name
+      property_dict['parentName'] = property_.parent.simple_name
 
     value = property_.value
     if value is not None:
@@ -283,7 +431,7 @@ class _JSCModel(object):
     }
     if (callback.parent is not None and
         not isinstance(callback.parent, model.Namespace)):
-      property_dict['parent_name'] = callback.parent.simple_name
+      property_dict['parentName'] = callback.parent.simple_name
     return property_dict
 
   def _RenderTypeInformation(self, type_, dst_dict):
@@ -325,12 +473,12 @@ class APIDataSource(object):
   |compiled_fs_factory|, so the APIs can be plugged into templates.
   """
   class Factory(object):
-    def __init__(self, compiled_fs_factory, base_path):
+    def __init__(self,
+                 compiled_fs_factory,
+                 base_path,
+                 availability_finder_factory):
       def create_compiled_fs(fn, category):
         return compiled_fs_factory.Create(fn, APIDataSource, category=category)
-
-      self._permissions_cache = create_compiled_fs(self._LoadPermissions,
-                                                   'permissions')
 
       self._json_cache = create_compiled_fs(
           lambda api_name, api: self._LoadJsonAPI(api, False),
@@ -353,7 +501,10 @@ class APIDataSource(object):
       self._names_cache = create_compiled_fs(self._GetAllNames, 'names')
 
       self._base_path = base_path
-
+      self._availability_finder = availability_finder_factory.Create()
+      self._parse_cache = create_compiled_fs(
+          lambda _, json: json_parse.Parse(json),
+          'intro-cache')
       # These must be set later via the SetFooDataSourceFactory methods.
       self._ref_resolver_factory = None
       self._samples_data_source_factory = None
@@ -363,6 +514,10 @@ class APIDataSource(object):
 
     def SetReferenceResolverFactory(self, ref_resolver_factory):
       self._ref_resolver_factory = ref_resolver_factory
+
+    def SetTemplateDataSource(self, template_data_source_factory):
+      # This TemplateDataSource is only being used for fetching template data.
+      self._template_data_source = template_data_source_factory.Create(None, '')
 
     def Create(self, request, disable_refs=False):
       """Create an APIDataSource. |disable_refs| specifies whether $ref's in
@@ -381,8 +536,7 @@ class APIDataSource(object):
       if not disable_refs and self._ref_resolver_factory is None:
         logging.error('ReferenceResolver.Factory was never set in '
                       'APIDataSource.Factory.')
-      return APIDataSource(self._permissions_cache,
-                           self._json_cache,
+      return APIDataSource(self._json_cache,
                            self._idl_cache,
                            self._json_cache_no_refs,
                            self._idl_cache_no_refs,
@@ -392,14 +546,14 @@ class APIDataSource(object):
                            samples,
                            disable_refs)
 
-    def _LoadPermissions(self, file_name, json_str):
-      return json_parse.Parse(json_str)
-
     def _LoadJsonAPI(self, api, disable_refs):
       return _JSCModel(
           json_parse.Parse(api)[0],
           self._ref_resolver_factory.Create() if not disable_refs else None,
-          disable_refs).ToDict()
+          disable_refs,
+          self._availability_finder,
+          self._parse_cache,
+          self._template_data_source).ToDict()
 
     def _LoadIdlAPI(self, api, disable_refs):
       idl = idl_parser.IDLParser().ParseData(api)
@@ -407,6 +561,9 @@ class APIDataSource(object):
           idl_schema.IDLSchema(idl).process()[0],
           self._ref_resolver_factory.Create() if not disable_refs else None,
           disable_refs,
+          self._availability_finder,
+          self._parse_cache,
+          self._template_data_source,
           idl=True).ToDict()
 
     def _GetIDLNames(self, base_dir, apis):
@@ -420,7 +577,6 @@ class APIDataSource(object):
               if os.path.splitext(api)[1][1:] in exts]
 
   def __init__(self,
-               permissions_cache,
                json_cache,
                idl_cache,
                json_cache_no_refs,
@@ -431,7 +587,6 @@ class APIDataSource(object):
                samples,
                disable_refs):
     self._base_path = base_path
-    self._permissions_cache = permissions_cache
     self._json_cache = json_cache
     self._idl_cache = idl_cache
     self._json_cache_no_refs = json_cache_no_refs
@@ -441,51 +596,17 @@ class APIDataSource(object):
     self._samples = samples
     self._disable_refs = disable_refs
 
-  def _GetFeatureFile(self, filename):
-    perms = self._permissions_cache.GetFromFile('%s/%s' %
-        (self._base_path, filename))
-    return dict((model.UnixName(k), v) for k, v in perms.iteritems())
-
-  def _GetFeatureData(self, path):
-    # Remove 'experimental_' from path name to match the keys in
-    # _permissions_features.json.
-    path = model.UnixName(path.replace('experimental_', ''))
-
-    for filename in ['_permission_features.json', '_manifest_features.json']:
-      feature_data = self._GetFeatureFile(filename).get(path, None)
-      if feature_data is not None:
-        break
-
-    # There are specific cases in which the feature is actually a list of
-    # features where only one needs to match; but currently these are only
-    # used to whitelist features for specific extension IDs. Filter those out.
-    if isinstance(feature_data, list):
-      feature_list = feature_data
-      feature_data = None
-      for single_feature in feature_list:
-        if 'whitelist' in single_feature:
-          continue
-        if feature_data is not None:
-          # Note: if you are seeing the exception below, add more heuristics as
-          # required to form a single feature.
-          raise ValueError('Multiple potential features match %s. I can\'t '
-                           'decide which one to use. Please help!' % path)
-        feature_data = single_feature
-
-    if feature_data and feature_data['channel'] in ('trunk', 'dev', 'beta'):
-      feature_data[feature_data['channel']] = True
-    return feature_data
-
   def _GenerateHandlebarContext(self, handlebar_dict, path):
-    handlebar_dict['permissions'] = self._GetFeatureData(path)
     handlebar_dict['samples'] = _LazySamplesGetter(path, self._samples)
     return handlebar_dict
 
   def _GetAsSubdirectory(self, name):
     if name.startswith('experimental_'):
       parts = name[len('experimental_'):].split('_', 1)
-      parts[1] = 'experimental_%s' % parts[1]
-      return '/'.join(parts)
+      if len(parts) > 1:
+        parts[1] = 'experimental_%s' % parts[1]
+        return '/'.join(parts)
+      return '%s/%s' % (parts[0], name)
     return name.replace('_', '/', 1)
 
   def get(self, key):

@@ -17,7 +17,6 @@
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -42,10 +41,9 @@ class WebContentsImplTestWebUIControllerFactory
  public:
   virtual WebUIController* CreateWebUIControllerForURL(
       WebUI* web_ui, const GURL& url) const OVERRIDE {
-   if (!UseWebUI(url))
-     return NULL;
-
-   return new WebUIController(web_ui);
+    if (!UseWebUI(url))
+      return NULL;
+    return new WebUIController(web_ui);
   }
 
   virtual WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
@@ -73,7 +71,7 @@ class TestInterstitialPage;
 
 class TestInterstitialPageDelegate : public InterstitialPageDelegate {
  public:
-  TestInterstitialPageDelegate(TestInterstitialPage* interstitial_page)
+  explicit TestInterstitialPageDelegate(TestInterstitialPage* interstitial_page)
       : interstitial_page_(interstitial_page) {}
   virtual void CommandReceived(const std::string& command) OVERRIDE;
   virtual std::string GetHTMLContents() OVERRIDE { return std::string(); }
@@ -234,6 +232,25 @@ class TestInterstitialPageStateGuard : public TestInterstitialPage::Delegate {
   TestInterstitialPage* interstitial_page_;
 };
 
+class WebContentsImplTestBrowserClient : public TestContentBrowserClient {
+ public:
+  WebContentsImplTestBrowserClient()
+      : assign_site_for_url_(false) {}
+
+  virtual ~WebContentsImplTestBrowserClient() {}
+
+  virtual bool ShouldAssignSiteForURL(const GURL& url) OVERRIDE {
+    return assign_site_for_url_;
+  }
+
+  void set_assign_site_for_url(bool assign) {
+    assign_site_for_url_ = assign;
+  }
+
+ private:
+  bool assign_site_for_url_;
+};
+
 class WebContentsImplTest : public RenderViewHostImplTestHarness {
  public:
   virtual void SetUp() {
@@ -252,7 +269,7 @@ class WebContentsImplTest : public RenderViewHostImplTestHarness {
 
 class TestWebContentsObserver : public WebContentsObserver {
  public:
-  TestWebContentsObserver(WebContents* contents)
+  explicit TestWebContentsObserver(WebContents* contents)
       : WebContentsObserver(contents) {
   }
   virtual ~TestWebContentsObserver() {}
@@ -401,10 +418,16 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
       url, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   contents()->TestDidNavigate(orig_rvh, 1, url, PAGE_TRANSITION_TYPED);
 
+  // Keep the number of active views in orig_rvh's SiteInstance
+  // non-zero so that orig_rvh doesn't get deleted when it gets
+  // swapped out.
+  static_cast<SiteInstanceImpl*>(orig_rvh->GetSiteInstance())->
+      increment_active_view_count();
+
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rvh, contents()->GetRenderViewHost());
   EXPECT_EQ(url, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url, contents()->GetActiveURL());
+  EXPECT_EQ(url, contents()->GetVisibleURL());
 
   // Navigate to new site
   const GURL url2("http://www.yahoo.com");
@@ -412,7 +435,7 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
       url2, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   EXPECT_TRUE(contents()->cross_navigation_pending());
   EXPECT_EQ(url, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url2, contents()->GetActiveURL());
+  EXPECT_EQ(url2, contents()->GetVisibleURL());
   TestRenderViewHost* pending_rvh =
       static_cast<TestRenderViewHost*>(contents()->GetPendingRenderViewHost());
   int pending_rvh_delete_count = 0;
@@ -428,10 +451,16 @@ TEST_F(WebContentsImplTest, CrossSiteBoundaries) {
       pending_rvh, 1, url2, PAGE_TRANSITION_TYPED);
   SiteInstance* instance2 = contents()->GetSiteInstance();
 
+  // Keep the number of active views in pending_rvh's SiteInstance
+  // non-zero so that orig_rvh doesn't get deleted when it gets
+  // swapped out.
+  static_cast<SiteInstanceImpl*>(pending_rvh->GetSiteInstance())->
+      increment_active_view_count();
+
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(pending_rvh, contents()->GetRenderViewHost());
   EXPECT_EQ(url2, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url2, contents()->GetActiveURL());
+  EXPECT_EQ(url2, contents()->GetVisibleURL());
   EXPECT_NE(instance1, instance2);
   EXPECT_TRUE(contents()->GetPendingRenderViewHost() == NULL);
   // We keep the original RVH around, swapped out.
@@ -531,7 +560,7 @@ TEST_F(WebContentsImplTest, NavigateTwoTabsCrossSite) {
 
   // Open a new contents with the same SiteInstance, navigated to the same site.
   scoped_ptr<TestWebContents> contents2(
-      TestWebContents::Create(browser_context_.get(), instance1));
+      TestWebContents::Create(browser_context(), instance1));
   contents2->transition_cross_site = true;
   contents2->GetController().LoadURL(url, Referrer(),
                                     PAGE_TRANSITION_TYPED,
@@ -578,7 +607,10 @@ TEST_F(WebContentsImplTest, NavigateTwoTabsCrossSite) {
   EXPECT_EQ(instance2a, instance2b);
 }
 
-TEST_F(WebContentsImplTest, NavigateFromChromeNativeKeepsSiteInstance) {
+TEST_F(WebContentsImplTest, NavigateDoesNotUseUpSiteInstance) {
+  WebContentsImplTestBrowserClient browser_client;
+  SetBrowserClientForTesting(&browser_client);
+
   contents()->transition_cross_site = true;
   TestRenderViewHost* orig_rvh = test_rvh();
   int orig_rvh_delete_count = 0;
@@ -586,8 +618,9 @@ TEST_F(WebContentsImplTest, NavigateFromChromeNativeKeepsSiteInstance) {
   SiteInstanceImpl* orig_instance =
       static_cast<SiteInstanceImpl*>(contents()->GetSiteInstance());
 
-  // Navigate to a chrome-native URL.
-  const GURL native_url("chrome-native://nativestuffandthings");
+  browser_client.set_assign_site_for_url(false);
+  // Navigate to an URL that will not assign a new SiteInstance.
+  const GURL native_url("non-site-url://stuffandthings");
   controller().LoadURL(
       native_url, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   contents()->TestDidNavigate(orig_rvh, 1, native_url, PAGE_TRANSITION_TYPED);
@@ -595,20 +628,28 @@ TEST_F(WebContentsImplTest, NavigateFromChromeNativeKeepsSiteInstance) {
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(orig_rvh, contents()->GetRenderViewHost());
   EXPECT_EQ(native_url, contents()->GetLastCommittedURL());
-  EXPECT_EQ(native_url, contents()->GetActiveURL());
+  EXPECT_EQ(native_url, contents()->GetVisibleURL());
   EXPECT_EQ(orig_instance, contents()->GetSiteInstance());
   EXPECT_EQ(GURL(), contents()->GetSiteInstance()->GetSiteURL());
   EXPECT_FALSE(orig_instance->HasSite());
 
+  browser_client.set_assign_site_for_url(true);
   // Navigate to new site (should keep same site instance).
   const GURL url("http://www.google.com");
   controller().LoadURL(
       url, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(native_url, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url, contents()->GetActiveURL());
+  EXPECT_EQ(url, contents()->GetVisibleURL());
   EXPECT_FALSE(contents()->GetPendingRenderViewHost());
   contents()->TestDidNavigate(orig_rvh, 1, url, PAGE_TRANSITION_TYPED);
+
+  // Keep the number of active views in orig_rvh's SiteInstance
+  // non-zero so that orig_rvh doesn't get deleted when it gets
+  // swapped out.
+  static_cast<SiteInstanceImpl*>(orig_rvh->GetSiteInstance())->
+      increment_active_view_count();
+
   EXPECT_EQ(orig_instance, contents()->GetSiteInstance());
   EXPECT_TRUE(
       contents()->GetSiteInstance()->GetSiteURL().DomainIs("google.com"));
@@ -620,7 +661,7 @@ TEST_F(WebContentsImplTest, NavigateFromChromeNativeKeepsSiteInstance) {
       url2, Referrer(), PAGE_TRANSITION_TYPED, std::string());
   EXPECT_TRUE(contents()->cross_navigation_pending());
   EXPECT_EQ(url, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url2, contents()->GetActiveURL());
+  EXPECT_EQ(url2, contents()->GetVisibleURL());
   TestRenderViewHost* pending_rvh =
       static_cast<TestRenderViewHost*>(contents()->GetPendingRenderViewHost());
   int pending_rvh_delete_count = 0;
@@ -639,7 +680,7 @@ TEST_F(WebContentsImplTest, NavigateFromChromeNativeKeepsSiteInstance) {
   EXPECT_FALSE(contents()->cross_navigation_pending());
   EXPECT_EQ(pending_rvh, contents()->GetRenderViewHost());
   EXPECT_EQ(url2, contents()->GetLastCommittedURL());
-  EXPECT_EQ(url2, contents()->GetActiveURL());
+  EXPECT_EQ(url2, contents()->GetVisibleURL());
   EXPECT_NE(new_instance, orig_instance);
   EXPECT_FALSE(contents()->GetPendingRenderViewHost());
   // We keep the original RVH around, swapped out.
@@ -699,7 +740,7 @@ TEST_F(WebContentsImplTest, CrossSiteComparesAgainstCurrentPage) {
 
   // Open a related contents to a second site.
   scoped_ptr<TestWebContents> contents2(
-      TestWebContents::Create(browser_context_.get(), instance1));
+      TestWebContents::Create(browser_context(), instance1));
   contents2->transition_cross_site = true;
   const GURL url2("http://www.yahoo.com");
   contents2->GetController().LoadURL(url2, Referrer(),
@@ -1551,7 +1592,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialCrashRendererThenGoBack) {
 
   // Crash the renderer
   test_rvh()->OnMessageReceived(
-      ViewHostMsg_RenderViewGone(
+      ViewHostMsg_RenderProcessGone(
           0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
 
   // While the interstitial is showing, go back.
@@ -1590,7 +1631,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialCrashRendererThenNavigate) {
 
   // Crash the renderer
   test_rvh()->OnMessageReceived(
-      ViewHostMsg_RenderViewGone(
+      ViewHostMsg_RenderProcessGone(
           0, base::TERMINATION_STATUS_PROCESS_CRASHED, -1));
 
   interstitial->TestDidNavigate(2, interstitial_url);
@@ -1642,7 +1683,7 @@ TEST_F(WebContentsImplTest, ShowInterstitialThenCloseAndShutdown) {
   // simulate quitting the browser.  This goes through all processes and
   // tells them to destruct.
   rvh->OnMessageReceived(
-        ViewHostMsg_RenderViewGone(0, 0, 0));
+        ViewHostMsg_RenderProcessGone(0, 0, 0));
 
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(deleted);
@@ -2067,7 +2108,7 @@ TEST_F(WebContentsImplTest, FilterURLs) {
 
   // A navigation to about:whatever should always look like a navigation to
   // about:blank
-  GURL url_normalized("about:blank");
+  GURL url_normalized(kAboutBlankURL);
   GURL url_from_ipc("about:whatever");
 
   // We navigate the test WebContents to about:blank, since NavigateAndCommit

@@ -11,7 +11,7 @@
 #import "chrome/browser/ui/cocoa/autofill/autofill_layout.h"
 
 namespace autofill {
-  class AutofillDialogController;
+  class AutofillDialogViewDelegate;
 }
 
 @class AutofillTextField;
@@ -31,19 +31,22 @@ namespace autofill {
   // The input set by ShowTextfield.
   base::scoped_nsobject<AutofillTextField> inputField_;
 
-  autofill::AutofillDialogController* controller_;  // Not owned.
+  autofill::AutofillDialogViewDelegate* delegate_;  // Not owned.
 }
+
+// Auxiliary textfield. See showTextfield: for details.
+@property (readonly, nonatomic) AutofillTextField* inputField;
 
 // Set the icon for the suggestion.
 - (void)setIcon:(NSImage*)iconImage;
 
 // Set the main suggestion text and the font used to render that text.
 - (void)setSuggestionText:(NSString*)line1
-                    line2:(NSString*)line2
-                 withFont:(NSFont*)font;
+                    line2:(NSString*)line2;
 
-// Turns editable textfield on, setting the field's placeholder text and icon.
-- (void)showTextfield:(NSString*)text withIcon:(NSImage*)icon;
+// Shows an auxiliary textfield to the right of the suggestion icon and
+// text. This is currently only used to show a CVC field for the CC section.
+- (void)showInputField:(NSString*)text withIcon:(NSImage*)icon;
 
 @end
 

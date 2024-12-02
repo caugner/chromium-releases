@@ -15,7 +15,6 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -27,7 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome_frame/utils.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace {
 

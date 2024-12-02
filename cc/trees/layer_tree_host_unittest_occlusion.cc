@@ -17,12 +17,11 @@ class TestLayer : public Layer {
     return make_scoped_refptr(new TestLayer());
   }
 
-  virtual void Update(
+  virtual bool Update(
       ResourceUpdateQueue* update_queue,
-      const OcclusionTracker* occlusion,
-      RenderingStats* stats) OVERRIDE {
+      const OcclusionTracker* occlusion) OVERRIDE {
     if (!occlusion)
-      return;
+      return false;
 
     // Gain access to internals of the OcclusionTracker.
     const TestOcclusionTracker* test_occlusion =
@@ -30,6 +29,7 @@ class TestLayer : public Layer {
     occlusion_ = UnionRegions(
         test_occlusion->occlusion_from_inside_target(),
         test_occlusion->occlusion_from_outside_target());
+    return false;
   }
 
   const Region& occlusion() const { return occlusion_; }
@@ -349,8 +349,8 @@ class LayerTreeHostOcclusionTestOcclusionOpacityFilter
     child_transform.Rotate(90.0);
     child_transform.Translate(-250.0, -250.0);
 
-    WebKit::WebFilterOperations filters;
-    filters.append(WebKit::WebFilterOperation::createOpacityFilter(0.5));
+    FilterOperations filters;
+    filters.Append(FilterOperation::CreateOpacityFilter(0.5f));
 
     // If the child layer has a filter that changes alpha values, and is below
     // child2, then child2 should contribute to occlusion on everything,
@@ -393,8 +393,8 @@ class LayerTreeHostOcclusionTestOcclusionBlurFilter
     child_transform.Rotate(90.0);
     child_transform.Translate(-250.0, -250.0);
 
-    WebKit::WebFilterOperations filters;
-    filters.append(WebKit::WebFilterOperation::createBlurFilter(10));
+    FilterOperations filters;
+    filters.Append(FilterOperation::CreateBlurFilter(10.f));
 
     // If the child layer has a filter that moves pixels/changes alpha, and is
     // below child2, then child should not inherit occlusion from outside its
@@ -439,12 +439,11 @@ class LayerTreeHostOcclusionTestManySurfaces
 
     for (int i = 0; i < num_surfaces; ++i) {
       layers.push_back(TestLayer::Create());
-      if (!i) {
+      if (i == 0) {
         SetLayerPropertiesForTesting(
             layers.back().get(), NULL, identity_matrix_,
             gfx::PointF(0.f, 0.f),
             gfx::Size(root_width, root_height), true);
-        layers.back()->CreateRenderSurface();
       } else {
         SetLayerPropertiesForTesting(
             layers.back().get(), layers[layers.size() - 2].get(),

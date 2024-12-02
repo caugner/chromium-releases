@@ -23,14 +23,13 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/http/http_response_headers.h"
@@ -40,6 +39,7 @@
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "url/gurl.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -274,7 +274,7 @@ int main(int argc, char* argv[]) {
 
   fetcher->Start();
   std::printf(
-      "Request started at %s (ticks = %"PRId64")\n",
+      "Request started at %s (ticks = %" PRId64 ")\n",
       UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(start_time)).c_str(),
       start_ticks.ToInternalValue());
 
@@ -285,7 +285,7 @@ int main(int argc, char* argv[]) {
   const base::TimeTicks end_ticks = base::TimeTicks::Now();
 
   std::printf(
-      "Request ended at %s (ticks = %"PRId64")\n",
+      "Request ended at %s (ticks = %" PRId64 ")\n",
       UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(end_time)).c_str(),
       end_ticks.ToInternalValue());
 
@@ -294,7 +294,7 @@ int main(int argc, char* argv[]) {
   const base::TimeDelta delta_ticks = end_ticks - start_ticks;
 
   std::printf(
-      "Request took %"PRId64" ticks (%.2f ms)\n",
+      "Request took %" PRId64 " ticks (%.2f ms)\n",
       delta_ticks_internal, delta_ticks.InMillisecondsF());
 
   const net::URLRequestStatus status = fetcher->GetStatus();

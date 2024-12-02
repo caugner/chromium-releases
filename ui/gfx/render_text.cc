@@ -9,9 +9,11 @@
 #include "base/i18n/break_iterator.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "third_party/icu/public/common/unicode/utf16.h"
+#include "third_party/icu/source/common/unicode/rbbi.h"
+#include "third_party/icu/source/common/unicode/utf16.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/base/text/utf16_indexing.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
@@ -324,7 +326,7 @@ void RenderText::SetText(const base::string16& text) {
     text_direction_ = base::i18n::UNKNOWN_DIRECTION;
 
   obscured_reveal_index_ = -1;
-  UpdateObscuredText();
+  UpdateLayoutText();
   ResetLayout();
 }
 
@@ -355,18 +357,16 @@ void RenderText::SetFont(const Font& font) {
 }
 
 void RenderText::SetFontSize(int size) {
-  font_list_ = font_list_.DeriveFontListWithSize(size);
-  cached_bounds_and_offset_valid_ = false;
-  ResetLayout();
+  SetFontList(font_list_.DeriveFontListWithSize(size));
+}
+
+const Font& RenderText::GetPrimaryFont() const {
+  return font_list_.GetPrimaryFont();
 }
 
 void RenderText::SetCursorEnabled(bool cursor_enabled) {
   cursor_enabled_ = cursor_enabled;
   cached_bounds_and_offset_valid_ = false;
-}
-
-const Font& RenderText::GetFont() const {
-  return font_list_.GetFonts()[0];
 }
 
 void RenderText::ToggleInsertMode() {
@@ -379,7 +379,7 @@ void RenderText::SetObscured(bool obscured) {
     obscured_ = obscured;
     obscured_reveal_index_ = -1;
     cached_bounds_and_offset_valid_ = false;
-    UpdateObscuredText();
+    UpdateLayoutText();
     ResetLayout();
   }
 }
@@ -390,7 +390,7 @@ void RenderText::SetObscuredRevealIndex(int index) {
 
   obscured_reveal_index_ = index;
   cached_bounds_and_offset_valid_ = false;
-  UpdateObscuredText();
+  UpdateLayoutText();
   ResetLayout();
 }
 
@@ -642,7 +642,7 @@ void RenderText::Draw(Canvas* canvas) {
     canvas->ClipRect(clip_rect);
   }
 
-  if (!text().empty())
+  if (!text().empty() && focused())
     DrawSelection(canvas);
 
   if (cursor_enabled() && cursor_visible() && focused())
@@ -661,15 +661,27 @@ void RenderText::DrawCursor(Canvas* canvas, const SelectionModel& position) {
   canvas->FillRect(GetCursorBounds(position, true), cursor_color_);
 }
 
-void RenderText::DrawSelectedText(Canvas* canvas) {
+void RenderText::DrawSelectedTextForDrag(Canvas* canvas) {
   EnsureLayout();
   const std::vector<Rect> sel = GetSubstringBounds(selection());
+
+  // Override the selection color with black, and force the background to be
+  // transparent so that it's rendered without subpixel antialiasing.
+  const bool saved_background_is_transparent = background_is_transparent();
+  const SkColor saved_selection_color = selection_color();
+  set_background_is_transparent(true);
+  set_selection_color(SK_ColorBLACK);
+
   for (size_t i = 0; i < sel.size(); ++i) {
     canvas->Save();
     canvas->ClipRect(sel[i]);
     DrawVisualText(canvas);
     canvas->Restore();
   }
+
+  // Restore saved transparency and selection color.
+  set_selection_color(saved_selection_color);
+  set_background_is_transparent(saved_background_is_transparent);
 }
 
 Rect RenderText::GetCursorBounds(const SelectionModel& caret,
@@ -709,7 +721,7 @@ const Rect& RenderText::GetUpdatedCursorBounds() {
 }
 
 size_t RenderText::IndexOfAdjacentGrapheme(size_t index,
-    LogicalCursorDirection direction) {
+                                           LogicalCursorDirection direction) {
   if (index > text().length())
     return text().length();
 
@@ -755,7 +767,6 @@ RenderText::RenderText()
       cursor_color_(kDefaultColor),
       selection_color_(kDefaultColor),
       selection_background_focused_color_(kDefaultSelectionBackgroundColor),
-      selection_background_unfocused_color_(kDefaultSelectionBackgroundColor),
       focused_(false),
       composition_range_(ui::Range::InvalidRange()),
       colors_(kDefaultColor),
@@ -763,6 +774,7 @@ RenderText::RenderText()
       composition_and_selection_styles_applied_(false),
       obscured_(false),
       obscured_reveal_index_(-1),
+      truncate_length_(0),
       fade_head_(false),
       fade_tail_(false),
       background_is_transparent_(false),
@@ -803,7 +815,7 @@ void RenderText::SetSelectionModel(const SelectionModel& model) {
 }
 
 const base::string16& RenderText::GetLayoutText() const {
-  return obscured() ? obscured_text_ : text();
+  return layout_text_.empty() ? text_ : layout_text_;
 }
 
 void RenderText::ApplyCompositionAndSelectionStyles() {
@@ -873,7 +885,8 @@ void RenderText::ApplyFadeEffects(internal::SkiaTextRenderer* renderer) {
   if (text_width <= display_width)
     return;
 
-  int gradient_width = CalculateFadeGradientWidth(GetFont(), display_width);
+  int gradient_width = CalculateFadeGradientWidth(GetPrimaryFont(),
+                                                  display_width);
   if (gradient_width == 0)
     return;
 
@@ -933,27 +946,37 @@ void RenderText::MoveCursorTo(size_t position, bool select) {
         (cursor == 0) ? CURSOR_FORWARD : CURSOR_BACKWARD));
 }
 
-void RenderText::UpdateObscuredText() {
-  if (!obscured_)
-    return;
+void RenderText::UpdateLayoutText() {
+  layout_text_.clear();
 
-  const size_t obscured_text_length =
-      static_cast<size_t>(ui::UTF16IndexToOffset(text_, 0, text_.length()));
-  obscured_text_.assign(obscured_text_length, kPasswordReplacementChar);
+  if (obscured_) {
+    size_t obscured_text_length =
+        static_cast<size_t>(ui::UTF16IndexToOffset(text_, 0, text_.length()));
+    layout_text_.assign(obscured_text_length, kPasswordReplacementChar);
 
-  if (obscured_reveal_index_ >= 0 &&
-      obscured_reveal_index_ < static_cast<int>(text_.length())) {
-    // Gets the index range in |text_| to be revealed.
-    size_t start = obscured_reveal_index_;
-    U16_SET_CP_START(text_.data(), 0, start);
-    size_t end = start;
-    UChar32 unused_char;
-    U16_NEXT(text_.data(), end, text_.length(), unused_char);
+    if (obscured_reveal_index_ >= 0 &&
+        obscured_reveal_index_ < static_cast<int>(text_.length())) {
+      // Gets the index range in |text_| to be revealed.
+      size_t start = obscured_reveal_index_;
+      U16_SET_CP_START(text_.data(), 0, start);
+      size_t end = start;
+      UChar32 unused_char;
+      U16_NEXT(text_.data(), end, text_.length(), unused_char);
 
-    // Gets the index in |obscured_text_| to be replaced.
-    const size_t cp_start =
-        static_cast<size_t>(ui::UTF16IndexToOffset(text_, 0, start));
-    obscured_text_.replace(cp_start, 1, text_.substr(start, end - start));
+      // Gets the index in |layout_text_| to be replaced.
+      const size_t cp_start =
+          static_cast<size_t>(ui::UTF16IndexToOffset(text_, 0, start));
+      if (layout_text_.length() > cp_start)
+        layout_text_.replace(cp_start, 1, text_.substr(start, end - start));
+    }
+  }
+
+  const base::string16& text = obscured_ ? layout_text_ : text_;
+  if (truncate_length_ > 0 && truncate_length_ < text.length()) {
+    // Truncate the text at a valid character break and append an ellipsis.
+    icu::StringCharacterIterator iter(text.c_str());
+    iter.setIndex32(truncate_length_ - 1);
+    layout_text_.assign(text.substr(0, iter.getIndex()) + ui::kEllipsisUTF16);
   }
 }
 
@@ -976,13 +999,13 @@ void RenderText::UpdateCachedBoundsAndOffset() {
     // Don't pan if the text fits in the display width or when the cursor is
     // disabled.
     delta_x = -display_offset_.x();
-  } else if (cursor_bounds_.right() >= display_rect_.right()) {
+  } else if (cursor_bounds_.right() > display_rect_.right()) {
     // TODO(xji): when the character overflow is a RTL character, currently, if
     // we pan cursor at the rightmost position, the entered RTL character is not
     // displayed. Should pan cursor to show the last logical characters.
     //
-    // Pan to show the cursor when it overflows to the right,
-    delta_x = display_rect_.right() - cursor_bounds_.right() - 1;
+    // Pan to show the cursor when it overflows to the right.
+    delta_x = display_rect_.right() - cursor_bounds_.right();
   } else if (cursor_bounds_.x() < display_rect_.x()) {
     // TODO(xji): have similar problem as above when overflow character is a
     // LTR character.
@@ -1005,12 +1028,9 @@ void RenderText::UpdateCachedBoundsAndOffset() {
 }
 
 void RenderText::DrawSelection(Canvas* canvas) {
-  const SkColor color = focused() ?
-      selection_background_focused_color_ :
-      selection_background_unfocused_color_;
   const std::vector<Rect> sel = GetSubstringBounds(selection());
   for (std::vector<Rect>::const_iterator i = sel.begin(); i < sel.end(); ++i)
-    canvas->FillRect(*i, color);
+    canvas->FillRect(*i, selection_background_focused_color_);
 }
 
 }  // namespace gfx

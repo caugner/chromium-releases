@@ -22,22 +22,37 @@ APP_LIST_EXPORT
 @interface AppsGridViewItem : NSCollectionViewItem {
  @private
   scoped_ptr<app_list::ItemModelObserverBridge> observerBridge_;
+  base::scoped_nsobject<NSProgressIndicator> progressIndicator_;
 
   // Used to highlight the background on hover.
   ui::ScopedCrTrackingArea trackingArea_;
 }
 
-@property(retain, nonatomic) NSString* buttonTitle;
+@property(readonly, nonatomic) NSProgressIndicator* progressIndicator;
 
+// Designated initializer. |tileSize| is the size of tiles in the grid.
 - (id)initWithSize:(NSSize)tileSize;
 
+// Set the represented model, updating views. Clears if |itemModel| is NULL.
 - (void)setModel:(app_list::AppListItemModel*)itemModel;
 
+// Model accessor, via the |observerBridge_|.
 - (app_list::AppListItemModel*)model;
 
+// Return the button portion of the item, showing the icon and title.
 - (NSButton*)button;
 
+// Generate and return a context menu, populated using the represented model.
 - (NSMenu*)contextMenu;
+
+// Take a snapshot of the grid cell with correct layout, then hide the button.
+// If |isRestore| is true, the snapshot includes the label and items hidden for
+// the initial snapshot are restored.
+- (NSBitmapImageRep*)dragRepresentationForRestore:(BOOL)isRestore;
+
+// Called the first time an item is added to the grid view, once the grid view
+// is consistent with items being added at the same time.
+- (void)onInitialModelBuilt;
 
 @end
 

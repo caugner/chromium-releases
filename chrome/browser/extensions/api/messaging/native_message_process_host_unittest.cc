@@ -10,16 +10,15 @@
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
-#include "base/process_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/extensions/api/messaging/native_message_process_host.h"
 #include "chrome/browser/extensions/api/messaging/native_messaging_test_util.h"
 #include "chrome/browser/extensions/api/messaging/native_process_launcher.h"
@@ -27,7 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/features/feature.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -145,7 +144,7 @@ class NativeMessagingTest : public ::testing::Test,
 
   // Force the channel to be dev.
   base::ScopedTempDir temp_dir_;
-  Feature::ScopedCurrentChannel current_channel_;
+  ScopedCurrentChannel current_channel_;
   scoped_ptr<NativeMessageProcessHost> native_message_process_host_;
   base::FilePath user_data_dir_;
   scoped_ptr<base::RunLoop> read_message_run_loop_;
@@ -219,7 +218,7 @@ TEST_F(NativeMessagingTest, EchoConnect) {
       switches::kNativeMessagingHosts, hosts_option);
 
   native_message_process_host_ = NativeMessageProcessHost::Create(
-      AsWeakPtr(), kTestNativeMessagingExtensionId,
+      gfx::NativeView(), AsWeakPtr(), kTestNativeMessagingExtensionId,
       kTestNativeMessagingHostName, 0);
   ASSERT_TRUE(native_message_process_host_.get());
 

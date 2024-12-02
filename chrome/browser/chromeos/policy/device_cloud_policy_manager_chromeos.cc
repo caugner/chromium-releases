@@ -59,7 +59,7 @@ std::string GetMachineStatistic(const std::string& key) {
   chromeos::system::StatisticsProvider* provider =
       chromeos::system::StatisticsProvider::GetInstance();
   if (!provider->GetMachineStatistic(key, &value))
-    LOG(WARNING) << "Failed to get machine statistic " << key;
+    return std::string();
 
   return value;
 }
@@ -70,10 +70,8 @@ bool GetMachineFlag(const std::string& key, bool default_value) {
   bool value = default_value;
   chromeos::system::StatisticsProvider* provider =
       chromeos::system::StatisticsProvider::GetInstance();
-  if (!provider->GetMachineFlag(key, &value)) {
-    LOG(WARNING) << "Failed to get machine flag " << key;
+  if (!provider->GetMachineFlag(key, &value))
     return default_value;
-  }
 
   return value;
 }
@@ -241,7 +239,7 @@ void DeviceCloudPolicyManagerChromeOS::EnrollmentCompleted(
     EnrollmentStatus status) {
   if (status.status() == EnrollmentStatus::STATUS_SUCCESS) {
     core()->Connect(enrollment_handler_->ReleaseClient());
-    core()->StartRefreshScheduler();
+    StartRefreshScheduler();
     core()->TrackRefreshDelayPref(local_state_,
                                   prefs::kDevicePolicyRefreshRate);
     attestation_policy_observer_.reset(
@@ -262,7 +260,7 @@ void DeviceCloudPolicyManagerChromeOS::StartIfManaged() {
       store()->is_managed() &&
       !service()) {
     core()->Connect(CreateClient());
-    core()->StartRefreshScheduler();
+    StartRefreshScheduler();
     core()->TrackRefreshDelayPref(local_state_,
                                   prefs::kDevicePolicyRefreshRate);
     attestation_policy_observer_.reset(

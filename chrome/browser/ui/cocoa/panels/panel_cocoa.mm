@@ -283,6 +283,10 @@ bool PanelCocoa::IsPanelMinimizedBySystem() const {
   return [controller_ isMiniaturized];
 }
 
+bool PanelCocoa::IsPanelShownOnActiveDesktop() const {
+  return [[controller_ window] isOnActiveSpace];
+}
+
 void PanelCocoa::ShowShadow(bool show) {
   [controller_ showShadow:show];
 }
@@ -351,6 +355,7 @@ class CocoaNativePanelTesting : public NativePanelTesting {
   virtual bool IsButtonVisible(
       panel::TitlebarButtonType button_type) const OVERRIDE;
   virtual panel::CornerStyle GetWindowCornerStyle() const OVERRIDE;
+  virtual bool EnsureApplicationRunOnForeground() OVERRIDE;
 
  private:
   PanelTitlebarViewCocoa* titlebar() const;
@@ -454,4 +459,11 @@ bool CocoaNativePanelTesting::IsButtonVisible(
 
 panel::CornerStyle CocoaNativePanelTesting::GetWindowCornerStyle() const {
   return native_panel_window_->corner_style_;
+}
+
+bool CocoaNativePanelTesting::EnsureApplicationRunOnForeground() {
+  if ([NSApp isActive])
+    return true;
+  [NSApp activateIgnoringOtherApps:YES];
+  return [NSApp isActive];
 }

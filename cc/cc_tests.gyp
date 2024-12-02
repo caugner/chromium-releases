@@ -38,13 +38,13 @@
       'layers/tiled_layer_impl_unittest.cc',
       'layers/tiled_layer_unittest.cc',
       'output/delegating_renderer_unittest.cc',
+      'output/filter_operations_unittest.cc',
       'output/gl_renderer_unittest.cc',
       'output/output_surface_unittest.cc',
       'output/renderer_pixeltest.cc',
       'output/render_surface_filters_unittest.cc',
       'output/shader_unittest.cc',
       'output/software_renderer_unittest.cc',
-      'output/texture_copier_unittest.cc',
       'quads/draw_quad_unittest.cc',
       'quads/render_pass_unittest.cc',
       'resources/layer_quad_unittest.cc',
@@ -54,12 +54,14 @@
       'resources/picture_pile_unittest.cc',
       'resources/picture_unittest.cc',
       'resources/prioritized_resource_unittest.cc',
+      'resources/prioritized_tile_set_unittest.cc',
       'resources/raster_worker_pool_unittest.cc',
       'resources/resource_provider_unittest.cc',
       'resources/resource_update_controller_unittest.cc',
       'resources/scoped_resource_unittest.cc',
       'resources/tile_manager_unittest.cc',
       'resources/tile_priority_unittest.cc',
+      'resources/video_resource_updater_unittest.cc',
       'resources/worker_pool_unittest.cc',
       'scheduler/delay_based_time_source_unittest.cc',
       'scheduler/frame_rate_controller_unittest.cc',
@@ -105,7 +107,6 @@
       'test/fake_delegated_renderer_layer_impl.cc',
       'test/fake_delegated_renderer_layer_impl.h',
       'test/fake_impl_proxy.h',
-      'test/fake_output_surface.h',
       'test/fake_layer_tree_host_client.cc',
       'test/fake_layer_tree_host_client.h',
       'test/fake_layer_tree_host_impl.cc',
@@ -133,6 +134,10 @@
       'test/fake_tile_manager_client.cc',
       'test/fake_output_surface.cc',
       'test/fake_output_surface.h',
+      'test/fake_output_surface_client.cc',
+      'test/fake_output_surface_client.h',
+      'test/fake_scoped_ui_resource.cc',
+      'test/fake_scoped_ui_resource.h',
       'test/fake_video_frame_provider.cc',
       'test/fake_video_frame_provider.h',
       'test/geometry_test_utils.cc',
@@ -167,6 +172,8 @@
       'test/solid_color_content_layer_client.cc',
       'test/skia_common.cc',
       'test/skia_common.h',
+      'test/test_tile_priorities.cc',
+      'test/test_tile_priorities.h',
       'test/test_web_graphics_context_3d.cc',
       'test/test_web_graphics_context_3d.h',
       'test/tiled_layer_test_common.cc',
@@ -200,20 +207,26 @@
         '.',
       ],
       'conditions': [
-        ['OS == "android" and gtest_target_type == "shared_library"', {
-          'dependencies': [
-            '../testing/android/native_test.gyp:native_test_native_code',
-          ],
-        }],
-        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
-          'conditions': [
-            [ 'linux_use_tcmalloc==1', {
-              'dependencies': [
-                '../base/allocator/allocator.gyp:allocator',
+        ['OS == "android" and gtest_target_type == "shared_library"',
+          {
+            'dependencies': [
+              '../testing/android/native_test.gyp:native_test_native_code',
+            ],
+          }
+        ],
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"',
+          {
+            'conditions': [
+              [ 'linux_use_tcmalloc==1',
+                {
+                  'dependencies': [
+                    '../base/allocator/allocator.gyp:allocator',
+                  ],
+                }
               ],
-            }],
-          ],
-        }],
+            ],
+          }
+        ],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -233,6 +246,7 @@
       ],
       'sources': [
         'resources/raster_worker_pool_perftest.cc',
+        'resources/tile_manager_perftest.cc',
         'resources/worker_pool_perftest.cc',
         'test/cc_test_suite.cc',
         'test/run_all_unittests.cc',
@@ -243,17 +257,21 @@
         '.',
       ],
       'conditions': [
-        ['OS == "android" and gtest_target_type == "shared_library"', {
-          'dependencies': [
-            '../testing/android/native_test.gyp:native_test_native_code',
-          ],
-        }],
+        ['OS == "android" and gtest_target_type == "shared_library"',
+          {
+            'dependencies': [
+              '../testing/android/native_test.gyp:native_test_native_code',
+            ],
+          }
+        ],
         # See http://crbug.com/162998#c4 for why this is needed.
-        ['OS=="linux" and linux_use_tcmalloc==1', {
-          'dependencies': [
-            '../base/allocator/allocator.gyp:allocator',
-          ],
-        }],
+        ['OS=="linux" and linux_use_tcmalloc==1',
+          {
+            'dependencies': [
+              '../base/allocator/allocator.gyp:allocator',
+            ],
+          }
+        ],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -302,33 +320,35 @@
   'conditions': [
     # Special target to wrap a gtest_target_type==shared_library
     # cc_unittests into an android apk for execution.
-    ['OS == "android" and gtest_target_type == "shared_library"', {
-      'targets': [
-        {
-          'target_name': 'cc_unittests_apk',
-          'type': 'none',
-          'dependencies': [
-            'cc_unittests',
-          ],
-          'variables': {
-            'test_suite_name': 'cc_unittests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_unittests<(SHARED_LIB_SUFFIX)',
+    ['OS == "android" and gtest_target_type == "shared_library"',
+      {
+        'targets': [
+          {
+            'target_name': 'cc_unittests_apk',
+            'type': 'none',
+            'dependencies': [
+              'cc_unittests',
+            ],
+            'variables': {
+              'test_suite_name': 'cc_unittests',
+              'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_unittests<(SHARED_LIB_SUFFIX)',
+            },
+            'includes': [ '../build/apk_test.gypi' ],
           },
-          'includes': [ '../build/apk_test.gypi' ],
-        },
-        {
-          'target_name': 'cc_perftests_apk',
-          'type': 'none',
-          'dependencies': [
-            'cc_perftests',
-          ],
-          'variables': {
-            'test_suite_name': 'cc_perftests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_perftests<(SHARED_LIB_SUFFIX)',
+          {
+            'target_name': 'cc_perftests_apk',
+            'type': 'none',
+            'dependencies': [
+              'cc_perftests',
+            ],
+            'variables': {
+              'test_suite_name': 'cc_perftests',
+              'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_perftests<(SHARED_LIB_SUFFIX)',
+            },
+            'includes': [ '../build/apk_test.gypi' ],
           },
-          'includes': [ '../build/apk_test.gypi' ],
-        },
-      ],
-    }]
+        ],
+      }
+    ]
   ],
 }

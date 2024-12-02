@@ -4,8 +4,11 @@
 
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
 
 namespace notifier {
@@ -20,6 +23,25 @@ ChromeNotifierService* ChromeNotifierServiceFactory::GetForProfile(
 // static
 ChromeNotifierServiceFactory* ChromeNotifierServiceFactory::GetInstance() {
   return Singleton<ChromeNotifierServiceFactory>::get();
+}
+
+// static
+bool ChromeNotifierServiceFactory::UseSyncedNotifications(
+    CommandLine* command_line) {
+  if (command_line->HasSwitch(switches::kDisableSyncSyncedNotifications))
+    return false;
+  if (command_line->HasSwitch(switches::kEnableSyncSyncedNotifications))
+    return true;
+
+  // enable it by default for canary and dev
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_UNKNOWN ||
+      channel == chrome::VersionInfo::CHANNEL_DEV ||
+      channel == chrome::VersionInfo::CHANNEL_CANARY)
+    return true;
+  else
+
+  return false;
 }
 
 ChromeNotifierServiceFactory::ChromeNotifierServiceFactory()

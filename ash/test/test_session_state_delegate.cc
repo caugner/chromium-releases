@@ -4,6 +4,8 @@
 
 #include "ash/test/test_session_state_delegate.h"
 
+#include "ash/shell.h"
+#include "ash/system/user/login_status.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 
@@ -11,10 +13,11 @@ namespace ash {
 namespace test {
 
 TestSessionStateDelegate::TestSessionStateDelegate()
-    : has_active_user_(true),
-      active_user_session_started_(true),
+    : has_active_user_(false),
+      active_user_session_started_(false),
       can_lock_screen_(true),
       screen_locked_(false),
+      user_adding_screen_running_(false),
       logged_in_users_(1) {
 }
 
@@ -51,30 +54,46 @@ void TestSessionStateDelegate::UnlockScreen() {
   screen_locked_ = false;
 }
 
+bool TestSessionStateDelegate::IsUserSessionBlocked() const {
+  return !IsActiveUserSessionStarted() || IsScreenLocked() ||
+      user_adding_screen_running_;
+}
+
 void TestSessionStateDelegate::SetHasActiveUser(bool has_active_user) {
   has_active_user_ = has_active_user;
   if (!has_active_user)
     active_user_session_started_ = false;
+  else
+    Shell::GetInstance()->ShowLauncher();
 }
 
 void TestSessionStateDelegate::SetActiveUserSessionStarted(
     bool active_user_session_started) {
   active_user_session_started_ = active_user_session_started;
-  if (active_user_session_started)
+  if (active_user_session_started) {
     has_active_user_ = true;
+    Shell::GetInstance()->CreateLauncher();
+    Shell::GetInstance()->UpdateAfterLoginStatusChange(
+        user::LOGGED_IN_USER);
+  }
 }
 
 void TestSessionStateDelegate::SetCanLockScreen(bool can_lock_screen) {
   can_lock_screen_ = can_lock_screen;
 }
 
+void TestSessionStateDelegate::SetUserAddingScreenRunning(
+    bool user_adding_screen_running) {
+  user_adding_screen_running_ = user_adding_screen_running;
+}
+
 const base::string16 TestSessionStateDelegate::GetUserDisplayName(
-    ash::MultiProfileIndex index) const {
+    MultiProfileIndex index) const {
   return UTF8ToUTF16("Über tray Über tray Über tray Über tray");
 }
 
 const std::string TestSessionStateDelegate::GetUserEmail(
-    ash::MultiProfileIndex index) const {
+    MultiProfileIndex index) const {
   switch (index) {
     case 0: return "first@tray";
     case 1: return "second@tray";
@@ -84,7 +103,7 @@ const std::string TestSessionStateDelegate::GetUserEmail(
 }
 
 const gfx::ImageSkia& TestSessionStateDelegate::GetUserImage(
-    ash::MultiProfileIndex index) const {
+    MultiProfileIndex index) const {
   return null_image_;
 }
 
@@ -96,11 +115,11 @@ void TestSessionStateDelegate::SwitchActiveUser(const std::string& email) {
 }
 
 void TestSessionStateDelegate::AddSessionStateObserver(
-    ash::SessionStateObserver* observer) {
+    SessionStateObserver* observer) {
 }
 
 void TestSessionStateDelegate::RemoveSessionStateObserver(
-    ash::SessionStateObserver* observer) {
+    SessionStateObserver* observer) {
 }
 
 }  // namespace test

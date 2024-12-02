@@ -23,7 +23,8 @@ TEST(AutofillCreditCardWrapperTest, GetInfoCreditCardExpMonth) {
   for (int month = 1; month <= 12; ++month) {
     card.SetRawInfo(CREDIT_CARD_EXP_MONTH, base::IntToString16(month));
     AutofillCreditCardWrapper wrapper(&card);
-    EXPECT_EQ(model.GetItemAt(month), wrapper.GetInfo(CREDIT_CARD_EXP_MONTH));
+    EXPECT_EQ(model.GetItemAt(month),
+              wrapper.GetInfo(AutofillType(CREDIT_CARD_EXP_MONTH)));
   }
 }
 
@@ -33,7 +34,8 @@ TEST(AutofillCreditCardWrapperTest, GetDisplayTextEmptyWhenExpired) {
   card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2010"));
   card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
   AutofillCreditCardWrapper wrapper(&card);
-  EXPECT_TRUE(wrapper.GetDisplayText().empty());
+  base::string16 unused, unused2;
+  EXPECT_FALSE(wrapper.GetDisplayText(&unused, &unused2));
 }
 
 TEST(AutofillCreditCardWrapperTest, GetDisplayTextEmptyWhenInvalid) {
@@ -42,7 +44,8 @@ TEST(AutofillCreditCardWrapperTest, GetDisplayTextEmptyWhenInvalid) {
   card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("9999"));
   card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("41111"));
   AutofillCreditCardWrapper wrapper(&card);
-  EXPECT_TRUE(wrapper.GetDisplayText().empty());
+  base::string16 unused, unused2;
+  EXPECT_FALSE(wrapper.GetDisplayText(&unused, &unused2));
 }
 
 TEST(AutofillCreditCardWrapperTest, GetDisplayTextNotEmptyWhenValid) {
@@ -51,7 +54,8 @@ TEST(AutofillCreditCardWrapperTest, GetDisplayTextNotEmptyWhenValid) {
   card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("9999"));
   card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
   AutofillCreditCardWrapper wrapper(&card);
-  EXPECT_FALSE(wrapper.GetDisplayText().empty());
+  base::string16 unused, unused2;
+  EXPECT_TRUE(wrapper.GetDisplayText(&unused, &unused2));
 }
 
 TEST(WalletInstrumentWrapperTest, GetInfoCreditCardExpMonth) {
@@ -61,7 +65,8 @@ TEST(WalletInstrumentWrapperTest, GetInfoCreditCardExpMonth) {
   for (int month = 1; month <= 12; ++month) {
     instrument->expiration_month_ = month;
     WalletInstrumentWrapper wrapper(instrument.get());
-    EXPECT_EQ(model.GetItemAt(month), wrapper.GetInfo(CREDIT_CARD_EXP_MONTH));
+    EXPECT_EQ(model.GetItemAt(month),
+              wrapper.GetInfo(AutofillType(CREDIT_CARD_EXP_MONTH)));
   }
 }
 
@@ -70,7 +75,8 @@ TEST(WalletInstrumentWrapperTest, GetDisplayTextEmptyWhenExpired) {
       wallet::GetTestMaskedInstrument());
   instrument->status_ = wallet::WalletItems::MaskedInstrument::EXPIRED;
   WalletInstrumentWrapper wrapper(instrument.get());
-  EXPECT_TRUE(wrapper.GetDisplayText().empty());
+  base::string16 unused, unused2;
+  EXPECT_FALSE(wrapper.GetDisplayText(&unused, &unused2));
 }
 
 TEST(DataModelWrapperTest, GetDisplayTextEmptyWithoutPhone) {
@@ -78,19 +84,23 @@ TEST(DataModelWrapperTest, GetDisplayTextEmptyWithoutPhone) {
       wallet::GetTestMaskedInstrument());
 
   WalletInstrumentWrapper instrument_wrapper(instrument.get());
-  ASSERT_FALSE(instrument_wrapper.GetDisplayText().empty());
+  base::string16 unused, unused2;
+  ASSERT_TRUE(instrument_wrapper.GetDisplayText(&unused, &unused2));
 
   WalletAddressWrapper address_wrapper(&instrument->address());
-  ASSERT_FALSE(address_wrapper.GetDisplayText().empty());
+  ASSERT_TRUE(address_wrapper.GetDisplayText(&unused, &unused2));
 
   const_cast<wallet::Address*>(&instrument->address())->set_phone_number(
       string16());
 
-  ASSERT_TRUE(instrument_wrapper.GetInfo(PHONE_HOME_WHOLE_NUMBER).empty());
-  EXPECT_TRUE(instrument_wrapper.GetDisplayText().empty());
+  ASSERT_TRUE(
+      instrument_wrapper.GetInfo(
+          AutofillType(PHONE_HOME_WHOLE_NUMBER)).empty());
+  EXPECT_FALSE(instrument_wrapper.GetDisplayText(&unused, &unused2));
 
-  ASSERT_TRUE(address_wrapper.GetInfo(PHONE_HOME_WHOLE_NUMBER).empty());
-  EXPECT_TRUE(address_wrapper.GetDisplayText().empty());
+  ASSERT_TRUE(
+      address_wrapper.GetInfo(AutofillType(PHONE_HOME_WHOLE_NUMBER)).empty());
+  EXPECT_FALSE(address_wrapper.GetDisplayText(&unused, &unused2));
 }
 
 }  // namespace autofill

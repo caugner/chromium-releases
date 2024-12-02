@@ -18,7 +18,6 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_service.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_tree_model.h"
@@ -26,8 +25,8 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "components/user_prefs/user_prefs.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -37,6 +36,7 @@
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -549,7 +549,7 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
   if (!show_tree_ || !selected_parent) {
     // TODO: this is wrong. Just because there is no selection doesn't mean new
     // folders weren't added.
-    bookmark_utils::ApplyEditsWithNoFolderChange(
+    BookmarkEditor::ApplyEditsWithNoFolderChange(
         bb_model_, parent_, details_, new_title, new_url);
     return;
   }
@@ -572,7 +572,7 @@ void BookmarkEditorGtk::ApplyEdits(GtkTreeIter* selected_parent) {
     return;
   }
 
-  bookmark_utils::ApplyEditsWithPossibleFolderChange(
+  BookmarkEditor::ApplyEditsWithPossibleFolderChange(
       bb_model_, new_parent, details_, new_title, new_url);
 
   // Remove the folders that were removed. This has to be done after all the

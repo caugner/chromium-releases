@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 
+#include "apps/metrics_names.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
@@ -28,10 +29,6 @@ class Profile;
 
 namespace chrome {
 struct FaviconImageResult;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
 }
 
 // The handler for Javascript messages related to the "apps" view.
@@ -68,59 +65,46 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
   // Populate the given dictionary with the web store promo content.
   void FillPromoDictionary(base::DictionaryValue* value);
 
-  // Callback for the "getApps" message.
+  // Handles the "launchApp" message with unused |args|.
   void HandleGetApps(const base::ListValue* args);
 
-  // Callback for the "launchApp" message.
+  // Handles the "launchApp" message with |args| containing [extension_id,
+  // source] with optional [url, disposition], |disposition| defaulting to
+  // CURRENT_TAB.
   void HandleLaunchApp(const base::ListValue* args);
 
-  // Callback for the "setLaunchType" message.
+  // Handles the "setLaunchType" message with args containing [extension_id,
+  // launch_type].
   void HandleSetLaunchType(const base::ListValue* args);
 
-  // Callback for the "uninstallApp" message.
+  // Handles the "uninstallApp" message with |args| containing [extension_id]
+  // and an optional bool to not confirm the uninstall when true, defaults to
+  // false.
   void HandleUninstallApp(const base::ListValue* args);
 
-  // Callback for the "createAppShortcut" message.
+  // Handles the "createAppShortcut" message with |args| containing
+  // [extension_id].
   void HandleCreateAppShortcut(const base::ListValue* args);
 
-  // Callback for the "reorderApps" message.
+  // Handles the "reorderApps" message with |args| containing [dragged_app_id,
+  // app_order].
   void HandleReorderApps(const base::ListValue* args);
 
-  // Callback for the "setPageIndex" message.
+  // Handles the "setPageIndex" message with |args| containing [extension_id,
+  // page_index].
   void HandleSetPageIndex(const base::ListValue* args);
 
-  // Callback for the "saveAppPageName" message.
+  // Handles "saveAppPageName" message with |args| containing [name,
+  // page_index].
   void HandleSaveAppPageName(const base::ListValue* args);
 
-  // Callback for the "generateAppForLink" message.
+  // Handles "generateAppForLink" message with |args| containing [url, title,
+  // page_index].
   void HandleGenerateAppForLink(const base::ListValue* args);
 
-  // Callback for the "recordAppLaunchByURL" message. Takes an escaped URL and a
-  // launch source (integer), and if the URL represents an app, records the
-  // action for UMA.
-  void HandleRecordAppLaunchByUrl(const base::ListValue* args);
-
-  // Callback for "stopShowingAppLauncherPromo" message.
+  // Other registered message callbacks with unused |args|.
   void StopShowingAppLauncherPromo(const base::ListValue* args);
-
-  // Callback for "closeNotification" message.
-  void HandleNotificationClose(const base::ListValue* args);
-
-  // Callback for "setNotificationsDisabled" message.
-  void HandleSetNotificationsDisabled(const base::ListValue* args);
-
-  // Register app launcher preferences.
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
-
-  // Records the given type of app launch for UMA.
-  static void RecordAppLaunchType(extension_misc::AppLaunchBucket bucket,
-                                  extensions::Manifest::Type app_type);
-
-  // Records an app launch from the search view of the app list.
-  static void RecordAppListSearchLaunch(const extensions::Extension* extension);
-
-  // Records an app launch from the main view of the app list.
-  static void RecordAppListMainLaunch(const extensions::Extension* extension);
+  void OnLearnMore(const base::ListValue* args);
 
  private:
   struct AppInstallInfo {
@@ -135,15 +119,6 @@ class AppLauncherHandler : public content::WebUIMessageHandler,
 
   // Reset some instance flags we use to track the currently uninstalling app.
   void CleanupAfterUninstall();
-
-  // Records a web store launch in the appropriate histograms.
-  static void RecordWebStoreLaunch();
-
-  // Records an app launch in the corresponding |bucket| of the app launch
-  // histogram if the |escaped_url| corresponds to an installed app.
-  static void RecordAppLaunchByUrl(Profile* profile,
-                                   std::string escaped_url,
-                                   extension_misc::AppLaunchBucket bucket);
 
   // Prompts the user to re-enable the app for |extension_id|.
   void PromptToEnableApp(const std::string& extension_id);

@@ -53,13 +53,14 @@ ChromeDownloadManagerDelegate* DownloadService::GetDownloadManagerDelegate() {
 #endif
 
   if (!profile_->IsOffTheRecord()) {
-    HistoryService* hs = HistoryServiceFactory::GetForProfile(
+    HistoryService* history = HistoryServiceFactory::GetForProfile(
         profile_, Profile::EXPLICIT_ACCESS);
-    if (hs)
-      download_history_.reset(new DownloadHistory(
-          manager,
-          scoped_ptr<DownloadHistory::HistoryAdapter>(
-            new DownloadHistory::HistoryAdapter(hs))));
+    history->GetNextDownloadId(base::Bind(
+        &ChromeDownloadManagerDelegate::SetNextId, manager_delegate_));
+    download_history_.reset(new DownloadHistory(
+        manager,
+        scoped_ptr<DownloadHistory::HistoryAdapter>(
+            new DownloadHistory::HistoryAdapter(history))));
   }
 
   // Pass an empty delegate when constructing the DownloadUIController. The
@@ -101,9 +102,9 @@ int DownloadService::DownloadCountAllProfiles() {
   int count = 0;
   for (std::vector<Profile*>::iterator it = profiles.begin();
        it < profiles.end(); ++it) {
-    count += DownloadServiceFactory::GetForProfile(*it)->DownloadCount();
+    count += DownloadServiceFactory::GetForBrowserContext(*it)->DownloadCount();
     if ((*it)->HasOffTheRecordProfile())
-      count += DownloadServiceFactory::GetForProfile(
+      count += DownloadServiceFactory::GetForBrowserContext(
           (*it)->GetOffTheRecordProfile())->DownloadCount();
   }
 
@@ -122,6 +123,15 @@ void DownloadService::SetDownloadManagerDelegateForTesting(
     dm->SetDelegate(new_delegate);
     new_delegate->SetDownloadManager(dm);
   }
+}
+
+bool DownloadService::IsShelfEnabled() {
+#if defined(OS_ANDROID)
+  return true;
+#else
+  return !extension_event_router_ ||
+         extension_event_router_->IsShelfEnabled();
+#endif
 }
 
 void DownloadService::Shutdown() {

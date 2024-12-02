@@ -9,7 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/stream_parser_buffer.h"
@@ -38,7 +38,6 @@ class MP4StreamParserTest : public testing::Test {
 
  protected:
   scoped_ptr<MP4StreamParser> parser_;
-  base::TimeDelta segment_start_;
   bool configs_received_;
 
   bool AppendData(const uint8* data, size_t length) {
@@ -70,15 +69,22 @@ class MP4StreamParserTest : public testing::Test {
     return true;
   }
 
-  bool NewBuffersF(const StreamParser::BufferQueue& bufs) {
-    DVLOG(2) << "NewBuffersF: " << bufs.size() << " buffers";
-    for (StreamParser::BufferQueue::const_iterator buf = bufs.begin();
-         buf != bufs.end(); buf++) {
-      DVLOG(3) << "  n=" << buf - bufs.begin()
-               << ", size=" << (*buf)->GetDataSize()
-               << ", dur=" << (*buf)->GetDuration().InMilliseconds();
-      EXPECT_GE((*buf)->GetTimestamp(), segment_start_);
+
+  void DumpBuffers(const std::string& label,
+                   const StreamParser::BufferQueue& buffers) {
+    DVLOG(2) << "DumpBuffers: " << label << " size " << buffers.size();
+    for (StreamParser::BufferQueue::const_iterator buf = buffers.begin();
+         buf != buffers.end(); buf++) {
+      DVLOG(3) << "  n=" << buf - buffers.begin()
+               << ", size=" << (*buf)->data_size()
+               << ", dur=" << (*buf)->duration().InMilliseconds();
     }
+  }
+
+  bool NewBuffersF(const StreamParser::BufferQueue& audio_buffers,
+                   const StreamParser::BufferQueue& video_buffers) {
+    DumpBuffers("audio_buffers", audio_buffers);
+    DumpBuffers("video_buffers", video_buffers);
     return true;
   }
 
@@ -87,13 +93,12 @@ class MP4StreamParserTest : public testing::Test {
     return true;
   }
 
-  bool KeyNeededF(const std::string& type,
+  void KeyNeededF(const std::string& type,
                   scoped_ptr<uint8[]> init_data, int init_data_size) {
     DVLOG(1) << "KeyNeededF: " << init_data_size;
     EXPECT_EQ(kMp4InitDataType, type);
     EXPECT_TRUE(init_data.get());
     EXPECT_GT(init_data_size, 0);
-    return true;
   }
 
   scoped_ptr<TextTrack> AddTextTrackF(
@@ -103,9 +108,8 @@ class MP4StreamParserTest : public testing::Test {
     return scoped_ptr<TextTrack>();
   }
 
-  void NewSegmentF(TimeDelta start_dts) {
-    DVLOG(1) << "NewSegmentF: " << start_dts.InMilliseconds();
-    segment_start_ = start_dts;
+  void NewSegmentF() {
+    DVLOG(1) << "NewSegmentF";
   }
 
   void EndOfSegmentF() {
@@ -116,7 +120,6 @@ class MP4StreamParserTest : public testing::Test {
     parser_->Init(
         base::Bind(&MP4StreamParserTest::InitF, base::Unretained(this)),
         base::Bind(&MP4StreamParserTest::NewConfigF, base::Unretained(this)),
-        base::Bind(&MP4StreamParserTest::NewBuffersF, base::Unretained(this)),
         base::Bind(&MP4StreamParserTest::NewBuffersF, base::Unretained(this)),
         base::Bind(&MP4StreamParserTest::NewTextBuffersF,
                    base::Unretained(this)),
@@ -132,57 +135,57 @@ class MP4StreamParserTest : public testing::Test {
     InitializeParser();
 
     scoped_refptr<DecoderBuffer> buffer = ReadTestDataFile(filename);
-    EXPECT_TRUE(AppendDataInPieces(buffer->GetData(),
-                                   buffer->GetDataSize(),
+    EXPECT_TRUE(AppendDataInPieces(buffer->data(),
+                                   buffer->data_size(),
                                    append_bytes));
     return true;
   }
 };
 
-TEST_F(MP4StreamParserTest, TestUnalignedAppend) {
+TEST_F(MP4StreamParserTest, UnalignedAppend) {
   // Test small, non-segment-aligned appends (small enough to exercise
   // incremental append system)
   ParseMP4File("bear-1280x720-av_frag.mp4", 512);
 }
 
-TEST_F(MP4StreamParserTest, TestBytewiseAppend) {
+TEST_F(MP4StreamParserTest, BytewiseAppend) {
   // Ensure no incremental errors occur when parsing
   ParseMP4File("bear-1280x720-av_frag.mp4", 1);
 }
 
-TEST_F(MP4StreamParserTest, TestMultiFragmentAppend) {
+TEST_F(MP4StreamParserTest, MultiFragmentAppend) {
   // Large size ensures multiple fragments are appended in one call (size is
   // larger than this particular test file)
   ParseMP4File("bear-1280x720-av_frag.mp4", 768432);
 }
 
-TEST_F(MP4StreamParserTest, TestFlush) {
+TEST_F(MP4StreamParserTest, Flush) {
   // Flush while reading sample data, then start a new stream.
   InitializeParser();
 
   scoped_refptr<DecoderBuffer> buffer =
       ReadTestDataFile("bear-1280x720-av_frag.mp4");
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData(), 65536, 512));
+  EXPECT_TRUE(AppendDataInPieces(buffer->data(), 65536, 512));
   parser_->Flush();
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData(),
-                                 buffer->GetDataSize(),
+  EXPECT_TRUE(AppendDataInPieces(buffer->data(),
+                                 buffer->data_size(),
                                  512));
 }
 
-TEST_F(MP4StreamParserTest, TestReinitialization) {
+TEST_F(MP4StreamParserTest, Reinitialization) {
   InitializeParser();
 
   scoped_refptr<DecoderBuffer> buffer =
       ReadTestDataFile("bear-1280x720-av_frag.mp4");
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData(),
-                                 buffer->GetDataSize(),
+  EXPECT_TRUE(AppendDataInPieces(buffer->data(),
+                                 buffer->data_size(),
                                  512));
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData(),
-                                 buffer->GetDataSize(),
+  EXPECT_TRUE(AppendDataInPieces(buffer->data(),
+                                 buffer->data_size(),
                                  512));
 }
 
-TEST_F(MP4StreamParserTest, TestMPEG2_AAC_LC) {
+TEST_F(MP4StreamParserTest, MPEG2_AAC_LC) {
   std::set<int> audio_object_types;
   audio_object_types.insert(kISO_13818_7_AAC_LC);
   parser_.reset(new MP4StreamParser(audio_object_types, false));
@@ -190,19 +193,19 @@ TEST_F(MP4StreamParserTest, TestMPEG2_AAC_LC) {
 }
 
 // Test that a moov box is not always required after Flush() is called.
-TEST_F(MP4StreamParserTest, TestNoMoovAfterFlush) {
+TEST_F(MP4StreamParserTest, NoMoovAfterFlush) {
   InitializeParser();
 
   scoped_refptr<DecoderBuffer> buffer =
       ReadTestDataFile("bear-1280x720-av_frag.mp4");
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData(),
-                                 buffer->GetDataSize(),
+  EXPECT_TRUE(AppendDataInPieces(buffer->data(),
+                                 buffer->data_size(),
                                  512));
   parser_->Flush();
 
   const int kFirstMoofOffset = 1307;
-  EXPECT_TRUE(AppendDataInPieces(buffer->GetData() + kFirstMoofOffset,
-                                 buffer->GetDataSize() - kFirstMoofOffset,
+  EXPECT_TRUE(AppendDataInPieces(buffer->data() + kFirstMoofOffset,
+                                 buffer->data_size() - kFirstMoofOffset,
                                  512));
 }
 

@@ -88,8 +88,7 @@ using content::UserMetricsAction;
     return;
 
   NSColor* color =
-      themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT,
-                                true);
+      themeProvider->GetNSColor(ThemeProperties::COLOR_BOOKMARK_TEXT);
   [noItemTextfield_ setTextColor:color];
 }
 
@@ -119,10 +118,6 @@ using content::UserMetricsAction;
     [controller_ setDropInsertionPos:dropIndicatorPosition_];
   else
     [controller_ clearDropInsertionPos];
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-  [super drawRect:dirtyRect];
 }
 
 // Shim function to assist in unit testing.

@@ -7,11 +7,13 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/output/output_surface.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 
 namespace cc {
+class ContextProvider;
 class CompositorFrameMetadata;
 }
 
@@ -30,6 +32,7 @@ class SynchronousCompositorOutputSurfaceDelegate {
   virtual void SetContinuousInvalidate(bool enable) = 0;
   virtual void UpdateFrameMetaData(
       const cc::CompositorFrameMetadata& frame_metadata) = 0;
+  virtual void DidActivatePendingTree() = 0;
 
  protected:
   SynchronousCompositorOutputSurfaceDelegate() {}
@@ -58,10 +61,14 @@ class SynchronousCompositorOutputSurface
   virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
 
   // Partial SynchronousCompositor API implementation.
-  bool InitializeHwDraw();
+  bool InitializeHwDraw(
+      scoped_refptr<gfx::GLSurface> surface,
+      scoped_refptr<cc::ContextProvider> offscreen_context);
+  void ReleaseHwDraw();
   bool DemandDrawHw(gfx::Size surface_size,
                     const gfx::Transform& transform,
-                    gfx::Rect clip);
+                    gfx::Rect clip,
+                    bool stencil_enabled);
   bool DemandDrawSw(SkCanvas* canvas);
 
  private:
@@ -72,8 +79,6 @@ class SynchronousCompositorOutputSurface
   virtual void PostCheckForRetroactiveBeginFrame() OVERRIDE;
 
   void InvokeComposite(gfx::Size damage_size);
-  void UpdateCompositorClientSettings();
-  void NotifyCompositorSettingsChanged();
   bool CalledOnValidThread() const;
   SynchronousCompositorOutputSurfaceDelegate* GetDelegate();
 

@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/events/event.h"
@@ -616,6 +616,20 @@ void RootView::ViewHierarchyChanged(
       scroll_gesture_handler_ = NULL;
     if (event_dispatch_target_ == details.child)
       event_dispatch_target_ = NULL;
+  }
+}
+
+void RootView::VisibilityChanged(View* /*starting_from*/, bool is_visible) {
+  if (!is_visible) {
+    // When the root view is being hidden (e.g. when widget is minimized)
+    // handlers are reset, so that after it is reshown, events are not captured
+    // by old handlers.
+    mouse_pressed_handler_ = NULL;
+    mouse_move_handler_ = NULL;
+    touch_pressed_handler_ = NULL;
+    gesture_handler_ = NULL;
+    scroll_gesture_handler_ = NULL;
+    event_dispatch_target_ = NULL;
   }
 }
 

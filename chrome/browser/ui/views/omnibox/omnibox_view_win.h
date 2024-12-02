@@ -21,7 +21,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/win/extra_sdk_defines.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 
 class LocationBarView;
 class OmniboxPopupView;
@@ -63,7 +63,7 @@ class OmniboxViewWin
                  LocationBarView* parent_view,
                  CommandUpdater* command_updater,
                  bool popup_window_mode,
-                 const gfx::Font& font,
+                 const gfx::FontList& font_list,
                  int font_y_offset);
   ~OmniboxViewWin();
 
@@ -110,9 +110,9 @@ class OmniboxViewWin
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
-  virtual void SetInstantSuggestion(const string16& suggestion) OVERRIDE;
+  virtual void SetGrayTextAutocompletion(const string16& suggestion) OVERRIDE;
   virtual int TextWidth() const OVERRIDE;
-  virtual string16 GetInstantSuggestion() const OVERRIDE;
+  virtual string16 GetGrayTextAutocompletion() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
   virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
@@ -470,9 +470,8 @@ class OmniboxViewWin
   scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
   scoped_ptr<views::MenuRunner> context_menu_runner_;
 
-  // Font we're using.  We keep a reference to make sure the font supplied to
-  // the constructor doesn't go away before we do.
-  gfx::Font font_;
+  // The font list to draw text in Omnibox.
+  gfx::FontList font_list_;
 
   // Metrics about the font, which we keep so we don't need to recalculate them
   // every time we paint.  |font_y_adjustment_| is the number of pixels we need

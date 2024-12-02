@@ -9,9 +9,13 @@
 #include <map>
 #include <string>
 
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "apps/shell_window_registry.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/window_observer.h"
+
+namespace apps {
+class ShellWindow;
+}
 
 namespace aura {
 
@@ -24,14 +28,13 @@ class ActivationClient;
 }
 
 class ChromeLauncherController;
-class ShellWindow;
 class ShellWindowLauncherItemController;
 
 // ShellWindowLauncherController observes the Shell Window registry and the
 // aura window manager. It handles adding and removing launcher items from
 // ChromeLauncherController.
 class ShellWindowLauncherController
-    : public extensions::ShellWindowRegistry::Observer,
+    : public apps::ShellWindowRegistry::Observer,
       public aura::WindowObserver,
       public aura::client::ActivationChangeObserver {
  public:
@@ -39,9 +42,10 @@ class ShellWindowLauncherController
   virtual ~ShellWindowLauncherController();
 
   // Overridden from ShellWindowRegistry::Observer:
-  virtual void OnShellWindowAdded(ShellWindow* shell_window) OVERRIDE;
-  virtual void OnShellWindowIconChanged(ShellWindow* shell_window) OVERRIDE;
-  virtual void OnShellWindowRemoved(ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowAdded(apps::ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowIconChanged(
+      apps::ShellWindow* shell_window) OVERRIDE;
+  virtual void OnShellWindowRemoved(apps::ShellWindow* shell_window) OVERRIDE;
 
   // Overriden from aura::WindowObserver:
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
@@ -64,7 +68,7 @@ class ShellWindowLauncherController
   ShellWindowLauncherItemController* ControllerForWindow(aura::Window* window);
 
   ChromeLauncherController* owner_;
-  extensions::ShellWindowRegistry* registry_;  // Unowned convenience pointer
+  apps::ShellWindowRegistry* registry_;  // Unowned convenience pointer
   aura::client::ActivationClient* activation_client_;
 
   // Map of app launcher id to controller.

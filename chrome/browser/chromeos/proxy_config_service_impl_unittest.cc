@@ -9,7 +9,7 @@
 #include "base/format_macros.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -221,12 +221,16 @@ class ProxyConfigServiceImplTest : public testing::Test {
     SetUpNetwork();
 
     PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service_.registry());
-    ProxyConfigServiceImpl::RegisterPrefs(pref_service_.registry());
-    proxy_config_service_.reset(new ChromeProxyConfigService(NULL));
-    config_service_impl_.reset(new ProxyConfigServiceImpl(&pref_service_));
-    config_service_impl_->SetChromeProxyConfigService(
-        proxy_config_service_.get());
-    // SetChromeProxyConfigService triggers update of initial prefs proxy
+
+    // Create a ProxyConfigServiceImpl like for the system request context.
+    config_service_impl_.reset(
+        new ProxyConfigServiceImpl(NULL,  // no profile prefs
+                                   &pref_service_));
+    proxy_config_service_ =
+        config_service_impl_->CreateTrackingProxyConfigService(
+            scoped_ptr<net::ProxyConfigService>());
+
+    // CreateTrackingProxyConfigService triggers update of initial prefs proxy
     // config by tracker to chrome proxy config service, so flush all pending
     // tasks so that tests start fresh.
     loop_.RunUntilIdle();
@@ -245,14 +249,11 @@ class ProxyConfigServiceImplTest : public testing::Test {
 
     service_test->AddService("stub_wifi2", "wifi2_PSK",
                              flimflam::kTypeWifi, flimflam::kStateOnline,
-                             true /* add to watchlist */);
+                             true /* visible */, true /* watch */);
     service_test->SetServiceProperty("stub_wifi2",
                                      flimflam::kGuidProperty,
                                      base::StringValue("stub_wifi2"));
-    service_test->SetServiceProperty("stub_wifi2",
-                                     flimflam::kProfileProperty,
-                                     base::StringValue(kUserProfilePath));
-    profile_test->AddService("stub_wifi2");
+    profile_test->AddService(kUserProfilePath, "stub_wifi2");
 
     loop_.RunUntilIdle();
   }
@@ -320,7 +321,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
   }
 
   base::MessageLoop loop_;
-  scoped_ptr<ChromeProxyConfigService> proxy_config_service_;
+  scoped_ptr<net::ProxyConfigService> proxy_config_service_;
   scoped_ptr<ProxyConfigServiceImpl> config_service_impl_;
   TestingPrefServiceSimple pref_service_;
 

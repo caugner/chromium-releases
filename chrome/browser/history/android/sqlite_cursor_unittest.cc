@@ -10,7 +10,7 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/history/android/android_history_provider_service.h"
 #include "chrome/browser/history/android/android_history_types.h"
 #include "chrome/browser/history/android/android_time.h"
@@ -63,7 +63,7 @@ class SQLiteCursorTest : public testing::Test,
     ui_test_utils::WaitForBookmarkModelToLoad(testing_profile_);
 
     testing_profile_->CreateFaviconService();
-    testing_profile_->CreateHistoryService(true, false);
+    ASSERT_TRUE(testing_profile_->CreateHistoryService(true, false));
     service_.reset(new AndroidHistoryProviderService(testing_profile_));
     hs_ = HistoryServiceFactory::GetForProfile(testing_profile_,
                                                Profile::EXPLICIT_ACCESS);

@@ -9,7 +9,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/ui/tabs/tab_strip_layout_type.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
@@ -475,7 +475,15 @@ class TabStrip : public views::View,
   int GenerateIdealBoundsForMiniTabs(int* first_non_mini_index);
 
   // Returns the width needed for the new tab button (and padding).
-  int new_tab_button_width() const;
+  static int new_tab_button_width();
+
+  // Returns the vertical offset of the tab strip button. This offset applies
+  // only to restored windows.
+  static int button_v_offset();
+
+  // Returns the width of the area that contains tabs. This does not include
+  // the width of the new tab button.
+  int tab_area_width() const;
 
   // Starts various types of TabStrip animations.
   void StartResizeLayoutAnimation();

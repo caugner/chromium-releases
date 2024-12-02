@@ -76,17 +76,36 @@ class ASH_EXPORT BaseLayoutManager
                                  aura::Window* lost_active) OVERRIDE;
 
  protected:
+  enum AdjustWindowReason {
+    ADJUST_WINDOW_DISPLAY_SIZE_CHANGED,
+    ADJUST_WINDOW_WORK_AREA_INSETS_CHANGED,
+  };
+
   // Invoked from OnWindowPropertyChanged() if |kShowStateKey| changes.
   virtual void ShowStateChanged(aura::Window* window,
                                 ui::WindowShowState last_show_state);
 
+  // Adjusts the window's bounds when the display area changes for given
+  // window. This happens when the display size, work area insets or
+  // the display on which the window exists has changed.
+  // If this is called for a display size change (i.e. |reason|
+  // is ADJUST_WINDOW_DISPLAY_SIZE_CHANGED), the non-maximized/non-fullscreen
+  // windows are readjusted to make sure the window is completely within the
+  // display region. Otherwise, it makes sure at least some parts of the window
+  // is on display.
+  virtual void AdjustAllWindowsBoundsForWorkAreaChange(
+      AdjustWindowReason reason);
+
+  // Adjusts the sizes of the specific window in respond to a screen change or
+  // display-area size change.
+  virtual void AdjustWindowBoundsForWorkAreaChange(aura::Window* window,
+                                                   AdjustWindowReason reason);
+
+  aura::RootWindow* root_window() { return root_window_; }
+
  private:
   // Update window bounds based on a change in show state.
   void UpdateBoundsFromShowState(aura::Window* window);
-
-  // Adjusts the window sizes when the screen changes its size or its
-  // work area insets.
-  void AdjustWindowSizesForScreenChange();
 
   // Set of windows we're listening to.
   WindowSet windows_;

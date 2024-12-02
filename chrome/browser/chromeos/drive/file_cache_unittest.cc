@@ -10,6 +10,7 @@
 #include "base/file_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/md5.h"
 #include "base/run_loop.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
@@ -77,16 +78,16 @@ class FileCacheTestOnUIThread : public testing::Test {
         pool->GetSequencedTaskRunner(pool->GetSequenceToken());
 
     metadata_storage_.reset(new ResourceMetadataStorage(
-        temp_dir_.path(), blocking_task_runner_));
+        temp_dir_.path(), blocking_task_runner_.get()));
 
     bool success = false;
     base::PostTaskAndReplyWithResult(
-        blocking_task_runner_,
+        blocking_task_runner_.get(),
         FROM_HERE,
         base::Bind(&ResourceMetadataStorage::Initialize,
                    base::Unretained(metadata_storage_.get())),
         google_apis::test_util::CreateCopyResultCallback(&success));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
     ASSERT_TRUE(success);
 
     cache_.reset(new FileCache(
@@ -97,37 +98,28 @@ class FileCacheTestOnUIThread : public testing::Test {
 
     success = false;
     base::PostTaskAndReplyWithResult(
-        blocking_task_runner_,
+        blocking_task_runner_.get(),
         FROM_HERE,
-        base::Bind(&FileCache::Initialize,
-                   base::Unretained(cache_.get())),
+        base::Bind(&FileCache::Initialize, base::Unretained(cache_.get())),
         google_apis::test_util::CreateCopyResultCallback(&success));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
     ASSERT_TRUE(success);
   }
 
-  void TestGetFileFromCacheByResourceIdAndMd5(
-      const std::string& resource_id,
-      const std::string& md5,
-      FileError expected_error,
-      const std::string& expected_file_extension) {
+  void TestGetFile(const std::string& resource_id,
+                   FileError expected_error) {
     FileError error = FILE_ERROR_OK;
     base::FilePath cache_file_path;
-    cache_->GetFileOnUIThread(resource_id, md5,
+    cache_->GetFileOnUIThread(resource_id,
                               google_apis::test_util::CreateCopyResultCallback(
                                   &error, &cache_file_path));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
 
     EXPECT_EQ(expected_error, error);
     if (error == FILE_ERROR_OK) {
       // Verify filename of |cache_file_path|.
-      base::FilePath base_name = cache_file_path.BaseName();
-      EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                base::FilePath::kExtensionSeparator +
-                util::EscapeCacheFileName(
-                    expected_file_extension.empty() ?
-                    md5 : expected_file_extension),
-                base_name.value());
+      EXPECT_EQ(util::EscapeCacheFileName(resource_id),
+                cache_file_path.BaseName().AsUTF8Unsafe());
     } else {
       EXPECT_TRUE(cache_file_path.empty());
     }
@@ -146,8 +138,15 @@ class FileCacheTestOnUIThread : public testing::Test {
         resource_id, md5, source_path,
         FileCache::FILE_OPERATION_COPY,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
-    VerifyCacheFileState(error, resource_id, md5);
+    test_util::RunBlockingPoolTask();
+
+    if (error == FILE_ERROR_OK) {
+      FileCacheEntry cache_entry;
+      EXPECT_TRUE(GetCacheEntryFromOriginThread(resource_id, &cache_entry));
+      EXPECT_EQ(md5, cache_entry.md5());
+    }
+
+    VerifyCacheFileState(error, resource_id);
   }
 
   void TestRemoveFromCache(const std::string& resource_id,
@@ -158,36 +157,19 @@ class FileCacheTestOnUIThread : public testing::Test {
     cache_->RemoveOnUIThread(
         resource_id,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
-    VerifyRemoveFromCache(error, resource_id, "");
+    test_util::RunBlockingPoolTask();
+    VerifyRemoveFromCache(error, resource_id);
   }
 
-  // Returns number of files matching to |path_pattern|.
-  int CountFilesWithPathPattern(const base::FilePath& path_pattern) {
-    int result = 0;
-    base::FileEnumerator enumerator(
-        path_pattern.DirName(), false /* not recursive*/,
-        base::FileEnumerator::FILES,
-        path_pattern.BaseName().value());
-    for (base::FilePath current = enumerator.Next(); !current.empty();
-         current = enumerator.Next())
-      ++result;
-    return result;
-  }
-
-  void VerifyRemoveFromCache(FileError error,
-                             const std::string& resource_id,
-                             const std::string& md5) {
+  void VerifyRemoveFromCache(FileError error, const std::string& resource_id) {
     EXPECT_EQ(expected_error_, error);
 
     FileCacheEntry cache_entry;
-    if (!GetCacheEntryFromOriginThread(resource_id, md5, &cache_entry)) {
+    if (!GetCacheEntryFromOriginThread(resource_id, &cache_entry)) {
       EXPECT_EQ(FILE_ERROR_OK, error);
 
-      // Verify that no files with "<resource_id>.*" exist.
-      const base::FilePath path_pattern = cache_->GetCacheFilePath(
-          resource_id, util::kWildCard, FileCache::CACHED_FILE_FROM_SERVER);
-      EXPECT_EQ(0, CountFilesWithPathPattern(path_pattern));
+      const base::FilePath path = cache_->GetCacheFilePath(resource_id);
+      EXPECT_FALSE(base::PathExists(path));
     }
   }
 
@@ -201,8 +183,8 @@ class FileCacheTestOnUIThread : public testing::Test {
     cache_->PinOnUIThread(
         resource_id,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
-    VerifyCacheFileState(error, resource_id, std::string());
+    test_util::RunBlockingPoolTask();
+    VerifyCacheFileState(error, resource_id);
   }
 
   void TestUnpin(const std::string& resource_id,
@@ -215,12 +197,11 @@ class FileCacheTestOnUIThread : public testing::Test {
     cache_->UnpinOnUIThread(
         resource_id,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
-    VerifyCacheFileState(error, resource_id, std::string());
+    test_util::RunBlockingPoolTask();
+    VerifyCacheFileState(error, resource_id);
   }
 
   void TestMarkDirty(const std::string& resource_id,
-                     const std::string& md5,
                      FileError expected_error,
                      int expected_cache_state) {
     expected_error_ = expected_error;
@@ -228,27 +209,24 @@ class FileCacheTestOnUIThread : public testing::Test {
 
     FileError error = FILE_ERROR_OK;
     cache_->MarkDirtyOnUIThread(
-        resource_id, md5,
+        resource_id,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
 
-    VerifyCacheFileState(error, resource_id, md5);
+    VerifyCacheFileState(error, resource_id);
 
     // Verify filename.
     if (error == FILE_ERROR_OK) {
       base::FilePath cache_file_path;
       cache_->GetFileOnUIThread(
-          resource_id, md5,
+          resource_id,
           google_apis::test_util::CreateCopyResultCallback(
               &error, &cache_file_path));
-      google_apis::test_util::RunBlockingPoolTask();
+      test_util::RunBlockingPoolTask();
 
       EXPECT_EQ(FILE_ERROR_OK, error);
-      base::FilePath base_name = cache_file_path.BaseName();
-      EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                base::FilePath::kExtensionSeparator +
-                "local",
-                base_name.value());
+      EXPECT_EQ(util::EscapeCacheFileName(resource_id),
+                cache_file_path.BaseName().AsUTF8Unsafe());
     }
   }
 
@@ -268,8 +246,15 @@ class FileCacheTestOnUIThread : public testing::Test {
                    resource_id,
                    md5),
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
-    VerifyCacheFileState(error, resource_id, md5);
+    test_util::RunBlockingPoolTask();
+
+    if (error == FILE_ERROR_OK) {
+      FileCacheEntry cache_entry;
+      EXPECT_TRUE(GetCacheEntryFromOriginThread(resource_id, &cache_entry));
+      EXPECT_EQ(md5, cache_entry.md5());
+    }
+
+    VerifyCacheFileState(error, resource_id);
   }
 
   void TestMarkAsMounted(const std::string& resource_id,
@@ -279,8 +264,7 @@ class FileCacheTestOnUIThread : public testing::Test {
     expected_cache_state_ = expected_cache_state;
 
     FileCacheEntry entry;
-    EXPECT_TRUE(GetCacheEntryFromOriginThread(resource_id, std::string(),
-                                              &entry));
+    EXPECT_TRUE(GetCacheEntryFromOriginThread(resource_id, &entry));
 
     FileError error = FILE_ERROR_OK;
     base::FilePath cache_file_path;
@@ -288,16 +272,13 @@ class FileCacheTestOnUIThread : public testing::Test {
         resource_id,
         google_apis::test_util::CreateCopyResultCallback(
             &error, &cache_file_path));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
 
-    EXPECT_TRUE(file_util::PathExists(cache_file_path));
-    EXPECT_EQ(cache_file_path,
-              cache_->GetCacheFilePath(resource_id, entry.md5(),
-                                       FileCache::CACHED_FILE_FROM_SERVER));
+    EXPECT_TRUE(base::PathExists(cache_file_path));
+    EXPECT_EQ(cache_file_path, cache_->GetCacheFilePath(resource_id));
   }
 
   void TestMarkAsUnmounted(const std::string& resource_id,
-                           const std::string& md5,
                            const base::FilePath& file_path,
                            FileError expected_error,
                            int expected_cache_state) {
@@ -308,31 +289,27 @@ class FileCacheTestOnUIThread : public testing::Test {
     cache_->MarkAsUnmountedOnUIThread(
         file_path,
         google_apis::test_util::CreateCopyResultCallback(&error));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
 
     base::FilePath cache_file_path;
     cache_->GetFileOnUIThread(
-        resource_id, md5,
+        resource_id,
         google_apis::test_util::CreateCopyResultCallback(
             &error, &cache_file_path));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
     EXPECT_EQ(FILE_ERROR_OK, error);
 
-    EXPECT_TRUE(file_util::PathExists(cache_file_path));
-    EXPECT_EQ(cache_file_path,
-              cache_->GetCacheFilePath(resource_id, md5,
-                                       FileCache::CACHED_FILE_FROM_SERVER));
+    EXPECT_TRUE(base::PathExists(cache_file_path));
+    EXPECT_EQ(cache_file_path, cache_->GetCacheFilePath(resource_id));
   }
 
-  void VerifyCacheFileState(FileError error,
-                            const std::string& resource_id,
-                            const std::string& md5) {
+  void VerifyCacheFileState(FileError error, const std::string& resource_id) {
     EXPECT_EQ(expected_error_, error);
 
     // Verify cache map.
     FileCacheEntry cache_entry;
     const bool cache_entry_found =
-        GetCacheEntryFromOriginThread(resource_id, md5, &cache_entry);
+        GetCacheEntryFromOriginThread(resource_id, &cache_entry);
     if ((expected_cache_state_ & TEST_CACHE_STATE_PRESENT) ||
         (expected_cache_state_ & TEST_CACHE_STATE_PINNED)) {
       ASSERT_TRUE(cache_entry_found);
@@ -347,80 +324,43 @@ class FileCacheTestOnUIThread : public testing::Test {
     }
 
     // Verify actual cache file.
-    base::FilePath dest_path = cache_->GetCacheFilePath(
-        resource_id,
-        cache_entry.md5(),
-        (expected_cache_state_ & TEST_CACHE_STATE_DIRTY) ?
-            FileCache::CACHED_FILE_LOCALLY_MODIFIED :
-        FileCache::CACHED_FILE_FROM_SERVER);
+    base::FilePath dest_path = cache_->GetCacheFilePath(resource_id);
     EXPECT_EQ((expected_cache_state_ & TEST_CACHE_STATE_PRESENT) != 0,
-              file_util::PathExists(dest_path));
-  }
-
-  base::FilePath GetCacheFilePath(const std::string& resource_id,
-                                  const std::string& md5,
-                                  FileCache::CachedFileOrigin file_origin) {
-    return cache_->GetCacheFilePath(resource_id, md5, file_origin);
+              base::PathExists(dest_path));
   }
 
   // Helper function to call GetCacheEntry from origin thread.
   bool GetCacheEntryFromOriginThread(const std::string& resource_id,
-                                     const std::string& md5,
                                      FileCacheEntry* cache_entry) {
     bool result = false;
     cache_->GetCacheEntryOnUIThread(
-        resource_id, md5,
+        resource_id,
         google_apis::test_util::CreateCopyResultCallback(&result, cache_entry));
-    google_apis::test_util::RunBlockingPoolTask();
+    test_util::RunBlockingPoolTask();
     return result;
   }
 
-  // Returns true if the cache entry exists for the given resource ID and MD5.
-  bool CacheEntryExists(const std::string& resource_id,
-                        const std::string& md5) {
+  // Returns true if the cache entry exists for the given resource ID.
+  bool CacheEntryExists(const std::string& resource_id) {
     FileCacheEntry cache_entry;
-    return GetCacheEntryFromOriginThread(resource_id, md5, &cache_entry);
-  }
-
-  void TestGetCacheFilePath(const std::string& resource_id,
-                            const std::string& md5,
-                            const std::string& expected_filename) {
-    base::FilePath actual_path = cache_->GetCacheFilePath(
-        resource_id, md5, FileCache::CACHED_FILE_FROM_SERVER);
-    base::FilePath expected_path =
-        temp_dir_.path().Append(util::kCacheFileDirectory);
-    expected_path = expected_path.Append(
-        base::FilePath::FromUTF8Unsafe(expected_filename));
-    EXPECT_EQ(expected_path, actual_path);
-
-    base::FilePath base_name = actual_path.BaseName();
-
-    // base::FilePath::Extension returns ".", so strip it.
-    std::string unescaped_md5 = util::UnescapeCacheFileName(
-        base_name.Extension().substr(1));
-    EXPECT_EQ(md5, unescaped_md5);
-    std::string unescaped_resource_id = util::UnescapeCacheFileName(
-        base_name.RemoveExtension().value());
-    EXPECT_EQ(resource_id, unescaped_resource_id);
+    return GetCacheEntryFromOriginThread(resource_id, &cache_entry);
   }
 
   // Returns the number of the cache files with name <resource_id>, and Confirm
   // that they have the <md5>. This should return 1 or 0.
   size_t CountCacheFiles(const std::string& resource_id,
                          const std::string& md5) {
-    base::FilePath path = GetCacheFilePath(
-        resource_id, util::kWildCard, FileCache::CACHED_FILE_FROM_SERVER);
-    base::FileEnumerator enumerator(path.DirName(), false,
+    base::FilePath path = cache_->GetCacheFilePath(resource_id);
+    base::FileEnumerator enumerator(path.DirName(),
+                                    false,  // recursive
                                     base::FileEnumerator::FILES,
                                     path.BaseName().value());
     size_t num_files_found = 0;
     for (base::FilePath current = enumerator.Next(); !current.empty();
          current = enumerator.Next()) {
       ++num_files_found;
-      EXPECT_EQ(util::EscapeCacheFileName(resource_id) +
-                base::FilePath::kExtensionSeparator +
-                util::EscapeCacheFileName(md5),
-                current.BaseName().value());
+      EXPECT_EQ(util::EscapeCacheFileName(resource_id),
+                current.BaseName().AsUTF8Unsafe());
     }
     return num_files_found;
   }
@@ -439,23 +379,6 @@ class FileCacheTestOnUIThread : public testing::Test {
   int expected_cache_state_;
   std::string expected_file_extension_;
 };
-
-TEST_F(FileCacheTestOnUIThread, GetCacheFilePath) {
-  // Use alphanumeric characters for resource id.
-  std::string resource_id("pdf:1a2b");
-  std::string md5("abcdef0123456789");
-  TestGetCacheFilePath(resource_id, md5,
-                       resource_id + base::FilePath::kExtensionSeparator + md5);
-
-  // Use non-alphanumeric characters for resource id, including '.' which is an
-  // extension separator, to test that the characters are escaped and unescaped
-  // correctly, and '.' doesn't mess up the filename format and operations.
-  resource_id = "pdf:`~!@#$%^&*()-_=+[{|]}\\;',<.>/?";
-  std::string escaped_resource_id = util::EscapeCacheFileName(resource_id);
-  std::string escaped_md5 = util::EscapeCacheFileName(md5);
-  TestGetCacheFilePath(resource_id, md5, escaped_resource_id +
-                       base::FilePath::kExtensionSeparator + escaped_md5);
-}
 
 TEST_F(FileCacheTestOnUIThread, StoreToCacheSimple) {
   std::string resource_id("pdf:1a2b");
@@ -491,19 +414,11 @@ TEST_F(FileCacheTestOnUIThread, GetFromCacheSimple) {
                    FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
 
   // Then try to get the existing file from cache.
-  TestGetFileFromCacheByResourceIdAndMd5(
-      resource_id, md5, FILE_ERROR_OK, md5);
+  TestGetFile(resource_id, FILE_ERROR_OK);
 
-  // Get file from cache with same resource id as existing file but different
-  // md5.
-  TestGetFileFromCacheByResourceIdAndMd5(
-      resource_id, "9999", FILE_ERROR_NOT_FOUND, md5);
-
-  // Get file from cache with different resource id from existing file but same
-  // md5.
+  // Get file from cache with different resource id.
   resource_id = "document:1a2b";
-  TestGetFileFromCacheByResourceIdAndMd5(
-      resource_id, md5, FILE_ERROR_NOT_FOUND, md5);
+  TestGetFile(resource_id, FILE_ERROR_NOT_FOUND);
 }
 
 TEST_F(FileCacheTestOnUIThread, RemoveFromCacheSimple) {
@@ -586,16 +501,14 @@ TEST_F(FileCacheTestOnUIThread, GetFromCachePinned) {
   TestPin(resource_id, FILE_ERROR_OK, TEST_CACHE_STATE_PINNED);
 
   // Get the non-existent pinned file from cache.
-  TestGetFileFromCacheByResourceIdAndMd5(
-      resource_id, md5, FILE_ERROR_NOT_FOUND, md5);
+  TestGetFile(resource_id, FILE_ERROR_NOT_FOUND);
 
   // Store an existing file to the previously pinned non-existent file.
   TestStoreToCache(resource_id, md5, dummy_file_path_, FILE_ERROR_OK,
                    TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_PINNED);
 
   // Get the previously pinned and stored file from cache.
-  TestGetFileFromCacheByResourceIdAndMd5(
-      resource_id, md5, FILE_ERROR_OK, md5);
+  TestGetFile(resource_id, FILE_ERROR_OK);
 }
 
 TEST_F(FileCacheTestOnUIThread, RemoveFromCachePinned) {
@@ -633,7 +546,7 @@ TEST_F(FileCacheTestOnUIThread, DirtyCacheSimple) {
                    FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
 
   // Mark the file dirty.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
 
   // Clear dirty state of the file.
@@ -651,7 +564,7 @@ TEST_F(FileCacheTestOnUIThread, DirtyCachePinned) {
           TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_PINNED);
 
   // Mark the file dirty.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT |
                 TEST_CACHE_STATE_DIRTY |
                 TEST_CACHE_STATE_PINNED);
@@ -668,18 +581,18 @@ TEST_F(FileCacheTestOnUIThread, PinAndUnpinDirtyCache) {
   // First store a file to cache and mark it as dirty.
   TestStoreToCache(resource_id, md5, dummy_file_path_,
                    FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
 
   // Verifies dirty file exists.
   base::FilePath dirty_path;
   FileError error = FILE_ERROR_FAILED;
   cache_->GetFileOnUIThread(
-      resource_id, md5,
+      resource_id,
       google_apis::test_util::CreateCopyResultCallback(&error, &dirty_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
   EXPECT_EQ(FILE_ERROR_OK, error);
-  EXPECT_TRUE(file_util::PathExists(dirty_path));
+  EXPECT_TRUE(base::PathExists(dirty_path));
 
   // Pin the dirty file.
   TestPin(resource_id, FILE_ERROR_OK,
@@ -688,14 +601,14 @@ TEST_F(FileCacheTestOnUIThread, PinAndUnpinDirtyCache) {
           TEST_CACHE_STATE_PINNED);
 
   // Verify dirty file still exist at the same pathname.
-  EXPECT_TRUE(file_util::PathExists(dirty_path));
+  EXPECT_TRUE(base::PathExists(dirty_path));
 
   // Unpin the dirty file.
   TestUnpin(resource_id, FILE_ERROR_OK,
             TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
 
   // Verify dirty file still exist at the same pathname.
-  EXPECT_TRUE(file_util::PathExists(dirty_path));
+  EXPECT_TRUE(base::PathExists(dirty_path));
 }
 
 TEST_F(FileCacheTestOnUIThread, DirtyCacheRepetitive) {
@@ -707,11 +620,11 @@ TEST_F(FileCacheTestOnUIThread, DirtyCacheRepetitive) {
                    FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
 
   // Mark the file dirty.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
 
   // Again, mark the file dirty.  Nothing should change.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
 
   // Clear dirty state of the file.
@@ -727,7 +640,7 @@ TEST_F(FileCacheTestOnUIThread, DirtyCacheInvalid) {
   std::string md5("abcdef0123456789");
 
   // Mark a non-existent file dirty.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_NOT_FOUND, TEST_CACHE_STATE_NONE);
+  TestMarkDirty(resource_id, FILE_ERROR_NOT_FOUND, TEST_CACHE_STATE_NONE);
 
   // Clear dirty state of a non-existent file.
   TestClearDirty(resource_id, md5, FILE_ERROR_NOT_FOUND, TEST_CACHE_STATE_NONE);
@@ -742,7 +655,7 @@ TEST_F(FileCacheTestOnUIThread, DirtyCacheInvalid) {
 
   // Mark an existing file dirty, then store a new file to the same resource id
   // but different md5, which should fail.
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_DIRTY);
   md5 = "new_md5";
   TestStoreToCache(resource_id, md5, dummy_file_path_,
@@ -759,13 +672,16 @@ TEST_F(FileCacheTestOnUIThread, RemoveFromDirtyCache) {
                    FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
   TestPin(resource_id, FILE_ERROR_OK,
           TEST_CACHE_STATE_PRESENT | TEST_CACHE_STATE_PINNED);
-  TestMarkDirty(resource_id, md5, FILE_ERROR_OK,
+  TestMarkDirty(resource_id, FILE_ERROR_OK,
                 TEST_CACHE_STATE_PRESENT |
                 TEST_CACHE_STATE_PINNED |
                 TEST_CACHE_STATE_DIRTY);
 
-  // Try to remove the file.  Since file is dirty, it should not be removed.
-  TestRemoveFromCache(resource_id, FILE_ERROR_IN_USE);
+  // Try to remove the file.  Dirty caches can be removed at the level of
+  // FileCache::Remove. Upper layer cache clearance functions like
+  // FreeDiskSpaceIfNeededFor() and RemoveStaleCacheFiles() takes care of
+  // securing dirty files.
+  TestRemoveFromCache(resource_id, FILE_ERROR_OK);
 }
 
 TEST_F(FileCacheTestOnUIThread, MountUnmount) {
@@ -778,7 +694,7 @@ TEST_F(FileCacheTestOnUIThread, MountUnmount) {
 
   // Mark the file mounted.
   TestMarkAsMounted(resource_id, FILE_ERROR_OK, TEST_CACHE_STATE_PRESENT);
-  EXPECT_TRUE(CacheEntryExists(resource_id, md5));
+  EXPECT_TRUE(CacheEntryExists(resource_id));
 
   // Try to remove the file.
   TestRemoveFromCache(resource_id, FILE_ERROR_IN_USE);
@@ -787,14 +703,14 @@ TEST_F(FileCacheTestOnUIThread, MountUnmount) {
   base::FilePath file_path;
   FileError error = FILE_ERROR_FAILED;
   cache_->GetFileOnUIThread(
-      resource_id, md5,
+      resource_id,
       google_apis::test_util::CreateCopyResultCallback(&error, &file_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
   EXPECT_EQ(FILE_ERROR_OK, error);
 
-  TestMarkAsUnmounted(resource_id, md5, file_path, FILE_ERROR_OK,
+  TestMarkAsUnmounted(resource_id, file_path, FILE_ERROR_OK,
                       TEST_CACHE_STATE_PRESENT);
-  EXPECT_TRUE(CacheEntryExists(resource_id, md5));
+  EXPECT_TRUE(CacheEntryExists(resource_id));
 
   // Try to remove the file.
   TestRemoveFromCache(resource_id, FILE_ERROR_OK);
@@ -812,7 +728,7 @@ TEST_F(FileCacheTestOnUIThread, Iterate) {
   cache_->IterateOnUIThread(
       base::Bind(&OnIterate, &resource_ids, &cache_entries),
       base::Bind(&OnIterateCompleted, &completed));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   ASSERT_TRUE(completed);
 
@@ -843,12 +759,12 @@ TEST_F(FileCacheTestOnUIThread, ClearAll) {
   bool success = false;
   cache_->ClearAllOnUIThread(
       google_apis::test_util::CreateCopyResultCallback(&success));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
   EXPECT_TRUE(success);
 
   // Verify that all the cache is removed.
   expected_error_ = FILE_ERROR_OK;
-  VerifyRemoveFromCache(FILE_ERROR_OK, resource_id, md5);
+  VerifyRemoveFromCache(FILE_ERROR_OK, resource_id);
   EXPECT_EQ(0U, CountCacheFiles(resource_id, md5));
 }
 
@@ -859,7 +775,8 @@ TEST_F(FileCacheTestOnUIThread, StoreToCacheNoSpace) {
   std::string md5("abcdef0123456789");
 
   // Try to store an existing file.
-  TestStoreToCache(resource_id, md5, dummy_file_path_, FILE_ERROR_NO_SPACE,
+  TestStoreToCache(resource_id, md5, dummy_file_path_,
+                   FILE_ERROR_NO_LOCAL_SPACE,
                    TEST_CACHE_STATE_NONE);
 
   // Verify that there's no files added.
@@ -898,23 +815,23 @@ class FileCacheTest : public testing::Test {
 
     metadata_storage_.reset(new ResourceMetadataStorage(
         temp_dir_.path().Append(util::kMetadataDirectory),
-        base::MessageLoopProxy::current()));
+        base::MessageLoopProxy::current().get()));
     ASSERT_TRUE(metadata_storage_->Initialize());
 
     cache_.reset(new FileCache(
         metadata_storage_.get(),
         temp_dir_.path().Append(util::kCacheFileDirectory),
-        base::MessageLoopProxy::current(),
+        base::MessageLoopProxy::current().get(),
         fake_free_disk_space_getter_.get()));
     ASSERT_TRUE(cache_->Initialize());
   }
 
-  virtual void TearDown() OVERRIDE {
-    cache_.reset();
-  }
-
   static bool ImportOldDB(FileCache* cache, const base::FilePath& old_db_path) {
     return cache->ImportOldDB(old_db_path);
+  }
+
+  static void RenameCacheFilesToNewFormat(FileCache* cache) {
+    cache->RenameCacheFilesToNewFormat();
   }
 
   content::TestBrowserThreadBundle thread_bundle_;
@@ -931,14 +848,12 @@ TEST_F(FileCacheTest, ScanCacheFile) {
   const base::FilePath file_directory =
       temp_dir_.path().Append(util::kCacheFileDirectory);
   ASSERT_TRUE(google_apis::test_util::WriteStringToFile(
-      file_directory.AppendASCII("id_foo.md5foo"), "foo"));
-  ASSERT_TRUE(google_apis::test_util::WriteStringToFile(
-      file_directory.AppendASCII("id_bar.local"), "bar"));
+      file_directory.AppendASCII("id_foo"), "foo"));
 
   // Remove the existing DB.
   const base::FilePath metadata_directory =
       temp_dir_.path().Append(util::kMetadataDirectory);
-  ASSERT_TRUE(file_util::Delete(metadata_directory, true /* recursive */));
+  ASSERT_TRUE(base::DeleteFile(metadata_directory, true /* recursive */));
 
   // Put an empty file with the same name as old DB.
   // This file cannot be opened by ImportOldDB() and will be dismissed.
@@ -948,24 +863,20 @@ TEST_F(FileCacheTest, ScanCacheFile) {
 
   // Create a new cache and initialize it.
   metadata_storage_.reset(new ResourceMetadataStorage(
-      metadata_directory, base::MessageLoopProxy::current()));
+      metadata_directory, base::MessageLoopProxy::current().get()));
   ASSERT_TRUE(metadata_storage_->Initialize());
 
   cache_.reset(new FileCache(metadata_storage_.get(),
                              temp_dir_.path().Append(util::kCacheFileDirectory),
-                             base::MessageLoopProxy::current(),
+                             base::MessageLoopProxy::current().get(),
                              fake_free_disk_space_getter_.get()));
   ASSERT_TRUE(cache_->Initialize());
 
   // Check contents of the cache.
   FileCacheEntry cache_entry;
-  EXPECT_TRUE(cache_->GetCacheEntry("id_foo", std::string(), &cache_entry));
+  EXPECT_TRUE(cache_->GetCacheEntry("id_foo", &cache_entry));
   EXPECT_TRUE(cache_entry.is_present());
-  EXPECT_EQ("md5foo", cache_entry.md5());
-
-  EXPECT_TRUE(cache_->GetCacheEntry("id_bar", std::string(), &cache_entry));
-  EXPECT_TRUE(cache_entry.is_present());
-  EXPECT_TRUE(cache_entry.is_dirty());
+  EXPECT_EQ(base::MD5String("foo"), cache_entry.md5());
 }
 
 TEST_F(FileCacheTest, FreeDiskSpaceIfNeededFor) {
@@ -978,8 +889,7 @@ TEST_F(FileCacheTest, FreeDiskSpaceIfNeededFor) {
             cache_->Store(resource_id_tmp, md5_tmp, src_file,
                           FileCache::FILE_OPERATION_COPY));
   base::FilePath tmp_path;
-  ASSERT_EQ(FILE_ERROR_OK,
-            cache_->GetFile(resource_id_tmp, md5_tmp, &tmp_path));
+  ASSERT_EQ(FILE_ERROR_OK, cache_->GetFile(resource_id_tmp, &tmp_path));
 
   // Store a file as a pinned file and remember the path.
   const std::string resource_id_pinned = "id_pinned", md5_pinned = "md5_pinned";
@@ -988,8 +898,7 @@ TEST_F(FileCacheTest, FreeDiskSpaceIfNeededFor) {
                           FileCache::FILE_OPERATION_COPY));
   ASSERT_EQ(FILE_ERROR_OK, cache_->Pin(resource_id_pinned));
   base::FilePath pinned_path;
-  ASSERT_EQ(FILE_ERROR_OK,
-            cache_->GetFile(resource_id_pinned, md5_pinned, &pinned_path));
+  ASSERT_EQ(FILE_ERROR_OK, cache_->GetFile(resource_id_pinned, &pinned_path));
 
   // Call FreeDiskSpaceIfNeededFor().
   fake_free_disk_space_getter_->set_default_value(test_util::kLotsOfSpace);
@@ -999,11 +908,11 @@ TEST_F(FileCacheTest, FreeDiskSpaceIfNeededFor) {
 
   // Only 'temporary' file gets removed.
   FileCacheEntry entry;
-  EXPECT_FALSE(cache_->GetCacheEntry(resource_id_tmp, md5_tmp, &entry));
-  EXPECT_FALSE(file_util::PathExists(tmp_path));
+  EXPECT_FALSE(cache_->GetCacheEntry(resource_id_tmp, &entry));
+  EXPECT_FALSE(base::PathExists(tmp_path));
 
-  EXPECT_TRUE(cache_->GetCacheEntry(resource_id_pinned, md5_pinned, &entry));
-  EXPECT_TRUE(file_util::PathExists(pinned_path));
+  EXPECT_TRUE(cache_->GetCacheEntry(resource_id_pinned, &entry));
+  EXPECT_TRUE(base::PathExists(pinned_path));
 
   // Returns false when disk space cannot be freed.
   fake_free_disk_space_getter_->set_default_value(0);
@@ -1030,20 +939,59 @@ TEST_F(FileCacheTest, ImportOldDB) {
     entry.set_md5(md5_2);
     old_metadata.AddOrUpdateCacheEntry(key2, entry);
   }
-  EXPECT_TRUE(file_util::PathExists(old_db_path));
+  EXPECT_TRUE(base::PathExists(old_db_path));
 
   // Do import.
   EXPECT_TRUE(ImportOldDB(cache_.get(), old_db_path));
 
   // Old DB should be removed.
-  EXPECT_FALSE(file_util::PathExists(old_db_path));
+  EXPECT_FALSE(base::PathExists(old_db_path));
 
   // Data is imported correctly.
   FileCacheEntry entry;
-  EXPECT_TRUE(cache_->GetCacheEntry(key1, std::string(), &entry));
+  EXPECT_TRUE(cache_->GetCacheEntry(key1, &entry));
   EXPECT_EQ(md5_1, entry.md5());
-  EXPECT_TRUE(cache_->GetCacheEntry(key2, std::string(), &entry));
+  EXPECT_TRUE(cache_->GetCacheEntry(key2, &entry));
   EXPECT_EQ(md5_2, entry.md5());
+}
+
+TEST_F(FileCacheTest, RenameCacheFilesToNewFormat) {
+  const base::FilePath file_directory =
+      temp_dir_.path().Append(util::kCacheFileDirectory);
+
+  // File with an old style "<resource ID>.<MD5>" name.
+  ASSERT_TRUE(google_apis::test_util::WriteStringToFile(
+      file_directory.AppendASCII("id_koo.md5"), "koo"));
+
+  // File with multiple extensions should be removed.
+  ASSERT_TRUE(google_apis::test_util::WriteStringToFile(
+      file_directory.AppendASCII("id_kyu.md5.mounted"), "kyu (mounted)"));
+  ASSERT_TRUE(google_apis::test_util::WriteStringToFile(
+      file_directory.AppendASCII("id_kyu.md5"), "kyu"));
+
+  // Rename and verify the result.
+  RenameCacheFilesToNewFormat(cache_.get());
+  std::string contents;
+  EXPECT_TRUE(file_util::ReadFileToString(file_directory.AppendASCII("id_koo"),
+                                          &contents));
+  EXPECT_EQ("koo", contents);
+  contents.clear();
+  EXPECT_TRUE(file_util::ReadFileToString(file_directory.AppendASCII("id_kyu"),
+                                          &contents));
+  EXPECT_EQ("kyu", contents);
+
+  // Rename again.
+  RenameCacheFilesToNewFormat(cache_.get());
+
+  // Files with new style names are not affected.
+  contents.clear();
+  EXPECT_TRUE(file_util::ReadFileToString(file_directory.AppendASCII("id_koo"),
+                                          &contents));
+  EXPECT_EQ("koo", contents);
+  contents.clear();
+  EXPECT_TRUE(file_util::ReadFileToString(file_directory.AppendASCII("id_kyu"),
+                                          &contents));
+  EXPECT_EQ("kyu", contents);
 }
 
 }  // namespace internal

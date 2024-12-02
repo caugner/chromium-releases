@@ -14,10 +14,6 @@
 //                                      -> SQLite connection to History
 //                                   -> ArchivedDatabase
 //                                      -> SQLite connection to Archived History
-//                                   -> TextDatabaseManager
-//                                      -> SQLite connection to one month's data
-//                                      -> SQLite connection to one month's data
-//                                      ...
 //                                   -> ThumbnailDatabase
 //                                      -> SQLite connection to Thumbnails
 //                                         (and favicons)
@@ -30,17 +26,17 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/favicon/imported_favicon_usage.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -56,13 +52,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -76,16 +73,9 @@ namespace {
 
 static const char* kHistoryThreadName = "Chrome_HistoryThread";
 
-void DerefDownloadDbHandle(
-    const HistoryService::DownloadCreateCallback& callback,
-    int64* db_handle) {
-  callback.Run(*db_handle);
-}
-
-void DerefDownloadId(
-    const HistoryService::DownloadNextIdCallback& callback,
-    int* id) {
-  callback.Run(*id);
+template<typename PODType> void DerefPODType(
+    const base::Callback<void(PODType)>& callback, PODType* pod_value) {
+  callback.Run(*pod_value);
 }
 
 void RunWithFaviconResults(
@@ -462,6 +452,11 @@ HistoryService::Handle HistoryService::QuerySegmentDurationSince(
                   from_time, max_result_count);
 }
 
+void HistoryService::FlushForTest(const base::Closure& flushed) {
+  thread_->message_loop_proxy()->PostTaskAndReply(
+      FROM_HERE, base::Bind(&base::DoNothing), flushed);
+}
+
 void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetOnBackendDestroyTask,
@@ -598,6 +593,15 @@ void HistoryService::AddPagesWithDetails(const history::URLRows& info,
                     &HistoryBackend::AddPagesWithDetails, info, visit_source);
 }
 
+HistoryService::Handle HistoryService::GetPageThumbnail(
+    const GURL& page_url,
+    CancelableRequestConsumerBase* consumer,
+    const ThumbnailDataCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return Schedule(PRIORITY_NORMAL, &HistoryBackend::GetPageThumbnail, consumer,
+                  new history::GetPageThumbnailRequest(callback), page_url);
+}
+
 void HistoryService::SetPageContents(const GURL& url,
                                      const string16& contents) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -606,15 +610,6 @@ void HistoryService::SetPageContents(const GURL& url,
 
   ScheduleAndForget(PRIORITY_LOW, &HistoryBackend::SetPageContents,
                     url, contents);
-}
-
-HistoryService::Handle HistoryService::GetPageThumbnail(
-    const GURL& page_url,
-    CancelableRequestConsumerBase* consumer,
-    const ThumbnailDataCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return Schedule(PRIORITY_NORMAL, &HistoryBackend::GetPageThumbnail, consumer,
-                  new history::GetPageThumbnailRequest(callback), page_url);
 }
 
 CancelableTaskTracker::TaskId HistoryService::GetFavicons(
@@ -783,28 +778,28 @@ void HistoryService::CreateDownload(
   DCHECK(thread_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
-  int64* db_handle = new int64(
-      history::DownloadDatabase::kUninitializedHandle);
+  bool* success = new bool(false);
   thread_->message_loop_proxy()->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&HistoryBackend::CreateDownload,
                  history_backend_.get(),
                  create_info,
-                 db_handle),
-      base::Bind(&DerefDownloadDbHandle, callback, base::Owned(db_handle)));
+                 success),
+      base::Bind(&DerefPODType<bool>, callback, base::Owned(success)));
 }
 
-void HistoryService::GetNextDownloadId(const DownloadNextIdCallback& callback) {
+void HistoryService::GetNextDownloadId(
+    const content::DownloadIdCallback& callback) {
   DCHECK(thread_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
-  int* id = new int(history::DownloadDatabase::kUninitializedHandle);
+  uint32* next_id = new uint32(content::DownloadItem::kInvalidId);
   thread_->message_loop_proxy()->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&HistoryBackend::GetNextDownloadId,
                  history_backend_.get(),
-                 id),
-      base::Bind(&DerefDownloadId, callback, base::Owned(id)));
+                 next_id),
+      base::Bind(&DerefPODType<uint32>, callback, base::Owned(next_id)));
 }
 
 // Handle queries for a list of all downloads in the history database's
@@ -834,10 +829,10 @@ void HistoryService::UpdateDownload(const history::DownloadRow& data) {
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateDownload, data);
 }
 
-void HistoryService::RemoveDownloads(const std::set<int64>& db_handles) {
+void HistoryService::RemoveDownloads(const std::set<uint32>& ids) {
   DCHECK(thread_checker_.CalledOnValidThread());
   ScheduleAndForget(PRIORITY_NORMAL,
-                    &HistoryBackend::RemoveDownloads, db_handles);
+                    &HistoryBackend::RemoveDownloads, ids);
 }
 
 HistoryService::Handle HistoryService::QueryHistory(

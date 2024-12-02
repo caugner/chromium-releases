@@ -4,8 +4,7 @@
 
 #include <string>
 
-#include "base/message_loop.h"
-#include "base/process_util.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"

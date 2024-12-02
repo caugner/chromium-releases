@@ -11,6 +11,7 @@ chromium_os_flag should be 1 if this is a Chromium OS build
 template is the path to a .json policy template file.'''
 
 from __future__ import with_statement
+import json
 from optparse import OptionParser
 import re
 import sys
@@ -25,13 +26,15 @@ class PolicyDetails:
   """Parses a policy template and caches all its details."""
 
   # Maps policy types to a tuple with 3 other types:
-  # - the equivalent base::Value::Type
+  # - the equivalent base::Value::Type or 'TYPE_EXTERNAL' if the policy
+  #   references external data
   # - the equivalent Protobuf field type
   # - the name of one of the protobufs for shared policy types
-  # TODO(joaodasilva): introduce a message to represent dictionary values.
-  # Mapping 'dict' to 'string' for now. http://crbug.com/108997
+  # TODO(joaodasilva): refactor the 'dict' type into a more generic 'json' type
+  # that can also be used to represent lists of other JSON objects.
   TYPE_MAP = {
     'dict':         ('TYPE_DICTIONARY',   'string',       'String'),
+    'external':     ('TYPE_EXTERNAL',     'string',       'String'),
     'int':          ('TYPE_INTEGER',      'int64',        'Integer'),
     'int-enum':     ('TYPE_INTEGER',      'int64',        'Integer'),
     'list':         ('TYPE_LIST',         'StringList',   'StringList'),
@@ -39,6 +42,11 @@ class PolicyDetails:
     'string':       ('TYPE_STRING',       'string',       'String'),
     'string-enum':  ('TYPE_STRING',       'string',       'String'),
   }
+
+  class EnumItem:
+    def __init__(self, item):
+      self.caption = PolicyDetails._RemovePlaceholders(item['caption'])
+      self.value = item['value']
 
   def __init__(self, policy, os, is_chromium_os):
     self.id = policy['id']
@@ -48,34 +56,50 @@ class PolicyDetails:
 
     if is_chromium_os:
       expected_platform = 'chrome_os'
-      wildcard_platform = None
-    elif os == 'android':
-      expected_platform = 'android'
-      wildcard_platform = None
     else:
-      expected_platform = 'chrome.' + os.lower()
-      wildcard_platform = 'chrome.*'
-    is_supported = False
+      expected_platform = os.lower()
+
+    self.platforms = []
     for platform, version in [ p.split(':') for p in policy['supported_on'] ]:
-      if (platform == expected_platform or platform == wildcard_platform) and \
-          version.endswith('-'):
-        is_supported = True
-    self.is_supported = is_supported
+      if not version.endswith('-'):
+        continue
+
+      if platform.startswith('chrome.'):
+        platform_sub = platform[7:]
+        if platform_sub == '*':
+          self.platforms.extend(['win', 'mac', 'linux'])
+        else:
+          self.platforms.append(platform_sub)
+      else:
+        self.platforms.append(platform)
+
+    self.platforms.sort()
+    self.is_supported = expected_platform in self.platforms
 
     if not PolicyDetails.TYPE_MAP.has_key(policy['type']):
       raise NotImplementedError('Unknown policy type for %s: %s' %
                                 (policy['name'], policy['type']))
-    self.value_type, self.protobuf_type, self.policy_protobuf_type = \
+    self.policy_type, self.protobuf_type, self.policy_protobuf_type = \
         PolicyDetails.TYPE_MAP[policy['type']]
+    self.schema = policy['schema']
 
     self.desc = '\n'.join(
-        map(str.strip, self._RemovePlaceholders(policy['desc']).splitlines()))
-    self.caption = self._RemovePlaceholders(policy['caption'])
+        map(str.strip,
+            PolicyDetails._RemovePlaceholders(policy['desc']).splitlines()))
+    self.caption = PolicyDetails._RemovePlaceholders(policy['caption'])
+    self.max_size = policy.get('max_size', 0)
+
+    items = policy.get('items')
+    if items is None:
+      self.items = None
+    else:
+      self.items = [ PolicyDetails.EnumItem(entry) for entry in items ]
 
   PH_PATTERN = re.compile('<ph[^>]*>([^<]*|[^<]*<ex>([^<]*)</ex>[^<]*)</ph>')
 
   # Simplistic grit placeholder stripper.
-  def _RemovePlaceholders(self, text):
+  @staticmethod
+  def _RemovePlaceholders(text):
     result = ''
     pos = 0
     for m in PolicyDetails.PH_PATTERN.finditer(text):
@@ -189,6 +213,7 @@ def _WritePolicyConstantHeader(policies, os, f):
           '\n'
           '#include <string>\n'
           '\n'
+          '#include "base/basictypes.h"\n'
           '#include "base/values.h"\n'
           '\n'
           'namespace policy {\n\n')
@@ -198,14 +223,16 @@ def _WritePolicyConstantHeader(policies, os, f):
             'configuration resides.\n'
             'extern const wchar_t kRegistryChromePolicyKey[];\n')
 
-  f.write('// Lists policy types mapped to their names and expected types.\n'
-          '// Used to initialize ConfigurationPolicyProviders.\n'
+  f.write('// Lists metadata such as name, expected type and id for all\n'
+          '// policies. Used to initialize ConfigurationPolicyProviders and\n'
+          '// CloudExternalDataManagers.\n'
           'struct PolicyDefinitionList {\n'
           '  struct Entry {\n'
           '    const char* name;\n'
           '    base::Value::Type value_type;\n'
           '    bool device_policy;\n'
           '    int id;\n'
+          '    size_t max_external_data_size;\n'
           '  };\n'
           '\n'
           '  const Entry* begin;\n'
@@ -232,6 +259,10 @@ def _WritePolicyConstantHeader(policies, os, f):
 
 #------------------ policy constants source ------------------------#
 
+def _GetValueType(policy_type):
+  return policy_type if policy_type != 'TYPE_EXTERNAL' else 'TYPE_DICTIONARY'
+
+
 def _WritePolicyConstantSource(policies, os, f):
   f.write('#include "base/basictypes.h"\n'
           '#include "base/logging.h"\n'
@@ -244,9 +275,10 @@ def _WritePolicyConstantSource(policies, os, f):
   f.write('const PolicyDefinitionList::Entry kEntries[] = {\n')
   for policy in policies:
     if policy.is_supported:
-      f.write('  { key::k%s, base::Value::%s, %s, %s },\n' %
-          (policy.name, policy.value_type,
-              'true' if policy.is_device_only else 'false', policy.id))
+      f.write('  { key::k%s, base::Value::%s, %s, %s, %s },\n' %
+          (policy.name, _GetValueType(policy.policy_type),
+              'true' if policy.is_device_only else 'false', policy.id,
+              policy.max_size))
   f.write('};\n\n')
 
   f.write('const PolicyDefinitionList kChromePolicyList = {\n'
@@ -369,6 +401,15 @@ RESERVED_IDS = 2
 
 def _WritePolicyProto(f, policy, fields):
   _OutputComment(f, policy.caption + '\n\n' + policy.desc)
+  if policy.items is not None:
+    _OutputComment(f, '\nValid values:')
+    for item in policy.items:
+      _OutputComment(f, '  %s: %s' % (str(item.value), item.caption))
+  if policy.policy_type == 'TYPE_DICTIONARY':
+    _OutputComment(f, '\nValue schema:\n%s' %
+                   json.dumps(policy.schema, sort_keys=True, indent=4,
+                              separators=(',', ': ')))
+  _OutputComment(f, '\nSupported on: %s' % ', '.join(policy.platforms))
   f.write('message %sProto {\n' % policy.name)
   f.write('  optional PolicyOptions policy_options = 1;\n')
   f.write('  optional %s %s = 2;\n' % (policy.protobuf_type, policy.name))
@@ -412,8 +453,15 @@ CPP_HEAD = '''
 #include <limits>
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/callback.h"
+#include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "chrome/browser/policy/cloud/cloud_external_data_manager.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "policy/policy_constants.h"
 #include "policy/proto/cloud_policy.pb.h"
@@ -445,7 +493,21 @@ base::ListValue* DecodeStringList(const em::StringList& string_list) {
   return list_value;
 }
 
-void DecodePolicy(const em::CloudPolicySettings& policy, PolicyMap* map) {
+base::Value* DecodeJson(const std::string& json) {
+  scoped_ptr<base::Value> root(
+      base::JSONReader::Read(json, base::JSON_ALLOW_TRAILING_COMMAS));
+
+  if (!root)
+    LOG(WARNING) << "Invalid JSON string, ignoring: " << json;
+
+  // Accept any Value type that parsed as JSON, and leave it to the handler to
+  // convert and check the concrete type.
+  return root.release();
+}
+
+void DecodePolicy(const em::CloudPolicySettings& policy,
+                  base::WeakPtr<CloudExternalDataManager> external_data_manager,
+                  PolicyMap* map) {
 '''
 
 
@@ -464,11 +526,16 @@ def _CreateValue(type, arg):
     return 'base::Value::CreateStringValue(%s)' % arg
   elif type == 'TYPE_LIST':
     return 'DecodeStringList(%s)' % arg
-  elif type == 'TYPE_DICTIONARY':
-    # TODO(joaodasilva): decode 'dict' types. http://crbug.com/108997
-    return 'new base::DictionaryValue()'
+  elif type == 'TYPE_DICTIONARY' or type == 'TYPE_EXTERNAL':
+    return 'DecodeJson(%s)' % arg
   else:
     raise NotImplementedError('Unknown type %s' % type)
+
+
+def _CreateExternalDataFetcher(type, name):
+  if type == 'TYPE_EXTERNAL':
+    return 'new ExternalDataFetcher(external_data_manager, key::k%s)' % name
+  return 'NULL'
 
 
 def _WritePolicyCode(f, policy):
@@ -497,9 +564,12 @@ def _WritePolicyCode(f, policy):
           '      }\n'
           '      if (do_set) {\n')
   f.write('        base::Value* value = %s;\n' %
-          (_CreateValue(policy.value_type, 'policy_proto.value()')))
-  f.write('        map->Set(key::k%s, level, POLICY_SCOPE_USER, value);\n' %
+          (_CreateValue(policy.policy_type, 'policy_proto.value()')))
+  f.write('        ExternalDataFetcher* external_data_fetcher = %s;\n' %
+          _CreateExternalDataFetcher(policy.policy_type, policy.name))
+  f.write('        map->Set(key::k%s, level, POLICY_SCOPE_USER,\n' %
           policy.name)
+  f.write('                 value, external_data_fetcher);\n')
   f.write('      }\n'
           '    }\n'
           '  }\n')

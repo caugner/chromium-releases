@@ -25,6 +25,7 @@ AwRenderViewHostExt::AwRenderViewHostExt(
     AwRenderViewHostExtClient* client, content::WebContents* contents)
     : content::WebContentsObserver(contents),
       client_(client),
+      background_color_(SK_ColorWHITE),
       has_new_hit_test_data_(false) {
   DCHECK(client_);
 }
@@ -85,7 +86,27 @@ void AwRenderViewHostExt::SetInitialPageScale(double page_scale_factor) {
                                          page_scale_factor));
 }
 
-void AwRenderViewHostExt::RenderViewGone(base::TerminationStatus status) {
+void AwRenderViewHostExt::SetBackgroundColor(SkColor c) {
+  if (background_color_ == c)
+    return;
+  background_color_ = c;
+  if (web_contents()->GetRenderViewHost()) {
+    Send(new AwViewMsg_SetBackgroundColor(web_contents()->GetRoutingID(),
+                                          background_color_));
+  }
+}
+
+void AwRenderViewHostExt::SetJsOnlineProperty(bool network_up) {
+  Send(new AwViewMsg_SetJsOnlineProperty(network_up));
+}
+
+void AwRenderViewHostExt::RenderViewCreated(
+    content::RenderViewHost* render_view_host) {
+  Send(new AwViewMsg_SetBackgroundColor(web_contents()->GetRoutingID(),
+                                        background_color_));
+}
+
+void AwRenderViewHostExt::RenderProcessGone(base::TerminationStatus status) {
   DCHECK(CalledOnValidThread());
   for (std::map<int, DocumentHasImagesResult>::iterator pending_req =
            pending_document_has_images_requests_.begin();
@@ -140,7 +161,7 @@ void AwRenderViewHostExt::OnUpdateHitTestData(
 }
 
 void AwRenderViewHostExt::OnPageScaleFactorChanged(float page_scale_factor) {
-  client_->OnPageScaleFactorChanged(page_scale_factor);
+  client_->OnWebLayoutPageScaleFactorChanged(page_scale_factor);
 }
 
 }  // namespace android_webview

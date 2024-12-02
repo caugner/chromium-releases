@@ -11,7 +11,7 @@
 #include "base/observer_list.h"
 #include "base/prefs/pref_member.h"
 #include "base/threading/non_thread_safe.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 
@@ -57,7 +57,7 @@ class SyncPrefs : NON_EXPORTED_BASE(public base::NonThreadSafe),
 
   virtual ~SyncPrefs();
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   void AddSyncPrefObserver(SyncPrefObserver* sync_pref_observer);
   void RemoveSyncPrefObserver(SyncPrefObserver* sync_pref_observer);

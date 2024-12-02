@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
@@ -21,19 +21,19 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
-#include "googleurl/src/url_parse.h"
-#include "googleurl/src/url_util.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "url/gurl.h"
+#include "url/url_parse.h"
+#include "url/url_util.h"
 
 namespace {
 
@@ -349,8 +349,9 @@ AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     match.fill_into_edit =
         AutocompleteInput::FormattedStringWithEquivalentMeaning(url,
                                                                 display_string);
-    // NOTE: Don't set match.inline_autocomplete_offset (to allow inline
-    // autocompletion) here, it's surprising and annoying.
+    match.allowed_to_be_default_match = true;
+    // NOTE: Don't set match.inline_autocompletion to something non-empty here;
+    // it's surprising and annoying.
 
     // Try to highlight "innermost" match location.  If we fix up "w" into
     // "www.w.com", we want to highlight the fifth character, not the first.
@@ -1059,10 +1060,17 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
           net::FormatUrl(info.url(), languages, format_types,
                          net::UnescapeRule::SPACES, NULL, NULL,
                          &inline_autocomplete_offset));
-  if (!params->prevent_inline_autocomplete)
-    match.inline_autocomplete_offset = inline_autocomplete_offset;
-  DCHECK((match.inline_autocomplete_offset == string16::npos) ||
-         (match.inline_autocomplete_offset <= match.fill_into_edit.length()));
+  if (!params->prevent_inline_autocomplete &&
+      (inline_autocomplete_offset != string16::npos)) {
+    DCHECK(inline_autocomplete_offset <= match.fill_into_edit.length());
+    match.inline_autocompletion =
+        match.fill_into_edit.substr(inline_autocomplete_offset);
+  }
+  // The latter part of the test effectively asks "is the inline completion
+  // empty?" (i.e., is this match effectively the what-you-typed match?).
+  match.allowed_to_be_default_match = !params->prevent_inline_autocomplete ||
+      ((inline_autocomplete_offset != string16::npos) &&
+       (inline_autocomplete_offset >= match.fill_into_edit.length()));
 
   size_t match_start = history_match.input_location;
   match.contents = net::FormatUrl(info.url(), languages,

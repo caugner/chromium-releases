@@ -12,6 +12,7 @@
 #include "sdk_util/auto_lock.h"
 #include "sdk_util/macros.h"
 
+namespace sdk_util {
 
 // ThreadSafeQueue
 //
@@ -21,28 +22,26 @@
 template<class T> class ThreadSafeQueue {
  public:
   ThreadSafeQueue() {
-    pthread_mutex_init(&mutex_, NULL);
     pthread_cond_init(&cond_, NULL);
   }
 
   ~ThreadSafeQueue() {
-    pthread_mutex_destroy(&mutex_);
     pthread_cond_destroy(&cond_);
   }
 
   void Enqueue(T* item) {
-    AutoLock lock(&mutex_);
+    AUTO_LOCK(lock_);
     list_.push_back(item);
 
     pthread_cond_signal(&cond_);
   }
 
   T* Dequeue(bool block) {
-    AutoLock lock(&mutex_);
+    AUTO_LOCK(lock_);
 
     // If blocking enabled, wait until we queue is non-empty
     if (block) {
-      while (list_.empty()) pthread_cond_wait(&cond_, &mutex_);
+      while (list_.empty()) pthread_cond_wait(&cond_, lock_.mutex());
     }
 
     if (list_.empty()) return NULL;
@@ -55,9 +54,11 @@ template<class T> class ThreadSafeQueue {
  private:
   std::list<T*> list_;
   pthread_cond_t  cond_;
-  pthread_mutex_t mutex_;
+  SimpleLock lock_;
   DISALLOW_COPY_AND_ASSIGN(ThreadSafeQueue);
 };
+
+}  // namespace sdk_util
 
 #endif  // LIBRARIES_SDK_UTIL_THREAD_SAFE_QUEUE_H_
 

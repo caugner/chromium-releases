@@ -22,7 +22,7 @@
 
 class ChromeNetLog;
 class CommandLine;
-class PrefProxyConfigTrackerImpl;
+class PrefProxyConfigTracker;
 class PrefService;
 class PrefRegistrySimple;
 class SystemURLRequestContextGetter;
@@ -154,7 +154,6 @@ class IOThread : public content::BrowserThreadDelegate {
     bool http_pipelining_enabled;
     uint16 testing_fixed_http_port;
     uint16 testing_fixed_https_port;
-    Optional<size_t> max_spdy_sessions_per_domain;
     Optional<size_t> initial_max_spdy_concurrent_streams;
     Optional<size_t> max_spdy_concurrent_streams_limit;
     Optional<bool> force_spdy_single_domain;
@@ -165,6 +164,7 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<net::NextProto> spdy_default_protocol;
     Optional<string> trusted_spdy_proxy;
     Optional<bool> enable_quic;
+    Optional<bool> enable_quic_https;
     Optional<net::HostPortPair> origin_to_force_quic_on;
     bool enable_user_alternate_protocol_ports;
     // NetErrorTabHelper uses |dns_probe_service| to send DNS probes when a
@@ -186,6 +186,11 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Can only be called on the IO thread.
   Globals* globals();
+
+  // Allows overriding Globals in tests where IOThread::Init() and
+  // IOThread::CleanUp() are not called.  This allows for injecting mocks into
+  // IOThread global objects.
+  void SetGlobalsForTesting(Globals* globals);
 
   ChromeNetLog* net_log();
 
@@ -211,6 +216,7 @@ class IOThread : public content::BrowserThreadDelegate {
   // This handles initialization and destruction of state that must
   // live on the IO thread.
   virtual void Init() OVERRIDE;
+  virtual void InitAsync() OVERRIDE;
   virtual void CleanUp() OVERRIDE;
 
   void InitializeNetworkOptions(const CommandLine& parsed_command_line);
@@ -256,6 +262,10 @@ class IOThread : public content::BrowserThreadDelegate {
   // of a field trial or a command line flag.
   bool ShouldEnableQuic(const CommandLine& command_line);
 
+  // Returns true if HTTPS over QUIC should be enabled, either as a result
+  // of a field trial or a command line flag.
+  bool ShouldEnableQuicHttps(const CommandLine& command_line);
+
   // The NetLog is owned by the browser process, to allow logging from other
   // threads during shutdown, but is used most frequently on the IOThread.
   ChromeNetLog* net_log_;
@@ -299,7 +309,7 @@ class IOThread : public content::BrowserThreadDelegate {
   // which gets posted by calling certain member functions of IOThread.
   scoped_ptr<net::ProxyConfigService> system_proxy_config_service_;
 
-  scoped_ptr<PrefProxyConfigTrackerImpl> pref_proxy_config_tracker_;
+  scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   scoped_refptr<net::URLRequestContextGetter>
       system_url_request_context_getter_;

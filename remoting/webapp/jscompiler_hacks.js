@@ -61,11 +61,11 @@ MutationRecord.prototype.type;
 
 /** @constructor
     @param {function(Array.<MutationRecord>):void} callback */
-var WebKitMutationObserver = function(callback) {};
+var MutationObserver = function(callback) {};
 
 /** @param {Element} element
     @param {Object} options */
-WebKitMutationObserver.prototype.observe = function(element, options) {};
+MutationObserver.prototype.observe = function(element, options) {};
 
 /** @type {Object} */
 chrome.storage = {};
@@ -122,10 +122,7 @@ chrome.app.window = {
 };
 
 /** @type {Object} */
-chrome.experimental = {};
-
-/** @type {Object} */
-chrome.experimental.identity = {
+chrome.identity = {
   /**
    * @param {Object.<string>} parameters
    * @param {function(string):void} callback
@@ -168,7 +165,7 @@ chrome.runtime = {
     /** @type {string} */
     message: ''
   },
-  /** @return {{version: string}} */
+  /** @return {{version: string, app: {background: Object}}} */
   getManifest: function() {}
 };
 

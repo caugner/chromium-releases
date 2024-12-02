@@ -10,6 +10,7 @@
 #include "android_webview/common/render_view_messages.h"
 #include "base/bind.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/android_content_detection_prefixes.h"
 #include "content/public/renderer/document_state.h"
@@ -23,10 +24,13 @@
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebHitTestResult.h"
+#include "third_party/WebKit/public/web/WebImageCache.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "url/url_canon.h"
+#include "url/url_util.h"
 
 namespace android_webview {
 
@@ -73,7 +77,12 @@ bool RemovePrefixAndAssignIfMatches(const base::StringPiece& prefix,
   const base::StringPiece spec(url.possibly_invalid_spec());
 
   if (spec.starts_with(prefix)) {
-    dest->assign(spec.begin() + prefix.length(), spec.end());
+    url_canon::RawCanonOutputW<1024> output;
+    url_util::DecodeURLEscapeSequences(spec.data() + prefix.length(),
+        spec.length() - prefix.length(), &output);
+    std::string decoded_url = UTF16ToUTF8(
+        string16(output.data(), output.length()));
+    dest->assign(decoded_url.begin(), decoded_url.end());
     return true;
   }
   return false;
@@ -155,6 +164,7 @@ bool AwRenderViewExt::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AwViewMsg_ResetScrollAndScaleState,
                         OnResetScrollAndScaleState)
     IPC_MESSAGE_HANDLER(AwViewMsg_SetInitialPageScale, OnSetInitialPageScale)
+    IPC_MESSAGE_HANDLER(AwViewMsg_SetBackgroundColor, OnSetBackgroundColor)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -210,6 +220,17 @@ void AwRenderViewExt::UpdatePageScaleFactor() {
     Send(new AwViewHostMsg_PageScaleFactorChanged(routing_id(),
                                                   page_scale_factor_));
   }
+}
+
+void AwRenderViewExt::Navigate(const GURL& url) {
+  // Navigate is called only on NEW navigations, so WebImageCache won't be freed
+  // when the user just clicks on links, but only when a navigation is started,
+  // for instance via loadUrl. A better approach would be clearing the cache on
+  // cross-site boundaries, however this would require too many changes both on
+  // the browser side (in RenderViewHostManger), to the IPCmessages and to the
+  // RenderViewObserver. Thus, clearing decoding image cache on Navigate, seems
+  // a more acceptable compromise.
+  WebKit::WebImageCache::clear();
 }
 
 void AwRenderViewExt::FocusedNodeChanged(const WebKit::WebNode& node) {
@@ -281,6 +302,12 @@ void AwRenderViewExt::OnSetInitialPageScale(double page_scale_factor) {
     return;
   render_view()->GetWebView()->setInitialPageScaleOverride(
       page_scale_factor);
+}
+
+void AwRenderViewExt::OnSetBackgroundColor(SkColor c) {
+  if (!render_view() || !render_view()->GetWebView())
+    return;
+  render_view()->GetWebView()->setBaseBackgroundColor(c);
 }
 
 }  // namespace android_webview

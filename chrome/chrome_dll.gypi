@@ -21,6 +21,11 @@
                 ],
               },
             }],  # OS=="mac"
+            ['chrome_multiple_dll==1', {
+              'dependencies': [
+                'chrome_child_dll',
+              ],
+            }],
             ['incremental_chrome_dll==1', {
               # Linking to a different directory and then hardlinking back
               # to OutDir is a workaround to avoid having the .ilk for
@@ -75,19 +80,13 @@
           },
           'dependencies': [
             '<@(chromium_browser_dependencies)',
-            '<@(chromium_child_dependencies)',
-            '../content/content.gyp:content_worker',
+            '../content/content.gyp:content_app_browser',
             'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
             ['use_aura==1', {
               'dependencies': [
                 '../ui/compositor/compositor.gyp:compositor',
-              ],
-            }],
-            ['use_ash==1', {
-              'sources': [
-                '<(SHARED_INTERMEDIATE_DIR)/ash/ash_resources/ash_wallpaper_resources.rc',
               ],
             }],
             ['OS=="win" and target_arch=="ia32"', {
@@ -111,7 +110,7 @@
                 '../net/net.gyp:net_resources',
                 '../third_party/cld/cld.gyp:cld',
                 '../ui/views/views.gyp:views',
-                '../webkit/support/webkit_support.gyp:webkit_resources',
+                '../webkit/webkit_resources.gyp:webkit_resources',
               ],
               'sources': [
                 'app/chrome_command_ids.h',
@@ -146,9 +145,10 @@
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/content/browser/tracing/tracing_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_unscaled_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/webkit/blink_resources.rc',
               ],
               'include_dirs': [
                 '<(DEPTH)/third_party/wtl/include',
@@ -222,26 +222,38 @@
                   ],
                 },
                 'VCManifestTool': {
-                  'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.dll.manifest',
+                  'AdditionalManifestFiles': [
+                    '$(ProjectDir)\\app\\chrome.dll.manifest',
+                  ],
                 },
               },
-            }],  # OS=="win"
+              'conditions': [
+                ['win_use_allocator_shim==1', {
+                  'dependencies': [
+                    '<(allocator_target)',
+                  ],
+                }],
+              ]
+            }],
+            ['chrome_multiple_dll==1', {
+              'defines': [
+                'CHROME_MULTIPLE_DLL_BROWSER',
+              ],
+            }, {
+              'dependencies': [
+                '<@(chromium_child_dependencies)',
+                '../content/content.gyp:content_app_both',
+                '../content/content.gyp:content_worker',
+              ],
+              'dependencies!': [
+                '../content/content.gyp:content_app_browser',
+              ],
+            }],
             ['OS=="mac" and component!="shared_library"', {
               'includes': [ 'chrome_dll_bundle.gypi' ],
             }],
             ['OS=="mac" and component=="shared_library"', {
               'xcode_settings': { 'OTHER_LDFLAGS': [ '-Wl,-ObjC' ], },
-            }],
-            ['chrome_split_dll', {
-              'sources': [
-                # See comment in .cc for explanation.
-                'split_dll_fake_entry.cc',
-              ],
-              'msvs_settings': {
-                'VCLinkerTool': {
-                  'AdditionalOptions': ['/splitlink'],
-                },
-              }
             }],
             ['OS=="mac"', {
               'xcode_settings': {
@@ -255,7 +267,6 @@
                 'app/chrome_main.cc',
                 'app/chrome_main_delegate.cc',
                 'app/chrome_main_delegate.h',
-                'app/chrome_main_app_mode_mac.mm',
                 'app/chrome_main_mac.mm',
                 'app/chrome_main_mac.h',
               ],
@@ -282,14 +293,21 @@
                 ['mac_breakpad_compiled_in==1', {
                   'dependencies': [
                     '../breakpad/breakpad.gyp:breakpad',
+                    '../components/components.gyp:breakpad_component',
                     'app/policy/cloud_policy_codegen.gyp:policy',
                   ],
                   'sources': [
                     'app/breakpad_mac.mm',
                     'app/breakpad_mac.h',
+                    'app/chrome_breakpad_client.cc',
+                    'app/chrome_breakpad_client.h',
+                    'app/chrome_breakpad_client_mac.mm',
                   ],
                 }, {  # else: mac_breakpad_compiled_in!=1
                   # No Breakpad, put in the stubs.
+                  'dependencies': [
+                    '../components/components.gyp:breakpad_stubs',
+                  ],
                   'sources': [
                     'app/breakpad_mac_stubs.mm',
                     'app/breakpad_mac.h',
@@ -327,6 +345,36 @@
             }],
           ],
         },
+      ],
+    }],
+    ['chrome_multiple_dll', {
+      'targets': [
+        {
+          'target_name': 'chrome_child_dll',
+          'type': 'shared_library',
+          'product_name': 'chrome_child',
+          'variables': {
+            'enable_wexit_time_destructors': 1,
+          },
+          'dependencies': [
+            '<@(chromium_child_dependencies)',
+            '../content/content.gyp:content_app_child',
+            '../content/content.gyp:content_worker',
+            'chrome_version_resources',
+            'policy_path_parser',
+          ],
+          'defines': [
+            'CHROME_MULTIPLE_DLL_CHILD',
+          ],
+          'sources': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
+            'app/chrome_main.cc',
+            'app/chrome_main_delegate.cc',
+            'app/chrome_main_delegate.h',
+          ],
+        },  # target chrome_child_dll
       ],
     }],
   ],

@@ -7,18 +7,18 @@
 
 #include "apps/pref_names.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -27,7 +27,7 @@
 #include "content/public/browser/notification_service.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/icu/public/i18n/unicode/smpdtfmt.h"
+#include "third_party/icu/source/i18n/unicode/smpdtfmt.h"
 
 namespace {
 

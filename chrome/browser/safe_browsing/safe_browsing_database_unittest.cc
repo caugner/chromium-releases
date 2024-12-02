@@ -7,21 +7,20 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/safe_browsing/safe_browsing_store_file.h"
 #include "chrome/browser/safe_browsing/safe_browsing_store_unittest_helper.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/sha2.h"
-#include "googleurl/src/gurl.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
+#include "url/gurl.h"
 
 using base::Time;
-using content::BrowserThread;
 
 namespace {
 
@@ -1126,7 +1125,7 @@ TEST_F(SafeBrowsingDatabaseTest, DISABLED_FileCorruptionHandling) {
     database_->UpdateFinished(true);
 
     // Database file still exists until the corruption handler has run.
-    EXPECT_TRUE(file_util::PathExists(database_filename_));
+    EXPECT_TRUE(base::PathExists(database_filename_));
 
     // Flush through the corruption-handler task.
     VLOG(1) << "Expect failed check on: SafeBrowsing database reset";
@@ -1134,13 +1133,13 @@ TEST_F(SafeBrowsingDatabaseTest, DISABLED_FileCorruptionHandling) {
   }
 
   // Database file should not exist.
-  EXPECT_FALSE(file_util::PathExists(database_filename_));
+  EXPECT_FALSE(base::PathExists(database_filename_));
 
   // Run the update again successfully.
   EXPECT_TRUE(database_->UpdateStarted(&lists));
   database_->InsertChunks(safe_browsing_util::kMalwareList, chunks);
   database_->UpdateFinished(true);
-  EXPECT_TRUE(file_util::PathExists(database_filename_));
+  EXPECT_TRUE(base::PathExists(database_filename_));
 
   database_.reset();
 }
@@ -1252,10 +1251,9 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
 // Checks that the whitelists are handled properly.
 TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   database_.reset();
-  base::MessageLoop loop(base::MessageLoop::TYPE_DEFAULT);
   // We expect all calls to ContainsCsdWhitelistedUrl in particular to be made
   // from the IO thread.  In general the whitelist lookups are thread-safe.
-  content::TestBrowserThread io_thread(BrowserThread::IO, &loop);
+  content::TestBrowserThreadBundle thread_bundle_;
 
   // If the whitelist is disabled everything should match the whitelist.
   database_.reset(new SafeBrowsingDatabaseNew(new SafeBrowsingStoreFile(),
@@ -1367,6 +1365,19 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   EXPECT_FALSE(database_->ContainsDownloadWhitelistedUrl(
       GURL(std::string("http://www.google.com/"))));
 
+  // Test only add the malware IP killswitch
+  csd_chunks.clear();
+  chunk.hosts.clear();
+  InsertAddChunkHostFullHashes(
+      &chunk, 15, "sb-ssl.google.com/",
+      "sb-ssl.google.com/safebrowsing/csd/killswitch_malware");
+  csd_chunks.push_back(chunk);
+  EXPECT_TRUE(database_->UpdateStarted(&lists));
+  database_->InsertChunks(safe_browsing_util::kCsdWhiteList, csd_chunks);
+  database_->UpdateFinished(true);
+
+  EXPECT_TRUE(database_->IsMalwareIPMatchKillSwitchOn());
+
   // Test that the kill-switch works as intended.
   csd_chunks.clear();
   download_chunks.clear();
@@ -1375,7 +1386,6 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   InsertAddChunkHostFullHashes(&chunk, 5, "sb-ssl.google.com/",
                                "sb-ssl.google.com/safebrowsing/csd/killswitch");
   csd_chunks.push_back(chunk);
-
   chunk.hosts.clear();
   InsertAddChunkHostFullHashes(&chunk, 5, "sb-ssl.google.com/",
                                "sb-ssl.google.com/safebrowsing/csd/killswitch");
@@ -1387,6 +1397,7 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
                           download_chunks);
   database_->UpdateFinished(true);
 
+  EXPECT_TRUE(database_->IsMalwareIPMatchKillSwitchOn());
   EXPECT_TRUE(database_->ContainsCsdWhitelistedUrl(
       GURL(std::string("https://") + kGood1Url2 + "/c.html")));
   EXPECT_TRUE(database_->ContainsCsdWhitelistedUrl(
@@ -1415,6 +1426,12 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   csd_chunks.push_back(sub_chunk);
 
   sub_chunk.hosts.clear();
+  InsertSubChunkHostFullHash(
+      &sub_chunk, 10, 15, "sb-ssl.google.com/",
+      "sb-ssl.google.com/safebrowsing/csd/killswitch_malware");
+  csd_chunks.push_back(sub_chunk);
+
+  sub_chunk.hosts.clear();
   InsertSubChunkHostFullHash(&sub_chunk, 1, 5,
                              "sb-ssl.google.com/",
                              "sb-ssl.google.com/safebrowsing/csd/killswitch");
@@ -1426,6 +1443,7 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
                           download_chunks);
   database_->UpdateFinished(true);
 
+  EXPECT_FALSE(database_->IsMalwareIPMatchKillSwitchOn());
   EXPECT_TRUE(database_->ContainsCsdWhitelistedUrl(
       GURL(std::string("https://") + kGood1Url2 + "/c.html")));
   EXPECT_TRUE(database_->ContainsCsdWhitelistedUrl(
@@ -1647,7 +1665,7 @@ TEST_F(SafeBrowsingDatabaseTest, FilterFile) {
 
   // After re-creating the database, it should have a filter read from
   // a file, so it should find the same results.
-  ASSERT_TRUE(file_util::PathExists(filter_file));
+  ASSERT_TRUE(base::PathExists(filter_file));
   database_.reset(new SafeBrowsingDatabaseNew);
   database_->Init(database_filename_);
   EXPECT_TRUE(database_->ContainsBrowseUrl(
@@ -1658,8 +1676,8 @@ TEST_F(SafeBrowsingDatabaseTest, FilterFile) {
       &matching_list, &prefix_hits, &full_hashes, now));
 
   // If there is no filter file, the database cannot find malware urls.
-  file_util::Delete(filter_file, false);
-  ASSERT_FALSE(file_util::PathExists(filter_file));
+  base::DeleteFile(filter_file, false);
+  ASSERT_FALSE(base::PathExists(filter_file));
   database_.reset(new SafeBrowsingDatabaseNew);
   database_->Init(database_filename_);
   EXPECT_FALSE(database_->ContainsBrowseUrl(

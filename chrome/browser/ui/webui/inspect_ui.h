@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/devtools/devtools_adb_bridge.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -16,49 +17,55 @@
 #include "content/public/browser/web_ui_data_source.h"
 
 class InspectUI : public content::WebUIController,
-                  public content::NotificationObserver {
+                  public content::NotificationObserver,
+                  public DevToolsAdbBridge::Listener {
  public:
   explicit InspectUI(content::WebUI* web_ui);
   virtual ~InspectUI();
 
-  void RefreshUI();
+  void InitUI();
+  void InspectRemotePage(const std::string& page_id);
+  void CloseRemotePage(const std::string& page_id);
+  void ReloadRemotePage(const std::string& page_id);
+  void OpenRemotePage(const std::string& browser_id, const std::string& url);
 
  private:
   class WorkerCreationDestructionListener;
 
-  static bool WeakHandleRequestCallback(
-      const base::WeakPtr<InspectUI>& inspect_ui,
-      const std::string& path,
-      const content::WebUIDataSource::GotDataCallback& callback);
+  void PopulateLists();
 
   // content::NotificationObserver overrides.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  void StartListeningNotifications();
   void StopListeningNotifications();
 
   content::WebUIDataSource* CreateInspectUIHTMLSource();
 
-  bool HandleRequestCallback(
-      const std::string& path,
-      const content::WebUIDataSource::GotDataCallback& callback);
+  // DevToolsAdbBridge::Listener overrides.
+  virtual void RemoteDevicesChanged(
+      DevToolsAdbBridge::RemoteDevices* devices) OVERRIDE;
 
-  bool HandleAdbPagesCallback(
-      const std::string& path,
-      const content::WebUIDataSource::GotDataCallback& callback);
-
-  void OnAdbPages(const content::WebUIDataSource::GotDataCallback& callback,
-                  int result,
-                  DevToolsAdbBridge::RemotePages* pages);
+  void UpdatePortForwardingEnabled();
+  void UpdatePortForwardingConfig();
 
   scoped_refptr<WorkerCreationDestructionListener> observer_;
 
   // A scoped container for notification registries.
-  content::NotificationRegistrar registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
-  scoped_ptr<DevToolsAdbBridge> adb_bridge_;
-  base::WeakPtrFactory<InspectUI> weak_factory_;
+  // A scoped container for preference change registries.
+  PrefChangeRegistrar pref_change_registrar_;
+
+  typedef std::map<std::string, scoped_refptr<DevToolsAdbBridge::RemotePage> >
+      RemotePages;
+  RemotePages remote_pages_;
+
+  typedef std::map<std::string,
+      scoped_refptr<DevToolsAdbBridge::RemoteBrowser> > RemoteBrowsers;
+  RemoteBrowsers remote_browsers_;
 
   DISALLOW_COPY_AND_ASSIGN(InspectUI);
 };

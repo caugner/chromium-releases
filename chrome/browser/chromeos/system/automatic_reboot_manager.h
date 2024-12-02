@@ -12,8 +12,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/update_engine_client.h"
 #include "content/public/browser/notification_observer.h"
@@ -104,7 +104,7 @@ class AutomaticRebootManager : public PowerManagerClient::Observer,
       const UpdateEngineClient::Status& status) OVERRIDE;
 
   // ash::UserActivityObserver:
-  virtual void OnUserActivity() OVERRIDE;
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE;
 
   // content::NotificationObserver:
   virtual void Observe(int type,

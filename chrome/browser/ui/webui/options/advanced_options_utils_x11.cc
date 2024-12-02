@@ -11,7 +11,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/nix/xdg_util.h"
-#include "base/process_util.h"
+#include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -82,7 +82,7 @@ bool StartProxyConfigUtil(const char* command[]) {
   bool found = false;
   for (size_t i = 0; i < paths.size(); ++i) {
     base::FilePath file(paths[i]);
-    if (file_util::PathExists(file.Append(command[0]))) {
+    if (base::PathExists(file.Append(command[0]))) {
       found = true;
       break;
     }

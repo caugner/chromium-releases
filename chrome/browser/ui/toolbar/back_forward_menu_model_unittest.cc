@@ -8,7 +8,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -497,10 +497,9 @@ TEST_F(BackFwdMenuModelTest, EscapeLabel) {
 
 // Test asynchronous loading of favicon from history service.
 TEST_F(BackFwdMenuModelTest, FaviconLoadTest) {
-  profile()->CreateHistoryService(true, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(true, false));
   profile()->CreateFaviconService();
-  Browser::CreateParams native_params(profile(),
-                                      chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser::CreateParams native_params(profile(), chrome::GetActiveDesktop());
   scoped_ptr<Browser> browser(
       chrome::CreateBrowserWithTestWindowForParams(&native_params));
   FaviconDelegate favicon_delegate;

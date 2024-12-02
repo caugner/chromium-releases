@@ -33,6 +33,7 @@ class ChromeMockRenderThread : public content::MockRenderThread {
   //////////////////////////////////////////////////////////////////////////
   // The following functions are called by the test itself.
 
+#if defined(ENABLE_PRINTING)
   // Returns the pseudo-printer instance.
   MockPrinter* printer();
 
@@ -45,6 +46,7 @@ class ChromeMockRenderThread : public content::MockRenderThread {
 
   // Get the number of pages to generate for print preview.
   int print_preview_pages_remaining() const;
+#endif
 
  private:
   // Overrides base class implementation to add custom handling for
@@ -57,8 +59,10 @@ class ChromeMockRenderThread : public content::MockRenderThread {
                                 const std::string& channel_name,
                                 int* port_id);
 
-#if defined(OS_CHROMEOS)
-  void OnAllocateTempFileForPrinting(base::FileDescriptor* renderer_fd,
+#if defined(ENABLE_PRINTING)
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+  void OnAllocateTempFileForPrinting(int render_view_id,
+                                     base::FileDescriptor* renderer_fd,
                                      int* browser_fd);
   void OnTempFileForPrintingWritten(int render_view_id, int browser_fd);
 #endif
@@ -97,6 +101,9 @@ class ChromeMockRenderThread : public content::MockRenderThread {
 
   // Number of pages to generate for print preview.
   int print_preview_pages_remaining_;
+#endif
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeMockRenderThread);
 };
 
 #endif  // CHROME_RENDERER_CHROME_MOCK_RENDER_THREAD_H_

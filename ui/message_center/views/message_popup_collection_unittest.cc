@@ -6,15 +6,19 @@
 
 #include <list>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/events/event.h"
+#include "ui/base/events/event_constants.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
 #include "ui/message_center/fake_message_center.h"
 #include "ui/message_center/views/toast_contents_view.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace message_center {
 namespace test {
@@ -24,12 +28,15 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
   virtual void SetUp() OVERRIDE {
     views::ViewsTestBase::SetUp();
     MessageCenter::Initialize();
-    collection_.reset(
-        new MessagePopupCollection(GetContext(), MessageCenter::Get(), NULL));
+    collection_.reset(new MessagePopupCollection(
+        GetContext(), MessageCenter::Get(), NULL, false));
     // This size fits test machines resolution and also can keep a few toasts
     // w/o ill effects of hitting the screen overflow. This allows us to assume
     // and verify normal layout of the toast stack.
-    collection_->SetWorkAreaForTest(gfx::Rect(0, 0, 600, 400));
+    collection_->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),
+                                gfx::Rect(0, 0, 600, 400));  // Simulate a
+                                                             // taskbar at the
+                                                             // bottom.
     id_ = 0;
   }
 
@@ -47,6 +54,10 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
     return collection_->toasts_.size();
   }
 
+  bool MouseInCollection() {
+    return collection_->latest_toast_entered_ != NULL;
+  }
+
   bool IsToastShown(const std::string& id) {
     views::Widget* widget = collection_->GetWidgetForTest(id);
     return widget && widget->IsVisible();
@@ -54,6 +65,10 @@ class MessagePopupCollectionTest : public views::ViewsTestBase {
 
   views::Widget* GetWidget(const std::string& id) {
     return collection_->GetWidgetForTest(id);
+  }
+
+  gfx::Rect GetWorkArea() {
+    return collection_->work_area_;
   }
 
   ToastContentsView* GetToast(const std::string& id) {
@@ -174,6 +189,190 @@ TEST_F(MessagePopupCollectionTest, DefaultPositioning) {
 
   CloseAllToastsAndWait();
   EXPECT_EQ(0u, GetToastCounts());
+}
+
+TEST_F(MessagePopupCollectionTest, DefaultPositioningWithRightTaskbar) {
+  // If taskbar is on the right we show the toasts bottom to top as usual.
+
+  // Simulate a taskbar at the right.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 590, 400),   // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  gfx::Rect r0 = GetToastRectAt(0);
+  gfx::Rect r1 = GetToastRectAt(1);
+
+  // 2 toasts are shown, equal size, vertical stack.
+  EXPECT_TRUE(IsToastShown(id0));
+  EXPECT_TRUE(IsToastShown(id1));
+
+  EXPECT_EQ(r0.width(), r1.width());
+  EXPECT_EQ(r0.height(), r1.height());
+  EXPECT_GT(r0.y(), r1.y());
+  EXPECT_EQ(r0.x(), r1.x());
+
+  CloseAllToastsAndWait();
+  EXPECT_EQ(0u, GetToastCounts());
+
+  // Restore simulated taskbar position to bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),  // Work-area.
+                               gfx::Rect(0, 0, 600, 400)); // Display-bounds.
+}
+
+TEST_F(MessagePopupCollectionTest, TopDownPositioningWithTopTaskbar) {
+  // Simulate a taskbar at the top.
+  collection()->SetDisplayInfo(gfx::Rect(0, 10, 600, 390),  // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  gfx::Rect r0 = GetToastRectAt(0);
+  gfx::Rect r1 = GetToastRectAt(1);
+
+  // 2 toasts are shown, equal size, vertical stack.
+  EXPECT_TRUE(IsToastShown(id0));
+  EXPECT_TRUE(IsToastShown(id1));
+
+  EXPECT_EQ(r0.width(), r1.width());
+  EXPECT_EQ(r0.height(), r1.height());
+  EXPECT_LT(r0.y(), r1.y());
+  EXPECT_EQ(r0.x(), r1.x());
+
+  CloseAllToastsAndWait();
+  EXPECT_EQ(0u, GetToastCounts());
+
+  // Restore simulated taskbar position to bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+}
+
+TEST_F(MessagePopupCollectionTest, TopDownPositioningWithLeftAndTopTaskbar) {
+  // If there "seems" to be a taskbar on left and top (like in Unity), it is
+  // assumed that the actual taskbar is the top one.
+
+  // Simulate a taskbar at the top and left.
+  collection()->SetDisplayInfo(gfx::Rect(10, 10, 590, 390),  // Work-area.
+                               gfx::Rect(0, 0, 600, 400));   // Display-bounds.
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  gfx::Rect r0 = GetToastRectAt(0);
+  gfx::Rect r1 = GetToastRectAt(1);
+
+  // 2 toasts are shown, equal size, vertical stack.
+  EXPECT_TRUE(IsToastShown(id0));
+  EXPECT_TRUE(IsToastShown(id1));
+
+  EXPECT_EQ(r0.width(), r1.width());
+  EXPECT_EQ(r0.height(), r1.height());
+  EXPECT_LT(r0.y(), r1.y());
+  EXPECT_EQ(r0.x(), r1.x());
+
+  CloseAllToastsAndWait();
+  EXPECT_EQ(0u, GetToastCounts());
+
+  // Restore simulated taskbar position to bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+}
+
+TEST_F(MessagePopupCollectionTest, TopDownPositioningWithBottomAndTopTaskbar) {
+  // If there "seems" to be a taskbar on bottom and top (like in Gnome), it is
+  // assumed that the actual taskbar is the top one.
+
+  // Simulate a taskbar at the top and bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 10, 580, 400),  // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  gfx::Rect r0 = GetToastRectAt(0);
+  gfx::Rect r1 = GetToastRectAt(1);
+
+  // 2 toasts are shown, equal size, vertical stack.
+  EXPECT_TRUE(IsToastShown(id0));
+  EXPECT_TRUE(IsToastShown(id1));
+
+  EXPECT_EQ(r0.width(), r1.width());
+  EXPECT_EQ(r0.height(), r1.height());
+  EXPECT_LT(r0.y(), r1.y());
+  EXPECT_EQ(r0.x(), r1.x());
+
+  CloseAllToastsAndWait();
+  EXPECT_EQ(0u, GetToastCounts());
+
+  // Restore simulated taskbar position to bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+}
+
+TEST_F(MessagePopupCollectionTest, LeftPositioningWithLeftTaskbar) {
+  // Simulate a taskbar at the left.
+  collection()->SetDisplayInfo(gfx::Rect(10, 0, 590, 400),  // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  gfx::Rect r0 = GetToastRectAt(0);
+  gfx::Rect r1 = GetToastRectAt(1);
+
+  // 2 toasts are shown, equal size, vertical stack.
+  EXPECT_TRUE(IsToastShown(id0));
+  EXPECT_TRUE(IsToastShown(id1));
+
+  EXPECT_EQ(r0.width(), r1.width());
+  EXPECT_EQ(r0.height(), r1.height());
+  EXPECT_GT(r0.y(), r1.y());
+  EXPECT_EQ(r0.x(), r1.x());
+
+  // Ensure that toasts are on the left.
+  EXPECT_LT(r1.x(), GetWorkArea().CenterPoint().x());
+
+  CloseAllToastsAndWait();
+  EXPECT_EQ(0u, GetToastCounts());
+
+  // Restore simulated taskbar position to bottom.
+  collection()->SetDisplayInfo(gfx::Rect(0, 0, 600, 390),   // Work-area.
+                               gfx::Rect(0, 0, 600, 400));  // Display-bounds.
+}
+
+TEST_F(MessagePopupCollectionTest, DetectMouseHover) {
+  std::string id0 = AddNotification();
+  std::string id1 = AddNotification();
+  WaitForTransitionsDone();
+
+  views::WidgetDelegateView* toast0 = GetToast(id0);
+  EXPECT_TRUE(toast0 != NULL);
+  views::WidgetDelegateView* toast1 = GetToast(id1);
+  EXPECT_TRUE(toast1 != NULL);
+
+  ui::MouseEvent event(ui::ET_MOUSE_MOVED, gfx::Point(), gfx::Point(), 0);
+
+  // Test that mouse detection logic works in presence of out-of-order events.
+  toast0->OnMouseEntered(event);
+  EXPECT_TRUE(MouseInCollection());
+  toast1->OnMouseEntered(event);
+  EXPECT_TRUE(MouseInCollection());
+  toast0->OnMouseExited(event);
+  EXPECT_TRUE(MouseInCollection());
+  toast1->OnMouseExited(event);
+  EXPECT_FALSE(MouseInCollection());
+
+  // Test that mouse detection logic works in presence of WindowClosing events.
+  toast0->OnMouseEntered(event);
+  EXPECT_TRUE(MouseInCollection());
+  toast1->OnMouseEntered(event);
+  EXPECT_TRUE(MouseInCollection());
+  toast0->WindowClosing();
+  EXPECT_TRUE(MouseInCollection());
+  toast1->WindowClosing();
+  EXPECT_FALSE(MouseInCollection());
 }
 
 // TODO(dimich): Test repositioning - both normal one and when user is closing

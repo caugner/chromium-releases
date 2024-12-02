@@ -25,7 +25,6 @@ class SearchModel {
   struct State {
     State();
     State(const SearchMode& mode,
-          bool top_bars_visible,
           InstantSupportState instant_support,
           bool voice_search_supported);
 
@@ -33,9 +32,6 @@ class SearchModel {
 
     // The display mode of UI elements such as the toolbar, the tab strip, etc.
     SearchMode mode;
-
-    // The visibility of top bars such as bookmark and info bars.
-    bool top_bars_visible;
 
     // Does the current page support Instant?
     InstantSupportState instant_support;
@@ -46,11 +42,6 @@ class SearchModel {
 
   SearchModel();
   ~SearchModel();
-
-  // Returns true if visibility in top bars should be changed based on
-  // |old_state| and |new_state|.
-  static bool ShouldChangeTopBarsVisibility(const State& old_state,
-                                            const State& new_state);
 
   // Change the state.  Change notifications are sent to observers.
   void SetState(const State& state);
@@ -63,12 +54,6 @@ class SearchModel {
 
   // Get the active mode.
   const SearchMode& mode() const { return state_.mode; }
-
-  // Set visibility of top bars.  Change notifications are sent to observers.
-  void SetTopBarsVisible(bool visible);
-
-  // Get the visibility of top bars.
-  bool top_bars_visible() const { return state_.top_bars_visible; }
 
   // Sets the page instant support state. Change notifications are sent to
   // observers.

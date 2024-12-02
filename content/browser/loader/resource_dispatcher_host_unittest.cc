@@ -7,9 +7,8 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
-#include "base/process_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "content/browser/browser_thread_impl.h"
@@ -1682,7 +1681,8 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContextTransferred) {
   MakeTestRequest(render_view_id, request_id, GURL("http://example.com/blah"));
 
   GlobalRequestID global_request_id(filter_->child_id(), request_id);
-  host_.MarkAsTransferredNavigation(global_request_id);
+  host_.MarkAsTransferredNavigation(global_request_id,
+                                    GURL("http://example.com/blah"));
 
   // And now simulate a cancellation coming from the renderer.
   ResourceHostMsg_CancelRequest msg(filter_->child_id(), request_id);

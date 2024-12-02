@@ -9,6 +9,7 @@
 #include <iepmapi.h>
 #include <sddl.h>
 #include <shlobj.h>
+#include <TlHelp32.h>
 #include <winsock2.h>
 
 #include "base/command_line.h"
@@ -17,8 +18,10 @@
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process.h"
+#include "base/process/process_iterator.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -532,6 +535,10 @@ std::wstring GetClipboardText() {
   return UTF16ToWide(text16);
 }
 
+void DestroyClipboard() {
+  ui::Clipboard::DestroyClipboardForCurrentThread();
+}
+
 void SetClipboardText(const std::wstring& text) {
   ui::ScopedClipboardWriter clipboard_writer(
       ui::Clipboard::GetForCurrentThread(),
@@ -702,7 +709,7 @@ void ClearIESessionHistory() {
   session_history_path = session_history_path.AppendASCII("Microsoft");
   session_history_path = session_history_path.AppendASCII("Internet Explorer");
   session_history_path = session_history_path.AppendASCII("Recovery");
-  file_util::Delete(session_history_path, true);
+  base::DeleteFile(session_history_path, true);
 }
 
 std::string GetLocalIPv4Address() {

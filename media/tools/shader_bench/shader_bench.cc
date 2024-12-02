@@ -12,7 +12,7 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/base/video_frame.h"
 #include "media/tools/shader_bench/cpu_color_painter.h"
 #include "media/tools/shader_bench/gpu_color_painter.h"
@@ -138,7 +138,6 @@ int main(int argc, char** argv) {
   context->SetSwapInterval(0);
 
   // Initialize and name GPU painters.
-  static const int kNumPainters = 3;
   static const struct {
     const char* name;
     GPUPainter* painter;
@@ -148,7 +147,7 @@ int main(int argc, char** argv) {
   };
 
   // Run GPU painter tests.
-  for (int i = 0; i < kNumPainters; i++) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(painters); i++) {
     scoped_ptr<GPUPainter> painter(painters[i].painter);
     painter->LoadFrames(&frames);
     painter->SetGLContext(surface, context);

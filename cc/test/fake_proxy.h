@@ -29,8 +29,10 @@ class FakeProxy : public Proxy {
   virtual void CreateAndInitializeOutputSurface() OVERRIDE;
   virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;
   virtual void SetNeedsAnimate() OVERRIDE {}
+  virtual void SetNeedsUpdateLayers() OVERRIDE {}
   virtual void SetNeedsCommit() OVERRIDE {}
   virtual void SetNeedsRedraw(gfx::Rect damage_rect) OVERRIDE {}
+  virtual void NotifyInputThrottledUntilCommit() OVERRIDE {}
   virtual void SetDeferCommits(bool defer_commits) OVERRIDE {}
   virtual void MainThreadHasStoppedFlinging() OVERRIDE {}
   virtual bool CommitRequested() const OVERRIDE;
@@ -40,7 +42,6 @@ class FakeProxy : public Proxy {
   virtual size_t MaxPartialTextureUpdates() const OVERRIDE;
   virtual void AcquireLayerTextures() OVERRIDE {}
   virtual bool CommitPendingForTesting() OVERRIDE;
-  virtual skia::RefPtr<SkPicture> CapturePicture() OVERRIDE;
   virtual scoped_ptr<base::Value> AsValue() const OVERRIDE;
 
   virtual RendererCapabilities& GetRendererCapabilities();

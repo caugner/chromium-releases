@@ -115,6 +115,11 @@
   margin-top: 16px;
 }
 
-#createManagedUserLinkPlaceholder {
+#createManagedUserLogo img {
+  vertical-align: text-bottom;
+}
+
+#createManagedUserLinkPlaceholder,
+#createManagedUserNoManagerText {
   margin-top: 10px;
 }

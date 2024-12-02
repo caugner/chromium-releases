@@ -60,9 +60,7 @@ void FakePowerManagerClient::IncreaseKeyboardBrightness() {
 void FakePowerManagerClient::IncreaseScreenBrightness() {
 }
 
-void FakePowerManagerClient::NotifyVideoActivity(
-    const base::TimeTicks& last_activity_time,
-    bool is_fullscreen) {
+void FakePowerManagerClient::NotifyVideoActivity(bool is_fullscreen) {
 }
 
 void FakePowerManagerClient::DecreaseKeyboardBrightness() {
@@ -74,7 +72,8 @@ void FakePowerManagerClient::SetIsProjecting(bool is_projecting) {
 void FakePowerManagerClient::RemoveObserver(Observer* observer) {
 }
 
-void FakePowerManagerClient::NotifyUserActivity() {
+void FakePowerManagerClient::NotifyUserActivity(
+    power_manager::UserActivityType type) {
 }
 
 } // namespace chromeos

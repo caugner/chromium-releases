@@ -4,6 +4,7 @@
 
 #include "ash/system/tray/tray_constants.h"
 
+#include "ash/ash_switches.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace ash {
@@ -13,6 +14,9 @@ const int kPaddingFromBottomOfScreenBottomAlignment = 7;
 const int kPaddingFromOuterEdgeOfLauncherVerticalAlignment = 8;
 const int kPaddingFromInnerEdgeOfLauncherVerticalAlignment = 9;
 const int kPaddingFromBottomOfScreenVerticalAlignment = 10;
+
+// Inset between the edge of the shelf region and the status tray.
+const int kPaddingFromEdgeOfShelf = 3;
 
 // Top inset of system tray bubble for bottom anchor alignment.
 const int kTrayBubbleAnchorTopInsetBottomAnchor = 3;
@@ -62,5 +66,13 @@ const int kTrayNotificationContentsWidth = kTrayPopupMinWidth -
     (kNotificationIconWidth + kNotificationButtonWidth +
      (kTrayPopupPaddingHorizontal / 2) * 3);
 const int kTraySpacing = 8;
+const int kAlternateTraySpacing = 4;
+
+// Returns kTraySpacing or kAlternateTraySpacing as applicable
+// (Determined by ash::switches::UseAlternateShelfLayout).
+int GetTraySpacing() {
+  return ash::switches::UseAlternateShelfLayout() ?
+      kAlternateTraySpacing : kTraySpacing;
+}
 
 }  // namespace ash

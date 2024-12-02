@@ -9,8 +9,7 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/process_util.h"
+#include "base/message_loop/message_loop.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
@@ -79,10 +78,9 @@ class MockVideoCaptureControllerEventHandler
         base::Bind(&VideoCaptureController::ReturnBuffer,
                    controller_, controller_id_, this, buffer_id));
   }
-  virtual void OnFrameInfo(const VideoCaptureControllerID& id,
-                           int width,
-                           int height,
-                           int frame_per_second) OVERRIDE {
+  virtual void OnFrameInfo(
+      const VideoCaptureControllerID& id,
+      const media::VideoCaptureCapability& format) OVERRIDE {
     EXPECT_EQ(id, controller_id_);
     DoFrameInfo(id);
   }
@@ -100,12 +98,10 @@ class MockVideoCaptureControllerEventHandler
 class MockVideoCaptureManager : public VideoCaptureManager {
  public:
   MockVideoCaptureManager()
-      : video_session_id_(kStartOpenSessionId) {}
+      : video_session_id_(kStartOpenSessionId),
+        device_name_("fake_device_0", "/dev/video0") {}
 
   void Init() {
-    device_name_.unique_id = "/dev/video0";
-    device_name_.device_name = "fake_device_0";
-
     video_capture_device_.reset(
         media::FakeVideoCaptureDevice::Create(device_name_));
     ASSERT_TRUE(video_capture_device_.get() != NULL);
@@ -118,9 +114,17 @@ class MockVideoCaptureManager : public VideoCaptureManager {
   void Start(const media::VideoCaptureParams& capture_params,
              media::VideoCaptureDevice::EventHandler* vc_receiver) OVERRIDE {
     StartCapture(capture_params.width, capture_params.height, vc_receiver);
-    video_capture_device_->Allocate(capture_params.width, capture_params.height,
-                                    capture_params.frame_per_second,
-                                    vc_receiver);
+    // TODO(mcasas): Add testing for variable resolution video capture devices,
+    // supported by FakeVideoCaptureDevice. See crbug.com/261410, second part.
+    media::VideoCaptureCapability capture_format(
+        capture_params.width,
+        capture_params.height,
+        capture_params.frame_per_second,
+        media::VideoCaptureCapability::kI420,
+        0,
+        false,
+        media::ConstantResolutionVideoCaptureDevice);
+    video_capture_device_->Allocate(capture_format, vc_receiver);
     video_capture_device_->Start();
   }
 

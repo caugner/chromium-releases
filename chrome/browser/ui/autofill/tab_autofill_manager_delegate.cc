@@ -13,16 +13,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autocheckout_bubble.h"
 #include "chrome/browser/ui/autofill/autocheckout_bubble_controller.h"
-#include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
+#include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/common/url_constants.h"
+#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/core/common/autofill_messages.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/rect.h"
 
@@ -38,7 +42,19 @@ TabAutofillManagerDelegate::TabAutofillManagerDelegate(
 }
 
 TabAutofillManagerDelegate::~TabAutofillManagerDelegate() {
-  HideAutofillPopup();
+  // NOTE: It is too late to clean up the autofill popup; that cleanup process
+  // requires that the WebContents instance still be valid and it is not at
+  // this point (in particular, the WebContentsImpl destructor has already
+  // finished running and we are now in the base class destructor).
+  DCHECK(!popup_controller_);
+}
+
+void TabAutofillManagerDelegate::TabActivated(int reason) {
+  if (reason != TabStripModelObserver::CHANGE_REASON_USER_GESTURE)
+    return;
+
+  if (dialog_controller_.get())
+    dialog_controller_->TabActivated();
 }
 
 PersonalDataManager* TabAutofillManagerDelegate::GetPersonalDataManager() {
@@ -91,13 +107,14 @@ void TabAutofillManagerDelegate::ConfirmSaveCreditCard(
       infobar_service, &metric_logger, save_card_callback);
 }
 
-void TabAutofillManagerDelegate::ShowAutocheckoutBubble(
+bool TabAutofillManagerDelegate::ShowAutocheckoutBubble(
     const gfx::RectF& bounding_box,
     bool is_google_user,
-    const base::Callback<void(bool)>& callback) {
+    const base::Callback<void(AutocheckoutBubbleState)>& callback) {
 #if !defined(TOOLKIT_VIEWS)
-  callback.Run(false);
+  callback.Run(AUTOCHECKOUT_BUBBLE_CANCELED);
   NOTIMPLEMENTED();
+  return false;
 #else
   HideAutocheckoutBubble();
 
@@ -113,7 +130,12 @@ void TabAutofillManagerDelegate::ShowAutocheckoutBubble(
               web_contents_->GetView()->GetTopLevelNativeWindow(),
               is_google_user,
               callback)));
+
+  if (!autocheckout_bubble_)
+    return false;
+
   autocheckout_bubble_->ShowBubble();
+  return true;
 #endif  // #if !defined(TOOLKIT_VIEWS)
 }
 
@@ -130,12 +152,17 @@ void TabAutofillManagerDelegate::ShowRequestAutocompleteDialog(
                               const std::string&)>& callback) {
   HideRequestAutocompleteDialog();
 
-  dialog_controller_ = AutofillDialogControllerImpl::Create(web_contents_,
-                                                            form,
-                                                            source_url,
-                                                            dialog_type,
-                                                            callback);
-  dialog_controller_->Show();
+  dialog_controller_ = AutofillDialogController::Create(web_contents_,
+                                                        form,
+                                                        source_url,
+                                                        dialog_type,
+                                                        callback);
+  if (dialog_controller_) {
+    dialog_controller_->Show();
+  } else {
+    callback.Run(NULL, std::string());
+    NOTIMPLEMENTED();
+  }
 }
 
 void TabAutofillManagerDelegate::ShowAutofillPopup(
@@ -161,6 +188,13 @@ void TabAutofillManagerDelegate::ShowAutofillPopup(
       text_direction);
 
   popup_controller_->Show(values, labels, icons, identifiers);
+}
+
+void TabAutofillManagerDelegate::UpdateAutofillPopupDataListValues(
+    const std::vector<base::string16>& values,
+    const std::vector<base::string16>& labels) {
+  if (popup_controller_.get())
+    popup_controller_->UpdateDataListValues(values, labels);
 }
 
 void TabAutofillManagerDelegate::HideAutofillPopup() {
@@ -189,20 +223,38 @@ void TabAutofillManagerDelegate::HideRequestAutocompleteDialog() {
     dialog_controller_->Hide();
 }
 
+void TabAutofillManagerDelegate::WasShown() {
+  content::RenderViewHost* host = web_contents()->GetRenderViewHost();
+  if (!host)
+    return;
+  host->Send(new AutofillMsg_PageShown(host->GetRoutingID()));
+}
+
 void TabAutofillManagerDelegate::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
-  // A redirect immediately after a successful Autocheckout flow shouldn't hide
-  // the dialog.
-  bool was_redirect = details.entry &&
-      content::PageTransitionIsRedirect(details.entry->GetTransitionType());
-  if (dialog_controller_.get() &&
-      (dialog_controller_->dialog_type() == DIALOG_TYPE_REQUEST_AUTOCOMPLETE ||
-       (!dialog_controller_->AutocheckoutIsRunning() && !was_redirect))) {
-    HideRequestAutocompleteDialog();
-  }
 
   HideAutocheckoutBubble();
+
+  if (!dialog_controller_.get())
+    return;
+
+  // A redirect immediately after a successful Autocheckout flow shouldn't hide
+  // the dialog.
+  bool preserve_dialog = AutofillDriverImpl::FromWebContents(web_contents())->
+      autofill_manager()->autocheckout_manager()->should_preserve_dialog();
+  bool was_redirect = details.entry &&
+      content::PageTransitionIsRedirect(details.entry->GetTransitionType());
+
+  if (dialog_controller_->GetDialogType() == DIALOG_TYPE_REQUEST_AUTOCOMPLETE ||
+      (!was_redirect && !preserve_dialog)) {
+    HideRequestAutocompleteDialog();
+  }
+}
+
+void TabAutofillManagerDelegate::WebContentsDestroyed(
+    content::WebContents* web_contents) {
+  HideAutofillPopup();
 }
 
 }  // namespace autofill

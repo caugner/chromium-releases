@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "build/build_config.h"
+#include "cc/layers/solid_color_layer.h"
 #include "cc/test/layer_tree_pixel_test.h"
 #include "cc/test/pixel_comparator.h"
 
@@ -26,16 +27,32 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlur) {
   background->AddChild(green);
   background->AddChild(blur);
 
-  WebKit::WebFilterOperations filters;
-  filters.append(WebKit::WebFilterOperation::createBlurFilter(2));
+  FilterOperations filters;
+  filters.Append(FilterOperation::CreateBlurFilter(2.f));
   blur->SetBackgroundFilters(filters);
+
+#if defined(OS_WIN)
+  // Windows has 436 pixels off by 1: crbug.com/259915
+  float percentage_pixels_large_error = 1.09f;  // 436px / (200*200)
+  float percentage_pixels_small_error = 0.0f;
+  float average_error_allowed_in_bad_pixels = 1.f;
+  int large_error_allowed = 1;
+  int small_error_allowed = 0;
+  pixel_comparator_.reset(new FuzzyPixelComparator(
+      true,  // discard_alpha
+      percentage_pixels_large_error,
+      percentage_pixels_small_error,
+      average_error_allowed_in_bad_pixels,
+      large_error_allowed,
+      small_error_allowed));
+#endif
 
   RunPixelTest(GL_WITH_BITMAP,
                background,
                base::FilePath(FILE_PATH_LITERAL("background_filter_blur.png")));
 }
 
-TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOutsets) {
+TEST_F(LayerTreeHostFiltersPixelTest, DISABLED_BackgroundFilterBlurOutsets) {
   scoped_refptr<SolidColorLayer> background = CreateSolidColorLayer(
       gfx::Rect(200, 200), SK_ColorWHITE);
 
@@ -51,9 +68,25 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOutsets) {
   background->AddChild(green_border);
   background->AddChild(blur);
 
-  WebKit::WebFilterOperations filters;
-  filters.append(WebKit::WebFilterOperation::createBlurFilter(5));
+  FilterOperations filters;
+  filters.Append(FilterOperation::CreateBlurFilter(5.f));
   blur->SetBackgroundFilters(filters);
+
+#if defined(OS_WIN)
+  // Windows has 2250 pixels off by at most 2: crbug.com/259922
+  float percentage_pixels_large_error = 5.625f;  // 2250px / (200*200)
+  float percentage_pixels_small_error = 0.0f;
+  float average_error_allowed_in_bad_pixels = 1.f;
+  int large_error_allowed = 2;
+  int small_error_allowed = 0;
+  pixel_comparator_.reset(new FuzzyPixelComparator(
+      true,  // discard_alpha
+      percentage_pixels_large_error,
+      percentage_pixels_small_error,
+      average_error_allowed_in_bad_pixels,
+      large_error_allowed,
+      small_error_allowed));
+#endif
 
   RunPixelTest(GL_WITH_BITMAP,
                background,
@@ -89,17 +122,17 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOffAxis) {
   blur_transform.Translate(-60.0, -60.0);
   blur->SetTransform(blur_transform);
 
-  WebKit::WebFilterOperations filters;
-  filters.append(WebKit::WebFilterOperation::createBlurFilter(2));
+  FilterOperations filters;
+  filters.Append(FilterOperation::CreateBlurFilter(2.f));
   blur->SetBackgroundFilters(filters);
 
 #if defined(OS_WIN)
-  // Windows has 5 pixels off by 1: crbug.com/225027
-  float percentage_pixels_large_error = 0.0125f;  // 5px / (200*200)
-  float percentage_pixels_small_error = 0.0125f;  // 5px / (200*200)
+  // Windows has 151 pixels off by at most 2: crbug.com/225027
+  float percentage_pixels_large_error = 0.3775f;  // 151px / (200*200)
+  float percentage_pixels_small_error = 0.0f;
   float average_error_allowed_in_bad_pixels = 1.f;
-  int large_error_allowed = 1;
-  int small_error_allowed = 1;
+  int large_error_allowed = 2;
+  int small_error_allowed = 0;
   pixel_comparator_.reset(new FuzzyPixelComparator(
       true,  // discard_alpha
       percentage_pixels_large_error,

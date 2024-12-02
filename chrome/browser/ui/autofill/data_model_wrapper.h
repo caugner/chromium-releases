@@ -9,7 +9,6 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "components/autofill/content/browser/wallet/wallet_items.h"
-#include "components/autofill/core/browser/field_types.h"
 
 namespace gfx {
 class Image;
@@ -19,6 +18,7 @@ namespace autofill {
 
 class AutofillDataModel;
 class AutofillProfile;
+class AutofillType;
 class CreditCard;
 class FormStructure;
 
@@ -35,7 +35,7 @@ class DataModelWrapper {
   virtual ~DataModelWrapper();
 
   // Returns the data for a specific autocomplete type.
-  virtual string16 GetInfo(AutofillFieldType type) const = 0;
+  virtual base::string16 GetInfo(const AutofillType& type) const = 0;
 
   // Returns the icon, if any, that represents this model.
   virtual gfx::Image GetIcon();
@@ -44,9 +44,15 @@ class DataModelWrapper {
   // out-param).
   virtual void FillInputs(DetailInputs* inputs);
 
-  // Returns text to display to the user to summarize this data source. The
-  // default implementation assumes this is an address.
-  virtual string16 GetDisplayText();
+  // Gets text to display to the user to summarize this data source. The
+  // default implementation assumes this is an address. Both params are required
+  // to be non-NULL and will be filled in with text that is vertically compact
+  // (but may take up a lot of horizontal space) and horizontally compact (but
+  // may take up a lot of vertical space) respectively. The return value will
+  // be true and the outparams will be filled in only if the data represented is
+  // complete and valid.
+  virtual bool GetDisplayText(base::string16* vertically_compact,
+                              base::string16* horizontally_compact);
 
   // Fills in |form_structure| with the data that this model contains. |inputs|
   // and |comparator| are used to determine whether each field in the
@@ -64,6 +70,10 @@ class DataModelWrapper {
   virtual void FillFormField(AutofillField* field) const;
 
  private:
+  // Formats address data into a single string using |separator| between
+  // fields.
+  base::string16 GetAddressDisplayText(const base::string16& separator);
+
   DISALLOW_COPY_AND_ASSIGN(DataModelWrapper);
 };
 
@@ -74,7 +84,7 @@ class EmptyDataModelWrapper : public DataModelWrapper {
   EmptyDataModelWrapper();
   virtual ~EmptyDataModelWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
 
  protected:
   virtual void FillFormField(AutofillField* field) const OVERRIDE;
@@ -88,7 +98,7 @@ class AutofillDataModelWrapper : public DataModelWrapper {
   AutofillDataModelWrapper(const AutofillDataModel* data_model, size_t variant);
   virtual ~AutofillDataModelWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
 
  protected:
   virtual void FillFormField(AutofillField* field) const OVERRIDE;
@@ -108,7 +118,9 @@ class AutofillProfileWrapper : public AutofillDataModelWrapper {
   AutofillProfileWrapper(const AutofillProfile* profile, size_t variant);
   virtual ~AutofillProfileWrapper();
 
+ protected:
   virtual void FillInputs(DetailInputs* inputs) OVERRIDE;
+  virtual void FillFormField(AutofillField* field) const OVERRIDE;
 
  private:
   const AutofillProfile* profile_;
@@ -122,12 +134,10 @@ class AutofillCreditCardWrapper : public AutofillDataModelWrapper {
   explicit AutofillCreditCardWrapper(const CreditCard* card);
   virtual ~AutofillCreditCardWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
   virtual gfx::Image GetIcon() OVERRIDE;
-  virtual string16 GetDisplayText() OVERRIDE;
-
- protected:
-  virtual void FillFormField(AutofillField* field) const OVERRIDE;
+  virtual bool GetDisplayText(base::string16* vertically_compact,
+                              base::string16* horizontally_compact) OVERRIDE;
 
  private:
   const CreditCard* card_;
@@ -141,8 +151,9 @@ class WalletAddressWrapper : public DataModelWrapper {
   explicit WalletAddressWrapper(const wallet::Address* address);
   virtual ~WalletAddressWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
-  virtual string16 GetDisplayText() OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
+  virtual bool GetDisplayText(base::string16* vertically_compact,
+                              base::string16* horizontally_compact) OVERRIDE;
 
  private:
   const wallet::Address* address_;
@@ -157,9 +168,10 @@ class WalletInstrumentWrapper : public DataModelWrapper {
       const wallet::WalletItems::MaskedInstrument* instrument);
   virtual ~WalletInstrumentWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
   virtual gfx::Image GetIcon() OVERRIDE;
-  virtual string16 GetDisplayText() OVERRIDE;
+  virtual bool GetDisplayText(base::string16* vertically_compact,
+                              base::string16* horizontally_compact) OVERRIDE;
 
  private:
   const wallet::WalletItems::MaskedInstrument* instrument_;
@@ -173,8 +185,9 @@ class FullWalletBillingWrapper : public DataModelWrapper {
   explicit FullWalletBillingWrapper(wallet::FullWallet* full_wallet);
   virtual ~FullWalletBillingWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
-  virtual string16 GetDisplayText() OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
+  virtual bool GetDisplayText(base::string16* vertically_compact,
+                              base::string16* horizontally_compact) OVERRIDE;
 
  private:
   wallet::FullWallet* full_wallet_;
@@ -188,12 +201,26 @@ class FullWalletShippingWrapper : public DataModelWrapper {
   explicit FullWalletShippingWrapper(wallet::FullWallet* full_wallet);
   virtual ~FullWalletShippingWrapper();
 
-  virtual string16 GetInfo(AutofillFieldType type) const OVERRIDE;
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
 
  private:
   wallet::FullWallet* full_wallet_;
 
   DISALLOW_COPY_AND_ASSIGN(FullWalletShippingWrapper);
+};
+
+// A DataModelWrapper to copy the output of one section to the input of another.
+class DetailOutputWrapper : public DataModelWrapper {
+ public:
+  explicit DetailOutputWrapper(const DetailOutputMap& outputs);
+  virtual ~DetailOutputWrapper();
+
+  virtual base::string16 GetInfo(const AutofillType& type) const OVERRIDE;
+
+ private:
+  const DetailOutputMap& outputs_;
+
+  DISALLOW_COPY_AND_ASSIGN(DetailOutputWrapper);
 };
 
 }  // namespace autofill

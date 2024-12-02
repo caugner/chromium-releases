@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_aedesc.h"
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -23,6 +24,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/drop_data.h"
 #include "content/public/common/url_constants.h"
 #include "grit/ui_resources.h"
 #include "net/base/escape.h"
@@ -32,13 +34,13 @@
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
 #include "ui/gfx/image/image.h"
-#include "webkit/common/webdropdata.h"
 
 using base::SysNSStringToUTF8;
 using base::SysUTF8ToNSString;
 using base::SysUTF16ToNSString;
 using content::BrowserThread;
 using content::DragDownloadFile;
+using content::DropData;
 using content::PromiseFileFinalizer;
 using content::RenderViewHostImpl;
 using net::FileStream;
@@ -63,7 +65,7 @@ base::FilePath FilePathFromFilename(const string16& filename) {
 // Returns a filename appropriate for the drop data
 // TODO(viettrungluu): Refactor to make it common across platforms,
 // and move it somewhere sensible.
-base::FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
+base::FilePath GetFileNameFromDragData(const DropData& drop_data) {
   base::FilePath file_name(
       FilePathFromFilename(drop_data.file_description_filename));
 
@@ -84,7 +86,7 @@ base::FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
 // This helper's sole task is to write out data for a promised file; the caller
 // is responsible for opening the file. It takes the drop data and an open file
 // stream.
-void PromiseWriterHelper(const WebDropData& drop_data,
+void PromiseWriterHelper(const DropData& drop_data,
                          scoped_ptr<FileStream> file_stream) {
   DCHECK(file_stream);
   file_stream->WriteSync(drop_data.file_contents.data(),
@@ -119,6 +121,87 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
   return drop_path;
 }
 
+void SelectFileInFinder(const base::FilePath& file_path) {
+  DCHECK([NSThread isMainThread]);
+
+  // Create the target of this AppleEvent, the Finder.
+  base::mac::ScopedAEDesc<AEAddressDesc> address;
+  const OSType finder_creator_code = 'MACS';
+  OSErr status = AECreateDesc(typeApplSignature,  // type
+                              &finder_creator_code,  // data
+                              sizeof(finder_creator_code),  // dataSize
+                              address.OutPointer());  // result
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status) << "Could not create SelectFile() AE target";
+    return;
+  }
+
+  // Build the AppleEvent data structure that instructs Finder to select files.
+  base::mac::ScopedAEDesc<AppleEvent> the_event;
+  status = AECreateAppleEvent(kAEMiscStandards,  // theAEEventClass
+                              kAESelect,  // theAEEventID
+                              address,  // target
+                              kAutoGenerateReturnID,  // returnID
+                              kAnyTransactionID,  // transactionID
+                              the_event.OutPointer());  // result
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status) << "Could not create SelectFile() AE event";
+    return;
+  }
+
+  // Create the list of files (only ever one) to select.
+  base::mac::ScopedAEDesc<AEDescList> file_list;
+  status = AECreateList(NULL,  // factoringPtr
+                        0,  // factoredSize
+                        false,  // isRecord
+                        file_list.OutPointer());  // resultList
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status)
+        << "Could not create SelectFile() AE file list";
+    return;
+  }
+
+  // Add the single path to the file list.
+  NSURL* url = [NSURL fileURLWithPath:SysUTF8ToNSString(file_path.value())];
+  base::ScopedCFTypeRef<CFDataRef> url_data(
+      CFURLCreateData(kCFAllocatorDefault, base::mac::NSToCFCast(url),
+                      kCFStringEncodingUTF8, true));
+  status = AEPutPtr(file_list.OutPointer(),  // theAEDescList
+                    0,  // index
+                    typeFileURL,  // typeCode
+                    CFDataGetBytePtr(url_data),  // dataPtr
+                    CFDataGetLength(url_data));  // dataSize
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status)
+        << "Could not add file path to AE list in SelectFile()";
+    return;
+  }
+
+  // Attach the file list to the AppleEvent.
+  status = AEPutParamDesc(the_event.OutPointer(),  // theAppleEvent
+                          keyDirectObject,  // theAEKeyword
+                          file_list);  // theAEDesc
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status)
+        << "Could not put the AE file list the path in SelectFile()";
+    return;
+  }
+
+  // Send the actual event.  Do not care about the reply.
+  base::mac::ScopedAEDesc<AppleEvent> reply;
+  status = AESend(the_event,  // theAppleEvent
+                  reply.OutPointer(),  // reply
+                  kAENoReply + kAEAlwaysInteract,  // sendMode
+                  kAENormalPriority,  // sendPriority
+                  kAEDefaultTimeout,  // timeOutInTicks
+                  NULL, // idleProc
+                  NULL);  // filterProc
+  if (status != noErr) {
+    OSSTATUS_LOG(WARNING, status)
+        << "Could not send AE to Finder in SelectFile()";
+  }
+}
+
 }  // namespace
 
 
@@ -135,7 +218,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
 
 - (id)initWithContents:(content::WebContentsImpl*)contents
                   view:(NSView*)contentsView
-              dropData:(const WebDropData*)dropData
+              dropData:(const DropData*)dropData
                  image:(NSImage*)image
                 offset:(NSPoint)offset
             pasteboard:(NSPasteboard*)pboard
@@ -147,7 +230,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
     contentsView_ = contentsView;
     DCHECK(contentsView_);
 
-    dropData_.reset(new WebDropData(*dropData));
+    dropData_.reset(new DropData(*dropData));
     DCHECK(dropData_.get());
 
     dragImage_.reset([image retain]);
@@ -310,7 +393,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
       contents_->GetRenderViewHost());
   if (rvh) {
     // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = NSMakePoint(0, 0);
+    NSPoint localPoint = NSZeroPoint;
     if ([contentsView_ window])
       localPoint = [self convertScreenPoint:screenPoint];
     NSRect viewFrame = [contentsView_ frame];
@@ -340,7 +423,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
       contents_->GetRenderViewHost());
   if (rvh) {
     // Convert |screenPoint| to view coordinates and flip it.
-    NSPoint localPoint = NSMakePoint(0, 0);
+    NSPoint localPoint = NSZeroPoint;
     if ([contentsView_ window])
       localPoint = [self convertScreenPoint:screenPoint];
     NSRect viewFrame = [contentsView_ frame];
@@ -368,7 +451,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
   base::FilePath filePath(SysNSStringToUTF8(path));
   filePath = filePath.Append(downloadFileName_);
 
-  // CreateFileStreamForDrop() will call file_util::PathExists(),
+  // CreateFileStreamForDrop() will call base::PathExists(),
   // which is blocking.  Since this operation is already blocking the
   // UI thread on OSX, it should be reasonable to let it happen.
   base::ThreadRestrictions::ScopedAllowIO allowIO;
@@ -387,7 +470,8 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
         contents_));
 
     // The finalizer will take care of closing and deletion.
-    dragFileDownloader->Start(new PromiseFileFinalizer(dragFileDownloader));
+    dragFileDownloader->Start(new PromiseFileFinalizer(
+        dragFileDownloader.get()));
   } else {
     // The writer will take care of closing and deletion.
     BrowserThread::PostTask(BrowserThread::FILE,
@@ -396,6 +480,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
                                        *dropData_,
                                        base::Passed(&fileStream)));
   }
+  SelectFileInFinder(filePath);
 }
 
 - (void)fillPasteboard {
@@ -470,7 +555,7 @@ NSString* GetDropLocation(NSPasteboard* pboard) {
   // if there is an image flavor, don't put the HTML data on as HTML, but rather
   // put it on as this Chrome-only flavor.
   //
-  // (The only time that Blink fills in the WebDropData::file_contents is with
+  // (The only time that Blink fills in the DropData::file_contents is with
   // an image drop, but the MIME time is tested anyway for paranoia's sake.)
   bool hasImageData = !dropData_->file_contents.empty() &&
                       fileUTI_ &&

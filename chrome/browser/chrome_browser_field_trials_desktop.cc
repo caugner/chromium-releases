@@ -17,12 +17,13 @@
 #include "chrome/browser/gpu/chrome_gpu_util.h"
 #include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/metrics/variations/variations_util.h"
+#include "content/public/common/content_constants.h"
 #include "net/spdy/spdy_session.h"
 #include "ui/base/layout.h"
 
@@ -55,15 +56,15 @@ void AutoLaunchChromeFieldTrial() {
   }
 }
 
-void SetUpInfiniteCacheFieldTrial() {
+void SetupInfiniteCacheFieldTrial() {
   const base::FieldTrial::Probability kDivisor = 100;
 
   base::FieldTrial::Probability infinite_cache_probability = 0;
 
   scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial("InfiniteCache", kDivisor,
-                                                 "No", 2013, 12, 31, NULL));
-  trial->UseOneTimeRandomization();
+      base::FieldTrialList::FactoryGetFieldTrial(
+          "InfiniteCache", kDivisor, "No", 2013, 12, 31,
+          base::FieldTrial::ONE_TIME_RANDOMIZED, NULL));
   trial->AppendGroup("Yes", infinite_cache_probability);
   trial->AppendGroup("Control", infinite_cache_probability);
 }
@@ -77,13 +78,13 @@ void DisableShowProfileSwitcherTrialIfNecessary() {
   avatar_menu_always_hidden = true;
 #endif
   base::FieldTrial* trial = base::FieldTrialList::Find("ShowProfileSwitcher");
-  if (trial && (!ProfileManager::IsMultipleProfilesEnabled() ||
+  if (trial && (!profiles::IsMultipleProfilesEnabled() ||
                 avatar_menu_always_hidden)) {
     trial->Disable();
   }
 }
 
-void SetUpCacheSensitivityAnalysisFieldTrial() {
+void SetupCacheSensitivityAnalysisFieldTrial() {
   const base::FieldTrial::Probability kDivisor = 100;
 
   base::FieldTrial::Probability sensitivity_analysis_probability = 0;
@@ -105,9 +106,9 @@ void SetUpCacheSensitivityAnalysisFieldTrial() {
 #endif
 
   scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial("CacheSensitivityAnalysis",
-                                                 kDivisor, "No",
-                                                 2013, 06, 15, NULL));
+      base::FieldTrialList::FactoryGetFieldTrial(
+          "CacheSensitivityAnalysis", kDivisor, "No", 2013, 06, 15,
+          base::FieldTrial::SESSION_RANDOMIZED, NULL));
   trial->AppendGroup("ControlA", sensitivity_analysis_probability);
   trial->AppendGroup("ControlB", sensitivity_analysis_probability);
   trial->AppendGroup("100A", sensitivity_analysis_probability);
@@ -129,8 +130,9 @@ void WindowsOverlappedTCPReadsFieldTrial(
     const base::FieldTrial::Probability kDivisor = 2;  // 1 in 2 chance
     const base::FieldTrial::Probability kOverlappedReadProbability = 1;
     scoped_refptr<base::FieldTrial> overlapped_reads_trial(
-        base::FieldTrialList::FactoryGetFieldTrial("OverlappedReadImpact",
-            kDivisor, "OverlappedReadEnabled", 2013, 6, 1, NULL));
+        base::FieldTrialList::FactoryGetFieldTrial(
+            "OverlappedReadImpact", kDivisor, "OverlappedReadEnabled",
+            2013, 6, 1, base::FieldTrial::SESSION_RANDOMIZED, NULL));
     int overlapped_reads_disabled_group =
         overlapped_reads_trial->AppendGroup("OverlappedReadDisabled",
                                             kOverlappedReadProbability);
@@ -139,6 +141,17 @@ void WindowsOverlappedTCPReadsFieldTrial(
       net::TCPClientSocketWin::DisableOverlappedReads();
   }
 #endif
+}
+
+void SetupLowLatencyFlashAudioFieldTrial() {
+  scoped_refptr<base::FieldTrial> trial(
+      base::FieldTrialList::FactoryGetFieldTrial(
+          content::kLowLatencyFlashAudioFieldTrialName, 100, "Standard",
+          2013, 9, 1, base::FieldTrial::SESSION_RANDOMIZED, NULL));
+
+  // Trial is enabled for dev / beta / canary users only.
+  if (chrome::VersionInfo::GetChannel() != chrome::VersionInfo::CHANNEL_STABLE)
+    trial->AppendGroup(content::kLowLatencyFlashAudioFieldTrialEnabledName, 25);
 }
 
 }  // namespace
@@ -150,11 +163,12 @@ void SetupDesktopFieldTrials(const CommandLine& parsed_command_line,
   AutoLaunchChromeFieldTrial();
   gpu_util::InitializeCompositingFieldTrial();
   OmniboxFieldTrial::ActivateStaticTrials();
-  SetUpInfiniteCacheFieldTrial();
-  SetUpCacheSensitivityAnalysisFieldTrial();
+  SetupInfiniteCacheFieldTrial();
+  SetupCacheSensitivityAnalysisFieldTrial();
   DisableShowProfileSwitcherTrialIfNecessary();
   WindowsOverlappedTCPReadsFieldTrial(parsed_command_line);
   SetupAppLauncherFieldTrial(local_state);
+  SetupLowLatencyFlashAudioFieldTrial();
 }
 
 }  // namespace chrome

@@ -55,7 +55,7 @@ class ExternalLoader : public base::RefCountedThreadSafe<ExternalLoader> {
   virtual ~ExternalLoader();
 
   // Notifies the provider that the list of extensions has been loaded.
-  void LoadFinished();
+  virtual void LoadFinished();
 
   // Used for passing the list of extensions from the method that loads them
   // to |LoadFinished|. To ensure thread safety, the rules are the following:
@@ -70,10 +70,6 @@ class ExternalLoader : public base::RefCountedThreadSafe<ExternalLoader> {
   friend class base::RefCountedThreadSafe<ExternalLoader>;
 
   ExternalProviderImpl* owner_;  // weak
-
-  // Set to true if loading the extensions is already running. New requests
-  // are ignored while this is set true.
-  bool running_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalLoader);
 };

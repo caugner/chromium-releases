@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/debug/leak_annotations.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,6 +48,10 @@ struct Target : public TargetBase, public SupportsWeakPtr<Target> {};
 struct DerivedTarget : public Target {};
 struct Arrow {
   WeakPtr<Target> target;
+};
+struct TargetWithFactory : public Target {
+  TargetWithFactory() : factory(this) {}
+  WeakPtrFactory<Target> factory;
 };
 
 // Helper class to create and destroy weak pointer copies
@@ -336,43 +340,54 @@ TEST(WeakPtrTest, MoveOwnershipImplicitly) {
   background.DeleteArrow(arrow);
 }
 
-TEST(WeakPtrTest, MoveOwnershipExplicitlyObjectNotReferenced) {
-  // Case 1: The target is not bound to any thread yet. So calling
-  // DetachFromThread() is a no-op.
-  Target target;
-  target.DetachFromThreadHack();
-
-  // Case 2: The target is bound to main thread but no WeakPtr is pointing to
-  // it. In this case, it will be re-bound to any thread trying to get a
-  // WeakPtr pointing to it. So detach function call is again no-op.
-  {
-    WeakPtr<Target> weak_ptr = target.AsWeakPtr();
-  }
-  target.DetachFromThreadHack();
-}
-
-TEST(WeakPtrTest, MoveOwnershipExplicitly) {
+TEST(WeakPtrTest, MoveOwnershipOfUnreferencedObject) {
   BackgroundThread background;
   background.Start();
 
   Arrow* arrow;
   {
     Target target;
-    // Background thread creates WeakPtr(and implicitly owns the object).
+    // Background thread creates WeakPtr.
     background.CreateArrowFromTarget(&arrow, &target);
+
+    // Bind to background thread.
     EXPECT_EQ(&target, background.DeRef(arrow));
 
-    // Detach from background thread.
-    target.DetachFromThreadHack();
+    // Release the only WeakPtr.
+    arrow->target.reset();
+
+    // Now we should be able to create a new reference from this thread.
+    arrow->target = target.AsWeakPtr();
 
     // Re-bind to main thread.
     EXPECT_EQ(&target, arrow->target.get());
 
-    // Main thread can now delete the target.
+    // And the main thread can now delete the target.
   }
 
-  // WeakPtr can be deleted on non-owner thread.
-  background.DeleteArrow(arrow);
+  delete arrow;
+}
+
+TEST(WeakPtrTest, MoveOwnershipAfterInvalidate) {
+  BackgroundThread background;
+  background.Start();
+
+  Arrow arrow;
+  scoped_ptr<TargetWithFactory> target(new TargetWithFactory);
+
+  // Bind to main thread.
+  arrow.target = target->factory.GetWeakPtr();
+  EXPECT_EQ(target.get(), arrow.target.get());
+
+  target->factory.InvalidateWeakPtrs();
+  EXPECT_EQ(NULL, arrow.target.get());
+
+  arrow.target = target->factory.GetWeakPtr();
+  // Re-bind to background thread.
+  EXPECT_EQ(target.get(), background.DeRef(&arrow));
+
+  // And the background thread can now delete the target.
+  background.DeleteTarget(target.release());
 }
 
 TEST(WeakPtrTest, MainThreadRefOutlivesBackgroundThreadRef) {

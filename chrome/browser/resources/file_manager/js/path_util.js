@@ -45,6 +45,13 @@ var DriveSubRootDirectory = {
 var PathUtil = {};
 
 /**
+ * The path to the default directory.
+ * @type {string}
+ * @const
+ */
+PathUtil.DEFAULT_DIRECTORY = RootDirectory.DOWNLOADS;
+
+/**
  * Checks if the given path represents a special search. Fake entries in
  * RootDirectory correspond to special searches.
  * @param {string} path Path to check.
@@ -111,6 +118,54 @@ PathUtil.split = function(path) {
   if (fromRoot)
     components[0] = '/' + components[0];
   return components;
+};
+
+/**
+ * Returns a directory part of the given |path|. In other words, the path
+ * without its base name.
+ *
+ * Examples:
+ * PathUtil.dirname('abc') -> ''
+ * PathUtil.dirname('a/b') -> 'a'
+ * PathUtil.dirname('a/b/') -> 'a/b'
+ * PathUtil.dirname('a/b/c') -> 'a/b'
+ * PathUtil.dirname('/') -> '/'
+ * PathUtil.dirname('/abc') -> '/'
+ * PathUtil.dirname('/abc/def') -> '/abc'
+ * PathUtil.dirname('') -> ''
+ *
+ * @param {string} path The path to be parsed.
+ * @return {string} The directory path.
+ */
+PathUtil.dirname = function(path) {
+  var index = path.lastIndexOf('/');
+  if (index < 0)
+    return '';
+  if (index == 0)
+    return '/';
+  return path.substring(0, index);
+};
+
+/**
+ * Returns the base name (the last component) of the given |path|. If the
+ * |path| ends with '/', returns an empty component.
+ *
+ * Examples:
+ * PathUtil.basename('abc') -> 'abc'
+ * PathUtil.basename('a/b') -> 'b'
+ * PathUtil.basename('a/b/') -> ''
+ * PathUtil.basename('a/b/c') -> 'c'
+ * PathUtil.basename('/') -> ''
+ * PathUtil.basename('/abc') -> 'abc'
+ * PathUtil.basename('/abc/def') -> 'def'
+ * PathUtil.basename('') -> ''
+ *
+ * @param {string} path The path to be parsed.
+ * @return {string} The base name.
+ */
+PathUtil.basename = function(path) {
+  var index = path.lastIndexOf('/');
+  return index >= 0 ? path.substring(index + 1) : path;
 };
 
 /**
@@ -258,4 +313,41 @@ PathUtil.getRootLabel = function(path) {
     return str('DRIVE_RECENT_COLLECTION_LABEL');
 
   return path;
+};
+
+/**
+ * Return the label of the folder to be shown. Eg.
+ *  - '/foo/bar/baz' -> 'baz'
+ *  - '/hoge/fuga/ -> 'fuga'
+ * If the directory is root, returns the root label, which is same as
+ * PathUtil.getRootLabel().
+ *
+ * @param {string} directoryPath The full path of the folder.
+ * @return {string} The label to be shown.
+ */
+PathUtil.getFolderLabel = function(directoryPath) {
+  var label = '';
+  if (PathUtil.isRootPath(directoryPath))
+    label = PathUtil.getRootLabel(directoryPath);
+
+  if (label && label != directoryPath)
+    return label;
+
+  var matches = directoryPath.match(/([^\/]*)[\/]?$/);
+  if (matches[1])
+    return matches[1];
+
+  return directoryPath;
+};
+
+/**
+ * Returns if the given path can be a target path of folder shortcut.
+ *
+ * @param {string} directoryPath Diretcoty path to be checked.
+ * @return {boolean} True if the path can be a target path of the shortcut.
+ */
+PathUtil.isEligibleForFolderShortcut = function(directoryPath) {
+  return !PathUtil.isSpecialSearchRoot(directoryPath) &&
+         !PathUtil.isRootPath(directoryPath) &&
+         PathUtil.isDriveBasedPath(directoryPath);
 };

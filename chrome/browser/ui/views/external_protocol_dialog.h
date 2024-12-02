@@ -7,9 +7,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/time.h"
-#include "googleurl/src/gurl.h"
+#include "base/time/time.h"
 #include "ui/views/window/dialog_delegate.h"
+#include "url/gurl.h"
 
 namespace content {
 class WebContents;

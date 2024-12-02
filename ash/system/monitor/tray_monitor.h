@@ -8,8 +8,8 @@
 #include <list>
 
 #include "ash/system/tray/system_tray_item.h"
-#include "base/process.h"
-#include "base/timer.h"
+#include "base/process/process.h"
+#include "base/timer/timer.h"
 
 namespace views {
 class Label;

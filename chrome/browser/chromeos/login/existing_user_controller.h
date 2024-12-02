@@ -14,8 +14,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
@@ -24,13 +24,17 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 namespace chromeos {
 
 class CrosSettings;
 class LoginDisplayHost;
+
+namespace login {
+class NetworkStateHelper;
+}
 
 // ExistingUserController is used to handle login when someone has
 // already logged into the machine.
@@ -153,9 +157,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Adds first-time login URLs.
   void InitializeStartUrls() const;
-
-  // Shows "Release Notes"/"What's new"/Getting started guide on update.
-  void OptionallyShowReleaseNotes(Profile* profile) const;
 
   // Show error message. |error_id| error message ID in resources.
   // If |details| string is not empty, it specify additional error text
@@ -298,6 +299,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Timer for the interval to wait for the reboot after TPM error UI was shown.
   base::OneShotTimer<ExistingUserController> reboot_timer_;
+
+  scoped_ptr<login::NetworkStateHelper> network_state_helper_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 

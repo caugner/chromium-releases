@@ -10,12 +10,17 @@ import android.content.ContentResolver;
 import android.content.SyncStatusObserver;
 import android.os.AsyncTask;
 
+import junit.framework.Assert;
+
+import org.chromium.base.ThreadUtils;
 import org.chromium.sync.notifier.SyncContentResolverDelegate;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -31,6 +36,8 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
     private final Set<AsyncSyncStatusObserver> mObservers;
 
     private boolean mMasterSyncAutomatically;
+
+    private Semaphore mPendingObserverCount;
 
     public MockSyncContentResolverDelegate() {
         mSyncAutomaticallyMap = new HashMap<String, Boolean>();
@@ -59,6 +66,8 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
 
     @Override
     public void setMasterSyncAutomatically(boolean sync) {
+        if (mMasterSyncAutomatically == sync) return;
+
         mMasterSyncAutomatically = sync;
         notifyObservers();
     }
@@ -85,6 +94,7 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
                         " is not syncable for authority " + authority +
                         ". Can not set sync state to " + sync);
             }
+            if (mSyncAutomaticallyMap.get(key) == sync) return;
             mSyncAutomaticallyMap.put(key, sync);
         }
         notifyObservers();
@@ -92,13 +102,19 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
 
     @Override
     public void setIsSyncable(Account account, String authority, int syncable) {
+        String key = createKey(account, authority);
+
         synchronized (mSyncAutomaticallyMap) {
             switch (syncable) {
                 case 0:
-                    mSyncAutomaticallyMap.remove(createKey(account, authority));
+                    if (!mSyncAutomaticallyMap.containsKey(key)) return;
+
+                    mSyncAutomaticallyMap.remove(key);
                     break;
                 case 1:
-                    mSyncAutomaticallyMap.put(createKey(account, authority), false);
+                    if (mSyncAutomaticallyMap.containsKey(key)) return;
+
+                    mSyncAutomaticallyMap.put(key, false);
                     break;
                 default:
                     throw new IllegalArgumentException("Unable to understand syncable argument: " +
@@ -125,10 +141,23 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
 
     private void notifyObservers() {
         synchronized (mObservers) {
+            mPendingObserverCount = new Semaphore(1 - mObservers.size());
             for (AsyncSyncStatusObserver observer : mObservers) {
-                observer.notifyObserverAsync();
+                observer.notifyObserverAsync(mPendingObserverCount);
             }
         }
+    }
+
+    /**
+     * Blocks until the last notification has been issued to all registered observers.
+     * Note that if an observer is removed while a notification is being handled this can
+     * fail to return correctly.
+     *
+     * @throws InterruptedException
+     */
+    public void waitForLastNotificationCompleted() throws InterruptedException {
+        Assert.assertTrue("Timed out waiting for notifications to complete.",
+                mPendingObserverCount.tryAcquire(5, TimeUnit.SECONDS));
     }
 
     private static class AsyncSyncStatusObserver {
@@ -139,16 +168,26 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
             mSyncStatusObserver = syncStatusObserver;
         }
 
-        private void notifyObserverAsync() {
-            new AsyncTask<Void, Void, Void>() {
+        private void notifyObserverAsync(final Semaphore pendingObserverCount) {
+            if (ThreadUtils.runningOnUiThread()) {
+                new AsyncTask<Void, Void, Void>() {
+                    @Override
+                    protected Void doInBackground(Void... params) {
+                        mSyncStatusObserver.onStatusChanged(
+                                ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
+                        return null;
+                    }
 
-                @Override
-                protected Void doInBackground(Void... params) {
-                    mSyncStatusObserver.onStatusChanged(
-                            ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
-                    return null;
-                }
-            }.execute();
+                    @Override
+                    protected void onPostExecute(Void result) {
+                        pendingObserverCount.release();
+                    }
+                }.execute();
+            } else {
+                mSyncStatusObserver.onStatusChanged(
+                        ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
+                pendingObserverCount.release();
+            }
         }
     }
 }

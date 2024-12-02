@@ -62,10 +62,24 @@ var MainView = (function() {
             value = process['pid'];
             break;
           case 'process-info':
-            value = process['type'] + '<br>' + process['titles'].join('<br>');
+            value = process['type'];
+            if (process['type'].match(/^Tab/)) {
+              // Append each tab's history.
+              for (var j = 0; j < process['history'].length; ++j) {
+                value += '<dl><dt>Hisotry ' + j + ':' +
+                    JoinLinks(process['history'][j]);
+              }
+            } else {
+              value += '<br>' + process['titles'].join('<br>');
+            }
             break;
-          case 'process-memory':
+          case 'process-memory-private':
             value = process['memory_private'];
+            break;
+          case 'process-memory-v8':
+            if (process['v8_alloc'] !== undefined) {
+              value = process['v8_used'] + '<br>/ ' + process['v8_alloc'];
+            }
             break;
           }
           var col = row.insertCell(-1);
@@ -88,7 +102,6 @@ var MainView = (function() {
       }
 
       var template = $('extension-template').childNodes;
-      // Add information of each extension.
       for (var id in extensions) {
         var extension = extensions[id];
 
@@ -114,6 +127,21 @@ var MainView = (function() {
         row.setAttribute('class', 'extension');
       }
     }
+  };
+
+  function JoinLinks(tab) {
+    var line = '';
+    for (var l in tab['history']) {
+      var history = tab['history'][l];
+      var title = (history['title'] == '') ? history['url'] : history['title'];
+      var url = '<a href="' + history['url'] + '">' + title + '</a> (' +
+          history['time'] + ' sec. ago)';
+      if (l == tab['index']) {
+        url = '<strong>' + url + '</strong>';
+      }
+      line += '<dd>' + url;
+    }
+    return line;
   };
 
   return MainView;

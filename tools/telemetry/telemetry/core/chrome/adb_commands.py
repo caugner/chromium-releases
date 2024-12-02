@@ -20,7 +20,6 @@ try:
   from pylib import cmd_helper # pylint: disable=F0401
   from pylib import forwarder # pylint: disable=F0401
   from pylib import ports # pylint: disable=F0401
-  from pylib import valgrind_tools # pylint: disable=F0401
 except Exception:
   android_commands = None
 
@@ -54,6 +53,10 @@ class AdbCommands(object):
 
   def __init__(self, device):
     self._adb = android_commands.AndroidCommands(device)
+    self._device = device
+
+  def device(self):
+    return self._device
 
   def Adb(self):
     return self._adb
@@ -156,25 +159,24 @@ def HasForwarder(buildtype=None):
 
 class Forwarder(object):
   def __init__(self, adb, *port_pairs):
-    assert HasForwarder()
-    tool = valgrind_tools.BaseTool()
+    self._adb = adb.Adb()
     self._host_port = port_pairs[0].local_port
 
     new_port_pairs = [(port_pair.local_port, port_pair.remote_port)
                       for port_pair in port_pairs]
 
-    buildtype = 'Debug'
-    if HasForwarder('Release'):
-      buildtype = 'Release'
-    self._forwarder = forwarder.Forwarder(adb.Adb(), buildtype)
-    self._forwarder.Run(new_port_pairs, tool, '127.0.0.1')
+    self._port_pairs = new_port_pairs
+    forwarder.Forwarder.Map(new_port_pairs, self._adb)
+
+  @staticmethod
+  def _GetBuildType():
+    assert HasForwarder()
+    return 'Debug' if HasForwarder('Debug') else 'Release'
 
   @property
   def url(self):
-    assert self._forwarder
     return 'http://localhost:%i' % self._host_port
 
   def Close(self):
-    if self._forwarder:
-      self._forwarder.Close()
-      self._forwarder = None
+    for (device_port, _) in self._port_pairs:
+      forwarder.Forwarder.UnmapDevicePort(device_port, self._adb)

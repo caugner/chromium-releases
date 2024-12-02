@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/process/launch.h"
 #include "base/strings/string16.h"
 #include "base/win/registry.h"
 
@@ -43,18 +44,6 @@ const char kChromeAppLauncher[] = "app-launcher";
 const wchar_t kChromeExe[] = L"chrome.exe";
 const wchar_t kUninstallArgumentsField[] = L"UninstallArguments";
 const wchar_t kUninstallStringField[] = L"UninstallString";
-
-#ifndef OFFICIAL_BUILD
-base::FilePath GetDevelopmentExe(const wchar_t* exe_file) {
-  base::FilePath current_directory;
-  if (PathService::Get(base::DIR_EXE, &current_directory)) {
-    base::FilePath chrome_exe_path(current_directory.Append(exe_file));
-    if (file_util::PathExists(chrome_exe_path))
-      return chrome_exe_path;
-  }
-  return base::FilePath();
-}
-#endif
 
 // Reads a string value from the specified product's "ClientState" registry key.
 // Returns true iff the value is present and successfully read.
@@ -112,7 +101,7 @@ base::FilePath GetSetupExeFromRegistry(InstallationLevel level,
   string16 uninstall;
   if (GetClientStateValue(level, app_guid, kUninstallStringField, &uninstall)) {
     base::FilePath setup_exe_path(uninstall);
-    if (file_util::PathExists(setup_exe_path))
+    if (base::PathExists(setup_exe_path))
       return setup_exe_path;
   }
   return base::FilePath();
@@ -129,18 +118,36 @@ base::FilePath FindExeRelativeToSetupExe(const base::FilePath setup_exe_path,
     // name) and look for chrome.exe from there.
     base::FilePath exe_path(
         setup_exe_path.DirName().DirName().DirName().Append(exe_file));
-    if (file_util::PathExists(exe_path))
+    if (base::PathExists(exe_path))
       return exe_path;
     // By way of mild future proofing, look up one to see if there's a
     // |exe_file| in the version directory
     exe_path = setup_exe_path.DirName().DirName().Append(exe_file);
-    if (file_util::PathExists(exe_path))
+    if (base::PathExists(exe_path))
       return exe_path;
   }
   return base::FilePath();
 }
 
 }  // namespace
+
+void UninstallLegacyAppLauncher(InstallationLevel level) {
+  base::FilePath setup_exe(GetSetupExeFromRegistry(level, kAppHostAppId));
+  if (setup_exe.empty())
+    return;
+  string16 uninstall_arguments;
+  if (GetClientStateValue(level,
+                          kAppHostAppId,
+                          kUninstallArgumentsField,
+                          &uninstall_arguments)) {
+    CommandLine uninstall_cmd = CommandLine::FromString(
+        L"\"" + setup_exe.value() + L"\" " + uninstall_arguments);
+
+    VLOG(1) << "Uninstalling legacy app launcher with command line: "
+            << uninstall_cmd.GetCommandLineString();
+    base::LaunchProcess(uninstall_cmd, base::LaunchOptions(), NULL);
+  }
+}
 
 base::FilePath GetSetupExeForInstallationLevel(InstallationLevel level) {
   // Look in the registry for Chrome Binaries first.
@@ -165,10 +172,6 @@ base::FilePath GetAppHostPathForInstallationLevel(InstallationLevel level) {
 
 base::FilePath GetAnyChromePath() {
   base::FilePath chrome_path;
-#ifndef OFFICIAL_BUILD
-  // For development mode, chrome.exe should be in same dir as the stub.
-  chrome_path = GetDevelopmentExe(kChromeExe);
-#endif
   if (chrome_path.empty())
     chrome_path = GetChromePathForInstallationLevel(SYSTEM_LEVEL_INSTALLATION);
   if (chrome_path.empty())
@@ -178,10 +181,6 @@ base::FilePath GetAnyChromePath() {
 
 base::FilePath GetAnyAppHostPath() {
   base::FilePath app_host_path;
-#ifndef OFFICIAL_BUILD
-  // For development mode, app_host.exe should be in same dir as chrome.exe.
-  app_host_path = GetDevelopmentExe(kChromeAppHostExe);
-#endif
   if (app_host_path.empty()) {
     app_host_path = GetAppHostPathForInstallationLevel(
         SYSTEM_LEVEL_INSTALLATION);

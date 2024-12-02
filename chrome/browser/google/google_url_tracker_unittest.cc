@@ -7,24 +7,23 @@
 #include <set>
 #include <string>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/google/google_url_tracker_infobar_delegate.h"
 #include "chrome/browser/google/google_url_tracker_navigation_helper.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class GoogleURLTrackerTest;
-
 
 namespace {
 
@@ -33,10 +32,10 @@ namespace {
 class TestInfoBarDelegate : public GoogleURLTrackerInfoBarDelegate {
  public:
   // Creates a test delegate and returns it.  Unlike the parent class, this does
-  // not create add the infobar to |infobar_service|, since that "pointer" is
-  // really just a magic number.  Thus there is no InfoBarService ownership of
-  // the returned object; and since the caller doesn't own the returned object,
-  // we rely on |test_harness| cleaning this up eventually in
+  // not add the infobar to |infobar_service|, since that "pointer" is really
+  // just a magic number.  Thus there is no InfoBarService ownership of the
+  // returned object; and since the caller doesn't own the returned object, we
+  // rely on |test_harness| cleaning this up eventually in
   // GoogleURLTrackerTest::OnInfoBarClosed() to avoid leaks.
   static GoogleURLTrackerInfoBarDelegate* Create(
       GoogleURLTrackerTest* test_harness,
@@ -201,7 +200,7 @@ bool TestGoogleURLTrackerNavigationHelper::IsListeningForTabDestruction(
 class GoogleURLTrackerTest : public testing::Test {
  public:
   // Called by TestInfoBarDelegate::Close().
-  void OnInfoBarClosed(InfoBarDelegate* infobar,
+  void OnInfoBarClosed(scoped_ptr<InfoBarDelegate> infobar,
                        InfoBarService* infobar_service);
 
  protected:
@@ -231,7 +230,7 @@ class GoogleURLTrackerTest : public testing::Test {
   void CommitSearch(intptr_t unique_id, const GURL& search_url);
   void CloseTab(intptr_t unique_id);
   GoogleURLTrackerMapEntry* GetMapEntry(intptr_t unique_id);
-  GoogleURLTrackerInfoBarDelegate* GetInfoBar(intptr_t unique_id);
+  GoogleURLTrackerInfoBarDelegate* GetInfoBarDelegate(intptr_t unique_id);
   void ExpectDefaultURLs() const;
   void ExpectListeningForCommit(intptr_t unique_id, bool listening);
   bool observer_notified() const { return observer_.notified(); }
@@ -241,7 +240,7 @@ class GoogleURLTrackerTest : public testing::Test {
   // Since |infobar_service| is really a magic number rather than an actual
   // object, we don't add the created infobar to it.  Instead we will simulate
   // any helper<->infobar interaction necessary.  The returned object will be
-  // cleaned up in CloseTab().
+  // cleaned up in OnInfoBarClosed().
   GoogleURLTrackerInfoBarDelegate* CreateTestInfoBar(
       InfoBarService* infobar_service,
       GoogleURLTracker* google_url_tracker,
@@ -249,8 +248,7 @@ class GoogleURLTrackerTest : public testing::Test {
 
   // These are required by the TestURLFetchers GoogleURLTracker will create (see
   // test_url_fetcher_factory.h).
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread io_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   // Creating this allows us to call
   // net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests().
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
@@ -265,26 +263,25 @@ class GoogleURLTrackerTest : public testing::Test {
   std::set<int> unique_ids_seen_;
 };
 
-void GoogleURLTrackerTest::OnInfoBarClosed(InfoBarDelegate* infobar,
+void GoogleURLTrackerTest::OnInfoBarClosed(scoped_ptr<InfoBarDelegate> infobar,
                                            InfoBarService* infobar_service) {
   // First, simulate the InfoBarService firing INFOBAR_REMOVED.
-  InfoBarRemovedDetails removed_details(infobar, false);
+  InfoBarRemovedDetails removed_details(infobar.get(), false);
   GoogleURLTracker::EntryMap::const_iterator i =
       google_url_tracker_->entry_map_.find(infobar_service);
   ASSERT_FALSE(i == google_url_tracker_->entry_map_.end());
   GoogleURLTrackerMapEntry* map_entry = i->second;
-  ASSERT_EQ(infobar, map_entry->infobar());
+  ASSERT_EQ(infobar, map_entry->infobar_delegate());
   map_entry->Observe(chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
                      content::Source<InfoBarService>(infobar_service),
                      content::Details<InfoBarRemovedDetails>(&removed_details));
 
   // Second, simulate the infobar container closing the infobar in response.
-  delete infobar;
+  // This happens automatically as |infobar| goes out of scope.
 }
 
 GoogleURLTrackerTest::GoogleURLTrackerTest()
-    : message_loop_(base::MessageLoop::TYPE_IO),
-      io_thread_(content::BrowserThread::IO, &message_loop_) {
+    : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
   GoogleURLTrackerFactory::GetInstance()->RegisterUserPrefsOnBrowserContext(
       &profile_);
 }
@@ -386,14 +383,14 @@ void GoogleURLTrackerTest::CommitNonSearch(intptr_t unique_id) {
 
   // The infobar should be showing; otherwise the pending non-search should
   // have closed it.
-  ASSERT_TRUE(map_entry->has_infobar());
+  ASSERT_TRUE(map_entry->has_infobar_delegate());
 
   // The pending_id should have been reset to 0 when the non-search became
   // pending.
-  EXPECT_EQ(0, map_entry->infobar()->pending_id());
+  EXPECT_EQ(0, map_entry->infobar_delegate()->pending_id());
 
   // Committing the navigation would close the infobar.
-  map_entry->infobar()->Close(false);
+  map_entry->infobar_delegate()->Close(false);
 }
 
 void GoogleURLTrackerTest::CommitSearch(intptr_t unique_id,
@@ -402,8 +399,7 @@ void GoogleURLTrackerTest::CommitSearch(intptr_t unique_id,
   if (nav_helper_->IsListeningForNavigationCommit(
       reinterpret_cast<content::NavigationController*>(unique_id))) {
     google_url_tracker_->OnNavigationCommitted(
-        reinterpret_cast<InfoBarService*>(unique_id),
-        search_url);
+        reinterpret_cast<InfoBarService*>(unique_id), search_url);
   }
 }
 
@@ -415,9 +411,9 @@ void GoogleURLTrackerTest::CloseTab(intptr_t unique_id) {
     google_url_tracker_->OnTabClosed(nav_controller);
   } else {
     // Closing a tab with an infobar showing would close the infobar.
-    GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(unique_id);
-    if (infobar)
-      infobar->Close(false);
+    GoogleURLTrackerInfoBarDelegate* delegate = GetInfoBarDelegate(unique_id);
+    if (delegate)
+      delegate->Close(false);
   }
 }
 
@@ -429,10 +425,10 @@ GoogleURLTrackerMapEntry* GoogleURLTrackerTest::GetMapEntry(
   return (i == google_url_tracker_->entry_map_.end()) ? NULL : i->second;
 }
 
-GoogleURLTrackerInfoBarDelegate* GoogleURLTrackerTest::GetInfoBar(
+GoogleURLTrackerInfoBarDelegate* GoogleURLTrackerTest::GetInfoBarDelegate(
     intptr_t unique_id) {
   GoogleURLTrackerMapEntry* map_entry = GetMapEntry(unique_id);
-  return map_entry ? map_entry->infobar() : NULL;
+  return map_entry ? map_entry->infobar_delegate() : NULL;
 }
 
 void GoogleURLTrackerTest::ExpectDefaultURLs() const {
@@ -492,7 +488,9 @@ void TestInfoBarDelegate::Update(const GURL& search_url) {
 }
 
 void TestInfoBarDelegate::Close(bool redo_search) {
-  test_harness_->OnInfoBarClosed(this, infobar_service_);
+  test_harness_->OnInfoBarClosed(scoped_ptr<InfoBarDelegate>(this),
+                                 infobar_service_);
+  // WARNING: At this point |this| has been deleted!
 }
 
 }  // namespace
@@ -739,7 +737,7 @@ TEST_F(GoogleURLTrackerTest, TabClosedOnPendingSearch) {
   SetNavigationPending(1, true);
   GoogleURLTrackerMapEntry* map_entry = GetMapEntry(1);
   ASSERT_FALSE(map_entry == NULL);
-  EXPECT_FALSE(map_entry->has_infobar());
+  EXPECT_FALSE(map_entry->has_infobar_delegate());
   EXPECT_EQ(GURL(GoogleURLTracker::kDefaultGoogleHomepage), google_url());
   EXPECT_EQ(GURL("http://www.google.co.uk/"), GetLastPromptedGoogleURL());
   EXPECT_FALSE(observer_notified());
@@ -759,7 +757,7 @@ TEST_F(GoogleURLTrackerTest, TabClosedOnCommittedSearch) {
 
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
 
   CloseTab(1);
   EXPECT_TRUE(GetMapEntry(1) == NULL);
@@ -776,7 +774,7 @@ TEST_F(GoogleURLTrackerTest, InfoBarClosed) {
 
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(1);
+  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBarDelegate(1);
   ASSERT_FALSE(infobar == NULL);
 
   infobar->Close(false);
@@ -794,7 +792,7 @@ TEST_F(GoogleURLTrackerTest, InfoBarRefused) {
 
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(1);
+  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBarDelegate(1);
   ASSERT_FALSE(infobar == NULL);
 
   infobar->Cancel();
@@ -812,7 +810,7 @@ TEST_F(GoogleURLTrackerTest, InfoBarAccepted) {
 
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(1);
+  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBarDelegate(1);
   ASSERT_FALSE(infobar == NULL);
 
   infobar->Accept();
@@ -833,7 +831,7 @@ TEST_F(GoogleURLTrackerTest, FetchesCanAutomaticallyCloseInfoBars) {
   MockSearchDomainCheckResponse("http://www.google.co.uk/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
   NotifyIPAddressChanged();
   MockSearchDomainCheckResponse(google_url().spec());
   EXPECT_EQ(google_url(), GetLastPromptedGoogleURL());
@@ -844,7 +842,7 @@ TEST_F(GoogleURLTrackerTest, FetchesCanAutomaticallyCloseInfoBars) {
   MockSearchDomainCheckResponse("http://www.google.co.uk/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
   NotifyIPAddressChanged();
   url_canon::Replacements<char> replacements;
   const std::string& scheme("https");
@@ -861,7 +859,7 @@ TEST_F(GoogleURLTrackerTest, FetchesCanAutomaticallyCloseInfoBars) {
   MockSearchDomainCheckResponse("http://www.google.co.jp/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
   NotifyIPAddressChanged();
   MockSearchDomainCheckResponse("http://www.google.co.uk/");
   EXPECT_EQ(new_google_url, google_url());
@@ -873,7 +871,7 @@ TEST_F(GoogleURLTrackerTest, FetchesCanAutomaticallyCloseInfoBars) {
   MockSearchDomainCheckResponse("http://www.google.co.jp/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
   NotifyIPAddressChanged();
   MockSearchDomainCheckResponse("https://www.google.co.uk/");
   EXPECT_EQ(new_google_url, google_url());
@@ -885,7 +883,7 @@ TEST_F(GoogleURLTrackerTest, FetchesCanAutomaticallyCloseInfoBars) {
   MockSearchDomainCheckResponse("http://www.google.co.jp/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
   NotifyIPAddressChanged();
   MockSearchDomainCheckResponse("https://www.google.co.in/");
   EXPECT_EQ(new_google_url, google_url());
@@ -902,15 +900,15 @@ TEST_F(GoogleURLTrackerTest, ResetInfoBarGoogleURLs) {
   MockSearchDomainCheckResponse("http://www.google.co.uk/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.com/search?q=test"));
-  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(1);
-  ASSERT_FALSE(infobar == NULL);
+  GoogleURLTrackerInfoBarDelegate* delegate = GetInfoBarDelegate(1);
+  ASSERT_FALSE(delegate == NULL);
   EXPECT_EQ(GURL("http://www.google.co.uk/"), fetched_google_url());
 
   // If while an infobar is showing we fetch a new URL that differs from the
   // infobar's only by scheme, the infobar should stay showing.
   NotifyIPAddressChanged();
   MockSearchDomainCheckResponse("https://www.google.co.uk/");
-  EXPECT_EQ(infobar, GetInfoBar(1));
+  EXPECT_EQ(delegate, GetInfoBarDelegate(1));
   EXPECT_EQ(GURL("https://www.google.co.uk/"), fetched_google_url());
 }
 
@@ -924,7 +922,7 @@ TEST_F(GoogleURLTrackerTest, NavigationsAfterPendingSearch) {
   SetNavigationPending(1, true);
   GoogleURLTrackerMapEntry* map_entry = GetMapEntry(1);
   ASSERT_FALSE(map_entry == NULL);
-  EXPECT_FALSE(map_entry->has_infobar());
+  EXPECT_FALSE(map_entry->has_infobar_delegate());
   SetNavigationPending(1, false);
   EXPECT_TRUE(GetMapEntry(1) == NULL);
 
@@ -932,15 +930,15 @@ TEST_F(GoogleURLTrackerTest, NavigationsAfterPendingSearch) {
   SetNavigationPending(1, true);
   map_entry = GetMapEntry(1);
   ASSERT_FALSE(map_entry == NULL);
-  EXPECT_FALSE(map_entry->has_infobar());
+  EXPECT_FALSE(map_entry->has_infobar_delegate());
   SetNavigationPending(1, true);
   ASSERT_EQ(map_entry, GetMapEntry(1));
-  EXPECT_FALSE(map_entry->has_infobar());
+  EXPECT_FALSE(map_entry->has_infobar_delegate());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, true));
 
   // Committing this search should show an infobar.
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test2"));
-  EXPECT_TRUE(map_entry->has_infobar());
+  EXPECT_TRUE(map_entry->has_infobar_delegate());
   EXPECT_EQ(GURL(GoogleURLTracker::kDefaultGoogleHomepage), google_url());
   EXPECT_EQ(GURL("http://www.google.co.uk/"), GetLastPromptedGoogleURL());
   EXPECT_FALSE(observer_notified());
@@ -954,20 +952,20 @@ TEST_F(GoogleURLTrackerTest, NavigationsAfterCommittedSearch) {
   MockSearchDomainCheckResponse("http://www.google.co.jp/");
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  GoogleURLTrackerInfoBarDelegate* infobar = GetInfoBar(1);
-  ASSERT_FALSE(infobar == NULL);
+  GoogleURLTrackerInfoBarDelegate* delegate = GetInfoBarDelegate(1);
+  ASSERT_FALSE(delegate == NULL);
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
 
   // A pending non-search on a visible infobar should basically do nothing.
   SetNavigationPending(1, false);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(0, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(0, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
 
   // As should another pending non-search after the first.
   SetNavigationPending(1, false);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(0, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(0, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
 
   // Committing this non-search should close the infobar.  The control flow in
@@ -980,38 +978,38 @@ TEST_F(GoogleURLTrackerTest, NavigationsAfterCommittedSearch) {
   // for the search to commit.
   SetNavigationPending(1, true);
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  infobar = GetInfoBar(1);
-  ASSERT_FALSE(infobar == NULL);
+  delegate = GetInfoBarDelegate(1);
+  ASSERT_FALSE(delegate == NULL);
   SetNavigationPending(1, true);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(1, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(1, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, true));
 
   // But a non-search after this should cancel that state.
   SetNavigationPending(1, false);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(0, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(0, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
 
   // Another pending search after the non-search should put us back into
   // "waiting for commit" mode.
   SetNavigationPending(1, true);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(1, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(1, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, true));
 
   // A second pending search after the first should not really change anything.
   SetNavigationPending(1, true);
-  ASSERT_EQ(infobar, GetInfoBar(1));
-  EXPECT_EQ(1, infobar->pending_id());
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
+  EXPECT_EQ(1, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, true));
 
   // Committing this search should change the visible infobar's search_url.
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test2"));
-  ASSERT_EQ(infobar, GetInfoBar(1));
+  ASSERT_EQ(delegate, GetInfoBarDelegate(1));
   EXPECT_EQ(GURL("http://www.google.co.uk/search?q=test2"),
-            infobar->search_url());
-  EXPECT_EQ(0, infobar->pending_id());
+            delegate->search_url());
+  EXPECT_EQ(0, delegate->pending_id());
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
   EXPECT_EQ(GURL(GoogleURLTracker::kDefaultGoogleHomepage), google_url());
   EXPECT_EQ(GURL("http://www.google.co.uk/"), GetLastPromptedGoogleURL());
@@ -1027,35 +1025,35 @@ TEST_F(GoogleURLTrackerTest, MultipleMapEntries) {
   SetNavigationPending(1, true);
   GoogleURLTrackerMapEntry* map_entry = GetMapEntry(1);
   ASSERT_FALSE(map_entry == NULL);
-  EXPECT_FALSE(map_entry->has_infobar());
+  EXPECT_FALSE(map_entry->has_infobar_delegate());
 
   SetNavigationPending(2, true);
   CommitSearch(2, GURL("http://www.google.co.uk/search?q=test2"));
-  GoogleURLTrackerInfoBarDelegate* infobar2 = GetInfoBar(2);
-  ASSERT_FALSE(infobar2 == NULL);
+  GoogleURLTrackerInfoBarDelegate* delegate2 = GetInfoBarDelegate(2);
+  ASSERT_FALSE(delegate2 == NULL);
   EXPECT_EQ(GURL("http://www.google.co.uk/search?q=test2"),
-            infobar2->search_url());
+            delegate2->search_url());
 
   SetNavigationPending(3, true);
   GoogleURLTrackerMapEntry* map_entry3 = GetMapEntry(3);
   ASSERT_FALSE(map_entry3 == NULL);
-  EXPECT_FALSE(map_entry3->has_infobar());
+  EXPECT_FALSE(map_entry3->has_infobar_delegate());
 
   SetNavigationPending(4, true);
   CommitSearch(4, GURL("http://www.google.co.uk/search?q=test4"));
-  GoogleURLTrackerInfoBarDelegate* infobar4 = GetInfoBar(4);
-  ASSERT_FALSE(infobar4 == NULL);
+  GoogleURLTrackerInfoBarDelegate* delegate4 = GetInfoBarDelegate(4);
+  ASSERT_FALSE(delegate4 == NULL);
   EXPECT_EQ(GURL("http://www.google.co.uk/search?q=test4"),
-            infobar4->search_url());
+            delegate4->search_url());
 
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
-  EXPECT_TRUE(map_entry->has_infobar());
+  EXPECT_TRUE(map_entry->has_infobar_delegate());
 
-  infobar2->Close(false);
+  delegate2->Close(false);
   EXPECT_TRUE(GetMapEntry(2) == NULL);
   EXPECT_FALSE(observer_notified());
 
-  infobar4->Accept();
+  delegate4->Accept();
   EXPECT_TRUE(GetMapEntry(1) == NULL);
   EXPECT_TRUE(GetMapEntry(3) == NULL);
   EXPECT_TRUE(GetMapEntry(4) == NULL);
@@ -1076,12 +1074,12 @@ TEST_F(GoogleURLTrackerTest, IgnoreIrrelevantNavigation) {
   CommitSearch(1, GURL("http://www.google.co.uk/search?q=test"));
   SetNavigationPending(2, true);
   CommitSearch(2, GURL("http://www.google.co.uk/search?q=test2"));
-  EXPECT_FALSE(GetInfoBar(1) == NULL);
-  GoogleURLTrackerInfoBarDelegate* infobar2 = GetInfoBar(2);
-  ASSERT_FALSE(infobar2 == NULL);
+  EXPECT_FALSE(GetInfoBarDelegate(1) == NULL);
+  GoogleURLTrackerInfoBarDelegate* delegate2 = GetInfoBarDelegate(2);
+  ASSERT_FALSE(delegate2 == NULL);
   SetNavigationPending(1, true);
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, true));
-  infobar2->Close(false);
+  delegate2->Close(false);
   SetNavigationPending(1, false);
   ASSERT_NO_FATAL_FAILURE(ExpectListeningForCommit(1, false));
 }

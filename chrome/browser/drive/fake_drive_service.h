@@ -8,6 +8,7 @@
 #include "base/files/file_path.h"
 #include "base/values.h"
 #include "chrome/browser/drive/drive_service_interface.h"
+#include "chrome/browser/google_apis/auth_service_interface.h"
 
 namespace drive {
 
@@ -45,6 +46,15 @@ class FakeDriveService : public DriveServiceInterface {
     default_max_results_ = default_max_results;
   }
 
+  // Sets the url to the test server to be used as a base for generated share
+  // urls to the share dialog.
+  void set_share_url_base(const GURL& share_url_base) {
+    share_url_base_ = share_url_base;
+  }
+
+  // Changes the quota fields returned from GetAboutResource().
+  void SetQuotaValue(int64 used, int64 total);
+
   // Returns the largest changestamp, which starts from 0 by default. See
   // also comments at LoadAccountMetadataForWapi().
   int64 largest_changestamp() const { return largest_changestamp_; }
@@ -67,6 +77,10 @@ class FakeDriveService : public DriveServiceInterface {
     return about_resource_load_count_;
   }
 
+  // Returns the number of times the app list is successfully loaded by
+  // GetAppList().
+  int app_list_load_count() const { return app_list_load_count_; }
+
   // Returns the file path whose request is cancelled just before this method
   // invocation.
   const base::FilePath& last_cancelled_file() const {
@@ -77,7 +91,7 @@ class FakeDriveService : public DriveServiceInterface {
   static GURL GetFakeLinkUrl(const std::string& resource_id);
 
   // DriveServiceInterface Overrides
-  virtual void Initialize(Profile* profile) OVERRIDE;
+  virtual void Initialize() OVERRIDE;
   virtual void AddObserver(DriveServiceObserver* observer) OVERRIDE;
   virtual void RemoveObserver(DriveServiceObserver* observer) OVERRIDE;
   virtual bool CanSendRequest() const OVERRIDE;
@@ -85,6 +99,8 @@ class FakeDriveService : public DriveServiceInterface {
       const std::string& resource_id) const OVERRIDE;
   virtual std::string GetRootResourceId() const OVERRIDE;
   virtual bool HasAccessToken() const OVERRIDE;
+  virtual void RequestAccessToken(
+      const google_apis::AuthStatusCallback& callback) OVERRIDE;
   virtual bool HasRefreshToken() const OVERRIDE;
   virtual void ClearAccessToken() OVERRIDE;
   virtual void ClearRefreshToken() OVERRIDE;
@@ -111,6 +127,10 @@ class FakeDriveService : public DriveServiceInterface {
   virtual google_apis::CancelCallback GetResourceEntry(
       const std::string& resource_id,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
+  virtual google_apis::CancelCallback GetShareUrl(
+      const std::string& resource_id,
+      const GURL& embed_origin,
+      const google_apis::GetShareUrlCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback GetAboutResource(
       const google_apis::GetAboutResourceCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback GetAppList(
@@ -121,24 +141,24 @@ class FakeDriveService : public DriveServiceInterface {
       const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback DownloadFile(
       const base::FilePath& local_cache_path,
-      const GURL& download_url,
+      const std::string& resource_id,
       const google_apis::DownloadActionCallback& download_action_callback,
       const google_apis::GetContentCallback& get_content_callback,
       const google_apis::ProgressCallback& progress_callback) OVERRIDE;
   virtual google_apis::CancelCallback CopyResource(
       const std::string& resource_id,
       const std::string& parent_resource_id,
-      const std::string& new_name,
+      const std::string& new_title,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   // The new resource ID for the copied document will look like
   // |resource_id| + "_copied".
   virtual google_apis::CancelCallback CopyHostedDocument(
       const std::string& resource_id,
-      const std::string& new_name,
+      const std::string& new_title,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback RenameResource(
       const std::string& resource_id,
-      const std::string& new_name,
+      const std::string& new_title,
       const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback TouchResource(
       const std::string& resource_id,
@@ -155,7 +175,7 @@ class FakeDriveService : public DriveServiceInterface {
       const google_apis::EntryActionCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback AddNewDirectory(
       const std::string& parent_resource_id,
-      const std::string& directory_name,
+      const std::string& directory_title,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback InitiateUploadNewFile(
       const std::string& content_type,
@@ -253,7 +273,7 @@ class FakeDriveService : public DriveServiceInterface {
   GURL GetNewUploadSessionUrl();
 
   scoped_ptr<base::DictionaryValue> resource_list_value_;
-  scoped_ptr<base::Value> account_metadata_value_;
+  scoped_ptr<base::DictionaryValue> account_metadata_value_;
   scoped_ptr<base::Value> app_info_value_;
   std::map<GURL, UploadSession> upload_sessions_;
   int64 largest_changestamp_;
@@ -265,8 +285,10 @@ class FakeDriveService : public DriveServiceInterface {
   int change_list_load_count_;
   int directory_load_count_;
   int about_resource_load_count_;
+  int app_list_load_count_;
   bool offline_;
   base::FilePath last_cancelled_file_;
+  GURL share_url_base_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeDriveService);
 };

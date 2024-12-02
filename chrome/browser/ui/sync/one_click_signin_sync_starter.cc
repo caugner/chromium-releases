@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -47,11 +48,15 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     const std::string& email,
     const std::string& password,
     StartSyncMode start_mode,
-    bool force_same_tab_navigation,
-    ConfirmationRequired confirmation_required)
-    : start_mode_(start_mode),
-      force_same_tab_navigation_(force_same_tab_navigation),
+    content::WebContents* web_contents,
+    ConfirmationRequired confirmation_required,
+    signin::Source source,
+    Callback sync_setup_completed_callback)
+    : content::WebContentsObserver(web_contents),
+      start_mode_(start_mode),
       confirmation_required_(confirmation_required),
+      source_(source),
+      sync_setup_completed_callback_(sync_setup_completed_callback),
       weak_pointer_factory_(this) {
   DCHECK(profile);
   BrowserList::AddObserver(this);
@@ -223,7 +228,7 @@ void OneClickSigninSyncStarter::CreateNewSignedInProfile() {
       UTF8ToUTF16(ProfileInfoCache::GetDefaultAvatarIconUrl(icon_index)),
       base::Bind(&OneClickSigninSyncStarter::CompleteInitForNewProfile,
                  weak_pointer_factory_.GetWeakPtr(), desktop_type_),
-      false);
+      std::string());
 }
 
 void OneClickSigninSyncStarter::CompleteInitForNewProfile(
@@ -272,7 +277,7 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
       LoadPolicyWithCachedClient();
 
       // Open the profile's first window, after all initialization.
-      ProfileManager::FindOrCreateNewWindowForProfile(
+      profiles::FindOrCreateNewWindowForProfile(
         new_profile,
         chrome::startup::IS_PROCESS_STARTUP,
         chrome::startup::IS_FIRST_RUN,
@@ -311,7 +316,7 @@ void OneClickSigninSyncStarter::ConfirmAndSignin() {
 void OneClickSigninSyncStarter::UntrustedSigninConfirmed(
     StartSyncMode response) {
   if (response == UNDO_SYNC) {
-    CancelSigninAndDelete();
+    CancelSigninAndDelete();  // This statement frees this object.
   } else {
     // If the user clicked the "Advanced" link in the confirmation dialog, then
     // override the current start_mode_ to bring up the advanced sync settings.
@@ -324,6 +329,9 @@ void OneClickSigninSyncStarter::UntrustedSigninConfirmed(
 
 void OneClickSigninSyncStarter::SigninFailed(
     const GoogleServiceAuthError& error) {
+  if (!sync_setup_completed_callback_.is_null())
+    sync_setup_completed_callback_.Run(SYNC_SETUP_FAILURE);
+
   FinishProfileSyncServiceSetup();
   if (confirmation_required_ == CONFIRM_AFTER_SIGNIN) {
     switch (error.state()) {
@@ -344,10 +352,13 @@ void OneClickSigninSyncStarter::SigninFailed(
 }
 
 void OneClickSigninSyncStarter::SigninSuccess() {
+  if (!sync_setup_completed_callback_.is_null())
+    sync_setup_completed_callback_.Run(SYNC_SETUP_SUCCESS);
+
   switch (start_mode_) {
     case SYNC_WITH_DEFAULT_SETTINGS: {
-      ProfileSyncService* profile_sync_service = GetProfileSyncService();
       // Just kick off the sync machine, no need to configure it first.
+      ProfileSyncService* profile_sync_service = GetProfileSyncService();
       if (profile_sync_service)
         profile_sync_service->SetSyncSetupCompleted();
       FinishProfileSyncServiceSetup();
@@ -363,7 +374,10 @@ void OneClickSigninSyncStarter::SigninSuccess() {
       break;
     }
     case CONFIGURE_SYNC_FIRST:
-      ConfigureSync();
+      ShowSettingsPageInNewTab(true);  // Show sync config UI.
+      break;
+    case SHOW_SETTINGS_WITHOUT_CONFIGURE:
+      ShowSettingsPageInNewTab(false);  // Don't show sync config UI.
       break;
     default:
       NOTREACHED();
@@ -397,7 +411,7 @@ void OneClickSigninSyncStarter::EnsureBrowser() {
   }
 }
 
-void OneClickSigninSyncStarter::ConfigureSync() {
+void OneClickSigninSyncStarter::ShowSettingsPageInNewTab(bool configure_sync) {
   // Give the user a chance to configure things. We don't clear the
   // ProfileSyncService::setup_in_progress flag because we don't want sync
   // to start up until after the configure UI is displayed (the configure UI
@@ -410,10 +424,18 @@ void OneClickSigninSyncStarter::ConfigureSync() {
     EnsureBrowser();
     if (profile_sync_service) {
       // Need to navigate to the settings page and display the sync UI.
-      if (force_same_tab_navigation_) {
-        ShowSyncSettingsPageOnSameTab();
+      if (web_contents()) {
+        ShowSyncSettingsPageInWebContents(web_contents());
       } else {
-        chrome::ShowSettingsSubPage(browser_, chrome::kSyncSetupSubPage);
+        // If the user is setting up sync for the first time, let them configure
+        // advanced sync settings. However, in the case of re-authentication,
+        // return the user to the settings page without showing any config UI.
+        if (configure_sync) {
+          chrome::ShowSettingsSubPage(browser_, chrome::kSyncSetupSubPage);
+        } else {
+          FinishProfileSyncServiceSetup();
+          chrome::ShowSettings(browser_);
+        }
       }
     } else {
       // Sync is disabled - just display the settings page.
@@ -437,12 +459,21 @@ void OneClickSigninSyncStarter::FinishProfileSyncServiceSetup() {
     service->SetSetupInProgress(false);
 }
 
-void OneClickSigninSyncStarter::ShowSyncSettingsPageOnSameTab() {
+void OneClickSigninSyncStarter::ShowSyncSettingsPageInWebContents(
+    content::WebContents* contents) {
   std::string url = std::string(chrome::kChromeUISettingsURL) +
       chrome::kSyncSetupSubPage;
-  chrome::NavigateParams params(
-      browser_, GURL(url), content::PAGE_TRANSITION_AUTO_TOPLEVEL);
-  params.disposition = CURRENT_TAB;
-  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
-  chrome::Navigate(&params);
+  content::OpenURLParams params(GURL(url),
+                                content::Referrer(),
+                                CURRENT_TAB,
+                                content::PAGE_TRANSITION_AUTO_TOPLEVEL,
+                                false);
+  contents->OpenURL(params);
+
+  // Activate the tab.
+  Browser* browser = chrome::FindBrowserWithWebContents(contents);
+  int content_index =
+      browser->tab_strip_model()->GetIndexOfWebContents(contents);
+  browser->tab_strip_model()->ActivateTabAt(content_index,
+                                            false /* user_gesture */);
 }

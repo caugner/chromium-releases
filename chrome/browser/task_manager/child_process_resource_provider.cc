@@ -8,10 +8,10 @@
 
 #include "base/i18n/rtl.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/task_manager/resource_provider.h"
 #include "chrome/browser/task_manager/task_manager.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_process_type.h"
+#include "components/nacl/common/nacl_process_type.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
@@ -135,8 +135,6 @@ Resource::Type ChildProcessResource::GetType() const {
       return Resource::SANDBOX_HELPER;
     case content::PROCESS_TYPE_GPU:
       return Resource::GPU;
-    case PROCESS_TYPE_PROFILE_IMPORT:
-      return Resource::PROFILE_IMPORT;
     case PROCESS_TYPE_NACL_LOADER:
     case PROCESS_TYPE_NACL_BROKER:
       return Resource::NACL;
@@ -185,8 +183,6 @@ string16 ChildProcessResource::GetLocalizedTitle() const {
     case content::PROCESS_TYPE_PPAPI_BROKER:
       return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PLUGIN_BROKER_PREFIX,
                                         title);
-    case PROCESS_TYPE_PROFILE_IMPORT:
-      return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_UTILITY_PREFIX);
     case PROCESS_TYPE_NACL_BROKER:
       return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_NACL_BROKER_PREFIX);
     case PROCESS_TYPE_NACL_LOADER:

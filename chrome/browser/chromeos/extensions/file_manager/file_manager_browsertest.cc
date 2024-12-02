@@ -15,7 +15,8 @@
 #include "base/callback.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/extensions/file_manager/drive_test_util.h"
@@ -27,15 +28,16 @@
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
 
+namespace file_manager {
 namespace {
 
 enum EntryType {
@@ -118,7 +120,7 @@ class LocalTestVolume {
         base::FilePath source_path =
             google_apis::test_util::GetTestFilePath("chromeos/file_manager").
             AppendASCII(entry.source_file_name);
-        ASSERT_TRUE(file_util::CopyFile(source_path, target_path))
+        ASSERT_TRUE(base::CopyFile(source_path, target_path))
             << "Copy from " << source_path.value()
             << " to " << target_path.value() << " failed.";
         break;
@@ -254,14 +256,20 @@ class DriveTestVolume {
     }
   }
 
+  // Sets the url base for the test server to be used to generate share urls
+  // on the files and directories.
+  void ConfigureShareUrlBase(const GURL& share_url_base) {
+    fake_drive_service_->set_share_url_base(share_url_base);
+  }
+
   drive::DriveIntegrationService* CreateDriveIntegrationService(
       Profile* profile) {
     fake_drive_service_ = new drive::FakeDriveService;
     fake_drive_service_->LoadResourceListForWapi(
-        "chromeos/gdata/empty_feed.json");
+        "gdata/empty_feed.json");
     fake_drive_service_->LoadAccountMetadataForWapi(
-        "chromeos/gdata/account_metadata.json");
-    fake_drive_service_->LoadAppListForDriveApi("chromeos/drive/applist.json");
+        "gdata/account_metadata.json");
+    fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
     integration_service_ = new drive::DriveIntegrationService(
         profile,
         fake_drive_service_,
@@ -339,6 +347,14 @@ class FileManagerBrowserTest :
       drive_volume_(std::tr1::get<0>(GetParam()) != IN_GUEST_MODE ?
                     new DriveTestVolume() : NULL) {}
 
+  virtual void SetUp() OVERRIDE {
+    // TODO(danakj): The GPU Video Decoder needs real GL bindings.
+    // crbug.com/269087
+    UseRealGLBindings();
+
+    ExtensionApiTest::SetUp();
+  }
+
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
 
   virtual void SetUpOnMainThread() OVERRIDE;
@@ -369,6 +385,12 @@ void FileManagerBrowserTest::SetUpOnMainThread() {
     local_volume_->CreateEntry(kTestEntrySetCommon[i]);
 
   if (drive_volume_) {
+    // Install the web server to serve the mocked share dialog.
+    ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+    const GURL share_url_base(embedded_test_server()->GetURL(
+        "/chromeos/file_manager/share_dialog_mock/index.html"));
+    drive_volume_->ConfigureShareUrlBase(share_url_base);
+
     for (size_t i = 0; i < arraysize(kTestEntrySetCommon); ++i)
       drive_volume_->CreateEntry(kTestEntrySetCommon[i]);
 
@@ -377,7 +399,7 @@ void FileManagerBrowserTest::SetUpOnMainThread() {
     for (size_t i = 0; i < arraysize(kTestEntrySetDriveOnly); ++i)
       drive_volume_->CreateEntry(kTestEntrySetDriveOnly[i]);
 
-    drive_test_util::WaitUntilDriveMountPointIsAdded(browser()->profile());
+    test_util::WaitUntilDriveMountPointIsAdded(browser()->profile());
   }
 }
 
@@ -439,9 +461,9 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(IN_GUEST_MODE, "fileDisplayDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "fileDisplayDrive")));
 
-// TODO(hirono): Fix this test. crbug.com/247299
+// TODO(mtomasz): Fix this test. crbug.com/252561
 INSTANTIATE_TEST_CASE_P(
-    DISABLED_OpenSpecialTypes,
+    OpenSpecialTypes,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(IN_GUEST_MODE, "videoOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "videoOpenDownloads"),
@@ -451,13 +473,11 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "audioOpenDrive"),
                       TestParameter(IN_GUEST_MODE, "galleryOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE,
-                                    "galleryOpenDownloads")));
-                      // Disabled temporarily since fails on Linux Chromium OS
-                      // ASAN Tests (2).  TODO(mtomasz): crbug.com/243611.
-                      // TestParameter(NOT_IN_GUEST_MODE, "galleryOpenDrive")));
+                                    "galleryOpenDownloads"),
+                      TestParameter(NOT_IN_GUEST_MODE, "galleryOpenDrive")));
 
 INSTANTIATE_TEST_CASE_P(
-    KeyboardOpeartions,
+    KeyboardOperations,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(IN_GUEST_MODE, "keyboardDeleteDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE,
@@ -509,4 +529,12 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "restoreSortColumn"),
                       TestParameter(IN_GUEST_MODE, "restoreCurrentView"),
                       TestParameter(NOT_IN_GUEST_MODE, "restoreCurrentView")));
+
+INSTANTIATE_TEST_CASE_P(
+    ShareDialog,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "shareFile"),
+                      TestParameter(NOT_IN_GUEST_MODE, "shareDirectory")));
+
 }  // namespace
+}  // namespace file_manager

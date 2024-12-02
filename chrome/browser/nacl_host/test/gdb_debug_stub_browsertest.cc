@@ -5,11 +5,12 @@
 #include "base/command_line.h"
 #include "base/environment.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/nacl_host/nacl_browser.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/ppapi/ppapi_test.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "content/public/test/test_utils.h"
 
 class NaClGdbDebugStubTest : public PPAPINaClNewlibTest {

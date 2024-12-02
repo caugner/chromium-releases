@@ -132,8 +132,8 @@ class TestingProfile : public Profile {
   // deletes the directory containing the files used by HistoryService, this
   // only matters if you're recreating the HistoryService.  If |no_db| is true,
   // the history backend will fail to initialize its database; this is useful
-  // for testing error conditions.
-  void CreateHistoryService(bool delete_file, bool no_db);
+  // for testing error conditions. Returns true on success.
+  bool CreateHistoryService(bool delete_file, bool no_db) WARN_UNUSED_RESULT;
 
   // Shuts down and nulls out the reference to HistoryService.
   void DestroyHistoryService();
@@ -169,19 +169,11 @@ class TestingProfile : public Profile {
   TestingPrefServiceSyncable* GetTestingPrefService();
 
   // content::BrowserContext
-  virtual base::FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() const OVERRIDE;
   virtual scoped_refptr<base::SequencedTaskRunner> GetIOTaskRunner() OVERRIDE;
   virtual bool IsOffTheRecord() const OVERRIDE;
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
-  // Returns a testing ContextGetter (if one has been created via
-  // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
-  // (1) Some tests depend on GetRequestContext() returning NULL. (2) Because
-  // of the special memory management considerations for the
-  // TestURLRequestContextGetter class, many tests would find themseleves
-  // leaking if they called this method without the necessary IO thread. This
-  // getter is currently only capable of returning a Context that helps test
-  // the CookieMonster. See implementation comments for more details.
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContext(
       content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
@@ -190,8 +182,6 @@ class TestingProfile : public Profile {
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
-  virtual content::SpeechRecognitionPreferences*
-      GetSpeechRecognitionPreferences() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   virtual TestingProfile* AsTestingProfile() OVERRIDE;
@@ -204,25 +194,21 @@ class TestingProfile : public Profile {
   virtual void DestroyOffTheRecordProfile() OVERRIDE {}
   virtual bool HasOffTheRecordProfile() OVERRIDE;
   virtual Profile* GetOriginalProfile() OVERRIDE;
+  virtual bool IsManaged() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
-  // The CookieMonster will only be returned if a Context has been created. Do
-  // this by calling CreateRequestContext(). See the note at GetRequestContext
-  // for more information.
+  // TODO(ajwong): Remove this API in favor of directly retrieving the
+  // CookieStore from the StoragePartition after ExtensionURLRequestContext
+  // has been removed.
   net::CookieMonster* GetCookieMonster();
 
   virtual PrefService* GetPrefs() OVERRIDE;
 
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
-
-  void CreateRequestContext();
-  // Clears out the created request context (which must be done before shutting
-  // down the IO thread to avoid leaks).
-  void ResetRequestContext();
 
   virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
@@ -233,6 +219,11 @@ class TestingProfile : public Profile {
       GetMediaRequestContextForStoragePartition(
           const base::FilePath& partition_path,
           bool in_memory) OVERRIDE;
+  virtual void RequestMIDISysExPermission(
+      int render_process_id,
+      int render_view_id,
+      const GURL& requesting_frame,
+      const MIDISysExPermissionCallback& callback) OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
@@ -255,6 +246,7 @@ class TestingProfile : public Profile {
   virtual base::FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
   virtual bool WasCreatedByVersionOrLater(const std::string& version) OVERRIDE;
+  virtual bool IsGuestSession() const OVERRIDE;
   virtual void SetExitType(ExitType exit_type) OVERRIDE {}
   virtual ExitType GetLastSessionExitType() OVERRIDE;
 #if defined(OS_CHROMEOS)
@@ -309,7 +301,6 @@ class TestingProfile : public Profile {
 
   // Internally, this is a TestURLRequestContextGetter that creates a dummy
   // request context. Currently, only the CookieMonster is hooked up.
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
   scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
 
   std::wstring id_;
@@ -345,7 +336,9 @@ class TestingProfile : public Profile {
   // testing.
   BrowserContextDependencyManager* browser_context_dependency_manager_;
 
-  scoped_ptr<content::MockResourceContext> resource_context_;
+  // Owned, but must be deleted on the IO thread so not placing in a
+  // scoped_ptr<>.
+  content::MockResourceContext* resource_context_;
 
   scoped_ptr<policy::ProfilePolicyConnector> profile_policy_connector_;
 

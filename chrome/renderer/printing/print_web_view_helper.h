@@ -9,8 +9,9 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/shared_memory.h"
-#include "base/time.h"
+#include "base/memory/shared_memory.h"
+#include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
 #include "printing/metafile_impl.h"
@@ -112,6 +113,8 @@ class PrintWebViewHelper
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void PrintPage(WebKit::WebFrame* frame, bool user_initiated) OVERRIDE;
+  virtual void DidStartLoading() OVERRIDE;
+  virtual void DidStopLoading() OVERRIDE;
 
   // Message handlers ---------------------------------------------------------
 
@@ -231,7 +234,7 @@ class PrintWebViewHelper
   void FinishFramePrinting();
 
   // Prints the page listed in |params|.
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
   void PrintPageInternal(const PrintMsg_PrintPage_Params& params,
                          const gfx::Size& canvas_size,
                          WebKit::WebFrame* frame,
@@ -325,6 +328,9 @@ class PrintWebViewHelper
   // Increment the counter for script initiated printing.
   // Scripted printing will be blocked for a limited amount of time.
   void IncrementScriptedPrintCount();
+
+  // Shows scripted print preview when options from plugin are availible.
+  void ShowScriptedPrintPreview();
 
   void RequestPrintPreview(PrintPreviewRequestType type);
 
@@ -478,6 +484,9 @@ class PrintWebViewHelper
 
   bool print_node_in_progress_;
   PrintPreviewContext print_preview_context_;
+  bool is_loading_;
+  bool is_scripted_preview_delayed_;
+  base::WeakPtrFactory<PrintWebViewHelper> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(PrintWebViewHelper);
 };
 

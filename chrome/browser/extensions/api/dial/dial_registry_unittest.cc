@@ -3,14 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/extensions/api/dial/dial_device_data.h"
 #include "chrome/browser/extensions/api/dial/dial_registry.h"
 #include "chrome/browser/extensions/api/dial/dial_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using base::Time;
 using base::TimeDelta;

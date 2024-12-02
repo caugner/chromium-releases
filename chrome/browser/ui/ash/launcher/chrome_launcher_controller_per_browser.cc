@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/ash_switches.h"
 #include "ash/launcher/launcher_model.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
@@ -17,6 +18,7 @@
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -42,7 +44,6 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -383,8 +384,15 @@ ash::LauncherID ChromeLauncherControllerPerBrowser::CreateAppLauncherItem(
     const std::string& app_id,
     ash::LauncherItemStatus status) {
   DCHECK(controller);
-  return InsertAppLauncherItem(controller, app_id, status,
-                               model_->item_count());
+  int index = 0;
+  // Panels are inserted on the left so as not to push all existing panels over.
+  if (controller->GetLauncherItemType() != ash::TYPE_APP_PANEL) {
+    index = model_->item_count();
+    // For the alternate shelf layout increment index (insert after app icon).
+    if (ash::switches::UseAlternateShelfLayout())
+      ++index;
+  }
+  return InsertAppLauncherItem(controller, app_id, status, index);
 }
 
 void ChromeLauncherControllerPerBrowser::SetItemStatus(
@@ -650,15 +658,9 @@ void ChromeLauncherControllerPerBrowser::SetAppImage(
 }
 
 void ChromeLauncherControllerPerBrowser::OnAutoHideBehaviorChanged(
+    aura::RootWindow* root_window,
     ash::ShelfAutoHideBehavior new_behavior) {
-    std::string behavior_string;
-  ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
-
-  for (ash::Shell::RootWindowList::const_iterator iter =
-           root_windows.begin();
-       iter != root_windows.end(); ++iter) {
-    SetShelfAutoHideBehaviorPrefs(new_behavior, *iter);
-  }
+  SetShelfAutoHideBehaviorPrefs(new_behavior, root_window);
 }
 
 void ChromeLauncherControllerPerBrowser::SetLauncherItemImage(
@@ -1227,6 +1229,11 @@ void ChromeLauncherControllerPerBrowser::UpdateAppLaunchersFromPref() {
   // of iterators because of model mutations as part of the loop.
   std::vector<std::string>::const_iterator pref_app_id(pinned_apps.begin());
   int index = 0;
+  int max_index = model_->item_count();
+  if (ash::switches::UseAlternateShelfLayout()) {
+    ++index;
+    ++max_index;
+  }
   for (; index < model_->item_count() && pref_app_id != pinned_apps.end();
        ++index) {
     // If the next app launcher according to the pref is present in the model,
@@ -1255,6 +1262,7 @@ void ChromeLauncherControllerPerBrowser::UpdateAppLaunchersFromPref() {
             MoveItemWithoutPinnedStateChangeNotification(index, index + 1);
           } else {
             LauncherItemClosed(item.id);
+            --max_index;
           }
           --index;
         }
@@ -1327,7 +1335,7 @@ void ChromeLauncherControllerPerBrowser::SetShelfAutoHideBehaviorFromPrefs() {
 
 void ChromeLauncherControllerPerBrowser::SetShelfAlignmentFromPrefs() {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kShowLauncherAlignmentMenu))
+          switches::kShowShelfAlignmentMenu))
     return;
 
   ash::Shell::RootWindowList root_windows = ash::Shell::GetAllRootWindows();
@@ -1427,6 +1435,9 @@ int ChromeLauncherControllerPerBrowser::GetChromeIconIndexFromPref() const {
   size_t index = profile_->GetPrefs()->GetInteger(prefs::kShelfChromeIconIndex);
   const base::ListValue* pinned_apps_pref =
   profile_->GetPrefs()->GetList(prefs::kPinnedLauncherApps);
+  if (ash::switches::UseAlternateShelfLayout())
+    return std::max(static_cast<size_t>(1),
+                    std::min(pinned_apps_pref->GetSize(), index));
   return std::max(static_cast<size_t>(0),
                   std::min(pinned_apps_pref->GetSize(), index));
 }

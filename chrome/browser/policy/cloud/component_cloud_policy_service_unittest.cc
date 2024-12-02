@@ -4,8 +4,9 @@
 
 #include "chrome/browser/policy/cloud/component_cloud_policy_service.h"
 
+#include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
 #include "base/sha1.h"
@@ -17,12 +18,13 @@
 #include "chrome/browser/policy/cloud/mock_cloud_policy_store.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
 #include "chrome/browser/policy/cloud/resource_cache.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/policy_domain_descriptor.h"
 #include "chrome/browser/policy/policy_map.h"
-#include "chrome/browser/policy/policy_schema.h"
 #include "chrome/browser/policy/policy_types.h"
 #include "chrome/browser/policy/proto/cloud/chrome_extension_policy.pb.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
+#include "chrome/common/policy/policy_schema.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -106,7 +108,6 @@ class ComponentCloudPolicyServiceTest : public testing::Test {
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     cache_ = new ResourceCache(temp_dir_.path());
-    ASSERT_TRUE(cache_->IsOpen());
     service_.reset(new ComponentCloudPolicyService(
         &delegate_, &store_, make_scoped_ptr(cache_)));
 
@@ -117,9 +118,9 @@ class ComponentCloudPolicyServiceTest : public testing::Test {
     builder_.payload().set_secure_hash(base::SHA1HashString(kTestPolicy));
 
     expected_policy_.Set("Name", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                         base::Value::CreateStringValue("disabled"));
+                         base::Value::CreateStringValue("disabled"), NULL);
     expected_policy_.Set("Second", POLICY_LEVEL_RECOMMENDED, POLICY_SCOPE_USER,
-                         base::Value::CreateStringValue("maybe"));
+                         base::Value::CreateStringValue("maybe"), NULL);
 
     // A NULL |request_context_| is enough to construct the updater, but
     // ComponentCloudPolicyService::Backend::LoadStore() tests the pointer when

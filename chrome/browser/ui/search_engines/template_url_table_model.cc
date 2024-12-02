@@ -11,11 +11,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/common/cancelable_task_tracker.h"
+#include "chrome/common/favicon/favicon_types.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -252,14 +252,7 @@ void TemplateURLTableModel::Remove(int index) {
   template_url_service_->RemoveObserver(this);
   TemplateURL* template_url = GetTemplateURL(index);
 
-  scoped_ptr<ModelEntry> entry(entries_[index]);
-  entries_.erase(entries_.begin() + index);
-  if (index < last_search_engine_index_)
-    --last_search_engine_index_;
-  if (index < last_other_engine_index_)
-    --last_other_engine_index_;
-  if (observer_)
-    observer_->OnItemsRemoved(index, 1);
+  scoped_ptr<ModelEntry> entry(RemoveEntry(index));
 
   // Make sure to remove from the table model first, otherwise the
   // TemplateURL would be freed.
@@ -280,13 +273,9 @@ void TemplateURLTableModel::Add(int index,
   data.SetURL(url);
   TemplateURL* turl = new TemplateURL(template_url_service_->profile(), data);
   template_url_service_->Add(turl);
-  ModelEntry* entry = new ModelEntry(this, turl);
+  scoped_ptr<ModelEntry> entry(new ModelEntry(this, turl));
   template_url_service_->AddObserver(this);
-  entries_.insert(entries_.begin() + index, entry);
-  if (index <= last_other_engine_index_)
-    ++last_other_engine_index_;
-  if (observer_)
-    observer_->OnItemsAdded(index, 1);
+  AddEntry(index, entry.Pass());
 }
 
 void TemplateURLTableModel::ModifyTemplateURL(int index,
@@ -332,15 +321,9 @@ int TemplateURLTableModel::MoveToMainGroup(int index) {
   if (index < last_search_engine_index_)
     return index;  // Already in the main group.
 
-  ModelEntry* current_entry = entries_[index];
-  entries_.erase(index + entries_.begin());
-  if (observer_)
-    observer_->OnItemsRemoved(index, 1);
-
+  scoped_ptr<ModelEntry> current_entry(RemoveEntry(index));
   const int new_index = last_search_engine_index_++;
-  entries_.insert(entries_.begin() + new_index, current_entry);
-  if (observer_)
-    observer_->OnItemsAdded(new_index, 1);
+  AddEntry(new_index, current_entry.Pass());
   return new_index;
 }
 
@@ -392,4 +375,24 @@ void TemplateURLTableModel::FaviconAvailable(ModelEntry* entry) {
 
 void TemplateURLTableModel::OnTemplateURLServiceChanged() {
   Reload();
+}
+
+scoped_ptr<ModelEntry> TemplateURLTableModel::RemoveEntry(int index) {
+  scoped_ptr<ModelEntry> entry(entries_[index]);
+  entries_.erase(index + entries_.begin());
+  if (index < last_search_engine_index_)
+    --last_search_engine_index_;
+  if (index < last_other_engine_index_)
+    --last_other_engine_index_;
+  if (observer_)
+    observer_->OnItemsRemoved(index, 1);
+  return entry.Pass();
+}
+
+void TemplateURLTableModel::AddEntry(int index, scoped_ptr<ModelEntry> entry) {
+  entries_.insert(entries_.begin() + index, entry.release());
+  if (index <= last_other_engine_index_)
+    ++last_other_engine_index_;
+  if (observer_)
+    observer_->OnItemsAdded(index, 1);
 }

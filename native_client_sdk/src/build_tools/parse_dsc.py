@@ -14,6 +14,7 @@ VALID_TOOLCHAINS = ['newlib', 'glibc', 'pnacl', 'win', 'linux', 'mac']
 # 'KEY' : ( <TYPE>, [Accepted Values], <Required?>)
 DSC_FORMAT = {
     'DISABLE': (bool, [True, False], False),
+    'SEL_LDR': (bool, [True, False], False),
     'DISABLE_PACKAGE': (bool, [True, False], False),
     'TOOLS' : (list, VALID_TOOLCHAINS, True),
     'CONFIGS' : (list, ['Debug', 'Release'], False),
@@ -27,12 +28,13 @@ DSC_FORMAT = {
         'TYPE': (str, ['main', 'lib', 'static-lib', 'so', 'so-standalone'],
                  True),
         'SOURCES': (list, '', True),
-        'CCFLAGS': (list, '', False),
+        'CFLAGS': (list, '', False),
+        'CFLAGS_GCC': (list, '', False),
         'CXXFLAGS': (list, '', False),
         'DEFINES': (list, '', False),
         'LDFLAGS': (list, '', False),
         'INCLUDES': (list, '', False),
-        'LIBS' : (list, '', False),
+        'LIBS' : (dict, VALID_TOOLCHAINS, False),
         'DEPS' : (list, '', False)
     }, True),
     'HEADERS': (list, {
@@ -44,13 +46,14 @@ DSC_FORMAT = {
     'PRE': (str, '', False),
     'DEST': (str, ['examples/getting_started', 'examples/api',
                    'examples/demo', 'examples/tutorial',
-                   'src', 'testlibs', 'tests'], True),
+                   'src', 'tests'], True),
     'NAME': (str, '', False),
     'DATA': (list, '', False),
     'TITLE': (str, '', False),
     'GROUP': (str, '', False),
     'EXPERIMENTAL': (bool, [True, False], False),
     'PERMISSIONS': (list, '', False),
+    'SOCKET_PERMISSIONS': (list, '', False)
 }
 
 
@@ -74,14 +77,22 @@ def ValidateFormat(src, dsc_format):
     exp_type, exp_value, required = dsc_format[key]
     value = src[key]
 
+    # Verify the value is non-empty if required
+    if required and not value:
+      raise ValidationError('Expected non-empty value for %s.' % key)
+
+    # If the expected type is a dict, but the provided type is a list
+    # then the list applies to all keys of the dictionary, so we reset
+    # the expected type and value.
+    if exp_type is dict:
+      if type(value) is list:
+        exp_type = list
+        exp_value = ''
+
     # Verify the key is of the expected type
     if exp_type != type(value):
       raise ValidationError('Key %s expects %s not %s.' % (
           key, exp_type.__name__.upper(), type(value).__name__.upper()))
-
-    # Verify the value is non-empty if required
-    if required and not value:
-      raise ValidationError('Expected non-empty value for %s.' % key)
 
     # If it's a bool, the expected values are always True or False.
     if exp_type is bool:
@@ -117,6 +128,15 @@ def ValidateFormat(src, dsc_format):
                                   (val, key))
         continue
 
+    # if we are expecting a dict, verify the keys are allowed
+    if exp_type is dict:
+      print "Expecting dict\n"
+      for sub in value:
+        if sub not in exp_value:
+          raise ValidationError('Sub key %s not expected in %s.' %
+                                (sub, key))
+      continue
+
     # If we got this far, it's an unexpected type
     raise ValidationError('Unexpected type %s for key %s.' %
                           (str(type(src[key])), key))
@@ -132,11 +152,56 @@ def LoadProject(filename):
   return desc
 
 
-def AcceptProject(desc, filters):
-  # Check if we should filter node this on toolchain
-  if not filters:
-    return True
+def LoadProjectTreeUnfiltered(srcpath):
+  # Build the tree
+  out = collections.defaultdict(list)
+  for root, _, files in os.walk(srcpath):
+    for filename in files:
+      if fnmatch.fnmatch(filename, '*.dsc'):
+        filepath = os.path.join(root, filename)
+        try:
+          desc = LoadProject(filepath)
+        except ValidationError as e:
+          raise ValidationError("Failed to validate: %s: %s" % (filepath, e))
+        if desc:
+          key = desc['DEST']
+          out[key].append(desc)
+  return out
 
+
+def LoadProjectTree(srcpath, include, exclude=None):
+  out = LoadProjectTreeUnfiltered(srcpath)
+  return FilterTree(out, MakeDefaultFilterFn(include, exclude))
+
+
+def GenerateProjects(tree):
+  for key in tree:
+    for val in tree[key]:
+      yield key, val
+
+
+def FilterTree(tree, filter_fn):
+  out = collections.defaultdict(list)
+  for branch, desc in GenerateProjects(tree):
+    if filter_fn(desc):
+      out[branch].append(desc)
+  return out
+
+
+def MakeDefaultFilterFn(include, exclude):
+  def DefaultFilterFn(desc):
+    matches_include = not include or DescMatchesFilter(desc, include)
+    matches_exclude = exclude and DescMatchesFilter(desc, exclude)
+
+    # Exclude list overrides include list.
+    if matches_exclude:
+      return False
+    return matches_include
+
+  return DefaultFilterFn
+
+
+def DescMatchesFilter(desc, filters):
   for key, expected in filters.iteritems():
     # For any filtered key which is unspecified, assumed False
     value = desc.get(key, False)
@@ -154,37 +219,6 @@ def AcceptProject(desc, filters):
   return True
 
 
-def PruneTree(tree, filters):
-  out = collections.defaultdict(list)
-  for branch, projects in tree.iteritems():
-    for desc in projects:
-      if AcceptProject(desc, filters):
-        out[branch].append(desc)
-
-  return out
-
-
-def LoadProjectTree(srcpath, filters=None):
-  # Build the tree
-  out = collections.defaultdict(list)
-  for root, _, files in os.walk(srcpath):
-    for filename in files:
-      if fnmatch.fnmatch(filename, '*.dsc'):
-        filepath = os.path.join(root, filename)
-        try:
-          desc = LoadProject(filepath)
-        except ValidationError as e:
-          raise ValidationError("Failed to validate: %s: %s" % (filepath, e))
-        if desc:
-          key = desc['DEST']
-          out[key].append(desc)
-
-  # Filter if needed
-  if filters:
-    out = PruneTree(out, filters)
-  return out
-
-
 def PrintProjectTree(tree):
   for key in tree:
     print key + ':'
@@ -192,26 +226,23 @@ def PrintProjectTree(tree):
       print '\t' + val['NAME']
 
 
-def GenerateProjects(tree):
-  for key in tree:
-    for val in tree[key]:
-      yield key, val
-
-
 def main(argv):
-  parser = optparse.OptionParser()
+  parser = optparse.OptionParser(usage='%prog [options] <dir>')
   parser.add_option('-e', '--experimental',
       help='build experimental examples and libraries', action='store_true')
   parser.add_option('-t', '--toolchain',
       help='Build using toolchain. Can be passed more than once.',
       action='append')
 
-  options, files = parser.parse_args(argv[1:])
+  options, args = parser.parse_args(argv[1:])
   filters = {}
 
-  if len(files):
-    parser.error('Not expecting files.')
-    return 1
+  load_from_dir = '.'
+  if len(args) > 1:
+    parser.error('Expected 0 or 1 args, got %d.' % len(args))
+
+  if args:
+    load_from_dir = args[0]
 
   if options.toolchain:
     filters['TOOLS'] = options.toolchain
@@ -220,7 +251,7 @@ def main(argv):
     filters['EXPERIMENTAL'] = False
 
   try:
-    tree = LoadProjectTree('.', filters=filters)
+    tree = LoadProjectTree(load_from_dir, include=filters)
   except ValidationError as e:
     sys.stderr.write(str(e) + '\n')
     return 1

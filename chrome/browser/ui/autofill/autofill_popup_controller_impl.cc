@@ -170,6 +170,62 @@ void AutofillPopupControllerImpl::Show(
   delegate_->OnPopupShown(this);
 }
 
+void AutofillPopupControllerImpl::UpdateDataListValues(
+    const std::vector<base::string16>& values,
+    const std::vector<base::string16>& labels) {
+  // Remove all the old data list values, which should always be at the top of
+  // the list if they are present.
+  while (!identifiers_.empty() &&
+         identifiers_[0] == WebAutofillClient::MenuItemIDDataListEntry) {
+    names_.erase(names_.begin());
+    subtexts_.erase(subtexts_.begin());
+    icons_.erase(icons_.begin());
+    identifiers_.erase(identifiers_.begin());
+  }
+
+  // If there are no new data list values, exit (clearing the separator if there
+  // is one).
+  if (values.empty()) {
+    if (!identifiers_.empty() &&
+        identifiers_[0] == WebAutofillClient::MenuItemIDSeparator) {
+      names_.erase(names_.begin());
+      subtexts_.erase(subtexts_.begin());
+      icons_.erase(icons_.begin());
+      identifiers_.erase(identifiers_.begin());
+    }
+
+     // The popup contents have changed, so either update the bounds or hide it.
+    if (HasSuggestions())
+      UpdateBoundsAndRedrawPopup();
+    else
+      Hide();
+
+    return;
+  }
+
+  // Add a separator if there are any other values.
+  if (!identifiers_.empty() &&
+      identifiers_[0] != WebAutofillClient::MenuItemIDSeparator) {
+    names_.insert(names_.begin(), string16());
+    subtexts_.insert(subtexts_.begin(), string16());
+    icons_.insert(icons_.begin(), string16());
+    identifiers_.insert(identifiers_.begin(),
+                        WebAutofillClient::MenuItemIDSeparator);
+  }
+
+
+  names_.insert(names_.begin(), values.begin(), values.end());
+  subtexts_.insert(subtexts_.begin(), labels.begin(), labels.end());
+
+  // Add the values that are the same for all data list elements.
+  icons_.insert(icons_.begin(), values.size(), base::string16());
+  identifiers_.insert(identifiers_.begin(),
+                      values.size(),
+                      WebAutofillClient::MenuItemIDDataListEntry);
+
+  UpdateBoundsAndRedrawPopup();
+}
+
 void AutofillPopupControllerImpl::Hide() {
   if (delegate_.get())
     delegate_->OnPopupHidden(this);
@@ -607,10 +663,9 @@ std::pair<int, int> AutofillPopupControllerImpl::CalculatePopupXAndWidth(
     const gfx::Display& left_display,
     const gfx::Display& right_display,
     int popup_required_width) const {
-  int leftmost_display_x = left_display.bounds().x() *
-      left_display.device_scale_factor();
-  int rightmost_display_x = right_display.GetSizeInPixel().width() +
-      right_display.bounds().x() * right_display.device_scale_factor();
+  int leftmost_display_x = left_display.bounds().x();
+  int rightmost_display_x =
+      right_display.GetSizeInPixel().width() + right_display.bounds().x();
 
   // Calculate the start coordinates for the popup if it is growing right or
   // the end position if it is growing to the left, capped to screen space.
@@ -639,11 +694,9 @@ std::pair<int,int> AutofillPopupControllerImpl::CalculatePopupYAndHeight(
     const gfx::Display& top_display,
     const gfx::Display& bottom_display,
     int popup_required_height) const {
-  int topmost_display_y = top_display.bounds().y() *
-      top_display.device_scale_factor();
-  int bottommost_display_y = bottom_display.GetSizeInPixel().height() +
-      (bottom_display.bounds().y() *
-       bottom_display.device_scale_factor());
+  int topmost_display_y = top_display.bounds().y();
+  int bottommost_display_y =
+      bottom_display.GetSizeInPixel().height() + bottom_display.bounds().y();
 
   // Calculate the start coordinates for the popup if it is growing down or
   // the end position if it is growing up, capped to screen space.

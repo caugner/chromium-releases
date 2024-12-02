@@ -8,7 +8,7 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -101,7 +101,7 @@ void PerfUITestSuite::Initialize() {
     LOG(FATAL) << "Failed to create complex profile directory...";
   }
 
-  if (!file_util::CopyDirectory(default_path,
+  if (!base::CopyDirectory(default_path,
                                 complex_profile_dir_.path(),
                                 true)) {
     LOG(FATAL) << "Failed to copy data to complex profile directory...";
@@ -117,11 +117,8 @@ void PerfUITestSuite::Initialize() {
   base_data_dir = base_data_dir.AppendASCII("profile_with_complex_theme");
   base_data_dir = base_data_dir.AppendASCII("Default");
 
-  if (!file_util::CopyDirectory(base_data_dir,
-                                complex_profile_dir_.path(),
-                                true)) {
+  if (!base::CopyDirectory(base_data_dir, complex_profile_dir_.path(), true))
     LOG(FATAL) << "Failed to copy default to complex profile";
-  }
 
   // Parse the manifest and make a temporary extension object because the
   // theme system takes extensions as input.

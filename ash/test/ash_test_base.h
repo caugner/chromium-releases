@@ -8,8 +8,9 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/client/window_types.h"
@@ -54,8 +55,6 @@ class AshTestBase : public testing::Test {
   AshTestBase();
   virtual ~AshTestBase();
 
-  base::MessageLoopForUI* message_loop() { return &message_loop_; }
-
   // testing::Test:
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
@@ -95,9 +94,23 @@ class AshTestBase : public testing::Test {
   aura::test::EventGenerator& GetEventGenerator();
 
  protected:
+  enum UserSessionBlockReason {
+    FIRST_BLOCK_REASON,
+    BLOCKED_BY_LOCK_SCREEN = FIRST_BLOCK_REASON,
+    BLOCKED_BY_LOGIN_SCREEN,
+    BLOCKED_BY_USER_ADDING_SCREEN,
+    NUMBER_OF_BLOCK_REASONS
+  };
+
   // True if the running environment supports multiple displays,
   // or false otherwise (e.g. win8 bot).
   static bool SupportsMultipleDisplays();
+
+  // True if the running environment supports host window resize,
+  // or false otherwise (e.g. win8 bot).
+  static bool SupportsHostWindowResize();
+
+  void set_start_session(bool start_session) { start_session_ = start_session; }
 
   void RunAllPendingInMessageLoop();
 
@@ -106,11 +119,19 @@ class AshTestBase : public testing::Test {
   void SetSessionStarted(bool session_started);
   void SetUserLoggedIn(bool user_logged_in);
   void SetCanLockScreen(bool can_lock_screen);
+  void SetUserAddingScreenRunning(bool user_adding_screen_running);
+
+  // Methods to emulate blocking and unblocking user session with given
+  // |block_reason|.
+  void BlockUserSession(UserSessionBlockReason block_reason);
+  void UnblockUserSession();
 
  private:
   bool setup_called_;
   bool teardown_called_;
-  base::MessageLoopForUI message_loop_;
+  // |SetUp()| doesn't activate session if this is set to false.
+  bool start_session_;
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<AshTestHelper> ash_test_helper_;
   scoped_ptr<aura::test::EventGenerator> event_generator_;
 #if defined(OS_WIN)
@@ -122,6 +143,17 @@ class AshTestBase : public testing::Test {
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(AshTestBase);
+};
+
+class NoSessionAshTestBase : public AshTestBase {
+ public:
+  NoSessionAshTestBase() {
+    set_start_session(false);
+  }
+  virtual ~NoSessionAshTestBase() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NoSessionAshTestBase);
 };
 
 }  // namespace test

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 <include src="../uber/uber_utils.js">
+<include src="history_focus_manager.js">
 
 ///////////////////////////////////////////////////////////////////////////////
 // Globals:
@@ -11,6 +12,13 @@
 // Amount of time between pageviews that we consider a 'break' in browsing,
 // measured in milliseconds.
 /** @const */ var BROWSING_GAP_TIME = 15 * 60 * 1000;
+
+// The largest bucket value for UMA histogram, based on entry ID. All entries
+// with IDs greater than this will be included in this bucket.
+/** @const */ var UMA_MAX_BUCKET_VALUE = 1000;
+
+// The largest bucket value for a UMA histogram that is a subset of above.
+/** @const */ var UMA_MAX_SUBSET_BUCKET_VALUE = 100;
 
 // TODO(glen): Get rid of these global references, replace with a controller
 //     or just make the classes own more of the page.
@@ -53,6 +61,21 @@ function recordUmaAction(actionDesc) {
   chrome.send('metricsHandler:recordAction', [actionDesc]);
 }
 
+/**
+ * Record a histogram value in UMA. If specified value is larger than the max
+ * bucket value, record the value in the largest bucket.
+ * @param {string} histogram The name of the histogram to be recorded in.
+ * @param {integer} maxBucketValue The max value for the last histogram bucket.
+ * @param {integer} value The value to record in the histogram.
+ */
+
+function recordUmaHistogram(histogram, maxBucketValue, value) {
+  chrome.send('metricsHandler:recordInHistogram',
+              [histogram,
+              ((value > maxBucketValue) ? maxBucketValue : value),
+              maxBucketValue]);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Visit:
 
@@ -76,7 +99,7 @@ function Visit(result, continued, model) {
   this.deviceName = result.deviceName;
   this.deviceType = result.deviceType;
 
-  // The id will be set according to when the visit was displayed, not
+  // The ID will be set according to when the visit was displayed, not
   // received. Set to -1 to show that it has not been set yet.
   this.id_ = -1;
 
@@ -144,6 +167,7 @@ Visit.prototype.getResultDOM = function(propertyBag) {
     // Clicking anywhere in the entryBox will check/uncheck the checkbox.
     entryBox.setAttribute('for', checkbox.id);
     entryBox.addEventListener('mousedown', entryBoxMousedown);
+    entryBox.addEventListener('click', entryBoxClick);
   }
 
   // Keep track of the drop down that triggered the menu, so we know
@@ -164,7 +188,7 @@ Visit.prototype.getResultDOM = function(propertyBag) {
   if (this.starred_) {
     bookmarkSection.classList.add('starred');
     bookmarkSection.addEventListener('click', function f(e) {
-      recordUmaAction('BookmarkStarClicked_HistoryPage');
+      recordUmaAction('HistoryPage_BookmarkStarClicked');
       bookmarkSection.classList.remove('starred');
       chrome.send('removeBookmark', [self.url_]);
       bookmarkSection.removeEventListener('click', f);
@@ -180,7 +204,7 @@ Visit.prototype.getResultDOM = function(propertyBag) {
     visitEntryWrapper.classList.add('blocked-indicator');
     visitEntryWrapper.appendChild(this.getVisitAttemptDOM_());
   } else {
-    visitEntryWrapper.appendChild(this.getTitleDOM_());
+    visitEntryWrapper.appendChild(this.getTitleDOM_(isSearchResult));
     if (addTitleFavicon)
       this.addFaviconToElement_(visitEntryWrapper);
     visitEntryWrapper.appendChild(domain);
@@ -252,7 +276,7 @@ Visit.prototype.getResultDOM = function(propertyBag) {
  * Remove this visit from the history.
  */
 Visit.prototype.removeFromHistory = function() {
-  recordUmaAction('EntryMenuRemoveFromHistory_HistoryPage');
+  recordUmaAction('HistoryPage_EntryMenuRemoveFromHistory');
   var self = this;
   this.model_.removeVisitsFromHistory([this], function() {
     removeEntryFromView(self.domNode_);
@@ -308,21 +332,39 @@ Visit.prototype.addHighlightedText_ = function(node, content, highlightText) {
 /**
  * Returns the DOM element containing a link on the title of the URL for the
  * current visit.
+ * @param {boolean} isSearchResult Whether or not the entry is a search result.
  * @return {Element} DOM representation for the title block.
  * @private
  */
-Visit.prototype.getTitleDOM_ = function() {
+Visit.prototype.getTitleDOM_ = function(isSearchResult) {
   var node = createElementWithClassName('div', 'title');
   var link = document.createElement('a');
   link.href = this.url_;
   link.id = 'id-' + this.id_;
   link.target = '_top';
+  var integerId = parseInt(this.id_, 10);
   link.addEventListener('click', function() {
-    recordUmaAction('EntryLinkClick_HistoryPage');
+    recordUmaAction('HistoryPage_EntryLinkClick');
+    // Record the ID of the entry to signify how many entries are above this
+    // link on the page.
+    recordUmaHistogram('HistoryPage.ClickPosition',
+                       UMA_MAX_BUCKET_VALUE,
+                       integerId);
+    if (integerId <= UMA_MAX_SUBSET_BUCKET_VALUE) {
+      recordUmaHistogram('HistoryPage.ClickPositionSubset',
+                         UMA_MAX_SUBSET_BUCKET_VALUE,
+                         integerId);
+    }
   });
   link.addEventListener('contextmenu', function() {
-    recordUmaAction('EntryLinkRightClick_HistoryPage');
+    recordUmaAction('HistoryPage_EntryLinkRightClick');
   });
+
+  if (isSearchResult) {
+    link.addEventListener('click', function() {
+      recordUmaAction('HistoryPage_SearchResultClick');
+    });
+  }
 
   // Add a tooltip, since it might be ellipsized.
   // TODO(dubroy): Find a way to show the tooltip only when necessary.
@@ -365,7 +407,7 @@ Visit.prototype.addFaviconToElement_ = function(el) {
  * @private
  */
 Visit.prototype.showMoreFromSite_ = function() {
-  recordUmaAction('EntryMenuShowMoreFromSite_HistoryPage');
+  recordUmaAction('HistoryPage_EntryMenuShowMoreFromSite');
   historyView.setSearch(this.getDomainFromURL_(this.url_));
 };
 
@@ -460,16 +502,16 @@ HistoryModel.prototype.requestPage = function(page) {
  * @param {Array} results A list of results.
  */
 HistoryModel.prototype.addResults = function(info, results) {
+  // If no requests are in flight then this was an old request so we drop the
+  // results. Double check the search term as well.
+  if (!this.inFlight_ || info.term != this.searchText_)
+    return;
+
   $('loading-spinner').hidden = true;
   this.inFlight_ = false;
   this.isQueryFinished_ = info.finished;
   this.queryStartTime = info.queryStartTime;
   this.queryEndTime = info.queryEndTime;
-
-  // If the results are not for the current search term then there is nothing
-  // more to do.
-  if (info.term != this.searchText_)
-    return;
 
   var lastVisit = this.visits_.slice(-1)[0];
   var lastDay = lastVisit ? lastVisit.dateRelativeDay : null;
@@ -731,15 +773,15 @@ function HistoryView(model) {
 
   // Add handlers for the page navigation buttons at the bottom.
   $('newest-button').addEventListener('click', function() {
-    recordUmaAction('NewestHistoryClick_HistoryPage');
+    recordUmaAction('HistoryPage_NewestHistoryClick');
     self.setPage(0);
   });
   $('newer-button').addEventListener('click', function() {
-    recordUmaAction('NewerHistoryClick_HistoryPage');
+    recordUmaAction('HistoryPage_NewerHistoryClick');
     self.setPage(self.pageIndex_ - 1);
   });
   $('older-button').addEventListener('click', function() {
-    recordUmaAction('OlderHistoryClick_HistoryPage');
+    recordUmaAction('HistoryPage_OlderHistoryClick');
     self.setPage(self.pageIndex_ + 1);
   });
 
@@ -896,6 +938,13 @@ HistoryView.prototype.onModelReady = function(doneLoading) {
     document.body.classList.remove('has-results');
 
   this.updateNavBar_();
+
+  if (isMobileVersion()) {
+    // Hide the search field if it is empty and there are no results.
+    var hasResults = this.model_.visits_.length > 0;
+    var isSearch = this.model_.getSearchText().length > 0;
+    $('search-field').hidden = !(hasResults || isSearch);
+  }
 };
 
 /**
@@ -1256,7 +1305,6 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
           createElementWithClassName('div', 'no-results-message'));
       noResults.textContent = loadTimeData.getString('noResults');
       this.resultDiv_.appendChild(resultsFragment);
-      this.updateNavBar_();
       return;
     }
 
@@ -1284,7 +1332,6 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
     // Add all the days and their visits to the page.
     this.resultDiv_.appendChild(resultsFragment);
   }
-  this.updateNavBar_();
 };
 
 /**
@@ -1293,9 +1340,10 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
  */
 HistoryView.prototype.updateNavBar_ = function() {
   this.updateRangeButtons_();
+
+  // Managed users have the control bar on top, don't show it on the bottom
+  // as well.
   if (!loadTimeData.getBoolean('isManagedProfile')) {
-    // Managed users have the control bar on top, don't show it on the bottom
-    // as well.
     $('newest-button').hidden = this.pageIndex_ == 0;
     $('newer-button').hidden = this.pageIndex_ == 0;
     $('older-button').hidden =
@@ -1453,11 +1501,14 @@ function load() {
   var offset = parseInt(hashData.offset, 10) || historyView.getOffset();
   historyView.setPageState(hashData.q, page, range, offset);
 
-  if ($('overlay'))
+  if ($('overlay')) {
     cr.ui.overlay.setupOverlay($('overlay'));
+    cr.ui.overlay.globalInitialization();
+  }
+  HistoryFocusManager.getInstance().initialize();
 
   var doSearch = function(e) {
-    recordUmaAction('Search_HistoryPage');
+    recordUmaAction('HistoryPage_Search');
     historyView.setSearch(searchField.value);
 
     if (isMobileVersion())
@@ -1473,6 +1524,9 @@ function load() {
       activeVisit = null;
     });
   }
+
+  if (!loadTimeData.getBoolean('showDeleteVisitUI'))
+    $('remove-visit').hidden = true;
 
   searchField.addEventListener('search', doSearch);
   $('search-button').addEventListener('click', doSearch);
@@ -1498,6 +1552,8 @@ function load() {
   // Adjust the position of the notification bar when the window size changes.
   window.addEventListener('resize',
       historyView.positionNotificationBar.bind(historyView));
+
+  cr.ui.FocusManager.disableMouseFocusOnButtons();
 
   if (isMobileVersion()) {
     if (searchField) {
@@ -1553,7 +1609,7 @@ function updateHostStatus(statusElement, newStatus) {
  * @param {Event} e The click event.
  */
 function openClearBrowsingData(e) {
-  recordUmaAction('InitClearBrowsingData_HistoryPage');
+  recordUmaAction('HistoryPage_InitClearBrowsingData');
   chrome.send('clearBrowsingData');
 }
 
@@ -1599,7 +1655,7 @@ function confirmDeletion(okCallback, cancelCallback) {
  * Confirms the deletion with the user, and then deletes the selected visits.
  */
 function removeItems() {
-  recordUmaAction('RemoveSelected_HistoryPage');
+  recordUmaAction('HistoryPage_RemoveSelected');
   if (!loadTimeData.getBoolean('allowDeletingHistory'))
     return;
 
@@ -1619,10 +1675,23 @@ function removeItems() {
     checkbox.disabled = true;
     link.classList.add('to-be-removed');
     disabledItems.push(checkbox);
+    var integerId = parseInt(entry.visit.id_, 10);
+    // Record the ID of the entry to signify how many entries are above this
+    // link on the page.
+    recordUmaHistogram('HistoryPage.RemoveEntryPosition',
+                       UMA_MAX_BUCKET_VALUE,
+                       integerId);
+    if (integerId <= UMA_MAX_SUBSET_BUCKET_VALUE) {
+      recordUmaHistogram('HistoryPage.RemoveEntryPositionSubset',
+                         UMA_MAX_SUBSET_BUCKET_VALUE,
+                         integerId);
+    }
+    if (entry.parentNode.className == 'search-results')
+      recordUmaAction('HistoryPage_SearchResultRemove');
   }
 
   function onConfirmRemove() {
-    recordUmaAction('ConfirmRemoveSelected_HistoryPage');
+    recordUmaAction('HistoryPage_ConfirmRemoveSelected');
     historyModel.removeVisitsFromHistory(toBeRemoved,
         historyView.reload.bind(historyView));
     $('overlay').removeEventListener('cancelOverlay', onCancelRemove);
@@ -1630,7 +1699,7 @@ function removeItems() {
   }
 
   function onCancelRemove() {
-    recordUmaAction('CancelRemoveSelected_HistoryPage');
+    recordUmaAction('HistoryPage_CancelRemoveSelected');
     // Return everything to its previous state.
     for (var i = 0; i < disabledItems.length; i++) {
       var checkbox = disabledItems[i];
@@ -1654,11 +1723,20 @@ function removeItems() {
  * @param {Event} e The click event.
  */
 function checkboxClicked(e) {
-  var checkbox = e.currentTarget;
+  handleCheckboxStateChange(e.currentTarget, e.shiftKey);
+}
+
+/**
+ * Post-process of checkbox state change. This handles range selection and
+ * updates internal state.
+ * @param {!HTMLInputElement} checkbox Clicked checkbox.
+ * @param {boolean} shiftKey true if shift key is pressed.
+ */
+function handleCheckboxStateChange(checkbox, shiftKey) {
   updateParentCheckbox(checkbox);
   var id = Number(checkbox.id.slice('checkbox-'.length));
   // Handle multi-select if shift was pressed.
-  if (event.shiftKey && (selectionAnchor != -1)) {
+  if (shiftKey && (selectionAnchor != -1)) {
     var checked = checkbox.checked;
     // Set all checkboxes from the anchor up to the clicked checkbox to the
     // state of the clicked one.
@@ -1714,9 +1792,33 @@ function updateParentCheckbox(checkbox) {
 
 function entryBoxMousedown(event) {
   // Prevent text selection when shift-clicking to select multiple entries.
-  if (event.shiftKey) {
+  if (event.shiftKey)
     event.preventDefault();
+}
+
+/**
+ * Handle click event for entryBox labels.
+ * @param {!MouseEvent} event A click event.
+ */
+function entryBoxClick(event) {
+  // Do nothing if a bookmark star is clicked.
+  if (event.defaultPrevented)
+    return;
+  var element = event.target;
+  // Do nothing if the event happened in an interactive element.
+  for (; element != event.currentTarget; element = element.parentNode) {
+    switch (element.tagName) {
+      case 'A':
+      case 'BUTTON':
+      case 'INPUT':
+        return;
+    }
   }
+  var checkbox = event.currentTarget.control;
+  checkbox.checked = !checkbox.checked;
+  handleCheckboxStateChange(checkbox, event.shiftKey);
+  // We don't want to focus on the checkbox.
+  event.preventDefault();
 }
 
 // This is pulled out so we can wait for it in tests.
@@ -1724,12 +1826,20 @@ function removeNodeWithoutTransition(node) {
   node.parentNode.removeChild(node);
 }
 
-function removeNode(node) {
+/**
+ * Triggers a fade-out animation, and then removes |node| from the DOM.
+ * @param {Node} node The node to be removed.
+ * @param {Function?} onRemove A function to be called after the node
+ *     has been removed from the DOM.
+ */
+function removeNode(node, onRemove) {
   node.classList.add('fade-out'); // Trigger CSS fade out animation.
 
   // Delete the node when the animation is complete.
   node.addEventListener('webkitTransitionEnd', function() {
     removeNodeWithoutTransition(node);
+    if (onRemove)
+      onRemove();
   });
 }
 
@@ -1742,17 +1852,17 @@ function removeEntryFromView(entry) {
   var nextEntry = entry.nextSibling;
   var previousEntry = entry.previousSibling;
 
-  removeNode(entry);
+  removeNode(entry, function() {
+    historyView.updateSelectionEditButtons();
+  });
 
   // if there is no previous entry, and the next entry is a gap, remove it
-  if (!previousEntry && nextEntry && nextEntry.className == 'gap') {
+  if (!previousEntry && nextEntry && nextEntry.className == 'gap')
     removeNode(nextEntry);
-  }
 
   // if there is no next entry, and the previous entry is a gap, remove it
-  if (!nextEntry && previousEntry && previousEntry.className == 'gap') {
+  if (!nextEntry && previousEntry && previousEntry.className == 'gap')
     removeNode(previousEntry);
-  }
 
   // if both the next and previous entries are gaps, remove one
   if (nextEntry && nextEntry.className == 'gap' &&

@@ -2,8 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
+#include "chrome/browser/policy/external_data_fetcher.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_service_impl.h"
@@ -102,10 +105,11 @@ class ProxyPolicyTest : public testing::Test {
     scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
         new user_prefs::PrefRegistrySyncable);
     PrefServiceSyncable* prefs = builder.CreateSyncable(registry.get());
-    chrome::RegisterUserPrefs(registry.get());
+    chrome::RegisterUserProfilePrefs(registry.get());
     return prefs;
   }
 
+  base::MessageLoop loop_;
   CommandLine command_line_;
   MockConfigurationPolicyProvider provider_;
   scoped_ptr<PolicyServiceImpl> policy_service_;
@@ -118,11 +122,11 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
       ProxyPrefs::kFixedServersProxyModeName);
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             mode_name);
+             mode_name, NULL);
   policy.Set(key::kProxyBypassList, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             Value::CreateStringValue("abc"));
+             Value::CreateStringValue("abc"), NULL);
   policy.Set(key::kProxyServer, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             Value::CreateStringValue("ghi"));
+             Value::CreateStringValue("ghi"), NULL);
   provider_.UpdateChromePolicy(policy);
 
   // First verify that command-line options are set correctly when
@@ -152,7 +156,7 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
       ProxyPrefs::kAutoDetectProxyModeName);
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             mode_name);
+             mode_name, NULL);
   provider_.UpdateChromePolicy(policy);
 
   // First verify that command-line options are set correctly when
@@ -179,7 +183,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
       ProxyPrefs::kAutoDetectProxyModeName);
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             mode_name);
+             mode_name, NULL);
   provider_.UpdateChromePolicy(policy);
 
   // First verify that command-line options are set correctly when
@@ -202,7 +206,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
       ProxyPrefs::kDirectProxyModeName);
   PolicyMap policy;
   policy.Set(key::kProxyMode, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-             mode_name);
+             mode_name, NULL);
   provider_.UpdateChromePolicy(policy);
 
   // First verify that the auto-detect is set if there is no managed

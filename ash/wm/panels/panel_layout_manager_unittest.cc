@@ -393,6 +393,37 @@ TEST_F(PanelLayoutManagerTest, MultiplePanelStacking) {
   EXPECT_TRUE(WindowIsAbove(w2.get(), w1.get()));
 }
 
+TEST_F(PanelLayoutManagerTest, MultiplePanelStackingVertical) {
+  // set launcher shelf to be aligned on the right
+  SetAlignment(Shell::GetPrimaryRootWindow(), SHELF_ALIGNMENT_RIGHT);
+
+  // Size panels in such a way that ordering them by X coordinate would cause
+  // stacking order to be incorrect. Test that stacking order is based on Y.
+  scoped_ptr<aura::Window> w1(CreatePanelWindow(gfx::Rect(0, 0, 210, 201)));
+  scoped_ptr<aura::Window> w2(CreatePanelWindow(gfx::Rect(0, 0, 220, 201)));
+  scoped_ptr<aura::Window> w3(CreatePanelWindow(gfx::Rect(0, 0, 200, 201)));
+
+  // Default stacking order.
+  EXPECT_TRUE(WindowIsAbove(w3.get(), w2.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w1.get()));
+
+  // Changing the active window should update the stacking order.
+  wm::ActivateWindow(w1.get());
+  launcher_view_test()->RunMessageLoopUntilAnimationsDone();
+  EXPECT_TRUE(WindowIsAbove(w1.get(), w2.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w3.get()));
+
+  wm::ActivateWindow(w2.get());
+  launcher_view_test()->RunMessageLoopUntilAnimationsDone();
+  EXPECT_TRUE(WindowIsAbove(w1.get(), w3.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w3.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w1.get()));
+
+  wm::ActivateWindow(w3.get());
+  EXPECT_TRUE(WindowIsAbove(w3.get(), w2.get()));
+  EXPECT_TRUE(WindowIsAbove(w2.get(), w1.get()));
+}
+
 TEST_F(PanelLayoutManagerTest, MultiplePanelCallout) {
   gfx::Rect bounds(0, 0, 200, 200);
   scoped_ptr<aura::Window> w1(CreatePanelWindow(bounds));
@@ -628,6 +659,16 @@ TEST_F(PanelLayoutManagerTest, PanelMoveBetweenMultipleDisplays) {
   EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
   EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
       p1_d2->GetBoundsInScreen()));
+
+  // Test if clicking on a previously moved window moves the
+  // panel back to the original display.
+  ClickLauncherItemForWindow(launcher_view_1st, p1_d1.get());
+  EXPECT_EQ(root_windows[0], p1_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p2_d1->GetRootWindow());
+  EXPECT_EQ(root_windows[0], p1_d2->GetRootWindow());
+  EXPECT_EQ(root_windows[1], p2_d2->GetRootWindow());
+  EXPECT_TRUE(root_windows[0]->GetBoundsInScreen().Contains(
+      p1_d1->GetBoundsInScreen()));
 }
 
 TEST_F(PanelLayoutManagerTest, PanelAttachPositionMultipleDisplays) {

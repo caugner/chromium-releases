@@ -345,6 +345,9 @@ function Download(download) {
       loadTimeData.getString('control_cancel'));
   this.nodeControls_.appendChild(this.controlCancel_);
 
+  this.controlByExtension_ = document.createElement('span');
+  this.nodeControls_.appendChild(this.controlByExtension_);
+
   // Container for 'unsafe download' UI.
   this.danger_ = createElementWithClassName('div', 'show-dangerous');
   this.node.appendChild(this.danger_);
@@ -386,7 +389,8 @@ Download.DangerType = {
   DANGEROUS_URL: 'DANGEROUS_URL',
   DANGEROUS_CONTENT: 'DANGEROUS_CONTENT',
   UNCOMMON_CONTENT: 'UNCOMMON_CONTENT',
-  DANGEROUS_HOST: 'DANGEROUS_HOST'
+  DANGEROUS_HOST: 'DANGEROUS_HOST',
+  POTENTIALLY_UNWANTED: 'POTENTIALLY_UNWANTED',
 };
 
 /**
@@ -419,7 +423,10 @@ Download.prototype.update = function(download) {
   this.state_ = download.state;
   this.fileExternallyRemoved_ = download.file_externally_removed;
   this.dangerType_ = download.danger_type;
+  this.finchString_ = download.finch_string;
   this.lastReasonDescription_ = download.last_reason_text;
+  this.byExtensionId_ = download.by_ext_id;
+  this.byExtensionName_ = download.by_ext_name;
 
   this.since_ = download.since_string;
   this.date_ = download.date_string;
@@ -442,6 +449,13 @@ Download.prototype.update = function(download) {
     } else if (this.dangerType_ == Download.DangerType.UNCOMMON_CONTENT) {
       this.dangerDesc_.textContent = loadTimeData.getStringF(
           'danger_uncommon_desc', this.fileName_);
+    } else if (this.dangerType_ == Download.DangerType.POTENTIALLY_UNWANTED) {
+      this.dangerDesc_.textContent = loadTimeData.getStringF(
+          'danger_potentially_unwanted_desc', this.fileName_);
+    }
+    if (this.finchString_) {
+      // Finch trial overrides the normal display string.
+      this.dangerDesc_.textContent = this.finchString_;
     }
     this.danger_.style.display = 'block';
     this.safe_.style.display = 'none';
@@ -516,6 +530,23 @@ Download.prototype.update = function(download) {
                      this.state_ == Download.States.PAUSED;
     showInline(this.controlCancel_, showCancel);
     showInline(this.controlRemove_, !showCancel);
+
+    if (this.byExtensionId_ && this.byExtensionName_) {
+      // Format 'control_by_extension' with a link instead of plain text by
+      // splitting the formatted string into pieces.
+      var slug = 'XXXXX';
+      var formatted = loadTimeData.getStringF('control_by_extension', slug);
+      var slugIndex = formatted.indexOf(slug);
+      this.controlByExtension_.textContent = formatted.substr(0, slugIndex);
+      this.controlByExtensionLink_ = document.createElement('a');
+      this.controlByExtensionLink_.href =
+          'chrome://extensions#' + this.byExtensionId_;
+      this.controlByExtensionLink_.textContent = this.byExtensionName_;
+      this.controlByExtension_.appendChild(this.controlByExtensionLink_);
+      if (slugIndex < (formatted.length - slug.length))
+        this.controlByExtension_.appendChild(document.createTextNode(
+            formatted.substr(slugIndex + 1)));
+    }
 
     this.nodeSince_.textContent = this.since_;
     this.nodeDate_.textContent = this.date_;
@@ -727,7 +758,19 @@ function load() {
 function setSearch(searchText) {
   fifoResults.length = 0;
   downloads.setSearchText(searchText);
-  chrome.send('getDownloads', [searchText.toString()]);
+  searchText = searchText.toString().match(/(?:[^\s"]+|"[^"]*")+/g);
+  if (searchText) {
+    searchText = searchText.map(function(term) {
+      // strip quotes
+      return (term.match(/\s/) &&
+              term[0].match(/["']/) &&
+              term[term.length - 1] == term[0]) ?
+        term.substr(1, term.length - 2) : term;
+    });
+  } else {
+    searchText = [];
+  }
+  chrome.send('getDownloads', searchText);
 }
 
 function clearAll() {

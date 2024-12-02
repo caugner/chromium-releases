@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "chrome/browser/safe_browsing/two_phase_uploader.h"
@@ -169,12 +169,12 @@ TEST_F(DownloadFeedbackTest, CompleteUpload) {
   CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kSbDownloadFeedbackURL, kTestFeedbackURL);
 
-  DownloadFeedback* feedback = DownloadFeedback::Create(
-      url_request_context_getter_,
-      file_task_runner_,
-      upload_file_path_,
-      ping_request,
-      ping_response);
+  DownloadFeedback* feedback =
+      DownloadFeedback::Create(url_request_context_getter_.get(),
+                               file_task_runner_.get(),
+                               upload_file_path_,
+                               ping_request,
+                               ping_response);
   EXPECT_FALSE(uploader());
 
   feedback->Start(base::Bind(&DownloadFeedbackTest::FinishCallback,
@@ -192,14 +192,14 @@ TEST_F(DownloadFeedbackTest, CompleteUpload) {
             uploader()->metadata_);
   EXPECT_EQ(kTestFeedbackURL, uploader()->base_url_.spec());
 
-  EXPECT_TRUE(file_util::PathExists(upload_file_path_));
+  EXPECT_TRUE(base::PathExists(upload_file_path_));
 
   EXPECT_FALSE(feedback_finish_called_);
   uploader()->finish_callback_.Run(
       TwoPhaseUploader::STATE_SUCCESS, net::OK, 0, "");
   EXPECT_TRUE(feedback_finish_called_);
   base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(file_util::PathExists(upload_file_path_));
+  EXPECT_FALSE(base::PathExists(upload_file_path_));
 }
 
 TEST_F(DownloadFeedbackTest, CancelUpload) {
@@ -216,12 +216,12 @@ TEST_F(DownloadFeedbackTest, CancelUpload) {
   std::string ping_response(
       expected_report_metadata.download_response().SerializeAsString());
 
-  DownloadFeedback* feedback = DownloadFeedback::Create(
-      url_request_context_getter_,
-      file_task_runner_,
-      upload_file_path_,
-      ping_request,
-      ping_response);
+  DownloadFeedback* feedback =
+      DownloadFeedback::Create(url_request_context_getter_.get(),
+                               file_task_runner_.get(),
+                               upload_file_path_,
+                               ping_request,
+                               ping_response);
   EXPECT_FALSE(uploader());
 
   feedback->Start(base::Bind(&DownloadFeedbackTest::FinishCallback,
@@ -230,13 +230,13 @@ TEST_F(DownloadFeedbackTest, CancelUpload) {
   ASSERT_TRUE(uploader());
   EXPECT_FALSE(feedback_finish_called_);
   EXPECT_TRUE(uploader()->start_called_);
-  EXPECT_TRUE(file_util::PathExists(upload_file_path_));
+  EXPECT_TRUE(base::PathExists(upload_file_path_));
 
   delete feedback;
   EXPECT_FALSE(feedback_finish_called_);
 
   base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(file_util::PathExists(upload_file_path_));
+  EXPECT_FALSE(base::PathExists(upload_file_path_));
 }
 
 }  // namespace safe_browsing

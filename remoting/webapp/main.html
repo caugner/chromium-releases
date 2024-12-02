@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<html>
+<html class="scrollable">
   <head>
     <meta charset="utf-8">
     <link rel="icon" type="image/png" href="chromoting16.webp">
@@ -36,10 +36,13 @@ found in the LICENSE file.
     <script src="host_settings.js"></script>
     <script src="host_setup_dialog.js"></script>
     <script src="host_table_entry.js"></script>
+    <script src="identity.js"></script>
     <script src="l10n.js"></script>
     <script src="log_to_server.js"></script>
     <script src="menu_button.js"></script>
     <script src="oauth2.js"></script>
+    <script src="oauth2_api.js"></script>
+    <script src="paired_client_manager.js"></script>
     <script src="plugin_settings.js"></script>
     <script src="remoting.js"></script>
     <script src="server_log_entry.js"></script>
@@ -76,13 +79,13 @@ found in the LICENSE file.
       <div class="box-spacer"></div>
       <div id="top-secondary">
         <span id="current-email"></span>
-        <span data-ui-mode="home">
-          <a id="sign-out" href="#" i18n-content="SIGN_OUT_BUTTON"></a> |
+        <span data-ui-mode="home" class="apps-v1-only">
+          <a id="sign-out" href="#" i18n-content="SIGN_OUT_BUTTON"></a>
           <!-- TODO(jamiewalch): Add this back in when we support it.
           <a id="connection-history"
              i18n-content="CONNECTION_HISTORY_BUTTON"></a> |
           -->
-        </span>
+        </span> |
         <a href="https://www.google.com/support/chrome/bin/answer.py?answer=1649523"
            target="_blank" i18n-content="HELP"></a>
       </div>
@@ -205,10 +208,17 @@ found in the LICENSE file.
               </button>
             </div> <!-- enabled -->
             <div data-daemon-state="enabled">
-              <span i18n-content="HOME_DAEMON_ACTIVE_MESSAGE"></span>
-              <a id="change-daemon-pin"
-                 href="#"
-                 i18n-content="HOME_DAEMON_CHANGE_PIN_LINK"></a>
+              <div>
+                <span i18n-content="HOME_DAEMON_ACTIVE_MESSAGE"></span>
+                <a id="change-daemon-pin"
+                   href="#"
+                   i18n-content="HOME_DAEMON_CHANGE_PIN_LINK"></a>
+              </div>
+              <div id="paired-client-manager-message" hidden>
+                <span i18n-content="HOME_DAEMON_PAIRED_MESSAGE"></span>
+                <a href="#"
+                   id="open-paired-client-manager-dialog"
+                   i18n-content="HOME_DAEMON_MANAGE_PAIRINGS"></a>
             </div>
           </div> <!-- daemon-control -->
           <div id="host-list-empty" hidden>
@@ -249,11 +259,11 @@ found in the LICENSE file.
     </div> <!-- auth-dialog -->
 
     <div class="dialog-screen"
-         data-ui-mode="home.host home.client home.history home.confirm-host-delete home.host-setup home.token-refresh-failed"
+         data-ui-mode="home.host home.client home.history home.confirm-host-delete home.host-setup home.token-refresh-failed home.manage-pairings"
          hidden></div>
 
     <div class="dialog-container"
-         data-ui-mode="home.host home.client home.history home.confirm-host-delete home.host-setup home.token-refresh-failed"
+         data-ui-mode="home.host home.client home.history home.confirm-host-delete home.host-setup home.token-refresh-failed home.manage-pairings"
          hidden>
 
       <div class="box-spacer"></div>
@@ -519,27 +529,42 @@ found in the LICENSE file.
           <div id="pin-message"
                i18n-content="PIN_MESSAGE"
                class="message"></div>
-          <form id="pin-form" action="" class="centered">
-            <label for="pin-entry"
-                   i18n-content="PIN"
-                   class="editbox-label"></label>
-            <input id="pin-entry"
-                   type="password"
-                   autofocus="autofocus"
-                   autocomplete="off"/>
-            <button id="connect-button"
-                    type="submit"
-                    i18n-content="CONNECT_BUTTON">
-            </button>
-            <button id="cancel-pin-entry-button"
-                    type="button"
-                    i18n-content="CANCEL">
-            </button>
+          <form id="pin-form" action="">
+            <table class="centered">
+              <tr>
+                <td>
+                  <label for="pin-entry"
+                         i18n-content="PIN"
+                         class="editbox-label"></label>
+                </td>
+                <td>
+                  <input id="pin-entry"
+                         type="password"
+                         autofocus="autofocus"
+                         autocomplete="off"/>
+                  <button id="pin-connect-button"
+                          type="submit"
+                          i18n-content="CONNECT_BUTTON">
+                  </button>
+                  <button id="cancel-pin-entry-button"
+                          type="button"
+                          i18n-content="CANCEL">
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <!-- Empty cell to align the checkbox and PIN entry. -->
+                </td>
+                <td>
+                  <label id="remember-pin" class="checkbox-label">
+                    <input id="remember-pin-checkbox" type="checkbox">
+                    <span i18n-content="REMEMBER_PIN"></span>
+                  </label>
+                </td>
+              </tr>
+            </table>
           </form>
-          <label id="remember-pin" class="checkbox-label">
-            <input id="remember-pin-checkbox" type="checkbox">
-            <span i18n-content="REMEMBER_PIN"></span>
-          </label>
           <div id="startup-mode-box-me2me"
                class="information-box centered"
                hidden>
@@ -659,6 +684,45 @@ found in the LICENSE file.
           </button>
         </div>
       </div> <!-- home.confirm-host-delete -->
+
+      <div id="paired-client-manager-dialog"
+           class="kd-modaldialog"
+           data-ui-mode="home.manage-pairings"
+           hidden>
+        <p i18n-content="PAIRED_CLIENTS_INTRODUCTION"
+           class="message">
+        </p>
+        <div id="paired-clients-list">
+          <table>
+            <thead>
+              <tr>
+                <td i18n-content="PAIRED_CLIENT_DATE"></td>
+                <td i18n-content="PAIRED_CLIENT_NAME"></td>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+          <p id="no-paired-clients">
+            <em i18n-content="NO_PAIRED_CLIENTS"></em>
+          </p>
+        </div> <!-- paired-clients-list -->
+        <p id="paired-client-manager-dialog-error"
+           class="error-state"
+           hidden>
+        </p>
+        <div class="button-row">
+          <span id="paired-client-manager-dialog-working"
+                class="waiting"
+                i18n-content="WORKING"
+                hidden></span>
+          <button id="delete-all-paired-clients"
+                  i18n-content="DELETE_ALL_PAIRED_CLIENTS">
+          <button id="close-paired-client-manager-dialog"
+                  i18n-content="CLOSE">
+          </button>
+        </div>
+      </div> <!-- home.manage-pairings -->
 
       <div class="box-spacer"></div>
 

@@ -13,16 +13,15 @@
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/net/url_fixer_upper.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/url_util.h"
+#include "url/url_util.h"
 
 HistoryProvider::HistoryProvider(AutocompleteProviderListener* listener,
                                  Profile* profile,
                                  AutocompleteProvider::Type type)
-    : AutocompleteProvider(listener, profile, type),
-      always_prevent_inline_autocomplete_(false) {
+    : AutocompleteProvider(listener, profile, type) {
 }
 
 void HistoryProvider::DeleteMatch(const AutocompleteMatch& match) {
@@ -157,7 +156,6 @@ size_t HistoryProvider::TrimHttpPrefix(string16* url) {
 bool HistoryProvider::PreventInlineAutocomplete(
     const AutocompleteInput& input) {
   return input.prevent_inline_autocomplete() ||
-      always_prevent_inline_autocomplete_ ||
       (!input.text().empty() &&
        IsWhitespace(input.text()[input.text().length() - 1]));
 }

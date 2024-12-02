@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/cursor_client.h"
@@ -353,7 +353,7 @@ bool RootWindow::DispatchGestureEvent(ui::GestureEvent* event) {
 
 void RootWindow::OnWindowDestroying(Window* window) {
   DispatchMouseExitToHidingWindow(window);
-  OnWindowHidden(window, WINDOW_DESTROYED, NULL);
+  OnWindowHidden(window, WINDOW_DESTROYED);
 
   if (window->IsVisible() &&
       window->ContainsPointInRoot(GetLastMouseLocationInRoot())) {
@@ -389,7 +389,7 @@ void RootWindow::DispatchMouseExitToHidingWindow(Window* window) {
 
 void RootWindow::OnWindowVisibilityChanged(Window* window, bool is_visible) {
   if (!is_visible)
-    OnWindowHidden(window, WINDOW_HIDDEN, NULL);
+    OnWindowHidden(window, WINDOW_HIDDEN);
 
   if (window->ContainsPointInRoot(GetLastMouseLocationInRoot()))
     PostMouseMoveEventAfterWindowChange();
@@ -707,8 +707,7 @@ void RootWindow::ClearMouseHandlers() {
 ////////////////////////////////////////////////////////////////////////////////
 // RootWindow, private:
 
-void RootWindow::TransformEventForDeviceScaleFactor(bool keep_inside_root,
-                                                    ui::LocatedEvent* event) {
+void RootWindow::TransformEventForDeviceScaleFactor(ui::LocatedEvent* event) {
   event->UpdateForRootTransform(GetInverseRootTransform());
 }
 
@@ -789,7 +788,7 @@ void RootWindow::OnWindowRemovedFromRootWindow(Window* detached,
   DCHECK(aura::client::GetCaptureWindow(this) != this);
 
   DispatchMouseExitToHidingWindow(detached);
-  OnWindowHidden(detached, new_root ? WINDOW_MOVING : WINDOW_HIDDEN, new_root);
+  OnWindowHidden(detached, new_root ? WINDOW_MOVING : WINDOW_HIDDEN);
 
   if (detached->IsVisible() &&
       detached->ContainsPointInRoot(GetLastMouseLocationInRoot())) {
@@ -797,9 +796,7 @@ void RootWindow::OnWindowRemovedFromRootWindow(Window* detached,
   }
 }
 
-void RootWindow::OnWindowHidden(Window* invisible,
-                                WindowHiddenReason reason,
-                                RootWindow* new_root) {
+void RootWindow::OnWindowHidden(Window* invisible, WindowHiddenReason reason) {
   // TODO(beng): This should be removed once FocusController is turned on.
   if (client::GetFocusClient(this)) {
     client::GetFocusClient(this)->OnWindowHiddenInRootWindow(
@@ -918,7 +915,7 @@ bool RootWindow::OnHostMouseEvent(ui::MouseEvent* event) {
 bool RootWindow::OnHostScrollEvent(ui::ScrollEvent* event) {
   DispatchHeldEvents();
 
-  TransformEventForDeviceScaleFactor(false, event);
+  TransformEventForDeviceScaleFactor(event);
   SetLastMouseLocation(this, event->location());
   synthesize_mouse_move_ = false;
 
@@ -931,13 +928,12 @@ bool RootWindow::OnHostScrollEvent(ui::ScrollEvent* event) {
   if (!target)
     target = this;
 
+  event->ConvertLocationToTarget(static_cast<Window*>(this), target);
   int flags = event->flags();
-  gfx::Point location_in_window = event->location();
-  Window::ConvertPointToTarget(this, target, &location_in_window);
-  if (IsNonClientLocation(target, location_in_window))
+  if (IsNonClientLocation(target, event->location()))
     flags |= ui::EF_IS_NON_CLIENT;
   event->set_flags(flags);
-  event->ConvertLocationToTarget(static_cast<Window*>(this), target);
+
   ProcessEvent(target, event);
   return event->handled();
 }
@@ -1014,7 +1010,7 @@ RootWindow* RootWindow::AsRootWindow() {
 // RootWindow, private:
 
 bool RootWindow::DispatchMouseEventImpl(ui::MouseEvent* event) {
-  TransformEventForDeviceScaleFactor(true, event);
+  TransformEventForDeviceScaleFactor(event);
   Window* target = mouse_pressed_handler_ ?
       mouse_pressed_handler_ : client::GetCaptureWindow(this);
   if (!target)
@@ -1107,7 +1103,7 @@ bool RootWindow::DispatchTouchEventImpl(ui::TouchEvent* event) {
     default:
       break;
   }
-  TransformEventForDeviceScaleFactor(false, event);
+  TransformEventForDeviceScaleFactor(event);
   bool handled = false;
   Window* target = client::GetCaptureWindow(this);
   if (!target) {

@@ -7,15 +7,15 @@
 
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/native_focus_tracker.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class Browser;
 

@@ -71,11 +71,11 @@ const char kBluetoothOnDeviceSearchResult[] = "bluetooth.onDeviceSearchResult";
 
 const char kOnPushMessage[] = "pushMessaging.onMessage";
 
-const char kOnDisplayChanged[] = "systemInfo.display.onDisplayChanged";
+const char kOnDisplayChanged[] = "system.display.onDisplayChanged";
 const char kOnStorageAvailableCapacityChanged[] =
-    "experimental.systemInfo.storage.onAvailableCapacityChanged";
-const char kOnStorageAttached[] = "experimental.systemInfo.storage.onAttached";
-const char kOnStorageDetached[] = "experimental.systemInfo.storage.onDetached";
+    "system.storage.onAvailableCapacityChanged";
+const char kOnStorageAttached[] = "system.storage.onAttached";
+const char kOnStorageDetached[] = "system.storage.onDetached";
 
 const char kOnSystemIndicatorClicked[] = "systemIndicator.onClicked";
 
@@ -102,6 +102,13 @@ const char kOnLaunched[] = "app.runtime.onLaunched";
 const char kOnRestarted[] = "app.runtime.onRestarted";
 
 const char kOnFeedbackRequested[] = "feedbackPrivate.onFeedbackRequested";
+
+const char kDeveloperPrivateOnItemStateChanged[] =
+    "developerPrivate.onItemStateChanged";
+
+const char kRecoveryOnWriteProgress[] = "recoveryPrivate.onWriteProgress";
+const char kRecoveryOnWriteComplete[] = "recoveryPrivate.onWriteComplete";
+const char kRecoveryOnWriteError[] = "recoveryPrivate.onWriteError";
 
 }  // namespace event_names
 

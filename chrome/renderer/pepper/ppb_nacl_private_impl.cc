@@ -11,18 +11,21 @@
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/nacl_host_messages.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
+#include "chrome/renderer/pepper/pnacl_translation_resource_host.h"
+#include "components/nacl/common/nacl_host_messages.h"
+#include "components/nacl/common/nacl_types.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
-#include "ipc/ipc_sync_message_filter.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/private/pp_file_handle.h"
 #include "ppapi/native_client/src/trusted/plugin/nacl_entry_points.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
@@ -31,17 +34,24 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "webkit/plugins/ppapi/host_globals.h"
-#include "webkit/plugins/ppapi/plugin_module.h"
-#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 namespace {
 
-// This allows us to send requests from background threads.
-// E.g., to do LaunchSelLdr for helper nexes (which is done synchronously),
-// in a background thread, to avoid jank.
-base::LazyInstance<scoped_refptr<IPC::SyncMessageFilter> >
-    g_background_thread_sender = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<scoped_refptr<PnaclTranslationResourceHost> >
+    g_pnacl_resource_host = LAZY_INSTANCE_INITIALIZER;
+
+static bool InitializePnaclResourceHost() {
+  // Must run on the main thread.
+  content::RenderThread* render_thread = content::RenderThread::Get();
+  if (!render_thread)
+    return false;
+  if (!g_pnacl_resource_host.Get()) {
+    g_pnacl_resource_host.Get() = new PnaclTranslationResourceHost(
+        render_thread->GetIOMessageLoopProxy());
+    render_thread->AddFilter(g_pnacl_resource_host.Get());
+  }
+  return true;
+}
 
 struct InstanceInfo {
   InstanceInfo() : plugin_pid(base::kNullProcessId), plugin_child_id(0) {}
@@ -68,19 +78,19 @@ static int GetRoutingID(PP_Instance instance) {
 }
 
 // Launch NaCl's sel_ldr process.
-PP_NaClResult LaunchSelLdr(PP_Instance instance,
+PP_ExternalPluginResult LaunchSelLdr(PP_Instance instance,
                            const char* alleged_url,
                            PP_Bool uses_irt,
                            PP_Bool uses_ppapi,
                            PP_Bool enable_ppapi_dev,
                            PP_Bool enable_dyncode_syscalls,
                            PP_Bool enable_exception_handling,
-                           void* imc_handle) {
+                           void* imc_handle,
+                           struct PP_Var* error_message) {
   nacl::FileDescriptor result_socket;
   IPC::Sender* sender = content::RenderThread::Get();
-  if (sender == NULL)
-    sender = g_background_thread_sender.Pointer()->get();
-
+  DCHECK(sender);
+  *error_message = PP_MakeUndefined();
   int routing_id = 0;
   // If the nexe uses ppapi APIs, we need a routing ID.
   // To get the routing ID, we must be on the main thread.
@@ -89,7 +99,7 @@ PP_NaClResult LaunchSelLdr(PP_Instance instance,
   if (uses_ppapi) {
     routing_id = GetRoutingID(instance);
     if (!routing_id)
-      return PP_NACL_FAILED;
+      return PP_EXTERNAL_PLUGIN_FAILED;
   }
 
   InstanceInfo instance_info;
@@ -103,6 +113,8 @@ PP_NaClResult LaunchSelLdr(PP_Instance instance,
     perm_bits |= ppapi::PERMISSION_DEV;
   instance_info.permissions =
       ppapi::PpapiPermissions::GetForCommandLine(perm_bits);
+  std::string error_message_string;
+  nacl::NaClLaunchResult launch_result;
 
   if (!sender->Send(new NaClHostMsg_LaunchNaCl(
           nacl::NaClLaunchParams(instance_info.url.spec(),
@@ -111,13 +123,18 @@ PP_NaClResult LaunchSelLdr(PP_Instance instance,
                                  PP_ToBool(uses_irt),
                                  PP_ToBool(enable_dyncode_syscalls),
                                  PP_ToBool(enable_exception_handling)),
-          &result_socket,
-          &instance_info.channel_handle,
-          &instance_info.plugin_pid,
-          &instance_info.plugin_child_id))) {
-    return PP_NACL_FAILED;
+          &launch_result,
+          &error_message_string))) {
+    return PP_EXTERNAL_PLUGIN_FAILED;
   }
-
+  if (!error_message_string.empty()) {
+    *error_message = ppapi::StringVar::StringToPPVar(error_message_string);
+    return PP_EXTERNAL_PLUGIN_FAILED;
+  }
+  result_socket = launch_result.imc_channel_handle;
+  instance_info.channel_handle = launch_result.ipc_channel_handle;
+  instance_info.plugin_pid = launch_result.plugin_pid;
+  instance_info.plugin_child_id = launch_result.plugin_child_id;
   // Don't save instance_info if channel handle is invalid.
   bool invalid_handle = instance_info.channel_handle.name.empty();
 #if defined(OS_POSIX)
@@ -130,50 +147,32 @@ PP_NaClResult LaunchSelLdr(PP_Instance instance,
   *(static_cast<NaClHandle*>(imc_handle)) =
       nacl::ToNativeHandle(result_socket);
 
-  return PP_NACL_OK;
+  return PP_EXTERNAL_PLUGIN_OK;
 }
 
-PP_NaClResult StartPpapiProxy(PP_Instance instance) {
+PP_ExternalPluginResult StartPpapiProxy(PP_Instance instance) {
   InstanceInfoMap& map = g_instance_info.Get();
   InstanceInfoMap::iterator it = map.find(instance);
   if (it == map.end()) {
     DLOG(ERROR) << "Could not find instance ID";
-    return PP_NACL_FAILED;
+    return PP_EXTERNAL_PLUGIN_FAILED;
   }
   InstanceInfo instance_info = it->second;
   map.erase(it);
 
-  webkit::ppapi::PluginInstance* plugin_instance =
-      content::GetHostGlobals()->GetInstance(instance);
+  content::PepperPluginInstance* plugin_instance =
+      content::PepperPluginInstance::Get(instance);
   if (!plugin_instance) {
     DLOG(ERROR) << "GetInstance() failed";
-    return PP_NACL_ERROR_MODULE;
+    return PP_EXTERNAL_PLUGIN_ERROR_MODULE;
   }
 
-  // Create a new module for each instance of the NaCl plugin that is using
-  // the IPC based out-of-process proxy. We can't use the existing module,
-  // because it is configured for the in-process NaCl plugin, and we must
-  // keep it that way to allow the page to create other instances.
-  webkit::ppapi::PluginModule* plugin_module = plugin_instance->module();
-  scoped_refptr<webkit::ppapi::PluginModule> nacl_plugin_module(
-      plugin_module->CreateModuleForNaClInstance());
-
-  content::RendererPpapiHost* renderer_ppapi_host =
-      content::RendererPpapiHost::CreateExternalPluginModule(
-          nacl_plugin_module,
-          plugin_instance,
-          base::FilePath().AppendASCII(instance_info.url.spec()),
-          instance_info.permissions,
-          instance_info.channel_handle,
-          instance_info.plugin_pid,
-          instance_info.plugin_child_id);
-  if (!renderer_ppapi_host) {
-    DLOG(ERROR) << "CreateExternalPluginModule() failed";
-    return PP_NACL_ERROR_MODULE;
-  }
-
-  // Finally, switch the instance to the proxy.
-  return nacl_plugin_module->InitAsProxiedNaCl(plugin_instance);
+  return plugin_instance->SwitchToOutOfProcessProxy(
+      base::FilePath().AppendASCII(instance_info.url.spec()),
+      instance_info.permissions,
+      instance_info.channel_handle,
+      instance_info.plugin_pid,
+      instance_info.plugin_child_id);
 }
 
 int UrandomFD(void) {
@@ -187,11 +186,6 @@ int UrandomFD(void) {
 PP_Bool Are3DInterfacesDisabled() {
   return PP_FromBool(CommandLine::ForCurrentProcess()->HasSwitch(
                          switches::kDisable3DAPIs));
-}
-
-void EnableBackgroundSelLdrLaunch() {
-  g_background_thread_sender.Get() =
-      content::RenderThread::Get()->GetSyncMessageFilter();
 }
 
 int32_t BrokerDuplicateHandle(PP_FileHandle source_handle,
@@ -208,22 +202,31 @@ int32_t BrokerDuplicateHandle(PP_FileHandle source_handle,
 #endif
 }
 
+int32_t EnsurePnaclInstalled(PP_Instance instance,
+                             PP_CompletionCallback callback) {
+  ppapi::thunk::EnterInstance enter(instance, callback);
+  if (enter.failed())
+    return enter.retval();
+  if (!InitializePnaclResourceHost())
+    return enter.SetResult(PP_ERROR_FAILED);
+  g_pnacl_resource_host.Get()->EnsurePnaclInstalled(
+      instance,
+      enter.callback());
+  return enter.SetResult(PP_OK_COMPLETIONPENDING);
+}
+
 PP_FileHandle GetReadonlyPnaclFD(const char* filename) {
   IPC::PlatformFileForTransit out_fd = IPC::InvalidPlatformFileForTransit();
   IPC::Sender* sender = content::RenderThread::Get();
-  if (sender == NULL)
-    sender = g_background_thread_sender.Pointer()->get();
-
+  DCHECK(sender);
   if (!sender->Send(new NaClHostMsg_GetReadonlyPnaclFD(
           std::string(filename),
           &out_fd))) {
     return base::kInvalidPlatformFileValue;
   }
-
   if (out_fd == IPC::InvalidPlatformFileForTransit()) {
     return base::kInvalidPlatformFileValue;
   }
-
   base::PlatformFile handle =
       IPC::PlatformFileForTransitToPlatformFile(out_fd);
   return handle;
@@ -232,9 +235,7 @@ PP_FileHandle GetReadonlyPnaclFD(const char* filename) {
 PP_FileHandle CreateTemporaryFile(PP_Instance instance) {
   IPC::PlatformFileForTransit transit_fd = IPC::InvalidPlatformFileForTransit();
   IPC::Sender* sender = content::RenderThread::Get();
-  if (sender == NULL)
-    sender = g_background_thread_sender.Pointer()->get();
-
+  DCHECK(sender);
   if (!sender->Send(new NaClHostMsg_NaClCreateTemporaryFile(
           &transit_fd))) {
     return base::kInvalidPlatformFileValue;
@@ -250,21 +251,51 @@ PP_FileHandle CreateTemporaryFile(PP_Instance instance) {
 }
 
 int32_t GetNexeFd(PP_Instance instance,
-                  const char* cache_key,
+                  const char* pexe_url,
+                  uint32_t abi_version,
+                  uint32_t opt_level,
+                  const char* last_modified,
+                  const char* etag,
                   PP_Bool* is_hit,
                   PP_FileHandle* handle,
                   struct PP_CompletionCallback callback) {
-  // Check the instance. Once the call into the browser is hooked up, will need
-  // to do it again before calling the callback in case the plugin goes away.
   ppapi::thunk::EnterInstance enter(instance, callback);
   if (enter.failed())
     return enter.retval();
-  // stubbed out implementation for testing.
-  *is_hit = PP_FALSE;
-  *handle = CreateTemporaryFile(instance);
-  enter.callback()->PostRun(PP_OK);
-  enter.SetResult(PP_OK_COMPLETIONPENDING);
-  return enter.retval();
+  if (!pexe_url || !last_modified || !etag || !is_hit || !handle)
+    return enter.SetResult(PP_ERROR_BADARGUMENT);
+  if (!InitializePnaclResourceHost())
+    return enter.SetResult(PP_ERROR_FAILED);
+
+  base::Time last_modified_time;
+  // If FromString fails, it doesn't touch last_modified_time and we just send
+  // the default-constructed null value.
+  base::Time::FromString(last_modified, &last_modified_time);
+
+  nacl::PnaclCacheInfo cache_info;
+  cache_info.pexe_url = GURL(pexe_url);
+  cache_info.abi_version = abi_version;
+  cache_info.opt_level = opt_level;
+  cache_info.last_modified = last_modified_time;
+  cache_info.etag = std::string(etag);
+
+  g_pnacl_resource_host.Get()->RequestNexeFd(
+      GetRoutingID(instance),
+      instance,
+      cache_info,
+      is_hit,
+      handle,
+      enter.callback());
+
+  return enter.SetResult(PP_OK_COMPLETIONPENDING);
+}
+
+void ReportTranslationFinished(PP_Instance instance, PP_Bool success) {
+  // If the resource host isn't initialized, don't try to do that here.
+  // Just return because something is already very wrong.
+  if (g_pnacl_resource_host.Get() == NULL)
+    return;
+  g_pnacl_resource_host.Get()->ReportTranslationFinished(instance, success);
 }
 
 PP_Bool IsOffTheRecord() {
@@ -276,7 +307,7 @@ PP_Bool IsPnaclEnabled() {
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePnacl));
 }
 
-PP_NaClResult ReportNaClError(PP_Instance instance,
+PP_ExternalPluginResult ReportNaClError(PP_Instance instance,
                               PP_NaClError error_id) {
   IPC::Sender* sender = content::RenderThread::Get();
 
@@ -286,9 +317,9 @@ PP_NaClResult ReportNaClError(PP_Instance instance,
               // or is it safe to include the appropriate headers in
               // render_messages.h?
               GetRoutingID(instance), static_cast<int>(error_id)))) {
-    return PP_NACL_FAILED;
+    return PP_EXTERNAL_PLUGIN_FAILED;
   }
-  return PP_NACL_OK;
+  return PP_EXTERNAL_PLUGIN_OK;
 }
 
 PP_FileHandle OpenNaClExecutable(PP_Instance instance,
@@ -297,9 +328,7 @@ PP_FileHandle OpenNaClExecutable(PP_Instance instance,
                                  uint64_t* nonce_hi) {
   IPC::PlatformFileForTransit out_fd = IPC::InvalidPlatformFileForTransit();
   IPC::Sender* sender = content::RenderThread::Get();
-  if (sender == NULL)
-    sender = g_background_thread_sender.Pointer()->get();
-
+  DCHECK(sender);
   *nonce_lo = 0;
   *nonce_hi = 0;
   base::FilePath file_path;
@@ -326,11 +355,12 @@ const PPB_NaCl_Private nacl_interface = {
   &StartPpapiProxy,
   &UrandomFD,
   &Are3DInterfacesDisabled,
-  &EnableBackgroundSelLdrLaunch,
   &BrokerDuplicateHandle,
+  &EnsurePnaclInstalled,
   &GetReadonlyPnaclFD,
   &CreateTemporaryFile,
   &GetNexeFd,
+  &ReportTranslationFinished,
   &IsOffTheRecord,
   &IsPnaclEnabled,
   &ReportNaClError,

@@ -8,6 +8,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
@@ -28,8 +28,9 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "url/gurl.h"
 
 using extensions::Extension;
 
@@ -77,7 +78,6 @@ class LazyBackgroundPageApiTest : public ExtensionApiTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     ExtensionApiTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
     // Set shorter delays to prevent test timeouts.
     command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "1");
     command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "1");
@@ -141,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest,
 }
 
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, BroadcastEvent) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   const Extension* extension = LoadExtensionAndWait("broadcast_event");
   ASSERT_TRUE(extension);
@@ -159,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, BroadcastEvent) {
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
         content::NotificationService::AllSources());
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("files/extensions/test_file.html"));
+      browser(), embedded_test_server()->GetURL("/extensions/test_file.html"));
   page_complete.Wait();
 
   EXPECT_FALSE(pm->GetBackgroundHostForExtension(last_loaded_extension_id_));
@@ -183,7 +183,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, Filters) {
   // Open a tab to a URL that will fire a webNavigation event.
   LazyBackgroundObserver page_complete;
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("files/extensions/test_file.html"));
+      browser(), embedded_test_server()->GetURL("/extensions/test_file.html"));
   page_complete.Wait();
 }
 
@@ -235,7 +235,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForView) {
 // are complete.
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForRequest) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
 
   LazyBackgroundObserver page_complete;
   ResultCatcher catcher;
@@ -376,7 +376,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, MAYBE_IncognitoSplitMode) {
 // Tests that messages from the content script activate the lazy background
 // page, and keep it alive until all channels are closed.
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, Messaging) {
-  ASSERT_TRUE(StartTestServer());
+  ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(LoadExtensionAndWait("messaging"));
 
   // Lazy Background Page doesn't exist yet.
@@ -389,7 +389,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, Messaging) {
   ResultCatcher catcher;
   LazyBackgroundObserver lazybg;
   ui_test_utils::NavigateToURL(
-      browser(), test_server()->GetURL("files/extensions/test_file.html"));
+      browser(), embedded_test_server()->GetURL("/extensions/test_file.html"));
   lazybg.WaitUntilLoaded();
 
   // Background page got the content script's message and is still loaded

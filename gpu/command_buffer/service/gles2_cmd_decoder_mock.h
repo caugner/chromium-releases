@@ -71,7 +71,6 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(GetVertexArrayManager, gpu::gles2::VertexArrayManager*());
   MOCK_METHOD1(
       SetResizeCallback, void(const base::Callback<void(gfx::Size, float)>&));
-  MOCK_METHOD1(SetStreamTextureManager, void(StreamTextureManager*));
   MOCK_METHOD0(GetAsyncPixelTransferDelegate,
       AsyncPixelTransferDelegate*());
   MOCK_METHOD0(GetAsyncPixelTransferManager,
@@ -103,11 +102,14 @@ class MockGLES2Decoder : public GLES2Decoder {
                void(const ShaderCacheCallback& callback));
   MOCK_METHOD1(SetWaitSyncPointCallback,
                void(const WaitSyncPointCallback& callback));
+  MOCK_METHOD1(WaitForReadPixels,
+               void(base::Closure callback));
   MOCK_METHOD0(GetTextureUploadCount, uint32());
   MOCK_METHOD0(GetTotalTextureUploadTime, base::TimeDelta());
   MOCK_METHOD0(GetTotalProcessingCommandsTime, base::TimeDelta());
   MOCK_METHOD1(AddProcessingCommandsTime, void(base::TimeDelta));
   MOCK_METHOD0(WasContextLost, bool());
+  MOCK_METHOD0(WasContextLostByRobustnessExtension, bool());
   MOCK_METHOD1(LoseContext, void(uint32 reset_status));
 
   DISALLOW_COPY_AND_ASSIGN(MockGLES2Decoder);

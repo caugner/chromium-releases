@@ -8,11 +8,13 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/gfx/display.h"
+#include "ui/gfx/screen.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/notification.h"
@@ -69,12 +71,11 @@ views::Widget* ToastContentsView::CreateWidget(gfx::NativeView parent) {
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_POPUP);
   params.keep_on_top = true;
-  params.transparent = true;
   if (parent)
     params.parent = parent;
   else
     params.top_level = true;
-  params.transparent = true;
+  params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.delegate = this;
   views::Widget* widget = new views::Widget();
   widget->set_focus_on_creation(false);
@@ -83,10 +84,15 @@ views::Widget* ToastContentsView::CreateWidget(gfx::NativeView parent) {
 }
 
 void ToastContentsView::SetContents(MessageView* view) {
+  bool already_has_contents = child_count() > 0;
   RemoveAllChildViews(true);
   AddChildView(view);
   preferred_size_ = GetToastSizeForView(view);
   Layout();
+  // If it has the contents already, this invocation means an update of the
+  // popup toast, and the new contents should be read through a11y feature.
+  if (already_has_contents)
+    NotifyAccessibilityEvent(ui::AccessibilityTypes::EVENT_FOCUS, false);
 }
 
 void ToastContentsView::RevealWithAnimation(gfx::Point origin) {
@@ -237,6 +243,32 @@ bool ToastContentsView::CanActivate() const {
 #else
   return false;
 #endif
+}
+
+void ToastContentsView::OnDisplayChanged() {
+  views::Widget* widget = GetWidget();
+  if (!widget)
+    return;
+
+  gfx::NativeView native_view = widget->GetNativeView();
+  if (!native_view || !collection_)
+    return;
+
+  collection_->OnDisplayBoundsChanged(gfx::Screen::GetScreenFor(
+      native_view)->GetDisplayNearestWindow(native_view));
+}
+
+void ToastContentsView::OnWorkAreaChanged() {
+  views::Widget* widget = GetWidget();
+  if (!widget)
+    return;
+
+  gfx::NativeView native_view = widget->GetNativeView();
+  if (!native_view || !collection_)
+    return;
+
+  collection_->OnDisplayBoundsChanged(gfx::Screen::GetScreenFor(
+      native_view)->GetDisplayNearestWindow(native_view));
 }
 
 // views::View

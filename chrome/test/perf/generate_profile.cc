@@ -11,12 +11,11 @@
 #include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/top_sites.h"
@@ -192,8 +191,6 @@ void InsertURLBatch(Profile* profile,
                              transition, history::SOURCE_BROWSED, true);
     ThumbnailScore score(0.75, false, false);
     history_service->SetPageTitle(url, ConstructRandomTitle());
-    if (types & FULL_TEXT)
-      history_service->SetPageContents(url, ConstructRandomPage());
     if (types & TOP_SITES && top_sites) {
       top_sites->SetPageThumbnailToJPEGBytes(
           url,
@@ -229,7 +226,10 @@ bool GenerateProfile(GenerateProfileTypes types,
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
   content::TestBrowserThread db_thread(BrowserThread::DB, &message_loop);
   TestingProfile profile;
-  profile.CreateHistoryService(false, false);
+  if (!profile.CreateHistoryService(false, false)) {
+      PLOG(ERROR) << "Creating history service failed";
+      return false;
+  }
   if (types & TOP_SITES) {
     profile.CreateTopSites();
     profile.BlockUntilTopSitesLoaded();
@@ -256,8 +256,8 @@ bool GenerateProfile(GenerateProfileTypes types,
   base::FilePath path = file_iterator.Next();
   while (!path.empty()) {
     base::FilePath dst_file = dst_dir.Append(path.BaseName());
-    file_util::Delete(dst_file, false);
-    if (!file_util::CopyFile(path, dst_file)) {
+    base::DeleteFile(dst_file, false);
+    if (!base::CopyFile(path, dst_file)) {
       PLOG(ERROR) << "Copying file failed";
       return false;
     }

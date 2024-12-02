@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -41,8 +41,8 @@ class RecommendationRestorer : public BrowserContextKeyedService,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // ash::UserActivityObserver::Observer:
-  virtual void OnUserActivity() OVERRIDE;
+  // ash::UserActivityObserver:
+  virtual void OnUserActivity(const ui::Event* event) OVERRIDE;
 
   // If a recommended value and a user setting exist for |pref_name|, clears the
   // user setting so that the recommended value can take effect. If

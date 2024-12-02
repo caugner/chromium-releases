@@ -269,6 +269,8 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_quoteright:
     case XK_quotedbl:
       return VKEY_OEM_7;
+    case XK_ISO_Level5_Shift:
+      return VKEY_OEM_8;
     case XK_Shift_L:
     case XK_Shift_R:
       return VKEY_SHIFT;
@@ -280,6 +282,8 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_Alt_L:
     case XK_Alt_R:
       return VKEY_MENU;
+    case XK_ISO_Level3_Shift:
+      return VKEY_ALTGR;
     case XK_Pause:
       return VKEY_PAUSE;
     case XK_Caps_Lock:
@@ -343,6 +347,7 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     // assigned to ugrave key.
     case XK_ugrave:
     case XK_Ugrave:
+    case XK_brokenbar:
       return VKEY_OEM_102;  // international backslash key in 102 keyboard.
 
     // When evdev is in use, /usr/share/X11/xkb/symbols/inet maps F13-18 keys
@@ -579,6 +584,8 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return XK_Alt_L;
     case VKEY_APPS:
       return XK_Menu;
+    case VKEY_ALTGR:
+      return XK_ISO_Level3_Shift;
 
     case VKEY_PAUSE:
       return XK_Pause;
@@ -710,6 +717,8 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return shift ? XK_braceright : XK_bracketright;
     case VKEY_OEM_7:
       return shift ? XK_quotedbl : XK_quoteright;
+    case VKEY_OEM_8:
+      return XK_ISO_Level5_Shift;
     case VKEY_OEM_102:
       return shift ? XK_guillemotleft : XK_guillemotright;
 

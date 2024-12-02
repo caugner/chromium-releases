@@ -15,8 +15,9 @@
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_completion_blocker.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_file_picker.h"
@@ -33,13 +34,13 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/common/constants.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/download_handler.h"
@@ -47,7 +48,6 @@
 #endif
 
 using content::BrowserThread;
-using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
 using safe_browsing::DownloadProtectionService;
@@ -159,7 +159,7 @@ void CheckDownloadUrlDone(
 
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
     : profile_(profile),
-      next_download_id_(0),
+      next_download_id_(content::DownloadItem::kInvalidId),
       download_prefs_(new DownloadPrefs(profile)) {
 }
 
@@ -174,12 +174,41 @@ void ChromeDownloadManagerDelegate::Shutdown() {
   download_prefs_.reset();
 }
 
-DownloadId ChromeDownloadManagerDelegate::GetNextId() {
-  if (!profile_->IsOffTheRecord())
-    return DownloadId(this, next_download_id_++);
+void ChromeDownloadManagerDelegate::SetNextId(uint32 next_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!profile_->IsOffTheRecord());
+  DCHECK_NE(content::DownloadItem::kInvalidId, next_id);
+  next_download_id_ = next_id;
 
-  return content::BrowserContext::GetDownloadManager(
-      profile_->GetOriginalProfile())->GetDelegate()->GetNextId();
+  IdCallbackVector callbacks;
+  id_callbacks_.swap(callbacks);
+  for (IdCallbackVector::const_iterator it = callbacks.begin();
+       it != callbacks.end(); ++it) {
+    ReturnNextId(*it);
+  }
+}
+
+void ChromeDownloadManagerDelegate::GetNextId(
+    const content::DownloadIdCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (profile_->IsOffTheRecord()) {
+    content::BrowserContext::GetDownloadManager(
+        profile_->GetOriginalProfile())->GetDelegate()->GetNextId(callback);
+    return;
+  }
+  if (next_download_id_ == content::DownloadItem::kInvalidId) {
+    id_callbacks_.push_back(callback);
+    return;
+  }
+  ReturnNextId(callback);
+}
+
+void ChromeDownloadManagerDelegate::ReturnNextId(
+    const content::DownloadIdCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!profile_->IsOffTheRecord());
+  DCHECK_NE(content::DownloadItem::kInvalidId, next_download_id_);
+  callback.Run(next_download_id_++);
 }
 
 bool ChromeDownloadManagerDelegate::DetermineDownloadTarget(
@@ -203,7 +232,7 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
   // TODO(asanka): This determination is done based on |path|, while
   // ShouldOpenDownload() detects extension downloads based on the
   // characteristics of the download. Reconcile this. http://crbug.com/167702
-  if (extensions::Extension::IsExtension(path))
+  if (path.MatchesExtension(extensions::kExtensionFileExtension))
     return false;
   return download_prefs_->IsAutoOpenEnabledBasedOnExtension(path);
 }
@@ -256,7 +285,7 @@ bool ChromeDownloadManagerDelegate::IsDownloadReadyForCompletion(
 }
 
 void ChromeDownloadManagerDelegate::ShouldCompleteDownloadInternal(
-    int download_id,
+    uint32 download_id,
     const base::Closure& user_complete_callback) {
   DownloadItem* item = download_manager_->GetDownload(download_id);
   if (!item)
@@ -370,8 +399,13 @@ void ChromeDownloadManagerDelegate::CheckForFileExistence(
 #endif
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&file_util::PathExists, download->GetTargetFilePath()),
+      base::Bind(&base::PathExists, download->GetTargetFilePath()),
       callback);
+}
+
+std::string
+ChromeDownloadManagerDelegate::ApplicationClientIdForFileScanning() const {
+  return std::string(chrome::kApplicationClientIDStringForAVScanning);
 }
 
 DownloadProtectionService*
@@ -394,7 +428,7 @@ void ChromeDownloadManagerDelegate::NotifyExtensions(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 #if !defined(OS_ANDROID)
   ExtensionDownloadsEventRouter* router =
-      DownloadServiceFactory::GetForProfile(profile_)->
+      DownloadServiceFactory::GetForBrowserContext(profile_)->
       GetExtensionEventRouter();
   if (router) {
     base::Closure original_path_callback =
@@ -426,8 +460,12 @@ void ChromeDownloadManagerDelegate::ReserveVirtualPath(
   }
 #endif
   DownloadPathReservationTracker::GetReservedPath(
-      download, virtual_path, download_prefs_->DownloadPath(),
-      create_directory, conflict_action, callback);
+      download,
+      virtual_path,
+      download_prefs_->DownloadPath(),
+      create_directory,
+      conflict_action,
+      callback);
 }
 
 void ChromeDownloadManagerDelegate::PromptUserForDownloadPath(
@@ -480,7 +518,7 @@ void ChromeDownloadManagerDelegate::CheckDownloadUrl(
 }
 
 void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
-    int32 download_id,
+    uint32 download_id,
     DownloadProtectionService::DownloadCheckResult result) {
   DownloadItem* item = download_manager_->GetDownload(download_id);
   if (!item || (item->GetState() != DownloadItem::IN_PROGRESS))
@@ -493,23 +531,28 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
   if (item->GetDangerType() == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS ||
       item->GetDangerType() ==
       content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT) {
+    content::DownloadDangerType danger_type =
+        content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS;
     switch (result) {
       case DownloadProtectionService::SAFE:
         // Do nothing.
         break;
       case DownloadProtectionService::DANGEROUS:
-        item->OnContentCheckCompleted(
-            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
+        danger_type = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT;
         break;
       case DownloadProtectionService::UNCOMMON:
-        item->OnContentCheckCompleted(
-            content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT);
+        danger_type = content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT;
         break;
       case DownloadProtectionService::DANGEROUS_HOST:
-        item->OnContentCheckCompleted(
-            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST);
+        danger_type = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_HOST;
+        break;
+      case DownloadProtectionService::POTENTIALLY_UNWANTED:
+        danger_type = content::DOWNLOAD_DANGER_TYPE_POTENTIALLY_UNWANTED;
         break;
     }
+
+    if (danger_type != content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
+      item->OnContentCheckCompleted(danger_type);
   }
 
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(

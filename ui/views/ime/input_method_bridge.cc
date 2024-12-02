@@ -23,12 +23,14 @@ InputMethodBridge::InputMethodBridge(internal::InputMethodDelegate* delegate,
 }
 
 InputMethodBridge::~InputMethodBridge() {
+  // By the time we get here it's very likely |widget_|'s NativeWidget has been
+  // destroyed. This means any calls to |widget_| that go to the NativeWidget,
+  // such as IsActive(), will crash. SetFocusedTextInputClient() may callback to
+  // this and go into |widget_|. NULL out |widget_| so we don't attempt to use
+  // it.
+  DetachFromWidget();
   if (host_->GetTextInputClient() == this)
     host_->SetFocusedTextInputClient(NULL);
-}
-
-void InputMethodBridge::Init(Widget* widget) {
-  InputMethodBase::Init(widget);
 }
 
 void InputMethodBridge::OnFocus() {
@@ -43,7 +45,10 @@ void InputMethodBridge::OnFocus() {
 }
 
 void InputMethodBridge::OnBlur() {
-  ConfirmCompositionText();
+  if (HasCompositionText()) {
+    ConfirmCompositionText();
+    host_->CancelComposition(this);
+  }
 
   if (host_->GetTextInputClient() == this)
     host_->SetFocusedTextInputClient(NULL);
@@ -140,6 +145,11 @@ gfx::NativeWindow InputMethodBridge::GetAttachedWindow() const {
 ui::TextInputType InputMethodBridge::GetTextInputType() const {
   TextInputClient* client = GetTextInputClient();
   return client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
+}
+
+ui::TextInputMode InputMethodBridge::GetTextInputMode() const {
+  TextInputClient* client = GetTextInputClient();
+  return client ? client->GetTextInputMode() : ui::TEXT_INPUT_MODE_DEFAULT;
 }
 
 bool InputMethodBridge::CanComposeInline() const {

@@ -18,7 +18,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/about_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
@@ -146,6 +146,8 @@ const char OobeUI::kScreenWrongHWID[]       = "wrong-hwid";
 
 OobeUI::OobeUI(content::WebUI* web_ui)
     : WebUIController(web_ui),
+      core_handler_(NULL),
+      network_dropdown_handler_(NULL),
       update_screen_handler_(NULL),
       network_screen_actor_(NULL),
       eula_screen_actor_(NULL),
@@ -170,16 +172,19 @@ OobeUI::OobeUI(content::WebUI* web_ui)
   AddScreenHandler(core_handler_);
   core_handler_->SetDelegate(this);
 
-  AddScreenHandler(new NetworkDropdownHandler);
+  network_dropdown_handler_ = new NetworkDropdownHandler();
+  AddScreenHandler(network_dropdown_handler_);
 
   update_screen_handler_ = new UpdateScreenHandler();
   AddScreenHandler(update_screen_handler_);
+  network_dropdown_handler_->AddObserver(update_screen_handler_);
 
-  NetworkScreenHandler* network_screen_handler = new NetworkScreenHandler();
+  NetworkScreenHandler* network_screen_handler =
+      new NetworkScreenHandler(core_handler_);
   network_screen_actor_ = network_screen_handler;
   AddScreenHandler(network_screen_handler);
 
-  EulaScreenHandler* eula_screen_handler = new EulaScreenHandler();
+  EulaScreenHandler* eula_screen_handler = new EulaScreenHandler(core_handler_);
   eula_screen_actor_ = eula_screen_handler;
   AddScreenHandler(eula_screen_handler);
 
@@ -228,7 +233,8 @@ OobeUI::OobeUI(content::WebUI* web_ui)
   AddScreenHandler(error_screen_handler_);
 
   signin_screen_handler_ = new SigninScreenHandler(network_state_informer_,
-                                                   error_screen_handler_);
+                                                   error_screen_handler_,
+                                                   core_handler_);
   AddScreenHandler(signin_screen_handler_);
 
   // Initialize KioskAppMenuHandler. Note that it is NOT a screen handler.
@@ -260,6 +266,7 @@ OobeUI::OobeUI(content::WebUI* web_ui)
 
 OobeUI::~OobeUI() {
   core_handler_->SetDelegate(NULL);
+  network_dropdown_handler_->RemoveObserver(update_screen_handler_);
 }
 
 void OobeUI::ShowScreen(WizardScreen* screen) {
@@ -347,9 +354,8 @@ void OobeUI::GetLocalizedStrings(base::DictionaryValue* localized_strings) {
     localized_strings->SetString("bootIntoWallpaper", "off");
   }
 
-  bool keyboard_driven_oobe = false;
-  system::StatisticsProvider::GetInstance()->GetMachineFlag(
-      chromeos::system::kOemKeyboardDrivenOobeKey, &keyboard_driven_oobe);
+  bool keyboard_driven_oobe =
+      system::keyboard_settings::ForceKeyboardDrivenUINavigation();
   localized_strings->SetString("highlightStrength",
                                keyboard_driven_oobe ? "strong" : "normal");
 }

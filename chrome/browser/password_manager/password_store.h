@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "base/threading/thread.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "components/browser_context_keyed_service/refcounted_browser_context_keyed_service.h"
@@ -21,6 +21,7 @@ class PasswordStoreConsumer;
 class Task;
 
 namespace browser_sync {
+class PasswordChangeProcessor;
 class PasswordDataTypeController;
 class PasswordModelAssociator;
 class PasswordModelWorker;
@@ -132,6 +133,7 @@ class PasswordStore
 
  protected:
   friend class base::RefCountedThreadSafe<PasswordStore>;
+  friend class browser_sync::PasswordChangeProcessor;
   friend class browser_sync::PasswordDataTypeController;
   friend class browser_sync::PasswordModelAssociator;
   friend class browser_sync::PasswordModelWorker;

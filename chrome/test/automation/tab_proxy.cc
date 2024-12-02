@@ -15,7 +15,7 @@
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 TabProxy::TabProxy(AutomationMessageSender* sender,
                    AutomationHandleTracker* tracker,
@@ -409,10 +409,6 @@ void TabProxy::Copy() {
 
 void TabProxy::Paste() {
   sender_->Send(new AutomationMsg_Paste(handle_));
-}
-
-void TabProxy::SimulateKeyPress(ui::KeyboardCode key) {
-  sender_->Send(new AutomationMsg_KeyPress(handle_, key));
 }
 
 void TabProxy::ReloadAsync() {

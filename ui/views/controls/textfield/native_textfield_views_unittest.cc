@@ -11,11 +11,10 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "googleurl/src/gurl.h"
 #include "grit/ui_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -37,11 +36,15 @@
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/native_widget_private.h"
 #include "ui/views/widget/widget.h"
+#include "url/gurl.h"
+
+#define EXPECT_STR_EQ(ascii, utf16) EXPECT_EQ(ASCIIToUTF16(ascii), utf16)
 
 namespace {
 
-// A wrapper of Textfield to intercept the result of OnKeyPressed() and
-// OnKeyReleased() methods.
+const char16 kHebrewLetterSamekh = 0x05E1;
+
+// A Textfield wrapper to intercept OnKey[Pressed|Released]() ressults.
 class TestTextfield : public views::Textfield {
  public:
   explicit TestTextfield(StyleFlags style)
@@ -100,18 +103,9 @@ class GestureEventForTest : public ui::GestureEvent {
   DISALLOW_COPY_AND_ASSIGN(GestureEventForTest);
 };
 
-const char16 kHebrewLetterSamekh = 0x05E1;
-
 }  // namespace
 
 namespace views {
-
-// Convert to Wide so that the printed string will be readable when
-// check fails.
-#define EXPECT_STR_EQ(ascii, utf16) \
-  EXPECT_EQ(ASCIIToWide(ascii), UTF16ToWide(utf16))
-#define EXPECT_STR_NE(ascii, utf16) \
-  EXPECT_NE(ASCIIToWide(ascii), UTF16ToWide(utf16))
 
 // TODO(oshima): Move tests that are independent of TextfieldViews to
 // textfield_unittests.cc once we move the test utility functions
@@ -506,33 +500,18 @@ TEST_F(NativeTextfieldViewsTest, ControlAndSelectTest) {
 TEST_F(NativeTextfieldViewsTest, InsertionDeletionTest) {
   // Insert a test string in a textfield.
   InitTextfield(Textfield::STYLE_DEFAULT);
-  char test_str[] = "this is a test";
-  for (size_t i = 0; i < sizeof(test_str); i++) {
-    // This is ugly and should be replaced by a utility standard function.
-    // See comment in NativeTextfieldViews::GetPrintableChar.
-    char c = test_str[i];
-    ui::KeyboardCode code =
-        c == ' ' ? ui::VKEY_SPACE :
-        static_cast<ui::KeyboardCode>(ui::VKEY_A + c - 'a');
-    SendKeyEvent(code);
-  }
-  EXPECT_STR_EQ(test_str, textfield_->text());
+  for (size_t i = 0; i < 10; i++)
+    SendKeyEvent(static_cast<ui::KeyboardCode>(ui::VKEY_A + i));
+  EXPECT_STR_EQ("abcdefghij", textfield_->text());
 
-  // Move the cursor around.
-  for (int i = 0; i < 6; i++) {
-    SendKeyEvent(ui::VKEY_LEFT);
-  }
-  SendKeyEvent(ui::VKEY_RIGHT);
-
-  // Delete using backspace and check resulting string.
-  SendKeyEvent(ui::VKEY_BACK);
-  EXPECT_STR_EQ("this is  test", textfield_->text());
-
-  // Delete using delete key and check resulting string.
-  for (int i = 0; i < 5; i++) {
+  // Test the delete and backspace keys.
+  textfield_->SelectRange(ui::Range(5));
+  for (int i = 0; i < 3; i++)
+    SendKeyEvent(ui::VKEY_BACK);
+  EXPECT_STR_EQ("abfghij", textfield_->text());
+  for (int i = 0; i < 3; i++)
     SendKeyEvent(ui::VKEY_DELETE);
-  }
-  EXPECT_STR_EQ("this is ", textfield_->text());
+  EXPECT_STR_EQ("abij", textfield_->text());
 
   // Select all and replace with "k".
   textfield_->SelectAll(false);
@@ -545,8 +524,7 @@ TEST_F(NativeTextfieldViewsTest, InsertionDeletionTest) {
   SendKeyEvent(ui::VKEY_BACK, false, false, true, false);
   EXPECT_STR_EQ("one two three ", textfield_->text());
 
-  // Delete upto the beginning of the buffer from cursor in chromeos, do nothing
-  // in windows.
+  // Delete text preceeding the cursor in chromeos, do nothing in windows.
   SendKeyEvent(ui::VKEY_LEFT, false, false, true, false);
   SendKeyEvent(ui::VKEY_BACK, false, true, true, false);
 #if defined(OS_WIN)
@@ -561,8 +539,7 @@ TEST_F(NativeTextfieldViewsTest, InsertionDeletionTest) {
   SendKeyEvent(ui::VKEY_DELETE, false, false, true, false);
   EXPECT_STR_EQ(" two three four", textfield_->text());
 
-  // Delete upto the end of the buffer from cursor in chromeos, do nothing
-  // in windows.
+  // Delete text following the cursor in chromeos, do nothing in windows.
   SendKeyEvent(ui::VKEY_RIGHT, false, false, true, false);
   SendKeyEvent(ui::VKEY_DELETE, false, true, true, false);
 #if defined(OS_WIN)
@@ -596,6 +573,9 @@ TEST_F(NativeTextfieldViewsTest, PasswordTest) {
   SendKeyEvent(ui::VKEY_INSERT, false, true);
   EXPECT_STR_EQ("foo", string16(GetClipboardText()));
   EXPECT_STR_EQ("password", textfield_->text());
+  // [Shift]+[Delete] should just delete without copying text to the clipboard.
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_DELETE, true, false);
 
   // Paste should work normally.
   EXPECT_TRUE(textfield_view_->IsCommandIdEnabled(IDS_APP_PASTE));
@@ -804,6 +784,7 @@ TEST_F(NativeTextfieldViewsTest, FocusTraversalTest) {
 
 TEST_F(NativeTextfieldViewsTest, ContextMenuDisplayTest) {
   InitTextfield(Textfield::STYLE_DEFAULT);
+  EXPECT_TRUE(textfield_->context_menu_controller());
   textfield_->SetText(ASCIIToUTF16("hello world"));
   EXPECT_TRUE(GetContextMenuModel());
   VerifyTextfieldContextMenuContents(false, GetContextMenuModel());
@@ -836,10 +817,10 @@ TEST_F(NativeTextfieldViewsTest, DoubleAndTripleClickTest) {
   textfield_view_->OnMouseReleased(release);
   EXPECT_STR_EQ("hello world", textfield_->GetSelectedText());
 
-  // Another click should reset back to single click.
+  // Another click should reset back to double click.
   textfield_view_->OnMousePressed(click);
   textfield_view_->OnMouseReleased(release);
-  EXPECT_TRUE(textfield_->GetSelectedText().empty());
+  EXPECT_STR_EQ("hello", textfield_->GetSelectedText());
 }
 
 TEST_F(NativeTextfieldViewsTest, DragToSelect) {
@@ -1147,6 +1128,7 @@ TEST_F(NativeTextfieldViewsTest, ReadOnlyTest) {
   EXPECT_FALSE(textfield_view_->IsCommandIdEnabled(IDS_APP_CUT));
   textfield_view_->ExecuteCommand(IDS_APP_CUT, 0);
   SendKeyEvent(ui::VKEY_X, false, true);
+  SendKeyEvent(ui::VKEY_DELETE, true, false);
   EXPECT_STR_EQ("Test", string16(GetClipboardText()));
   EXPECT_STR_EQ("read only", textfield_->text());
 
@@ -1406,6 +1388,13 @@ TEST_F(NativeTextfieldViewsTest, CutCopyPaste) {
   EXPECT_STR_EQ("456", string16(GetClipboardText()));
   EXPECT_STR_EQ("", textfield_->text());
 
+  // Ensure [Shift]+[Delete] cuts.
+  textfield_->SetText(ASCIIToUTF16("123"));
+  textfield_->SelectAll(false);
+  SendKeyEvent(ui::VKEY_DELETE, true, false);
+  EXPECT_STR_EQ("123", string16(GetClipboardText()));
+  EXPECT_STR_EQ("", textfield_->text());
+
   // Ensure IDS_APP_COPY copies.
   textfield_->SetText(ASCIIToUTF16("789"));
   textfield_->SelectAll(false);
@@ -1500,13 +1489,13 @@ TEST_F(NativeTextfieldViewsTest, TextCursorDisplayTest) {
   EXPECT_EQ(prev_x, x);
 
   SendKeyEvent('a');
-  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2"L"a"), textfield_->text());
+  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2" L"a"), textfield_->text());
   x = GetCursorBounds().x();
   EXPECT_LT(prev_x, x);
   prev_x = x;
 
   SendKeyEvent('b');
-  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2"L"ab"), textfield_->text());
+  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2" L"ab"), textfield_->text());
   x = GetCursorBounds().x();
   EXPECT_LT(prev_x, x);
 }
@@ -1555,13 +1544,13 @@ TEST_F(NativeTextfieldViewsTest, TextCursorDisplayInRTLTest) {
   prev_x = x;
 
   SendKeyEvent('a');
-  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2"L"a"), textfield_->text());
+  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2" L"a"), textfield_->text());
   x = GetCursorBounds().x();
   EXPECT_EQ(prev_x, x);
   prev_x = x;
 
   SendKeyEvent('b');
-  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2"L"ab"), textfield_->text());
+  EXPECT_EQ(WideToUTF16(L"\x05E1\x5E2" L"ab"), textfield_->text());
   x = GetCursorBounds().x();
   EXPECT_EQ(prev_x, x);
 
@@ -1643,7 +1632,7 @@ TEST_F(NativeTextfieldViewsTest, HitOutsideTextAreaTest) {
   NonClientMouseClick();
 
   // RTL-LTR string in LTR context.
-  textfield_->SetText(WideToUTF16(L"\x05E1\x5E2"L"ab"));
+  textfield_->SetText(WideToUTF16(L"\x05E1\x5E2" L"ab"));
 
   SendKeyEvent(ui::VKEY_HOME);
   bound = GetCursorBounds();
@@ -1663,7 +1652,7 @@ TEST_F(NativeTextfieldViewsTest, HitOutsideTextAreaInRTLTest) {
   InitTextfield(Textfield::STYLE_DEFAULT);
 
   // RTL-LTR string in RTL context.
-  textfield_->SetText(WideToUTF16(L"\x05E1\x5E2"L"ab"));
+  textfield_->SetText(WideToUTF16(L"\x05E1\x5E2" L"ab"));
   SendKeyEvent(ui::VKEY_HOME);
   gfx::Rect bound = GetCursorBounds();
   MouseClick(bound, 10);
@@ -1692,16 +1681,6 @@ TEST_F(NativeTextfieldViewsTest, HitOutsideTextAreaInRTLTest) {
   base::i18n::SetICUDefaultLocale(locale);
 }
 
-// This verifies that |bound| is contained by |display|. |bound|'s right edge
-// must be less than |diaplay|'s right edge.
-void OverflowCursorBoundTestVerifier(const gfx::Rect& display,
-                                     const gfx::Rect& bound) {
-  EXPECT_LE(display.x(), bound.x());
-  EXPECT_GT(display.right(), bound.right());
-  EXPECT_LE(display.y(), bound.y());
-  EXPECT_GE(display.bottom(), bound.bottom());
-}
-
 TEST_F(NativeTextfieldViewsTest, OverflowTest) {
   InitTextfield(Textfield::STYLE_DEFAULT);
 
@@ -1709,12 +1688,10 @@ TEST_F(NativeTextfieldViewsTest, OverflowTest) {
   for (int i = 0; i < 500; ++i)
     SendKeyEvent('a');
   SendKeyEvent(kHebrewLetterSamekh);
-  gfx::Rect bound = GetCursorBounds();
-  gfx::Rect display = GetDisplayRect();
-  OverflowCursorBoundTestVerifier(display, bound);
+  EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
   // Test mouse pointing.
-  MouseClick(bound, -1);
+  MouseClick(GetCursorBounds(), -1);
   EXPECT_EQ(500U, textfield_->GetCursorPosition());
 
   // Clear text.
@@ -1724,11 +1701,9 @@ TEST_F(NativeTextfieldViewsTest, OverflowTest) {
   for (int i = 0; i < 500; ++i)
     SendKeyEvent(kHebrewLetterSamekh);
   SendKeyEvent('a');
-  bound = GetCursorBounds();
-  display = GetDisplayRect();
-  OverflowCursorBoundTestVerifier(display, bound);
+  EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
-  MouseClick(bound, -1);
+  MouseClick(GetCursorBounds(), -1);
   EXPECT_EQ(501U, textfield_->GetCursorPosition());
 }
 
@@ -1742,11 +1717,9 @@ TEST_F(NativeTextfieldViewsTest, OverflowInRTLTest) {
   for (int i = 0; i < 500; ++i)
     SendKeyEvent('a');
   SendKeyEvent(kHebrewLetterSamekh);
-  gfx::Rect bound = GetCursorBounds();
-  gfx::Rect display = GetDisplayRect();
-  OverflowCursorBoundTestVerifier(display, bound);
+  EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
-  MouseClick(bound, 1);
+  MouseClick(GetCursorBounds(), 1);
   EXPECT_EQ(501U, textfield_->GetCursorPosition());
 
   // Clear text.
@@ -1756,21 +1729,10 @@ TEST_F(NativeTextfieldViewsTest, OverflowInRTLTest) {
   for (int i = 0; i < 500; ++i)
     SendKeyEvent(kHebrewLetterSamekh);
   SendKeyEvent('a');
-  bound = GetCursorBounds();
-  display = GetDisplayRect();
-  OverflowCursorBoundTestVerifier(display, bound);
+  EXPECT_TRUE(GetDisplayRect().Contains(GetCursorBounds()));
 
-
-#if !defined(OS_WIN)
-  // TODO(jennyz): NonClientMouseClick() does not work for os_win builds;
-  // see crbug.com/104150. The mouse click in the next test will be confused
-  // as a double click, which breaks the test. Disable the test until the
-  // issue is fixed.
-  NonClientMouseClick();
-
-  MouseClick(bound, 1);
+  MouseClick(GetCursorBounds(), 1);
   EXPECT_EQ(500U, textfield_->GetCursorPosition());
-#endif  // !defined(OS_WIN)
 
   // Reset locale.
   base::i18n::SetICUDefaultLocale(locale);

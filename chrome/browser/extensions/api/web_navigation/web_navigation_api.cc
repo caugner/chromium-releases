@@ -7,6 +7,7 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 
 #include "base/lazy_instance.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_constants.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -17,7 +18,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/web_navigation.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
@@ -36,6 +36,8 @@ namespace GetAllFrames = extensions::api::web_navigation::GetAllFrames;
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(extensions::WebNavigationTabObserver);
 
 namespace extensions {
+
+#if !defined(OS_ANDROID)
 
 namespace helpers = web_navigation_api_helpers;
 namespace keys = web_navigation_api_constants;
@@ -857,5 +859,7 @@ void WebNavigationAPI::OnListenerAdded(const EventListenerInfo& details) {
   web_navigation_event_router_.reset(new WebNavigationEventRouter(profile_));
   ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
 }
+
+#endif  // OS_ANDROID
 
 }  // namespace extensions

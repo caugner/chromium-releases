@@ -18,21 +18,23 @@ namespace {
 class AppListServiceMacBrowserTest : public InProcessBrowserTest,
                                      public AppShimHandler::Host {
  public:
-  AppListServiceMacBrowserTest() : close_count_(0), running_(false) {}
+  AppListServiceMacBrowserTest() : launch_count_(0),
+                                   close_count_(0),
+                                   running_(false) {}
 
  protected:
   void LaunchShim() {
     DCHECK(!running_);
     // AppList shims should always succced showing the app list.
-    EXPECT_TRUE(AppShimHandler::GetForAppMode(
-        app_mode::kAppListModeId)->OnShimLaunch(this,
-                                                apps::APP_SHIM_LAUNCH_NORMAL));
+    AppShimHandler::GetForAppMode(app_mode::kAppListModeId)->
+        OnShimLaunch(this, apps::APP_SHIM_LAUNCH_NORMAL);
     running_ = true;
   }
 
   void FocusShim() {
     DCHECK(running_);
-    AppShimHandler::GetForAppMode(app_mode::kAppListModeId)->OnShimFocus(this);
+    AppShimHandler::GetForAppMode(app_mode::kAppListModeId)->
+        OnShimFocus(this, apps::APP_SHIM_FOCUS_REOPEN);
   }
 
   void QuitShim() {
@@ -42,6 +44,9 @@ class AppListServiceMacBrowserTest : public InProcessBrowserTest,
   }
 
   // AppShimHandler::Host overrides:
+  virtual void OnAppLaunchComplete(apps::AppShimLaunchResult) OVERRIDE {
+    ++launch_count_;
+  }
   virtual void OnAppClosed() OVERRIDE {
     ++close_count_;
     QuitShim();
@@ -54,6 +59,7 @@ class AppListServiceMacBrowserTest : public InProcessBrowserTest,
     return app_mode::kAppListModeId;
   }
 
+  int launch_count_;
   int close_count_;
   bool running_;
 
@@ -72,9 +78,10 @@ IN_PROC_BROWSER_TEST_F(AppListServiceMacBrowserTest, ShowAppListUsingShim) {
   EXPECT_EQ(0, close_count_);
 
   // With no saved profile, the default profile should be chosen and saved.
-  service->ShowForSavedProfile();
+  service->Show();
   EXPECT_EQ(browser()->profile(), service->GetCurrentAppListProfile());
   EXPECT_TRUE(service->IsAppListVisible());
+  EXPECT_EQ(0, launch_count_);
   EXPECT_EQ(0, close_count_);
   service->DismissAppList();
   EXPECT_FALSE(service->IsAppListVisible());
@@ -87,6 +94,7 @@ IN_PROC_BROWSER_TEST_F(AppListServiceMacBrowserTest, ShowAppListUsingShim) {
   // not the app list.
   LaunchShim();
   EXPECT_TRUE(service->IsAppListVisible());
+  EXPECT_EQ(1, launch_count_);
   QuitShim();
   EXPECT_FALSE(service->IsAppListVisible());
   EXPECT_EQ(0, close_count_);
@@ -95,6 +103,7 @@ IN_PROC_BROWSER_TEST_F(AppListServiceMacBrowserTest, ShowAppListUsingShim) {
   // icon again, which should close it.
   LaunchShim();
   EXPECT_TRUE(service->IsAppListVisible());
+  EXPECT_EQ(2, launch_count_);
   FocusShim();
   EXPECT_FALSE(service->IsAppListVisible());
   EXPECT_EQ(1, close_count_);
@@ -102,14 +111,16 @@ IN_PROC_BROWSER_TEST_F(AppListServiceMacBrowserTest, ShowAppListUsingShim) {
   // Test showing the app list via the shim, then dismissing the app list.
   LaunchShim();
   EXPECT_TRUE(service->IsAppListVisible());
+  EXPECT_EQ(3, launch_count_);
   service->DismissAppList();
   EXPECT_FALSE(service->IsAppListVisible());
   EXPECT_EQ(2, close_count_);
 
   // Verify that observers are correctly removed by ensuring that |close_count_|
   // is unchanged when the app list is dismissed again.
-  service->ShowAppList(browser()->profile());
+  service->ShowForProfile(browser()->profile());
   EXPECT_TRUE(service->IsAppListVisible());
+  EXPECT_EQ(3, launch_count_);
   service->DismissAppList();
   EXPECT_FALSE(service->IsAppListVisible());
   EXPECT_EQ(2, close_count_);

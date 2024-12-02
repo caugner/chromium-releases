@@ -8,6 +8,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/credit_card.h"
 
 namespace {
@@ -41,6 +42,7 @@ FullWallet::FullWallet(int expiration_month,
 
 FullWallet::~FullWallet() {}
 
+// static
 scoped_ptr<FullWallet>
     FullWallet::CreateFullWallet(const DictionaryValue& dictionary) {
   const ListValue* required_actions_list;
@@ -126,8 +128,34 @@ scoped_ptr<FullWallet>
                                                required_actions));
 }
 
-base::string16 FullWallet::GetInfo(AutofillFieldType type) {
-  switch (type) {
+// static
+scoped_ptr<FullWallet>
+    FullWallet::CreateFullWalletFromClearText(
+        int expiration_month,
+        int expiration_year,
+        const std::string& pan,
+        const std::string& cvn,
+        scoped_ptr<Address> billing_address,
+        scoped_ptr<Address> shipping_address) {
+  DCHECK(billing_address);
+  DCHECK(!pan.empty());
+  DCHECK(!cvn.empty());
+
+  scoped_ptr<FullWallet> wallet(new FullWallet(
+      expiration_month,
+      expiration_year,
+      std::string(),  // no iin -- clear text pan/cvn are set below.
+      std::string(),  // no encrypted_rest -- clear text pan/cvn are set below.
+      billing_address.Pass(),
+      shipping_address.Pass(),
+      std::vector<RequiredAction>()));  // no required actions in clear text.
+  wallet->pan_ = pan;
+  wallet->cvn_ = cvn;
+  return wallet.Pass();
+}
+
+base::string16 FullWallet::GetInfo(const AutofillType& type) {
+  switch (type.GetStorableType()) {
     case CREDIT_CARD_NUMBER:
       return UTF8ToUTF16(GetPan());
 
@@ -184,6 +212,13 @@ bool FullWallet::HasRequiredAction(RequiredAction action) const {
   return std::find(required_actions_.begin(),
                    required_actions_.end(),
                    action) != required_actions_.end();
+}
+
+base::string16 FullWallet::TypeAndLastFourDigits() {
+  CreditCard card;
+  card.SetRawInfo(CREDIT_CARD_NUMBER,
+                  GetInfo(AutofillType(CREDIT_CARD_NUMBER)));
+  return card.TypeAndLastFourDigits();
 }
 
 bool FullWallet::operator==(const FullWallet& other) const {

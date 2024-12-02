@@ -37,6 +37,9 @@ class CONTENT_EXPORT TouchEditableImplAura
   // depending on the current selection and cursor state.
   void UpdateEditingController();
 
+  void OverscrollStarted();
+  void OverscrollCompleted();
+
   // Overridden from RenderWidgetHostViewAura::TouchEditingClient.
   virtual void StartTouchEditing() OVERRIDE;
   virtual void EndTouchEditing() OVERRIDE;
@@ -84,10 +87,27 @@ class CONTENT_EXPORT TouchEditableImplAura
   scoped_ptr<ui::TouchSelectionController> touch_selection_controller_;
 
   // True if |rwhva_| is currently handling a gesture that could result in a
-  // change in selection.
+  // change in selection (long press, double tap or triple tap).
   bool selection_gesture_in_process_;
 
+  // Set to true if handles are hidden when user is scrolling. Used to determine
+  // whether to re-show handles after a scrolling session.
   bool handles_hidden_due_to_scroll_;
+
+  // Keeps track of when the user is scrolling.
+  bool scroll_in_progress_;
+
+  // Set to true when the page starts an overscroll.
+  bool overscroll_in_progress_;
+
+  // Used to track if the current tap gesture is on a focused textfield.
+  bool is_tap_on_focused_textfield_;
+
+  // When we receive ack for a ET_GESTURE_TAP, we do not know if the ack is for
+  // a tap or a double tap (we only get the event type in the ack). So we have
+  // this queue to keep track of the the tap count so that we can distinguish
+  // between double and single tap when we get the ack.
+  std::queue<int> tap_gesture_tap_count_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchEditableImplAura);
 };

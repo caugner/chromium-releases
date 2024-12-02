@@ -4,12 +4,15 @@
 
 #include "chrome/browser/drive/event_logger.h"
 
+#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 
 namespace drive {
 
-EventLogger::Event::Event(int id, const std::string& what)
+EventLogger::Event::Event(
+    int id, logging::LogSeverity severity, const std::string& what)
     : id(id),
+      severity(severity),
       when(base::Time::Now()),
       what(what) {
 }
@@ -22,16 +25,9 @@ EventLogger::EventLogger()
 EventLogger::~EventLogger() {
 }
 
-void EventLogger::Log(const char* format, ...) {
-  std::string what;
-
-  va_list args;
-  va_start(args, format);
-  base::StringAppendV(&what, format, args);
-  va_end(args);
-
+void EventLogger::Log(logging::LogSeverity severity, const std::string& what) {
   base::AutoLock auto_lock(lock_);
-  history_.push_back(Event(next_event_id_, what));
+  history_.push_back(Event(next_event_id_, severity, what));
   ++next_event_id_;
   if (history_.size() > history_size_)
     history_.pop_front();

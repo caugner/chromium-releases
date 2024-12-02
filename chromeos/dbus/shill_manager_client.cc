@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill_manager_client_stub.h"
 #include "chromeos/dbus/shill_property_changed_observer.h"
@@ -20,24 +20,6 @@
 namespace chromeos {
 
 namespace {
-
-// Appends a string-to-variant dictionary to the writer.
-void AppendServicePropertiesDictionary(
-    dbus::MessageWriter* writer,
-    const base::DictionaryValue& dictionary) {
-  dbus::MessageWriter array_writer(NULL);
-  writer->OpenArray("{sv}", &array_writer);
-  for (base::DictionaryValue::Iterator it(dictionary);
-       !it.IsAtEnd();
-       it.Advance()) {
-    dbus::MessageWriter entry_writer(NULL);
-    array_writer.OpenDictEntry(&entry_writer);
-    entry_writer.AppendString(it.key());
-    ShillClientHelper::AppendValueDataAsVariant(&entry_writer, it.value());
-    array_writer.CloseContainer(&entry_writer);
-  }
-  writer->CloseContainer(&array_writer);
-}
 
 // The ShillManagerClient implementation.
 class ShillManagerClientImpl : public ShillManagerClient {
@@ -66,12 +48,6 @@ class ShillManagerClientImpl : public ShillManagerClient {
     dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
                                  flimflam::kGetPropertiesFunction);
     helper_.CallDictionaryValueMethod(&method_call, callback);
-  }
-
-  virtual base::DictionaryValue* CallGetPropertiesAndBlock() OVERRIDE {
-    dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
-                                 flimflam::kGetPropertiesFunction);
-    return helper_.CallDictionaryValueMethodAndBlock(&method_call);
   }
 
   virtual void GetNetworksForGeolocation(
@@ -140,7 +116,7 @@ class ShillManagerClientImpl : public ShillManagerClient {
     dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
                                  flimflam::kConfigureServiceFunction);
     dbus::MessageWriter writer(&method_call);
-    AppendServicePropertiesDictionary(&writer, properties);
+    ShillClientHelper::AppendServicePropertiesDictionary(&writer, properties);
     helper_.CallObjectPathMethodWithErrorCallback(&method_call,
                                                   callback,
                                                   error_callback);
@@ -155,7 +131,7 @@ class ShillManagerClientImpl : public ShillManagerClient {
                                  shill::kConfigureServiceForProfileFunction);
     dbus::MessageWriter writer(&method_call);
     writer.AppendObjectPath(dbus::ObjectPath(profile_path));
-    AppendServicePropertiesDictionary(&writer, properties);
+    ShillClientHelper::AppendServicePropertiesDictionary(&writer, properties);
     helper_.CallObjectPathMethodWithErrorCallback(&method_call,
                                                   callback,
                                                   error_callback);
@@ -168,7 +144,7 @@ class ShillManagerClientImpl : public ShillManagerClient {
     dbus::MethodCall method_call(flimflam::kFlimflamManagerInterface,
                                  flimflam::kGetServiceFunction);
     dbus::MessageWriter writer(&method_call);
-    AppendServicePropertiesDictionary(&writer, properties);
+    ShillClientHelper::AppendServicePropertiesDictionary(&writer, properties);
     helper_.CallObjectPathMethodWithErrorCallback(&method_call,
                                                   callback,
                                                   error_callback);

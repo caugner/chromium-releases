@@ -6,9 +6,9 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/message_loop/message_loop.h"
+#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "content/child/request_extra_data.h"
 #include "content/child/resource_dispatcher.h"
 #include "content/common/resource_messages.h"
@@ -176,7 +176,7 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     request_info.routing_id = 0;
     RequestExtraData extra_data(WebKit::WebReferrerPolicyDefault,
                                 WebKit::WebString(),
-                                true, 0, false, -1, true,
+                                false, true, 0, false, -1, true,
                                 PAGE_TRANSITION_LINK, -1, -1);
     request_info.extra_data = &extra_data;
 

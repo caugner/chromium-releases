@@ -28,6 +28,8 @@
 <include src="source_filter_parser.js"/>
 <include src="source_row.js"/>
 <include src="events_view.js"/>
+<include src="waterfall_view.js"/>
+<include src="waterfall_row.js"/>
 <include src="details_view.js"/>
 <include src="source_entry.js"/>
 <include src="horizontal_scrollbar_view.js"/>
@@ -51,6 +53,7 @@
 <include src="cros_log_analyzer_view.js"/>
 <include src="cros_log_entry.js"/>
 <include src="cros_log_visualizer.js" />
+<include src="cros_log_marker.js" />
 
 document.addEventListener('DOMContentLoaded', function() {
   MainView.getInstance();  // from main.js

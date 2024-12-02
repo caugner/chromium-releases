@@ -20,6 +20,8 @@ class OmniboxCurrentPageDelegateImpl : public OmniboxCurrentPageDelegate {
   // OmniboxCurrentPageDelegate.
   virtual bool CurrentPageExists() const OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
+  virtual bool IsInstantNTP() const OVERRIDE;
+  virtual bool IsSearchResultsPage() const OVERRIDE;
   virtual bool IsLoading() const OVERRIDE;
   virtual content::NavigationController&
       GetNavigationController() const OVERRIDE;
@@ -29,9 +31,7 @@ class OmniboxCurrentPageDelegateImpl : public OmniboxCurrentPageDelegate {
       const AutocompleteMatch& match,
       WindowOpenDisposition disposition) OVERRIDE;
   virtual void NotifySearchTabHelper(bool user_input_in_progress,
-                                     bool cancelling,
-                                     bool popup_is_open,
-                                     bool user_text_is_empty) OVERRIDE;
+                                     bool cancelling) OVERRIDE;
   virtual void DoPrerender(const AutocompleteMatch& match) OVERRIDE;
 
  private:

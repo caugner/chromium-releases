@@ -55,11 +55,35 @@ class ByContextFinder : public content::RenderViewVisitor {
 
 // Writes |message| to stack to show up in minidump, then crashes.
 void CheckWithMinidump(const std::string& message) {
-  char minidump[256];
+  char minidump[1024];
   base::debug::Alias(&minidump);
   base::snprintf(minidump, arraysize(minidump),
                  "e::console: %s", message.c_str());
   CHECK(false) << message;
+}
+
+typedef void (*LogMethod)(v8::Handle<v8::Context> context,
+                          const std::string& message);
+
+void BoundLogMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  LogMethod log_method = reinterpret_cast<LogMethod>(
+      info.Data().As<v8::External>()->Value());
+  std::string message;
+  for (int i = 0; i < info.Length(); ++i) {
+    if (i > 0)
+      message += " ";
+    message += *v8::String::AsciiValue(info[i]);
+  }
+  (*log_method)(v8::Context::GetCalling(), message);
+}
+
+void BindLogMethod(v8::Local<v8::Object> target,
+                   const std::string& name,
+                   LogMethod log_method) {
+  v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(
+      &BoundLogMethodCallback,
+      v8::External::New(reinterpret_cast<void*>(log_method)));
+  target->Set(v8::String::New(name.c_str()), tmpl->GetFunction());
 }
 
 }  // namespace
@@ -145,6 +169,16 @@ void AddMessage(v8::Handle<v8::Context> context,
     return;
   }
   AddMessage(render_view, level, message);
+}
+
+v8::Local<v8::Object> AsV8Object() {
+  v8::HandleScope handle_scope;
+  v8::Local<v8::Object> console_object = v8::Object::New();
+  BindLogMethod(console_object, "debug", &Debug);
+  BindLogMethod(console_object, "log", &Log);
+  BindLogMethod(console_object, "warn", &Warn);
+  BindLogMethod(console_object, "error", &Error);
+  return handle_scope.Close(console_object);
 }
 
 }  // namespace console

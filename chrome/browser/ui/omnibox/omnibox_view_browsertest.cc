@@ -4,11 +4,11 @@
 
 #include <stdio.h>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,7 +30,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -320,7 +320,6 @@ class OmniboxViewTest : public InProcessBrowserTest,
                                         entry.visit_count,
                                         entry.typed_count, time, false,
                                         history::SOURCE_BROWSED);
-    history_service->SetPageContents(url, UTF8ToUTF16(entry.body));
     if (entry.starred)
       bookmark_utils::AddIfNotBookmarked(bookmark_model, url, string16());
     // Wait at least for the AddPageWithDetails() call to finish.
@@ -580,7 +579,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
                 GetController())));
 
     GURL url = browser()->tab_strip_model()->GetActiveWebContents()->GetURL();
-    EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
+    EXPECT_EQ(kDesiredTLDHostname, url.host());
+    EXPECT_EQ("/", url.path());
   }
 
   void AltEnterTest() {
@@ -616,7 +616,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
             &browser()->tab_strip_model()->GetActiveWebContents()->
                 GetController())));
     GURL url = browser()->tab_strip_model()->GetActiveWebContents()->GetURL();
-    EXPECT_STREQ(kSearchTextURL, url.spec().c_str());
+    EXPECT_EQ(kSearchTextURL, url.spec());
 
     // Test that entering a single character then Enter performs a search.
     chrome::FocusLocationBar(browser());
@@ -637,7 +637,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
             &browser()->tab_strip_model()->GetActiveWebContents()->
                 GetController())));
     url = browser()->tab_strip_model()->GetActiveWebContents()->GetURL();
-    EXPECT_STREQ(kSearchSingleCharURL, url.spec().c_str());
+    EXPECT_EQ(kSearchSingleCharURL, url.spec());
   }
 
   void EscapeToDefaultMatchTest() {
@@ -1336,14 +1336,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
 }
 #undef MAYBE_ESCAPE
 
-// http://crbug.com/131179
-#if defined(OS_LINUX)
-#define MAYBE_DesiredTLD DISABLED_DesiredTLD
-#else
-#define MAYBE_DesiredTLD DesiredTLD
-#endif
-
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLD) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLD) {
   DesiredTLDTest();
 }
 
@@ -1853,3 +1846,35 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, BeginningShownAfterBlur) {
   ASSERT_EQ(0U, end);
 }
 #endif  // !defined(TOOLKIT_GTK)
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, CtrlArrowAfterArrowSuggestions) {
+  OmniboxView* omnibox_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
+  OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
+  ASSERT_TRUE(popup_model);
+
+  // Input something to trigger results.
+  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kDesiredTLDKeys));
+  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+  ASSERT_TRUE(popup_model->IsOpen());
+
+  ASSERT_EQ(ASCIIToUTF16("bar.com/1"), omnibox_view->GetText());
+
+  // Arrow down on a suggestion, and omnibox text should be the suggestion.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_DOWN, 0));
+  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+  ASSERT_EQ(ASCIIToUTF16("www.bar.com/2"), omnibox_view->GetText());
+
+  // Highlight the last 2 words and the omnibox text should not change.
+  // Simulating Ctrl-shift-left only once does not seem to highlight anything
+  // on Linux.
+#if defined(OS_MACOSX)
+  // Mac uses alt-left/right to select a word.
+  const int modifiers = ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN;
+#else
+  const int modifiers = ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN;
+#endif
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, modifiers));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, modifiers));
+  ASSERT_EQ(ASCIIToUTF16("www.bar.com/2"), omnibox_view->GetText());
+}

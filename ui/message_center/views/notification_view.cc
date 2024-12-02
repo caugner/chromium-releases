@@ -13,6 +13,7 @@
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/message_center/message_center.h"
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_switches.h"
@@ -20,11 +21,11 @@
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/views/bounded_label.h"
-#include "ui/message_center/views/message_simple_view.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/progress_bar.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -34,11 +35,13 @@ namespace {
 // Dimensions.
 const int kIconSize = message_center::kNotificationIconSize;
 const int kLegacyIconSize = 40;
-const int kIconBottomPadding = 16;
 const int kTextLeftPadding = kIconSize + message_center::kIconToTextPadding;
 const int kTextBottomPadding = 12;
 const int kTextRightPadding = 23;
 const int kItemTitleToMessagePadding = 3;
+const int kProgressBarWidth = message_center::kNotificationWidth -
+    kTextLeftPadding - kTextRightPadding;
+const int kProgressBarBottomPadding = 0;
 const int kButtonVecticalPadding = 0;
 const int kButtonTitleTopPadding = 0;
 
@@ -73,6 +76,11 @@ views::Border* MakeTextBorder(int padding, int top, int bottom) {
   // Split the padding between the top and the bottom, then add the extra space.
   return MakeEmptyBorder(padding / 2 + top, kTextLeftPadding,
                          (padding + 1) / 2 + bottom, kTextRightPadding);
+}
+
+// static
+views::Border* MakeProgressBarBorder(int top, int bottom) {
+  return MakeEmptyBorder(top, kTextLeftPadding, bottom, kTextRightPadding);
 }
 
 // static
@@ -224,6 +232,67 @@ gfx::Size ProportionalImageView::GetImageSizeForWidth(int width) {
   return message_center::GetImageSizeForWidth(width, size);
 }
 
+// NotificationProgressBar /////////////////////////////////////////////////////
+
+class NotificationProgressBar : public views::ProgressBar {
+ public:
+  NotificationProgressBar();
+  virtual ~NotificationProgressBar();
+
+ private:
+  // Overriden from View
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(NotificationProgressBar);
+};
+
+NotificationProgressBar::NotificationProgressBar() {
+}
+
+NotificationProgressBar::~NotificationProgressBar() {
+}
+
+gfx::Size NotificationProgressBar::GetPreferredSize() {
+  gfx::Size pref_size(kProgressBarWidth, message_center::kProgressBarThickness);
+  gfx::Insets insets = GetInsets();
+  pref_size.Enlarge(insets.width(), insets.height());
+  return pref_size;
+}
+
+void NotificationProgressBar::OnPaint(gfx::Canvas* canvas) {
+  gfx::Rect content_bounds = GetContentsBounds();
+
+  // Draw background.
+  SkPath background_path;
+  background_path.addRoundRect(gfx::RectToSkRect(content_bounds),
+                               message_center::kProgressBarCornerRadius,
+                               message_center::kProgressBarCornerRadius);
+  SkPaint background_paint;
+  background_paint.setStyle(SkPaint::kFill_Style);
+  background_paint.setFlags(SkPaint::kAntiAlias_Flag);
+  background_paint.setColor(message_center::kProgressBarBackgroundColor);
+  canvas->DrawPath(background_path, background_paint);
+
+  // Draw slice.
+  const int slice_width =
+      static_cast<int>(content_bounds.width() * GetNormalizedValue() + 0.5);
+  if (slice_width < 1)
+    return;
+
+  gfx::Rect slice_bounds = content_bounds;
+  slice_bounds.set_width(slice_width);
+  SkPath slice_path;
+  slice_path.addRoundRect(gfx::RectToSkRect(slice_bounds),
+                          message_center::kProgressBarCornerRadius,
+                          message_center::kProgressBarCornerRadius);
+  SkPaint slice_paint;
+  slice_paint.setStyle(SkPaint::kFill_Style);
+  slice_paint.setFlags(SkPaint::kAntiAlias_Flag);
+  slice_paint.setColor(message_center::kProgressBarSliceColor);
+  canvas->DrawPath(slice_path, slice_paint);
+}
+
 // NotificationButton //////////////////////////////////////////////////////////
 
 // NotificationButtons render the action buttons of notifications.
@@ -341,18 +410,12 @@ MessageView* NotificationView::Create(const Notification& notification,
                                       MessageCenterTray* tray,
                                       bool expanded,
                                       bool top_level) {
-  // Use MessageSimpleView for simple notifications unless rich style
-  // notifications are enabled. This preserves the appearance of notifications
-  // created by existing code that uses webkitNotifications.
-  if (!IsRichNotificationEnabled() &&
-      notification.type() == NOTIFICATION_TYPE_SIMPLE)
-    return new MessageSimpleView(notification, message_center);
-
   switch (notification.type()) {
     case NOTIFICATION_TYPE_BASE_FORMAT:
     case NOTIFICATION_TYPE_IMAGE:
     case NOTIFICATION_TYPE_MULTIPLE:
     case NOTIFICATION_TYPE_SIMPLE:
+    case NOTIFICATION_TYPE_PROGRESS:
       break;
     default:
       // If the caller asks for an unrecognized kind of view (entirely possible
@@ -375,9 +438,7 @@ MessageView* NotificationView::Create(const Notification& notification,
     return notification_view;
 #endif
 
-  if (IsRichNotificationEnabled())
-    notification_view->CreateShadowBorder();
-
+  notification_view->CreateShadowBorder();
   return notification_view;
 }
 
@@ -430,6 +491,16 @@ NotificationView::NotificationView(const Notification& notification,
     message_view_->set_border(MakeTextBorder(padding, 4, 0));
     top_view_->AddChildView(message_view_);
     accessible_lines.push_back(notification.message());
+  }
+
+  // Create the progress bar view.
+  progress_bar_view_ = NULL;
+  if (notification.type() == NOTIFICATION_TYPE_PROGRESS) {
+    progress_bar_view_ = new NotificationProgressBar();
+    progress_bar_view_->set_border(MakeProgressBarBorder(
+        message_center::kProgressBarTopPadding, kProgressBarBottomPadding));
+    progress_bar_view_->SetValue(notification.progress() / 100.0);
+    top_view_->AddChildView(progress_bar_view_);
   }
 
   // Create the list item views (up to a maximum).
@@ -535,7 +606,8 @@ int NotificationView::GetHeightForWidth(int width) {
   // Adjust the height to make sure there is at least 16px of space below the
   // icon if there is any space there (<http://crbug.com/232966>).
   if (content_height > kIconSize)
-    content_height = std::max(content_height, kIconSize + kIconBottomPadding);
+    content_height = std::max(content_height,
+                              kIconSize + message_center::kIconBottomPadding);
 
   return content_height + GetInsets().height();
 }

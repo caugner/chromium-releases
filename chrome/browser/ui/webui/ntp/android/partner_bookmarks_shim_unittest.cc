@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/webui/ntp/android/partner_bookmarks_shim.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -13,8 +13,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 class PartnerBookmarksShimTest : public testing::Test {
  public:

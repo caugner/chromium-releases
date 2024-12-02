@@ -11,8 +11,8 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/screens/update_screen_actor.h"
 #include "chrome/browser/chromeos/login/screens/wizard_screen.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
@@ -44,6 +44,8 @@ class UpdateScreen: public UpdateEngineClient::Observer,
   // UpdateScreenActor::Delegate implementation:
   virtual void CancelUpdate() OVERRIDE;
   virtual void OnActorDestroyed(UpdateScreenActor* actor) OVERRIDE;
+  virtual void OnConnectToNetworkRequested(
+      const std::string& service_path) OVERRIDE;
 
   // Starts network check. Made virtual to simplify mocking.
   virtual void StartNetworkCheck();
@@ -78,6 +80,7 @@ class UpdateScreen: public UpdateEngineClient::Observer,
  private:
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestBasic);
   FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestUpdateAvailable);
+  FRIEND_TEST_ALL_PREFIXES(UpdateScreenTest, TestAPReselection);
 
   enum State {
     STATE_IDLE = 0,

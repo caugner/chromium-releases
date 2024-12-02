@@ -41,25 +41,11 @@ PolicyOAuth2TokenFetcher::PolicyOAuth2TokenFetcher(
       failed_(false),
       callback_(callback) {}
 
-PolicyOAuth2TokenFetcher::PolicyOAuth2TokenFetcher(
-    net::URLRequestContextGetter* system_context_getter,
-    const std::string& oauth2_refresh_token,
-    const TokenCallback& callback)
-    : system_context_getter_(system_context_getter),
-      oauth2_refresh_token_(oauth2_refresh_token),
-      retry_count_(0),
-      failed_(false),
-      callback_(callback) {}
-
 PolicyOAuth2TokenFetcher::~PolicyOAuth2TokenFetcher() {}
 
 void PolicyOAuth2TokenFetcher::Start() {
   retry_count_ = 0;
-  if (oauth2_refresh_token_.empty()) {
-    StartFetchingRefreshToken();
-  } else {
-    StartFetchingAccessToken();
-  }
+  StartFetchingRefreshToken();
 }
 
 void PolicyOAuth2TokenFetcher::StartFetchingRefreshToken() {
@@ -101,7 +87,9 @@ void PolicyOAuth2TokenFetcher::OnGetTokenSuccess(
     const std::string& access_token,
     const base::Time& expiration_time) {
   LOG(INFO) << "OAuth2 access token (device management) fetching succeeded.";
-  ForwardPolicyToken(access_token);
+  oauth2_access_token_ = access_token;
+  ForwardPolicyToken(access_token,
+                     GoogleServiceAuthError(GoogleServiceAuthError::NONE));
 }
 
 void PolicyOAuth2TokenFetcher::OnGetTokenFailure(
@@ -131,11 +119,14 @@ void PolicyOAuth2TokenFetcher::RetryOnError(const GoogleServiceAuthError& error,
   // completed, and the owner may delete this object on the callback method.
   // So don't rely on |this| still being valid after ForwardPolicyToken()
   // returns i.e. don't write to |failed_| or other fields.
-  ForwardPolicyToken(EmptyString());
+  ForwardPolicyToken(std::string(), error);
 }
 
-void PolicyOAuth2TokenFetcher::ForwardPolicyToken(const std::string& token) {
-  callback_.Run(token);
+void PolicyOAuth2TokenFetcher::ForwardPolicyToken(
+    const std::string& token,
+    const GoogleServiceAuthError& error) {
+  if (!callback_.is_null())
+    callback_.Run(token, error);
 }
 
 }  // namespace policy

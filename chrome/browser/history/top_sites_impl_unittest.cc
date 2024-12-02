@@ -12,6 +12,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_db_task.h"
@@ -26,14 +27,12 @@
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
-#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -41,6 +40,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -149,7 +149,7 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   virtual void SetUp() {
     profile_.reset(new TestingProfile);
     if (CreateHistoryAndTopSites()) {
-      profile_->CreateHistoryService(false, false);
+      ASSERT_TRUE(profile_->CreateHistoryService(false, false));
       profile_->CreateTopSites();
       profile_->BlockUntilTopSitesLoaded();
     }
@@ -360,7 +360,7 @@ class TopSitesMigrationTest : public TopSitesImplTest {
         data_path.AppendASCII("thumbnails.3.sql"),
         profile()->GetPath().Append(chrome::kThumbnailsFilename)));
 
-    profile()->CreateHistoryService(false, false);
+    ASSERT_TRUE(profile()->CreateHistoryService(false, false));
     profile()->CreateTopSites();
     profile()->BlockUntilTopSitesLoaded();
   }
@@ -910,11 +910,11 @@ TEST_F(TopSitesMigrationTest, Migrate) {
   WaitForHistory();
 
   // Make sure there is no longer a Thumbnails file on disk.
-  ASSERT_FALSE(file_util::PathExists(
+  ASSERT_FALSE(base::PathExists(
                    profile()->GetPath().Append(chrome::kThumbnailsFilename)));
 
   // Recreate top sites and make sure everything is still there.
-  profile()->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(false, false));
   RecreateTopSitesAndBlock();
 
   ASSERT_NO_FATAL_FAILURE(MigrationAssertions());
@@ -1198,8 +1198,8 @@ TEST_F(TopSitesImplTest, CreateTopSitesThenHistory) {
 
   // Remove the TopSites file. This forces TopSites to wait until history loads
   // before TopSites is considered loaded.
-  file_util::Delete(profile()->GetPath().Append(chrome::kTopSitesFilename),
-                    false);
+  sql::Connection::Delete(
+      profile()->GetPath().Append(chrome::kTopSitesFilename));
 
   // Create TopSites, but not History.
   profile()->CreateTopSites();
@@ -1207,7 +1207,7 @@ TEST_F(TopSitesImplTest, CreateTopSitesThenHistory) {
   EXPECT_FALSE(IsTopSitesLoaded());
 
   // Load history, which should make TopSites finish loading too.
-  profile()->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(false, false));
   profile()->BlockUntilTopSitesLoaded();
   EXPECT_TRUE(IsTopSitesLoaded());
 }
@@ -1227,7 +1227,7 @@ class TopSitesUnloadTest : public TopSitesImplTest {
 // Makes sure if history is unloaded after topsites is loaded we don't hit any
 // assertions.
 TEST_F(TopSitesUnloadTest, UnloadHistoryTest) {
-  profile()->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(false, false));
   profile()->CreateTopSites();
   profile()->BlockUntilTopSitesLoaded();
   HistoryServiceFactory::GetForProfile(
@@ -1250,7 +1250,7 @@ TEST_F(TopSitesUnloadTest, UnloadWithMigration) {
       profile()->GetPath().Append(chrome::kThumbnailsFilename)));
 
   // Create history and block until it's loaded.
-  profile()->CreateHistoryService(false, false);
+  ASSERT_TRUE(profile()->CreateHistoryService(false, false));
   profile()->BlockUntilHistoryProcessesPendingRequests();
 
   // Create top sites and unload history.

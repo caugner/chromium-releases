@@ -61,24 +61,15 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void SetCellularDataRoamingAllowed(bool new_value) OVERRIDE;
   virtual void SetCarrier(const std::string& carrier,
                           const NetworkOperationCallback& completed) OVERRIDE;
-  virtual void ResetModem() OVERRIDE;
   virtual bool IsCellularAlwaysInRoaming() OVERRIDE;
   virtual void RequestNetworkScan() OVERRIDE;
 
-  virtual void RefreshIPConfig(Network* network) OVERRIDE;
-
   virtual void DisconnectFromNetwork(const Network* network) OVERRIDE;
-
-  virtual void EnableOfflineMode(bool enable) OVERRIDE;
 
   virtual void GetIPConfigs(
       const std::string& device_path,
       HardwareAddressFormat format,
       const NetworkGetIPConfigsCallback& callback) OVERRIDE;
-  virtual NetworkIPConfigVector GetIPConfigsAndBlock(
-      const std::string& device_path,
-      std::string* hardware_address,
-      HardwareAddressFormat format) OVERRIDE;
   virtual void SetIPParameters(const std::string& service_path,
                                const std::string& address,
                                const std::string& netmask,

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -9,6 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "extensions/common/id_util.h"
 
@@ -24,6 +26,12 @@ typedef ExtensionApiTest AllUrlsApiTest;
 #define MAYBE_WhitelistedExtension WhitelistedExtension
 #endif
 IN_PROC_BROWSER_TEST_F(AllUrlsApiTest, MAYBE_WhitelistedExtension) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   // First setup the two extensions.
   base::FilePath extension_dir1 = test_data_dir_.AppendASCII("all_urls")
                                           .AppendASCII("content_script");

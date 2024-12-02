@@ -1,10 +1,11 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef LIBRARIES_NACL_IO_KERNEL_WRAP_REAL_H_
 #define LIBRARIES_NACL_IO_KERNEL_WRAP_REAL_H_
 
+#include "nacl_io/osstat.h"
 #include "nacl_io/ostypes.h"
 #include "sdk_util/macros.h"
 

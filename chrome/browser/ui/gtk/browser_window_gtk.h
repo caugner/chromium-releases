@@ -13,7 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_member.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
@@ -132,7 +132,6 @@ class BrowserWindowGtk
   virtual void ShowUpdateChromeDialog() OVERRIDE;
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
-  virtual void ShowChromeToMobileBubble() OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
@@ -149,8 +148,7 @@ class BrowserWindowGtk
   virtual void ShowWebsiteSettings(Profile* profile,
                                    content::WebContents* web_contents,
                                    const GURL& url,
-                                   const content::SSLStatus& ssl,
-                                   bool show_history) OVERRIDE;
+                                   const content::SSLStatus& ssl) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event,
@@ -163,7 +161,6 @@ class BrowserWindowGtk
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
-  virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
@@ -251,7 +248,7 @@ class BrowserWindowGtk
   // Returns the tab we're currently displaying in the tab contents container.
   content::WebContents* GetDisplayedTab();
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // Tells GTK that the toolbar area is invalidated and needs redrawing. We
   // have this method as a hack because GTK doesn't queue the toolbar area for
@@ -514,9 +511,6 @@ class BrowserWindowGtk
   // A container that manages the GtkWidget*s of developer tools for the
   // selected tab contents.
   scoped_ptr<TabContentsContainerGtk> devtools_container_;
-
-  // A sub-controller that manages the Instant overlay visual state.
-  scoped_ptr<InstantOverlayControllerGtk> instant_overlay_controller_;
 
   // The Extension Keybinding Registry responsible for registering listeners for
   // accelerators that are sent to the window, that are destined to be turned

@@ -8,8 +8,10 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/signin/signin_promo.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
-#include "chrome/browser/ui/sync/sync_promo_ui.h"
+#include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -21,6 +23,8 @@ class ProfileIOData;
 
 namespace content {
 class WebContents;
+struct FrameNavigateParams;
+struct LoadCommittedDetails;
 struct PasswordForm;
 }
 
@@ -48,7 +52,7 @@ class OneClickSigninHelper
     AUTO_ACCEPT_ACCEPTED,
 
     // User has explicitly accepted to sign in, but wants to configure sync
-    // settings before turing it on.
+    // settings before turning it on.
     AUTO_ACCEPT_CONFIGURE,
 
     // User has explicitly rejected to sign in.  Furthermore, the user does
@@ -110,10 +114,11 @@ class OneClickSigninHelper
                                     int child_id,
                                     int route_id);
 
-  // Remove the item currently at the top of the history list.  Due to
-  // limitations of the NavigationController, this cannot be done until
-  // a new page becomes "current".
-  static void RemoveCurrentHistoryItem(content::WebContents* web_contents);
+  // Remove the item currently at the top of the history list if it's
+  // the Gaia redirect URL. Due to limitations of the NavigationController
+  // this cannot be done until a new page becomes "current".
+  static void RemoveSigninRedirectURLHistoryItem(
+      content::WebContents* web_contents);
 
   static void LogConfirmHistogramValue(int action);
 
@@ -128,6 +133,8 @@ class OneClickSigninHelper
                            ShowSigninBubbleAfterSigninComplete);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest, SigninCancelled);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest, SigninFailed);
+  FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperTest,
+                           CleanTransientStateOnNavigate);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest, CanOfferOnIOThread);
   FRIEND_TEST_ALL_PREFIXES(OneClickSigninHelperIOTest,
                            CanOfferOnIOThreadIncognito);
@@ -184,7 +191,7 @@ class OneClickSigninHelper
   static void ShowInfoBarUIThread(const std::string& session_index,
                                   const std::string& email,
                                   AutoAccept auto_accept,
-                                  SyncPromoUI::Source source,
+                                  signin::Source source,
                                   const GURL& continue_url,
                                   int child_id,
                                   int route_id);
@@ -209,11 +216,20 @@ class OneClickSigninHelper
   virtual void NavigateToPendingEntry(
       const GURL& url,
       content::NavigationController::ReloadType reload_type) OVERRIDE;
+  virtual void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual void DidStopLoading(
       content::RenderViewHost* render_view_host) OVERRIDE;
 
   // ProfileSyncServiceObserver.
   virtual void OnStateChanged() OVERRIDE;
+
+  OneClickSigninSyncStarter::Callback CreateSyncStarterCallback();
+
+  // Callback invoked when OneClickSigninSyncStarter completes sync setup.
+  void SyncSetupCompletedCallback(
+      OneClickSigninSyncStarter::SyncSetupResult result);
 
   // Tracks if we are in the process of showing the signin or one click
   // interstitial page. It's set to true the first time we load one of those
@@ -226,13 +242,11 @@ class OneClickSigninHelper
   std::string email_;
   std::string password_;
   AutoAccept auto_accept_;
-  SyncPromoUI::Source source_;
+  signin::Source source_;
   bool switched_to_advanced_;
-  // When switching to advanced settings, we want to track the original source.
-  SyncPromoUI::Source original_source_;
   GURL continue_url_;
-  // Redirect URL after sync setup is complete.
-  GURL redirect_url_;
+  // The orignal continue URL after sync setup is complete.
+  GURL original_continue_url_;
   std::string error_message_;
 
   // Number of navigations since starting a sign in that is outside the
@@ -250,6 +264,8 @@ class OneClickSigninHelper
   // Allows unittests to avoid accessing the ResourceContext for clearing a
   // pending e-mail.
   bool do_not_clear_pending_email_;
+
+  base::WeakPtrFactory<OneClickSigninHelper> weak_pointer_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OneClickSigninHelper);
 };

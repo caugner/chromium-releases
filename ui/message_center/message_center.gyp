@@ -70,14 +70,12 @@
         'views/message_bubble_base.h',
         'views/message_center_bubble.cc',
         'views/message_center_bubble.h',
+        'views/message_center_button_bar.cc',
+        'views/message_center_button_bar.h',
         'views/message_center_view.cc',
         'views/message_center_view.h',
-        'views/message_popup_bubble.cc',
-        'views/message_popup_bubble.h',
         'views/message_popup_collection.cc',
         'views/message_popup_collection.h',
-        'views/message_simple_view.cc',
-        'views/message_simple_view.h',
         'views/message_view.cc',
         'views/message_view.h',
         'views/notifier_settings_view.cc',
@@ -97,6 +95,16 @@
         }, {
           'sources/': [
             ['exclude', 'views/'],
+          ],
+        }],
+        ['use_ash==0', {
+          'sources!': [
+            'views/message_bubble_base.cc',
+            'views/message_bubble_base.h',
+            'views/message_center_bubble.cc',
+            'views/message_center_bubble.h',
+            'views/message_popup_bubble.cc',
+            'views/message_popup_bubble.h',
           ],
         }],
         ['OS=="mac"', {
@@ -151,6 +159,7 @@
         '../../testing/gtest.gyp:gtest',
         '../ui.gyp:run_ui_unittests',
         '../ui.gyp:ui',
+        '../../url/url.gyp:url_lib',
         'message_center',
         'message_center_test_support',
       ],
@@ -192,6 +201,12 @@
             # Exclude everything except main().
             ['exclude', '\\.(cc|mm)$'],
             ['include', '^test/run_all_unittests\\.cc$'],
+          ],
+        }],
+        # See http://crbug.com/162998#c4 for why this is needed.
+        ['OS=="linux" and linux_use_tcmalloc==1', {
+          'dependencies': [
+            '../../base/allocator/allocator.gyp:allocator',
           ],
         }],
       ],

@@ -5,14 +5,20 @@
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 
 #include "base/logging.h"
-#include "base/message_loop.h"
-#include "base/time.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/ui/webui/chromeos/login/native_window_delegate.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "grit/generated_resources.h"
+
+namespace {
+
+const char kJsScreenPath[] = "login.ErrorMessageScreen";
+
+}  // namespace
 
 namespace chromeos {
 
@@ -34,7 +40,8 @@ void DisableLazyDetection() {
 
 ErrorScreenHandler::ErrorScreenHandler(
     const scoped_refptr<NetworkStateInformer>& network_state_informer)
-    : network_state_informer_(network_state_informer),
+    : BaseScreenHandler(kJsScreenPath),
+      network_state_informer_(network_state_informer),
       show_on_init_(false) {
   DCHECK(network_state_informer_.get());
 }
@@ -52,6 +59,7 @@ void ErrorScreenHandler::Show(OobeDisplay::Screen parent_screen,
   ShowScreen(OobeUI::kScreenErrorMessage, params);
   NetworkErrorShown();
   EnableLazyDetection();
+  LOG(WARNING) << "Offline message is displayed";
 }
 
 void ErrorScreenHandler::Hide() {
@@ -61,6 +69,7 @@ void ErrorScreenHandler::Hide() {
   if (GetScreenName(parent_screen_, &screen_name))
     ShowScreen(screen_name.c_str(), NULL);
   DisableLazyDetection();
+  LOG(WARNING) << "Offline message is hidden";
 }
 
 void ErrorScreenHandler::FixCaptivePortal() {
@@ -86,22 +95,21 @@ void ErrorScreenHandler::HideCaptivePortal() {
 
 void ErrorScreenHandler::SetUIState(ErrorScreen::UIState ui_state) {
   ui_state_ = ui_state;
-  CallJS("login.ErrorMessageScreen.setUIState", static_cast<int>(ui_state_));
+  CallJS("setUIState", static_cast<int>(ui_state_));
 }
 
 void ErrorScreenHandler::SetErrorState(ErrorScreen::ErrorState error_state,
                                        const std::string& network) {
   error_state_ = error_state;
-  CallJS("login.ErrorMessageScreen.setErrorState",
-         static_cast<int>(error_state_), network);
+  CallJS("setErrorState", static_cast<int>(error_state_), network);
 }
 
 void ErrorScreenHandler::AllowGuestSignin(bool allowed) {
-  CallJS("login.ErrorMessageScreen.allowGuestSignin", allowed);
+  CallJS("allowGuestSignin", allowed);
 }
 
 void ErrorScreenHandler::AllowOfflineLogin(bool allowed) {
-  CallJS("login.ErrorMessageScreen.allowOfflineLogin", allowed);
+  CallJS("allowOfflineLogin", allowed);
 }
 
 void ErrorScreenHandler::NetworkErrorShown() {

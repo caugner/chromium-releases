@@ -7,21 +7,27 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include <base/mac/scoped_nsobject.h>
+#include "base/mac/scoped_nsobject.h"
+#include "chrome/browser/ui/cocoa/autofill/autofill_input_field.h"
 
 // Text field used for text inputs inside Autofill.
 // Provide both dog ear and red outline when the contents are marked invalid.
-@interface AutofillTextField : NSTextField
+@interface AutofillTextField : NSTextField<AutofillInputField,
+                                           NSTextFieldDelegate> {
+ @private
+   id<AutofillInputDelegate> delegate_;
+   base::scoped_nsobject<NSString> validityMessage_;
+}
+
 @end
 
-@interface AutofillTextFieldCell : NSTextFieldCell {
+@interface AutofillTextFieldCell : NSTextFieldCell<AutofillInputCell> {
  @private
   BOOL invalid_;
   base::scoped_nsobject<NSImage> icon_;
 }
 
-@property(assign, nonatomic) BOOL invalid;
-@property(nonatomic, retain, getter=icon, setter=setIcon:) NSImage* icon;
+@property(nonatomic, retain) NSImage* icon;
 
 @end
 

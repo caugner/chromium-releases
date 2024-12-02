@@ -37,6 +37,7 @@ class FakeOmahaProxy(_FakeFetcher):
                                        'test_data',
                                        'branch_utility',
                                        'first.json'))
+
 class FakeOmahaHistory(_FakeFetcher):
   def fetch(self, url):
     return self._ReadFile(os.path.join('server2',
@@ -81,6 +82,13 @@ class FakeViewvcServer(_FakeFetcher):
     path = os.path.join(os.pardir, self._base_pattern.match(url).group(1))
     if self._IsDir(path):
       html = ['<table><tbody><tr>...</tr>']
+      # The version of the directory.
+      dir_stat = self._Stat(path)
+      html.append('<tr>')
+      html.append('<td>Directory revision:</td>')
+      html.append('<td><a>%s</a><a></a></td>' % dir_stat)
+      html.append('</tr>')
+      # The version of each file.
       for f in self._ListDir(path):
         if f.startswith('.'):
           continue

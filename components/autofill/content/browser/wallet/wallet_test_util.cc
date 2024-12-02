@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
 #include "base/values.h"
 #include "components/autofill/content/browser/wallet/full_wallet.h"
 #include "components/autofill/content/browser/wallet/instrument.h"
@@ -83,15 +83,31 @@ scoped_ptr<Address> GetTestMinimalAddress() {
 }
 
 scoped_ptr<FullWallet> GetTestFullWallet() {
-  base::Time::Exploded exploded;
-  base::Time::Now().LocalExplode(&exploded);
-  return scoped_ptr<FullWallet>(new FullWallet(FutureYear(),
+  scoped_ptr<FullWallet> wallet(new FullWallet(FutureYear(),
                                                12,
-                                               "iin",
-                                               "rest",
+                                               "528512",
+                                               "5ec4feecf9d6",
                                                GetTestAddress(),
                                                GetTestShippingAddress(),
                                                std::vector<RequiredAction>()));
+  std::vector<uint8> one_time_pad;
+  base::HexStringToBytes("5F04A8704183", &one_time_pad);
+  wallet->set_one_time_pad(one_time_pad);
+  return wallet.Pass();
+}
+
+scoped_ptr<FullWallet> GetTestFullWalletInstrumentOnly() {
+  scoped_ptr<FullWallet> wallet(new FullWallet(FutureYear(),
+                                               12,
+                                               "528512",
+                                               "5ec4feecf9d6",
+                                               GetTestAddress(),
+                                               scoped_ptr<Address>(),
+                                               std::vector<RequiredAction>()));
+  std::vector<uint8> one_time_pad;
+  base::HexStringToBytes("5F04A8704183", &one_time_pad);
+  wallet->set_one_time_pad(one_time_pad);
+  return wallet.Pass();
 }
 
 scoped_ptr<Instrument> GetTestInstrument() {
@@ -101,6 +117,39 @@ scoped_ptr<Instrument> GetTestInstrument() {
                                                FutureYear(),
                                                Instrument::VISA,
                                                GetTestAddress()));
+}
+
+scoped_ptr<Instrument> GetTestAddressUpgradeInstrument() {
+  scoped_ptr<Instrument> instrument(new Instrument(base::string16(),
+                                                   base::string16(),
+                                                   0,
+                                                   0,
+                                                   Instrument::UNKNOWN,
+                                                   GetTestAddress()));
+  instrument->set_object_id("instrument_id");
+  return instrument.Pass();
+}
+
+scoped_ptr<Instrument> GetTestExpirationDateChangeInstrument() {
+  scoped_ptr<Instrument> instrument(new Instrument(base::string16(),
+                                                   ASCIIToUTF16("123"),
+                                                   12,
+                                                   FutureYear(),
+                                                   Instrument::UNKNOWN,
+                                                   scoped_ptr<Address>()));
+  instrument->set_object_id("instrument_id");
+  return instrument.Pass();
+}
+
+scoped_ptr<Instrument> GetTestAddressNameChangeInstrument() {
+  scoped_ptr<Instrument> instrument(new Instrument(base::string16(),
+                                                   ASCIIToUTF16("123"),
+                                                   0,
+                                                   0,
+                                                   Instrument::UNKNOWN,
+                                                   GetTestAddress()));
+  instrument->set_object_id("instrument_id");
+  return instrument.Pass();
 }
 
 scoped_ptr<WalletItems::LegalDocument> GetTestLegalDocument() {

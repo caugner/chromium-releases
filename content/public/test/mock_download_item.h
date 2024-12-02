@@ -6,13 +6,12 @@
 #define CONTENT_PUBLIC_TEST_MOCK_DOWNLOAD_ITEM_H_
 
 #include "base/callback.h"
-#include "base/time.h"
-#include "content/public/browser/download_id.h"
+#include "base/time/time.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -31,8 +30,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_METHOD0(Remove, void());
   MOCK_METHOD0(OpenDownload, void());
   MOCK_METHOD0(ShowDownloadInShell, void());
-  MOCK_CONST_METHOD0(GetId, int32());
-  MOCK_CONST_METHOD0(GetGlobalId, DownloadId());
+  MOCK_CONST_METHOD0(GetId, uint32());
   MOCK_CONST_METHOD0(GetState, DownloadState());
   MOCK_CONST_METHOD0(GetLastReason, DownloadInterruptReason());
   MOCK_CONST_METHOD0(IsPaused, bool());
@@ -62,6 +60,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetHash, const std::string&());
   MOCK_CONST_METHOD0(GetHashState, const std::string&());
   MOCK_CONST_METHOD0(GetFileExternallyRemoved, bool());
+  MOCK_METHOD0(DeleteFile, void());
   MOCK_CONST_METHOD0(IsDangerous, bool());
   MOCK_CONST_METHOD0(GetDangerType, DownloadDangerType());
   MOCK_CONST_METHOD1(TimeRemaining, bool(base::TimeDelta*));

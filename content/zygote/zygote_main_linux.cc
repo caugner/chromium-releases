@@ -20,27 +20,27 @@
 #include "base/files/file_path.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/native_library.h"
 #include "base/pickle.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket_linux.h"
-#include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/sys_info.h"
 #include "build/build_config.h"
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/pepper_plugin_registry.h"
+#include "content/common/pepper_plugin_list.h"
 #include "content/common/sandbox_linux.h"
 #include "content/common/zygote_commands_linux.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/sandbox_linux.h"
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #include "content/zygote/zygote_linux.h"
 #include "crypto/nss_util.h"
 #include "sandbox/linux/services/libc_urandom_override.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
-#include "third_party/icu/public/i18n/unicode/timezone.h"
-#include "third_party/libjingle/overrides/init_webrtc.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "third_party/skia/include/ports/SkFontConfigInterface.h"
 
 #if defined(OS_LINUX)
@@ -49,6 +49,10 @@
 #include <sys/signal.h>
 #else
 #include <signal.h>
+#endif
+
+#if defined(ENABLE_WEBRTC)
+#include "third_party/libjingle/overrides/init_webrtc.h"
 #endif
 
 namespace content {
@@ -246,6 +250,27 @@ struct tm* localtime64_r_override(const time_t* timep, struct tm* result) {
   }
 }
 
+#if defined(ENABLE_PLUGINS)
+// Loads the (native) libraries but does not initialize them (i.e., does not
+// call PPP_InitializeModule). This is needed by the zygote on Linux to get
+// access to the plugins before entering the sandbox.
+void PreloadPepperPlugins() {
+  std::vector<PepperPluginInfo> plugins;
+  ComputePepperPluginList(&plugins);
+  for (size_t i = 0; i < plugins.size(); ++i) {
+    if (!plugins[i].is_internal && plugins[i].is_sandboxed) {
+      std::string error;
+      base::NativeLibrary library = base::LoadNativeLibrary(plugins[i].path,
+                                                            &error);
+      DLOG_IF(WARNING, !library) << "Unable to load plugin "
+                                 << plugins[i].path.value() << " "
+                                 << error;
+      (void)library;  // Prevent release-mode warning.
+    }
+  }
+}
+#endif
+
 // This function triggers the static and lazy construction of objects that need
 // to be created before imposing the sandbox.
 static void PreSandboxInit() {
@@ -274,7 +299,7 @@ static void PreSandboxInit() {
 #endif
 #if defined(ENABLE_PLUGINS)
   // Ensure access to the Pepper plugins before the sandbox is turned on.
-  PepperPluginRegistry::PreloadModules();
+  PreloadPepperPlugins();
 #endif
 #if defined(ENABLE_WEBRTC)
   InitializeWebRtcModule();

@@ -5,16 +5,16 @@
 #include "content/renderer/media/android/webmediaplayer_proxy_android.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "content/common/media/media_player_messages_android.h"
+#include "content/renderer/media/android/renderer_media_player_manager.h"
 #include "content/renderer/media/android/webmediaplayer_android.h"
-#include "content/renderer/media/android/webmediaplayer_manager_android.h"
 
 namespace content {
 
 WebMediaPlayerProxyAndroid::WebMediaPlayerProxyAndroid(
     RenderView* render_view,
-    WebMediaPlayerManagerAndroid* manager)
+    RendererMediaPlayerManager* manager)
     : RenderViewObserver(render_view), manager_(manager) {}
 
 WebMediaPlayerProxyAndroid::~WebMediaPlayerProxyAndroid() {
@@ -57,24 +57,28 @@ void WebMediaPlayerProxyAndroid::Initialize(
     const GURL& url,
     media::MediaPlayerAndroid::SourceType source_type,
     const GURL& first_party_for_cookies) {
-  Send(new MediaPlayerHostMsg_MediaPlayerInitialize(
+  Send(new MediaPlayerHostMsg_Initialize(
       routing_id(), player_id, url, source_type, first_party_for_cookies));
 }
 
 void WebMediaPlayerProxyAndroid::Start(int player_id) {
-  Send(new MediaPlayerHostMsg_MediaPlayerStart(routing_id(), player_id));
+  Send(new MediaPlayerHostMsg_Start(routing_id(), player_id));
 }
 
 void WebMediaPlayerProxyAndroid::Pause(int player_id) {
-  Send(new MediaPlayerHostMsg_MediaPlayerPause(routing_id(), player_id));
+  Send(new MediaPlayerHostMsg_Pause(routing_id(), player_id));
 }
 
 void WebMediaPlayerProxyAndroid::Seek(int player_id, base::TimeDelta time) {
-  Send(new MediaPlayerHostMsg_MediaPlayerSeek(routing_id(), player_id, time));
+  Send(new MediaPlayerHostMsg_Seek(routing_id(), player_id, time));
+}
+
+void WebMediaPlayerProxyAndroid::SetVolume(int player_id, double volume) {
+  Send(new MediaPlayerHostMsg_SetVolume(routing_id(), player_id, volume));
 }
 
 void WebMediaPlayerProxyAndroid::ReleaseResources(int player_id) {
-  Send(new MediaPlayerHostMsg_MediaPlayerRelease(routing_id(), player_id));
+  Send(new MediaPlayerHostMsg_Release(routing_id(), player_id));
 }
 
 void WebMediaPlayerProxyAndroid::DestroyPlayer(int player_id) {
@@ -179,6 +183,12 @@ void WebMediaPlayerProxyAndroid::ReadFromDemuxerAck(
       routing_id(), player_id, params));
 }
 
+void WebMediaPlayerProxyAndroid::SeekRequestAck(int player_id,
+                                                unsigned seek_request_id) {
+  Send(new MediaPlayerHostMsg_MediaSeekRequestAck(
+      routing_id(), player_id, seek_request_id));
+}
+
 #if defined(GOOGLE_TV)
 void WebMediaPlayerProxyAndroid::RequestExternalSurface(
     int player_id,
@@ -201,11 +211,10 @@ void WebMediaPlayerProxyAndroid::DidCommitCompositorFrame() {
 
 void WebMediaPlayerProxyAndroid::OnReadFromDemuxer(
     int player_id,
-    media::DemuxerStream::Type type,
-    bool seek_done) {
+    media::DemuxerStream::Type type) {
   WebMediaPlayerAndroid* player = GetWebMediaPlayer(player_id);
   if (player)
-    player->OnReadFromDemuxer(type, seek_done);
+    player->OnReadFromDemuxer(type);
 }
 
 void WebMediaPlayerProxyAndroid::DemuxerReady(
@@ -260,11 +269,8 @@ void WebMediaPlayerProxyAndroid::OnMediaSeekRequest(
     base::TimeDelta time_to_seek,
     unsigned seek_request_id) {
   WebMediaPlayerAndroid* player = GetWebMediaPlayer(player_id);
-  if (player) {
-    Send(new MediaPlayerHostMsg_MediaSeekRequestAck(
-        routing_id(), player_id, seek_request_id));
-    player->OnMediaSeekRequest(time_to_seek);
-  }
+  if (player)
+    player->OnMediaSeekRequest(time_to_seek, seek_request_id);
 }
 
 void WebMediaPlayerProxyAndroid::OnMediaConfigRequest(int player_id) {
@@ -293,7 +299,7 @@ void WebMediaPlayerProxyAndroid::OnKeyError(
 void WebMediaPlayerProxyAndroid::OnKeyMessage(
     int media_keys_id,
     const std::string& session_id,
-    const std::string& message,
+    const std::vector<uint8>& message,
     const std::string& destination_url) {
   WebMediaPlayerAndroid* player = GetWebMediaPlayer(media_keys_id);
   if (player)

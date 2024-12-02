@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/views/extensions/shell_window_frame_view.h"
 
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/views/extensions/native_app_window_views.h"
+#include "chrome/browser/ui/views/apps/native_app_window_views.h"
 #include "extensions/common/draggable_region.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_strings.h"  // Accessibility names
@@ -194,21 +194,19 @@ int ShellWindowFrameView::NonClientHitTest(const gfx::Point& point) {
   bool can_ever_resize = frame_->widget_delegate() ?
       frame_->widget_delegate()->CanResize() :
       false;
-  if (can_ever_resize) {
-    // Don't allow overlapping resize handles when the window is maximized or
-    // fullscreen, as it can't be resized in those states.
-    int resize_border =
-        frame_->IsMaximized() || frame_->IsFullscreen() ? 0 :
-        resize_inside_bounds_size;
-    int frame_component = GetHTComponentForFrame(point,
-                                                 resize_border,
-                                                 resize_border,
-                                                 resize_area_corner_size,
-                                                 resize_area_corner_size,
-                                                 can_ever_resize);
-    if (frame_component != HTNOWHERE)
-      return frame_component;
-  }
+  // Don't allow overlapping resize handles when the window is maximized or
+  // fullscreen, as it can't be resized in those states.
+  int resize_border =
+      (frame_->IsMaximized() || frame_->IsFullscreen()) ? 0 :
+      resize_inside_bounds_size;
+  int frame_component = GetHTComponentForFrame(point,
+                                               resize_border,
+                                               resize_border,
+                                               resize_area_corner_size,
+                                               resize_area_corner_size,
+                                               can_ever_resize);
+  if (frame_component != HTNOWHERE)
+    return frame_component;
 
   // Check for possible draggable region in the client area for the frameless
   // window.

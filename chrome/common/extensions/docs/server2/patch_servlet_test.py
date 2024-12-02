@@ -7,33 +7,37 @@ import unittest
 
 from empty_dir_file_system import EmptyDirFileSystem
 from fake_fetchers import ConfigureFakeFetchers
-from local_file_system import LocalFileSystem
+from host_file_system_creator import HostFileSystemCreator
 from patch_servlet import PatchServlet
 from render_servlet import RenderServlet
 from server_instance import ServerInstance
 from servlet import Request
+from test_branch_utility import TestBranchUtility
 from test_util import DisableLogging
 
 _ALLOWED_HOST = 'https://chrome-apps-doc.appspot.com'
 
 class _RenderServletDelegate(RenderServlet.Delegate):
-  def CreateServerInstanceForChannel(self, channel):
+  def CreateServerInstance(self):
     return ServerInstance.ForLocal()
 
 class _PatchServletDelegate(RenderServlet.Delegate):
   def CreateAppSamplesFileSystem(self, object_store_creator):
     return EmptyDirFileSystem()
 
-  def CreateHostFileSystemForBranch(self, channel):
-    return LocalFileSystem.Create()
+  def CreateBranchUtility(self, object_store_creator):
+    return TestBranchUtility.CreateWithCannedData()
+
+  def CreateHostFileSystemCreator(self, object_store_creator):
+    return HostFileSystemCreator.ForLocal(object_store_creator)
 
 class PatchServletTest(unittest.TestCase):
   def setUp(self):
     ConfigureFakeFetchers()
 
   def _RenderWithPatch(self, path, issue):
-    real_path = '%s/%s' % (issue, path)
-    return PatchServlet(Request.ForTest(real_path, host=_ALLOWED_HOST),
+    path_with_issue = '%s/%s' % (issue, path)
+    return PatchServlet(Request.ForTest(path_with_issue, host=_ALLOWED_HOST),
                         _PatchServletDelegate()).Get()
 
   def _RenderWithoutPatch(self, path):
@@ -64,8 +68,10 @@ class PatchServletTest(unittest.TestCase):
 
   @DisableLogging('warning')
   def _AssertNotFound(self, path, issue):
-    self.assertEqual(self._RenderWithPatch(path, issue).status, 404,
-        'Path %s with issue %s should have been removed.' % (path, issue))
+    response = self._RenderWithPatch(path, issue)
+    self.assertEqual(response.status, 404,
+        'Path %s with issue %s should have been removed for %s.' % (
+            path, issue, response))
 
   def _AssertOk(self, path, issue):
     response = self._RenderWithPatch(path, issue)
@@ -75,17 +81,27 @@ class PatchServletTest(unittest.TestCase):
         'Rendered result for path %s with issue %s should not be empty.' %
         (path, issue))
 
+  def _AssertRedirect(self, path, issue, redirect_path):
+    response = self._RenderWithPatch(path, issue)
+    self.assertEqual(302, response.status)
+    self.assertEqual('/_patch/%s/%s' % (issue, redirect_path),
+                     response.headers['Location'])
+
   def testRender(self):
     # '_patch' is not included in paths below because it's stripped by Handler.
     issue = '14096030'
 
     # extensions_sidenav.json is modified in the patch.
     self._RenderAndAssertNotEqual('extensions/index.html', issue)
+
     # apps_sidenav.json is not patched.
     self._RenderAndAssertEqual('apps/about_apps.html', issue)
 
-    # extensions/runtime.html is removed in the patch.
-    self._AssertNotFound('extensions/runtime.html', issue)
+    # extensions/runtime.html is removed in the patch, should redirect to the
+    # apps version.
+    self._AssertRedirect('extensions/runtime.html', issue,
+                         'apps/runtime.html')
+
     # apps/runtime.html is not removed.
     self._RenderAndAssertEqual('apps/runtime.html', issue)
 
@@ -94,11 +110,6 @@ class PatchServletTest(unittest.TestCase):
 
     # Invalid issue number results in a 404.
     self._AssertNotFound('extensions/index.html', '11111')
-
-    # Test redirect.
-    self.assertEqual(self._RenderWithPatch('extensions/',
-                                          issue).headers['Location'],
-                     '/_patch/%s/extensions/index.html' % issue)
 
   def testXssRedirect(self):
     def is_redirect(from_host, from_path, to_url):

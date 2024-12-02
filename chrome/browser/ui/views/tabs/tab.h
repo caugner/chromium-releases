@@ -100,6 +100,14 @@ class Tab : public TabAudioIndicator::Delegate,
     background_offset_ = offset;
   }
 
+  // Returns true if this tab became the active tab selected in
+  // response to the last ui::ET_GESTURE_BEGIN gesture dispatched to
+  // this tab. Only used for collecting UMA metrics.
+  // See ash/touch/touch_uma.cc.
+  bool tab_activated_with_last_gesture_begin() const {
+    return tab_activated_with_last_gesture_begin_;
+  }
+
   views::GlowHoverController* hover_controller() {
     return &hover_controller_;
   }
@@ -320,6 +328,8 @@ class Tab : public TabAudioIndicator::Delegate,
 
   ui::ThemeProvider* theme_provider_;
 
+  bool tab_activated_with_last_gesture_begin_;
+
   views::GlowHoverController hover_controller_;
 
   // The bounds of various sections of the display.
@@ -335,7 +345,6 @@ class Tab : public TabAudioIndicator::Delegate,
     gfx::ImageSkia* image_r;
     int l_width;
     int r_width;
-    int y_offset;
   };
   static TabImage tab_active_;
   static TabImage tab_inactive_;

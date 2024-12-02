@@ -4,18 +4,23 @@
 
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
 
+#include "apps/app_window_contents.h"
+#include "apps/native_app_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
+#include "chrome/browser/ui/apps/chrome_shell_window_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/common/switches.h"
 
+using apps::ShellWindow;
+using apps::ShellWindowRegistry;
 using content::WebContents;
 
 namespace utils = extension_function_test_utils;
@@ -23,7 +28,7 @@ namespace utils = extension_function_test_utils;
 namespace extensions {
 
 PlatformAppBrowserTest::PlatformAppBrowserTest() {
-  ShellWindow::DisableExternalOpenForTesting();
+  ChromeShellWindowDelegate::DisableExternalOpenForTesting();
 }
 
 void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
@@ -31,8 +36,8 @@ void PlatformAppBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
 
   // Make event pages get suspended quicker.
-  command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "1");
-  command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "1");
+  command_line->AppendSwitchASCII(::switches::kEventPageIdleTime, "1");
+  command_line->AppendSwitchASCII(::switches::kEventPageSuspendingTime, "1");
 }
 
 const Extension* PlatformAppBrowserTest::LoadAndLaunchPlatformApp(
@@ -144,15 +149,18 @@ void PlatformAppBrowserTest::SetCommandLineArg(const std::string& test_file) {
 
 ShellWindow* PlatformAppBrowserTest::CreateShellWindow(
     const Extension* extension) {
-  ShellWindow::CreateParams params;
-  return ShellWindow::Create(
-      browser()->profile(), extension, GURL(std::string()), params);
+  return CreateShellWindowFromParams(extension, ShellWindow::CreateParams());
 }
 
 ShellWindow* PlatformAppBrowserTest::CreateShellWindowFromParams(
     const Extension* extension, const ShellWindow::CreateParams& params) {
-  return ShellWindow::Create(
-      browser()->profile(), extension, GURL(std::string()), params);
+  ShellWindow* window = new ShellWindow(browser()->profile(),
+                                        new ChromeShellWindowDelegate(),
+                                        extension);
+  window->Init(GURL(std::string()),
+               new apps::AppWindowContents(window),
+               params);
+  return window;
 }
 
 void PlatformAppBrowserTest::CloseShellWindow(ShellWindow* window) {

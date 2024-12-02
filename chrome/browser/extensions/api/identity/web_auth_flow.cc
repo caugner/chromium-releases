@@ -4,9 +4,10 @@
 
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 
+#include "apps/shell_window.h"
 #include "base/base64.h"
 #include "base/location.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/component_loader.h"
@@ -15,7 +16,6 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -27,9 +27,10 @@
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "crypto/random.h"
-#include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
+#include "url/gurl.h"
 
+using apps::ShellWindow;
 using content::RenderViewHost;
 using content::ResourceRedirectDetails;
 using content::WebContents;
@@ -58,7 +59,7 @@ WebAuthFlow::~WebAuthFlow() {
   WebContentsObserver::Observe(NULL);
 
   if (!shell_window_key_.empty()) {
-    ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
+    apps::ShellWindowRegistry::Get(profile_)->RemoveObserver(this);
 
     if (shell_window_ && shell_window_->web_contents())
       shell_window_->web_contents()->Close();
@@ -66,13 +67,12 @@ WebAuthFlow::~WebAuthFlow() {
 }
 
 void WebAuthFlow::Start() {
-  ShellWindowRegistry::Get(profile_)->AddObserver(this);
+  apps::ShellWindowRegistry::Get(profile_)->AddObserver(this);
 
   // Attach a random ID string to the window so we can recoginize it
   // in OnShellWindowAdded.
   std::string random_bytes;
   crypto::RandBytes(WriteInto(&random_bytes, 33), 32);
-  std::string key;
   bool success = base::Base64Encode(random_bytes, &shell_window_key_);
   DCHECK(success);
 
@@ -98,12 +98,8 @@ void WebAuthFlow::Start() {
         base::FilePath(FILE_PATH_LITERAL("identity_scope_approval_dialog")));
   }
 
-  system->event_router()->AddLazyEventListener(
-      "identityPrivate.onWebFlowRequest", extension_misc::kIdentityApiUiAppId);
-  system->event_router()->DispatchEventToExtension(
+  system->event_router()->DispatchEventWithLazyListener(
       extension_misc::kIdentityApiUiAppId, event.Pass());
-  system->event_router()->RemoveLazyEventListener(
-      "identityPrivate.onWebFlowRequest", extension_misc::kIdentityApiUiAppId);
 }
 
 void WebAuthFlow::DetachDelegateAndDelete() {
@@ -123,6 +119,8 @@ void WebAuthFlow::OnShellWindowAdded(ShellWindow* shell_window) {
         content::NotificationService::AllBrowserContextsAndSources());
   }
 }
+
+void WebAuthFlow::OnShellWindowIconChanged(ShellWindow* shell_window) {}
 
 void WebAuthFlow::OnShellWindowRemoved(ShellWindow* shell_window) {
   if (shell_window->window_key() == shell_window_key_ &&
@@ -204,7 +202,7 @@ void WebAuthFlow::Observe(int type,
   }
 }
 
-void WebAuthFlow::RenderViewGone(base::TerminationStatus status) {
+void WebAuthFlow::RenderProcessGone(base::TerminationStatus status) {
   if (delegate_)
     delegate_->OnAuthFlowFailure(WebAuthFlow::WINDOW_CLOSED);
 }

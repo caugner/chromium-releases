@@ -35,6 +35,8 @@
       <structure name="IDR_EXTENSIONS_HTML" file="resources\extensions\extensions.html" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_HELP_CSS" file="resources\help\help.css" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_HELP_HTML" file="resources\help\help.html" flattenhtml="true" type="chrome_html" />
+      <structure name="IDR_HELP_CHANNEL_CHANGE_PAGE_CSS" file="resources\help\channel_change_page.css" flattenhtml="true" type="chrome_html" />
+      <structure name="IDR_HELP_CHANNEL_CHANGE_PAGE_HTML" file="resources\help\channel_change_page.html" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_INCOGNITO_TAB_HTML" file="resources\incognito_tab.html" flattenhtml="true" type="chrome_html" />
       <if expr="pp_ifdef('chromeos')">
         <structure name="IDR_LOGIN_HTML" file="resources\chromeos\login\login.html" flattenhtml="true" type="chrome_html" variables="OOBE=login" expand_variables="true"/>
@@ -118,6 +120,7 @@
       <include name="IDR_FLAGS_HTML" file="resources\flags.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FLAGS_JS" file="resources\flags.js" type="BINDATA" />
       <include name="IDR_HELP_JS" file="resources\help\help.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_CHANNEL_CHANGE_PAGE_JS" file="resources\help\channel_change_page.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_HISTORY_HTML" file="resources\history\history.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_HISTORY_JS" file="resources\history\history.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_OTHER_DEVICES_JS" file="resources\history\other_devices.js" flattenhtml="true" type="BINDATA" />
@@ -148,20 +151,16 @@
         <include name="IDR_NOTIFICATION_ICON_HTML" file="resources\notification_icon.html" type="BINDATA" />
       </if>
 
+      <include name="IDR_LOCAL_DISCOVERY_HTML" file="resources\local_discovery\local_discovery.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_LOCAL_DISCOVERY_CSS" file="resources\local_discovery\local_discovery.css" type="BINDATA" />
+      <include name="IDR_LOCAL_DISCOVERY_JS" file="resources\local_discovery\local_discovery.js" type="BINDATA" />
+
       <include name="IDR_INSTANT_IFRAME_VALIDATION_JS" file="resources\local_ntp\instant_iframe_validation.js" type="BINDATA" />
       <include name="IDR_LOCAL_NTP_HTML" file="resources\local_ntp\local_ntp.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_LOCAL_NTP_CSS" file="resources\local_ntp\local_ntp.css" type="BINDATA" />
       <include name="IDR_LOCAL_NTP_JS" file="resources\local_ntp\local_ntp.js" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_LOCAL_NTP_IMAGES_LOGO_PNG" file="resources\local_ntp\images\ntp_google_logo.png" type="BINDATA" />
       <include name="IDR_LOCAL_NTP_IMAGES_2X_LOGO_PNG" file="resources\local_ntp\images\2x\ntp_google_logo.png" type="BINDATA" />
-      <include name="IDR_LOCAL_NTP_IMAGES_WHITE_LOGO_PNG" file="resources\local_ntp\images\ntp_white_google_logo.png" type="BINDATA" />
       <include name="IDR_LOCAL_NTP_IMAGES_2X_WHITE_LOGO_PNG" file="resources\local_ntp\images\2x\ntp_white_google_logo.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_HISTORY_ICON_PNG" file="resources\local_omnibox_popup\images\history_icon.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_2X_HISTORY_ICON_PNG" file="resources\local_omnibox_popup\images\2x\history_icon.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_PAGE_ICON_PNG" file="resources\local_omnibox_popup\images\page_icon.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_2X_PAGE_ICON_PNG" file="resources\local_omnibox_popup\images\2x\page_icon.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_SEARCH_ICON_PNG" file="resources\local_omnibox_popup\images\search_icon.png" type="BINDATA" />
-      <include name="IDR_LOCAL_OMNIBOX_POPUP_IMAGES_2X_SEARCH_ICON_PNG" file="resources\local_omnibox_popup\images\2x\search_icon.png" type="BINDATA" />
       <include name="IDR_MOST_VISITED_IFRAME_CSS" file="resources\local_ntp\most_visited_iframe.css" type="BINDATA" />
       <include name="IDR_MOST_VISITED_TITLE_HTML" file="resources\local_ntp\most_visited_title.html" type="BINDATA" />
       <include name="IDR_MOST_VISITED_TITLE_CSS" file="resources\local_ntp\most_visited_title.css" type="BINDATA" />
@@ -170,10 +169,6 @@
       <include name="IDR_MOST_VISITED_THUMBNAIL_CSS" file="resources\local_ntp\most_visited_thumbnail.css" type="BINDATA" />
       <include name="IDR_MOST_VISITED_THUMBNAIL_JS" file="resources\local_ntp\most_visited_thumbnail.js" type="BINDATA" />
       <include name="IDR_MOST_VISITED_UTIL_JS" file="resources\local_ntp\most_visited_util.js" type="BINDATA" flattenhtml="true" />
-      <include name="IDR_OMNIBOX_RESULT_LOADER_HTML" file="resources\omnibox_result_loader.html" type="BINDATA" />
-      <include name="IDR_OMNIBOX_RESULT_LOADER_JS" file="resources\omnibox_result_loader.js" type="BINDATA" flattenhtml="true" />
-      <include name="IDR_OMNIBOX_RESULT_HTML" file="resources\omnibox_result.html" type="BINDATA" />
-      <include name="IDR_OMNIBOX_RESULT_JS" file="resources\omnibox_result.js" type="BINDATA" />
 
       <include name="IDR_OMNIBOX_HTML" file="resources\omnibox\omnibox.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_OMNIBOX_CSS" file="resources\omnibox\omnibox.css" type="BINDATA" />
@@ -199,7 +194,12 @@
           <include name="IDR_PLUGIN_DB_JSON" file="resources\plugin_metadata\plugins_linux.json" type="BINDATA" />
         </if>
       </if>
-      <include name="IDR_POLICY_CSS" file="resources\policy.css" type="BINDATA"/>
+      <if expr="is_android">
+        <include name="IDR_POLICY_CSS" file="resources\policy_android.css" type="BINDATA"/>
+      </if>
+      <if expr="not is_android">
+        <include name="IDR_POLICY_CSS" file="resources\policy.css" type="BINDATA"/>
+      </if>
       <include name="IDR_POLICY_HTML" file="resources\policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
       <include name="IDR_POLICY_JS" file="resources\policy.js" type="BINDATA"/>
       <include name="IDR_PRERENDER_URL_WHITELIST"
@@ -253,6 +253,10 @@
       <include name="IDR_USER_ACTIONS_HTML" file="resources\user_actions\user_actions.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_USER_ACTIONS_CSS" file="resources\user_actions\user_actions.css" type="BINDATA" />
       <include name="IDR_USER_ACTIONS_JS" file="resources\user_actions\user_actions.js" type="BINDATA" />
+      <if expr="pp_ifdef('enable_webrtc')">
+        <include name="IDR_WEBRTC_LOGS_HTML" file="resources\media\webrtc_logs.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+        <include name="IDR_WEBRTC_LOGS_JS" file="resources\media\webrtc_logs.js" type="BINDATA" />
+      </if>
       <include name="IDR_WEBSTORE_MANIFEST" file="resources\webstore_app\manifest.json" type="BINDATA" />
       <if expr="pp_ifdef('use_ash')">
         <include name="IDR_TASK_MANAGER_HTML" file="resources\task_manager\main.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
@@ -268,7 +272,6 @@
       </if>
       <include name="IDR_GAIA_AUTH_MANIFEST" file="resources\gaia_auth\manifest.json" type="BINDATA" />
       <include name="IDR_GAIA_AUTH_KEYBOARD_MANIFEST" file="resources\gaia_auth\manifest_keyboard.json" type="BINDATA" />
-      <include name="IDR_GAIA_TEST_AUTH_MANIFEST" file="resources\gaia_auth\manifest_test.json" type="BINDATA" />
       <if expr="pp_ifdef('chromeos')">
         <include name="IDR_ABOUT_SYS_HTML" file="resources\chromeos\about_sys.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_BACKLOADER_MANIFEST" file="resources\backloader\manifest.json" type="BINDATA" />
@@ -279,6 +282,9 @@
         <include name="IDR_CRYPTOHOME_JS" file="resources\chromeos\cryptohome.js" type="BINDATA" />
         <!-- manifest file of ChromeVox accessibility extension -->
         <include name="IDR_CHROMEVOX_MANIFEST" file="resources\chromeos\access_chromevox\manifest.json" type="BINDATA" />
+        <!-- manifest file of Connectivity Diagnostics app -->
+        <include name="IDR_CONNECTIVITY_DIAGNOSTICS_MANIFEST" file="resources\chromeos\connectivity_diagnostics\manifest.json" type="BINDATA" />
+        <include name="IDR_CONNECTIVITY_DIAGNOSTICS_LAUNCHER_MANIFEST" file="resources\chromeos\connectivity_diagnostics_launcher\manifest.json" type="BINDATA" />
         <!-- manifest file of built-in speech synthesis extension -->
         <include name="IDR_SPEECH_SYNTHESIS_MANIFEST" file="resources\chromeos\speech_synthesis\manifest.json" type="BINDATA" />
         <include name="IDR_DIAGNOSTICS_MAIN_CSS" file="resources\chromeos\diagnostics\main.css" type="BINDATA" />
@@ -312,6 +318,8 @@
         <include name="IDR_SIM_UNLOCK_HTML" file="resources\chromeos\sim_unlock.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_WRENCH_MENU_CSS" file="resources\chromeos\wrench_menu.css" flattenhtml="true" type="BINDATA" />
         <include name="IDR_WRENCH_MENU_JS" file="resources\chromeos\wrench_menu.js" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_SLOW_HTML" file="resources\chromeos\slow.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_SLOW_JS" file="resources\chromeos\slow.js" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('file_manager_extension')">
         <include name="IDR_FILEMANAGER_MANIFEST" file="resources\file_manager\manifest.json" type="BINDATA" />
@@ -331,9 +339,13 @@
       </if>
       <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
         <include name="IDR_HELP_MANIFEST" file="resources\help_app\manifest.json" type="BINDATA" />
-        <include name="IDR_QUICK_OFFICE_MANIFEST" file="resources\quick_office\manifest.json" type="BINDATA" />
-        <include name="IDR_QUICKOFFICE_EDITOR_MANIFEST"
-        file="resources\quick_office\manifest_experimental.json" type="BINDATA" />
+        <include name="IDR_QUICKOFFICE_VIEWING_MANIFEST" file="resources\quick_office\manifest_viewing.json" type="BINDATA" />
+        <include name="IDR_QUICKOFFICE_EDITOR_MANIFEST" file="resources\quick_office\manifest_editor.json" type="BINDATA" />
+      </if>
+      <if expr="pp_ifdef('chromeos')">
+        <include name="IDR_SALSA_CSS" file="resources\chromeos\salsa.css" type="BINDATA" />
+        <include name="IDR_SALSA_HTML" file="resources\chromeos\salsa.html" type="BINDATA" />
+        <include name="IDR_SALSA_JS" file="resources\chromeos\salsa.js" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('use_ash')">
         <include name="IDR_GESTURE_CONFIG_CSS" file="resources\gesture_config.css" type="BINDATA" />
@@ -344,16 +356,22 @@
         <include name="IDR_SET_AS_DEFAULT_BROWSER_JS" file="resources\set_as_default_browser.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_SET_AS_DEFAULT_BROWSER_HTML" file="resources\set_as_default_browser.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       </if>
+      <if expr="not is_android and not pp_ifdef('ios') and not pp_ifdef('chromeos')">
+        <include name="IDR_USER_MANAGER_JS" file="resources\user_manager\user_manager.js" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_USER_MANAGER_HTML" file="resources\user_manager\user_manager.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      </if>
       <include name="IDR_MANAGED_MODE_BLOCK_INTERSTITIAL_HTML" file="resources\managed_mode_block_interstitial.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_PROFILE_SIGNIN_CONFIRMATION_HTML" file="resources\profile_signin_confirmation.html" type="BINDATA" />
       <include name="IDR_PROFILE_SIGNIN_CONFIRMATION_JS" file="resources\profile_signin_confirmation.js" type="BINDATA" />
       <include name="IDR_PROFILE_SIGNIN_CONFIRMATION_CSS" file="resources\profile_signin_confirmation.css" type="BINDATA" />
-
       <include name="IDR_RECENTLY_CLOSED_WINDOW" file="resources\ntp4\images\closed_window.png" type="BINDATA" />
       <if expr="not is_android">
         <include name="IDR_IDENTITY_INTERNALS_HTML" file="resources\identity_internals.html" type="BINDATA" />
         <include name="IDR_IDENTITY_INTERNALS_CSS" file="resources\identity_internals.css" type="BINDATA" />
         <include name="IDR_IDENTITY_INTERNALS_JS" file="resources\identity_internals.js" type="BINDATA" />
+      </if>
+      <if expr="pp_ifdef('_google_chrome')">
+        <include name="IDR_PREF_HASH_SEED_BIN" file="resources\settings_internal\pref_hash_seed.bin" type="BINDATA" />
       </if>
     </includes>
   </release>

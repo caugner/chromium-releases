@@ -15,6 +15,8 @@ extern const int kPaddingFromOuterEdgeOfLauncherVerticalAlignment;
 extern const int kPaddingFromInnerEdgeOfLauncherVerticalAlignment;
 extern const int kPaddingFromBottomOfScreenVerticalAlignment;
 
+extern const int kPaddingFromEdgeOfShelf;
+
 extern const int kTrayBubbleAnchorTopInsetBottomAnchor;
 
 extern const int kTrayImageItemHorizontalPaddingBottomAlignment;
@@ -60,7 +62,9 @@ extern const int kNotificationIconWidth;
 extern const int kNotificationButtonWidth;
 extern const int kTrayNotificationContentsWidth;
 
-extern const int kTraySpacing;
+// Returns kTraySpacing or kAlternateTraySpacing as applicable
+// (Determined by ash::switches::UseAlternateShelfLayout).
+int GetTraySpacing();
 
 }  // namespace ash
 

@@ -12,9 +12,10 @@
       <div>
         <div class="action-area">
           <div class="action-area-link-container">
-            <a id="customize-link" href="#" i18n-content="customizeLinkLabel"
-                class="reset-opaque reset-shown">
-            </a>
+            <button id="customize-link" type="button"
+                i18n-content="customizeLinkLabel"
+                class="link-button">
+            </button>
           </div>
           <div id="confirm-everything-throbber" class="throbber"></div>
           <div class="button-strip">
@@ -34,7 +35,10 @@
             <select id="sync-select-datatypes">
               <option i18n-content="syncAllDataTypes" selected></option>
               <option i18n-content="chooseDataTypes"></option>
-              <option i18n-content="syncNothing"></option>
+              <!-- The syncNothing element is to be removed for M29.
+                   TODO(rsimha): Revisit this for M30.
+                   See http://crbug.com/252049.
+              -->
             </select>
             <div id="choose-data-types-body">
               <div id="apps-item" class="sync-type-checkbox checkbox">
@@ -105,30 +109,6 @@
             <div id="error-text" i18n-content="syncZeroDataTypesError"
                 class="sync-configuration-error reset-hidden" hidden></div>
           </div>
-          <div id="customize-sync-encryption">
-            <hr>
-            <h4 i18n-content="encryptedDataTypesTitle"></h4>
-            <div class="sync-customize-section-container">
-              <div id="passphrase-encryption-message"
-                  i18n-content="passphraseEncryptionMessage"></div>
-              <div class="radio">
-                <label>
-                  <input id="encrypt-sensitive-option" name="encrypt"
-                      type="radio" value="sensitive">
-                  <span i18n-content="encryptSensitiveOption"></span>
-                </label>
-              </div>
-              <div class="radio">
-                <label>
-                  <input id="encrypt-all-option" name="encrypt" type="radio"
-                      value="all">
-                  <span i18n-content="encryptAllOption"></span>
-                </label>
-              </div>
-            </div>
-            <hr>
-            <h4 i18n-content="passphraseSectionTitle"></h4>
-          </div>
           <div id="customize-sync-encryption-new">
             <hr>
             <h4 i18n-content="encryptionSectionTitle"></h4>
@@ -139,7 +119,8 @@
                 <label>
                   <input id="basic-encryption-option" name="encrypt-new"
                       type="radio" value="full">
-                  <span i18n-content="basicEncryptionOption"></span>
+                  <span id="basic-encryption-body"
+                      i18n-content="basicEncryptionOption"></span>
                 </label>
               </div>
               <div class="radio">
@@ -156,24 +137,6 @@
           </div>
           <div id="sync-custom-passphrase-container"
               class="sync-customize-section-container">
-            <div id="sync-custom-passphrase-options">
-              <div class="radio">
-                <label>
-                  <input id="google-option" name="option" type="radio"
-                      value="google">
-                  <span i18n-content="googleOption"></span>
-                </label>
-              </div>
-              <div class="radio">
-                <label>
-                  <input id="explicit-option" name="option" type="radio"
-                      value="explicit">
-                  <span i18n-content="explicitOption"></span>
-                </label>
-                <a i18n-values="href:encryptionHelpURL" target="_blank"
-                    i18n-content="learnMore"></a>
-              </div>
-            </div>
             <div id="sync-custom-passphrase"
                 class="reset-hidden" hidden>
               <div id="sync-passphrase-message">
@@ -226,9 +189,10 @@
         </div>
         <div class="action-area">
           <div class="action-area-link-container">
-            <a id="use-default-link" href="#" i18n-content="useDefaultSettings"
-                class="reset-opaque reset-shown">
-            </a>
+            <button id="use-default-link" type="button"
+                i18n-content="useDefaultSettings"
+                class="link-button">
+            </button>
           </div>
           <div id="choose-datatypes-throbber" class="throbber"></div>
           <div class="button-strip">

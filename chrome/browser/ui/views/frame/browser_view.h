@@ -11,15 +11,17 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
+#include "chrome/browser/ui/views/frame/scroll_end_effect_controller.h"
 #include "chrome/browser/ui/views/load_complete_listener.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -47,9 +49,7 @@ class ContentsContainer;
 class DownloadShelfView;
 class FullscreenExitBubbleViews;
 class InfoBarContainerView;
-class InstantOverlayControllerViews;
 class LocationBarView;
-class OverlayContainer;
 class StatusBubbleViews;
 class SearchViewController;
 class TabStrip;
@@ -100,7 +100,8 @@ class BrowserView : public BrowserWindow,
                     public InfoBarContainer::Delegate,
                     public views::SingleSplitViewListener,
                     public gfx::SysColorChangeListener,
-                    public LoadCompleteListener::Delegate {
+                    public LoadCompleteListener::Delegate,
+                    public OmniboxPopupModelObserver {
  public:
   // The browser view's class name.
   static const char kViewClassName[];
@@ -127,6 +128,12 @@ class BrowserView : public BrowserWindow,
 
   // Returns a Browser instance of this view.
   Browser* browser() { return browser_.get(); }
+
+  // Initializes (or re-initializes) the status bubble.  We try to only create
+  // the bubble once and re-use it for the life of the browser, but certain
+  // events (such as changing enabling/disabling Aero on Win) can force a need
+  // to change some of the bubble's creation parameters.
+  void InitStatusBubble();
 
   // Returns the apparent bounds of the toolbar, in BrowserView coordinates.
   // These differ from |toolbar_.bounds()| in that they match where the toolbar
@@ -177,6 +184,11 @@ class BrowserView : public BrowserWindow,
   // Accessor for the InfobarContainer.
   InfoBarContainerView* infobar_container() { return infobar_container_; }
 
+  // Accessor for the FullscreenExitBubbleViews.
+  FullscreenExitBubbleViews* fullscreen_exit_bubble() {
+    return fullscreen_bubble_.get();
+  }
+
   // Returns true if various window components are visible.
   bool IsTabStripVisible() const;
 
@@ -221,10 +233,6 @@ class BrowserView : public BrowserWindow,
     return browser_->is_type_tabbed();
   }
 
-  // Returns true if the specified point(BrowserView coordinates) is in
-  // in the window caption area of the browser window.
-  bool IsPositionInWindowCaption(const gfx::Point& point);
-
   // See ImmersiveModeController for description.
   ImmersiveModeController* immersive_mode_controller() const {
     return immersive_mode_controller_.get();
@@ -243,10 +251,6 @@ class BrowserView : public BrowserWindow,
   // Called from BookmarkBarView/DownloadShelfView during their show/hide
   // animations.
   void ToolbarSizeChanged(bool is_animating);
-
-  // Called from OverlayContainer::SetOverlay() when overlay is to be shown,
-  // expanded or hidden.  Set |repaint_infobars| to true to repaint infobars.
-  void OnOverlayStateChanged(bool repaint_infobars);
 
 #if defined(USE_ASH)
   // Test support.
@@ -325,7 +329,6 @@ class BrowserView : public BrowserWindow,
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
   virtual void ShowBookmarkPrompt() OVERRIDE;
-  virtual void ShowChromeToMobileBubble() OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
@@ -344,8 +347,7 @@ class BrowserView : public BrowserWindow,
   virtual void ShowWebsiteSettings(Profile* profile,
                                    content::WebContents* web_contents,
                                    const GURL& url,
-                                   const content::SSLStatus& ssl,
-                                   bool show_history) OVERRIDE;
+                                   const content::SSLStatus& ssl) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event,
@@ -357,7 +359,6 @@ class BrowserView : public BrowserWindow,
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
-  virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
@@ -370,6 +371,7 @@ class BrowserView : public BrowserWindow,
       const gfx::Rect& rect,
       const content::PasswordForm& form,
       autofill::PasswordGenerator* password_generator) OVERRIDE;
+  virtual void OverscrollUpdate(int delta_y) OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -431,6 +433,7 @@ class BrowserView : public BrowserWindow,
   virtual FullscreenController* GetFullscreenController() OVERRIDE;
   virtual void FullscreenStateChanged() OVERRIDE;
   virtual void SetImmersiveStyle(bool immersive) OVERRIDE;
+  virtual content::WebContents* GetWebContents() OVERRIDE;
 
   // InfoBarContainer::Delegate overrides
   virtual SkColor GetInfoBarSeparatorColor() const OVERRIDE;
@@ -455,13 +458,13 @@ class BrowserView : public BrowserWindow,
   // Overridden from ui::AcceleratorTarget:
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
+  // OmniboxPopupModelObserver overrides
+  virtual void OnOmniboxPopupShownOrHidden() OVERRIDE;
+
   // Testing interface:
   views::SingleSplitView* GetContentsSplitForTest() { return contents_split_; }
   ContentsContainer* GetContentsContainerForTest() {
     return contents_container_;
-  }
-  OverlayContainer* GetOverlayContainerForTest() {
-    return overlay_container_;
   }
   views::WebView* GetContentsWebViewForTest() { return contents_web_view_; }
 
@@ -596,12 +599,7 @@ class BrowserView : public BrowserWindow,
   // an existing showing one to the front.
   void ActivateAppModalDialog() const;
 
-  // Called when overlay is committed, i.e. made the active contents, where
-  // the overlay is reparented from |overlay_container_| to
-  // |contents_container_|.
-  void MakeOverlayContentsActiveContents();
-
-  // Return the max top arrow height for infobar.
+  // Returns the max top arrow height for infobar.
   int GetMaxTopInfoBarArrowHeight();
 
   // Last focused view that issued a tab traversal.
@@ -623,16 +621,9 @@ class BrowserView : public BrowserWindow,
   // |  | Navigation buttons, address bar, menu (toolbar_)           |  |
   // |  --------------------------------------------------------------  |
   // |------------------------------------------------------------------|
-  // | OverlayContainer (overlay_container_) [1]                        |
-  // |  --------------------------------------------------------------  |
-  // |  | overlay_controller_->overlay_                              |  |
-  // |  |------------------------------------------------------------|  |
-  // |  | overlay drop shadow if overlay is partial-height           |  |
-  // |  --------------------------------------------------------------  |
+  // | All infobars (infobar_container_) [1]                            |
   // |------------------------------------------------------------------|
-  // | All infobars (infobar_container_) [2]                            |
-  // |------------------------------------------------------------------|
-  // | Bookmarks (bookmark_bar_view_) [2]                               |
+  // | Bookmarks (bookmark_bar_view_) [1]                               |
   // |------------------------------------------------------------------|
   // | Debugger splitter (contents_split_)                              |
   // |  --------------------------------------------------------------  |
@@ -649,17 +640,14 @@ class BrowserView : public BrowserWindow,
   // | Active downloads (download_shelf_)                               |
   // --------------------------------------------------------------------
   //
-  // [1] Overlay container is only visible when there's an overlay; it is
-  //     directly below the toolbar in the y-axis, and appears on top the
-  //     attached bookmark and/or info bars.
-  // [2] The bookmark bar and info bar are swapped when on the new tab page.
-  //     Additionally contents_container_ is positioned on top of the bookmark
-  //     bar when the bookmark bar is detached. This is done to allow the
-  //     overlay_controller_->overlay_ to appear over the bookmark bar.
+  // [1] The bookmark bar and info bar are swapped when on the new tab page.
+  //     Additionally when the bookmark bar is detached, contents_container_ is
+  //     positioned on top of the bar while the tab's contents are placed below
+  //     the bar.  This allows the find bar to always align with the top of
+  //     contents_container_ regardless if there's bookmark or info bars.
 
   // The view that manages the tab strip, toolbar, and sometimes the bookmark
-  // bar. Stacked second in the view hiearachy behind |overlay_container_|
-  // (refer to comments for |overlay_container_|) so it can be used to slide out
+  // bar. Stacked top in the view hiearachy so it can be used to slide out
   // the top views in immersive fullscreen.
   TopContainerView* top_container_;
 
@@ -697,11 +685,6 @@ class BrowserView : public BrowserWindow,
 
   // The view managing the |contents_web_view_|.
   ContentsContainer* contents_container_;
-
-  // The view managing the |overlay_controller_->overlay_| and, if necessary,
-  // a drop shadow below the overlay in the y-axis.  Stacked at the top of the
-  // view hiearachy so it can appear over attached bookmark and/or info bars.
-  OverlayContainer* overlay_container_;
 
   // Split view containing the contents container and devtools container.
   views::SingleSplitView* contents_split_;
@@ -775,9 +758,9 @@ class BrowserView : public BrowserWindow,
 
   scoped_ptr<ImmersiveModeController> immersive_mode_controller_;
 
-  gfx::ScopedSysColorChangeListener color_change_listener_;
+  scoped_ptr<ScrollEndEffectController> scroll_end_effect_controller_;
 
-  scoped_ptr<InstantOverlayControllerViews> overlay_controller_;
+  gfx::ScopedSysColorChangeListener color_change_listener_;
 
   mutable base::WeakPtrFactory<BrowserView> activate_modal_dialog_factory_;
 

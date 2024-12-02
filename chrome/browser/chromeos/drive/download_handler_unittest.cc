@@ -8,11 +8,10 @@
 #include "chrome/browser/chromeos/drive/dummy_file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/file_write_helper.h"
-#include "chrome/browser/google_apis/test_util.h"
+#include "chrome/browser/chromeos/drive/test_util.h"
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/mock_download_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace drive {
@@ -104,7 +103,7 @@ TEST_F(DownloadHandlerTest, SubstituteDriveDownloadPathNonDrivePath) {
       non_drive_path,
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_EQ(non_drive_path, substituted_path);
@@ -124,7 +123,7 @@ TEST_F(DownloadHandlerTest, SubstituteDriveDownloadPath) {
       drive_path,
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_TRUE(temp_dir_.path().IsParent(substituted_path));
@@ -146,7 +145,7 @@ TEST_F(DownloadHandlerTest, SubstituteDriveDownloadPathGetEntryFailure) {
       drive_path,
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_TRUE(substituted_path.empty());
@@ -166,7 +165,7 @@ TEST_F(DownloadHandlerTest, SubstituteDriveDownloadPathCreateDirectory) {
       drive_path,
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_TRUE(temp_dir_.path().IsParent(substituted_path));
@@ -189,7 +188,7 @@ TEST_F(DownloadHandlerTest,
       drive_path,
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_TRUE(substituted_path.empty());
@@ -208,7 +207,7 @@ TEST_F(DownloadHandlerTest, SubstituteDriveDownloadPathForSavePackage) {
       drive_path,
       NULL,  // DownloadItem is not available at this moment.
       google_apis::test_util::CreateCopyResultCallback(&substituted_path));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result of SubstituteDriveDownloadPath().
   EXPECT_TRUE(temp_dir_.path().IsParent(substituted_path));
@@ -241,7 +240,7 @@ TEST_F(DownloadHandlerTest, CheckForFileExistence) {
   download_handler_->CheckForFileExistence(
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&file_exists));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_TRUE(file_exists);
@@ -253,7 +252,7 @@ TEST_F(DownloadHandlerTest, CheckForFileExistence) {
   download_handler_->CheckForFileExistence(
       &download_item_,
       google_apis::test_util::CreateCopyResultCallback(&file_exists));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the result.
   EXPECT_FALSE(file_exists);

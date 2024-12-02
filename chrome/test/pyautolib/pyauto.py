@@ -288,8 +288,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         '--skip-oauth-login',
         # Enables injection of test content script for webui login automation
         '--auth-ext-path=%s' % auth_ext_path,
-        # Enable automation provider and chromeos net logs
-        '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2',
+        # Enable automation provider, chromeos net and chromeos login logs
+        '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2,' +
+            '*/chromeos/login/*=2',
       ]
     else:
       return []
@@ -2995,33 +2996,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     finally:
       shutil.rmtree(tempdir, ignore_errors=True)
 
-  def ImportSettings(self, import_from, import_items, windex=0):
-    """Import the specified import items from the specified browser.
-
-    Implements the features available in the "Import Settings" part of the
-    first-run UI dialog.
-
-    Args:
-      import_from: A string indicating which browser to import from. Possible
-                   strings (depending on which browsers are installed on the
-                   machine) are: 'Mozilla Firefox', 'Google Toolbar',
-                   'Microsoft Internet Explorer', 'Safari'
-      import_items: A list of strings indicating which items to import.
-                    Strings that can be in the list are:
-                    HISTORY, FAVORITES, PASSWORDS, SEARCH_ENGINES, HOME_PAGE,
-                    ALL (note: COOKIES is not supported by the browser yet)
-      windex: window index, defaults to 0.
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = {  # Prepare command for the json interface
-      'command': 'ImportSettings',
-      'import_from': import_from,
-      'import_items': import_items
-    }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
-
   def AddSavedPassword(self, password_dict, windex=0):
     """Adds the given username-password combination to the saved passwords.
 
@@ -4573,19 +4547,16 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         u'ethernet_networks':
             { u'/service/ethernet_abcd':
                 { u'device_path': u'/device/abcdeth',
-                  u'ip_address': u'11.22.33.44',
                   u'name': u'',
                   u'service_path':
                   u'/profile/default/ethernet_abcd',
                   u'status': u'Connected'}
               u'network_type': pyautolib.TYPE_ETHERNET },
-        u'ip_address': u'11.22.33.44',
         u'remembered_wifi':
             { u'/service/wifi_abcd_1234_managed_none':
                 { u'device_path': u'',
                   u'encrypted': False,
                   u'encryption': u'',
-                  u'ip_address': '',
                   u'name': u'WifiNetworkName1',
                   u'status': u'Unknown',
                   u'strength': 0},
@@ -4598,14 +4569,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                 { u'device_path': u'/device/abcdwifi',
                   u'encrypted': False,
                   u'encryption': u'',
-                  u'ip_address': u'123.123.123.123',
                   u'name': u'WifiNetworkName1',
                   u'status': u'Connected',
                   u'strength': 76},
               u'/service/wifi_abcd_1234_managed_802_1x':
                   { u'encrypted': True,
                     u'encryption': u'8021X',
-                    u'ip_address': u'',
                     u'name': u'WifiNetworkName2',
                     u'status': u'Idle',
                     u'strength': 79}
@@ -5117,27 +5086,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
-  def GetUpdateInfo(self):
-    """Gets the status of the ChromeOS updater.
-
-    Returns:
-      a dictionary.
-      Samples:
-      { u'status': u'idle',
-        u'release_track': u'beta-channel'}
-
-      { u'status': u'downloading',
-        u'release_track': u'beta-channel',
-        u'download_progress': 0.1203236708350371,   # 0.0 ~ 1.0
-        u'new_size': 152033593,                     # size of payload, in bytes
-        u'last_checked_time': 1302055709}           # seconds since UNIX epoch
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    cmd_dict = { 'command': 'GetUpdateInfo' }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
   def UpdateCheck(self):
     """Checks for a ChromeOS update. Blocks until finished updating.
 
@@ -5145,23 +5093,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
     cmd_dict = { 'command': 'UpdateCheck' }
-    self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def SetReleaseTrack(self, track):
-    """Sets the release track (channel) of the ChromeOS updater.
-
-    Valid values for the track parameter are:
-      'stable-channel', 'beta-channel', 'dev-channel'
-
-    Raises:
-      pyauto_errors.JSONInterfaceError if the automation call returns an error.
-    """
-    assert track in ('stable-channel', 'beta-channel', 'dev-channel'), \
-        'Attempt to set release track to unknown release track "%s".' % track
-    cmd_dict = {
-        'command': 'SetReleaseTrack',
-        'track': track,
-    }
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
   def GetVolumeInfo(self):

@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "media/base/media_export.h"
 #include "media/base/media_log.h"
 #include "media/mp4/box_definitions.h"
@@ -60,9 +60,6 @@ class MEDIA_EXPORT TrackRunIterator {
   // safely. Result is in the same units as offset() (for Media Source this is
   // in bytes past the the head of the MOOF box).
   int64 GetMaxClearOffset();
-
-  // Returns the minimum timestamp (or kInfiniteDuration if no runs present).
-  TimeDelta GetMinDecodeTimestamp();
 
   // Property of the current run. Only valid if IsRunValid().
   uint32 track_id() const;

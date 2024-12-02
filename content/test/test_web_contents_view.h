@@ -22,10 +22,10 @@ class TestWebContentsView : public WebContentsViewPort,
                              int item_height,
                              double item_font_size,
                              int selected_item,
-                             const std::vector<WebMenuItem>& items,
+                             const std::vector<MenuItem>& items,
                              bool right_aligned,
                              bool allow_multiple_selection) OVERRIDE;
-  virtual void StartDragging(const WebDropData& drop_data,
+  virtual void StartDragging(const DropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
                              const gfx::ImageSkia& image,
                              const gfx::Vector2d& image_offset,
@@ -46,7 +46,7 @@ class TestWebContentsView : public WebContentsViewPort,
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
   virtual void RestoreFocus() OVERRIDE;
-  virtual WebDropData* GetDropData() const OVERRIDE;
+  virtual DropData* GetDropData() const OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;

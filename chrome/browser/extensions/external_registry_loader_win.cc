@@ -11,7 +11,7 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/registry.h"
@@ -100,7 +100,7 @@ void ExternalRegistryLoader::LoadOnFileThread() {
       continue;
     }
 
-    if (!file_util::PathExists(extension_path)) {
+    if (!base::PathExists(extension_path)) {
       LOG(ERROR) << "File " << extension_path_str
                  << " for key " << key_path
                  << " does not exist or is not readable.";

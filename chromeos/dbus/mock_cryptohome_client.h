@@ -38,6 +38,8 @@ class MockCryptohomeClient : public CryptohomeClient {
   MOCK_METHOD2(GetSanitizedUsername,
                void(const std::string& username,
                     const StringDBusMethodCallback& callback));
+  MOCK_METHOD1(BlockingGetSanitizedUsername,
+               std::string(const std::string& username));
   MOCK_METHOD4(AsyncMount, void(const std::string& username,
                                 const std::string& key,
                                 int flags,
@@ -48,6 +50,9 @@ class MockCryptohomeClient : public CryptohomeClient {
                                  const AsyncMethodCallback& callback));
   MOCK_METHOD1(AsyncMountGuest,
                void(const AsyncMethodCallback& callback));
+  MOCK_METHOD3(AsyncMountPublic, void(const std::string& public_mount_id,
+                                      int flags,
+                                      const AsyncMethodCallback& callback));
   MOCK_METHOD1(TpmIsReady, void(const BoolDBusMethodCallback& callback));
   MOCK_METHOD1(TpmIsEnabled, void(const BoolDBusMethodCallback& callback));
   MOCK_METHOD1(CallTpmIsEnabledAndBlock, bool(bool* enabled));

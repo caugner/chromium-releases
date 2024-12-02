@@ -7,6 +7,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/printing/print_web_view_helper.h"
+#include "content/public/common/referrer.h"
+#include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
@@ -18,12 +20,16 @@
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
+#include "ppapi/shared_impl/ppb_image_data_shared.h"
 #include "ppapi/shared_impl/scoped_pp_resource.h"
 #include "ppapi/thunk/enter.h"
+#include "ppapi/thunk/ppb_image_data_api.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
@@ -31,10 +37,6 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/point.h"
-#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/ppb_image_data_impl.h"
-
-using webkit::ppapi::PluginInstance;
 
 namespace chrome {
 
@@ -175,28 +177,33 @@ int32_t PepperPDFHost::OnHostMsgGetLocalizedString(
 
 int32_t PepperPDFHost::OnHostMsgDidStartLoading(
     ppapi::host::HostMessageContext* context) {
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
-  instance->delegate()->DidStartLoading();
+  instance->GetRenderView()->DidStartLoading();
   return PP_OK;
 }
 
 int32_t PepperPDFHost::OnHostMsgDidStopLoading(
     ppapi::host::HostMessageContext* context) {
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
-  instance->delegate()->DidStopLoading();
+  instance->GetRenderView()->DidStopLoading();
   return PP_OK;
 }
 
 int32_t PepperPDFHost::OnHostMsgSetContentRestriction(
     ppapi::host::HostMessageContext* context, int restrictions) {
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
-  instance->delegate()->SetContentRestriction(restrictions);
+  instance->GetRenderView()->Send(
+      new ChromeViewHostMsg_PDFUpdateContentRestrictions(
+          instance->GetRenderView()->GetRoutingID(), restrictions));
   return PP_OK;
 }
 
@@ -220,7 +227,8 @@ int32_t PepperPDFHost::OnHostMsgUserMetricsRecordAction(
 
 int32_t PepperPDFHost::OnHostMsgHasUnsupportedFeature(
     ppapi::host::HostMessageContext* context) {
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
 
@@ -229,7 +237,7 @@ int32_t PepperPDFHost::OnHostMsgHasUnsupportedFeature(
     return PP_OK;
 
   WebKit::WebView* view =
-      instance->container()->element().document().frame()->view();
+      instance->GetContainer()->element().document().frame()->view();
   content::RenderView* render_view = content::RenderView::FromWebView(view);
   render_view->Send(new ChromeViewHostMsg_PDFHasUnsupportedFeature(
       render_view->GetRoutingID()));
@@ -238,12 +246,13 @@ int32_t PepperPDFHost::OnHostMsgHasUnsupportedFeature(
 
 int32_t PepperPDFHost::OnHostMsgPrint(
     ppapi::host::HostMessageContext* context) {
-#if defined(ENABLE_PRINTING)
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+#if defined(ENABLE_FULL_PRINTING)
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
 
-  WebKit::WebElement element = instance->container()->element();
+  WebKit::WebElement element = instance->GetContainer()->element();
   WebKit::WebView* view = element.document().frame()->view();
   content::RenderView* render_view = content::RenderView::FromWebView(view);
 
@@ -259,10 +268,17 @@ int32_t PepperPDFHost::OnHostMsgPrint(
 
 int32_t PepperPDFHost::OnHostMsgSaveAs(
     ppapi::host::HostMessageContext* context) {
-  PluginInstance* instance = host_->GetPluginInstance(pp_instance());
+  content::PepperPluginInstance* instance =
+      host_->GetPluginInstance(pp_instance());
   if (!instance)
     return PP_ERROR_FAILED;
-  instance->delegate()->SaveURLAs(instance->plugin_url());
+  GURL url = instance->GetPluginURL();
+  content::RenderView* render_view = instance->GetRenderView();
+  WebKit::WebFrame* frame = render_view->GetWebView()->mainFrame();
+  content::Referrer referrer(frame->document().url(),
+                             frame->document().referrerPolicy());
+  render_view->Send(new ChromeViewHostMsg_PDFSaveURLAs(
+      render_view->GetRoutingID(), url, referrer));
   return PP_OK;
 }
 
@@ -304,7 +320,7 @@ int32_t PepperPDFHost::OnHostMsgGetResourceImage(
   uint32_t byte_count = 0;
   bool success = CreateImageData(
       pp_instance(),
-      webkit::ppapi::PPB_ImageData_Impl::GetNativeImageDataFormat(),
+      ppapi::PPB_ImageData_Shared::GetNativeImageDataFormat(),
       pp_size,
       image_skia_rep.sk_bitmap(),
       &host_resource,
@@ -361,16 +377,25 @@ bool PepperPDFHost::CreateImageData(
   if (enter_resource.failed())
     return false;
 
-  webkit::ppapi::PPB_ImageData_Impl* image_data =
-      static_cast<webkit::ppapi::PPB_ImageData_Impl*>(enter_resource.object());
-  webkit::ppapi::ImageDataAutoMapper mapper(image_data);
-  if (!mapper.is_valid())
-    return false;
+  ppapi::thunk::PPB_ImageData_API* image_data =
+      static_cast<ppapi::thunk::PPB_ImageData_API*>(enter_resource.object());
+  SkCanvas* canvas = image_data->GetCanvas();
+  bool needs_unmapping = false;
+  if (!canvas) {
+    needs_unmapping = true;
+    image_data->Map();
+    canvas = image_data->GetCanvas();
+    if (!canvas)
+      return false;  // Failure mapping.
+  }
 
-  const SkBitmap* bitmap = image_data->GetMappedBitmap();
+  const SkBitmap* bitmap = &skia::GetTopDevice(*canvas)->accessBitmap(false);
   pixels_to_write.copyPixelsTo(bitmap->getPixels(),
                                bitmap->getSize(),
                                bitmap->rowBytes());
+
+  if (needs_unmapping)
+    image_data->Unmap();
 
   return true;
 }

@@ -18,7 +18,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
@@ -482,8 +482,8 @@ void SafeBrowsingBlockingPage::OnDontProceed() {
   if (navigation_entry_index_to_remove_ != -1 &&
       navigation_entry_index_to_remove_ != last_committed_index &&
       !web_contents_->IsBeingDestroyed()) {
-    web_contents_->GetController().RemoveEntryAtIndex(
-        navigation_entry_index_to_remove_);
+    CHECK(web_contents_->GetController().RemoveEntryAtIndex(
+        navigation_entry_index_to_remove_));
     navigation_entry_index_to_remove_ = -1;
   }
 }

@@ -7,13 +7,13 @@
 #include <windows.h>
 
 #include "base/bind.h"
-#include "base/message_loop.h"
-#include "base/process_util.h"
+#include "base/message_loop/message_loop.h"
+#include "base/process/launch.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/win/object_watcher.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"

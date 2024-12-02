@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "net/base/cache_type.h"
 
 namespace base {
@@ -20,16 +21,26 @@ namespace disk_cache {
 class Backend;
 }
 
-namespace pnacl_cache {
+namespace nacl {
+struct PnaclCacheInfo;
+}
+
+namespace net {
+class DrainableIOBuffer;
+}
+
+namespace pnacl {
 typedef base::Callback<void(int)> CompletionCallback;
-class PNaClTranslationCacheEntry;
+typedef base::Callback<void(int, scoped_refptr<net::DrainableIOBuffer>)>
+    GetNexeCallback;
+class PnaclTranslationCacheEntry;
 extern const int kMaxMemCacheSize;
 
-class PNaClTranslationCache
-    : public base::SupportsWeakPtr<PNaClTranslationCache> {
+class PnaclTranslationCache
+    : public base::SupportsWeakPtr<PnaclTranslationCache> {
  public:
-  PNaClTranslationCache();
-  virtual ~PNaClTranslationCache();
+  PnaclTranslationCache();
+  virtual ~PnaclTranslationCache();
 
   // Initialize the translation cache in |cache_dir| (or in memory if
   // |in_memory| is true). Call |callback| with a 0 argument on sucess and
@@ -38,31 +49,42 @@ class PNaClTranslationCache
                 bool in_memory,
                 const CompletionCallback& callback);
 
-  // Store the nexe in the translation cache.
-  void StoreNexe(const std::string& key, const std::string& nexe);
+  // Store the nexe in the translation cache. A reference to |nexe_data| is
+  // held until completion or cancellation.
+  void StoreNexe(const std::string& key, net::DrainableIOBuffer* nexe_data);
 
   // Store the nexe in the translation cache, and call |callback| with
   // the result. The result passed to the callback is 0 on success and
-  // <0 otherwise.
+  // <0 otherwise. A reference to |nexe_data| is held until completion
+  // or cancellation.
   void StoreNexe(const std::string& key,
-                 const std::string& nexe,
+                 net::DrainableIOBuffer* nexe_data,
                  const CompletionCallback& callback);
 
   // Retrieve the nexe from the translation cache. Write the data into |nexe|
-  // and call |callback| with the result (0 on success and <0 otherwise)
-  void GetNexe(const std::string& key,
-               std::string* nexe,
-               const CompletionCallback& callback);
+  // and call |callback|, passing a result code (0 on success and <0 otherwise),
+  // and a DrainableIOBuffer with the data.
+  void GetNexe(const std::string& key, const GetNexeCallback& callback);
 
   // Return the number of entries in the cache backend.
   int Size();
 
+  // Return the cache key for |info|
+  static std::string GetKey(const nacl::PnaclCacheInfo& info);
+
+  // Doom all entries between |initial| and |end|. If the return value is
+  // net::ERR_IO_PENDING, |callback| will be invoked when the operation
+  // completes.
+  int DoomEntriesBetween(base::Time initial, base::Time end,
+                         const CompletionCallback& callback);
+
  private:
-  friend class PNaClTranslationCacheEntry;
-  // PNaClTranslationCacheEntry should only use the
-  // OpComplete and backend methods on PNaClTranslationCache.
-  void OpComplete(PNaClTranslationCacheEntry* entry);
-  disk_cache::Backend* backend() { return disk_cache_; }
+  friend class PnaclTranslationCacheEntry;
+  friend class PnaclTranslationCacheTest;
+  // PnaclTranslationCacheEntry should only use the
+  // OpComplete and backend methods on PnaclTranslationCache.
+  void OpComplete(PnaclTranslationCacheEntry* entry);
+  disk_cache::Backend* backend() { return disk_cache_.get(); }
 
   int InitWithDiskBackend(const base::FilePath& disk_cache_dir,
                           int cache_size,
@@ -77,14 +99,14 @@ class PNaClTranslationCache
 
   void OnCreateBackendComplete(int rv);
 
-  disk_cache::Backend* disk_cache_;
+  scoped_ptr<disk_cache::Backend> disk_cache_;
   CompletionCallback init_callback_;
   bool in_memory_;
-  std::map<void*, scoped_refptr<PNaClTranslationCacheEntry> > open_entries_;
+  std::map<void*, scoped_refptr<PnaclTranslationCacheEntry> > open_entries_;
 
-  DISALLOW_COPY_AND_ASSIGN(PNaClTranslationCache);
+  DISALLOW_COPY_AND_ASSIGN(PnaclTranslationCache);
 };
 
-}  // namespace pnacl_cache
+}  // namespace pnacl
 
 #endif  // CHROME_BROWSER_NACL_HOST_PNACL_TRANSLATION_CACHE_H_

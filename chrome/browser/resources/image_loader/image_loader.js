@@ -2,18 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Loads and resizes an image.
  * @constructor
  */
 function ImageLoader() {
-  /**
-   * Hash array of active requests.
-   * @type {Object}
-   * @private
-   */
-  this.requests_ = {};
-
   /**
    * Persistent cache object.
    * @type {Cache}
@@ -28,14 +23,11 @@ function ImageLoader() {
    */
   this.worker_ = new Worker();
 
-  // Grant permissions to the local file system.
+  // Grant permissions to the local file system and initialize the cache.
   chrome.fileBrowserPrivate.requestFileSystem(function(filesystem) {
-    // TODO(mtomasz): Handle.
-  });
-
-  // Initialize the cache database, then start handling requests.
-  this.cache_.initialize(function() {
-    this.worker_.start();
+    this.cache_.initialize(function() {
+      this.worker_.start();
+    }.bind(this));
   }.bind(this));
 
   chrome.extension.onMessageExternal.addListener(function(request,
@@ -81,15 +73,11 @@ ImageLoader.prototype.onMessage_ = function(senderId, request, callback) {
   var requestId = senderId + ':' + request.taskId;
   if (request.cancel) {
     // Cancel a task.
-    if (requestId in this.requests_) {
-      this.requests_[requestId].cancel();
-      delete this.requests_[requestId];
-    }
+    this.worker_.remove(requestId);
     return false;  // No callback calls.
   } else {
     // Create a request task and add it to the worker (queue).
-    var requestTask = new Request(this.cache_, request, callback);
-    this.requests_[requestId] = requestTask;
+    var requestTask = new Request(requestId, this.cache_, request, callback);
     this.worker_.add(requestTask);
     return true;  // Request will call the callback.
   }
@@ -103,6 +91,29 @@ ImageLoader.getInstance = function() {
   if (!ImageLoader.instance_)
     ImageLoader.instance_ = new ImageLoader();
   return ImageLoader.instance_;
+};
+
+/**
+ * Checks if the options contain any image processing.
+ *
+ * @param {number} width Source width.
+ * @param {number} height Source height.
+ * @param {Object} options Resizing options as a hash array.
+ * @return {boolean} True if yes, false if not.
+ */
+ImageLoader.shouldProcess = function(width, height, options) {
+  var targetDimensions = ImageLoader.resizeDimensions(width, height, options);
+
+  // Dimensions has to be adjusted.
+  if (targetDimensions.width != width || targetDimensions.height != height)
+    return true;
+
+  // Orientation has to be adjusted.
+  if (options.orientation)
+    return true;
+
+  // No changes required.
+  return false;
 };
 
 /**
@@ -179,6 +190,8 @@ ImageLoader.resize = function(source, target, options) {
   var orientation = options.orientation || 0;
 
   // For odd orientation values: 1 (90deg) and 3 (270deg) flip dimensions.
+  var drawImageWidth;
+  var drawImageHeight;
   if (orientation % 2) {
     drawImageWidth = target.height;
     drawImageHeight = target.width;

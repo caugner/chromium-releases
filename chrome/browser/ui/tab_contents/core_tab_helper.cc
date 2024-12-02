@@ -4,8 +4,13 @@
 
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -19,7 +24,8 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(CoreTabHelper);
 
 CoreTabHelper::CoreTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-      delegate_(NULL) {
+      delegate_(NULL),
+      content_restrictions_(0) {
 }
 
 CoreTabHelper::~CoreTabHelper() {
@@ -36,6 +42,9 @@ string16 CoreTabHelper::GetStatusText() const {
   }
 
   switch (web_contents()->GetLoadState().state) {
+    case net::LOAD_STATE_WAITING_FOR_STALLED_SOCKET_POOL:
+    case net::LOAD_STATE_WAITING_FOR_AVAILABLE_SOCKET:
+      return l10n_util::GetStringUTF16(IDS_LOAD_STATE_WAITING_FOR_SOCKET_SLOT);
     case net::LOAD_STATE_WAITING_FOR_DELEGATE:
       if (!web_contents()->GetLoadState().param.empty()) {
         return l10n_util::GetStringFUTF16(IDS_LOAD_STATE_WAITING_FOR_DELEGATE,
@@ -93,10 +102,35 @@ void CoreTabHelper::OnCloseStarted() {
 void CoreTabHelper::OnCloseCanceled() {
   close_start_time_ = base::TimeTicks();
   before_unload_end_time_ = base::TimeTicks();
+  unload_detached_start_time_ = base::TimeTicks();
+}
+
+void CoreTabHelper::OnUnloadStarted() {
+  before_unload_end_time_ = base::TimeTicks::Now();
+}
+
+void CoreTabHelper::OnUnloadDetachedStarted() {
+  if (unload_detached_start_time_.is_null())
+    unload_detached_start_time_ = base::TimeTicks::Now();
+}
+
+void CoreTabHelper::UpdateContentRestrictions(int content_restrictions) {
+  content_restrictions_ = content_restrictions;
+#if !defined(OS_ANDROID)
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  if (!browser)
+    return;
+
+  browser->command_controller()->ContentRestrictionsChanged();
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // WebContentsObserver overrides
+
+void CoreTabHelper::DidStartLoading(content::RenderViewHost* render_view_host) {
+  UpdateContentRestrictions(0);
+}
 
 void CoreTabHelper::WasShown() {
   WebCacheManager::GetInstance()->ObserveActivity(
@@ -106,12 +140,30 @@ void CoreTabHelper::WasShown() {
 void CoreTabHelper::WebContentsDestroyed(WebContents* web_contents) {
   // OnCloseStarted isn't called in unit tests.
   if (!close_start_time_.is_null()) {
-    base::TimeTicks now = base::TimeTicks::Now();
-    base::TimeTicks unload_start_time = close_start_time_;
-    if (!before_unload_end_time_.is_null())
-      unload_start_time = before_unload_end_time_;
-    UMA_HISTOGRAM_TIMES("Tab.Close", now - close_start_time_);
-    UMA_HISTOGRAM_TIMES("Tab.Close.UnloadTime", now - unload_start_time);
+    bool fast_tab_close_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableFastUnload);
+
+    if (fast_tab_close_enabled) {
+      base::TimeTicks now = base::TimeTicks::Now();
+      base::TimeDelta close_time = now - close_start_time_;
+      UMA_HISTOGRAM_TIMES("Tab.Close", close_time);
+
+      base::TimeTicks unload_start_time = close_start_time_;
+      base::TimeTicks unload_end_time = now;
+      if (!before_unload_end_time_.is_null())
+        unload_start_time = before_unload_end_time_;
+      if (!unload_detached_start_time_.is_null())
+        unload_end_time = unload_detached_start_time_;
+      base::TimeDelta unload_time = unload_end_time - unload_start_time;
+      UMA_HISTOGRAM_TIMES("Tab.Close.UnloadTime", unload_time);
+    } else {
+      base::TimeTicks now = base::TimeTicks::Now();
+      base::TimeTicks unload_start_time = close_start_time_;
+      if (!before_unload_end_time_.is_null())
+        unload_start_time = before_unload_end_time_;
+      UMA_HISTOGRAM_TIMES("Tab.Close", now - close_start_time_);
+      UMA_HISTOGRAM_TIMES("Tab.Close.UnloadTime", now - unload_start_time);
+    }
   }
 
 }

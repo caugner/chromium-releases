@@ -12,12 +12,14 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
@@ -51,19 +53,21 @@ ProfileSyncServiceFactory::ProfileSyncServiceFactory()
   // The ProfileSyncService depends on various SyncableServices being around
   // when it is shut down.  Specify those dependencies here to build the proper
   // destruction order.
-  DependsOn(TemplateURLServiceFactory::GetInstance());
+  DependsOn(AboutSigninInternalsFactory::GetInstance());
   DependsOn(autofill::PersonalDataManagerFactory::GetInstance());
+  DependsOn(BookmarkModelFactory::GetInstance());
+  DependsOn(extensions::ExtensionSystemFactory::GetInstance());
+  DependsOn(GlobalErrorServiceFactory::GetInstance());
+  DependsOn(HistoryServiceFactory::GetInstance());
+  DependsOn(invalidation::InvalidationServiceFactory::GetInstance());
+  DependsOn(PasswordStoreFactory::GetInstance());
+  DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
+  DependsOn(SigninManagerFactory::GetInstance());
+  DependsOn(TemplateURLServiceFactory::GetInstance());
 #if defined(ENABLE_THEMES)
   DependsOn(ThemeServiceFactory::GetInstance());
 #endif
-  DependsOn(GlobalErrorServiceFactory::GetInstance());
-  DependsOn(SigninManagerFactory::GetInstance());
-  DependsOn(PasswordStoreFactory::GetInstance());
-  DependsOn(extensions::ExtensionSystemFactory::GetInstance());
   DependsOn(WebDataServiceFactory::GetInstance());
-  DependsOn(HistoryServiceFactory::GetInstance());
-  DependsOn(BookmarkModelFactory::GetInstance());
-  DependsOn(AboutSigninInternalsFactory::GetInstance());
 
   // The following have not been converted to BrowserContextKeyedServices yet,
   // and for now they are explicitly destroyed after the

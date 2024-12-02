@@ -5,7 +5,7 @@
 #include "base/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "chrome/browser/value_store/value_store_frontend.h"
 #include "chrome/common/chrome_paths.h"
@@ -30,7 +30,7 @@ class ValueStoreFrontendTest : public testing::Test {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     base::FilePath src_db(test_data_dir.AppendASCII("value_store_db"));
     db_path_ = temp_dir_.path().AppendASCII("temp_db");
-    file_util::CopyDirectory(src_db, db_path_, true);
+    base::CopyDirectory(src_db, db_path_, true);
 
     ResetStorage();
   }

@@ -47,18 +47,19 @@ ExtensionInfoBarGtk::ExtensionInfoBarGtk(InfoBarService* owner,
       icon_(NULL),
       alignment_(NULL),
       weak_ptr_factory_(this) {
-  delegate->set_observer(this);
+  GetDelegate()->set_observer(this);
 
-  int height = delegate->height();
+  int height = GetDelegate()->height();
   SetBarTargetHeight((height > 0) ? (height + kSeparatorLineHeight) : 0);
 }
 
 ExtensionInfoBarGtk::~ExtensionInfoBarGtk() {
-  if (delegate_)
-    delegate_->set_observer(NULL);
+  if (GetDelegate())
+    GetDelegate()->set_observer(NULL);
 }
 
 void ExtensionInfoBarGtk::PlatformSpecificHide(bool animate) {
+  DCHECK(view_);
   DCHECK(alignment_);
   gtk_util::RemoveAllChildren(alignment_);
 }
@@ -74,9 +75,82 @@ void ExtensionInfoBarGtk::GetBottomColor(InfoBarDelegate::Type type,
   *r = *g = *b = 218.0 / 255.0;
 }
 
+void ExtensionInfoBarGtk::InitWidgets() {
+  InfoBarGtk::InitWidgets();
+
+  // Always render the close button as if we were doing chrome style widget
+  // rendering. For extension infobars, we force chrome style rendering because
+  // extension authors are going to expect to match the declared gradient in
+  // extensions_infobar.css, and the close button provided by some GTK+ themes
+  // won't look good on this background.
+  ForceCloseButtonToUseChromeTheme();
+
+  icon_ = gtk_image_new();
+  gtk_misc_set_alignment(GTK_MISC(icon_), 0.5, 0.5);
+
+  extensions::ExtensionHost* extension_host = GetDelegate()->extension_host();
+  const extensions::Extension* extension = extension_host->extension();
+
+  if (extension->ShowConfigureContextMenus()) {
+    button_ = gtk_chrome_button_new();
+    gtk_chrome_button_set_use_gtk_rendering(GTK_CHROME_BUTTON(button_), FALSE);
+    g_object_set_data(G_OBJECT(button_), "left-align-popup",
+                      reinterpret_cast<void*>(true));
+
+    gtk_button_set_image(GTK_BUTTON(button_), icon_);
+    gtk_util::CenterWidgetInHBox(hbox(), button_, false, 0);
+  } else {
+    gtk_util::CenterWidgetInHBox(hbox(), icon_, false, 0);
+  }
+
+  // Start loading the image for the menu button.
+  extensions::ExtensionResource icon_resource =
+      extensions::IconsInfo::GetIconResource(
+          extension,
+          extension_misc::EXTENSION_ICON_BITTY,
+          ExtensionIconSet::MATCH_EXACTLY);
+  // Load image asynchronously, calling back OnImageLoaded.
+  extensions::ImageLoader* loader =
+      extensions::ImageLoader::Get(extension_host->profile());
+  loader->LoadImageAsync(extension, icon_resource,
+                         gfx::Size(extension_misc::EXTENSION_ICON_BITTY,
+                                   extension_misc::EXTENSION_ICON_BITTY),
+                         base::Bind(&ExtensionInfoBarGtk::OnImageLoaded,
+                                    weak_ptr_factory_.GetWeakPtr()));
+
+  // Pad the bottom of the infobar by one pixel for the border.
+  alignment_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
+  gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_), 0, 1, 0, 0);
+  gtk_box_pack_start(GTK_BOX(hbox()), alignment_, TRUE, TRUE, 0);
+
+  view_ = extension_host->view();
+
+  if (gtk_widget_get_parent(view_->native_view())) {
+    gtk_widget_reparent(view_->native_view(), alignment_);
+  } else {
+    gtk_container_add(GTK_CONTAINER(alignment_), view_->native_view());
+  }
+
+  if (button_) {
+    signals()->Connect(button_, "button-press-event",
+                       G_CALLBACK(&OnButtonPressThunk), this);
+  }
+  signals()->Connect(view_->native_view(), "expose-event",
+                     G_CALLBACK(&OnExposeThunk), this);
+  signals()->Connect(view_->native_view(), "size_allocate",
+                     G_CALLBACK(&OnSizeAllocateThunk), this);
+}
+
+void ExtensionInfoBarGtk::StoppedShowing() {
+  if (button_)
+    gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(button_));
+}
+
+void ExtensionInfoBarGtk::OnDelegateDeleted() {
+  delegate_ = NULL;
+}
+
 void ExtensionInfoBarGtk::OnImageLoaded(const gfx::Image& image) {
-  if (!delegate_)
-    return;  // The delegate can go away while we asynchronously load images.
 
   DCHECK(icon_);
   // TODO(erg): IDR_EXTENSIONS_SECTION should have an IDR_INFOBAR_EXTENSIONS
@@ -112,94 +186,21 @@ void ExtensionInfoBarGtk::OnImageLoaded(const gfx::Image& image) {
   g_object_unref(pixbuf);
 }
 
-void ExtensionInfoBarGtk::InitWidgets() {
-  InfoBarGtk::InitWidgets();
-
-  // Always render the close button as if we were doing chrome style widget
-  // rendering. For extension infobars, we force chrome style rendering because
-  // extension authors are going to expect to match the declared gradient in
-  // extensions_infobar.css, and the close button provided by some GTK+ themes
-  // won't look good on this background.
-  close_button_->ForceChromeTheme();
-
-  icon_ = gtk_image_new();
-  gtk_misc_set_alignment(GTK_MISC(icon_), 0.5, 0.5);
-
-  const extensions::Extension* extension =
-      delegate_->extension_host()->extension();
-
-  if (extension->ShowConfigureContextMenus()) {
-    button_ = gtk_chrome_button_new();
-    gtk_chrome_button_set_use_gtk_rendering(GTK_CHROME_BUTTON(button_), FALSE);
-    g_object_set_data(G_OBJECT(button_), "left-align-popup",
-                      reinterpret_cast<void*>(true));
-
-    gtk_button_set_image(GTK_BUTTON(button_), icon_);
-    gtk_util::CenterWidgetInHBox(hbox_, button_, false, 0);
-  } else {
-    gtk_util::CenterWidgetInHBox(hbox_, icon_, false, 0);
-  }
-
-  // Start loading the image for the menu button.
-  extensions::ExtensionResource icon_resource =
-      extensions::IconsInfo::GetIconResource(
-          extension,
-          extension_misc::EXTENSION_ICON_BITTY,
-          ExtensionIconSet::MATCH_EXACTLY);
-  // Load image asynchronously, calling back OnImageLoaded.
-  extensions::ImageLoader* loader =
-      extensions::ImageLoader::Get(delegate_->extension_host()->profile());
-  loader->LoadImageAsync(extension, icon_resource,
-                         gfx::Size(extension_misc::EXTENSION_ICON_BITTY,
-                                   extension_misc::EXTENSION_ICON_BITTY),
-                         base::Bind(&ExtensionInfoBarGtk::OnImageLoaded,
-                                    weak_ptr_factory_.GetWeakPtr()));
-
-  // Pad the bottom of the infobar by one pixel for the border.
-  alignment_ = gtk_alignment_new(0.0, 0.0, 1.0, 1.0);
-  gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_), 0, 1, 0, 0);
-  gtk_box_pack_start(GTK_BOX(hbox_), alignment_, TRUE, TRUE, 0);
-
-  extensions::ExtensionHost* extension_host = delegate_->extension_host();
-  view_ = extension_host->view();
-
-  if (gtk_widget_get_parent(view_->native_view())) {
-    gtk_widget_reparent(view_->native_view(), alignment_);
-  } else {
-    gtk_container_add(GTK_CONTAINER(alignment_), view_->native_view());
-  }
-
-  if (button_) {
-    Signals()->Connect(button_, "button-press-event",
-                       G_CALLBACK(&OnButtonPressThunk), this);
-  }
-  Signals()->Connect(view_->native_view(), "expose-event",
-                     G_CALLBACK(&OnExposeThunk), this);
-  Signals()->Connect(view_->native_view(), "size_allocate",
-                     G_CALLBACK(&OnSizeAllocateThunk), this);
-}
-
-void ExtensionInfoBarGtk::StoppedShowing() {
-  if (button_)
-    gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(button_));
-}
-
-void ExtensionInfoBarGtk::OnDelegateDeleted() {
-  delegate_ = NULL;
+ExtensionInfoBarDelegate* ExtensionInfoBarGtk::GetDelegate() {
+  return delegate_ ? delegate_->AsExtensionInfoBarDelegate() : NULL;
 }
 
 Browser* ExtensionInfoBarGtk::GetBrowser() {
   DCHECK(icon_);
   // Get the Browser object this infobar is attached to.
   GtkWindow* parent = platform_util::GetTopLevel(icon_);
-  if (!parent)
-    return NULL;
-
-  return BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent)->browser();
+  return parent ?
+      BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent)->browser() :
+      NULL;
 }
 
 ExtensionContextMenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
-  const extensions::Extension* extension = delegate_->extension();
+  const extensions::Extension* extension = GetDelegate()->extension();
   if (!extension->ShowConfigureContextMenus())
     return NULL;
 
@@ -214,8 +215,8 @@ void ExtensionInfoBarGtk::OnSizeAllocate(GtkWidget* widget,
                                          GtkAllocation* allocation) {
   gfx::Size new_size(allocation->width, allocation->height);
 
-  delegate_->extension_host()->view()->render_view_host()->GetView()
-      ->SetSize(new_size);
+  GetDelegate()->extension_host()->view()->render_view_host()->GetView()->
+      SetSize(new_size);
 }
 
 gboolean ExtensionInfoBarGtk::OnButtonPress(GtkWidget* widget,

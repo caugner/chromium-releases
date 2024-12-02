@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
 #include "content/public/browser/content_browser_client.h"
@@ -35,10 +35,6 @@ class Preferences;
 
 namespace base {
 class SequencedTaskRunner;
-}
-
-namespace content {
-class SpeechRecognitionPreferences;
 }
 
 namespace extensions {
@@ -62,10 +58,10 @@ class ProfileImpl : public Profile {
 
   virtual ~ProfileImpl();
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // content::BrowserContext implementation:
-  virtual base::FilePath GetPath() OVERRIDE;
+  virtual base::FilePath GetPath() const OVERRIDE;
   virtual content::DownloadManagerDelegate*
       GetDownloadManagerDelegate() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
@@ -78,11 +74,14 @@ class ProfileImpl : public Profile {
       GetMediaRequestContextForStoragePartition(
           const base::FilePath& partition_path,
           bool in_memory) OVERRIDE;
+  virtual void RequestMIDISysExPermission(
+      int render_process_id,
+      int render_view_id,
+      const GURL& requesting_frame,
+      const MIDISysExPermissionCallback& callback) OVERRIDE;
   virtual content::ResourceContext* GetResourceContext() OVERRIDE;
   virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
-  virtual content::SpeechRecognitionPreferences*
-      GetSpeechRecognitionPreferences() OVERRIDE;
   virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
   // Profile implementation:
@@ -95,6 +94,7 @@ class ProfileImpl : public Profile {
   virtual void DestroyOffTheRecordProfile() OVERRIDE;
   virtual bool HasOffTheRecordProfile() OVERRIDE;
   virtual Profile* GetOriginalProfile() OVERRIDE;
+  virtual bool IsManaged() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
@@ -190,6 +190,8 @@ class ProfileImpl : public Profile {
   void GetCacheParameters(bool is_media_context,
                           base::FilePath* cache_path,
                           int* max_size);
+
+  PrefProxyConfigTracker* CreateProxyConfigTracker();
 
   content::HostZoomMap::ZoomLevelChangedCallback zoom_callback_;
   PrefChangeRegistrar pref_change_registrar_;

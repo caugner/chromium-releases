@@ -11,25 +11,26 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/platform_file.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/async_file_test_helper.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
+#include "webkit/browser/fileapi/file_system_backend.h"
 #include "webkit/browser/fileapi/file_system_context.h"
-#include "webkit/browser/fileapi/file_system_mount_point_provider.h"
 #include "webkit/browser/fileapi/file_system_operation_context.h"
-#include "webkit/browser/fileapi/file_system_task_runners.h"
 #include "webkit/browser/fileapi/file_system_usage_cache.h"
 #include "webkit/browser/fileapi/mock_file_change_observer.h"
 #include "webkit/browser/fileapi/mock_file_system_context.h"
 #include "webkit/browser/fileapi/obfuscated_file_util.h"
 #include "webkit/browser/fileapi/sandbox_directory_database.h"
 #include "webkit/browser/fileapi/sandbox_file_system_test_helper.h"
+#include "webkit/browser/fileapi/sandbox_isolated_origin_database.h"
 #include "webkit/browser/fileapi/sandbox_origin_database.h"
 #include "webkit/browser/fileapi/test_file_set.h"
 #include "webkit/browser/quota/mock_special_storage_policy.h"
 #include "webkit/browser/quota/quota_manager.h"
+#include "webkit/common/database/database_identifier.h"
 #include "webkit/common/quota/quota_types.h"
 
 namespace fileapi {
@@ -37,7 +38,7 @@ namespace fileapi {
 namespace {
 
 bool FileExists(const base::FilePath& path) {
-  return file_util::PathExists(path) && !file_util::DirectoryExists(path);
+  return base::PathExists(path) && !base::DirectoryExists(path);
 }
 
 int64 GetSize(const base::FilePath& path) {
@@ -142,8 +143,8 @@ class ObfuscatedFileUtilTest : public testing::Test {
 
     // Every time we create a new sandbox_file_system helper,
     // it creates another context, which creates another path manager,
-    // another sandbox_mount_point_provider, and
-    // another OFU.  We need to pass in the context to skip all that.
+    // another sandbox_backend, and another OFU.
+    // We need to pass in the context to skip all that.
     file_system_context_ = CreateFileSystemContextForTesting(
         quota_manager_->proxy(),
         data_dir_.path());
@@ -720,7 +721,7 @@ TEST_F(ObfuscatedFileUtilTest, TestCreateAndDeleteFile) {
   base::FilePath local_path;
   EXPECT_EQ(base::PLATFORM_FILE_OK, ofu()->GetLocalFilePath(
       context.get(), url, &local_path));
-  EXPECT_TRUE(file_util::PathExists(local_path));
+  EXPECT_TRUE(base::PathExists(local_path));
 
   // Verify that deleting a file isn't stopped by zero quota, and that it frees
   // up quote from its path.
@@ -729,7 +730,7 @@ TEST_F(ObfuscatedFileUtilTest, TestCreateAndDeleteFile) {
   EXPECT_EQ(base::PLATFORM_FILE_OK,
             ofu()->DeleteFile(context.get(), url));
   EXPECT_EQ(1, change_observer()->get_and_reset_remove_file_count());
-  EXPECT_FALSE(file_util::PathExists(local_path));
+  EXPECT_FALSE(base::PathExists(local_path));
   EXPECT_EQ(ObfuscatedFileUtil::ComputeFilePathCost(url.path()),
       context->allowed_bytes_growth());
 
@@ -758,13 +759,13 @@ TEST_F(ObfuscatedFileUtilTest, TestCreateAndDeleteFile) {
   context.reset(NewContext(NULL));
   EXPECT_EQ(base::PLATFORM_FILE_OK, ofu()->GetLocalFilePath(
       context.get(), url, &local_path));
-  EXPECT_TRUE(file_util::PathExists(local_path));
+  EXPECT_TRUE(base::PathExists(local_path));
 
   context.reset(NewContext(NULL));
   EXPECT_EQ(base::PLATFORM_FILE_OK,
             ofu()->DeleteFile(context.get(), url));
   EXPECT_EQ(1, change_observer()->get_and_reset_remove_file_count());
-  EXPECT_FALSE(file_util::PathExists(local_path));
+  EXPECT_FALSE(base::PathExists(local_path));
 
   // Make sure we have no unexpected changes.
   EXPECT_TRUE(change_observer()->HasNoChange());
@@ -867,7 +868,7 @@ TEST_F(ObfuscatedFileUtilTest, TestQuotaOnTruncation) {
                 UnlimitedContext().get(),
                 url, &local_path));
   ASSERT_FALSE(local_path.empty());
-  ASSERT_TRUE(file_util::Delete(local_path, false));
+  ASSERT_TRUE(base::DeleteFile(local_path, false));
 
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND,
             ofu()->Truncate(
@@ -1670,7 +1671,7 @@ TEST_F(ObfuscatedFileUtilTest, TestIncompleteDirectoryReading) {
   base::FilePath local_path;
   EXPECT_EQ(base::PLATFORM_FILE_OK,
             ofu()->GetLocalFilePath(context.get(), kPath[0], &local_path));
-  EXPECT_TRUE(file_util::Delete(local_path, false));
+  EXPECT_TRUE(base::DeleteFile(local_path, false));
 
   entries.clear();
   EXPECT_EQ(base::PLATFORM_FILE_OK,
@@ -2325,6 +2326,50 @@ TEST_F(ObfuscatedFileUtilTest, GetDirectoryDatabase_Isolated) {
   SandboxDirectoryDatabase* db2 = file_util.GetDirectoryDatabase(
       origin_, kFileSystemTypePersistent, false /* create */);
   ASSERT_EQ(db, db2);
+}
+
+TEST_F(ObfuscatedFileUtilTest, MigrationBackFromIsolated) {
+  std::string kFakeDirectoryData("0123456789");
+  base::FilePath old_directory_db_path;
+
+  // Initialize the directory with one origin using
+  // SandboxIsolatedOriginDatabase.
+  {
+    std::string origin_string =
+        webkit_database::GetIdentifierFromOrigin(origin_);
+    SandboxIsolatedOriginDatabase database_old(origin_string, data_dir_path());
+    base::FilePath path;
+    EXPECT_TRUE(database_old.GetPathForOrigin(origin_string, &path));
+    EXPECT_FALSE(path.empty());
+
+    // Populate the origin directory with some fake data.
+    old_directory_db_path = data_dir_path().Append(path);
+    ASSERT_TRUE(file_util::CreateDirectory(old_directory_db_path));
+    EXPECT_EQ(static_cast<int>(kFakeDirectoryData.size()),
+              file_util::WriteFile(old_directory_db_path.AppendASCII("dummy"),
+                                   kFakeDirectoryData.data(),
+                                   kFakeDirectoryData.size()));
+  }
+
+  storage_policy_->AddIsolated(origin_);
+  ObfuscatedFileUtil file_util(
+      storage_policy_.get(), data_dir_path(),
+      base::MessageLoopProxy::current().get());
+  base::PlatformFileError error = base::PLATFORM_FILE_ERROR_FAILED;
+  base::FilePath origin_directory = file_util.GetDirectoryForOrigin(
+      origin_, true /* create */, &error);
+  EXPECT_EQ(base::PLATFORM_FILE_OK, error);
+
+  // The database is migrated from the old one.
+  EXPECT_TRUE(base::DirectoryExists(origin_directory));
+  EXPECT_FALSE(base::DirectoryExists(old_directory_db_path));
+
+  // Check we see the same contents in the new origin directory.
+  std::string origin_db_data;
+  EXPECT_TRUE(base::PathExists(origin_directory.AppendASCII("dummy")));
+  EXPECT_TRUE(file_util::ReadFileToString(
+      origin_directory.AppendASCII("dummy"), &origin_db_data));
+  EXPECT_EQ(kFakeDirectoryData, origin_db_data);
 }
 
 }  // namespace fileapi

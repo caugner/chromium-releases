@@ -61,6 +61,8 @@ class CHROMEOS_EXPORT NetworkStateHandler
  public:
   typedef std::vector<ManagedState*> ManagedStateList;
   typedef std::vector<const NetworkState*> NetworkStateList;
+  typedef std::vector<const DeviceState*> DeviceStateList;
+  typedef std::vector<const FavoriteState*> FavoriteStateList;
 
   enum TechnologyState {
     TECHNOLOGY_UNAVAILABLE,
@@ -78,9 +80,17 @@ class CHROMEOS_EXPORT NetworkStateHandler
   void RemoveObserver(NetworkStateHandlerObserver* observer,
                       const tracked_objects::Location& from_here);
 
+  // Requests all Manager properties, specifically to update the complete
+  // list of services which determines the list of Favorites. This should be
+  // called any time a new service is configured or a Profile is loaded.
+  void UpdateManagerProperties();
+
   // Returns the state for technology |type|. kMatchTypeMobile (only) is
   // also supported.
   TechnologyState GetTechnologyState(const std::string& type) const;
+  bool IsTechnologyAvailable(const std::string& type) const {
+    return GetTechnologyState(type) != TECHNOLOGY_UNAVAILABLE;
+  }
   bool IsTechnologyEnabled(const std::string& type) const {
     return GetTechnologyState(type) == TECHNOLOGY_ENABLED;
   }
@@ -140,6 +150,22 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // only on the UI thread).
   void GetNetworkList(NetworkStateList* list) const;
 
+  // Sets |list| to contain the list of devices.  The returned list contains
+  // a copy of DeviceState pointers which should not be stored or used beyond
+  // the scope of the calling function (i.e. they may later become invalid, but
+  // only on the UI thread).
+  void GetDeviceList(DeviceStateList* list) const;
+
+  // Sets |list| to contain the list of favorite (aka "preferred") networks.
+  // See GetNetworkList() for usage, and notes for |favorite_list_|.
+  // Favorites that are visible have the same path() as the entries in
+  // GetNetworkList(), so GetNetworkState() can be used to determine if a
+  // favorite is visible and retrieve the complete properties (and vice-versa).
+  void GetFavoriteList(FavoriteStateList* list) const;
+
+  // Finds and returns a favorite state by |service_path| or NULL if not found.
+  const FavoriteState* GetFavoriteState(const std::string& service_path) const;
+
   // Requests a network scan. This may trigger updates to the network
   // list, which will trigger the appropriate observer calls.
   void RequestScan() const;
@@ -165,13 +191,9 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // existing networks.
   void RequestUpdateForAllNetworks();
 
-  // Set the user initiated connecting network.
-  void SetConnectingNetwork(const std::string& service_path);
-
   // Set the list of devices on which portal check is enabled.
   void SetCheckPortalList(const std::string& check_portal_list);
 
-  const std::string& connecting_network() const { return connecting_network_; }
   const std::string& check_portal_list() const { return check_portal_list_; }
 
   // Generates a DictionaryValue of all NetworkState properties. Currently
@@ -250,6 +272,11 @@ class CHROMEOS_EXPORT NetworkStateHandler
   friend class NetworkStateHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(NetworkStateHandlerTest, NetworkStateHandlerStub);
 
+  // NetworkState specific method for UpdateManagedStateProperties which
+  // notifies observers.
+  void UpdateNetworkStateProperties(NetworkState* network,
+                                    const base::DictionaryValue& properties);
+
   // Non-const getters for managed entries. These are const so that they can
   // be called by Get[Network|Device]State, even though they return non-const
   // pointers.
@@ -287,18 +314,19 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Observer list
   ObserverList<NetworkStateHandlerObserver> observers_;
 
-  // Lists of managed states
+  // List of managed network states
   ManagedStateList network_list_;
+
+  // List of managed favorite states; this list includes all entries in
+  // Manager.ServiceCompleteList, but only entries with a non-empty Profile
+  // property are returned in GetFavoriteList().
+  ManagedStateList favorite_list_;
+
+  // List of managed device states
   ManagedStateList device_list_;
 
   // Keeps track of the default network for notifying observers when it changes.
   std::string default_network_path_;
-
-  // Convenience member to track the user initiated connecting network. Set
-  // externally when a connection is requested and cleared here when the state
-  // changes to something other than Connecting (after observers are notified).
-  // TODO(stevenjb): Move this to NetworkConfigurationHandler.
-  std::string connecting_network_;
 
   // List of interfaces on which portal check is enabled.
   std::string check_portal_list_;

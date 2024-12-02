@@ -9,12 +9,13 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/url_index_private_data.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_profile.h"
@@ -186,7 +186,7 @@ bool InMemoryURLIndexTest::DeleteURL(const GURL& url) {
 
 void InMemoryURLIndexTest::SetUp() {
   // We cannot access the database until the backend has been loaded.
-  profile_.CreateHistoryService(true, false);
+  ASSERT_TRUE(profile_.CreateHistoryService(true, false));
   profile_.CreateBookmarkModel(true);
   ui_test_utils::WaitForBookmarkModelToLoad(&profile_);
   profile_.BlockUntilHistoryProcessesPendingRequests();
@@ -203,7 +203,7 @@ void InMemoryURLIndexTest::SetUp() {
   history_proto_path = history_proto_path.Append(
       FILE_PATH_LITERAL("History"));
   history_proto_path = history_proto_path.Append(TestDBName());
-  EXPECT_TRUE(file_util::PathExists(history_proto_path));
+  EXPECT_TRUE(base::PathExists(history_proto_path));
 
   std::ifstream proto_file(history_proto_path.value().c_str());
   static const size_t kCommandBufferMaxSize = 2048;

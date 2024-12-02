@@ -1,12 +1,17 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef LIBRARIES_NACL_IO_KERNEL_WRAP_H_
 #define LIBRARIES_NACL_IO_KERNEL_WRAP_H_
 
 #include <sys/types.h>
+#include <stdint.h>
 #include <stdlib.h>
+
+#include "nacl_io/ossocket.h"
+#include "nacl_io/ostypes.h"
+#include "nacl_io/osutime.h"
 #include "sdk_util/macros.h"
 
 #if defined(__GLIBC__)
@@ -33,13 +38,16 @@ typedef ssize_t write_ssize_t;
 EXTERN_C_BEGIN
 
 void kernel_wrap_init();
+void kernel_wrap_uninit();
 
 int NAME(access)(const char* path, int amode) NOTHROW;
 int NAME(chdir)(const char* path) NOTHROW;
 int NAME(chmod)(const char* path, chmod_mode_t mode) NOTHROW;
+int chown(const char* path, uid_t owner, gid_t group) NOTHROW;
 int NAME(close)(int fd);
 int NAME(dup)(int oldfd) NOTHROW;
 int NAME(dup2)(int oldfd, int newfd) NOTHROW;
+int fchown(int fd, uid_t owner, gid_t group) NOTHROW;
 #if defined(WIN32)
 int _fstat32(int fd, struct _stat32* buf);
 int _fstat64(int fd, struct _stat64* buf);
@@ -54,7 +62,9 @@ int ftruncate(int fd, off_t length) NOTHROW;
 char* NAME(getcwd)(char* buf, getcwd_size_t size) NOTHROW;
 char* getwd(char* buf) NOTHROW;
 int getdents(int fd, void* buf, unsigned int count) NOTHROW;
+int ioctl(int d, int request, char* argp) NOTHROW;
 int NAME(isatty)(int fd) NOTHROW;
+int lchown(const char* path, uid_t owner, gid_t group) NOTHROW;
 int link(const char* oldpath, const char* newpath) NOTHROW;
 off_t NAME(lseek)(int fd, off_t offset, int whence) NOTHROW;
 #if defined(WIN32)
@@ -72,6 +82,7 @@ read_ssize_t NAME(read)(int fd, void* buf, size_t nbyte);
 int remove(const char* path) NOTHROW;
 int NAME(rmdir)(const char* path) NOTHROW;
 #if defined(WIN32)
+int setenv(const char* name, const char* value, int overwrite);
 int _stat32(const char* path, struct _stat32* buf);
 int _stat64(const char* path, struct _stat64* buf);
 int _stat32i64(const char* path, struct _stat32i64* buf);
@@ -82,7 +93,34 @@ int stat(const char* path, struct stat* buf) NOTHROW;
 int symlink(const char* oldpath, const char* newpath) NOTHROW;
 int umount(const char* path) NOTHROW;
 int NAME(unlink)(const char* path) NOTHROW;
+uint64_t usec_since_epoch();
+int utime(const char* filename, const struct utimbuf* times);
 read_ssize_t NAME(write)(int fd, const void* buf, size_t nbyte);
+
+#ifdef PROVIDES_SOCKET_API
+// Socket Functions
+int accept(int fd, struct sockaddr* addr, socklen_t* len);
+int bind(int fd, const struct sockaddr* addr, socklen_t len);
+int connect(int fd, const struct sockaddr* addr, socklen_t len);
+struct hostent* gethostbyname(const char* name);
+int getpeername(int fd, struct sockaddr* addr, socklen_t* len);
+int getsockname(int fd, struct sockaddr* addr, socklen_t* len);
+int getsockopt(int fd, int lvl, int optname, void* optval, socklen_t* len);
+int listen(int fd, int backlog);
+ssize_t recv(int fd, void* buf, size_t len, int flags);
+ssize_t recvfrom(int fd, void* buf, size_t len, int flags,
+                 struct sockaddr* addr, socklen_t* addrlen);
+ssize_t recvmsg(int fd, struct msghdr* msg, int flags);
+ssize_t send(int fd, const void* buf, size_t len, int flags);
+ssize_t sendto(int fd, const void* buf, size_t len, int flags,
+               const struct sockaddr* addr, socklen_t addrlen);
+ssize_t sendmsg(int fd, const struct msghdr* msg, int flags);
+int setsockopt(int fd, int lvl, int optname, const void* optval,
+               socklen_t len);
+int shutdown(int fd, int how);
+int socket(int domain, int type, int protocol);
+int socketpair(int domain, int type, int protocl, int* sv);
+#endif  // PROVIDES_SOCKET_API
 
 EXTERN_C_END
 

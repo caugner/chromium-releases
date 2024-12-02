@@ -1,7 +1,6 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include <errno.h>
 #include <fcntl.h>
@@ -21,6 +20,9 @@
 #include "nacl_io/osunistd.h"
 #include "pepper_interface_mock.h"
 
+using namespace nacl_io;
+using namespace sdk_util;
+
 using ::testing::_;
 using ::testing::DoAll;
 using ::testing::Invoke;
@@ -38,9 +40,7 @@ class MountHtml5FsMock : public MountHtml5Fs {
     Init(1, map, ppapi);
   }
 
-  ~MountHtml5FsMock() {
-    Destroy();
-  }
+  ~MountHtml5FsMock() {}
 };
 
 class MountHtml5FsTest : public ::testing::Test {
@@ -100,8 +100,8 @@ class MountHtml5FsNodeTest : public MountHtml5FsTest {
   void InitNode();
 
  protected:
-  MountHtml5FsMock* mnt_;
-  MountNode* node_;
+  ScopedRef<MountHtml5FsMock> mnt_;
+  ScopedMountNode node_;
 
   FileRefInterfaceMock* fileref_;
   FileIoInterfaceMock* fileio_;
@@ -115,9 +115,7 @@ class MountHtml5FsNodeTest : public MountHtml5FsTest {
 const char MountHtml5FsNodeTest::path_[] = "/foo";
 
 MountHtml5FsNodeTest::MountHtml5FsNodeTest()
-    : mnt_(NULL),
-      node_(NULL),
-      fileref_(NULL),
+    : fileref_(NULL),
       fileio_(NULL) {
 }
 
@@ -127,10 +125,8 @@ void MountHtml5FsNodeTest::SetUp() {
 }
 
 void MountHtml5FsNodeTest::TearDown() {
-  if (mnt_) {
-    mnt_->ReleaseNode(node_);
-    delete mnt_;
-  }
+  node_.reset();
+  mnt_.reset();
 }
 
 void MountHtml5FsNodeTest::SetUpNodeExpectations(PP_FileType file_type) {
@@ -163,12 +159,12 @@ void MountHtml5FsNodeTest::SetUpNodeExpectations(PP_FileType file_type) {
 
 void MountHtml5FsNodeTest::InitFilesystem() {
   StringMap_t map;
-  mnt_ = new MountHtml5FsMock(map, ppapi_);
+  mnt_.reset(new MountHtml5FsMock(map, ppapi_));
 }
 
 void MountHtml5FsNodeTest::InitNode() {
   ASSERT_EQ(0, mnt_->Open(Path(path_), O_CREAT | O_RDWR, &node_));
-  ASSERT_NE((MountNode*)NULL, node_);
+  ASSERT_NE((MountNode*)NULL, node_.get());
 }
 
 // Node test where the filesystem is opened synchronously; that is, the
@@ -317,7 +313,7 @@ TEST_F(MountHtml5FsTest, FilesystemType) {
   StringMap_t map;
   map["type"] = "PERSISTENT";
   map["expected_size"] = "100";
-  MountHtml5FsMock mnt(map, ppapi_);
+  ScopedRef<MountHtml5FsMock> mnt(new MountHtml5FsMock(map, ppapi_));
 }
 
 TEST_F(MountHtml5FsTest, Access) {
@@ -350,9 +346,9 @@ TEST_F(MountHtml5FsTest, Access) {
   EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource));
 
   StringMap_t map;
-  MountHtml5FsMock mnt(map, ppapi_);
+  ScopedRef<MountHtml5FsMock> mnt(new MountHtml5FsMock(map, ppapi_));
 
-  ASSERT_EQ(0, mnt.Access(Path(path), R_OK | W_OK | X_OK));
+  ASSERT_EQ(0, mnt->Access(Path(path), R_OK | W_OK | X_OK));
 }
 
 TEST_F(MountHtml5FsTest, AccessFileNotFound) {
@@ -386,9 +382,9 @@ TEST_F(MountHtml5FsTest, AccessFileNotFound) {
   EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource));
 
   StringMap_t map;
-  MountHtml5FsMock mnt(map, ppapi_);
+  ScopedRef<MountHtml5FsMock> mnt(new MountHtml5FsMock(map, ppapi_));
 
-  ASSERT_EQ(ENOENT, mnt.Access(Path(path), F_OK));
+  ASSERT_EQ(ENOENT, mnt->Access(Path(path), F_OK));
 }
 
 TEST_F(MountHtml5FsTest, Mkdir) {
@@ -407,10 +403,10 @@ TEST_F(MountHtml5FsTest, Mkdir) {
   EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource));
 
   StringMap_t map;
-  MountHtml5FsMock mnt(map, ppapi_);
+  ScopedRef<MountHtml5FsMock> mnt(new MountHtml5FsMock(map, ppapi_));
 
   const int permissions = 0;  // unused.
-  int32_t result = mnt.Mkdir(Path(path), permissions);
+  int32_t result = mnt->Mkdir(Path(path), permissions);
   ASSERT_EQ(0, result);
 }
 
@@ -430,9 +426,9 @@ TEST_F(MountHtml5FsTest, Remove) {
   EXPECT_CALL(*ppapi_, ReleaseResource(fileref_resource));
 
   StringMap_t map;
-  MountHtml5FsMock mnt(map, ppapi_);
+  ScopedRef<MountHtml5FsMock> mnt(new MountHtml5FsMock(map, ppapi_));
 
-  int32_t result = mnt.Remove(Path(path));
+  int32_t result = mnt->Remove(Path(path));
   ASSERT_EQ(0, result);
 }
 
@@ -630,3 +626,4 @@ TEST_F(MountHtml5FsNodeSyncDirTest, GetDents) {
   EXPECT_EQ(sizeof(dirent), dirents[1].d_reclen);
   EXPECT_STREQ(fileref_name_cstr_2, dirents[1].d_name);
 }
+

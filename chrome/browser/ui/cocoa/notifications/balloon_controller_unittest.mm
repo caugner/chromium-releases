@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/mac/scoped_nsobject.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
@@ -31,7 +31,9 @@ namespace {
 class MockBalloonCollection : public BalloonCollection {
   virtual void Add(const Notification& notification,
                    Profile* profile) OVERRIDE {}
-  virtual bool DoesIdExist(const std::string& id) OVERRIDE { return false; }
+  virtual const Notification* FindById(const std::string& id) const OVERRIDE {
+    return NULL;
+  }
   virtual bool RemoveById(const std::string& id) OVERRIDE { return false; }
   virtual bool RemoveBySourceOrigin(const GURL& origin) OVERRIDE {
     return false;
@@ -58,9 +60,7 @@ class BalloonControllerTest : public ChromeRenderViewHostTestHarness {
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
     CocoaTest::BootstrapCocoa();
-    profile()->CreateRequestContext();
-    Browser::CreateParams native_params(profile(),
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE);
+    Browser::CreateParams native_params(profile(), chrome::GetActiveDesktop());
     browser_.reset(
         chrome::CreateBrowserWithTestWindowForParams(&native_params));
     collection_.reset(new MockBalloonCollection());

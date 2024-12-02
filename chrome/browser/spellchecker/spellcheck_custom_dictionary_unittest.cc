@@ -5,8 +5,6 @@
 #include <vector>
 
 #include "base/file_util.h"
-#include "base/message_loop.h"
-#include "base/metrics/histogram.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/strings/string_number_conversions.h"
@@ -17,7 +15,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_data.h"
 #include "sync/api/sync_error_factory.h"
@@ -29,7 +28,6 @@
 using base::HistogramBase;
 using base::HistogramSamples;
 using base::StatisticsRecorder;
-using content::BrowserThread;
 using chrome::spellcheck_common::WordList;
 using chrome::spellcheck_common::WordSet;
 
@@ -60,22 +58,12 @@ static BrowserContextKeyedService* BuildSpellcheckService(
 
 class SpellcheckCustomDictionaryTest : public testing::Test {
  protected:
-  SpellcheckCustomDictionaryTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_),
-        profile_(new TestingProfile) {
-  }
-
   virtual void SetUp() OVERRIDE {
     // Use SetTestingFactoryAndUse to force creation and initialization.
     SpellcheckServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-        profile_.get(), &BuildSpellcheckService);
+        &profile_, &BuildSpellcheckService);
 
     StatisticsRecorder::Initialize();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    base::MessageLoop::current()->RunUntilIdle();
   }
 
   // A wrapper around SpellcheckCustomDictionary::LoadDictionaryFile private
@@ -112,11 +100,10 @@ class SpellcheckCustomDictionaryTest : public testing::Test {
     return dictionary.Apply(change);
   }
 
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
 
-  scoped_ptr<TestingProfile> profile_;
+  TestingProfile profile_;
+  net::TestURLFetcherFactory fetcher_factory_;
 };
 
 // A wrapper around SpellcheckCustomDictionary that does not own the wrapped
@@ -154,7 +141,10 @@ class SyncErrorFactoryStub : public syncer::SyncErrorFactory {
       const tracked_objects::Location& location,
       const std::string& message) OVERRIDE {
     (*error_counter_)++;
-    return syncer::SyncError(location, message, syncer::DICTIONARY);
+    return syncer::SyncError(location,
+                             syncer::SyncError::DATATYPE_ERROR,
+                             message,
+                             syncer::DICTIONARY);
   }
 
  private:
@@ -184,7 +174,7 @@ class DictionaryObserverCounter : public SpellcheckCustomDictionary::Observer {
 
 TEST_F(SpellcheckCustomDictionaryTest, SaveAndLoad) {
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
   WordList loaded_custom_words = LoadDictionaryFile(path);
 
   // The custom word list should be empty now.
@@ -214,7 +204,7 @@ TEST_F(SpellcheckCustomDictionaryTest, SaveAndLoad) {
 
 TEST_F(SpellcheckCustomDictionaryTest, MultiProfile) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -248,7 +238,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MultiProfile) {
 // Legacy empty dictionary should be converted to new format empty dictionary.
 TEST_F(SpellcheckCustomDictionaryTest, LegacyEmptyDictionaryShouldBeConverted) {
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
 
   std::string content;
   file_util::WriteFile(path, content.c_str(), content.length());
@@ -261,7 +251,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LegacyEmptyDictionaryShouldBeConverted) {
 TEST_F(SpellcheckCustomDictionaryTest,
        LegacyDictionaryWithTwoWordsShouldBeConverted) {
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
 
   std::string content = "foo\nbar\nfoo\n";
   file_util::WriteFile(path, content.c_str(), content.length());
@@ -277,7 +267,7 @@ TEST_F(SpellcheckCustomDictionaryTest,
 TEST_F(SpellcheckCustomDictionaryTest,
        IllegalWordsShouldBeRemovedFromDictionary) {
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
 
   std::string content = "foo\n foo bar \n\n \nbar\n"
       "01234567890123456789012345678901234567890123456789"
@@ -296,7 +286,7 @@ TEST_F(SpellcheckCustomDictionaryTest,
 // previous version should be reloaded.
 TEST_F(SpellcheckCustomDictionaryTest, CorruptedWriteShouldBeRecovered) {
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
 
   std::string content = "foo\nbar";
   file_util::WriteFile(path, content.c_str(), content.length());
@@ -321,7 +311,7 @@ TEST_F(SpellcheckCustomDictionaryTest,
        GetAllSyncDataAccuratelyReflectsDictionaryState) {
   SpellcheckCustomDictionary* dictionary =
       SpellcheckServiceFactory::GetForProfile(
-          profile_.get())->GetCustomDictionary();
+          &profile_)->GetCustomDictionary();
 
   syncer::SyncDataList data = dictionary->GetAllSyncData(syncer::DICTIONARY);
   EXPECT_TRUE(data.empty());
@@ -351,7 +341,7 @@ TEST_F(SpellcheckCustomDictionaryTest,
 TEST_F(SpellcheckCustomDictionaryTest, GetAllSyncDataHasLimit) {
   SpellcheckCustomDictionary* dictionary =
       SpellcheckServiceFactory::GetForProfile(
-          profile_.get())->GetCustomDictionary();
+          &profile_)->GetCustomDictionary();
 
   SpellcheckCustomDictionary::Change change;
   for (size_t i = 0;
@@ -386,7 +376,7 @@ TEST_F(SpellcheckCustomDictionaryTest, GetAllSyncDataHasLimit) {
 
 TEST_F(SpellcheckCustomDictionaryTest, ProcessSyncChanges) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* dictionary =
       spellcheck_service->GetCustomDictionary();
 
@@ -457,7 +447,7 @@ TEST_F(SpellcheckCustomDictionaryTest, ProcessSyncChanges) {
 
 TEST_F(SpellcheckCustomDictionaryTest, MergeDataAndStartSyncing) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -503,7 +493,7 @@ TEST_F(SpellcheckCustomDictionaryTest, MergeDataAndStartSyncing) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigBeforeSyncing) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -546,7 +536,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigBeforeSyncing) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -598,7 +588,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigAndServerFull) {
 
 TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -649,7 +639,7 @@ TEST_F(SpellcheckCustomDictionaryTest, ServerTooBig) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -695,7 +685,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToStartSyncing) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -746,7 +736,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryTooBigToContiueSyncing) {
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStart) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -784,7 +774,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStart) {
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStartTooBigToSync) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -831,7 +821,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadAfterSyncStartTooBigToSync) {
 
 TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -878,7 +868,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryLoadNotification) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
 
@@ -899,7 +889,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryLoadNotification) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryAddWordNotification) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
 
@@ -919,7 +909,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryAddWordNotification) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionaryRemoveWordNotification) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
 
@@ -942,7 +932,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionaryRemoveWordNotification) {
 
 TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncNotification) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   TestingProfile profile2;
@@ -1003,7 +993,7 @@ TEST_F(SpellcheckCustomDictionaryTest, DictionarySyncLimit) {
   // Upload the maximum number of words to the sync server.
   {
     SpellcheckService* spellcheck_service =
-        SpellcheckServiceFactory::GetForProfile(profile_.get());
+        SpellcheckServiceFactory::GetForProfile(&profile_);
     SpellcheckCustomDictionary* custom_dictionary =
         spellcheck_service->GetCustomDictionary();
 
@@ -1089,7 +1079,7 @@ TEST_F(SpellcheckCustomDictionaryTest, RecordSizeStatsCorrectly) {
 
   // Load the dictionary which should be empty.
   base::FilePath path =
-      profile_->GetPath().Append(chrome::kCustomDictionaryFileName);
+      profile_.GetPath().Append(chrome::kCustomDictionaryFileName);
   WordList loaded_custom_words = LoadDictionaryFile(path);
   EXPECT_EQ(0u, loaded_custom_words.size());
 
@@ -1122,7 +1112,7 @@ TEST_F(SpellcheckCustomDictionaryTest, RecordSizeStatsCorrectly) {
 
 TEST_F(SpellcheckCustomDictionaryTest, HasWord) {
   SpellcheckService* spellcheck_service =
-      SpellcheckServiceFactory::GetForProfile(profile_.get());
+      SpellcheckServiceFactory::GetForProfile(&profile_);
   SpellcheckCustomDictionary* custom_dictionary =
       spellcheck_service->GetCustomDictionary();
   OnLoaded(*custom_dictionary, WordList());

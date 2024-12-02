@@ -11,7 +11,7 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/media_keys.h"
 #include "media/base/test_data_util.h"
-#include "media/crypto/aes_decryptor.h"
+#include "media/cdm/aes_decryptor.h"
 #include "media/filters/chunk_demuxer.h"
 
 using testing::AnyNumber;
@@ -55,7 +55,7 @@ static const int k640WebMFileDurationMs = 2763;
 static const int k640IsoFileDurationMs = 2737;
 static const int k640IsoCencFileDurationMs = 2736;
 static const int k1280IsoFileDurationMs = 2736;
-static const int kVP9WebMFileDurationMs = 2736;
+static const int kVP9WebMFileDurationMs = 2735;
 static const int kVP8AWebMFileDurationMs = 2700;
 
 // Note: Tests using this class only exercise the DecryptingDemuxerStream path.
@@ -77,7 +77,7 @@ class FakeEncryptedMedia {
     }
 
     virtual void KeyMessage(const std::string& session_id,
-                            const std::string& message,
+                            const std::vector<uint8>& message,
                             const std::string& default_url) = 0;
 
     virtual void NeedKey(const std::string& session_id,
@@ -112,7 +112,7 @@ class FakeEncryptedMedia {
   }
 
   void KeyMessage(const std::string& session_id,
-                  const std::string& message,
+                  const std::vector<uint8>& message,
                   const std::string& default_url) {
     app_->KeyMessage(session_id, message, default_url);
   }
@@ -137,7 +137,7 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
   }
 
   virtual void KeyMessage(const std::string& session_id,
-                          const std::string& message,
+                          const std::vector<uint8>& message,
                           const std::string& default_url) OVERRIDE {
     EXPECT_FALSE(session_id.empty());
     EXPECT_FALSE(message.empty());
@@ -184,7 +184,7 @@ class NoResponseApp : public FakeEncryptedMedia::AppBase {
   }
 
   virtual void KeyMessage(const std::string& session_id,
-                          const std::string& message,
+                          const std::vector<uint8>& message,
                           const std::string& default_url) OVERRIDE {
     EXPECT_FALSE(session_id.empty());
     EXPECT_FALSE(message.empty());
@@ -221,10 +221,10 @@ class MockMediaSource {
     file_data_ = ReadTestDataFile(filename);
 
     if (initial_append_size_ == kAppendWholeFile)
-      initial_append_size_ = file_data_->GetDataSize();
+      initial_append_size_ = file_data_->data_size();
 
     DCHECK_GT(initial_append_size_, 0);
-    DCHECK_LE(initial_append_size_, file_data_->GetDataSize());
+    DCHECK_LE(initial_append_size_, file_data_->data_size());
   }
 
   virtual ~MockMediaSource() {}
@@ -235,13 +235,13 @@ class MockMediaSource {
     need_key_cb_ = need_key_cb;
   }
 
-  void Seek(int new_position, int seek_append_size) {
-    chunk_demuxer_->StartWaitingForSeek();
+  void Seek(base::TimeDelta seek_time, int new_position, int seek_append_size) {
+    chunk_demuxer_->StartWaitingForSeek(seek_time);
 
     chunk_demuxer_->Abort(kSourceId);
 
     DCHECK_GE(new_position, 0);
-    DCHECK_LT(new_position, file_data_->GetDataSize());
+    DCHECK_LT(new_position, file_data_->data_size());
     current_position_ = new_position;
 
     AppendData(seek_append_size);
@@ -249,10 +249,10 @@ class MockMediaSource {
 
   void AppendData(int size) {
     DCHECK(chunk_demuxer_);
-    DCHECK_LT(current_position_, file_data_->GetDataSize());
-    DCHECK_LE(current_position_ + size, file_data_->GetDataSize());
+    DCHECK_LT(current_position_, file_data_->data_size());
+    DCHECK_LE(current_position_ + size, file_data_->data_size());
     chunk_demuxer_->AppendData(
-        kSourceId, file_data_->GetData() + current_position_, size);
+        kSourceId, file_data_->data() + current_position_, size);
     current_position_ += size;
   }
 
@@ -264,7 +264,7 @@ class MockMediaSource {
   }
 
   void EndOfStream() {
-    chunk_demuxer_->EndOfStream(PIPELINE_OK);
+    chunk_demuxer_->MarkEndOfStream(PIPELINE_OK);
   }
 
   void Abort() {
@@ -382,7 +382,7 @@ class PipelineIntegrationTest
     if (!WaitUntilCurrentTimeIsAfter(start_seek_time))
       return false;
 
-    source.Seek(seek_file_position, seek_append_size);
+    source.Seek(seek_time, seek_file_position, seek_append_size);
     if (!Seek(seek_time))
       return false;
 
@@ -453,10 +453,11 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_MediaSource) {
   Stop();
 }
 
-// TODO(fgalligan): Enable after new vp9 files are landed. crbug.com/180280
+// TODO(fgalligan): Enable after new vp9 files are landed.
+// http://crbug.com/259116
 TEST_F(PipelineIntegrationTest,
        DISABLED_BasicPlayback_MediaSource_VideoOnly_VP9_WebM) {
-  MockMediaSource source("bear-vp9.webm", kWebMVP9, 19678);
+  MockMediaSource source("bear-vp9.webm", kWebMVP9, 32393);
   StartPipelineWithMediaSource(&source);
   source.EndOfStream();
 
@@ -499,7 +500,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_WebM) {
       ReadTestDataFile("bear-640x360.webm");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -525,7 +526,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_Encrypted_WebM) {
       ReadTestDataFile("bear-640x360-av_enc-av.webm");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -553,7 +554,7 @@ TEST_F(PipelineIntegrationTest,
       ReadTestDataFile("bear-640x360-av_enc-av.webm");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -584,7 +585,7 @@ TEST_F(PipelineIntegrationTest,
       ReadTestDataFile("bear-640x360.webm");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -609,7 +610,7 @@ TEST_F(PipelineIntegrationTest, MediaSource_ConfigChange_MP4) {
       ReadTestDataFile("bear-1280x720-av_frag.mp4");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -636,7 +637,7 @@ TEST_F(PipelineIntegrationTest,
       ReadTestDataFile("bear-1280x720-v_frag-cenc.mp4");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -665,7 +666,7 @@ TEST_F(PipelineIntegrationTest,
       ReadTestDataFile("bear-1280x720-v_frag-cenc.mp4");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -696,7 +697,7 @@ TEST_F(PipelineIntegrationTest,
       ReadTestDataFile("bear-1280x720-av_frag.mp4");
 
   source.AppendAtTime(base::TimeDelta::FromSeconds(kAppendTimeSec),
-                      second_file->GetData(), second_file->GetDataSize());
+                      second_file->data(), second_file->data_size());
 
   source.EndOfStream();
 
@@ -915,7 +916,8 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_AudioOnly_Opus_WebM) {
 }
 
 // Verify that VP9 video in WebM containers can be played back.
-// TODO(fgalligan): Enable after new vp9 files are landed. crbug.com/180280
+// TODO(fgalligan): Enable after new vp9 files are landed.
+// http://crbug.com/259116
 TEST_F(PipelineIntegrationTest, DISABLED_BasicPlayback_VideoOnly_VP9_WebM) {
   ASSERT_TRUE(Start(GetTestDataFilePath("bear-vp9.webm"),
                     PIPELINE_OK));
@@ -925,7 +927,8 @@ TEST_F(PipelineIntegrationTest, DISABLED_BasicPlayback_VideoOnly_VP9_WebM) {
 
 // Verify that VP9 video and Opus audio in the same WebM container can be played
 // back.
-// TODO(fgalligan): Enable after new vp9 files are landed. crbug.com/180280
+// TODO(fgalligan): Enable after new vp9 files are landed.
+// http://crbug.com/259116
 TEST_F(PipelineIntegrationTest, DISABLED_BasicPlayback_VP9_Opus_WebM) {
   ASSERT_TRUE(Start(GetTestDataFilePath("bear-vp9-opus.webm"),
                     PIPELINE_OK));

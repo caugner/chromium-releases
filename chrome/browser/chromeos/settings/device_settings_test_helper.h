@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -99,6 +99,8 @@ class DeviceSettingsTestHelper : public SessionManagerClient {
   virtual void RetrievePolicyForUser(
       const std::string& username,
       const RetrievePolicyCallback& callback) OVERRIDE;
+  virtual std::string BlockingRetrievePolicyForUser(
+      const std::string& username) OVERRIDE;
   virtual void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
       const RetrievePolicyCallback& callback) OVERRIDE;

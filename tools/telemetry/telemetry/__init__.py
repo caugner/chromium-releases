@@ -5,6 +5,7 @@
 A library for cross-platform browser tests.
 """
 import inspect
+import os
 import sys
 
 from telemetry.core.browser import Browser
@@ -27,3 +28,24 @@ for x in dir():
   if (inspect.isclass(getattr(m, x)) or
       inspect.isfunction(getattr(m, x))):
     __all__.append(x)
+
+
+def _RemoveAllStalePycFiles():
+  for dirname, _, filenames in os.walk(os.path.dirname(__file__)):
+    if '.svn' in dirname or '.git' in dirname:
+      continue
+    for filename in filenames:
+      root, ext = os.path.splitext(filename)
+      if ext != '.pyc':
+        continue
+
+      pyc_path = os.path.join(dirname, filename)
+      py_path = os.path.join(dirname, root + '.py')
+      if not os.path.exists(py_path):
+        os.remove(pyc_path)
+
+    if not os.listdir(dirname):
+      os.removedirs(dirname)
+
+
+_RemoveAllStalePycFiles()

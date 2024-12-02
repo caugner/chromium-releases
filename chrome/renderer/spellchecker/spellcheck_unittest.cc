@@ -5,7 +5,7 @@
 #include "webkit/glue/webkit_glue.h"
 
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
 #include "base/strings/sys_string_conversions.h"
@@ -1291,7 +1291,7 @@ TEST_F(SpellCheckTest, DictionaryFiles) {
   for (size_t i = 0; i < spellcheck_languages.size(); ++i) {
     base::FilePath dict = chrome::spellcheck_common::GetVersionedFileName(
         spellcheck_languages[i], hunspell);
-    EXPECT_TRUE(file_util::PathExists(dict)) << dict.value() << " not found";
+    EXPECT_TRUE(base::PathExists(dict)) << dict.value() << " not found";
   }
 }
 

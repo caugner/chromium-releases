@@ -12,8 +12,8 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_image.h"
 #include "chrome/browser/chromeos/login/user_image_loader.h"
@@ -21,9 +21,10 @@
 #include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "third_party/icu/public/i18n/unicode/timezone.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "ui/gfx/image/image_skia.h"
 
+class CommandLine;
 class PrefRegistrySimple;
 
 namespace base {
@@ -68,10 +69,28 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
                         public chromeos::PowerManagerClient::Observer,
                         public content::NotificationObserver {
  public:
+  // For testing.
+  class TestApi {
+   public:
+    explicit TestApi(WallpaperManager* wallpaper_manager);
+    virtual ~TestApi();
+
+    base::FilePath current_wallpaper_path();
+
+   private:
+    WallpaperManager* wallpaper_manager_;  // not owned
+
+    DISALLOW_COPY_AND_ASSIGN(TestApi);
+  };
+
   static WallpaperManager* Get();
 
   WallpaperManager();
   virtual ~WallpaperManager();
+
+  void set_command_line_for_testing(CommandLine* command_line) {
+    command_line_for_testing_ = command_line;
+  }
 
   // Indicates imminent shutdown, allowing the WallpaperManager to remove any
   // observers it has registered.
@@ -184,6 +203,7 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
   void UpdateWallpaper();
 
  private:
+  friend class TestApi;
   friend class WallpaperManagerBrowserTest;
   typedef std::map<std::string, gfx::ImageSkia> CustomWallpaperMap;
 
@@ -224,6 +244,9 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
 
   // Creates all new custom wallpaper directories for |email| if not exist.
   void EnsureCustomWallpaperDirectories(const std::string& email);
+
+  // Gets the CommandLine representing the current process's command line.
+  CommandLine* GetComandLine();
 
   // Loads custom wallpaper from old places and triggers move all custom
   // wallpapers to new places.
@@ -340,6 +363,9 @@ class WallpaperManager: public system::TimezoneSettings::Observer,
 
   // Logged-in user wallpaper information.
   WallpaperInfo current_user_wallpaper_info_;
+
+  // If non-NULL, used in place of the real command line.
+  CommandLine* command_line_for_testing_;
 
   // Caches wallpapers of users. Accessed only on UI thread.
   CustomWallpaperMap wallpaper_cache_;

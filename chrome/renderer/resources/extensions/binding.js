@@ -354,15 +354,12 @@ Binding.prototype = {
         if (eventDef.filters && eventDef.filters.length > 0)
           options.supportsFilters = true;
 
+        var parameters = eventDef.parameters;
         if (this.customEvent_) {
           mod[eventDef.name] = new this.customEvent_(
-              eventName, eventDef.parameters, eventDef.extraParameters,
-              options);
-        } else if (eventDef.anonymous) {
-          mod[eventDef.name] = new Event();
+              eventName, parameters, eventDef.extraParameters, options);
         } else {
-          mod[eventDef.name] = new Event(
-              eventName, eventDef.parameters, options);
+          mod[eventDef.name] = new Event(eventName, parameters, options);
         }
       }, this);
     }
@@ -426,6 +423,9 @@ Binding.prototype = {
     if (!availability.is_available && $Object.keys(mod).length == 0) {
       console.error('chrome.' + schema.namespace + ' is not available: ' +
                         availability.message);
+      logActivity.LogBlockedCall(extensionId,
+                                 schema.namespace,
+                                 availability.result);
       return;
     }
 

@@ -29,8 +29,6 @@ cr.define('options', function() {
     initializePage: function() {
       OptionsPage.prototype.initializePage.call(this);
 
-      chrome.send('getContentFilterSettings');
-
       var exceptionsButtons =
           this.pageDiv.querySelectorAll('.exceptions-list-button');
       for (var i = 0; i < exceptionsButtons.length; i++) {
@@ -233,6 +231,14 @@ cr.define('options', function() {
    */
   ContentSettings.showMediaPepperFlashExceptionsLink = function(show) {
     $('media-pepper-flash-exceptions').hidden = !show;
+  }
+
+  /**
+   * Shows/hides the whole Web MIDI settings.
+   * @param {bool} show Wether to show the whole Web MIDI settings.
+   */
+  ContentSettings.showExperimentalWebMIDISettings = function(show) {
+    $('experimental-web-midi-settings').hidden = !show;
   }
 
   /**

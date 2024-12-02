@@ -1,7 +1,7 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "nacl_io/mount_node_dir.h"
 
 #include <errno.h>
@@ -11,6 +11,8 @@
 #include "nacl_io/osstat.h"
 #include "sdk_util/auto_lock.h"
 #include "sdk_util/macros.h"
+
+namespace nacl_io {
 
 MountNodeDir::MountNodeDir(Mount* mount) : MountNode(mount), cache_(NULL) {
   stat_.st_mode |= S_IFDIR;
@@ -31,7 +33,7 @@ Error MountNodeDir::Read(size_t offs, void* buf, size_t count, int* out_bytes) {
 Error MountNodeDir::FTruncate(off_t size) { return EISDIR; }
 
 Error MountNodeDir::Write(size_t offs,
-                          void* buf,
+                          const void* buf,
                           size_t count,
                           int* out_bytes) {
   *out_bytes = 0;
@@ -44,7 +46,7 @@ Error MountNodeDir::GetDents(size_t offs,
                              int* out_bytes) {
   *out_bytes = 0;
 
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
 
   // If the buffer pointer is invalid, fail
   if (NULL == pdir)
@@ -73,8 +75,9 @@ Error MountNodeDir::GetDents(size_t offs,
   return 0;
 }
 
-Error MountNodeDir::AddChild(const std::string& name, MountNode* node) {
-  AutoLock lock(&lock_);
+Error MountNodeDir::AddChild(const std::string& name,
+                             const ScopedMountNode& node) {
+  AUTO_LOCK(node_lock_);
 
   if (name.empty())
     return ENOENT;
@@ -93,7 +96,7 @@ Error MountNodeDir::AddChild(const std::string& name, MountNode* node) {
 }
 
 Error MountNodeDir::RemoveChild(const std::string& name) {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
   MountNodeMap_t::iterator it = map_.find(name);
   if (it != map_.end()) {
     it->second->Unlink();
@@ -104,10 +107,11 @@ Error MountNodeDir::RemoveChild(const std::string& name) {
   return ENOENT;
 }
 
-Error MountNodeDir::FindChild(const std::string& name, MountNode** out_node) {
-  *out_node = NULL;
+Error MountNodeDir::FindChild(const std::string& name,
+                              ScopedMountNode* out_node) {
+  out_node->reset(NULL);
 
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
   MountNodeMap_t::iterator it = map_.find(name);
   if (it == map_.end())
     return ENOENT;
@@ -117,7 +121,7 @@ Error MountNodeDir::FindChild(const std::string& name, MountNode** out_node) {
 }
 
 int MountNodeDir::ChildCount() {
-  AutoLock lock(&lock_);
+  AUTO_LOCK(node_lock_);
   return map_.size();
 }
 
@@ -131,9 +135,8 @@ void MountNodeDir::BuildCache() {
     cache_ = (struct dirent*)malloc(sizeof(struct dirent) * map_.size());
     MountNodeMap_t::iterator it = map_.begin();
     for (size_t index = 0; it != map_.end(); it++, index++) {
-      MountNode* node = it->second;
       size_t len = it->first.length();
-      cache_[index].d_ino = node->stat_.st_ino;
+      cache_[index].d_ino = it->second->stat_.st_ino;
       cache_[index].d_off = sizeof(struct dirent);
       cache_[index].d_reclen = sizeof(struct dirent);
       cache_[index].d_name[len] = 0;
@@ -141,3 +144,6 @@ void MountNodeDir::BuildCache() {
     }
   }
 }
+
+}  // namespace nacl_io
+

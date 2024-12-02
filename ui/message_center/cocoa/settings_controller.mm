@@ -6,6 +6,7 @@
 
 #include "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "grit/ui_strings.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -93,35 +94,42 @@ const int kCorrectedCheckmarkPadding =
 // Sets the icon on the checkbox corresponding to |notifiers_[index]|.
 - (void)setIcon:(NSImage*)icon forNotifierIndex:(size_t)index;
 
-- (void)setIcon:(NSImage*)icon forAppId:(const std::string&)id;
-- (void)setIcon:(NSImage*)icon forURL:(const GURL&)url;
+- (void)setIcon:(NSImage*)icon
+  forNotifierId:(const message_center::NotifierId&)id;
 
 // Returns the NSButton corresponding to the checkbox for |notifiers_[index]|.
 - (NSButton*)buttonForNotifierAtIndex:(size_t)index;
+
+// Update the contents view.
+- (void)updateView;
+
+// Handler for the notifier group dropdown menu.
+- (void)notifierGroupSelectionChanged:(id)sender;
 @end
 
 namespace message_center {
 
 NotifierSettingsObserverMac::~NotifierSettingsObserverMac() {}
 
-void NotifierSettingsObserverMac::UpdateIconImage(const std::string& id,
+void NotifierSettingsObserverMac::UpdateIconImage(const NotifierId& notifier_id,
                                                   const gfx::Image& icon) {
-  [settings_controller_ setIcon:icon.AsNSImage() forAppId:id];
+  [settings_controller_ setIcon:icon.AsNSImage() forNotifierId:notifier_id];
 }
 
-void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
-                                                const gfx::Image& icon) {
-  [settings_controller_ setIcon:icon.AsNSImage() forURL:url];
+void NotifierSettingsObserverMac::NotifierGroupChanged() {
+  [settings_controller_ updateView];
 }
 
 }  // namespace message_center
 
 @implementation MCSettingsController
 
-- (id)initWithProvider:(message_center::NotifierSettingsProvider*)provider {
+- (id)initWithProvider:(message_center::NotifierSettingsProvider*)provider
+    trayViewController:(MCTrayViewController*)trayViewController {
   if ((self = [super initWithNibName:nil bundle:nil])) {
     observer_.reset(new message_center::NotifierSettingsObserverMac(self));
     provider_ = provider;
+    trayViewController_ = trayViewController;
     provider_->AddObserver(observer_.get());
   }
   return self;
@@ -130,6 +138,7 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
 - (void)dealloc {
   provider_->RemoveObserver(observer_.get());
   provider_->OnNotifierSettingsClosing();
+  STLDeleteElements(&notifiers_);
   [super dealloc];
 }
 
@@ -143,7 +152,13 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   return label;
 }
 
+- (void)updateView {
+  notifiers_.clear();
+  [trayViewController_ updateSettings];
+}
+
 - (void)loadView {
+  DCHECK(notifiers_.empty());
   provider_->GetNotifierList(&notifiers_);
   CGFloat maxHeight = [MCTrayViewController maxTrayClientHeight];
 
@@ -187,14 +202,49 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   [detailsText_ setFont:
       [NSFont messageFontOfSize:message_center::kMessageFontSize]];
 
+  size_t groupCount = provider_->GetNotifierGroupCount();
   [detailsText_ setStringValue:l10n_util::GetNSString(
-      IDS_MESSAGE_CENTER_SETTINGS_DIALOG_DESCRIPTION)];
+      groupCount > 1 ? IDS_MESSAGE_CENTER_SETTINGS_DESCRIPTION_MULTIUSER
+                     : IDS_MESSAGE_CENTER_SETTINGS_DIALOG_DESCRIPTION)];
   [detailsText_ sizeToFit];
   subheaderFrame = [detailsText_ frame];
   subheaderFrame.origin.y =
       NSMinY(headerFrame) - message_center::kTextTopPadding -
       NSHeight(subheaderFrame);
   [[self view] addSubview:detailsText_];
+
+  // Profile switcher is only needed for more than one profile.
+  NSRect dropDownButtonFrame = subheaderFrame;
+  if (groupCount > 1) {
+    dropDownButtonFrame = NSMakeRect(
+        kMarginWidth, kMarginWidth, NSWidth(fullFrame), NSHeight(fullFrame));
+    groupDropDownButton_.reset(
+        [[NSPopUpButton alloc] initWithFrame:dropDownButtonFrame
+                                   pullsDown:YES]);
+    [groupDropDownButton_ setAction:@selector(notifierGroupSelectionChanged:)];
+    [groupDropDownButton_ setTarget:self];
+    // Add a dummy item for pull-down.
+    [groupDropDownButton_ addItemWithTitle:@""];
+    string16 title;
+    for (size_t i = 0; i < groupCount; ++i) {
+      const message_center::NotifierGroup& group =
+          provider_->GetNotifierGroupAt(i);
+      string16 item = group.login_info.empty() ? group.name : group.login_info;
+      [groupDropDownButton_ addItemWithTitle:base::SysUTF16ToNSString(item)];
+      if (provider_->IsNotifierGroupActiveAt(i)) {
+        title = item;
+        [[groupDropDownButton_ lastItem] setState:NSOnState];
+      }
+    }
+    [groupDropDownButton_ setTitle:base::SysUTF16ToNSString(title)];
+    [groupDropDownButton_ sizeToFit];
+    dropDownButtonFrame = [groupDropDownButton_ frame];
+    dropDownButtonFrame.origin.y =
+        NSMinY(subheaderFrame) - message_center::kTextTopPadding -
+        NSHeight(dropDownButtonFrame);
+    dropDownButtonFrame.size.width = NSWidth(fullFrame) - 2 * kMarginWidth;
+    [[self view] addSubview:groupDropDownButton_];
+  }
 
   // Document view for the notifier settings.
   CGFloat y = 0;
@@ -212,6 +262,8 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
     base::scoped_nsobject<MCSettingsButtonCell> cell(
         [[MCSettingsButtonCell alloc]
             initTextCell:base::SysUTF16ToNSString(notifier->name)]);
+    if (!notifier->icon.IsEmpty())
+      [cell setExtraImage:notifier->icon.AsNSImage()];
     [button setCell:cell];
     [button setButtonType:NSSwitchButton];
 
@@ -231,7 +283,7 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   NSRect scrollFrame = documentFrame;
   scrollFrame.origin.y = kMarginWidth;
   CGFloat remainingHeight =
-      NSMinY(subheaderFrame) - message_center::kTextTopPadding -
+      NSMinY(dropDownButtonFrame) - message_center::kTextTopPadding -
       NSMinY(scrollFrame);
 
   if (NSHeight(documentFrame) < remainingHeight) {
@@ -239,6 +291,7 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
     CGFloat delta = remainingHeight - NSHeight(documentFrame);
     headerFrame.origin.y -= delta;
     subheaderFrame.origin.y -= delta;
+    dropDownButtonFrame.origin.y -= delta;
     fullFrame.size.height -= delta;
   } else {
     scrollFrame.size.height = remainingHeight;
@@ -264,6 +317,7 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   [[self view] addSubview:scrollView_];
   [settingsText_ setFrame:headerFrame];
   [detailsText_ setFrame:subheaderFrame];
+  [groupDropDownButton_ setFrame:dropDownButtonFrame];
 }
 
 - (void)checkboxClicked:(id)sender {
@@ -272,6 +326,10 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
 }
 
 // Testing API /////////////////////////////////////////////////////////////////
+
+- (NSPopUpButton*)groupDropDownButton {
+  return groupDropDownButton_;
+}
 
 - (NSScrollView*)scrollView {
   return scrollView_;
@@ -285,18 +343,10 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   [button setNeedsDisplay:YES];
 }
 
-- (void)setIcon:(NSImage*)icon forAppId:(const std::string&)id {
+- (void)setIcon:(NSImage*)icon
+  forNotifierId:(const message_center::NotifierId&)id {
   for (size_t i = 0; i < notifiers_.size(); ++i) {
-    if (notifiers_[i]->id == id) {
-      [self setIcon:icon forNotifierIndex:i];
-      return;
-    }
-  }
-}
-
-- (void)setIcon:(NSImage*)icon forURL:(const GURL&)url {
-  for (size_t i = 0; i < notifiers_.size(); ++i) {
-    if (notifiers_[i]->url == url) {
+    if (notifiers_[i]->notifier_id == id) {
       [self setIcon:icon forNotifierIndex:i];
       return;
     }
@@ -309,6 +359,13 @@ void NotifierSettingsObserverMac::UpdateFavicon(const GURL& url,
   // last.
   NSView* view = [subviews objectAtIndex:notifiers_.size() - 1 - index];
   return base::mac::ObjCCastStrict<NSButton>(view);
+}
+
+- (void)notifierGroupSelectionChanged:(id)sender {
+  DCHECK_EQ(groupDropDownButton_.get(), sender);
+  NSPopUpButton* button = static_cast<NSPopUpButton*>(sender);
+  // The first item is a dummy item.
+  provider_->SwitchToNotifierGroup([button indexOfSelectedItem] - 1);
 }
 
 @end

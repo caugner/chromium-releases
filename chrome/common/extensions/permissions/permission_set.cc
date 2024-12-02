@@ -8,15 +8,17 @@
 #include <iterator>
 #include <string>
 
+#include "base/stl_util.h"
+#include "chrome/common/extensions/permissions/chrome_scheme_hosts.h"
+#include "chrome/common/extensions/permissions/media_galleries_permission.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
-#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using extensions::URLPatternSet;
 
@@ -35,45 +37,6 @@ bool RcdBetterThan(const std::string& a, const std::string& b) {
   return false;
 }
 
-// Names of API modules that can be used without listing it in the
-// permissions section of the manifest.
-const char* kNonPermissionModuleNames[] = {
-  "browserAction",
-  "commands",
-  "devtools",
-  "events",
-  "extension",
-  "i18n",
-  "omnibox",
-  "pageAction",
-  "pageActions",
-  "pageLauncher",
-  "permissions",
-  "runtime",
-  "scriptBadge",
-  "tabs",
-  "test",
-  "types",
-  "windows"
-};
-const size_t kNumNonPermissionModuleNames =
-    arraysize(kNonPermissionModuleNames);
-
-// Names of functions (within modules requiring permissions) that can be used
-// without asking for the module permission. In other words, functions you can
-// use with no permissions specified.
-const char* kNonPermissionFunctionNames[] = {
-  "app.getDetails",
-  "app.getDetailsForFrame",
-  "app.getIsInstalled",
-  "app.installState",
-  "app.runningState",
-  "management.getPermissionWarningsByManifest",
-  "management.uninstallSelf",
-};
-const size_t kNumNonPermissionFunctionNames =
-    arraysize(kNonPermissionFunctionNames);
-
 void AddPatternsAndRemovePaths(const URLPatternSet& set, URLPatternSet* out) {
   DCHECK(out);
   for (URLPatternSet::const_iterator i = set.begin(); i != set.end(); ++i) {
@@ -81,17 +44,6 @@ void AddPatternsAndRemovePaths(const URLPatternSet& set, URLPatternSet* out) {
     p.SetPath("/*");
     out->AddPattern(p);
   }
-}
-
-// Strips out the API name from a function or event name.
-// Functions will be of the form api_name.function
-// Events will be of the form api_name/id or api_name.optional.stuff
-std::string GetPermissionName(const std::string& function_name) {
-  size_t separator = function_name.find_first_of("./");
-  if (separator != std::string::npos)
-    return function_name.substr(0, separator);
-  else
-    return function_name;
 }
 
 }  // namespace
@@ -226,21 +178,7 @@ std::set<std::string> PermissionSet::GetAPIsAsStrings() const {
   return apis_str;
 }
 
-bool PermissionSet::HasAnyAccessToAPI(
-    const std::string& api_name) const {
-  if (HasAccessToFunction(api_name, true))
-    return true;
-
-  for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
-    if (api_name == GetPermissionName(kNonPermissionFunctionNames[i]))
-      return true;
-  }
-
-  return false;
-}
-
-std::set<std::string>
-    PermissionSet::GetDistinctHostsForDisplay() const {
+std::set<std::string> PermissionSet::GetDistinctHostsForDisplay() const {
   URLPatternSet hosts_displayed_as_url;
   // Filters out every URL pattern that matches chrome:// scheme.
   for (URLPatternSet::const_iterator i = effective_hosts_.begin();
@@ -263,36 +201,11 @@ PermissionMessages PermissionSet::GetPermissionMessages(
     return messages;
   }
 
-  // Since platform apps always use isolated storage, they can't (silently)
-  // access user data on other domains, so there's no need to prompt.
-  if (extension_type != Manifest::TYPE_PLATFORM_APP) {
-    if (HasEffectiveAccessToAllHosts()) {
-      messages.push_back(PermissionMessage(
-          PermissionMessage::kHostsAll,
-          l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS)));
-    } else {
-      for (URLPatternSet::const_iterator i = effective_hosts_.begin();
-           i != effective_hosts_.end(); ++i) {
-        if (i->scheme() != chrome::kChromeUIScheme)
-          continue;
-        // chrome://favicon is the only URL for chrome:// scheme that we
-        // want to support. We want to deprecate the "chrome" scheme.
-        // We should not add any additional "host" here.
-        if (GURL(chrome::kChromeUIFaviconURL).host() != i->host())
-          continue;
-        messages.push_back(PermissionMessage(
-            PermissionMessage::kFavicon,
-            l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_FAVICON)));
-      }
-      std::set<std::string> hosts = GetDistinctHostsForDisplay();
-      if (!hosts.empty())
-        messages.push_back(PermissionMessage::CreateFromHostList(hosts));
-    }
-  }
-
-  std::set<PermissionMessage> simple_msgs =
-      GetSimplePermissionMessages();
-  messages.insert(messages.end(), simple_msgs.begin(), simple_msgs.end());
+  std::set<PermissionMessage> host_msgs =
+      GetHostPermissionMessages(extension_type);
+  std::set<PermissionMessage> api_msgs = GetAPIPermissionMessages();
+  messages.insert(messages.end(), host_msgs.begin(), host_msgs.end());
+  messages.insert(messages.end(), api_msgs.begin(), api_msgs.end());
 
   return messages;
 }
@@ -304,22 +217,47 @@ std::vector<string16> PermissionSet::GetWarningMessages(
 
   bool audio_capture = false;
   bool video_capture = false;
+  bool media_galleries_read = false;
+  bool media_galleries_copy_to = false;
   for (PermissionMessages::const_iterator i = permissions.begin();
        i != permissions.end(); ++i) {
-    if (i->id() == PermissionMessage::kAudioCapture)
-      audio_capture = true;
-    if (i->id() == PermissionMessage::kVideoCapture)
-      video_capture = true;
+    switch (i->id()) {
+      case PermissionMessage::kAudioCapture:
+        audio_capture = true;
+        break;
+      case PermissionMessage::kVideoCapture:
+        video_capture = true;
+        break;
+      case PermissionMessage::kMediaGalleriesAllGalleriesRead:
+        media_galleries_read = true;
+        break;
+      case PermissionMessage::kMediaGalleriesAllGalleriesCopyTo:
+        media_galleries_copy_to = true;
+        break;
+      default:
+        break;
+    }
   }
 
   for (PermissionMessages::const_iterator i = permissions.begin();
        i != permissions.end(); ++i) {
+    int id = i->id();
     if (audio_capture && video_capture) {
-      if (i->id() == PermissionMessage::kAudioCapture) {
+      if (id == PermissionMessage::kAudioCapture) {
         messages.push_back(l10n_util::GetStringUTF16(
             IDS_EXTENSION_PROMPT_WARNING_AUDIO_AND_VIDEO_CAPTURE));
         continue;
-      } else if (i->id() == PermissionMessage::kVideoCapture) {
+      } else if (id == PermissionMessage::kVideoCapture) {
+        // The combined message will be pushed above.
+        continue;
+      }
+    }
+    if (media_galleries_read && media_galleries_copy_to) {
+      if (id == PermissionMessage::kMediaGalleriesAllGalleriesRead) {
+        messages.push_back(l10n_util::GetStringUTF16(
+            IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE));
+        continue;
+      } else if (id == PermissionMessage::kMediaGalleriesAllGalleriesCopyTo) {
         // The combined message will be pushed above.
         continue;
       }
@@ -327,6 +265,18 @@ std::vector<string16> PermissionSet::GetWarningMessages(
 
     messages.push_back(i->message());
   }
+
+  return messages;
+}
+
+std::vector<string16> PermissionSet::GetWarningMessagesDetails(
+    Manifest::Type extension_type) const {
+  std::vector<string16> messages;
+  PermissionMessages permissions = GetPermissionMessages(extension_type);
+
+  for (PermissionMessages::const_iterator i = permissions.begin();
+       i != permissions.end(); ++i)
+    messages.push_back(i->details());
 
   return messages;
 }
@@ -345,6 +295,13 @@ bool PermissionSet::HasAPIPermission(
   return apis().find(id) != apis().end();
 }
 
+bool PermissionSet::HasAPIPermission(const std::string& permission_name) const {
+  const APIPermissionInfo* permission =
+      PermissionsInfo::GetInstance()->GetByName(permission_name);
+  CHECK(permission) << permission_name;
+  return (permission && apis_.count(permission->id()));
+}
+
 bool PermissionSet::CheckAPIPermission(APIPermission::ID permission) const {
   return CheckAPIPermissionWithParam(permission, NULL);
 }
@@ -356,45 +313,6 @@ bool PermissionSet::CheckAPIPermissionWithParam(
   if (iter == apis().end())
     return false;
   return iter->Check(param);
-}
-
-bool PermissionSet::HasAccessToFunction(
-    const std::string& function_name, bool allow_implicit) const {
-  // TODO(jstritar): Embed this information in each permission and add a method
-  // like GrantsAccess(function_name) to APIPermission. A "default"
-  // permission can then handle the modules and functions that everyone can
-  // access.
-  if (allow_implicit) {
-    for (size_t i = 0; i < kNumNonPermissionFunctionNames; ++i) {
-      if (function_name == kNonPermissionFunctionNames[i])
-        return true;
-    }
-  }
-
-  // Search for increasingly smaller substrings of |function_name| to see if we
-  // find a matching permission or non-permission module name. E.g. for
-  // "a.b.c", we'll search on "a.b.c", then "a.b", and finally "a".
-  std::string name = function_name;
-  size_t lastdot;
-  do {
-    const APIPermissionInfo* permission =
-        PermissionsInfo::GetInstance()->GetByName(name);
-    if (permission && apis_.count(permission->id()))
-      return true;
-
-    if (allow_implicit) {
-      for (size_t i = 0; i < kNumNonPermissionModuleNames; ++i) {
-        if (name == kNonPermissionModuleNames[i]) {
-          return true;
-        }
-      }
-    }
-    lastdot = name.find_last_of("./");
-    if (lastdot != std::string::npos)
-      name = std::string(name, 0, lastdot);
-  } while (lastdot != std::string::npos);
-
-  return false;
 }
 
 bool PermissionSet::HasExplicitAccessToOrigin(
@@ -429,8 +347,7 @@ bool PermissionSet::HasEffectiveAccessToAllHosts() const {
   return false;
 }
 
-bool PermissionSet::HasEffectiveAccessToURL(
-    const GURL& url) const {
+bool PermissionSet::HasEffectiveAccessToURL(const GURL& url) const {
   return effective_hosts().MatchesURL(url);
 }
 
@@ -444,7 +361,8 @@ bool PermissionSet::HasEffectiveFullAccess() const {
 }
 
 bool PermissionSet::HasLessPrivilegesThan(
-    const PermissionSet* permissions) const {
+    const PermissionSet* permissions,
+    Manifest::Type extension_type) const {
   // Things can't get worse than native code access.
   if (HasEffectiveFullAccess())
     return false;
@@ -453,7 +371,7 @@ bool PermissionSet::HasLessPrivilegesThan(
   if (permissions->HasEffectiveFullAccess())
     return true;
 
-  if (HasLessHostPrivilegesThan(permissions))
+  if (HasLessHostPrivilegesThan(permissions, extension_type))
     return true;
 
   if (HasLessAPIPrivilegesThan(permissions))
@@ -546,8 +464,7 @@ void PermissionSet::InitEffectiveHosts() {
       explicit_hosts(), scriptable_hosts(), &effective_hosts_);
 }
 
-std::set<PermissionMessage>
-    PermissionSet::GetSimplePermissionMessages() const {
+std::set<PermissionMessage> PermissionSet::GetAPIPermissionMessages() const {
   std::set<PermissionMessage> messages;
   for (APIPermissionSet::const_iterator permission_it = apis_.begin();
        permission_it != apis_.end(); ++permission_it) {
@@ -561,26 +478,56 @@ std::set<PermissionMessage>
   return messages;
 }
 
+std::set<PermissionMessage> PermissionSet::GetHostPermissionMessages(
+    Manifest::Type extension_type) const {
+  // Since platform apps always use isolated storage, they can't (silently)
+  // access user data on other domains, so there's no need to prompt.
+  // Note: this must remain consistent with HasLessHostPrivilegesThan.
+  // See crbug.com/255229.
+  std::set<PermissionMessage> messages;
+  if (extension_type == Manifest::TYPE_PLATFORM_APP)
+    return messages;
+
+  if (HasEffectiveAccessToAllHosts()) {
+    messages.insert(PermissionMessage(
+        PermissionMessage::kHostsAll,
+        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_ALL_HOSTS)));
+  } else {
+    PermissionMessages additional_warnings =
+        GetChromeSchemePermissionWarnings(effective_hosts_);
+    for (size_t i = 0; i < additional_warnings.size(); ++i)
+      messages.insert(additional_warnings[i]);
+
+    std::set<std::string> hosts = GetDistinctHostsForDisplay();
+    if (!hosts.empty())
+      messages.insert(PermissionMessage::CreateFromHostList(hosts));
+  }
+  return messages;
+}
+
 bool PermissionSet::HasLessAPIPrivilegesThan(
     const PermissionSet* permissions) const {
   if (permissions == NULL)
     return false;
 
-  std::set<PermissionMessage> current_warnings =
-      GetSimplePermissionMessages();
-  std::set<PermissionMessage> new_warnings =
-      permissions->GetSimplePermissionMessages();
-  std::set<PermissionMessage> delta_warnings;
-  std::set_difference(new_warnings.begin(), new_warnings.end(),
-                      current_warnings.begin(), current_warnings.end(),
-                      std::inserter(delta_warnings, delta_warnings.begin()));
+  typedef std::set<PermissionMessage> PermissionMsgSet;
+  PermissionMsgSet current_warnings = GetAPIPermissionMessages();
+  PermissionMsgSet new_warnings = permissions->GetAPIPermissionMessages();
+  PermissionMsgSet delta_warnings =
+      base::STLSetDifference<PermissionMsgSet>(new_warnings, current_warnings);
 
   // We have less privileges if there are additional warnings present.
   return !delta_warnings.empty();
 }
 
 bool PermissionSet::HasLessHostPrivilegesThan(
-    const PermissionSet* permissions) const {
+    const PermissionSet* permissions,
+    Manifest::Type extension_type) const {
+  // Platform apps host permission changes do not count as privilege increases.
+  // Note: this must remain consistent with GetHostPermissionMessages.
+  if (extension_type == Manifest::TYPE_PLATFORM_APP)
+    return false;
+
   // If this permission set can access any host, then it can't be elevated.
   if (HasEffectiveAccessToAllHosts())
     return false;

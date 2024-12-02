@@ -8,12 +8,11 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "base/win/scoped_handle.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -24,6 +23,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/tools/dump_cache/cache_dumper.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -319,7 +319,7 @@ bool MasterSM::DoInit() {
   DEBUGMSG("Master DoInit\n");
   DCHECK(state_ == MASTER_INITIAL);
 
-  disk_cache::Backend* cache;
+  scoped_ptr<disk_cache::Backend> cache;
   net::TestCompletionCallback cb;
   int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
                                           net::CACHE_BACKEND_DEFAULT, path_, 0,
@@ -330,7 +330,7 @@ bool MasterSM::DoInit() {
     printf("Unable to initialize new files\n");
     return false;
   }
-  cache_.reset(cache);
+  cache_ = cache.Pass();
   writer_ = new CacheDumper(cache_.get());
 
   copied_entries_ = 0;
@@ -594,7 +594,7 @@ class SlaveSM : public BaseSM {
 
 SlaveSM::SlaveSM(const base::FilePath& path, HANDLE channel)
     : BaseSM(channel), iterator_(NULL) {
-  disk_cache::Backend* cache;
+  scoped_ptr<disk_cache::Backend> cache;
   net::TestCompletionCallback cb;
   int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
                                           net::CACHE_BACKEND_BLOCKFILE, path, 0,
@@ -605,7 +605,7 @@ SlaveSM::SlaveSM(const base::FilePath& path, HANDLE channel)
     printf("Unable to open cache files\n");
     return;
   }
-  cache_.reset(reinterpret_cast<disk_cache::BackendImpl*>(cache));
+  cache_.reset(reinterpret_cast<disk_cache::BackendImpl*>(cache.release()));
   cache_->SetUpgradeMode();
 }
 

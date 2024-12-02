@@ -9,8 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
-#include "base/time.h"
-#include "base/timer.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
@@ -77,14 +77,13 @@ class AutocompleteController : public AutocompleteProviderListener {
   // If |clear_result| is true, the controller will also erase the result set.
   void Stop(bool clear_result);
 
-  // Begin asynchronously fetching zero-suggest suggestions for |url|.
-  // |user_text| is the text entered in the omnibox, which may be non-empty if
-  // the user previously focused in the omnibox during this interaction.
-  // |permanent_text| is the omnibox text for the current page.
-  // TODO(jered): Rip out |user_text| once the first match is decoupled from
-  // the current typing in the omnibox.
-  void StartZeroSuggest(const GURL& url,
-                        const string16& permanent_text);
+  // Begin asynchronously fetching zero-suggest suggestions for |url| of
+  // classification |page_classification|. |permanent_text| is the omnibox
+  // text for the current page.
+  void StartZeroSuggest(
+      const GURL& url,
+      AutocompleteInput::PageClassification page_classification,
+      const string16& permanent_text);
 
   // Cancels any pending zero-suggest fetch.
   void StopZeroSuggest();

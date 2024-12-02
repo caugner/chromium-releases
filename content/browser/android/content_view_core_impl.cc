@@ -15,11 +15,12 @@
 #include "base/values.h"
 #include "cc/layers/layer.h"
 #include "cc/output/begin_frame_args.h"
+#include "content/browser/android/browser_media_player_manager.h"
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/android/load_url_params.h"
-#include "content/browser/android/media_player_manager_impl.h"
 #include "content/browser/android/touch_point.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
+#include "content/browser/renderer_host/input/web_input_event_builders_android.h"
 #include "content/browser/renderer_host/java/java_bound_object.h"
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
@@ -32,6 +33,7 @@
 #include "content/browser/web_contents/web_contents_view_android.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/notification_details.h"
@@ -41,11 +43,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/menu_item.h"
 #include "content/public/common/page_transition_types.h"
 #include "jni/ContentViewCore_jni.h"
 #include "third_party/WebKit/public/web/WebBindings.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "third_party/WebKit/public/web/android/WebInputEventFactory.h"
 #include "ui/android/view_android.h"
 #include "ui/android/window_android.h"
 #include "ui/gfx/android/java_bitmap.h"
@@ -53,7 +55,6 @@
 #include "ui/gfx/size_conversions.h"
 #include "ui/gfx/size_f.h"
 #include "webkit/common/user_agent/user_agent_util.h"
-#include "webkit/common/webmenuitem.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -64,7 +65,6 @@ using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
 using WebKit::WebGestureEvent;
 using WebKit::WebInputEvent;
-using WebKit::WebInputEventFactory;
 
 // Describes the type and enabled state of a select popup item.
 // Keep in sync with the value defined in SelectPopupDialog.java
@@ -324,15 +324,6 @@ jint ContentViewCoreImpl::GetBackgroundColor(JNIEnv* env, jobject obj) {
   return rwhva->GetCachedBackgroundColor();
 }
 
-void ContentViewCoreImpl::SetBackgroundColor(JNIEnv* env,
-                                             jobject obj,
-                                             jint color) {
-  RenderWidgetHostViewAndroid* rwhva = GetRenderWidgetHostViewAndroid();
-  if (!rwhva)
-    return;
-  rwhva->OnDidChangeBodyBackgroundColor(color);
-}
-
 void ContentViewCoreImpl::OnHide(JNIEnv* env, jobject obj) {
   Hide();
 }
@@ -359,17 +350,17 @@ void ContentViewCoreImpl::OnTabCrashed() {
     return;
   Java_ContentViewCore_resetVSyncNotification(env, obj.obj());
 
-  // If |tab_crashed_| is already true, just return. e.g. if two tabs share the
-  // render process, this will be called for each tab when the render process
-  // crashed. If user reload one tab, a new render process is created. It can be
-  // shared by the other tab. But if user closes the tab before reload the other
+  // Note that we might reach this place multiple times while the
+  // ContentViewCore remains crashed. E.g. if two tabs share the render process
+  // and the process crashes, this will be called for each tab. If the user
+  // reload one tab, a new render process is created and it can be shared by the
+  // other tab. But if user closes the reloaded tab before reloading the other
   // tab, the new render process will be shut down. This will trigger the other
   // tab's OnTabCrashed() called again as two tabs share the same
-  // BrowserRenderProcessHost.
-  if (tab_crashed_)
-    return;
+  // BrowserRenderProcessHost. The Java side will distinguish this case using
+  // tab_crashed_ passed below.
+  Java_ContentViewCore_onTabCrash(env, obj.obj(), tab_crashed_);
   tab_crashed_ = true;
-  Java_ContentViewCore_onTabCrash(env, obj.obj());
 }
 
 // All positions and sizes are in CSS pixels.
@@ -403,11 +394,6 @@ void ContentViewCoreImpl::UpdateFrameInfo(
       controls_offset.y(),
       content_offset.y(),
       overdraw_bottom_height);
-
-  for (size_t i = 0; i < update_frame_info_callbacks_.size(); ++i) {
-    update_frame_info_callbacks_[i].Run(
-        content_size, scroll_offset, page_scale_factor);
-  }
 }
 
 void ContentViewCoreImpl::SetTitle(const string16& title) {
@@ -429,7 +415,7 @@ void ContentViewCoreImpl::OnBackgroundColorChanged(SkColor color) {
 }
 
 void ContentViewCoreImpl::ShowSelectPopupMenu(
-    const std::vector<WebMenuItem>& items, int selected_item, bool multiple) {
+    const std::vector<MenuItem>& items, int selected_item, bool multiple) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   if (j_obj.is_null())
@@ -447,11 +433,12 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
         native_selected_array[selected_count++] = i;
     }
 
-    selected_array.Reset(env, env->NewIntArray(selected_count));
+    selected_array = ScopedJavaLocalRef<jintArray>(
+        env, env->NewIntArray(selected_count));
     env->SetIntArrayRegion(selected_array.obj(), 0, selected_count,
                            native_selected_array.get());
   } else {
-    selected_array.Reset(env, env->NewIntArray(1));
+    selected_array = ScopedJavaLocalRef<jintArray>(env, env->NewIntArray(1));
     jint value = selected_item;
     env->SetIntArrayRegion(selected_array.obj(), 0, 1, &value);
   }
@@ -463,7 +450,7 @@ void ContentViewCoreImpl::ShowSelectPopupMenu(
   for (size_t i = 0; i < items.size(); ++i) {
     labels.push_back(items[i].label);
     jint enabled =
-        (items[i].type == WebMenuItem::GROUP ? POPUP_ITEM_TYPE_GROUP :
+        (items[i].type == MenuItem::GROUP ? POPUP_ITEM_TYPE_GROUP :
             (items[i].enabled ? POPUP_ITEM_TYPE_ENABLED :
                 POPUP_ITEM_TYPE_DISABLED));
     env->SetIntArrayRegion(enabled_array.obj(), i, 1, &enabled);
@@ -482,6 +469,14 @@ void ContentViewCoreImpl::ConfirmTouchEvent(InputEventAckState ack_result) {
     return;
   Java_ContentViewCore_confirmTouchEvent(env, j_obj.obj(),
                                          static_cast<jint>(ack_result));
+}
+
+void ContentViewCoreImpl::UnhandledFlingStartEvent() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return;
+  Java_ContentViewCore_unhandledFlingStartEvent(env, j_obj.obj());
 }
 
 void ContentViewCoreImpl::HasTouchEventHandlers(bool need_touch_events) {
@@ -547,22 +542,6 @@ unsigned int ContentViewCoreImpl::GetScaledContentTexture(
     return 0;
 
   return view->GetScaledContentTexture(scale, out_size);
-}
-
-void ContentViewCoreImpl::AddFrameInfoCallback(
-    const UpdateFrameInfoCallback& callback) {
-  update_frame_info_callbacks_.push_back(callback);
-}
-
-void ContentViewCoreImpl::RemoveFrameInfoCallback(
-    const UpdateFrameInfoCallback& callback) {
-  for (size_t i = 0; i < update_frame_info_callbacks_.size(); ++i) {
-    if (update_frame_info_callbacks_[i].Equals(callback)) {
-      update_frame_info_callbacks_.erase(
-          update_frame_info_callbacks_.begin() + i);
-      return;
-    }
-  }
 }
 
 void ContentViewCoreImpl::StartContentIntent(const GURL& content_url) {
@@ -906,8 +885,8 @@ jboolean ContentViewCoreImpl::SendMouseMoveEvent(JNIEnv* env,
   if (!rwhv)
     return false;
 
-  WebKit::WebMouseEvent event = WebInputEventFactory::mouseEvent(
-      WebInputEventFactory::MouseEventTypeMove,
+  WebKit::WebMouseEvent event = WebMouseEventBuilder::Build(
+      WebInputEvent::MouseMove,
       WebKit::WebMouseEvent::ButtonNone,
       time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale(), 0, 1);
 
@@ -925,16 +904,16 @@ jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
   if (!rwhv)
     return false;
 
-  WebKit::WebInputEventFactory::MouseWheelDirectionType type;
+  WebMouseWheelEventBuilder::Direction direction;
   if (vertical_axis > 0) {
-    type = WebInputEventFactory::MouseWheelDirectionTypeUp;
+    direction = WebMouseWheelEventBuilder::DIRECTION_UP;
   } else if (vertical_axis < 0) {
-    type = WebInputEventFactory::MouseWheelDirectionTypeDown;
+    direction = WebMouseWheelEventBuilder::DIRECTION_DOWN;
   } else {
     return false;
   }
-  WebKit::WebMouseWheelEvent event = WebInputEventFactory::mouseWheelEvent(
-      type, time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale());
+  WebKit::WebMouseWheelEvent event = WebMouseWheelEventBuilder::Build(
+      direction, time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale());
 
   rwhv->SendMouseWheelEvent(event);
   return true;
@@ -942,13 +921,8 @@ jboolean ContentViewCoreImpl::SendMouseWheelEvent(JNIEnv* env,
 
 WebGestureEvent ContentViewCoreImpl::MakeGestureEvent(
     WebInputEvent::Type type, long time_ms, float x, float y) const {
-  WebGestureEvent event;
-  event.type = type;
-  event.x = x / GetDpiScale();
-  event.y = y / GetDpiScale();
-  event.timeStampSeconds = time_ms / 1000.0;
-  event.sourceDevice = WebGestureEvent::Touchscreen;
-  return event;
+  return WebGestureEventBuilder::Build(
+      type, time_ms / 1000.0, x / GetDpiScale(), y / GetDpiScale());
 }
 
 void ContentViewCoreImpl::SendGestureEvent(
@@ -986,6 +960,12 @@ void ContentViewCoreImpl::ScrollBy(JNIEnv* env, jobject obj, jlong time_ms,
   event.data.scrollUpdate.deltaY = -dy / GetDpiScale();
 
   SendGestureEvent(event);
+
+  // TODO(brianderson): Clean up last_input_event_for_vsync. crbug.com/247043
+  if (last_input_event_for_vsync) {
+    SendBeginFrame(base::TimeTicks() +
+                   base::TimeDelta::FromMilliseconds(time_ms));
+  }
 }
 
 void ContentViewCoreImpl::FlingStart(JNIEnv* env, jobject obj, jlong time_ms,
@@ -1115,6 +1095,12 @@ void ContentViewCoreImpl::PinchBy(JNIEnv* env, jobject obj, jlong time_ms,
   event.data.pinchUpdate.scale = delta;
 
   SendGestureEvent(event);
+
+  // TODO(brianderson): Clean up last_input_event_for_vsync. crbug.com/247043
+  if (last_input_event_for_vsync) {
+    SendBeginFrame(base::TimeTicks() +
+                   base::TimeDelta::FromMilliseconds(time_ms));
+  }
 }
 
 void ContentViewCoreImpl::SelectBetweenCoordinates(JNIEnv* env, jobject obj,
@@ -1250,12 +1236,16 @@ void ContentViewCoreImpl::UpdateVSyncParameters(JNIEnv* env, jobject /* obj */,
 
 void ContentViewCoreImpl::OnVSync(JNIEnv* env, jobject /* obj */,
                                   jlong frame_time_micros) {
+  base::TimeTicks frame_time =
+      base::TimeTicks::FromInternalValue(frame_time_micros);
+  SendBeginFrame(frame_time);
+}
+
+void ContentViewCoreImpl::SendBeginFrame(base::TimeTicks frame_time) {
   RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
   if (!view)
     return;
 
-  base::TimeTicks frame_time =
-      base::TimeTicks::FromInternalValue(frame_time_micros);
   base::TimeTicks display_time = frame_time + vsync_interval_;
   base::TimeTicks deadline = display_time - expected_browser_composite_time_;
 
@@ -1311,11 +1301,12 @@ void ContentViewCoreImpl::AttachExternalVideoSurface(JNIEnv* env,
 #if defined(GOOGLE_TV)
   RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
       web_contents_->GetRenderViewHost());
-  MediaPlayerManagerImpl* media_player_manager_impl =
-      rvhi ? static_cast<MediaPlayerManagerImpl*>(rvhi->media_player_manager())
+  BrowserMediaPlayerManager* browser_media_player_manager =
+      rvhi ? static_cast<BrowserMediaPlayerManager*>(
+                 rvhi->media_player_manager())
            : NULL;
-  if (media_player_manager_impl) {
-    media_player_manager_impl->AttachExternalVideoSurface(
+  if (browser_media_player_manager) {
+    browser_media_player_manager->AttachExternalVideoSurface(
         static_cast<int>(player_id), jsurface);
   }
 #endif
@@ -1327,11 +1318,12 @@ void ContentViewCoreImpl::DetachExternalVideoSurface(JNIEnv* env,
 #if defined(GOOGLE_TV)
   RenderViewHostImpl* rvhi = static_cast<RenderViewHostImpl*>(
       web_contents_->GetRenderViewHost());
-  MediaPlayerManagerImpl* media_player_manager_impl =
-      rvhi ? static_cast<MediaPlayerManagerImpl*>(rvhi->media_player_manager())
+  BrowserMediaPlayerManager* browser_media_player_manager =
+      rvhi ? static_cast<BrowserMediaPlayerManager*>(
+                 rvhi->media_player_manager())
            : NULL;
-  if (media_player_manager_impl) {
-    media_player_manager_impl->DetachExternalVideoSurface(
+  if (browser_media_player_manager) {
+    browser_media_player_manager->DetachExternalVideoSurface(
         static_cast<int>(player_id));
   }
 #endif
@@ -1480,14 +1472,22 @@ void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
 void ContentViewCoreImpl::EvaluateJavaScript(JNIEnv* env,
                                              jobject obj,
                                              jstring script,
-                                             jobject callback) {
-  RenderViewHost* host = web_contents_->GetRenderViewHost();
-  DCHECK(host);
+                                             jobject callback,
+                                             jboolean start_renderer) {
+  RenderViewHost* rvh = web_contents_->GetRenderViewHost();
+  DCHECK(rvh);
+
+  if (start_renderer && !rvh->IsRenderViewLive()) {
+    if (!web_contents_->CreateRenderViewForInitialEmptyDocument()) {
+      LOG(ERROR) << "Failed to create RenderView in EvaluateJavaScript";
+      return;
+    }
+  }
 
   if (!callback) {
     // No callback requested.
-    host->ExecuteJavascriptInWebFrame(string16(),  // frame_xpath
-                                      ConvertJavaStringToUTF16(env, script));
+    rvh->ExecuteJavascriptInWebFrame(string16(),  // frame_xpath
+                                     ConvertJavaStringToUTF16(env, script));
     return;
   }
 
@@ -1498,7 +1498,7 @@ void ContentViewCoreImpl::EvaluateJavaScript(JNIEnv* env,
   content::RenderViewHost::JavascriptResultCallback c_callback =
       base::Bind(&JavaScriptResultCallback, j_callback);
 
-  host->ExecuteJavascriptInWebFrameCallbackResult(
+  rvh->ExecuteJavascriptInWebFrameCallbackResult(
       string16(),  // frame_xpath
       ConvertJavaStringToUTF16(env, script),
       c_callback);
@@ -1569,6 +1569,29 @@ void ContentViewCoreImpl::SetUseDesktopUserAgent(
     NavigationControllerImpl& controller =
         static_cast<NavigationControllerImpl&>(web_contents_->GetController());
     controller.ReloadOriginalRequestURL(false);
+  }
+}
+
+void ContentViewCoreImpl::SetAccessibilityEnabled(JNIEnv* env, jobject obj,
+                                                  bool enabled) {
+  RenderWidgetHostViewAndroid* host_view = GetRenderWidgetHostViewAndroid();
+  if (!host_view)
+    return;
+  RenderWidgetHostImpl* host_impl = RenderWidgetHostImpl::From(
+      host_view->GetRenderWidgetHost());
+  BrowserAccessibilityState* accessibility_state =
+      BrowserAccessibilityState::GetInstance();
+  if (enabled) {
+    // This enables accessibility globally unless it was explicitly disallowed
+    // by a command-line flag.
+    accessibility_state->OnScreenReaderDetected();
+    // If it was actually enabled globally, enable it for this RenderWidget now.
+    if (accessibility_state->IsAccessibleBrowser() && host_impl)
+      host_impl->SetAccessibilityMode(AccessibilityModeComplete);
+  } else {
+    accessibility_state->DisableAccessibility();
+    if (host_impl)
+      host_impl->SetAccessibilityMode(AccessibilityModeOff);
   }
 }
 

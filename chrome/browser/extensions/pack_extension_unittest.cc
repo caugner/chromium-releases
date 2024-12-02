@@ -6,7 +6,7 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/common/chrome_paths.h"
@@ -17,7 +17,7 @@
 namespace extensions {
 
 // Tests the environment for packing extensions from the command line
-// via the --pack-extension switch.
+// when using the --pack-extension switch.
 class PackExtensionTest : public testing::Test {
  public:
   PackExtensionTest()
@@ -31,7 +31,7 @@ class PackExtensionTest : public testing::Test {
   bool TestPackExtension(const base::FilePath& path) {
     base::ScopedTempDir temp_dir;
     EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
-    EXPECT_TRUE(file_util::CopyDirectory(path, temp_dir.path(), true));
+    EXPECT_TRUE(base::CopyDirectory(path, temp_dir.path(), true));
     CommandLine command_line(CommandLine::NO_PROGRAM);
     command_line.AppendSwitchPath(switches::kPackExtension,
                                   temp_dir.path().Append(path.BaseName()));

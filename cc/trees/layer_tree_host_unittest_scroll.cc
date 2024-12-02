@@ -13,7 +13,6 @@
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/layer_tree_test.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "third_party/WebKit/public/platform/WebLayerScrollClient.h"
 #include "ui/gfx/point_conversions.h"
 #include "ui/gfx/size_conversions.h"
 #include "ui/gfx/vector2d_conversions.h"
@@ -33,13 +32,15 @@ class LayerTreeHostScrollTestScrollSimple : public LayerTreeHostScrollTest {
 
   virtual void BeginTest() OVERRIDE {
     layer_tree_host()->root_layer()->SetScrollable(true);
+    layer_tree_host()->root_layer()
+        ->SetMaxScrollOffset(gfx::Vector2d(100, 100));
     layer_tree_host()->root_layer()->SetScrollOffset(initial_scroll_);
     PostSetNeedsCommitToMainThread();
   }
 
   virtual void Layout() OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    if (!layer_tree_host()->commit_number()) {
+    if (!layer_tree_host()->source_frame_number()) {
       EXPECT_VECTOR_EQ(initial_scroll_, root->scroll_offset());
     } else {
       EXPECT_VECTOR_EQ(initial_scroll_ + scroll_amount_, root->scroll_offset());
@@ -71,10 +72,8 @@ class LayerTreeHostScrollTestScrollSimple : public LayerTreeHostScrollTest {
     }
   }
 
-  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float scale)
-      OVERRIDE {
-    gfx::Vector2d offset = layer_tree_host()->root_layer()->scroll_offset();
-    layer_tree_host()->root_layer()->SetScrollOffset(offset + scroll_delta);
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float scale) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -98,12 +97,15 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
   virtual void BeginTest() OVERRIDE {
     layer_tree_host()->root_layer()->SetScrollable(true);
     layer_tree_host()->root_layer()->SetScrollOffset(initial_scroll_);
+    layer_tree_host()->root_layer()->SetBounds(gfx::Size(200, 200));
+    layer_tree_host()->root_layer()
+        ->SetMaxScrollOffset(gfx::Vector2d(100, 100));
     PostSetNeedsCommitToMainThread();
   }
 
   virtual void BeginCommitOnThread(LayerTreeHostImpl* impl) OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    switch (layer_tree_host()->commit_number()) {
+    switch (layer_tree_host()->source_frame_number()) {
       case 0:
         EXPECT_VECTOR_EQ(root->scroll_offset(), initial_scroll_);
         break;
@@ -119,9 +121,6 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
 
   virtual void DrawLayersOnThread(LayerTreeHostImpl* impl) OVERRIDE {
     LayerImpl* root = impl->active_tree()->root_layer();
-    root->SetScrollable(true);
-    root->SetMaxScrollOffset(gfx::Vector2d(100, 100));
-
     if (impl->active_tree()->source_frame_number() == 0 &&
         impl->SourceAnimationFrameNumber() == 1) {
       // First draw after first commit.
@@ -150,10 +149,8 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
     }
   }
 
-  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float scale)
-      OVERRIDE {
-    gfx::Vector2d offset = layer_tree_host()->root_layer()->scroll_offset();
-    layer_tree_host()->root_layer()->SetScrollOffset(offset + scroll_delta);
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float scale) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -167,18 +164,195 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
 
 MULTI_THREAD_TEST_F(LayerTreeHostScrollTestScrollMultipleRedraw);
 
+class LayerTreeHostScrollTestScrollAbortedCommit
+    : public LayerTreeHostScrollTest {
+ public:
+  LayerTreeHostScrollTestScrollAbortedCommit()
+      : initial_scroll_(50, 60),
+        impl_scroll_(-3, 2),
+        second_main_scroll_(14, -3),
+        impl_scale_(2.f),
+        num_will_begin_frames_(0),
+        num_did_begin_frames_(0),
+        num_will_commits_(0),
+        num_did_commits_(0),
+        num_impl_commits_(0),
+        num_impl_scrolls_(0) {}
+
+  virtual void BeginTest() OVERRIDE { PostSetNeedsCommitToMainThread(); }
+
+  virtual void SetupTree() OVERRIDE {
+    LayerTreeHostScrollTest::SetupTree();
+    scoped_refptr<Layer> root_scroll_layer = Layer::Create();
+    root_scroll_layer->SetScrollable(true);
+    root_scroll_layer->SetScrollOffset(initial_scroll_);
+    root_scroll_layer->SetBounds(gfx::Size(200, 200));
+    root_scroll_layer->SetMaxScrollOffset(gfx::Vector2d(100, 100));
+    root_scroll_layer->SetIsDrawable(true);
+    layer_tree_host()->root_layer()->AddChild(root_scroll_layer);
+
+    layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.01f, 100.f);
+  }
+
+  virtual void WillBeginFrame() OVERRIDE {
+    num_will_begin_frames_++;
+    Layer* root_scroll_layer = layer_tree_host()->root_layer()->children()[0];
+    switch (num_will_begin_frames_) {
+      case 1:
+        // This will not be aborted because of the initial prop changes.
+        EXPECT_EQ(0, num_impl_scrolls_);
+        EXPECT_EQ(0, layer_tree_host()->source_frame_number());
+        EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(), initial_scroll_);
+        EXPECT_EQ(1.f, layer_tree_host()->page_scale_factor());
+        break;
+      case 2:
+        // This commit will be aborted, and another commit will be
+        // initiated from the redraw.
+        EXPECT_EQ(1, num_impl_scrolls_);
+        EXPECT_EQ(1, layer_tree_host()->source_frame_number());
+        EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(),
+                         initial_scroll_ + impl_scroll_);
+        EXPECT_EQ(impl_scale_, layer_tree_host()->page_scale_factor());
+        PostSetNeedsRedrawToMainThread();
+        break;
+      case 3:
+        // This commit will not be aborted because of the scroll change.
+        EXPECT_EQ(2, num_impl_scrolls_);
+        EXPECT_EQ(1, layer_tree_host()->source_frame_number());
+        EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(),
+                         initial_scroll_ + impl_scroll_ + impl_scroll_);
+        EXPECT_EQ(impl_scale_ * impl_scale_,
+                  layer_tree_host()->page_scale_factor());
+        root_scroll_layer->SetScrollOffset(root_scroll_layer->scroll_offset() +
+                                           second_main_scroll_);
+        break;
+      case 4:
+        // This commit will also be aborted.
+        EXPECT_EQ(3, num_impl_scrolls_);
+        EXPECT_EQ(2, layer_tree_host()->source_frame_number());
+        EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(),
+                         initial_scroll_ + impl_scroll_ + impl_scroll_ +
+                             impl_scroll_ + second_main_scroll_);
+        // End the test by drawing to verify this commit is also aborted.
+        PostSetNeedsRedrawToMainThread();
+        break;
+    }
+  }
+
+  virtual void DidBeginFrame() OVERRIDE { num_did_begin_frames_++; }
+
+  virtual void WillCommit() OVERRIDE { num_will_commits_++; }
+
+  virtual void DidCommit() OVERRIDE { num_did_commits_++; }
+
+  virtual void BeginCommitOnThread(LayerTreeHostImpl* impl) OVERRIDE {
+    num_impl_commits_++;
+  }
+
+  virtual void DrawLayersOnThread(LayerTreeHostImpl* impl) OVERRIDE {
+    LayerImpl* root_scroll_layer =
+        impl->active_tree()->root_layer()->children()[0];
+
+    if (impl->active_tree()->source_frame_number() == 0 &&
+        impl->SourceAnimationFrameNumber() == 1) {
+      // First draw
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), gfx::Vector2d());
+      root_scroll_layer->ScrollBy(impl_scroll_);
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), impl_scroll_);
+      EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(), initial_scroll_);
+
+      EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
+      EXPECT_EQ(1.f, impl->active_tree()->total_page_scale_factor());
+      impl->active_tree()->SetPageScaleDelta(impl_scale_);
+      EXPECT_EQ(impl_scale_, impl->active_tree()->page_scale_delta());
+      EXPECT_EQ(impl_scale_, impl->active_tree()->total_page_scale_factor());
+
+      // To simplify the testing flow, don't redraw here, just commit.
+      impl->SetNeedsCommit();
+    } else if (impl->active_tree()->source_frame_number() == 0 &&
+               impl->SourceAnimationFrameNumber() == 2) {
+      // Test a second draw after an aborted commit.
+      // The scroll/scale values should be baked into the offset/scale factor
+      // since the main thread consumed but aborted the begin frame.
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), gfx::Vector2d());
+      root_scroll_layer->ScrollBy(impl_scroll_);
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), impl_scroll_);
+      EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(),
+                       initial_scroll_ + impl_scroll_);
+
+      EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
+      EXPECT_EQ(impl_scale_, impl->active_tree()->total_page_scale_factor());
+      impl->active_tree()->SetPageScaleDelta(impl_scale_);
+      EXPECT_EQ(impl_scale_, impl->active_tree()->page_scale_delta());
+      EXPECT_EQ(impl_scale_ * impl_scale_,
+                impl->active_tree()->total_page_scale_factor());
+
+      impl->SetNeedsCommit();
+    } else if (impl->active_tree()->source_frame_number() == 1 &&
+               impl->SourceAnimationFrameNumber() == 3) {
+      // Third draw after the second full commit.
+      EXPECT_EQ(root_scroll_layer->ScrollDelta(), gfx::Vector2d());
+      root_scroll_layer->ScrollBy(impl_scroll_);
+      impl->SetNeedsCommit();
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), impl_scroll_);
+      EXPECT_VECTOR_EQ(
+          root_scroll_layer->scroll_offset(),
+          initial_scroll_ + impl_scroll_ + impl_scroll_ + second_main_scroll_);
+    } else if (impl->active_tree()->source_frame_number() == 1 &&
+               impl->SourceAnimationFrameNumber() == 4) {
+      // Final draw after the second aborted commit.
+      EXPECT_VECTOR_EQ(root_scroll_layer->ScrollDelta(), gfx::Vector2d());
+      EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(),
+                       initial_scroll_ + impl_scroll_ + impl_scroll_ +
+                           impl_scroll_ + second_main_scroll_);
+      EndTest();
+    }
+  }
+
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float scale) OVERRIDE {
+    num_impl_scrolls_++;
+  }
+
+  virtual void AfterTest() OVERRIDE {
+    EXPECT_EQ(3, num_impl_scrolls_);
+    // Verify that the embedder sees aborted commits as real commits.
+    EXPECT_EQ(4, num_will_begin_frames_);
+    EXPECT_EQ(4, num_did_begin_frames_);
+    EXPECT_EQ(4, num_will_commits_);
+    EXPECT_EQ(4, num_did_commits_);
+    // ...but the compositor thread only sees two real ones.
+    EXPECT_EQ(2, num_impl_commits_);
+  }
+
+ private:
+  gfx::Vector2d initial_scroll_;
+  gfx::Vector2d impl_scroll_;
+  gfx::Vector2d second_main_scroll_;
+  float impl_scale_;
+  int num_will_begin_frames_;
+  int num_did_begin_frames_;
+  int num_will_commits_;
+  int num_did_commits_;
+  int num_impl_commits_;
+  int num_impl_scrolls_;
+};
+
+MULTI_THREAD_TEST_F(LayerTreeHostScrollTestScrollAbortedCommit);
+
 class LayerTreeHostScrollTestFractionalScroll : public LayerTreeHostScrollTest {
  public:
   LayerTreeHostScrollTestFractionalScroll() : scroll_amount_(1.75, 0) {}
 
   virtual void BeginTest() OVERRIDE {
     layer_tree_host()->root_layer()->SetScrollable(true);
+    layer_tree_host()->root_layer()
+        ->SetMaxScrollOffset(gfx::Vector2d(100, 100));
     PostSetNeedsCommitToMainThread();
   }
 
   virtual void DrawLayersOnThread(LayerTreeHostImpl* impl) OVERRIDE {
     LayerImpl* root = impl->active_tree()->root_layer();
-    root->SetMaxScrollOffset(gfx::Vector2d(100, 100));
 
     // Check that a fractional scroll delta is correctly accumulated over
     // multiple commits.
@@ -208,12 +382,6 @@ class LayerTreeHostScrollTestFractionalScroll : public LayerTreeHostScrollTest {
     root->ScrollBy(scroll_amount_);
   }
 
-  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float scale)
-      OVERRIDE {
-    gfx::Vector2d offset = layer_tree_host()->root_layer()->scroll_offset();
-    layer_tree_host()->root_layer()->SetScrollOffset(offset + scroll_delta);
-  }
-
   virtual void AfterTest() OVERRIDE {}
 
  private:
@@ -222,9 +390,7 @@ class LayerTreeHostScrollTestFractionalScroll : public LayerTreeHostScrollTest {
 
 MULTI_THREAD_TEST_F(LayerTreeHostScrollTestFractionalScroll);
 
-class LayerTreeHostScrollTestCaseWithChild
-    : public LayerTreeHostScrollTest,
-      public WebKit::WebLayerScrollClient {
+class LayerTreeHostScrollTestCaseWithChild : public LayerTreeHostScrollTest {
  public:
   LayerTreeHostScrollTestCaseWithChild()
       : initial_offset_(10, 20),
@@ -241,7 +407,7 @@ class LayerTreeHostScrollTestCaseWithChild
     root_scroll_layer_ = ContentLayer::Create(&fake_content_layer_client_);
     root_scroll_layer_->SetBounds(gfx::Size(110, 110));
 
-    root_scroll_layer_->SetPosition(gfx::Point(0, 0));
+    root_scroll_layer_->SetPosition(gfx::Point());
     root_scroll_layer_->SetAnchorPoint(gfx::PointF());
 
     root_scroll_layer_->SetIsDrawable(true);
@@ -250,13 +416,20 @@ class LayerTreeHostScrollTestCaseWithChild
     root_layer->AddChild(root_scroll_layer_);
 
     child_layer_ = ContentLayer::Create(&fake_content_layer_client_);
-    child_layer_->set_layer_scroll_client(this);
+    child_layer_->set_did_scroll_callback(
+        base::Bind(&LayerTreeHostScrollTestCaseWithChild::DidScroll,
+                   base::Unretained(this)));
     child_layer_->SetBounds(gfx::Size(110, 110));
 
-    // Scrolls on the child layer will happen at 5, 5. If they are treated
-    // like device pixels, and device scale factor is 2, then they will
-    // be considered at 2.5, 2.5 in logical pixels, and will miss this layer.
-    child_layer_->SetPosition(gfx::Point(5, 5));
+    if (scroll_child_layer_) {
+      // Scrolls on the child layer will happen at 5, 5. If they are treated
+      // like device pixels, and device scale factor is 2, then they will
+      // be considered at 2.5, 2.5 in logical pixels, and will miss this layer.
+      child_layer_->SetPosition(gfx::Point(5, 5));
+    } else {
+      // Adjust the child layer horizontally so that scrolls will never hit it.
+      child_layer_->SetPosition(gfx::Point(60, 5));
+    }
     child_layer_->SetAnchorPoint(gfx::PointF());
 
     child_layer_->SetIsDrawable(true);
@@ -280,14 +453,20 @@ class LayerTreeHostScrollTestCaseWithChild
 
   virtual void BeginTest() OVERRIDE { PostSetNeedsCommitToMainThread(); }
 
-  virtual void didScroll() OVERRIDE {
+  virtual void WillCommit() OVERRIDE {
+    // Keep the test committing (otherwise the early out for no update
+    // will stall the test).
+    if (layer_tree_host()->source_frame_number() < 2) {
+      layer_tree_host()->SetNeedsCommit();
+    }
+  }
+
+  void DidScroll() {
     final_scroll_offset_ = expected_scroll_layer_->scroll_offset();
   }
 
-  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float scale)
-      OVERRIDE {
-    gfx::Vector2d offset = root_scroll_layer_->scroll_offset();
-    root_scroll_layer_->SetScrollOffset(offset + scroll_delta);
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float scale) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -295,7 +474,7 @@ class LayerTreeHostScrollTestCaseWithChild
     EXPECT_VECTOR_EQ(gfx::Vector2d(),
                      expected_no_scroll_layer_->scroll_offset());
 
-    switch (layer_tree_host()->commit_number()) {
+    switch (layer_tree_host()->source_frame_number()) {
       case 0:
         EXPECT_VECTOR_EQ(initial_offset_,
                          expected_scroll_layer_->scroll_offset());
@@ -347,7 +526,7 @@ class LayerTreeHostScrollTestCaseWithChild
       case 0: {
         // Gesture scroll on impl thread.
         InputHandler::ScrollStatus status = impl->ScrollBegin(
-            gfx::ToCeiledPoint(expected_scroll_layer_impl->position() +
+            gfx::ToCeiledPoint(expected_scroll_layer_impl->position() -
                                gfx::Vector2dF(0.5f, 0.5f)),
             InputHandler::Gesture);
         EXPECT_EQ(InputHandler::ScrollStarted, status);
@@ -548,13 +727,15 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
 
   virtual void BeginTest() OVERRIDE {
     layer_tree_host()->root_layer()->SetScrollable(true);
+    layer_tree_host()->root_layer()
+        ->SetMaxScrollOffset(gfx::Vector2d(100, 100));
     layer_tree_host()->root_layer()->SetScrollOffset(initial_scroll_);
     PostSetNeedsCommitToMainThread();
   }
 
   virtual void Layout() OVERRIDE {
     Layer* root = layer_tree_host()->root_layer();
-    if (!layer_tree_host()->commit_number()) {
+    if (!layer_tree_host()->source_frame_number()) {
       EXPECT_VECTOR_EQ(root->scroll_offset(), initial_scroll_);
     } else {
       EXPECT_VECTOR_EQ(root->scroll_offset(),
@@ -571,6 +752,11 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
     return can_activate_;
   }
 
+  virtual bool CanActivatePendingTreeIfNeeded(LayerTreeHostImpl* impl)
+      OVERRIDE {
+    return can_activate_;
+  }
+
   virtual void CommitCompleteOnThread(LayerTreeHostImpl* impl) OVERRIDE {
     // We force a second draw here of the first commit before activating
     // the second commit.
@@ -582,9 +768,6 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
     ImplSidePaintingScrollTest::DrawLayersOnThread(impl);
 
     LayerImpl* root = impl->active_tree()->root_layer();
-    root->SetScrollable(true);
-    root->SetMaxScrollOffset(gfx::Vector2d(100, 100));
-
     LayerImpl* pending_root =
         impl->active_tree()->FindPendingTreeLayerById(root->id());
 
@@ -632,10 +815,8 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
     }
   }
 
-  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta, float scale)
-      OVERRIDE {
-    gfx::Vector2d offset = layer_tree_host()->root_layer()->scroll_offset();
-    layer_tree_host()->root_layer()->SetScrollOffset(offset + scroll_delta);
+  virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
+                                   float scale) OVERRIDE {
     num_scrolls_++;
   }
 
@@ -706,8 +887,7 @@ class ThreadCheckingInputHandlerClient : public InputHandlerClient {
     *received_stop_flinging_ = true;
   }
 
-  virtual void DidOverscroll(gfx::Vector2dF accumulated_overscroll,
-                             gfx::Vector2dF current_fling_velocity) OVERRIDE {
+  virtual void DidOverscroll(const DidOverscrollParams& params) OVERRIDE {
     if (!task_runner_->BelongsToCurrentThread())
       ADD_FAILURE() << "DidOverscroll called on wrong thread";
   }
@@ -734,11 +914,9 @@ TEST(LayerTreeHostFlingTest, DidStopFlingingThread) {
           impl_thread.message_loop_proxy().get(), &received_stop_flinging);
   FakeLayerTreeHostClient client(FakeLayerTreeHostClient::DIRECT_3D);
 
-  ASSERT_TRUE(impl_thread.message_loop_proxy());
-  scoped_ptr<LayerTreeHost> layer_tree_host =
-      LayerTreeHost::Create(&client,
-                            settings,
-                            impl_thread.message_loop_proxy());
+  ASSERT_TRUE(impl_thread.message_loop_proxy().get());
+  scoped_ptr<LayerTreeHost> layer_tree_host = LayerTreeHost::Create(
+      &client, settings, impl_thread.message_loop_proxy());
 
   impl_thread.message_loop_proxy()
       ->PostTask(FROM_HERE,
@@ -802,16 +980,16 @@ class LayerTreeHostScrollTestLayerStructureChange
   }
 
  protected:
-  class FakeWebLayerScrollClient : public WebKit::WebLayerScrollClient {
+  class FakeLayerScrollClient {
    public:
-    virtual void didScroll() OVERRIDE {
+    void DidScroll() {
       owner_->DidScroll(layer_);
     }
     LayerTreeHostScrollTestLayerStructureChange* owner_;
     Layer* layer_;
   };
 
-  Layer* CreateScrollLayer(Layer* parent, FakeWebLayerScrollClient* client) {
+  Layer* CreateScrollLayer(Layer* parent, FakeLayerScrollClient* client) {
     scoped_refptr<Layer> scroll_layer =
         ContentLayer::Create(&fake_content_layer_client_);
     scroll_layer->SetBounds(gfx::Size(110, 110));
@@ -820,16 +998,17 @@ class LayerTreeHostScrollTestLayerStructureChange
     scroll_layer->SetIsDrawable(true);
     scroll_layer->SetScrollable(true);
     scroll_layer->SetMaxScrollOffset(gfx::Vector2d(100, 100));
-    scroll_layer->set_layer_scroll_client(client);
+    scroll_layer->set_did_scroll_callback(base::Bind(
+        &FakeLayerScrollClient::DidScroll, base::Unretained(client)));
     client->owner_ = this;
     client->layer_ = scroll_layer.get();
     parent->AddChild(scroll_layer);
     return scroll_layer.get();
   }
 
-  FakeWebLayerScrollClient root_scroll_layer_client_;
-  FakeWebLayerScrollClient sibling_scroll_layer_client_;
-  FakeWebLayerScrollClient child_scroll_layer_client_;
+  FakeLayerScrollClient root_scroll_layer_client_;
+  FakeLayerScrollClient sibling_scroll_layer_client_;
+  FakeLayerScrollClient child_scroll_layer_client_;
 
   FakeContentLayerClient fake_content_layer_client_;
 

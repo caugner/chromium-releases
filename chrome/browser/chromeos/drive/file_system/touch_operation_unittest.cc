@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/drive/file_system/touch_operation.h"
 
 #include "base/files/file_path.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system/operation_test_base.h"
@@ -38,7 +38,7 @@ TEST_F(TouchOperationTest, TouchFile) {
       base::Time::FromUTCExploded(kLastAccessTime),
       base::Time::FromUTCExploded(kLastModifiedTime),
       google_apis::test_util::CreateCopyResultCallback(&error));
-  google_apis::test_util::RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
   EXPECT_EQ(FILE_ERROR_OK, error);
 
   ResourceEntry entry;

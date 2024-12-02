@@ -6,9 +6,11 @@
 #define CHROME_BROWSER_MANAGED_MODE_MANAGED_MODE_NAVIGATION_OBSERVER_H_
 
 #include <set>
+#include <vector>
 
 #include "base/memory/scoped_vector.h"
 #include "base/values.h"
+#include "chrome/browser/managed_mode/managed_users.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -27,10 +29,10 @@ class ManagedModeNavigationObserver
   virtual ~ManagedModeNavigationObserver();
 
   // Sets the specific infobar as dismissed.
-  void WarnInfobarDismissed();
+  void WarnInfoBarDismissed();
 
-  const std::vector<const content::NavigationEntry*>* blocked_navigations()
-      const {
+  const std::vector<const content::NavigationEntry*>*
+      blocked_navigations() const {
     return &blocked_navigations_.get();
   }
 
@@ -65,7 +67,7 @@ class ManagedModeNavigationObserver
   const ManagedModeURLFilter* url_filter_;
 
   // Owned by the InfoBarService, which has the same lifetime as this object.
-  InfoBarDelegate* warn_infobar_delegate_;
+  InfoBarDelegate* warn_infobar_;
 
   ScopedVector<const content::NavigationEntry> blocked_navigations_;
 

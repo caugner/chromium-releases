@@ -10,8 +10,8 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/process/kill.h"
+#include "base/process/process.h"
 #include "base/values.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
@@ -24,8 +24,8 @@
 #include "cloud_print/service/service_constants.h"
 #include "cloud_print/service/win/service_utils.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/url_util.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -139,10 +139,10 @@ std::string ReadAndUpdateServiceState(const base::FilePath& directory,
   }
 
   // Remove everything except kCloudPrintRoot.
-  base::Value* cloud_print_root = NULL;
+  scoped_ptr<base::Value> cloud_print_root;
   dictionary->Remove(prefs::kCloudPrintRoot, &cloud_print_root);
   dictionary->Clear();
-  dictionary->Set(prefs::kCloudPrintRoot, cloud_print_root);
+  dictionary->Set(prefs::kCloudPrintRoot, cloud_print_root.release());
 
   dictionary->SetBoolean(prefs::kCloudPrintXmppPingEnabled, true);
   if (!proxy_id.empty())  // Reuse proxy id if we already had one.

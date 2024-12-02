@@ -5,8 +5,8 @@
 #include "dbus/bus.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "dbus/exported_object.h"
@@ -372,7 +372,8 @@ TEST(BusTest, ListenForServiceOwnerChange) {
   EXPECT_EQ(0, num_of_owner_changes1);
 
   // Make an ownership change.
-  ASSERT_TRUE(bus->RequestOwnershipAndBlock("org.chromium.TestService"));
+  ASSERT_TRUE(bus->RequestOwnershipAndBlock("org.chromium.TestService",
+                                            Bus::REQUIRE_PRIMARY));
   run_loop_state.Run(1);
 
   {

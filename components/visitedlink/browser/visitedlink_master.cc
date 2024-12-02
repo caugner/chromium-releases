@@ -18,9 +18,8 @@
 #include "base/containers/stack_container.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -28,7 +27,7 @@
 #include "components/visitedlink/browser/visitedlink_event_listener.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using file_util::ScopedFILE;

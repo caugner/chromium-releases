@@ -1,13 +1,13 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "apps/shell_window.h"
+#include "apps/shell_window_registry.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/platform_app_browsertest_util.h"
-#include "chrome/browser/extensions/shell_window_registry.h"
-#include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -17,9 +17,13 @@
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/test/ui_controls.h"
+
+using apps::ShellWindow;
 
 class WebViewInteractiveTest
     : public extensions::PlatformAppBrowserTest {
@@ -49,9 +53,14 @@ class WebViewInteractiveTest
     SendMouseEvent(button, ui_controls::UP);
   }
 
+  void MoveMouseInsideWindow(const gfx::Point& point) {
+    ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
+        gfx::Point(corner_.x() + point.x(), corner_.y() + point.y())));
+  }
+
   gfx::NativeWindow GetPlatformAppWindow() {
-    const extensions::ShellWindowRegistry::ShellWindowList& shell_windows =
-        extensions::ShellWindowRegistry::Get(
+    const apps::ShellWindowRegistry::ShellWindowList& shell_windows =
+        apps::ShellWindowRegistry::Get(
             browser()->profile())->shell_windows();
     return (*shell_windows.begin())->GetNativeWindow();
   }
@@ -87,47 +96,79 @@ class WebViewInteractiveTest
 #endif
   }
 
-  void SendMouseEvent(ui_controls::MouseButton button,
-                      ui_controls::MouseButtonState state) {
-   if (first_click_) {
-     mouse_click_result_ = ui_test_utils::SendMouseEventsSync(button,
-                                                              state);
-     first_click_ = false;
-   } else {
-     ASSERT_EQ(mouse_click_result_, ui_test_utils::SendMouseEventsSync(
-         button, state));
-   }
+  void SendBackShortcutToPlatformApp() {
+#if defined(OS_MACOSX)
+    // Send Cmd+[ on MacOSX.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_OEM_4, false, false, false, true));
+#else
+    // Send browser back key on Linux/Windows.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_BROWSER_BACK,
+        false, false, false, false));
+#endif
   }
 
-  void NewWindowTestHelper(const std::string& test_name,
-                           const std::string& app_location) {
-    ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  void SendForwardShortcutToPlatformApp() {
+#if defined(OS_MACOSX)
+    // Send Cmd+] on MacOSX.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_OEM_6, false, false, false, true));
+#else
+    // Send browser back key on Linux/Windows.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressToWindowSync(
+        GetPlatformAppWindow(), ui::VKEY_BROWSER_FORWARD,
+        false, false, false, false));
+#endif
+  }
+
+  void SendMouseEvent(ui_controls::MouseButton button,
+                      ui_controls::MouseButtonState state) {
+    if (first_click_) {
+      mouse_click_result_ = ui_test_utils::SendMouseEventsSync(button,
+                                                                state);
+      first_click_ = false;
+    } else {
+      ASSERT_EQ(mouse_click_result_, ui_test_utils::SendMouseEventsSync(
+          button, state));
+    }
+  }
+
+  void TestHelper(const std::string& test_name,
+                  const std::string& test_passed_msg,
+                  const std::string& test_failed_msg,
+                  const std::string& app_location) {
+    ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
     ExtensionTestMessageListener launched_listener("Launched", false);
     LoadAndLaunchPlatformApp(app_location.c_str());
     ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+    ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
+        GetPlatformAppWindow()));
+
+    // Flush any pending events to make sure we start with a clean slate.
+    content::RunAllPendingInMessageLoop();
 
     content::WebContents* embedder_web_contents =
         GetFirstShellWindowWebContents();
     ASSERT_TRUE(embedder_web_contents);
 
-    ExtensionTestMessageListener done_listener("DoneNewWindowTest.PASSED",
-                                               false);
-    done_listener.AlsoListenForFailureMessage("DoneNewWindowTest.FAILED");
+    ExtensionTestMessageListener done_listener(test_passed_msg, false);
+    done_listener.AlsoListenForFailureMessage(test_failed_msg);
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
-                    base::StringPrintf("runNewWindowTest('%s')",
-                                       test_name.c_str())));
+                    base::StringPrintf("runTest('%s')", test_name.c_str())));
     ASSERT_TRUE(done_listener.WaitUntilSatisfied());
   }
 
   void SetupTest(const std::string& app_name,
                  const std::string& guest_url_spec) {
-    ASSERT_TRUE(StartTestServer());
+    ASSERT_TRUE(StartEmbeddedTestServer());
     GURL::Replacements replace_host;
     std::string host_str("localhost");  // Must stay in scope with replace_host.
     replace_host.SetHostStr(host_str);
 
-    GURL guest_url = test_server()->GetURL(guest_url_spec);
+    GURL guest_url = embedded_test_server()->GetURL(guest_url_spec);
     guest_url = guest_url.ReplaceComponents(replace_host);
 
     ui_test_utils::UrlLoadObserver guest_observer(
@@ -151,6 +192,16 @@ class WebViewInteractiveTest
     gfx::Rect offset;
     embedder_web_contents_->GetView()->GetContainerBounds(&offset);
     corner_ = gfx::Point(offset.x(), offset.y());
+
+    const testing::TestInfo* const test_info =
+            testing::UnitTest::GetInstance()->current_test_info();
+    const std::string& prefix = "DragDropWithinWebView";
+    if (!strncmp(test_info->name(), prefix.c_str(), prefix.size())) {
+      // In the drag drop test we add 20px padding to the page body because on
+      // windows if we get too close to the edge of the window the resize cursor
+      // appears and we start dragging the window edge.
+      corner_.Offset(20, 20);
+    }
   }
 
   content::WebContents* guest_web_contents() {
@@ -275,12 +326,66 @@ class WebViewInteractiveTest
     WaitForTitle("PASSED3");
   }
 
- private:
+  void DragTestStep1() {
+    // Move mouse to start of text.
+    MoveMouseInsideWindow(gfx::Point(45, 8));
+    SendMouseEvent(ui_controls::LEFT, ui_controls::DOWN);
+    MoveMouseInsideWindow(gfx::Point(76, 12));
+
+    // Now wait a bit before moving mouse to initiate drag/drop.
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&WebViewInteractiveTest::DragTestStep2,
+                   base::Unretained(this)),
+        base::TimeDelta::FromMilliseconds(200));
+  }
+
+  void DragTestStep2() {
+    // Drag source over target.
+    MoveMouseInsideWindow(gfx::Point(76, 76));
+
+    // Create a second mouse over the source to trigger the drag over event.
+    MoveMouseInsideWindow(gfx::Point(76, 77));
+
+    // Release mouse to drop.
+    SendMouseEvent(ui_controls::LEFT, ui_controls::UP);
+    SendMouseClick(ui_controls::LEFT);
+
+    quit_closure_.Run();
+
+    // Note that following ExtensionTestMessageListener and ExecuteScript*
+    // call must be after we quit |quit_closure_|. Otherwise the class
+    // here won't be able to receive messages sent by chrome.test.sendMessage.
+    // This is because of the nature of drag and drop code (esp. the
+    // MessageLoop) in it.
+
+    // Now verify we got a drop and correct drop data.
+    ExtensionTestMessageListener drop_listener("guest-got-drop", false);
+    EXPECT_TRUE(content::ExecuteScript(guest_web_contents_,
+                                       "window.pingEmbedder()"));
+    EXPECT_TRUE(drop_listener.WaitUntilSatisfied());
+
+    std::string last_drop_data;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractString(
+        embedder_web_contents_,
+        "window.domAutomationController.send(getLastDropData())",
+        &last_drop_data));
+    EXPECT_EQ(last_drop_data, "Drop me");
+  }
+
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(switches::kEnableBrowserPluginDragDrop);
+    extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
+  }
+
   content::WebContents* guest_web_contents_;
   content::WebContents* embedder_web_contents_;
   gfx::Point corner_;
   bool mouse_click_result_;
   bool first_click_;
+  // Only used in drag/drop test.
+  base::Closure quit_closure_;
 };
 
 // ui_test_utils::SendMouseMoveSync doesn't seem to work on OS_MACOSX, and
@@ -290,7 +395,7 @@ class WebViewInteractiveTest
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PointerLock) {
   SetupTest("web_view/pointer_lock",
-            "files/extensions/platform_apps/web_view/pointer_lock/guest.html");
+            "/extensions/platform_apps/web_view/pointer_lock/guest.html");
 
   // Move the mouse over the Lock Pointer button.
   ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
@@ -364,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PointerLock) {
 
 // Tests that setting focus on the <webview> sets focus on the guest.
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_Focus) {
-  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   ASSERT_TRUE(RunPlatformAppTest("platform_apps/web_view/focus"))
       << message_;
 }
@@ -372,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_Focus) {
 // Tests that guests receive edit commands and respond appropriately.
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommands) {
   SetupTest("web_view/edit_commands",
-            "files/extensions/platform_apps/web_view/edit_commands/guest.html");
+            "/extensions/platform_apps/web_view/edit_commands/guest.html");
 
   ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
       GetPlatformAppWindow()));
@@ -390,7 +495,7 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommands) {
 // Tests that guests receive edit commands and respond appropriately.
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommandsNoMenu) {
   SetupTest("web_view/edit_commands_no_menu",
-      "files/extensions/platform_apps/web_view/edit_commands_no_menu/"
+      "/extensions/platform_apps/web_view/edit_commands_no_menu/"
       "guest.html");
 
   ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
@@ -407,44 +512,67 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, EditCommandsNoMenu) {
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_NewWindowNameTakesPrecedence) {
-  NewWindowTestHelper("testNewWindowNameTakesPrecedence", "web_view/newwindow");
+  TestHelper("testNewWindowNameTakesPrecedence",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
                        NewWindow_WebViewNameTakesPrecedence) {
-  NewWindowTestHelper("testWebViewNameTakesPrecedence", "web_view/newwindow");
+  TestHelper("testWebViewNameTakesPrecedence",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_NoName) {
-  NewWindowTestHelper("testNoName", "web_view/newwindow");
+  TestHelper("testNoName",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Redirect) {
-  NewWindowTestHelper("testNewWindowRedirect", "web_view/newwindow");
+  TestHelper("testNewWindowRedirect",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_Close) {
-  NewWindowTestHelper("testNewWindowClose", "web_view/newwindow");
+  TestHelper("testNewWindowClose",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_ExecuteScript) {
-  NewWindowTestHelper("testNewWindowExecuteScript", "web_view/newwindow");
+  TestHelper("testNewWindowExecuteScript",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, NewWindow_WebRequest) {
-  NewWindowTestHelper("testNewWindowWebRequest", "web_view/newwindow");
+  TestHelper("testNewWindowWebRequest",
+             "DoneNewWindowTest.PASSED",
+             "DoneNewWindowTest.FAILED",
+             "web_view/newwindow");
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ExecuteCode) {
-  ASSERT_TRUE(StartTestServer());  // For serving guest pages.
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "execute_code")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PopupPositioning) {
+// This test used the old Autofill UI, which has been removed.
+// See crbug.com/259438
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_PopupPositioning) {
   SetupTest(
       "web_view/popup_positioning",
-      "files/extensions/platform_apps/web_view/popup_positioning/guest.html");
+      "/extensions/platform_apps/web_view/popup_positioning/guest.html");
   ASSERT_TRUE(guest_web_contents());
 
   PopupTestHelper(gfx::Point());
@@ -461,9 +589,83 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, PopupPositioning) {
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_PopupPositioningMoved) {
   SetupTest(
       "web_view/popup_positioning_moved",
-      "files/extensions/platform_apps/web_view/popup_positioning_moved"
+      "/extensions/platform_apps/web_view/popup_positioning_moved"
       "/guest.html");
   ASSERT_TRUE(guest_web_contents());
 
   PopupTestHelper(gfx::Point(20, 0));
 }
+
+// Drag and drop inside a webview is currently only enabled for linux and mac,
+// but the tests don't work on anything except chromeos for now. This is because
+// of simulating mouse drag code's dependency on platforms.
+#if defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DragDropWithinWebView) {
+  SetupTest(
+      "web_view/dnd_within_webview",
+      "/extensions/platform_apps/web_view/dnd_within_webview/guest.html");
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(GetPlatformAppWindow()));
+
+  // Flush any pending events to make sure we start with a clean slate.
+  content::RunAllPendingInMessageLoop();
+  base::RunLoop run_loop;
+  quit_closure_ = run_loop.QuitClosure();
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&WebViewInteractiveTest::DragTestStep1,
+                 base::Unretained(this)));
+  run_loop.Run();
+}
+#endif  // (defined(OS_CHROMEOS))
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, Navigation) {
+  TestHelper("testNavigation",
+             "DoneNavigationTest.PASSED",
+             "DoneNavigationTest.FAILED",
+             "web_view/navigation");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, Navigation_BackForwardKeys) {
+  ASSERT_TRUE(StartEmbeddedTestServer());  // For serving guest pages.
+  ExtensionTestMessageListener launched_listener("Launched", false);
+  LoadAndLaunchPlatformApp("web_view/navigation");
+  ASSERT_TRUE(launched_listener.WaitUntilSatisfied());
+
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(
+      GetPlatformAppWindow()));
+  // Flush any pending events to make sure we start with a clean slate.
+  content::RunAllPendingInMessageLoop();
+
+  content::WebContents* embedder_web_contents =
+      GetFirstShellWindowWebContents();
+  ASSERT_TRUE(embedder_web_contents);
+
+  ExtensionTestMessageListener done_listener(
+      "DoneNavigationTest.PASSED", false);
+  done_listener.AlsoListenForFailureMessage("DoneNavigationTest.FAILED");
+  ExtensionTestMessageListener ready_back_key_listener(
+      "ReadyForBackKey", false);
+  ExtensionTestMessageListener ready_forward_key_listener(
+      "ReadyForForwardKey", false);
+
+  EXPECT_TRUE(content::ExecuteScript(
+                  embedder_web_contents,
+                  "runTest('testBackForwardKeys')"));
+
+  ASSERT_TRUE(ready_back_key_listener.WaitUntilSatisfied());
+  SendBackShortcutToPlatformApp();
+
+  ASSERT_TRUE(ready_forward_key_listener.WaitUntilSatisfied());
+  SendForwardShortcutToPlatformApp();
+
+  ASSERT_TRUE(done_listener.WaitUntilSatisfied());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       PointerLock_PointerLockLostWithFocus) {
+  TestHelper("testPointerLockLostWithFocus",
+             "DonePointerLockTest.PASSED",
+             "DonePointerLockTest.FAILED",
+             "web_view/pointerlock");
+}
+

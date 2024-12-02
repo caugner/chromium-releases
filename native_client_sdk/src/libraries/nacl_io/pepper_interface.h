@@ -1,11 +1,13 @@
-/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef LIBRARIES_NACL_IO_PEPPER_INTERFACE_H_
 #define LIBRARIES_NACL_IO_PEPPER_INTERFACE_H_
 
+#include <ppapi/c/pp_bool.h>
 #include <ppapi/c/pp_completion_callback.h>
+#include <ppapi/c/pp_errors.h>
 #include <ppapi/c/pp_file_info.h>
 #include <ppapi/c/pp_instance.h>
 #include <ppapi/c/pp_resource.h>
@@ -14,14 +16,18 @@
 #include <ppapi/c/ppb_file_io.h>
 #include <ppapi/c/ppb_file_ref.h>
 #include <ppapi/c/ppb_file_system.h>
+#include <ppapi/c/ppb_host_resolver.h>
 #include <ppapi/c/ppb_messaging.h>
 #include <ppapi/c/ppb_messaging.h>
+#include <ppapi/c/ppb_net_address.h>
 #include <ppapi/c/ppb_url_loader.h>
 #include <ppapi/c/ppb_url_request_info.h>
 #include <ppapi/c/ppb_url_response_info.h>
 #include <ppapi/c/ppb_var.h>
 
 #include <sdk_util/macros.h>
+
+namespace nacl_io {
 
 // Note: To add a new interface:
 //
@@ -97,5 +103,7 @@ class ScopedResource {
 
   DISALLOW_COPY_AND_ASSIGN(ScopedResource);
 };
+
+}  // namespace nacl_io
 
 #endif  // LIBRARIES_NACL_IO_PEPPER_INTERFACE_H_

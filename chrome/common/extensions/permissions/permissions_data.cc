@@ -11,22 +11,22 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/features/base_feature_provider.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/common/extensions/manifest.h"
-#include "chrome/common/extensions/manifest_handlers/content_scripts_handler.h"
 #include "chrome/common/extensions/permissions/api_permission_set.h"
+#include "chrome/common/extensions/permissions/chrome_scheme_hosts.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_info.h"
-#include "chrome/common/extensions/user_script.h"
-#include "chrome/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
+#include "extensions/common/switches.h"
 #include "extensions/common/url_pattern_set.h"
-#include "googleurl/src/gurl.h"
+#include "extensions/common/user_script.h"
+#include "url/gurl.h"
 
 namespace keys = extension_manifest_keys;
 namespace errors = extension_manifest_errors;
@@ -34,8 +34,6 @@ namespace errors = extension_manifest_errors;
 namespace extensions {
 
 namespace {
-
-const char kThumbsWhiteListedExtension[] = "khopmbdjffemhegeeobelklnbglcdgfh";
 
 PermissionsData::PolicyDelegate* g_policy_delegate = NULL;
 
@@ -81,22 +79,10 @@ bool CanSpecifyHostPermission(const Extension* extension,
                               const APIPermissionSet& permissions) {
   if (!pattern.match_all_urls() &&
       pattern.MatchesScheme(chrome::kChromeUIScheme)) {
-    // Regular extensions are only allowed access to chrome://favicon.
-    if (pattern.host() == chrome::kChromeUIFaviconHost)
+    URLPatternSet chrome_scheme_hosts =
+        GetPermittedChromeSchemeHosts(extension, permissions);
+    if (chrome_scheme_hosts.ContainsPattern(pattern))
       return true;
-
-    // Experimental extensions are also allowed chrome://thumb.
-    //
-    // TODO: A public API should be created for retrieving thumbnails.
-    // See http://crbug.com/222856. A temporary hack is implemented here to
-    // make chrome://thumbs available to NTP Russia extension as
-    // non-experimental.
-    if (pattern.host() == chrome::kChromeUIThumbnailHost) {
-      return
-          permissions.find(APIPermission::kExperimental) != permissions.end() ||
-          (extension->id() == kThumbsWhiteListedExtension &&
-              extension->from_webstore());
-    }
 
     // Component extensions can have access to all of chrome://*.
     if (PermissionsData::CanExecuteScriptEverywhere(extension))
@@ -139,7 +125,8 @@ bool ParseHelper(Extension* extension,
 
   std::vector<std::string> host_data;
   if (!APIPermissionSet::ParseFromJSON(
-          permissions, api_permissions, error, &host_data)) {
+          permissions, APIPermissionSet::kDisallowInternalPermissions,
+          api_permissions, error, &host_data)) {
     return false;
   }
 
@@ -233,20 +220,11 @@ bool ParseHelper(Extension* extension,
       }
 
       host_permissions->AddPattern(pattern);
-
       // We need to make sure all_urls matches chrome://favicon and (maybe)
       // chrome://thumbnail, so add them back in to host_permissions separately.
-      if (pattern.match_all_urls()) {
-        host_permissions->AddPattern(
-            URLPattern(URLPattern::SCHEME_CHROMEUI,
-                       chrome::kChromeUIFaviconURL));
-        if (api_permissions->find(APIPermission::kExperimental) !=
-                api_permissions->end()) {
-          host_permissions->AddPattern(
-              URLPattern(URLPattern::SCHEME_CHROMEUI,
-                         chrome::kChromeUIThumbnailURL));
-        }
-      }
+      if (pattern.match_all_urls())
+        host_permissions->AddPatterns(GetPermittedChromeSchemeHosts(
+            extension, *api_permissions));
       continue;
     }
 
@@ -273,6 +251,7 @@ bool IsTrustedId(const std::string& extension_id) {
 struct PermissionsData::InitialPermissions {
   APIPermissionSet api_permissions;
   URLPatternSet host_permissions;
+  URLPatternSet scriptable_hosts;
 };
 
 PermissionsData::PermissionsData() {
@@ -310,6 +289,13 @@ APIPermissionSet* PermissionsData::GetInitialAPIPermissions(
     Extension* extension) {
   return &extension->permissions_data()->
       initial_required_permissions_->api_permissions;
+}
+
+// static
+void PermissionsData::SetInitialScriptableHosts(
+    Extension* extension, const URLPatternSet& scriptable_hosts) {
+  extension->permissions_data()->
+      initial_required_permissions_->scriptable_hosts = scriptable_hosts;
 }
 
 // static
@@ -370,11 +356,11 @@ bool PermissionsData::HasAPIPermission(const Extension* extension,
 }
 
 // static
-bool PermissionsData::HasAPIPermission(const Extension* extension,
-                                       const std::string& function_name) {
+bool PermissionsData::HasAPIPermission(
+    const Extension* extension,
+    const std::string& permission_name) {
   base::AutoLock auto_lock(extension->permissions_data()->runtime_lock_);
-  return GetActivePermissions(extension)->HasAccessToFunction(
-      function_name, true);  // include implicit
+  return GetActivePermissions(extension)->HasAPIPermission(permission_name);
 }
 
 // static
@@ -454,6 +440,18 @@ std::vector<string16> PermissionsData::GetPermissionMessageStrings(
     return std::vector<string16>();
   } else {
     return GetActivePermissions(extension)->GetWarningMessages(
+        extension->GetType());
+  }
+}
+
+// static
+std::vector<string16> PermissionsData::GetPermissionMessageDetailsStrings(
+    const Extension* extension) {
+  base::AutoLock auto_lock(extension->permissions_data()->runtime_lock_);
+  if (ShouldSkipPermissionWarnings(extension)) {
+    return std::vector<string16>();
+  } else {
+    return GetActivePermissions(extension)->GetWarningMessagesDetails(
         extension->GetType());
   }
 }
@@ -623,18 +621,15 @@ bool PermissionsData::ParsePermissions(Extension* extension, string16* error) {
 }
 
 void PermissionsData::FinalizePermissions(Extension* extension) {
-  URLPatternSet scriptable_hosts =
-      ContentScriptsInfo::GetScriptableHosts(extension);
-
   active_permissions_ = new PermissionSet(
       initial_required_permissions_->api_permissions,
       initial_required_permissions_->host_permissions,
-      scriptable_hosts);
+      initial_required_permissions_->scriptable_hosts);
 
   required_permission_set_ = new PermissionSet(
       initial_required_permissions_->api_permissions,
       initial_required_permissions_->host_permissions,
-      scriptable_hosts);
+      initial_required_permissions_->scriptable_hosts);
 
   optional_permission_set_ = new PermissionSet(
       initial_optional_permissions_->api_permissions,

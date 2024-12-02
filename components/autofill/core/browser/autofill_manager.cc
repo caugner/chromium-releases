@@ -51,11 +51,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/url_constants.h"
-#include "googleurl/src/gurl.h"
 #include "grit/component_strings.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
+#include "url/gurl.h"
 
 namespace autofill {
 
@@ -150,7 +150,7 @@ void DeterminePossibleFieldTypesForUpload(
     AutofillField* field = submitted_form->field(i);
     base::string16 value = CollapseWhitespace(field->value, false);
 
-    FieldTypeSet matching_types;
+    ServerFieldTypeSet matching_types;
     for (std::vector<AutofillProfile>::const_iterator it = profiles.begin();
          it != profiles.end(); ++it) {
       it->GetMatchingTypes(value, app_locale, &matching_types);
@@ -211,7 +211,7 @@ AutofillManager::AutofillManager(
 AutofillManager::~AutofillManager() {}
 
 // static
-void AutofillManager::RegisterUserPrefs(
+void AutofillManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
       prefs::kAutofillEnabled,
@@ -244,10 +244,6 @@ void AutofillManager::SetExternalDelegate(AutofillExternalDelegate* delegate) {
   // future directions may not need such a pointer.
   external_delegate_ = delegate;
   autocomplete_history_manager_->SetExternalDelegate(delegate);
-}
-
-bool AutofillManager::IsNativeUiEnabled() {
-  return external_delegate_ != NULL;
 }
 
 bool AutofillManager::OnFormSubmitted(const FormData& form,
@@ -382,6 +378,7 @@ void AutofillManager::OnTextFieldDidChange(const FormData& form,
     return;
 
   if (!user_did_type_) {
+    autocheckout_manager_.set_should_show_bubble(false);
     user_did_type_ = true;
     metric_logger_->LogUserHappinessMetric(AutofillMetrics::USER_DID_TYPE);
   }
@@ -414,13 +411,11 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
   std::vector<base::string16> icons;
   std::vector<int> unique_ids;
 
-  if (external_delegate_) {
-    external_delegate_->OnQuery(query_id,
-                                form,
-                                field,
-                                bounding_box,
-                                display_warning);
-  }
+  external_delegate_->OnQuery(query_id,
+                              form,
+                              field,
+                              bounding_box,
+                              display_warning);
 
   RenderViewHost* host = NULL;
   FormStructure* form_structure = NULL;
@@ -429,9 +424,8 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
       GetCachedFormAndField(form, field, &form_structure, &autofill_field) &&
       // Don't send suggestions for forms that aren't auto-fillable.
       form_structure->IsAutofillable(false)) {
-    AutofillFieldType type = autofill_field->type();
-    bool is_filling_credit_card =
-        (AutofillType(type).group() == AutofillType::CREDIT_CARD);
+    AutofillType type = autofill_field->Type();
+    bool is_filling_credit_card = (type.group() == CREDIT_CARD);
     if (is_filling_credit_card) {
       GetCreditCardSuggestions(
           field, type, &values, &labels, &icons, &unique_ids);
@@ -534,14 +528,12 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
       }
     }
 
-    host->Send(new AutofillMsg_FormDataFilled(host->GetRoutingID(), query_id,
-                                              result));
+    driver_->SendFormDataToRenderer(query_id, result);
     return;
   }
 
   // Cache the field type for the field from which the user initiated autofill.
-  FieldTypeGroup initiating_group_type =
-      AutofillType(autofill_field->type()).group();
+  FieldTypeGroup initiating_group_type = autofill_field->Type().group();
   DCHECK_EQ(form_structure->field_count(), form.fields.size());
   for (size_t i = 0; i < form_structure->field_count(); ++i) {
     if (form_structure->field(i)->section() != autofill_field->section())
@@ -550,9 +542,8 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
     DCHECK_EQ(*form_structure->field(i), result.fields[i]);
 
     const AutofillField* cached_field = form_structure->field(i);
-    FieldTypeGroup field_group_type =
-        AutofillType(cached_field->type()).group();
-    if (field_group_type != AutofillType::NO_GROUP) {
+    FieldTypeGroup field_group_type = cached_field->Type().group();
+    if (field_group_type != NO_GROUP) {
       // If the field being filled is either
       //   (a) the field that the user initiated the fill from, or
       //   (b) part of the same logical unit, e.g. name or phone number,
@@ -579,8 +570,7 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
   if (autofilled_form_signatures_.size() > kMaxRecentFormSignaturesToRemember)
     autofilled_form_signatures_.pop_back();
 
-  host->Send(new AutofillMsg_FormDataFilled(
-      host->GetRoutingID(), query_id, result));
+  driver_->SendFormDataToRenderer(query_id, result);
 }
 
 void AutofillManager::OnShowAutofillDialog() {
@@ -621,9 +611,11 @@ void AutofillManager::OnDidShowAutofillSuggestions(bool is_new_popup) {
   }
 }
 
-void AutofillManager::OnHideAutofillUi() {
-  if (IsNativeUiEnabled())
-    manager_delegate_->HideAutofillPopup();
+void AutofillManager::OnHideAutofillUI() {
+  if (!IsAutofillEnabled())
+    return;
+
+  manager_delegate_->HideAutofillPopup();
   manager_delegate_->HideAutocheckoutBubble();
 }
 
@@ -675,8 +667,7 @@ void AutofillManager::SetTestDelegate(
 void AutofillManager::OnAddPasswordFormMapping(
       const FormFieldData& form,
       const PasswordFormFillData& fill_data) {
-  if (external_delegate_)
-    external_delegate_->AddPasswordFormMapping(form, fill_data);
+  external_delegate_->AddPasswordFormMapping(form, fill_data);
 }
 
 void AutofillManager::OnShowPasswordSuggestions(
@@ -684,29 +675,18 @@ void AutofillManager::OnShowPasswordSuggestions(
     const gfx::RectF& bounds,
     const std::vector<base::string16>& suggestions,
     const std::vector<base::string16>& realms) {
-  if (external_delegate_) {
-    external_delegate_->OnShowPasswordSuggestions(suggestions,
-                                                  realms,
-                                                  field,
-                                                  bounds);
-  }
+  external_delegate_->OnShowPasswordSuggestions(suggestions,
+                                                realms,
+                                                field,
+                                                bounds);
 }
 
 void AutofillManager::OnSetDataList(const std::vector<base::string16>& values,
-                                    const std::vector<base::string16>& labels,
-                                    const std::vector<base::string16>& icons,
-                                    const std::vector<int>& unique_ids) {
-  if (labels.size() != values.size() ||
-      icons.size() != values.size() ||
-      unique_ids.size() != values.size()) {
+                                    const std::vector<base::string16>& labels) {
+  if (values.size() != labels.size())
     return;
-  }
-  if (external_delegate_) {
-    external_delegate_->SetCurrentDataListValues(values,
-                                                 labels,
-                                                 icons,
-                                                 unique_ids);
-  }
+
+  external_delegate_->SetCurrentDataListValues(values, labels);
 }
 
 void AutofillManager::OnRequestAutocomplete(
@@ -778,16 +758,16 @@ void AutofillManager::OnLoadedServerPredictions(
 #endif  // #if defined(TOOLKIT_VIEWS)
 
   // If the corresponding flag is set, annotate forms with the predicted types.
-  SendAutofillTypePredictions(form_structures_.get());
+  driver_->SendAutofillTypePredictionsToRenderer(form_structures_.get());
 }
 
 void AutofillManager::OnDidEndTextFieldEditing() {
-  if (external_delegate_)
-    external_delegate_->DidEndTextFieldEditing();
+  external_delegate_->DidEndTextFieldEditing();
 }
 
-void AutofillManager::OnClickFailed(autofill::AutocheckoutStatus status) {
-  autocheckout_manager_.OnClickFailed(status);
+void AutofillManager::OnAutocheckoutPageCompleted(
+    autofill::AutocheckoutStatus status) {
+  autocheckout_manager_.OnAutocheckoutPageCompleted(status);
 }
 
 std::string AutofillManager::GetAutocheckoutURLPrefix() const {
@@ -803,23 +783,6 @@ std::string AutofillManager::GetAutocheckoutURLPrefix() const {
 
 bool AutofillManager::IsAutofillEnabled() const {
   return manager_delegate_->GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
-}
-
-void AutofillManager::SendAutofillTypePredictions(
-    const std::vector<FormStructure*>& forms) const {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kShowAutofillTypePredictions))
-    return;
-
-  RenderViewHost* host = driver_->GetWebContents()->GetRenderViewHost();
-  if (!host)
-    return;
-
-  std::vector<FormDataPredictions> type_predictions;
-  FormStructure::GetFieldTypePredictions(forms, &type_predictions);
-  host->Send(
-      new AutofillMsg_FieldTypePredictionsAvailable(host->GetRoutingID(),
-                                                    type_predictions));
 }
 
 void AutofillManager::ImportFormData(const FormStructure& submitted_form) {
@@ -873,10 +836,7 @@ void AutofillManager::OnMaybeShowAutocheckoutBubble(
   if (!HasServerSpecifiedFieldTypes(*cached_form))
     return;
 
-  autocheckout_manager_.MaybeShowAutocheckoutBubble(
-      form.origin,
-      form.ssl_status,
-      bounding_box);
+  autocheckout_manager_.MaybeShowAutocheckoutBubble(form.origin, bounding_box);
 }
 
 void AutofillManager::UploadFormData(const FormStructure& submitted_form) {
@@ -894,7 +854,7 @@ void AutofillManager::UploadFormData(const FormStructure& submitted_form) {
       was_autofilled = true;
   }
 
-  FieldTypeSet non_empty_types;
+  ServerFieldTypeSet non_empty_types;
   personal_data_->GetNonEmptyTypes(&non_empty_types);
 
   download_manager_->StartUploadRequest(submitted_form, was_autofilled,
@@ -911,9 +871,7 @@ void AutofillManager::Reset() {
   user_did_edit_autofilled_field_ = false;
   forms_loaded_timestamp_ = TimeTicks();
   initial_interaction_timestamp_ = TimeTicks();
-
-  if (external_delegate_)
-    external_delegate_->Reset();
+  external_delegate_->Reset();
 }
 
 AutofillManager::AutofillManager(AutofillDriver* driver,
@@ -955,10 +913,10 @@ bool AutofillManager::GetHost(RenderViewHost** host) const {
     return false;
   }
 
-  *host = driver_->GetWebContents()->GetRenderViewHost();
-  if (!*host)
+  if (!driver_->RendererIsAvailable())
     return false;
 
+  *host = driver_->GetWebContents()->GetRenderViewHost();
   return true;
 }
 
@@ -1102,7 +1060,7 @@ bool AutofillManager::UpdateCachedForm(const FormData& live_form,
 
   // Annotate the updated form with its predicted types.
   std::vector<FormStructure*> forms(1, *updated_form);
-  SendAutofillTypePredictions(forms);
+  driver_->SendAutofillTypePredictionsToRenderer(forms);
 
   return true;
 }
@@ -1110,14 +1068,14 @@ bool AutofillManager::UpdateCachedForm(const FormData& live_form,
 void AutofillManager::GetProfileSuggestions(
     FormStructure* form,
     const FormFieldData& field,
-    AutofillFieldType type,
+    const AutofillType& type,
     std::vector<base::string16>* values,
     std::vector<base::string16>* labels,
     std::vector<base::string16>* icons,
     std::vector<int>* unique_ids) const {
-  std::vector<AutofillFieldType> field_types(form->field_count());
+  std::vector<ServerFieldType> field_types(form->field_count());
   for (size_t i = 0; i < form->field_count(); ++i) {
-    field_types[i] = form->field(i)->type();
+    field_types.push_back(form->field(i)->Type().GetStorableType());
   }
   std::vector<GUIDPair> guid_pairs;
 
@@ -1133,7 +1091,7 @@ void AutofillManager::GetProfileSuggestions(
 
 void AutofillManager::GetCreditCardSuggestions(
     const FormFieldData& field,
-    AutofillFieldType type,
+    const AutofillType& type,
     std::vector<base::string16>* values,
     std::vector<base::string16>* labels,
     std::vector<base::string16>* icons,
@@ -1191,7 +1149,7 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
   // For the |non_queryable_forms|, we have all the field type info we're ever
   // going to get about them.  For the other forms, we'll wait until we get a
   // response from the server.
-  SendAutofillTypePredictions(non_queryable_forms);
+  driver_->SendAutofillTypePredictionsToRenderer(non_queryable_forms);
 }
 
 int AutofillManager::GUIDToID(const GUIDPair& guid) const {

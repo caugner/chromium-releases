@@ -358,6 +358,9 @@ are declared in build/common.gypi.
       <message name="IDS_WEBSITE_SETTINGS_TYPE_MEDIASTREAM" desc="The label used for media stream permission controls in the Website Settings popup.">
         Media
       </message>
+      <message name="IDS_WEBSITE_SETTINGS_TYPE_MIDI_SYSEX" desc="The label used for MIDI system exclusive message permission controls in the Website Settings popup.">
+        MIDI full control
+      </message>
       <message name="IDS_WEBSITE_SETTINGS_SHOW_SITE_DATA" desc="The label of the Show Cookies and Site Data link in the site data section of the Website Settings popup.">
         Show cookies and site data
       </message>
@@ -784,6 +787,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFOR" desc="The name of the Search the Web for 'string' command in the content area context menu">
           &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for '<ph name="SEARCH_TERMS">$2<ex>flowers</ex></ph>'
         </message>
+        <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE" desc="The name of the Search For Image command in the content area context menu">
+          &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for this image
+        </message>
         <message name="IDS_CONTENT_CONTEXT_GOTOURL" desc="The name of the Go to 'url' command in the content area context menu">
           &amp;Go to <ph name="URL">$1<ex>http://www.google.com/</ex></ph>
         </message>
@@ -992,6 +998,9 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         </message>
         <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFOR" desc="In Title Case: The name of the Search the Web for 'string' command in the content area context menu">
           &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for '<ph name="SEARCH_TERMS">$2<ex>flowers</ex></ph>'
+        </message>
+        <message name="IDS_CONTENT_CONTEXT_SEARCHWEBFORIMAGE" desc="In Title Case: The name of the Search For Image command in the content area context menu">
+          &amp;Search <ph name="SEARCH_ENGINE">$1<ex>Google</ex></ph> for this Image
         </message>
         <message name="IDS_CONTENT_CONTEXT_GOTOURL" desc="In Title Case: The name of the Go to url for 'string' command in the content area context menu">
           &amp;Go to <ph name="URL">$1<ex>http://www.google.com/</ex></ph>
@@ -1602,1070 +1611,6 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
         <ph name="ENGINE_NAME">$1<ex>Google</ex></ph> (Default)
       </message>
 
-      <message name="IDS_TIME_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_SEC_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_SECS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_SECS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_SECS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_SECS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_MIN_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_MINS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_MINS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_MINS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_MINS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_MINS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_HOURS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_HOUR_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_HOUR_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_HOURS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_HOURS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_HOURS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_HOURS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_HOURS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_HOURS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_HOURS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_HOURS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_DAYS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_DAY_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_DAY_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_DAYS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_DAYS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_DAYS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DAYS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_DAYS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DAYS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_DAYS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_DAYS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_REMAINING_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs left
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_REMAINING_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec left
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_REMAINING_SEC_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_REMAINING_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs left
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_REMAINING_SECS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs left
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_SECS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs left
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_SECS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_REMAINING_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs left
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_REMAINING_SECS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_REMAINING_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins left
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_REMAINING_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min left
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_REMAINING_MIN_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_REMAINING_MINS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins left
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_REMAINING_MINS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins left
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_MINS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins left
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_MINS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_REMAINING_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins left
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_REMAINING_MINS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_REMAINING_LONG_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> minutes left
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_REMAINING_LONG_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> minute left
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_REMAINING_LONG_MIN_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_REMAINING_LONG_MINS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> minutes left
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_REMAINING_LONG_MINS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_LONG_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> minutes left
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_LONG_MINS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_LONG_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> minutes left
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_LONG_MINS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_REMAINING_LONG_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> minutes left
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_REMAINING_LONG_MINS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_REMAINING_HOURS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours left
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_REMAINING_HOUR_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour left
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_REMAINING_HOUR_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_REMAINING_HOURS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours left
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_REMAINING_HOURS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_HOURS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours left
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_HOURS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_HOURS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours left
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_HOURS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_REMAINING_HOURS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours left
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_REMAINING_HOURS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_REMAINING_DAYS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days left
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_REMAINING_DAY_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day left
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_REMAINING_DAY_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_REMAINING_DAYS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days left
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_REMAINING_DAYS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_DAYS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days left
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_DAYS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_REMAINING_DAYS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days left
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_REMAINING_DAYS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_REMAINING_DAYS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days left
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_REMAINING_DAYS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_DURATION_LONG_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> seconds
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_DURATION_LONG_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> second
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_SEC_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_DURATION_LONG_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> seconds
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_SECS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_DURATION_LONG_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> seconds
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_SECS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_DURATION_LONG_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> seconds
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_SECS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_DURATION_LONG_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> seconds
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_SECS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_DURATION_LONG_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> minutes
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_DURATION_LONG_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> minute
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_MIN_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_DURATION_LONG_MINS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> minutes
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_MINS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_DURATION_LONG_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> minutes
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_MINS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_DURATION_LONG_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> minutes
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_MINS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_DURATION_LONG_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> minutes
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_DURATION_LONG_MINS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_TIME_ELAPSED_SECS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> secs ago
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_ELAPSED_SEC_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> sec ago
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_SEC_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_ELAPSED_SECS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> secs ago
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_SECS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> secs ago
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_SECS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> secs ago
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_ELAPSED_SECS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> secs ago
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_ELAPSED_SECS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_ELAPSED_MINS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> mins ago
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_ELAPSED_MIN_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> min ago
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_MIN_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_ELAPSED_MINS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> mins ago
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_MINS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> mins ago
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_MINS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> mins ago
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_ELAPSED_MINS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> mins ago
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_ELAPSED_MINS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_ELAPSED_HOURS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> hours ago
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_ELAPSED_HOUR_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> hour ago
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_HOUR_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_ELAPSED_HOURS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> hours ago
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_HOURS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> hours ago
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_HOURS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> hours ago
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_ELAPSED_HOURS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> hours ago
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_ELAPSED_HOURS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-
-      <message name="IDS_TIME_ELAPSED_DAYS_DEFAULT"
-               desc="This is necessary for every language. This is the default for all the numbers NOT covered by special cases (singular, dual/two, few, many) some languages need. For CJK, Vietnamese, Turkish and Kannada, this is the only string necessary. For languages with singular-plural distinction, this is the generic plural. For Lithuanian, NUMBER_DEFAULT is 11 .. 19.">
-        <ph name="NUMBER_DEFAULT"><ex>37</ex>#</ph> days ago
-      </message>
-
-      <if expr="lang not in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message name="IDS_TIME_ELAPSED_DAY_SINGULAR"
-               desc="NUMBER_ONE is one or one-like numbers : 1 (many European and most Indian languages), 1 and 0 (French, Brazilian Portuguese and Hindi), 1,21,31, .. (Russian, Ukrainian, Croatian, Serbian, Latvian, Lithuanian), or 1, 101, 201, .. (Slovenian). Do NOT translate this for CJK, Vietnamese, Turkish and Kannada">
-        <ph name="NUMBER_ONE"><ex>1</ex>#</ph> day ago
-      </message>
-      </if>
-      <if expr="lang in ['zh-CN', 'zh-TW', 'ko', 'ja', 'vi', 'tr', 'kn']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_DAY_SINGULAR"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ar', 'ro', 'lv']">
-      <message name="IDS_TIME_ELAPSED_DAYS_ZERO"
-               desc="NUMBER_ZERO is 0 (Arabic, Latvian) or 0, 2..19, 101..119, ... (Romanian). For other languages, do NOT translate.">
-        <ph name="NUMBER_ZERO"><ex>0</ex>#</ph> days ago
-      </message>
-      </if>
-      <if expr="lang not in ['ar', 'ro', 'lv']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_ZERO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang in ['ga', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_DAYS_TWO"
-               desc="NUMBER_TWO is two or two-like/dual numbers :  2 (Arabic and Irish) or  2, 102, 202 ... (Slovenian). For other languages, do NOT translated.">
-        <ph name="NUMBER_TWO"><ex>2</ex>#</ph> days ago
-      </message>
-      </if>
-      <if expr="lang not in ['ga', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_TWO"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang  in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message name="IDS_TIME_ELAPSED_DAYS_FEW"
-               desc="NUMBER_FEW is few or few-like numbers in Arabic, Russian, Polish, Croatian, Serbian, Ukrainian, Czech, Slovak, Slovenian, Latvian. For other languages, do NOT translate.">
-        <ph name="NUMBER_FEW"><ex>3</ex>#</ph> days ago
-      </message>
-      </if>
-      <if expr="lang not in ['ru', 'lt', 'hr', 'uk', 'cs', 'sk', 'pl', 'sl', 'ar']">
-      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_FEW"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <if expr="lang == 'ar'">
-      <message name="IDS_TIME_ELAPSED_DAYS_MANY"
-               desc="NUMBER_MANY is 11 through 99 in Arabic. For all other languages, do NOT translate.">
-        <ph name="NUMBER_MANY"><ex>23</ex>#</ph> days ago
-      </message>
-      </if>
-      <if expr="lang != 'ar'">
-      <message translateable="false" name="IDS_TIME_ELAPSED_DAYS_MANY"
-               desc="">
-        NA
-      </message>
-      </if>
-
-      <message name="IDS_PAST_TIME_TODAY" desc="Relative day today">
-        Today
-      </message>
-      <message name="IDS_PAST_TIME_YESTERDAY" desc="Relative day yesterday">
-        Yesterday
-      </message>
       <!-- Download Shelf-->
       <if expr="is_macosx">
         <message name="IDS_SHOW_ALL"
@@ -2990,6 +1935,10 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
                desc="Open downloads folder link">
         Open downloads folder
       </message>
+      <message name="IDS_DOWNLOAD_BY_EXTENSION"
+               desc="Indicates which extension downloaded this file.">
+        Downloaded by <ph name="EXTENSION">$1<ex>The Best Chrome Extension Ever</ex></ph>
+      </message>
 
       <!-- Download Context Menu Items -->
       <if expr="not pp_ifdef('use_titlecase')">
@@ -3192,6 +2141,43 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
       </message>
 
       <!-- Content blocking strings -->
+      <message name="IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL" desc="Header for multiple automatic downloads page on Content Settings dialog">
+        Automatic Downloads
+      </message>
+      <message name="IDS_AUTOMATIC_DOWNLOADS_ALLOW_RADIO" desc="A radio button in Content Settings dialog to allow all sites to download multiple files automatically.">
+        Allow all sites to download multiple files automatically
+      </message>
+      <message name="IDS_AUTOMATIC_DOWNLOADS_ASK_RADIO" desc="A radio button in Content Settings dialog to configure multiple automatic downloads per-site.">
+        Ask me when a site tries to download files automatically after the first file (recommended)
+      </message>
+      <message name="IDS_AUTOMATIC_DOWNLOADS_BLOCK_RADIO" desc="A radio button in Content Settings dialog to deny all sites to download multiple files automatically.">
+        Do not allow any site to download multiple files automatically
+      </message>
+      <message name="IDS_BLOCKED_DOWNLOAD_NO_ACTION" desc="Radio button to keep blocking automatic downloads">
+        Continue blocking automatic downloads of multiple files
+      </message>
+      <message name="IDS_BLOCKED_DOWNLOAD_UNBLOCK" desc="Radio button to unblock automatic downloads">
+        Always allow <ph name="HOST">$1<ex>example.com</ex></ph> to download multiple files
+      </message>
+      <message name="IDS_BLOCKED_DOWNLOADS_LINK" desc="Link to downloads section of content blocking management dialog, displayed in bubble when a page tries to download files automatically.">
+        Manage download settings...
+      </message>
+      <message name="IDS_BLOCKED_DOWNLOAD_TITLE" desc="Title for the page action when an automatic download was blocked">
+        This site attempted to download multiple files automatically.
+      </message>
+      <message name="IDS_BLOCKED_DOWNLOADS_EXPLANATION" desc="Explanatory animated text that appears (and then disappears) in the address line when a download is blocked">
+        Download blocked
+      </message>
+      <message name="IDS_ALLOWED_DOWNLOAD_TITLE" desc="Title for the page action when automatic downloads were allowed">
+        This site downloaded multiple files automatically.
+      </message>
+      <message name="IDS_ALLOWED_DOWNLOAD_NO_ACTION" desc="Radio button to keep allowing automatic downloads">
+        Continue allowing automatic downloads of multiple files
+      </message>
+      <message name="IDS_ALLOWED_DOWNLOAD_BLOCK" desc="Radio button to block automatic downloads">
+        Always block multiple automatic downloads on <ph name="HOST">$1<ex>example.com</ex></ph>
+      </message>
+
       <message name="IDS_BLOCKED_COOKIES_TITLE" desc="Tooltip and bubble info header text when a page is not allowed to write cookies or other site data.">
         This page was prevented from setting cookies.
       </message>
@@ -3482,10 +2468,10 @@ Psst! Incognito mode <ph name="SHORTCUT_KEY">$1<ex>(Ctrl+Shift+N)</ex></ph> may 
 
       <!-- Administrator-provided certificate notifications -->
       <message name="IDS_CERT_POLICY_PROVIDED_CERT_HEADER" desc="Text that is displayed in the header of the Website Settings popup when using an administrator-provided certificate">
-	Using an administrator-provided certificate
+        Using an administrator-provided certificate
       </message>
       <message name="IDS_CERT_POLICY_PROVIDED_CERT_MESSAGE" desc="Text that is displayed in the Website Settings popup when using an administrator-provided certificate">
-	You have accessed content using an administrator-provided certificate. Data you provide to <ph name="DOMAIN">$1<ex>www.google.com</ex></ph> can be intercepted by your administrator.
+        You have accessed content using an administrator-provided certificate. Data you provide to <ph name="DOMAIN">$1<ex>www.google.com</ex></ph> can be intercepted by your administrator.
       </message>
 
       <!-- Win certificate selector dialog strings.  -->
@@ -4128,7 +3114,7 @@ Public Exponent (<ph name="PUBLIC_EXPONENT_NUM_BITS">$3<ex>24</ex></ph> bits):
         Untrusted
       </message>
       <message name="IDS_CERT_MANAGER_POLICY_INSTALLED" desc="The text of the popup bubble shown when the user clicks the controlled setting indicator next to a certificate entry.">
-	This certificate has been installed by your system administrator.
+        This certificate has been installed by your system administrator.
       </message>
       <message name="IDS_CERT_MANAGER_PKCS12_IMPORT_ERROR_TITLE" desc="The title in the error dialog for PKCS #12 file import errors.">
         PKCS #12 Import Error
@@ -5054,6 +4040,9 @@ Make sure you do not expose any sensitive information.
       <message name="IDS_EXTENSION_PROMPT_RETAINED_FILES" desc="A line of explanatory text that precedes the list of files the app has permanent access to. This is shown when an app has persistent access to files.">
         It has permanent access to:
       </message>
+      <message name="IDS_EXTENSION_PROMPT_RETAINED_FILES_WITH_COUNT" desc="A line of explanatory text that precedes the list of files the app has permanent access to, showing how the number of files. This is shown when an app has persistent access to files.">
+        It has permanent access to <ph name="NUMBER_OF_FILES">$1<ex>5</ex></ph> files.
+      </message>
 
       <if expr="is_android">
         <message name="IDS_EXTENSION_PROMPT_WARNING_FULL_ACCESS" desc="Mobile: Permission string for full access to the device and all websites.">
@@ -5079,6 +4068,15 @@ Make sure you do not expose any sensitive information.
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_4_OR_MORE_HOSTS" desc="Permission string for access to data on four or more websites.">
         Access your data on <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>, <ph name="WEBSITE_2">$2<ex>www.yahoo.com</ex></ph>, and <ph name="NUMBER_OF_OTHER_WEBSITES">$3<ex>3</ex></ph> other websites
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_HOSTS" desc="Permission string for access to data on four or more websites.">
+        Access your data on <ph name="NUMBER_OF_OTHER_WEBSITES">$1<ex>5</ex></ph> website(s)
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_HOST_LIST" desc="Permission string (heading) for a list of websites.">
+        Access your data on the following websites:
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_HOST_LIST_ENTRY" desc="Single entry in a list of websites.">
+        - <ph name="WEBSITE_1">$1<ex>www.google.com</ex></ph>
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_FAVICON" desc="Permission string for access to favicons.">
         Access the icons of the websites you visit.
@@ -5119,11 +4117,11 @@ Make sure you do not expose any sensitive information.
       <message name="IDS_EXTENSION_PROMPT_WARNING_USB" desc="Permission string for access to USB devices.">
         Access USB devices
       </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH" desc="Permission string for access to the Bluetooth API.">
-        Access Bluetooth on your system
+      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH" desc="Permission string for general access to the Bluetooth API.">
+        Access information about Bluetooth devices paired with your system.
       </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_DEVICE" desc="Permission string for access to a specific Bluetooth device.">
-        Access the Bluetooth device "<ph name="DEVICE_NAME">$1<ex>Galaxy Nexus</ex></ph>".
+      <message name="IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_DEVICES" desc="Permission string for implementing Bluetooth profiles.">
+        Access Bluetooth devices paired with your system.
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE" desc="Permission string for access to a specific USB device.">
         Access the USB device <ph name="PRODUCT_NAME">$1<ex>SoundKnob</ex></ph> from <ph name="VENDOR_NAME">$2<ex>Griffin Technology</ex></ph>.
@@ -5144,13 +4142,22 @@ Make sure you do not expose any sensitive information.
         Use your microphone and camera
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS" desc="Permission string for access to downloads.">
-        Download files
+        Manage your downloads
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_DOWNLOADS_OPEN" desc="Permission string for access to downloads.">
+        Open downloaded files
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_FILE_SYSTEM_WRITE" desc="Permission string for write access to the file system.">
         Write to files that you have opened in the application
       </message>
-      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_ALL_GALLERIES" desc="Permission string for read access to all of the user's media galleries.">
-        Access photos, music, and other media from your computer (Read)
+      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ_WRITE" desc="Permission string for access to read and write to all of the user's media galleries.">
+        Access and change photos, music, and other media from your computer.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_READ" desc="Permission string for access to read all of the user's media galleries.">
+        Access photos, music, and other media from your computer.
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_MEDIA_GALLERIES_WRITE" desc="Permission string for access to write to all of the user's media galleries.">
+        Change photos, music, and other media from your computer.
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_SERIAL" desc="Permission string for access to serial devices.">
         Use serial devices attached to your computer
@@ -5187,6 +4194,9 @@ Make sure you do not expose any sensitive information.
       </message>
       <message name="IDS_EXTENSION_PROMPT_WARNING_ACTIVITY_LOG_PRIVATE" desc="Permission string for the observing other extensions' API calls">
         Monitor the behavior of other extensions, including visited URLs
+      </message>
+      <message name="IDS_EXTENSION_PROMPT_WARNING_NETWORKING_PRIVATE" desc="Permission string for Networking Private API.">
+        Manage network connections
       </message>
 
       <!-- Extension/App error messages -->
@@ -5451,9 +4461,6 @@ Make sure you do not expose any sensitive information.
       <message name="IDS_EXTENSIONS_NONE_INSTALLED" desc="Text that lets the user know that no extensions are installed.">
         Boo... You have no extensions :-(
       </message>
-      <message name="IDS_APPS_DEVTOOL_TITLE" desc="Title for the apps devtool app.">
-        Apps Developer Tool
-      </message>
       <message name="IDS_EXTENSIONS_PERMISSIONS_HEADING" desc="Heading for permissions dialog in apps_devtools">
         It can:
       </message>
@@ -5467,13 +4474,10 @@ Make sure you do not expose any sensitive information.
         Pack...
       </message>
       <message name="IDS_APPS_DEVTOOL_UPDATE_BUTTON" desc="Text for the 'Update app/extensions' button.">
-        Update now
+        Update
       </message>
       <message name="IDS_APPS_DEVTOOL_SEARCH" desc="Placeholder text that appears inside the search box until the user inputs data.">
         Search
-      </message>
-      <message name="IDS_APPS_DEVTOOL_NO_APPS_INSTALLED" desc="Text that lets the user know that no apps are installed.">
-        Boo... You have no apps :-(
       </message>
       <message name="IDS_APPS_DEVTOOL_APPS_INSTALLED" desc="Text for the word 'Apps'.">
         Apps
@@ -5481,11 +4485,38 @@ Make sure you do not expose any sensitive information.
       <message name="IDS_APPS_DEVTOOL_EXTENSIONS_INSTALLED" desc="Text for the word 'Extensions'.">
         Extensions
       </message>
-      <message name="IDS_APPS_DEVTOOL_NO_UNPACKED_INSTALLED" desc="Text that lets the user know that no unpacked apps or extensions are installed.">
-        No unpacked applications or extensions.
+      <message name="IDS_APPS_DEVTOOL_NO_PACKED_APPS" desc="Text that lets the user know that no packed apps are installed.">
+        No installed applications.
+      </message>
+      <message name="IDS_APPS_DEVTOOL_NO_UNPACKED_APPS" desc="Text that lets the user know that no unpacked apps are installed.">
+        No unpacked applications.
+      </message>
+      <message name="IDS_APPS_DEVTOOL_NO_PACKED_EXTENSIONS" desc="Text that lets the user know that no packed extensions are installed.">
+        No installed extensions.
+      </message>
+      <message name="IDS_APPS_DEVTOOL_NO_UNPACKED_EXTENSIONS" desc="Text that lets the user know that no unpacked extensions are installed.">
+        No unpacked extensions.
       </message>
       <message name="IDS_APPS_DEVTOOL_UNPACKED_INSTALLED" desc="Text for the word 'Unpacked' (unpacked app or extension).">
         Unpacked
+      </message>
+      <message name="IDS_APPS_DEVTOOL_INSTALLED" desc="Text for the word 'Installed' (installed app or extension).">
+        Installed
+      </message>
+      <message name="IDS_APPS_DEVTOOL_UPDATING" desc="Text for the word 'Updating...' when the user clicks on 'Update'.">
+        Updating...
+      </message>
+      <message name="IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_BUTTON" desc="Text of  the delete button in the apps/extension delete confirmation dialog.">
+        Delete
+      </message>
+      <message name="IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_TITLE" desc="Text of the title of the apps/extension delete confirmation dialog.">
+        Delete
+      </message>
+      <message name="IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_MESSAGE_APP" desc="Text of the message of the apps/extension delete confirmation dialog in case the user is deleting an app.">
+        Do you really want to delete this application?
+      </message>
+      <message name="IDS_APPS_DEVTOOL_DELETE_CONFIRMATION_MESSAGE_EXTENSION" desc="Text of the message of the apps/extension delete confirmation dialog in case the user is deleting an extension.">
+        Do you really want to delete this extension?
       </message>
       <message name="IDS_EXTENSIONS_NONE_INSTALLED_SUGGEST_GALLERY" desc="Text on next line after IDS_EXTENSIONS_NONE_INSTALLED that suggests the user look in the gallery for extensions to install.">
         Want to <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph>browse the gallery<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> instead?
@@ -5607,6 +4638,12 @@ Make sure you do not expose any sensitive information.
       </message>
       <message name="IDS_EXTENSIONS_LOCKED_MANAGED_USER" desc="The error message (either shown in the extensions UI or logged) informing a supervised user that extensions cannot be changed.">
         Extensions cannot be modified by supervised users.
+      </message>
+      <message name="IDS_EXTENSIONS_USE_APPS_DEV_TOOLS" desc="The message in the banner to invite people to use Apps Developer Tools.">
+        The new Apps Developer Tools makes it easier than ever to manage and debug your apps and extensions. It's also been added to the application list.
+      </message>
+      <message name="IDS_EXTENSIONS_OPEN_APPS_DEV_TOOLS" desc="The text of the button to open Apps Developer Tools in the banner to invite people to use Apps Developer Tools.">
+        Open
       </message>
       <message name="IDS_GET_MORE_EXTENSIONS" desc="The text for getting more extensions. Displayed at bottom of extension management page when there is at least one extension installed.">
         Get more extensions
@@ -5748,6 +4785,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_EXTENSION_WARNINGS_CREDENTIALS_CONFLICT" desc="Warning message which indicates that two or more extensions tried to modify a network request in a conflicting way and the modification of this extension was ignored">
         This extension failed to provide credentials to a network request because another extension (<ph name="EXTENSION_NAME">$1<ex>My Cool Extension</ex></ph>) provided different credentials.
+      </message>
+      <message name="IDS_EXTENSION_WARNINGS_DOWNLOAD_FILENAME_CONFLICT" desc="Warning message which indicates that two or more extensions tried to determine the filename of a downloaded file in a conflicting way and the modification of this extension was ignored">
+        This extension failed to name the download "<ph name="ATTEMPTED_FILENAME">$1<ex>apple.png</ex></ph>" because another extension (<ph name="EXTENSION_NAME">$2<ex>My Cool Extension</ex></ph>) determined a different filename "<ph name="ACTUAL_FILENAME">$3<ex>banana.png</ex></ph>".
       </message>
 
       <!-- External extension install alerts -->
@@ -6071,6 +5111,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_POLICY_NETWORK_CONFIG_IMPORT_FAILED" desc="The text displayed in the status column when the corresponding network configuration policy is invalid.">
         The network configuration is invalid and couldn't be imported.
       </message>
+      <message name="IDS_POLICY_JSON_PARSE_ERROR" desc="The text displayed in the status column when a policy that should have been specified in JSON format could not be parsed.">
+        Failed to parse JSON format: <ph name="JSON_PARSE_ERROR">$1<ex>Unexpected token.</ex></ph>
+      </message>
       <message name="IDS_POLICY_OK" desc="Text displayed in the status column when a valid value is set for a policy.">
         OK
       </message>
@@ -6079,6 +5122,9 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_POLICY_UNKNOWN" desc="Text displayed in the status column when a policy name is not recognized.">
         Unknown policy.
+      </message>
+      <message name="IDS_POLICY_INVALID_BOOKMARK" desc="Text displayed in the status column when an entry of the ManagedBookmarks policy is not a valid bookmark.">
+        Ignored invalid bookmark at index <ph name="ENTRY_INDEX">$1<ex>3</ex></ph>
       </message>
 
       <!-- chrome://policy -->
@@ -6167,6 +5213,15 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_POLICY_LEVEL_MANDATORY" desc="Text displayed in the Level column when a policy is mandatory.">
         Mandatory
       </message>
+
+      <if expr="is_android">
+        <message name="IDS_POLICY_MANAGED_BOOKMARKS" desc="Mobile: name of the managed bookmarks folder">
+          <ph name="DOMAIN">$1<ex>google.com</ex></ph> bookmarks
+        </message>
+        <message name="IDS_POLICY_MANAGED_BOOKMARKS_DEFAULT_NAME" desc="Mobile: name of the managed bookmarks folder when the management domain can't be determined.">
+          Managed bookmarks
+        </message>
+      </if>
 
       <!-- about:flags -->
       <message name="IDS_FLAGS_LONG_TITLE" desc="Long version of the title for the about:flags page.">
@@ -6283,6 +5338,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_SAVE_PAGE_AS_MHTML_DESCRIPTION" desc="Description of the 'Save Page as MHTML' lab.">
         Disables saving pages as HTML-only or HTML Complete; enables saving pages only as MHTML: a single text file containing HTML and all sub-resources.
       </message>
+      <message name="IDS_FLAGS_ENABLE_DEVICE_DISCOVERY_NAME" desc="Title of the enable 'device discovery' flag.">
+        Device Discovery
+      </message>
+      <message name="IDS_FLAGS_ENABLE_DEVICE_DISCOVERY_DESCRIPTION" desc="Description for 'device discovery' flag.">
+        Enables experimental device discovery on local network.
+      </message>
       <message name="IDS_FLAGS_TOUCH_OPTIMIZED_UI_NAME" desc="Title of the touch-optimized UI flag." >
         Touch Optimized UI
       </message>
@@ -6306,12 +5367,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_DISABLE_TOUCH_ADJUSTMENT_DESCRIPTION" desc="Description of the disable touch adjustment flag.">
         Disables touch adjustment support.  Touch adjustment is the process of refining the position of a touch gesture in order to compensate for touches having poor resolution compared to a mouse.
-      </message>
-      <message name="IDS_ENABLE_TAB_CAPTURE_NAME" desc="Title of the enable tab capture flag." >
-        Enable Tab Capture API
-      </message>
-      <message name="IDS_ENABLE_TAB_CAPTURE_DESCRIPTION" desc="Description of the enable tab capture flag.">
-        Enables experimental tab capture API to generate video streams of tab content.
       </message>
       <message name="IDS_ENABLE_BACKLOADER_NAME" desc="Title of the enable background loader flag." >
         Enable background loader component for hosted applications
@@ -6440,6 +5495,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_EXTENSIONS_ON_CHROME_URLS_DESCRIPTION" desc="Description of the 'Extensions on chrome:// URLs' lab">
         Enables running extensions on chrome:// URLs, where extensions explicitly request this permission.
       </message>
+      <message name="IDS_FLAGS_ENABLE_FAST_UNLOAD_DESCRIPTION" desc="Description of the 'Fast Unload' lab.">
+        Enables fast tab/window closing - runs a tab's onunload js handler independently of the GUI.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_FAST_UNLOAD_NAME" desc="Name of the 'Extensions on chrome:// URLs' lab">
+        Enable fast tab/window close
+      </message>
       <message name="IDS_FLAGS_ENABLE_ADVIEW_NAME" desc="Name of the 'Enable 'adview' element' lab.">
         Enable 'adview' element
       </message>
@@ -6452,11 +5513,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_ADVIEW_SRC_ATTRIBUTE_DESCRIPTION" desc="Description of the 'Enable specifying 'src' attribute on 'adview' elements' element' lab.">
         Enables specifying 'src' attribute on 'adview' elements, as well as arbitrary 'ad-network' names.
       </message>
-      <message name="IDS_FLAGS_ACTION_BOX_NAME" desc="Name of the 'Action Box' lab.">
-        Action box
+      <message name="IDS_FLAGS_ENABLE_APP_WINDOW_CONTROLS_NAME" desc="Name of the 'Enable 'window-controls' element' lab.">
+        Enable 'window-controls' element
       </message>
-      <message name="IDS_FLAGS_ACTION_BOX_DESCRIPTION" desc="Description of the 'Action Box' lab.">
-        Enable or disable the "Action Box" experimental toolbar UI.
+      <message name="IDS_FLAGS_ENABLE_APP_WINDOW_CONTROLS_DESCRIPTION" desc="Description of the 'Enable 'window-controls' element' lab.">
+        Enables using 'window-controls' HTML elements in packaged apps.
       </message>
       <message name="IDS_FLAGS_SCRIPT_BADGES_NAME" desc="Name of the 'Script Badges' lab.">
         Script badges
@@ -6519,17 +5580,17 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_INSTANT_EXTENDED_API_DESCRIPTION" desc="Description for the flag to enable the Instant extended API.">
         Enables the Instant Extended API which provides a deeper integration with your default search provider, including a renovated New Tab Page, extracting search query terms in the omnibox, a spruced-up omnibox dropdown and Instant previews of search results as you type in the omnibox.
       </message>
-      <message name="IDS_FLAGS_ENABLE_LOCAL_ONLY_INSTANT_EXTENDED_API" desc="Title for the flag to enable the local-only Instant extended API.">
-        Enable local-only Instant Extended API
-      </message>
-      <message name="IDS_FLAGS_ENABLE_LOCAL_ONLY_INSTANT_EXTENDED_API_DESCRIPTION" desc="Description for the flag to enable the Instant extended API.">
-        Enables the Instant Extended API using only local resources, including a renovated New Tab Page and a spruced-up omnibox dropdown, but without search query terms extraction or Instant search results.
-      </message>
       <message name="IDS_FLAGS_ENABLE_LOCAL_FIRST_LOAD_NTP" desc="Title for the flag to enable the local first load NTP.">
         Enable local first-load NTP in Instant Extended.
       </message>
       <message name="IDS_FLAGS_ENABLE_LOCAL_FIRST_LOAD_NTP_DESCRIPTION" desc="Description for the flag to enable the Instant extended API.">
         Whether or not the first New Tab Page load of a new window will automatically fall back to the local page when Instant Extended is enabled.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NEW_NTP" desc="Title for the flag to enable the new NTP.">
+        Enable the new NTP.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_NEW_NTP_DESCRIPTION" desc="Description for the flag to enable the new NTP.">
+        Whether or not the new style New Tab Page is enabled.
       </message>
       <message name="IDS_FLAGS_ENABLE_GESTURE_TAP_HIGHLIGHTING_NAME" desc="Title for the flag to turn on gesture tap highlighting">
         Gesture Tap Highlighting
@@ -6577,6 +5638,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_TCP_FAST_OPEN_DESCRIPTION" desc="Description of the flag that enables TCP Fast Open.">
         Enable the option to send extra authentication information in the initial SYN packet for a previously connected client, allowing faster data send start.
       </message>
+      <message name="IDS_FLAGS_ENABLE_TOUCH_SIDE_BEZELS_NAME" desc="Name of the flag that enables touch events on the side bezels.">
+        Enable touch events on the side bezels.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_TOUCH_SIDE_BEZELS_DESCRIPTION" desc="Description of the flag to enable touch events on the side bezels.">
+        Touch events from the side bezels are processed rather than thrown away.
+      </message>
       <message name="IDS_FLAGS_ENABLE_TOUCH_DRAG_DROP_NAME" desc="Name of the flag that enables touch initiated drag drop.">
         Enable touch initiated drag and drop
       </message>
@@ -6612,6 +5679,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_FLAGS_OVERSCROLL_HISTORY_NAVIGATION_DESCRIPTION" desc="Description for the flag to disable history navigation from horizontal overscroll.">
         Experimental history navigation in response to horizontal overscroll.
+      </message>
+      <message name="IDS_FLAGS_OVERVIEW_MODE_NAME" desc="Title for the flag to enable window overview mode.">
+        Enable overview mode.
+      </message>
+      <message name="IDS_FLAGS_OVERVIEW_MODE_DESCRIPTION" desc="Description for the flag to enable window overview mode.">
+        Enable overview mode, activated by pushing the switch window button.
+      </message>
+      <message name="IDS_FLAGS_SCROLL_END_EFFECT_NAME" desc="Title for the flag for scroll end effect from vertical overscroll.">
+        Scroll end effect
+      </message>
+      <message name="IDS_FLAGS_SCROLL_END_EFFECT_DESCRIPTION" desc="Description for the flag that controls scroll end effect from vertical overscroll.">
+        Experimental scroll end effect in response to vertical overscroll.
       </message>
       <message name="IDS_FLAGS_ENABLE_SYNC_FAVICONS_NAME" desc="Title for the flag to enable the favicon sync datatype">
         Enable favicon sync.
@@ -6677,6 +5756,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_PANELS_DESCRIPTION" desc="Description for the flag to enable Panel windows.">
         Enable Panel windows that open outside of the browser frame. Attempts to open a Panel will open a popup instead if not enabled. Panels are always enabled on the dev and canary channels.
       </message>
+      <message name="IDS_FLAGS_ENABLE_HTML_IMPORTS_NAME" desc="Enable HTML Imports.">
+        Enable HTML Imports
+      </message>
+      <message name="IDS_FLAGS_ENABLE_HTML_IMPORTS_DESCRIPTION" desc="Description of 'Enable HTML Imports' flag.">
+        Enabling this option allows web applications to load HTML Imports.
+      </message>
       <message name="IDS_FLAGS_ENABLE_WEBGL_NAME" desc="Name of the 'Enable WebGL' lab.">
         Enable WebGL
       </message>
@@ -6707,6 +5792,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_SCTP_DATA_CHANNELS_DESCRIPTION" desc="Description of about:flags option to turn on SCTP data channels support">
         When enabled, DataChannels created by WebRTC will use the SCTP wire protocol.
       </message>
+      <message name="IDS_FLAGS_DISABLE_DEVICE_ENUMERATION_NAME" desc="Name of about:flags option to turn off WebRTC device enumeration support.">
+        Disable WebRTC device enumeration.
+      </message>
+      <message name="IDS_FLAGS_DISABLE_DEVICE_ENUMERATION_DESCRIPTION" desc="Description of chrome:flags option to turn off WebRTC device enumeration support">
+        Disable support for MediaStreamTrack.getSources().
+      </message>
       <message name="IDS_FLAGS_DISABLE_WEBAUDIO_NAME" desc="Name of the 'Disable WebAudio' lab.">
         Disable WebAudio
       </message>
@@ -6734,6 +5825,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_COMPOSITING_FOR_TRANSITION_DESCRIPTION" desc="Description for the flag to make RenderLayers with transitions become composited layers.">
         Enabling this option will make RenderLayers with a transition on opacity, transform, or filter have their own composited layer.
       </message>
+      <message name="IDS_FLAGS_ACCELERATED_FIXED_ROOT_BACKGROUND_NAME" desc="Name of the 'Accelerated fixed root background' lab.">
+        Compositing for fixed root backgrounds.
+      </message>
+      <message name="IDS_FLAGS_ACCELERATED_FIXED_ROOT_BACKGROUND_DESCRIPTION" desc="Description for the flag to all fixed root backgrounds to be put in separate, composited layers.">
+        If this option is enabled, and if the body is styled with background-attachment:fixed, the background will have its own compositied layer.
+      </message>
       <message name="IDS_FLAGS_ENABLE_DEFERRED_IMAGE_DECODING_NAME" desc="Name of the 'Enable deferred image decoding' lab.">
         Enable deferred image decoding.
       </message>
@@ -6746,28 +5843,36 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_QUIC_DESCRIPTION" desc="Description for the flag to enable QUIC.">
         Enable experimental QUIC protocol support.
       </message>
+      <message name="IDS_FLAGS_ENABLE_QUIC_HTTPS_NAME" desc="Title for the flag to enable HTTPS over QUIC.">
+        HTTPS over experimental QUIC protocol.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_QUIC_HTTPS_DESCRIPTION" desc="Description for the flag to enable HTTPS over QUIC.">
+        Enables QUIC over an Authenticated Encrypted channel (can replace HTTPS transactions). Without this flag, only HTTP requests are supported over QUIC. This only has an effect if QUIC protocol is enabled.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_SPDY4A2_NAME" desc="Title for the flag to enable SPDY/4 alpha 2">
+        Enable SPDY/4 alpha 2
+      </message>
+      <message name="IDS_FLAGS_ENABLE_SPDY4A2_DESCRIPTION" desc="Description for the flag to enable SPDY/4 alpha 2.">
+        Enable experimental SPDY/4 alpha 2.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_HTTP2_DRAFT_04_NAME" desc="Title for the flag to enable HTTP/2 draft 04">
+        Enable HTTP/2 draft 04.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_HTTP2_DRAFT_04_DESCRIPTION" desc="Description for the flag to enable HTTP/2 draft 04.">
+        Enable experimental HTTP/2 draft 04.
+      </message>
       <message name="IDS_FLAGS_ENABLE_ASYNC_DNS_NAME" desc="Title for the flag to enable asynchronous DNS client.">
         Built-in Asynchronous DNS
       </message>
       <message name="IDS_FLAGS_ENABLE_ASYNC_DNS_DESCRIPTION" desc="Description for the flag to enable asynchronous DNS client.">
         Enable experimental asynchronous DNS client.
       </message>
-      <if expr="is_android and not pp_ifdef('google_tv')">
-        <message name="IDS_FLAGS_ENABLE_WEBKIT_MEDIA_SOURCE_NAME" desc="Title for the flag to enable the prefixed Media Source API.">
-          Enable prefixed Media Source API.
-        </message>
-        <message name="IDS_FLAGS_ENABLE_WEBKIT_MEDIA_SOURCE_DESCRIPTION" desc="Description for the flag to enable the prefixed Media Source API.">
-          Enable the experimental WebKitMediaSource object. This object allows JavaScript to send media data directly to a video element.
-        </message>
-      </if>
-      <if expr="not is_android or pp_ifdef('google_tv')">
-        <message name="IDS_FLAGS_DISABLE_WEBKIT_MEDIA_SOURCE_NAME" desc="Title for the flag to disable the prefixed Media Source API.">
-          Disable prefixed Media Source API.
-        </message>
-        <message name="IDS_FLAGS_DISABLE_WEBKIT_MEDIA_SOURCE_DESCRIPTION" desc="Description for the flag to disable the prefixed Media Source API.">
-          Disable the experimental WebKitMediaSource object. This object allows JavaScript to send media data directly to a video element.
-        </message>
-      </if>
+      <message name="IDS_FLAGS_DISABLE_WEBKIT_MEDIA_SOURCE_NAME" desc="Title for the flag to disable the prefixed Media Source API.">
+        Disable prefixed Media Source API.
+      </message>
+      <message name="IDS_FLAGS_DISABLE_WEBKIT_MEDIA_SOURCE_DESCRIPTION" desc="Description for the flag to disable the prefixed Media Source API.">
+        Disable the experimental WebKitMediaSource object. This object allows JavaScript to send media data directly to a video element.
+      </message>
       <message name="IDS_FLAGS_ENABLE_ENCRYPTED_MEDIA_NAME" desc="Title for the flag to enable the (unprefixed) Encrypted Media Extensions APIs (e.g. MediaKeys).">
         Enable Encrypted Media Extensions.
       </message>
@@ -6866,16 +5971,10 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Enable the new network configuration handlers which handle Shill connection requests without using NetworkLibrary.
       </message>
       <message name="IDS_FLAGS_CHROMEOS_USE_NEW_NETWORK_CONNECTION_HANDLER_NAME" desc="Title for the flag to enable using the new network connection handler.">
-	Enables new network connection handler
+        Enables new network connection handler
       </message>
       <message name="IDS_FLAGS_CHROMEOS_USE_NEW_NETWORK_CONNECTION_HANDLER_DESCRIPTION" desc="Description for the flag to enable using the new network connection handler.">
-	Enable the new network connection handler.
-      </message>
-      <message name="IDS_FLAGS_ASH_ENABLE_NEW_AUDIO_HANDLER_NAME" desc="Title for the flag to enable using the new audio handler.">
-        Enables new audio handler
-      </message>
-      <message name="IDS_FLAGS_ASH_ENABLE_NEW_AUDIO_HANDLER_DESCRIPTION" desc="Description for the flag to enable using the new audio handler.">
-        Enable the new audio handler which uses the new cras audio dbus apis.
+        Enable the new network connection handler.
       </message>
       <message name="IDS_FLAGS_ASH_AUDIO_DEVICE_MENU_NAME" desc="Title for a flag for audio switching.">
         Audio input/output menu
@@ -6956,11 +6055,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_DISABLE_SOFTWARE_RASTERIZER_DESCRIPTION" desc="Description for the flag to disable using a software renderer.">
         Don't fall back to a 3D software rasterizer when the GPU cannot be used.
       </message>
-      <message name="IDS_FLAGS_EXPERIMENTAL_WEBKIT_FEATURES_NAME" desc="Name for the flag to enable experimental WebKit features.">
-        Enable experimental WebKit features.
+      <message name="IDS_FLAGS_EXPERIMENTAL_WEB_PLATFORM_FEATURES_NAME" desc="Name for the flag to enable experimental Web Platform features.">
+        Enable experimental Web Platform features.
       </message>
-      <message name="IDS_FLAGS_EXPERIMENTAL_WEBKIT_FEATURES_DESCRIPTION" desc="Description for the flag to enable experimental WebKit features.">
-        Enable experimental WebKit features that are in development.
+      <message name="IDS_FLAGS_EXPERIMENTAL_WEB_PLATFORM_FEATURES_DESCRIPTION" desc="Description for the flag to enable experimental Web Platform features.">
+        Enable experimental Web Platform features that are in development.
       </message>
       <message name="IDS_FLAGS_CSS_SHADERS_NAME" desc="Name for the flag to enable CSS Shaders.">
         Enable CSS Shaders.
@@ -6986,6 +6085,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_DEVTOOLS_EXPERIMENTS_DESCRIPTION" desc="Description for the flag to enable experiments in Developer Tools.">
         Enable Developer Tools experiments. Use Settings panel in Developer Tools to toggle individual experiments.
       </message>
+      <message name="IDS_FLAGS_REMOTE_DEBUGGING_RAW_USB_NAME" desc="Name for the flag to enable remote debugging of Chrome for Android over raw USB interface.">
+        Enable Remote Debugging over USB.
+      </message>
+      <message name="IDS_FLAGS_REMOTE_DEBUGGING_RAW_USB_DESCRIPTION" desc="Description for the flag to enable remote debugging of Chrome for Android over raw USB interface.">
+        Enable Remote Debugging of Chrome for Android over raw USB interface (no need to install / run Android Debug Bridge).
+      </message>
       <message name="IDS_FLAGS_SILENT_DEBUGGER_EXTENSION_API_NAME" desc="Name for the flag to enable silent debugging via chrome.debugger extension API.">
         Enable Silent Debugging.
       </message>
@@ -7004,11 +6109,17 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_NO_DISCARD_TABS_DESCRIPTION" desc="Description for the flag to disable the tab discarding feature.">
         Turns off tab discarding, a feature that discards infrequently used tabs under low memory conditions.
       </message>
-      <message name="IDS_FLAGS_SHOW_LAUNCHER_ALIGNMENT_MENU_NAME" desc="Name for the flag to show a menu that lets you change the alignment of the launcher.">
-        Show launcher alignment menu.
+      <message name="IDS_FLAGS_DOCKED_WINDOWS_NAME" desc="Name for the flag to enable docked windows feature.">
+        Enable docking of windows near screen edges.
       </message>
-      <message name="IDS_FLAGS_SHOW_LAUNCHER_ALIGNMENT_MENU_DESCRIPTION" desc="Description for the flag to show a menu that lets you change the alignment of the launcher.">
-        Enables a menu that allows changing the side the launcher is aligned to.
+      <message name="IDS_FLAGS_DOCKED_WINDOWS_DESCRIPTION" desc="Description for the flag to enable docked windows feature.">
+        Turns on docking of windows near screen edges, a feature that provides an easier way to interact with panel and other small windows.
+      </message>
+      <message name="IDS_FLAGS_SHOW_SHELF_ALIGNMENT_MENU_NAME" desc="Name for the flag to show a menu that lets you change the alignment of the shelf.">
+        Show shelf alignment menu.
+      </message>
+      <message name="IDS_FLAGS_SHOW_SHELF_ALIGNMENT_MENU_DESCRIPTION" desc="Description for the flag to show a menu that lets you change the alignment of the shelf.">
+        Enables a menu that allows changing the side the shelf is aligned to.
       </message>
      <message name="IDS_FLAGS_FORCE_MAXIMIZE_MODE_NAME" desc="Name for the flag which forces the window manager to use maximized mode wherever possible.">
         Always maximized mode
@@ -7075,12 +6186,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <message name="IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_CLICK_DESCRIPTION" desc="Description for the flag to enable touchpad three finger click as middle button.">
           Enables touchpad three-finger-click as middle button.
         </message>
-        <message name="IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_SWIPE_NAME" desc="Name for the flag to enable touchpad three finger swipe.">
-          Enable touchpad three-finger swipe.
-        </message>
-        <message name="IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_SWIPE_DESCRIPTION" desc="Description for the flag to enable touchpad three finger swipe.">
-          Enables touchpad three-finger swipe.
-        </message>
         <message name="IDS_FLAGS_DISABLE_BOOT_ANIMATION" desc="Name for the flag to disable wallpaper boot animation (except for OOBE).">
           Disable boot animation.
         </message>
@@ -7102,17 +6207,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
         <message name="IDS_FLAGS_ASH_NEW_LOCK_ANIMATIONS_DESCRIPTION" desc="Description for the flag to switch lock animations.">
           Disables new lock animations.
         </message>
-        <message name="IDS_FLAGS_DISABLE_KIOSK_APPS_NAME" desc="Name for the flag to disable kiosk applications.">
-          Disable kiosk applications.
+        <message name="IDS_FLAGS_ENABLE_STICKY_KEYS_NAME" desc="Name for the flag to enable sticky keys.">
+          Enable sticky keys.
         </message>
-        <message name="IDS_FLAGS_DISABLE_KIOSK_APPS_DESCRIPTION" desc="Description for the flag to disable kiosk applications.">
-          Disable kiosk applications on the device.
-        </message>
-        <message name="IDS_FLAGS_DISABLE_FULLSCREEN_APP_NAME" desc="Name for the flag to disable auto run kiosk applications in full screen.">
-          Disable auto run kiosk applications in full screen..
-        </message>
-        <message name="IDS_FLAGS_DISABLE_FULLSCREEN_APP_DESCRIPTION" desc="Description for the flag to disable auto run kiosk applications in full screen.">
-          Disables making kiosk applications run in full screen automatically..
+        <message name="IDS_FLAGS_ENABLE_STICKY_KEYS_DESCRIPTION" desc="Description for the flag to enable sticky keys.">
+          StickyKeys allows the user to press and release a modifier key, such as Shift, Ctrl, or Alt, and have it remain active until any other key is pressed.
         </message>
       </if>
       <message name="IDS_FLAGS_FULL_HISTORY_SYNC_NAME" desc="Name of the flag to disable full history sync.">
@@ -7151,11 +6250,11 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_PASSWORD_GENERATION_DESCRIPTION" desc="Description of flag to enable password generation.">
         Allow the user to have Chrome generate passwords when it detects account creation pages.
       </message>
-      <message name="IDS_FLAGS_ENABLE_PASSWORD_AUTOFILL_PUBLIC_SUFFIX_DOMAIN_MATCHING_NAME" desc="Name of the flag to enable public suffix domain matching for autofill of passwords.">
-        Enable public suffix domain matching for autofill of passwords.
+      <message name="IDS_FLAGS_PASSWORD_AUTOFILL_PUBLIC_SUFFIX_DOMAIN_MATCHING_NAME" desc="Name of the flag for public suffix domain matching for autofill of passwords.">
+        Public suffix domain matching for autofill of passwords.
       </message>
-      <message name="IDS_FLAGS_ENABLE_PASSWORD_AUTOFILL_PUBLIC_SUFFIX_DOMAIN_MATCHING_DESCRIPTION" desc="Description of flag to enable public suffix domain matching for autofill of passwords.">
-        Allow the user to select username/password combinations for domains that match the same public suffix registry domain.
+      <message name="IDS_FLAGS_PASSWORD_AUTOFILL_PUBLIC_SUFFIX_DOMAIN_MATCHING_DESCRIPTION" desc="Description of flag to enable or disable public suffix domain matching for autofill of passwords.">
+        Enable or disable a feature which allows the user to select username/password combinations for domains that match the same public suffix registry domain.
       </message>
       <message name="IDS_FLAGS_PERFORMANCE_MONITOR_GATHERING_NAME" desc="Name for the flag to enable Performance Monitor.">
         Enable performance monitoring
@@ -7201,6 +6300,12 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_IMPL_SIDE_PAINTING_DESCRIPTION" desc="Description of about:flags option for impl-side painting.">
         If enabled, painting is done on a separate thread instead of the main thread.
       </message>
+      <message name="IDS_FLAGS_DELEGATED_RENDERER_NAME" desc="Name of about:flags option for delegated renderer.">
+        Delegated Renderer (AKA Übercompositor).
+      </message>
+      <message name="IDS_FLAGS_DELEGATED_RENDERER_DESCRIPTION" desc="Description of about:flags option for delegated renderer.">
+        If enabled, the renderer delegates compositing to the browser, merging both compositing passes.
+      </message>
       <message name="IDS_FLAGS_TRACK_ACTIVE_VISIT_TIME_NAME" desc="Name of about:flags option for tracking active time on a page.">
         Track time spent on each each page
       </message>
@@ -7241,13 +6346,13 @@ Keep your key file in a safe place. You will need it to create new versions of y
         Specifies quality setting for images captured if scaling down.
       </message>
       <message name="IDS_FLAGS_TAB_CAPTURE_SCALE_QUALITY_FAST" desc="">
-	fast
+        fast
       </message>
       <message name="IDS_FLAGS_TAB_CAPTURE_SCALE_QUALITY_GOOD" desc="">
-	good
+        good
       </message>
       <message name="IDS_FLAGS_TAB_CAPTURE_SCALE_QUALITY_BEST" desc="">
-	best
+        best
       </message>
       <message name="IDS_FLAGS_DEFAULT_TILE_WIDTH_NAME" desc="Name of about:flags option for default tile width.">
         Default tile width
@@ -7297,13 +6402,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_FLAGS_ENABLE_SYNC_DIRECTORY_OPERATION_DESCRIPTION" desc="Description of the flag to enable syncfs directory support.">
         Enables directory support for sync filesystem.
       </message>
-      <message name="IDS_FLAGS_ENABLE_DRAGGABLE_MENU_BUTTON_NAME" desc="Title for the flag to enable draggable menu button.">
-        Enable draggable menu button.
-      </message>
-      <message name="IDS_FLAGS_ENABLE_DRAGGABLE_MENU_BUTTON_DESCRIPTION" desc="Description for the flag to enable draggable menu button.">
-        Make the menu button touch-draggable so that users can execute a menu item (e.g., New Tab, Settings,...) by a single touch.
-        If the popup list is too long to display at once, touch-dragging at the top or the bottom scrolls the list.
-      </message>
       <if expr="is_macosx">
         <message name="IDS_FLAGS_ENABLE_APP_LIST_SHIM_NAME" desc="Name of the flag to enable the app launcher app bundle.">
           Enable App Launcher OSX app bundle.
@@ -7329,6 +6427,18 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_FLAGS_ENABLE_TRANSLATE_SETTINGS_DESCRIPTION" desc="Description of the flag to translate setting.">
         Enable Translate settings in chrome://settings/languages where the user can configure which language should be translated.
+      </message>
+      <message name="IDS_FLAGS_DISABLE_APP_LIST_NAME" desc="Name of the flag to disable the app list on startup.">
+        Disable the app launcher on startup.
+      </message>
+      <message name="IDS_FLAGS_DISABLE_APP_LIST_DESCRIPTION" desc="Description of the flag to disable the app list on startup.">
+        Disable the app launcher on startup. While this flag is set the launcher will be disabled every time Chrome starts. This is used for testing the app launcher install flow.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_DEVICE_MOTION_NAME" desc="Name of the flag to enable device motion DOM events.">
+        Enable device motion.
+      </message>
+      <message name="IDS_FLAGS_ENABLE_DEVICE_MOTION_DESCRIPTION" desc="Description for the flag to enable device motion.">
+        Enables device motion DOM events in JavaScript.
       </message>
 
       <!-- Crashes -->
@@ -7360,6 +6470,32 @@ Keep your key file in a safe place. You will need it to create new versions of y
         If enabled, application size and layout will adapt to the operating system's DPI settings.
       </message>
 
+      <!-- WebRTC logs -->
+      <message name="IDS_WEBRTC_LOGS_TITLE" desc="Title for the chrome://webrtc-logs page.">
+        Uploaded WebRTC logs
+      </message>
+      <message name="IDS_WEBRTC_LOGS_LOG_COUNT_BANNER_FORMAT" desc="Format for WebRTC log count banner on chrome://webrtc-logs">
+        Uploaded WebRTC logs (<ph name="WEBRTC_LOG_COUNT">$1<ex>3</ex></ph>)
+      </message>
+      <message name="IDS_WEBRTC_LOGS_LOG_HEADER_FORMAT" desc="Format for uploaded log entry headings on chrome://webrtc-logs">
+        WebRTC log ID <ph name="WEBRTC_LOG_ID">$1<ex>8fa95dbb6f2ec862</ex></ph>
+      </message>
+      <message name="IDS_WEBRTC_LOGS_LOG_TIME_FORMAT" desc="Format for uploaded log entry upload time on chrome://webrtc-logs">
+        Uploaded <ph name="WEBRTC_LOG_TIME">$1<ex>Tuesday, January 25, 2011 2:58:02 PM</ex></ph>
+      </message>
+      <message name="IDS_WEBRTC_LOGS_BUG_LINK_LABEL" desc="Link text for filing a bug on chrome://webrtc-logs">
+        File bug
+      </message>
+      <message name="IDS_WEBRTC_LOGS_NO_LOGS_MESSAGE" desc="The explanatory message for chrome://webrtc-logs when there are no uploaded logs">
+        You have no recently uploaded WebRTC logs.
+      </message>
+      <message name="IDS_WEBRTC_LOGS_DISABLED_HEADER" desc="The header for chrome://webrtc-logs when uploading is disabled">
+        Log capturing and uploading is disabled.
+      </message>
+      <message name="IDS_WEBRTC_LOGS_DISABLED_MESSAGE" desc="The explanatory message for chrome://webrtc-logs when uploading is disabled">
+        This page only shows information on your recently uploaded WebRTC logs if you <ph name="BEGIN_LINK">&lt;a href="https://www.google.com/support/chrome/bin/answer.py?answer=96817"&gt;</ph>enable crash reporting<ph name="END_LINK">&lt;/a&gt;</ph>.
+      </message>
+
       <!-- Custom dictionary page -->
       <message name="IDS_LANGUAGE_DICTIONARY_OVERLAY_TITLE" desc="Title for the chrome://settings/editDictionary page, where a user can add and remove words in the dictionary used for spelling">
         Custom spelling dictionary
@@ -7378,29 +6514,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_SEARCH_PREF_EXPLANATION" desc="Description of the search engine preference">
         Set which search engine is used when searching from the
         <ph name="BEGIN_LINK">&lt;a target="_blank" href="$1"&gt;</ph>omnibox<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>.
-      </message>
-
-      <!-- Instant checkbox strings -->
-      <message name="IDS_INSTANT_CHECKBOX_ENABLED" desc="Description of a preference that enables or disables Instant previews of search results.">
-        Display Instant results.
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_NO_EXTENDED_API" desc="Description of a preference that's disabled because the Instant Extended API is disabled.">
-        Display Instant results (Instant Extended is disabled).
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_LOCAL_ONLY_EXTENDED_API" desc="Description of a preference that's disabled because the Instant Extended API is enabled in local-only mode.">
-        Display Instant results (Instant Extended is local-only).
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_NO_DEFAULT_SEARCH_PROVIDER" desc="Description of a preference that's disabled because there's no default search engine.">
-        Display Instant results (no default search engine).
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_UNKNOWN_DEFAULT_SEARCH_PROVIDER" desc="Description of a preference that's disabled because an unnamed default search provider does not support Instant.">
-        Display Instant results (the default search engine does not support Instant).
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_NON_INSTANT_DEFAULT_SEARCH_PROVIDER" desc="Description of a preference that's disabled because the named default search provider does not support Instant.">
-        Display Instant results (<ph name="SEARCH_ENGINE_NAME">$1<ex>Yahoo!</ex></ph> does not support Instant).
-      </message>
-      <message name="IDS_INSTANT_CHECKBOX_PREDICTION_DISABLED" desc="Description of a preference that's disabled because search query prediction is disabled.">
-        Display Instant results (a prediction service must be enabled).
       </message>
 
       <!-- Conflicts page -->
@@ -7887,8 +7000,8 @@ Keep your key file in a safe place. You will need it to create new versions of y
       <message name="IDS_TOOLTIP_NEW_TAB" desc="The tooltip for the new tab button">
         New tab
       </message>
-      <message name="IDS_TOOLTIP_ACTION_BOX_BUTTON" desc="The tooltip for action box button">
-        Actions
+      <message name="IDS_TOOLTIP_MIC_SEARCH" desc="The tooltip for search-by-voice button">
+        Search by voice
       </message>
       <message name="IDS_TOOLTIP_ZOOM" desc="The tooltip for zoom icon">
         Zoom: <ph name="VALUE">$1<ex>100</ex></ph>%
@@ -7913,11 +7026,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
           Reset
         </message>
       </if>
-
-      <!--Action Box menu-->
-      <message name="IDS_CHROME_TO_MOBILE" desc="The text for chrome to mobile menu item">
-        Send tab to device
-      </message>
 
       <!--Script Bubble-->
       <message name="IDS_SCRIPT_BUBBLE_HEADLINE" desc="The headline of the script bubble.">
@@ -7944,9 +7052,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_ACCNAME_LOCATION" desc="The accessible name for the editable-text portion of the omnibox.">
         Address and search bar
-      </message>
-      <message name="IDS_ACCNAME_STAR" desc="The accessible name for the bookmark button.">
-        Bookmark
       </message>
       <message name="IDS_ACCNAME_ZOOM" desc="The accessible name for the zoom button.">
         Zoom
@@ -7998,9 +7103,6 @@ Keep your key file in a safe place. You will need it to create new versions of y
       </message>
       <message name="IDS_ACCNAME_WEB_CONTENTS" desc="The accessible name for the web contents.">
         Web Contents
-      </message>
-      <message name="IDS_ACCNAME_ACTION_BOX_BUTTON" desc="The accessible name for the action box button.">
-        Actions
       </message>
       <if expr="pp_ifdef('ios')">
         <message name="IDS_ACCNAME_CLEAR_TEXT" desc="The accessibility label for the clear text button in the location bar [Length: unlimited].">
@@ -8111,11 +7213,11 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       <message name="IDS_IMPORT_FROM_ICEWEASEL" desc="browser combo box: Iceweasel">
         Iceweasel
       </message>
-      <message name="IDS_IMPORT_FROM_GOOGLE_TOOLBAR" desc="browser combo box: Google Toolbar">
-        Google Toolbar
-      </message>
       <message name="IDS_IMPORT_FROM_SAFARI" desc="browser combo box: Safari">
         Safari
+      </message>
+      <message name="IDS_IMPORT_FROM_BOOKMARKS_HTML_FILE" desc="browser combo box: Bookmarks HTML File">
+        Bookmarks HTML File
       </message>
       <message name="IDS_IMPORT_ITEMS_LABEL" desc="Label before item select checkboxes">
         Select items to import:
@@ -8142,6 +7244,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       <message name="IDS_IMPORT_COMMIT" desc="Text for OK button on dialog">
         Import
       </message>
+      <message name="IDS_IMPORT_CHOOSE_FILE" desc="Text for the Choose File on dialog">
+        Choose File
+      </message>
 
       <message name="IDS_IMPORTER_GOOGLE_LOGIN_TEXT" desc="The message to be displayed on dialog">
         In order to import Toolbar bookmarks into Chrome, you must be signed in to your Google account.  Please sign in and try to import again.
@@ -8149,6 +7254,10 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       <message name="IDS_IMPORT_NO_PROFILE_FOUND" desc="Message displayed when we do not find any supported browser to import from.">
         No supported browser found
       </message>
+      <message name="IDS_IMPORT_PASSWORD_KEYCHAIN_WARNING" desc="Message displayed at the bottom of the Import Dialog for Safari on Mac OS">
+        Passwords saved in the Mac OS X Keychain will be used to help you sign in without typing.
+      </message>
+
 
       <!-- Import progress popup -->
       <message name="IDS_IMPORT_PROGRESS_TITLE" desc="Title for the importing progress dialog">
@@ -8242,6 +7351,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       </message>
       <message name="IDS_FEEDBACK_SAVED_SCREENSHOTS" desc="Radio button for including the last screen image on the bug report dialog box">
         Send a saved screen shot
+      </message>
+      <message name="IDS_FEEDBACK_INCLUDE_PERFORMANCE_TRACE_CHECKBOX" desc="Checkbox for including system information on the bug report dialog box">
+        Send performance trace data
       </message>
       <message name="IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_CHKBOX" desc="Checkbox for including system information on the bug report dialog box">
         Send system information
@@ -8358,7 +7470,7 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
 
       <!-- Managed User Avatar Menu -->
       <message name="IDS_MANAGED_USER_INFO" desc="Text which explains that a supervised user is managed by a custodian.">
-        This user is supervised by <ph name="CUSTODIAN_NAME">$1<ex>Jane Doe</ex></ph>. Usage and history from this user may be viewed by the manager.
+        This user is supervised by <ph name="CUSTODIAN_EMAIL">$1<ex>Jane.Doe@gmail.com</ex></ph>. Usage and history from this user can be reviewed by the manager on chrome.com.
       </message>
       <message name="IDS_MANAGED_USER_AVATAR_LABEL" desc="A label for the supervised user which is used in the avatar menu and as a label in the titlebar.">
         Supervised user
@@ -8370,6 +7482,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       </message>
       <message name="IDS_BLOCK_INTERSTITIAL_MESSAGE" desc="A message for the supervised user when they attempt to visit a site that is not permitted by the manager.">
         Oops, looks like you need permission from <ph name="NAME">$1<ex>John Doe</ex></ph> to access this page.
+      </message>
+      <message name="IDS_BLOCK_INTERSTITIAL_MESSAGE_ACCESS_REQUESTS_DISABLED" desc="A message for the supervised user when they attempt to visit a site that is not permitted by the manager (and they can't ask for permission).">
+        Oops, looks like you don't have permission to access this page.
       </message>
       <message name="IDS_BACK_BUTTON" desc="A button for going back to the last safe url after being blocked.">
         Go back
@@ -9064,6 +8179,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       </message>
 
       <!-- Load State -->
+      <message name="IDS_LOAD_STATE_WAITING_FOR_SOCKET_SLOT" desc="Status text when Chrome is at its connection limit, and is waiting for a URL request to complete to free up a connection.">
+        Waiting for available socket...
+      </message>
       <message name="IDS_LOAD_STATE_WAITING_FOR_DELEGATE">
         Waiting for <ph name="LOAD_STATE_PARAMETER">$1<ex>extension Adblock</ex></ph>...
       </message>
@@ -9200,50 +8318,6 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
         </message>
       </if>
 
-      <!-- Chrome To Mobile bubble messages -->
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SINGLE_TITLE" desc="Title of the bubble when a single device is available.">
-        Send this page to <ph name="DEVICE_NAME">$1<ex>Galaxy Nexus</ex></ph>.
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_MULTI_TITLE" desc="Title of the bubble when multiple devices are available.">
-        Send this page to:
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY" desc="Checkbox for optionally sending an offline copy of the page to the device.">
-        Also send a copy for offline viewing (<ph name="PAGE_SIZE">$1<ex>111kB</ex></ph>)
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY_GENERATING" desc="Placeholder PAGE_SIZE text indicating that the offline copy is being generated.">
-        generating...
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SEND_COPY_FAILED" desc="Text indicating that the offline copy generation failed.">
-        An error occurred while generating the offline copy
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SEND" desc="Button to send the page to the target device.">
-        Send
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SENDING_0" desc="First animated text step indicating that the page is being sent to the device.">
-        Sending
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SENDING_1" desc="Second animated text step indicating that the page is being sent to the device.">
-        Sending.
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SENDING_2" desc="Third animated text step indicating that the page is being sent to the device.">
-        Sending..
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SENDING_3" desc="Fourth animated text step indicating that the page is being sent to the device.">
-        Sending...
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_SENT" desc="Text indicating that the page has been sent to the device.">
-        Sent!
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_ERROR" desc="Text indicating that an error occurred sending the page to the device.">
-        Error
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_ERROR_MESSAGE" desc="The error message shown when an error occurs sending the page to the device.">
-        An error occurred while sending the page
-      </message>
-      <message name="IDS_CHROME_TO_MOBILE_BUBBLE_TOOLTIP" desc="The tooltip for the Chrome To Mobile button.">
-        Send this page to your device
-      </message>
-
       <!-- Application window menu -->
       <if expr="not pp_ifdef('use_titlecase')">
         <message name="IDS_APP_MENU_RELOAD" desc="The reload menu in application windows">
@@ -9271,6 +8345,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       </message>
       <message name="IDS_ERRORPAGES_BUTTON_RELOAD" desc="Label for the button on an error page to reload the page">
         Reload
+      </message>
+      <message name="IDS_ERRORPAGES_BUTTON_DIAGNOSE" desc="Label for the button that invokes the connection diagnostic tool on the error page">
+        Diagnose errors...
       </message>
       <if expr="is_android">
         <message name="IDS_ERRORPAGES_BUTTON_SETTINGS" desc="Mobile: Label for the button on an error page to launch system settings menu">
@@ -9615,6 +8692,11 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
         <ph name="PRODUCT_NAME">&lt;span jscontent="productName"&gt;&lt;/span&gt;<ex>Google Chrome</ex></ph>
         won't use insecure connections in order to protect your privacy.
       </message>
+      <message name="IDS_ERRORPAGES_SUMMARY_DNS_PROBE_RUNNING" desc="Summary in the error page when DNS resolution failed and we are running a probe to figure out why.">
+        Unable to look up
+        <ph name="HOST_NAME">&lt;strong jscontent="hostName"&gt;&lt;/strong&gt;<ex>www.whatever.com</ex></ph>.
+        Trying to diagnose the problem...
+      </message>
 
       <message name="IDS_ERRORPAGES_ERROR_CODE" desc="At the bottom of error pages, a non-internationalized string or numeric code is displayed for debugging purposes">
         Error code: <ph name="ERROR_NAME">$1<ex>ERR_FILE_NOT_FOUND</ex></ph>
@@ -9685,6 +8767,9 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       <message name="IDS_ERRORPAGES_DETAILS_RESPONSE_HEADERS_MULTIPLE_LOCATION" desc="The error message displayed when we received multiple 'Location' header fields in an http response.">
         Multiple distinct Location headers received.  This is disallowed to protect
         against HTTP response splitting attacks.
+      </message>
+      <message name="IDS_ERRORPAGES_DETAILS_DNS_PROBE_RUNNING" desc="The error message displayed when we are waiting to see whether we will run a DNS probe.">
+        Waiting for DNS probe.
       </message>
       <message name="IDS_ERRORPAGES_DETAILS_UNKNOWN" desc="The default error message displayed if we don't have a more specific error message.">
         Unknown error.
@@ -9964,14 +9049,14 @@ The following plug-in is unresponsive: <ph name="PLUGIN_NAME">$1
       <message name="IDS_MEDIA_SCREEN_CAPTURE_CONFIRMATION_TEXT" desc="Text for the prompt shown when screen capturing is requrested by an app.">
         Do you want <ph name="APP_NAME">$1<ex>html5rocks.com</ex></ph> to share your screen?
       </message>
-      <message name="IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_TITLE" desc="Text shown on the button that stops screen capture.">
-        Screen capture - <ph name="APP_NAME">$1<ex>Sharing App</ex></ph>
+      <message name="IDS_MEDIA_SCREEN_AND_AUDIO_CAPTURE_CONFIRMATION_TEXT" desc="Text for the prompt shown when screen and audio capturing is requrested by an app.">
+        Do you want <ph name="APP_NAME">$1<ex>html5rocks.com</ex></ph> to share your screen and audio output?
       </message>
       <message name="IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_TEXT" desc="label used in screen capture notification UI to show the screen sharing status">
-        <ph name="APP_NAME">$1<ex>Google Cast</ex></ph> is sharing your screen
+        <ph name="APP_NAME">$1<ex>Google Cast</ex></ph> is sharing your screen.
       </message>
       <message name="IDS_MEDIA_SCREEN_CAPTURE_NOTIFICATION_STOP" desc="Text shown on the button that stops screen capture.">
-        Stop
+        Stop sharing
       </message>
 
       <!-- SSL Blocking Page -->
@@ -10433,6 +9518,9 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       <message name="IDS_ABOUT_NETWORK_NETWORKS" desc="The section title for all networks in the chrome://network page.">
         Networks:
       </message>
+      <message name="IDS_ABOUT_NETWORK_FAVORITES" desc="The section title for favorite networks in the chrome://network page.">
+        Favorites:
+      </message>
       <message name="IDS_ABOUT_NETWORK_ETHERNET" desc="The section title for ethernet networks in the chrome://network page.">
         Ethernet Networks:
       </message>
@@ -10699,6 +9787,12 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       <message name="IDS_AUTOFILL_DIALOG_PLACEHOLDER_CARD_NUMBER" desc="The placeholder/label text for credit card number in the requestAutocomplete dialog.">
         Card number
       </message>
+      <message name="IDS_AUTOFILL_DIALOG_PLACEHOLDER_EXPIRY_MONTH" desc="The placeholder/label text for credit card expiration month in the requestAutocomplete dialog.">
+        Month
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_PLACEHOLDER_EXPIRY_YEAR" desc="The placeholder/label text for credit card expiration year in the requestAutocomplete dialog.">
+        Year
+      </message>
       <message name="IDS_AUTOFILL_DIALOG_PLACEHOLDER_CVC" desc="The placeholder/label text for credit card verification code in the requestAutocomplete dialog.">
         CVC
       </message>
@@ -10730,13 +9824,19 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
 
       <!-- Autofill dialog: title bar -->
       <message name="IDS_AUTOFILL_DIALOG_TITLE" desc="Title for autofill dialog which asks user to input address + payment info.">
-        Submit Payment Details
+        Pay
       </message>
-      <message name="IDS_AUTOFILL_DIALOG_PAY_WITHOUT_WALLET" desc="This text is shown in a payment method chooser when a user is forced to pay without Google Wallet because the service is unavailable.">
-        Pay without Google Wallet
+      <message name="IDS_AUTOFILL_DIALOG_PAY_WITHOUT_WALLET" desc="This text is shown in a payment method chooser as a way for a user to pay with local Chrome Autofill data instead of using Wallet.">
+        Disable Google Wallet
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_PAYING_WITHOUT_WALLET" desc="This text is shown as the click target for a dormant payment method chooser when using Chrome Autofill data instead of Wallet.">
+        Google Wallet disabled
       </message>
       <message name="IDS_AUTOFILL_DIALOG_SIGN_IN" desc="This link text is shown when the user is not signed into a GAIA account.">
-        Sign in to use Google Wallet
+        Sign in to pay with Google Wallet
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_CANCEL_SIGN_IN" desc="This link text is shown when the user is signing into a GAIA account as a way to cancel sign in.">
+        Back
       </message>
       <message name="IDS_AUTOFILL_DIALOG_GOOGLE_WALLET" desc="The menu item that allows a user to select Google Wallet as their payment backend.">
         Google Wallet
@@ -10746,11 +9846,11 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       <message name="IDS_AUTOFILL_DIALOG_DETAILS_FROM_WALLET" desc="Text explaining where the dialog got its payment info from (on first run of this dialog while using Google Wallet).">
         The following details are saved in your Google Wallet.
       </message>
-      <message name="IDS_AUTOFILL_DIALOG_SIGN_IN_AND_SAVE_DETAILS" desc="Text promoting signing in to Google Wallet so a user can save details in Wallet.">
-        Sign in and save these details in your Google Wallet.
-      </message>
       <message name="IDS_AUTOFILL_DIALOG_SAVE_DETAILS_IN_WALLET" desc="Text that shows on the top of the autofill dialog promoting saving info in Google Wallet.">
-        Save these details in your Google Wallet.
+        Save and protect my details with Google Wallet.
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_SAVE_IN_WALLET_TOOLTIP" desc="Tooltip text that explains how Google Wallet integration works.">
+        Google Wallet generates a new credit card number for each transaction, so the merchant never sees your personal card number.
       </message>
       <message name="IDS_AUTOFILL_DIALOG_COMPLETE_WITHOUT_WALLET" desc="An error notification shown to users when Google Wallet is found to be unavailable.">
         Oops, <ph name="WALLET_ERROR">$1<ex>Google Wallet is unavailable at this time.</ex></ph> You can complete this transaction without Google Wallet.
@@ -10762,10 +9862,10 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
         The following details will be shared with <ph name="SITE">$1<ex>www.shopping.com</ex></ph>
       </message>
       <message name="IDS_AUTOFILL_DIALOG_AUTOCHECKOUT_ERROR" desc="Text explaining there has been an Autocheckout error and the user must finish checking out themselves.">
-        Oops. Auto-Checkout cannot complete this form. You'll have to the finish this transaction from here.
+        Oops! We couldn't complete your entire checkout form. We finished as much as we could, but you'll have to take over from here.
       </message>
       <message name="IDS_AUTOFILL_DIALOG_AUTOCHECKOUT_SUCCESS" desc="Text explaining Autocheckout succeeded but the user must confirm the transaction.">
-        You're almost done. After you close this window, confirm this transaction on the merchant's site and look forward to receiving your new purchase.
+        We're done! Click continue to check your details on the confirmation page. Don't forget to submit your purchase!
       </message>
       <message name="IDS_AUTOFILL_DIALOG_VERIFY_CVV" desc="Text explaining a user must enter their CVV to continuing submitting for security purposes (while using Google Wallet).">
         For your security, please verify your card details.
@@ -10773,19 +9873,48 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       <message name="IDS_AUTOFILL_DIALOG_NOT_PROD_WARNING" desc="Text warning the user that they're not using the Online Wallet production server, so their purchases probably wont succeed.">
         Warning: You are not connected to production Wallet servers. Issued cards are probably invalid.
       </message>
+      <message name="IDS_AUTOFILL_DIALOG_FAILED_TO_SAVE_WALLET_DATA" desc="Text advising the user that there was an unrecoverable validation error on the wallet server.">
+        Could not save data to Wallet.
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_CHOOSE_DIFFERENT_WALLET_INSTRUMENT" desc="Text asking the user to choose a different payment method or address when using wallet.">
+        We need more information to complete your purchase.
+      </message>
+
+      <!--- Autofill dialog: Wallet interstitials -->
+      <message name="IDS_AUTOFILL_DIALOG_CARD_GENERATION_IN_PROGRESS" desc="Text the user sees while waiting for the wallet servers to respond with a generated card number.">
+        Generating Google Wallet Virtual Online card...
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_CARD_GENERATION_DONE" desc="Text the user sees after the wallet servers respond with a generated card number.">
+        Your card has been protected by Google Wallet.
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_CARD_GENERATION_EXPLANATION" desc="More detailed text the user sees after the wallet servers respond with a generated card number.">
+        Wallet never shares your credit information with merchants. Shop with confidence knowing that you credit card number is protected online.
+      </message>
+      <message name="IDS_AUTOFILL_DIALOG_CARD_GENERATION_OK_BUTTON" desc="Text for the button users have to press to proceed past the wallet card generation text.">
+        Okay, got it
+      </message>
 
       <!--- Autofill dialog: Wallet error messages -->
       <message name="IDS_AUTOFILL_WALLET_BUYER_ACCOUNT_ERROR" desc="Text explaining that the user's Wallet account cannot be used.">
-        There's something wrong with your Google Wallet account.
+        There's something wrong with your Google Wallet account [12].
+      </message>
+      <message name="IDS_AUTOFILL_WALLET_BUYER_COUNTRY_NOT_SUPPORTED" desc="Text explaining that the user's Wallet Buyer Legal Address has a country which is unsupported.">
+        lorem ipsum - unsupported buyer bla.
+      </message>
+      <message name="IDS_AUTOFILL_WALLET_UNVERIFIED_KNOW_YOUR_CUSTOMER_STATUS" desc="Text explaining that Google Wallet failed/pending Know Your Customer (KYC) check, and would require user to call Google Wallet.">
+        lorem ipsum - kyc.
+      </message>
+      <message name="IDS_AUTOFILL_WALLET_UNSUPPORTED_MERCHANT" desc="Text explaining that the merchant is blacklisted for Google Wallet Chrome Payments due to compliance violation.">
+        lorem ipsum - unsupported_merchant.
       </message>
       <message name="IDS_AUTOFILL_WALLET_UPGRADE_CHROME_ERROR" desc="Text explaining that user must upgrade Chrome to use Wallet.">
-        You must upgrade Chrome to use Google Wallet.
+        You must upgrade Chrome to use Google Wallet [<ph name="ERROR_CODE">$1<ex>54</ex></ph>].
       </message>
       <message name="IDS_AUTOFILL_WALLET_SERVICE_UNAVAILABLE_ERROR" desc="Text explaining that Wallet is currently unavailable.">
-        Google Wallet is currently unavailable.
+        Google Wallet is currently unavailable [61].
       </message>
       <message name="IDS_AUTOFILL_WALLET_UNKNOWN_ERROR" desc="Text explaining that Wallet encountered an unknown error.">
-        Google Wallet has encounted an unknown error.
+        Google Wallet has encountered an unknown error [<ph name="ERROR_CODE">$1<ex>54</ex></ph>].
       </message>
 
       <!-- Autofill dialog: step progress -->
@@ -10826,16 +9955,16 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
         Error filling billing details
       </message>
       <message name="IDS_AUTOFILL_STEP_PROXY_CARD_UNSTARTED" desc="Text describing the task of generating a proxy card in an Autocheckout flow.">
-        Google Google Wallet Virtual OneTime Card
+        Google Wallet Virtual Online Card
       </message>
       <message name="IDS_AUTOFILL_STEP_PROXY_CARD_STARTED" desc="Text describing that the task of generating a proxy card in an Autocheckout flow is in progress.">
-        Generating Google Wallet Virtual OneTime Card
+        Generating Google Wallet Virtual Online Card
       </message>
       <message name="IDS_AUTOFILL_STEP_PROXY_CARD_COMPLETE" desc="Text describing that the task of generating a proxy card in an Autocheckout flow is complete.">
-        Google Wallet Virtual OneTime Card generated
+        Google Wallet Virtual Online Card generated
       </message>
       <message name="IDS_AUTOFILL_STEP_PROXY_CARD_FAILED" desc="Text describing that the task of generating a proxy card in an Autocheckout flow has failed.">
-        Error generating Google Wallet Virtual OneTime Card
+        Error generating Google Wallet Virtual Online Card
       </message>
 
       <!-- Autofill dialog: detail section -->
@@ -10846,19 +9975,16 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
         Email address
       </message>
       <message name="IDS_AUTOFILL_DIALOG_SECTION_CC" desc="Label for the credit card section of the autofill dialog.">
-        Credit card
+        Card information
       </message>
-      <message name="IDS_AUTOFILL_DIALOG_SECTION_BILLING" desc="Label for the billing address section of the imperative autofill dialog.">
-        Billing address
-      </message>
-      <message name="IDS_AUTOFILL_DIALOG_SECTION_CC_BILLING" desc="Label for the billing details (credit card + address) section of the autofill dialog.">
+      <message name="IDS_AUTOFILL_DIALOG_SECTION_BILLING" desc="Label for the billing details (credit card + address) section of the autofill dialog.">
         Billing details
       </message>
       <message name="IDS_AUTOFILL_DIALOG_SECTION_SHIPPING" desc="Label for the shipping details section of the autofill dialog.">
-        Shipping details
+        Shipping address
       </message>
       <message name="IDS_AUTOFILL_DIALOG_USING_BILLING_FOR_SHIPPING" desc="Text that is shown when the billing info will also be used for shipping.">
-        Same as billing
+        Same as billing address
       </message>
       <message name="IDS_AUTOFILL_DIALOG_CONTINUE_BUTTON" desc="Button text for confirmation of successful completion of an Autocheckout flow.">
         Continue
@@ -10944,6 +10070,9 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       <message name="IDS_AUTOFILL_DIALOG_VALIDATION_INVALID_ZIP_CODE" desc="Message displayed to user when ZIP code (postal code) validation fails.">
         Not a valid ZIP code
       </message>
+      <message name="IDS_AUTOFILL_DIALOG_VALIDATION_INVALID_REGION" desc="Message displayed to user when the region (US state) validation fails.">
+        Not a valid state
+      </message>
       <message name="IDS_AUTOFILL_DIALOG_VALIDATION_INVALID_PHONE_NUMBER" desc="Message displayed to user when phone number validation fails.">
         Not a valid phone number
       </message>
@@ -10963,6 +10092,17 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       </message>
       <message name="IDS_AUTOCHECKOUT_BUBBLE_CANCEL" desc="Label for the button a user clicks to cancel an Autocheckout flow.">
         No, Thanks
+      </message>
+
+      <!-- Autofill dialog post-submit bubbles -->
+      <message name="IDS_AUTOFILL_GENERATED_CREDIT_CARD_BUBBLE_TITLE" desc="Title of a bubble shown directly after a new card has been generated via Online Wallet using the Autofill dialog.">
+        Google Wallet is protecting your card
+      </message>
+      <message name="IDS_AUTOFILL_GENERATED_CREDIT_CARD_BUBBLE_CONTENTS" desc="Text in the bubble explaining that a temporary card has been generated for the user's security by Google Wallet.">
+        Don't worry, this purchase will still be charged to your |$1|. Your card has been protected with the Google Wallet Virtual Online Card (|$2|), this number will appear on your receipt.
+      </message>
+      <message name="IDS_AUTOFILL_NEW_CREDIT_CARD_BUBBLE_LINK" desc="The text of a link at the bottom of the autofill dialog bubble that sends users to a Google Wallet billing/card management page.">
+        Manage Saved Cards
       </message>
 
       <message name="IDS_APPEARANCE_GROUP_NAME" desc="The title of the appearance group">
@@ -11223,9 +10363,6 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       </message>
 
       <!-- One click sign in bubble and dialog -->
-      <message name="IDS_ONE_CLICK_SIGNIN_DIALOG_MESSAGE" desc="The message of the one click sign in dialog.">
-        Now you can access your bookmarks, history, and other settings on all of your signed-in devices.
-      </message>
       <message name="IDS_ONE_CLICK_BUBBLE_UNDO" desc="The text for the undo button in the one click signin bubble.">
         Undo
       </message>
@@ -11244,13 +10381,13 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
 
       <!-- Enterprise sign-in profile linking -->
       <message name="IDS_ENTERPRISE_SIGNIN_PROFILE_LINK_LEARN_MORE" desc="The link to get more information about profile linking after signing into an enterprise account">
-	Learn more
+        Learn more
       </message>
       <message name="IDS_ENTERPRISE_SIGNIN_CREATE_NEW_PROFILE" desc="Text of the button to create a new profile after enterprise account signin">
-	Create a new user
+        Create a new user
       </message>
       <message name="IDS_ENTERPRISE_SIGNIN_CANCEL" desc="Text of the button to cancel signin">
-	Cancel
+        Cancel
       </message>
 
       <!-- Enterprise sign-in profile linking -->
@@ -11841,6 +10978,9 @@ Would you like to start <ph name="CONTROL_PANEL_APPLET_NAME">$1<ex>Add/Remove Pr
       </message>
       <message name="IDS_PROFILES_PROFILE_USERS_BUTTON" desc="Button in the avatar menu bubble view for switching users.">
         Users
+      </message>
+      <message name="IDS_PROFILES_GUEST_PROFILE_NAME" desc="Name of the guest profile.">
+        Guest
       </message>
       <message name="IDS_PROFILES_PROFILE_GUEST_BUTTON" desc="Button in the avatar menu bubble view for guest browsing.">
         Guest browsing
@@ -12433,11 +11573,11 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_WALLPAPER_MANAGER_SHOW_CUSTOM_WALLPAPER_ON_START_WARNING" desc="The string displayed to user when set custom wallpaper">
         Wallpapers appear on the Sign-in Screen.
       </message>
-      <message name="IDS_WALLPAPER_MANAGER_SURPRISE_ME_LABEL" desc="Wallpaper surprise me checkbox label.">
+      <message name="IDS_WALLPAPER_MANAGER_SURPRISE_ME_LABEL" desc="Wallpaper surprise me checkbox label. If the checkbox is checked, Chrome will automatically change wallpaper to either a random one available in wallpaper picker or a google pushed wallpaper (surprise factor).">
         Surprise Me
       </message>
       <message name="IDS_WALLPAPER_MANAGER_ACCESS_FAIL" desc="The string displayed to user when access wallpaper server failed.">
-        Chrome cannot access wallpapers at this time.
+        Chrome cannot access wallpapers. Please connect to a network.
       </message>
       <message name="IDS_WALLPAPER_MANAGER_DOWNLOAD_FAIL" desc="The string displayed to user when downloading the wallpaper failed.">
         Chrome cannot download this wallpaper.
@@ -12459,11 +11599,11 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_FLAGS_FILE_MANAGER_SHOW_CHECKBOXES_DESCRIPTION" desc="Description of the about:flag option to show the selecting checkboxes to the Files app.">
         Show selecting checkboxes in the Files.app.
       </message>
-      <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_SHARING_NAME" desc="Name of the about:flag option to hide the selecting checkboxes to in the Files app.">
-        Sharing in Files.app.
+      <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_WEBSTORE_INTEGRATION" desc="Name of the about:flag option to enable the webstore integration feature in Files app.">
+        Enable the integration of Webstore and Files.app.
       </message>
-      <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_SHARING_DESCRIPTION" desc="Description of the about:flag option to show the sharing option in Files app.">
-        Enables the sharing dialog in Files app under the context menu.
+      <message name="IDS_FLAGS_FILE_MANAGER_ENABLE_WEBSTORE_INTEGRATION_DESCRIPTION" desc="Description of the about:flag option to enable the webstore integration feature in Files app.">
+        Enables the webstore integration feature in Files.app.
       </message>
       <message name="IDS_FILE_BROWSER_ROOT_DIRECTORY_LABEL" desc="Root directory label.">
         Files
@@ -12679,6 +11819,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
 
       <message name="IDS_FILE_BROWSER_GALLERY_EDIT" desc="In the Gallery, the title on the button shows/hides editing buttons.">
         Edit
+      </message>
+      <message name="IDS_FILE_BROWSER_GALLERY_PRINT" desc="In the Gallery, the title on the button showing the print dialog for the current image or video.">
+        Print
       </message>
       <message name="IDS_FILE_BROWSER_GALLERY_SHARE" desc="In the Gallery, the title on the button that lets the user share a photo.">
         Share
@@ -12898,6 +12041,15 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_FILE_BROWSER_ZIP_SELECTION_BUTTON_LABEL" desc="Menu item label, showing dialog to create zip file for selected files.">
         Zip selection
       </message>
+      <message name="IDS_FILE_BROWSER_CREATE_FOLDER_SHORTCUT_BUTTON_LABEL" desc="Menu item label, creating a shortcut of the selected folder to the left nav.">
+        Create shortcut
+      </message>
+      <message name="IDS_FILE_BROWSER_REMOVE_FOLDER_SHORTCUT_BUTTON_LABEL" desc="Menu item label, unpinning the selected folder from the left nav.">
+        Remove shortcut
+      </message>
+      <message name="IDS_FILE_BROWSER_SHORTCUT_TARGET_UNAVAILABLE" desc="The message which is shown when the user selects a shortcut to a missing folder and ask whether to remove said shortcut.">
+        The folder referred by this shortcut has been changed or deleted. Do you want to remove it?
+      </message>
       <message name="IDS_FILE_BROWSER_SHARE_BUTTON_LABEL" desc="Menu item label, showing dialog to share the selected file.">
         Share
       </message>
@@ -12971,7 +12123,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_FILE_BROWSER_ZIP_UNEXPECTED_ERROR" desc="File Manager error message.">
         Zipping failed, unexpected error: $1
       </message>
-
+      <message name="IDS_FILE_BROWSER_SHARE_ERROR" desc="File Manager error message when sharing a file or a directory on Drive fails because of internet connection problems.">
+        Sharing failed. Check your connection and try again later.
+      </message>
       <message name="IDS_FILE_BROWSER_DELETED_MESSAGE_PLURAL" desc="Message informing about deleting multiple items.">
         Deleted <ph name="COUNT">$1<ex>10</ex></ph> items
       </message>
@@ -12996,6 +12150,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
       </message>
       <message name="IDS_FILE_BROWSER_OK_LABEL" desc="OK label.">
         OK
+      </message>
+      <message name="IDS_FILE_BROWSER_UPLOAD_LABEL" desc="Upload label.">
+        Upload
       </message>
       <message name="IDS_FILE_BROWSER_SEARCH_TEXT_LABEL" desc="Search text field label.">
         Search
@@ -13030,6 +12187,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
 
       <message name="IDS_FILE_BROWSER_SELECT_FOLDER_TITLE" desc="Select folder title.">
         Select a folder to open
+      </message>
+      <message name="IDS_FILE_BROWSER_SELECT_UPLOAD_FOLDER_TITLE" desc="Select folder title for upload.">
+        Select a folder to upload
       </message>
       <message name="IDS_FILE_BROWSER_SELECT_OPEN_FILE_TITLE" desc="Select open file title.">
         Select a file to open
@@ -13082,9 +12242,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
       </message>
       <message name="IDS_FILE_BROWSER_DRIVE_CLEAR_LOCAL_CACHE" desc="In the Google Drive settings menu, menu item to clear the local cache of Google Drive">
         Clean local cache
-      </message>
-      <message name="IDS_FILE_BROWSER_DRIVE_RELOAD" desc="In the Google Drive settings menu, menu item to reload the metadata of the file system from the server">
-        Reload
       </message>
       <message name="IDS_FILE_BROWSER_DRIVE_MENU_HELP" desc="In the Google Drive settings menu, name of the Help item.">
         Help
@@ -13378,6 +12535,9 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_FILE_BROWSER_THUMBNAIL_VIEW_TOOLTIP" desc="Tooltip for the Thumbnail View button.">
         Thumbnail view
       </message>
+      <message name="IDS_FILE_BROWSER_GEAR_BUTTON_TOOLTIP" desc="Tooltip for the gear button in Files.app.">
+        Settings
+      </message>
 
       <message name="IDS_FILE_BROWSER_TIME_TODAY" desc="File date and time in case the date is today.">
         Today <ph name="TODAY_DAYTIME">$1<ex>6:19 AM</ex></ph>
@@ -13477,9 +12637,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
         Signed in as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>. Sync is disabled by your administrator.
       </message>
       <message name="IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED" desc="The message that appears in the options dialog indicating that user is signed in with the given email address, but sync has been stopped.">
-        Signed in as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>.
-        <ph name="LINE_BREAK">&lt;br /&gt;<ex>&lt;br /&gt;</ex></ph>
-        Sync has been stopped on this device. Manage your synced data on <ph name="BEGIN_LINK">&lt;a href="$2" target=&quot;_blank&quot;&gt;<ex>&lt;a href="$2" target=&quot;_blank&quot;&gt;</ex></ph>Google Dashboard<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>.
+        Signed in as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>. Sync has been stopped via the Google Dashboard.
       </message>
       <message name="IDS_SYNC_ACCOUNT_SYNCING_TO_USER" desc="The message that appears in the options dialog indicating that account is syncing to a user with the given email address.">
         Signed in as <ph name="USER_EMAIL_ADDRESS">$1<ex>foo@gmail.com</ex></ph>.
@@ -13521,21 +12679,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
         Sync Error: Please contact administrator to enable sync.
       </message>
 
-      <message name="IDS_SYNC_PASSPHRASE_ENCRYPTION_MESSAGE" desc="Message explaining that passwords are encrypted.">
-        For added security, <ph name="PRODUCT_NAME">$1<ex>Chrome</ex></ph> will encrypt your data.
-      </message>
-      <message name="IDS_SYNC_PASSPHRASE_OPT_GOOGLE" desc="Radio button label for using Google password.">
-        Use my Google Account password
-      </message>
-      <message name="IDS_SYNC_PASSPHRASE_OPT_EXPLICIT" desc="Radio button label for using explicit passphrase.">
-        Choose my own passphrase
-      </message>
-      <message name="IDS_SYNC_PASSPHRASE_MSG_GOOGLE" desc="Message when Google password is selected.">
-        You have chosen to encrypt data using your Google password; you can always change your mind later by changing your sync settings.
-      </message>
-      <message name="IDS_SYNC_PASSPHRASE_MSG_EXPLICIT" desc="Message when explicit passphrase is selected.">
-        Only someone with your passphrase can read your encrypted data. The passphrase is not sent to or stored by Google. If you forget your passphrase, you will need to reset sync.
-      </message>
       <message name="IDS_SYNC_PASSPHRASE_MSG_EXPLICIT_PREFIX" desc="Message when explicit passphrase is selected.">
         Only someone with your passphrase can read your encrypted data. The passphrase is not sent to or stored by Google. If you forget your passphrase, you will need to
       </message>
@@ -13706,18 +12849,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
       </message>
 
       <!-- Encryption tab of the configure sync dialog -->
-      <message name="IDS_SYNC_ENCRYPTION_DATA_TYPES_TITLE" desc="Title of the section containing the data types to encrypt.">
-        Encrypted data types
-      </message>
-      <message name="IDS_SYNC_ENCRYPT_SENSITIVE_DATA" desc="Text of the radio that when selected causes sync to encrypt sensitive data.">
-        Encrypt passwords
-      </message>
-      <message name="IDS_SYNC_ENCRYPT_ALL_DATA" desc="Text of the radio that when selected causes sync to encrypt all data.">
-        Encrypt all synced data
-      </message>
-      <message name="IDS_SYNC_PASSPHRASE_SECTION_TITLE" desc="Title of the section containing sync passphrase preferences.">
-        Encryption passphrase
-      </message>
       <message name="IDS_SYNC_ENCRYPTION_INSTRUCTIONS" desc="Instructions for the encryption settings tab.">
         <ph name="PRODUCT_NAME">$1<ex>Chrome</ex></ph> requires you to encrypt your data using either your Google password or your own passphrase.
       </message>
@@ -13749,9 +12880,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
       </message>
 
       <!-- Passphrase dialog strings -->
-      <message name="IDS_SYNC_ENTER_PASSPHRASE_TITLE" desc="Title for the dialog where the user enters the passphrase.">
-        Enter your sync passphrase
-      </message>
       <message name="IDS_SYNC_ENTER_PASSPHRASE_BODY" desc="Instructions for the dialog where the user enters the passphrase.">
         Your data is encrypted with your sync passphrase. Please enter it below.
       </message>
@@ -13981,7 +13109,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_TRANSLATE_INFOBAR_BEFORE_MESSAGE" desc="Message that page is in specified language and ask if should translate">
         This page is in<ph name="original_language">$1<ex>French</ex></ph>Would you like to translate it?
       </message>
-      <if expr="is_android">
+      <if expr="is_android or pp_ifdef('ios')">
         <message name="IDS_TRANSLATE_INFOBAR_BEFORE_MESSAGE_MOBILE" desc="Mobile: Message that page is in specified language and ask if should translate.">
           Translate from <ph name="original_language">$1<ex>French</ex></ph> to <ph name="target_language">$2<ex>English</ex></ph>?
         </message>
@@ -14007,7 +13135,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_TRANSLATE_INFOBAR_AFTER_MESSAGE_AUTODETERMINED_SOURCE_LANGUAGE" desc="Message that page has been translated to another with server side auto language detection">
         This page has been translated to <ph name="target_language">$1<ex>German</ex></ph>
       </message>
-      <if expr="is_android">
+      <if expr="is_android or pp_ifdef('ios')">
       <message name="IDS_TRANSLATE_INFOBAR_AFTER_MESSAGE_MOBILE" desc="Mobile: Message that page has been translated from one language to another">
         This page has been translated to <ph name="target_language">$1<ex>German</ex></ph>
       </message>
@@ -14033,7 +13161,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_TRANSLATE_INFOBAR_UNSUPPORTED_PAGE_LANGUAGE" desc="Error message shown when the translate server translated the page and returned the page was in a language the browser does not know.">
         This page has been translated from an unknown language to <ph name="language_language">$1<ex>English</ex></ph>
       </message>
-      <if expr="is_android">
+      <if expr="is_android or pp_ifdef('ios')">
       <message name="IDS_TRANSLATE_INFOBAR_ERROR_MOBILE" desc="Mobile: Translate Error message">
         The translation to <ph name="target_language">$1<ex>German</ex></ph> failed.
       </message>
@@ -14082,6 +13210,11 @@ Some features may be unavailable.  Please check that the profile exists and you 
       <message name="IDS_NOTIFICATION_POSITION_UPPER_RIGHT" desc="Menu label for positioning in upper right corner">
         Upper right
       </message>
+      <if expr="is_macosx">
+        <message name="IDS_MESSAGE_CENTER_FOOTER_WITH_PRODUCT_TITLE" desc="The label in the footer of the message center tray, with the product title.">
+          <ph name="product_name">$1<ex>Chrome</ex></ph> Notifications
+        </message>
+      </if>
 
       <!-- Mac AppleScript -->
       <if expr="is_macosx">
@@ -14506,7 +13639,7 @@ Some features may be unavailable.  Please check that the profile exists and you 
       The following sites have been blocked from tracking your location on this page:
     </message>
     <message name="IDS_GEOLOCATION_BUBBLE_REQUIRE_RELOAD_TO_CLEAR" desc="Hint text for the geolocation bubble informing user they must reload the page for the Clear settings command to take effect.">
-      Settings will be cleared on next reload
+      Settings will be cleared on next reload.
     </message>
     <message name="IDS_GEOLOCATION_BUBBLE_CLEAR_LINK" desc="Link on the geolocation bubble that resets the list of allowed and blocked sites.">
       Clear these settings for future visits
@@ -14521,10 +13654,58 @@ Some features may be unavailable.  Please check that the profile exists and you 
       This page has been blocked from tracking your location.
     </message>
 
+    <!-- Web MIDI messages -->
+    <message name="IDS_MIDI_SYSEX_TAB_LABEL" desc="Label for MIDI system exclusive message on Content Settings dialog">
+      MIDI full control
+    </message>
+    <message name="IDS_MIDI_SYSEX_ALLOW_RADIO" desc="A radio button in Content Settings dialog to allow a site to access MIDI devices with system exclusive messages.">
+      Allow all sites to use system exclusive messages to access MIDI devices
+    </message>
+    <message name="IDS_MIDI_SYSEX_BLOCK_RADIO" desc="A radio button in Content Settings dialog to deny a site to access MIDI devices with system exclusive messages.">
+      Do not allow any sites to use system exclusive messages to access MIDI devices
+    </message>
+    <message name="IDS_MIDI_SYSEX_ASK_RADIO" desc="A radio button in Content Settings dialog to allow a site to query the permision to access MIDI devices with system exclusive messages.">
+      Ask me when a site wants to use system exclusive messages to access MIDI devices (recommended)
+    </message>
+    <message name="IDS_MIDI_SYSEX_INFOBAR_QUESTION" desc="Question asked on the info bar whenever URL wants to access MIDI devices with system exclusive messages.">
+      <ph name="URL">
+        $1<ex>www.google.com</ex>
+      </ph> wants to get full control of your MIDI devices.
+    </message>
+    <message name="IDS_MIDI_SYSEX_ALLOW_BUTTON" desc="A button in MIDI access infobar for allowing full access to MIDI devices for a given domain.">
+      Allow
+    </message>
+    <message name="IDS_MIDI_SYSEX_DENY_BUTTON" desc="A button in MIDI access infobar for denying full access to MIDI devices for a given domain.">
+      Deny
+    </message>
+    <message name="IDS_MIDI_SYSEX_ALLOWED_TOOLTIP" desc="Location bar icon tooltip text when a page is allowed to use MIDI system exclusive messages.">
+      This page has full control of MIDI devices.
+    </message>
+    <message name="IDS_MIDI_SYSEX_BLOCKED_TOOLTIP" desc="Location bar icon tooltip text when a page is blocked from using MIDI system exclusive messages.">
+      This page has been blocked from having full control of MIDI devices.
+    </message>
+    <message name="IDS_MIDI_SYSEX_BUBBLE_ALLOWED" desc="Title of the MIDI bubble where system exclusive messages are allowed.">
+      This site has full control of MIDI devices.
+    </message>
+    <message name="IDS_MIDI_SYSEX_BUBBLE_DENIED" desc="Title of the MIDI bubble where system exclusive messages are blocked.">
+      This site has been blocked from having full control of MIDI devices.
+    </message>
+    <message name="IDS_MIDI_SYSEX_BUBBLE_REQUIRE_RELOAD_TO_CLEAR" desc="Hint text for the MIDI bubble informing user they must reload the page for the Clear settings command to take effect.">
+      Settings will be cleared on next reload.
+    </message>
+    <message name="IDS_MIDI_SYSEX_BUBBLE_CLEAR_LINK" desc="Link on the MIDI bubble that resets the list of allowed and blocked sites.">
+      Clear these settings for future visits
+    </message>
+    <message name="IDS_MIDI_SYSEX_BUBBLE_MANAGE_LINK" desc="Link on the MIDI bubble that opens up the Content Settings management dialog.">
+      Manage MIDI settings...
+    </message>
+
+    <!-- Protocol Handler -->
     <message name="IDS_REGISTER_PROTOCOL_HANDLER_TOOLTIP" desc="Location bar icon tooltip text when a page wants to use registerProtocolHandler.">
       This page wants to install a service handler.
     </message>
 
+    <!-- Media Stream -->
     <message name="IDS_MEDIASTREAM_BUBBLE_MANAGE_LINK" desc="Link on the media (camera and microphone) bubble that opens up the Content Settings management dialog for media settings.">
       Manage media settings...
     </message>
@@ -14971,17 +14152,6 @@ Some features may be unavailable.  Please check that the profile exists and you 
       Deny
     </message>
 
-    <!-- MediaStream capture status tray icon -->
-    <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_AND_VIDEO" desc="Tool tip for the capture status tray icon when microphone and camera are being used">
-      <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is using your camera and microphone.
-    </message>
-    <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_AUDIO_ONLY" desc="Tool tip for the capture status tray icon when microphone is being used">
-      <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is using your microphone.
-    </message>
-    <message name="IDS_MEDIA_STREAM_STATUS_TRAY_TEXT_VIDEO_ONLY" desc="Tool tip for the capture status tray icon when camera is being used">
-      <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is using your camera.
-    </message>
-
     <!-- Quota messages -->
     <if expr="is_android">
       <message name="IDS_REQUEST_QUOTA_INFOBAR_QUESTION" desc="Mobile: For Android device. Question asked on the info bar whenever webapp requests new (larger) quota to persistently store data on the device (e.g. for persistent-type filesystem).">
@@ -15065,8 +14235,15 @@ Some features may be unavailable.  Please check that the profile exists and you 
     <message name="IDS_PROFILES_CREATE_REMOTE_ERROR" desc="Message shown when a remote error (for example, a network error) occurs during creation of a new supervised user.">
       Oops! The new supervised user couldn't be created. Please check your network connection and try again later.
     </message>
+    <message name="IDS_PROFILES_CREATE_SIGN_IN_ERROR" desc="Message shown when a sign-in error occurs during creation of a new supervised user.">
+      Oops! The new supervised user couldn't be created. Please make sure you're signed in properly and try again.
+    </message>
     <message name="IDS_PROFILES_CREATE_MANAGED_SIGNED_IN_LABEL" desc="Label for the 'Supervised user' checkbox in the create-profile dialog when the current user is signed in. This will be followed by a 'Learn more' link.">
       This is a supervised user managed by <ph name="CUSTODIAN_EMAIL">$1<ex>user@gmail.com</ex>.</ph>
+    </message>
+    <message name="IDS_PROFILES_CREATE_MANAGED_ACCOUNT_DETAILS_OUT_OF_DATE_LABEL" desc="Label for the 'Supervised user' checkbox in the create-profile dialog when the current user is signed in, but their login information is invalid. This will be followed by a 'Sign in again' link.">
+      This is a supervised user managed by <ph name="CUSTODIAN_EMAIL">$1<ex>user@gmail.com</ex>.</ph>
+Your account sign-in details are out of date.
     </message>
     <message name="IDS_PROFILES_CREATE_MANAGED_NOT_SIGNED_IN_LABEL" desc="Label for the (disabled) 'Supervised user' checkbox in the create-profile dialog when the current user is not signed in. This will be followed by a 'Sign in now' link.">
       This is a supervised user who will be managed by you.
@@ -15074,6 +14251,12 @@ You need to be signed in to use this feature.
     </message>
     <message name="IDS_PROFILES_CREATE_MANAGED_NOT_SIGNED_IN_LINK" desc="Text for the sign-in promo link, shown after the (disabled) 'Supervised user' checkbox in the create-profile dialog when the current user is not signed in.">
       Sign in now
+    </message>
+    <message name="IDS_PROFILES_CREATE_MANAGED_ACCOUNT_SIGN_IN_AGAIN_LINK" desc="Text for the sign-in promo link, shown after the message telling the user that their sign-in credentials are out of date in the create supervised user dialog.">
+      Sign in again
+    </message>
+    <message name="IDS_PROFILES_CREATE_MANAGED_FROM_EXISTING_LABEL" desc="Label for the 'Select an exisiting managed user' checkbox. During managed user creation a custodian will have an option to select an existing managed profile rather creating a new one.">
+      Select an existing managed user:
     </message>
     <message name="IDS_PROFILES_CREATE_SHORTCUT_CHECKBOX" desc="Create Shortcut checkbox when creating a new profile">
       Create a desktop shortcut for this user
@@ -15097,7 +14280,7 @@ You need to be signed in to use this feature.
 &#160;&#8226;&#160;manage other settings.
 
 Creating a supervised user does not create a Google Account, and their settings and data will not follow them to other devices with Chrome Sync. Currently, a supervised user applies only to this installation of Chrome, on this device.
-      
+
 After you create a new supervised user, you can manage their settings at any time, from any device, at www.chrome.com/manage.
     </message>
     <message name="IDS_NEW_MANAGED_USER_LEARN_MORE_DONE_BUTTON" desc="Text for the 'OK' button on the 'Learn more' dialog for the supervised user feature.">
@@ -15117,6 +14300,62 @@ Please check your email at <ph name="ACCOUNT_EMAIL">$2<ex>jane.doe@gmail.com</ex
     <message name="IDS_NEW_MANAGED_USER_CREATED_SWITCH_BUTTON" desc="Text for the button that opens a window for the new supervised user, on the supervised user creation confirmation dialog.">
       Switch to <ph name="NEW_PROFILE_NAME">$1<ex>New User</ex></ph>
     </message>
+
+    <if expr="not is_android and not pp_ifdef('ios') and not pp_ifdef('chromeos')">
+      <!-- User manager web UI -->
+      <if expr="pp_ifdef('use_titlecase')">
+        <message name="IDS_ADD_USER_BUTTON" desc="Text shown on an add user button on login/locker screen">
+          Add User
+        </message>
+        <message name="IDS_SCREEN_LOCK_SIGN_OUT">
+          Sign Out
+        </message>
+        <message name="IDS_LOGIN_BUTTON">
+          Sign In
+        </message>
+        <message name="IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON" desc="Login screen user pod menu item text.">
+          Remove This User
+        </message>
+      </if>
+      <if expr="not pp_ifdef('use_titlecase')">
+        <message name="IDS_ADD_USER_BUTTON" desc="Text shown on an add user button on login/locker screen">
+          Add user
+        </message>
+        <message name="IDS_SCREEN_LOCK_SIGN_OUT">
+          Sign out
+        </message>
+        <message name="IDS_LOGIN_BUTTON">
+          Sign in
+        </message>
+        <message name="IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON" desc="Login screen user pod menu item text.">
+          Remove this user
+        </message>
+      </if>
+      <message name="IDS_USER_MANAGER_SCREEN_TITLE" desc="String to be displayed in the title bar of the user manager page">
+        User Manager
+      </message>
+      <message name="IDS_GO_INCOGNITO_BUTTON" desc="Text shown on Chrome OS login screen button that launches guest session. Should be short.">
+        Browse as Guest
+      </message>
+      <message name="IDS_SCREEN_LOCK_ACTIVE_USER">
+        Currently signed in
+      </message>
+      <message name="IDS_LOGIN_POD_EMPTY_PASSWORD_TEXT" desc="Text to display in the password field for user pod when no password has been entered.">
+        Enter password
+      </message>
+      <message name="IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the password field of a user pod on the login screen.">
+        Password for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+      </message>
+      <message name="IDS_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME" desc="Text to be spoken when the focus is set to the menu button of the user pod on the login screen.">
+        Options menu for <ph name="USER_EMAIL_ADDRESS">$1<ex>john.doe@example.com</ex></ph>
+      </message>
+      <message name="IDS_LOGIN_POD_MENU_REMOVE_ITEM_ACCESSIBLE_NAME" desc="Text to be spoken when 'Remove user' item is selected on the pod menu.">
+        Remove this user
+      </message>
+      <message name="IDS_LOGIN_POD_USER_REMOVE_WARNING" desc="Text shown as a warning when attempting to remove an user.">
+        Are you sure you want to delete this user and all the data associated with it from this computer? This cannot be undone!
+      </message>
+    </if>
 
     <!-- Aura strings -->
     <if expr="pp_ifdef('use_ash')">
@@ -15204,7 +14443,18 @@ Do you accept?
     <message name="IDS_FLAGS_DESKTOP_GUEST_MODE_DESCRIPTION" desc="Description of about:flags option to turn on desktop guest mode">
       When enabled, a guest user will be available in desktop Chrome.
     </message>
-
+    <message name="IDS_FLAGS_ENABLE_NEW_PROFILE_MANAGEMENT_NAME" desc="Title for the flag to enable the new profile management.">
+      Enable new profile management system
+    </message>
+    <message name="IDS_FLAGS_ENABLE_NEW_PROFILE_MANAGEMENT_DESCRIPTION" desc="Description for the flag to enable the new profile management">
+      Enables the new profile management system, including profile sign-out and the new avatar menu UI.
+    </message>
+    <message name="IDS_FLAGS_ENABLE_GAIA_PROFILE_INFO_NAME" desc="Title for the flag to enable the gaia profile information">
+      Enable GAIA profile name and icon
+    </message>
+    <message name="IDS_FLAGS_ENABLE_GAIA_PROFILE_INFO_DESCRIPTION" desc="Description for the flag to enable the gaia profile information">
+      Enables using GAIA information to populate the profile name and icon in the avatar menu.
+    </message>
     <message name="IDS_FLAGS_ENABLE_GOOGLE_NOW_INTEGRATION_NAME" desc="Name of about:flags option to turn on Google Now integration">
       Google Now
     </message>
@@ -15239,6 +14489,16 @@ Do you accept?
     </message>
     <message name="IDS_FLAGS_ENABLE_SPELLING_SERVICE_FEEDBACK_DESCRIPTION" desc="Description of about:flags option to turn on sending feedback to spelling service.">
       Send user feedback to spelling service. For example, if spelling service marks a misspelled word, but the user adds it to the custom dictionary, then Chrome will send a feedback message to spelling service. Spelling service uses this feedback to improve spelling suggestions.
+    </message>
+
+    <!-- Web MIDI API. -->
+    <message name="IDS_FLAGS_ENABLE_WEB_MIDI_NAME"
+             desc="Name of about:flag option to turn on Web MIDI API">
+      Enable Web MIDI API
+    </message>
+    <message name="IDS_FLAGS_ENABLE_WEB_MIDI_DESCRIPTION"
+             desc="Description of about:flag option to turn on Web MIDI API">
+      Enable Web MIDI API experimental support.
     </message>
 
     <!-- Toast experiment. -->
@@ -15308,8 +14568,14 @@ Do you accept?
     <message name="IDS_MEDIA_GALLERIES_DIALOG_HEADER" desc="Header for media gallery permissions dialog.">
       Access Settings
     </message>
-    <message name="IDS_MEDIA_GALLERIES_DIALOG_SUBTEXT" desc="Explanatory text for the media gallery access permission. Indicates than the specified (by name) extension has access to the listed folders.">
+    <message name="IDS_MEDIA_GALLERIES_DIALOG_SUBTEXT_READ_WRITE" desc="Explanatory text for the media gallery access permission. Indicates than the specified (by name) extension has read and write access to the listed folders.">
       <ph name="EXTENSION">$1<ex>PhotoEditor</ex></ph> can access and change media in these locations.
+    </message>
+    <message name="IDS_MEDIA_GALLERIES_DIALOG_SUBTEXT_READ_ONLY" desc="Explanatory text for the media gallery access permission. Indicates than the specified (by name) extension has read-only access to the listed folders.">
+      <ph name="EXTENSION">$1<ex>PhotoEditor</ex></ph> can access media in these locations.
+    </message>
+    <message name="IDS_MEDIA_GALLERIES_DIALOG_SUBTEXT_WRITE_ONLY" desc="Explanatory text for the media gallery access permission. Indicates than the specified (by name) extension has write-only access to the listed folders.">
+      <ph name="EXTENSION">$1<ex>PhotoEditor</ex></ph> can change media in these locations.
     </message>
     <message name="IDS_MEDIA_GALLERIES_UNATTACHED_LOCATIONS" desc="Header for media gallery permissions to locations not currently attached, i.e. removable devices which aren't plugged in">
       Unattached locations
@@ -15523,19 +14789,25 @@ Do you accept?
 
     <!-- Reset Profile Settings strings -->
     <message name="IDS_RESET_PROFILE_SETTINGS_SECTION_TITLE" desc="The title of the section in chrome://settings that allows resetting some settings in a profile">
-      Reset
+      Reset browser settings
     </message>
     <message name="IDS_RESET_PROFILE_SETTINGS_DESCRIPTION" desc="A label describing the purpose of the 'reset profile settings' feature">
-      Things got out of control? Revert your Chrome profile to a clean, post install state.
+      Restore browser settings to their original defaults.
+    </message>
+    <message name="IDS_RESET_PROFILE_SETTINGS_EXPLANATION" desc="A label describing the consequences of the 'reset profile settings' feature">
+      Your browser settings will be restored to their original defaults. This will reset your homepage, new tab page and search engine, disable your extensions and unpin all tabs. It will also clear other temporary and cached data, such as cookies, content and site data.
     </message>
     <message name="IDS_RESET_PROFILE_SETTINGS_BUTTON" desc="The text on the button in chrome://settings that allows resetting some settings in a profile">
-      Reset profile settings...
+      Reset browser settings
     </message>
     <message name="IDS_RESET_PROFILE_SETTINGS_TITLE" desc="Dialog title">
-      Reset profile settings
+      Reset browser settings
     </message>
     <message name="IDS_RESET_PROFILE_SETTINGS_COMMIT_BUTTON" desc="Reset button of the Reset Profile Settings dialog">
       Reset
+    </message>
+    <message name="IDS_RESET_PROFILE_SETTINGS_FEEDBACK" desc="Feedback label in the Reset Profile Settings dialog">
+      Help make Google Chrome better by reporting the current settings
     </message>
 
     <!-- Identity internals strings -->
@@ -15568,6 +14840,39 @@ Do you accept?
     </message>
     <message name="IDS_IDENTITY_INTERNALS_REVOKE" desc="Label on a revoke token button.">
       Revoke
+    </message>
+
+    <!-- WebStore name experiment names -->
+    <message name="IDS_WEBSTORE_NAME_STORE" desc="Name for the WebStore app in the app launcher.">
+      Store
+    </message>
+    <message name="IDS_WEBSTORE_NAME_WEBSTORE" desc="Name for the WebStore app in the app launcher.">
+      WebStore
+    </message>
+    <message name="IDS_WEBSTORE_NAME_GET_APPS" desc="Name for the WebStore app in the app launcher.">
+      Get Apps
+    </message>
+    <message name="IDS_WEBSTORE_NAME_ADD_APPS" desc="Name for the WebStore app in the app launcher.">
+      Add Apps
+    </message>
+    <message name="IDS_WEBSTORE_NAME_MORE_APPS" desc="Name for the WebStore app in the app launcher.">
+      More Apps
+    </message>
+
+    <!-- Synced Notification display strings -->
+    <message name="IDS_FIRST_SYNCED_NOTIFICATION_SERVICE_NAME" desc="The name of the first service source for synced notifications.">
+      Google+
+    </message>
+
+    <!-- Desktop media picker UI for Desktop Capture API -->
+    <message name="IDS_DESKTOP_MEDIA_PICKER_TITLE" desc="Title for the window picker dialog shown when desktop capture is requrested by an app.">
+      Desktop sharing - <ph name="APP_NAME">$1<ex>Google Hangouts</ex></ph>
+    </message>
+    <message name="IDS_DESKTOP_MEDIA_PICKER_TEXT" desc="Text for the window picker dialog shown when desktop capture is requrested by an app.">
+      <ph name="APP_NAME">$1<ex>Google Hangouts</ex></ph> requested to share content of your desktop. Please select a window or the whole screen to share.
+    </message>
+    <message name="IDS_DESKTOP_MEDIA_PICKER_SCREEN_NAME" desc="Name for screens in the desktop media picker UI.">
+      Screen
     </message>
 
     </messages>

@@ -25,7 +25,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
@@ -39,6 +38,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 using content::WebUIMessageHandler;
@@ -88,7 +88,7 @@ void AddDummyHttpPipelineFeedbackOnIOThread(
   net::URLRequestContext* context = context_getter->GetURLRequestContext();
   net::HttpNetworkSession* http_network_session =
       context->http_transaction_factory()->GetSession();
-  net::HttpServerProperties* http_server_properties =
+  base::WeakPtr<net::HttpServerProperties> http_server_properties =
       http_network_session->http_server_properties();
   net::HostPortPair origin(hostname, port);
   http_server_properties->SetPipelineCapability(origin, capability);
@@ -376,6 +376,16 @@ NetInternalsTest::NetInternalsTest()
 }
 
 NetInternalsTest::~NetInternalsTest() {
+}
+
+void NetInternalsTest::SetUp() {
+#if defined(OS_WIN) && defined(USE_AURA)
+  // The NetInternalsTest.netInternalsTimelineViewScrollbar test requires real
+  // GL bindings to pass on Win7 Aura.
+  UseRealGLBindings();
+#endif
+
+  WebUIBrowserTest::SetUp();
 }
 
 void NetInternalsTest::SetUpCommandLine(CommandLine* command_line) {

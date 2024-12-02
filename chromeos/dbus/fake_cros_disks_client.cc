@@ -5,7 +5,7 @@
 #include "chromeos/dbus/fake_cros_disks_client.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 
 namespace chromeos {
 
@@ -21,15 +21,14 @@ FakeCrosDisksClient::~FakeCrosDisksClient() {}
 void FakeCrosDisksClient::Mount(const std::string& source_path,
                                 const std::string& source_format,
                                 const std::string& mount_label,
-                                MountType type,
-                                const MountCallback& callback,
-                                const ErrorCallback& error_callback) {
+                                const base::Closure& callback,
+                                const base::Closure& error_callback) {
 }
 
 void FakeCrosDisksClient::Unmount(const std::string& device_path,
                                   UnmountOptions options,
-                                  const UnmountCallback& callback,
-                                  const UnmountCallback& error_callback) {
+                                  const base::Closure& callback,
+                                  const base::Closure& error_callback) {
   DCHECK(!callback.is_null());
   DCHECK(!error_callback.is_null());
 
@@ -37,22 +36,20 @@ void FakeCrosDisksClient::Unmount(const std::string& device_path,
   last_unmount_device_path_ = device_path;
   last_unmount_options_ = options;
   base::MessageLoopProxy::current()->PostTask(
-      FROM_HERE,
-      base::Bind(unmount_success_ ? callback : error_callback,
-                 device_path));
+      FROM_HERE, unmount_success_ ? callback : error_callback);
   if(!unmount_listener_.is_null())
     unmount_listener_.Run();
 }
 
 void FakeCrosDisksClient::EnumerateAutoMountableDevices(
     const EnumerateAutoMountableDevicesCallback& callback,
-    const ErrorCallback& error_callback) {
+    const base::Closure& error_callback) {
 }
 
 void FakeCrosDisksClient::FormatDevice(const std::string& device_path,
                                        const std::string& filesystem,
                                        const FormatDeviceCallback& callback,
-                                       const ErrorCallback& error_callback) {
+                                       const base::Closure& error_callback) {
   DCHECK(!callback.is_null());
   DCHECK(!error_callback.is_null());
 
@@ -60,20 +57,17 @@ void FakeCrosDisksClient::FormatDevice(const std::string& device_path,
   last_format_device_device_path_ = device_path;
   last_format_device_filesystem_ = filesystem;
   if (format_device_success_) {
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, device_path, true));
+    base::MessageLoopProxy::current()->PostTask(FROM_HERE,
+                                                base::Bind(callback, true));
   } else {
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(error_callback));
+    base::MessageLoopProxy::current()->PostTask(FROM_HERE, error_callback);
   }
 }
 
 void FakeCrosDisksClient::GetDeviceProperties(
     const std::string& device_path,
     const GetDevicePropertiesCallback& callback,
-    const ErrorCallback& error_callback) {
+    const base::Closure& error_callback) {
 }
 
 void FakeCrosDisksClient::SetUpConnections(

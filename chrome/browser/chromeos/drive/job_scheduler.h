@@ -17,7 +17,7 @@
 #include "chrome/browser/drive/drive_uploader.h"
 #include "net/base/network_change_notifier.h"
 
-class Profile;
+class PrefService;
 
 namespace base {
 class SeqencedTaskRunner;
@@ -51,7 +51,7 @@ class JobScheduler
     : public net::NetworkChangeNotifier::ConnectionTypeObserver,
       public JobListInterface {
  public:
-  JobScheduler(Profile* profile,
+  JobScheduler(PrefService* pref_service,
                DriveServiceInterface* drive_service,
                base::SequencedTaskRunner* blocking_task_runner);
   virtual ~JobScheduler();
@@ -102,6 +102,11 @@ class JobScheduler
                         const ClientContext& context,
                         const google_apis::GetResourceEntryCallback& callback);
 
+  // Adds a GetShareUrl operation to the queue.
+  void GetShareUrl(const std::string& resource_id,
+                   const GURL& embed_origin,
+                   const ClientContext& context,
+                   const google_apis::GetShareUrlCallback& callback);
 
   // Adds a DeleteResource operation to the queue.
   void DeleteResource(const std::string& resource_id,
@@ -111,18 +116,18 @@ class JobScheduler
   void CopyResource(
       const std::string& resource_id,
       const std::string& parent_resource_id,
-      const std::string& new_name,
+      const std::string& new_title,
       const google_apis::GetResourceEntryCallback& callback);
 
   // Adds a CopyHostedDocument operation to the queue.
   void CopyHostedDocument(
       const std::string& resource_id,
-      const std::string& new_name,
+      const std::string& new_title,
       const google_apis::GetResourceEntryCallback& callback);
 
   // Adds a RenameResource operation to the queue.
   void RenameResource(const std::string& resource_id,
-                      const std::string& new_name,
+                      const std::string& new_title,
                       const google_apis::EntryActionCallback& callback);
 
   // Adds a TouchResource operation to the queue.
@@ -144,14 +149,14 @@ class JobScheduler
 
   // Adds a AddNewDirectory operation to the queue.
   void AddNewDirectory(const std::string& parent_resource_id,
-                       const std::string& directory_name,
+                       const std::string& directory_title,
                        const google_apis::GetResourceEntryCallback& callback);
 
   // Adds a DownloadFile operation to the queue.
   JobID DownloadFile(
       const base::FilePath& virtual_path,
       const base::FilePath& local_cache_path,
-      const GURL& download_url,
+      const std::string& resource_id,
       const ClientContext& context,
       const google_apis::DownloadActionCallback& download_action_callback,
       const google_apis::GetContentCallback& get_content_callback);
@@ -239,12 +244,8 @@ class JobScheduler
   // currently allowed to start for the |queue_type|.
   int GetCurrentAcceptedPriority(QueueType queue_type);
 
-  // Increases the throttle delay if it's below the maximum value, and posts a
-  // task to continue the loop after the delay.
-  void ThrottleAndContinueJobLoop(QueueType queue_type);
-
-  // Resets the throttle delay to the initial value, and continues the job loop.
-  void ResetThrottleAndContinueJobLoop(QueueType queue_type);
+  // Updates |wait_until_| to throttle requests.
+  void UpdateWait();
 
   // Retries the job if needed and returns false. Otherwise returns true.
   bool OnJobDone(JobID job_id, google_apis::GDataErrorCode error);
@@ -269,6 +270,13 @@ class JobScheduler
       const google_apis::GetAboutResourceCallback& callback,
       google_apis::GDataErrorCode error,
       scoped_ptr<google_apis::AboutResource> about_resource);
+
+  // Callback for job finishing with a GetShareUrlCallback.
+  void OnGetShareUrlJobDone(
+      JobID job_id,
+      const google_apis::GetShareUrlCallback& callback,
+      google_apis::GDataErrorCode error,
+      const GURL& share_url);
 
   // Callback for job finishing with a GetAppListCallback.
   void OnGetAppListJobDone(
@@ -298,6 +306,15 @@ class JobScheduler
       const GURL& upload_location,
       scoped_ptr<google_apis::ResourceEntry> resource_entry);
 
+  // Callback for DriveUploader::ResumeUploadFile().
+  void OnResumeUploadFileDone(
+      JobID job_id,
+      const base::Callback<google_apis::CancelCallback()>& original_task,
+      const google_apis::GetResourceEntryCallback& callback,
+      google_apis::GDataErrorCode error,
+      const GURL& upload_location,
+      scoped_ptr<google_apis::ResourceEntry> resource_entry);
+
   // Updates the progress status of the specified job.
   void UpdateProgress(JobID job_id, int64 progress, int64 total);
 
@@ -310,6 +327,9 @@ class JobScheduler
 
   // For testing only.  Disables throttling so that testing is faster.
   void SetDisableThrottling(bool disable) { disable_throttling_ = disable; }
+
+  // Aborts a job which is not in STATE_RUNNING.
+  void AbortNotRunningJob(JobEntry* job, google_apis::GDataErrorCode error);
 
   // Notifies updates to observers.
   void NotifyJobAdded(const JobInfo& job_info);
@@ -328,6 +348,9 @@ class JobScheduler
   // next task.
   int throttle_count_;
 
+  // Jobs should not start running until this time. Used for throttling.
+  base::Time wait_until_;
+
   // Disables throttling for testing.
   bool disable_throttling_;
 
@@ -344,7 +367,7 @@ class JobScheduler
   DriveServiceInterface* drive_service_;
   scoped_ptr<DriveUploaderInterface> uploader_;
 
-  Profile* profile_;
+  PrefService* pref_service_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

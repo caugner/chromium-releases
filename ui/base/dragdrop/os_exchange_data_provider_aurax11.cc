@@ -16,7 +16,7 @@
 #include "ui/base/x/x11_util.h"
 
 // Note: the GetBlah() methods are used immediately by the
-// web_contents_view_aura.cc:PrepareWebDropData(), while the omnibox is a
+// web_contents_view_aura.cc:PrepareDropData(), while the omnibox is a
 // little more discriminating and calls HasBlah() before trying to get the
 // information.
 
@@ -102,7 +102,13 @@ SelectionFormatMap OSExchangeDataProviderAuraX11::GetFormatMap() const {
   return selection_owner_.selection_format_map();
 }
 
-void OSExchangeDataProviderAuraX11::SetString(const string16& text_data) {
+OSExchangeData::Provider* OSExchangeDataProviderAuraX11::Clone() const {
+  OSExchangeDataProviderAuraX11* ret = new OSExchangeDataProviderAuraX11();
+  ret->format_map_ = format_map_;
+  return ret;
+}
+
+void OSExchangeDataProviderAuraX11::SetString(const base::string16& text_data) {
   std::string utf8 = UTF16ToUTF8(text_data);
   scoped_refptr<base::RefCountedMemory> mem(
       base::RefCountedString::TakeString(&utf8));
@@ -114,8 +120,22 @@ void OSExchangeDataProviderAuraX11::SetString(const string16& text_data) {
 }
 
 void OSExchangeDataProviderAuraX11::SetURL(const GURL& url,
-                                           const string16& title) {
-  NOTIMPLEMENTED();
+                                           const base::string16& title) {
+  // Mozilla's URL format: (UTF16: URL, newline, title)
+  if (url.is_valid()) {
+    string16 spec = UTF8ToUTF16(url.spec());
+
+    std::vector<unsigned char> data;
+    ui::AddString16ToVector(spec, &data);
+    ui::AddString16ToVector(ASCIIToUTF16("\n"), &data);
+    ui::AddString16ToVector(title, &data);
+    scoped_refptr<base::RefCountedMemory> mem(
+        base::RefCountedBytes::TakeVector(&data));
+
+    format_map_.Insert(atom_cache_.GetAtom(kMimeTypeMozillaURL), mem);
+
+    SetString(spec);
+  }
 }
 
 void OSExchangeDataProviderAuraX11::SetFilename(const base::FilePath& path) {
@@ -129,11 +149,19 @@ void OSExchangeDataProviderAuraX11::SetFilenames(
 
 void OSExchangeDataProviderAuraX11::SetPickledData(
     const OSExchangeData::CustomFormat& format,
-    const Pickle& data) {
-  NOTIMPLEMENTED();
+    const Pickle& pickle) {
+  const unsigned char* data =
+      reinterpret_cast<const unsigned char*>(pickle.data());
+
+  std::vector<unsigned char> bytes;
+  bytes.insert(bytes.end(), data, data + pickle.size());
+  scoped_refptr<base::RefCountedMemory> mem(
+      base::RefCountedBytes::TakeVector(&bytes));
+
+  format_map_.Insert(atom_cache_.GetAtom(format.ToString().c_str()), mem);
 }
 
-bool OSExchangeDataProviderAuraX11::GetString(string16* result) const {
+bool OSExchangeDataProviderAuraX11::GetString(base::string16* result) const {
   std::vector< ::Atom> text_atoms = ui::GetTextAtomsFrom(&atom_cache_);
   std::vector< ::Atom> requested_types;
   ui::GetAtomIntersection(text_atoms, GetTargets(), &requested_types);
@@ -148,8 +176,9 @@ bool OSExchangeDataProviderAuraX11::GetString(string16* result) const {
   return false;
 }
 
-bool OSExchangeDataProviderAuraX11::GetURLAndTitle(GURL* url,
-                                                   string16* title) const {
+bool OSExchangeDataProviderAuraX11::GetURLAndTitle(
+    GURL* url,
+    base::string16* title) const {
   std::vector< ::Atom> url_atoms = ui::GetURLAtomsFrom(&atom_cache_);
   std::vector< ::Atom> requested_types;
   ui::GetAtomIntersection(url_atoms, GetTargets(), &requested_types);
@@ -162,10 +191,10 @@ bool OSExchangeDataProviderAuraX11::GetURLAndTitle(GURL* url,
 
     if (data.GetType() == atom_cache_.GetAtom(kMimeTypeMozillaURL)) {
       // Mozilla URLs are (UTF16: URL, newline, title).
-      string16 unparsed;
+      base::string16 unparsed;
       data.AssignTo(&unparsed);
 
-      std::vector<string16> tokens;
+      std::vector<base::string16> tokens;
       size_t num_tokens = Tokenize(unparsed, ASCIIToUTF16("\n"), &tokens);
       if (num_tokens >= 2) {
         *url = GURL(tokens[0]);
@@ -189,7 +218,7 @@ bool OSExchangeDataProviderAuraX11::GetURLAndTitle(GURL* url,
       }
 
       *url = GURL(tokens[0]);
-      *title = string16();
+      *title = base::string16();
 
       return true;
     }
@@ -211,8 +240,19 @@ bool OSExchangeDataProviderAuraX11::GetFilenames(
 
 bool OSExchangeDataProviderAuraX11::GetPickledData(
     const OSExchangeData::CustomFormat& format,
-    Pickle* data) const {
-  NOTIMPLEMENTED();
+    Pickle* pickle) const {
+  std::vector< ::Atom> requested_types;
+  requested_types.push_back(atom_cache_.GetAtom(format.ToString().c_str()));
+
+  ui::SelectionData data(format_map_.GetFirstOf(requested_types));
+  if (data.IsValid()) {
+    // Note that the pickle object on the right hand side of the assignment
+    // only refers to the bytes in |data|. The assignment copies the data.
+    *pickle = Pickle(reinterpret_cast<const char*>(data.GetData()),
+                     static_cast<int>(data.GetSize()));
+    return true;
+  }
+
   return false;
 }
 
@@ -245,12 +285,21 @@ bool OSExchangeDataProviderAuraX11::HasCustomFormat(
   return !requested_types.empty();
 }
 
-void OSExchangeDataProviderAuraX11::SetHtml(const string16& html,
+void OSExchangeDataProviderAuraX11::SetHtml(const base::string16& html,
                                             const GURL& base_url) {
-  NOTIMPLEMENTED();
+  std::vector<unsigned char> bytes;
+  // Manually jam a UTF16 BOM into bytes because otherwise, other programs will
+  // assume UTF-8.
+  bytes.push_back(0xFF);
+  bytes.push_back(0xFE);
+  ui::AddString16ToVector(html, &bytes);
+  scoped_refptr<base::RefCountedMemory> mem(
+      base::RefCountedBytes::TakeVector(&bytes));
+
+  format_map_.Insert(atom_cache_.GetAtom(Clipboard::kMimeTypeHTML), mem);
 }
 
-bool OSExchangeDataProviderAuraX11::GetHtml(string16* html,
+bool OSExchangeDataProviderAuraX11::GetHtml(base::string16* html,
                                             GURL* base_url) const {
   std::vector< ::Atom> url_atoms;
   url_atoms.push_back(atom_cache_.GetAtom(Clipboard::kMimeTypeHTML));
@@ -305,7 +354,15 @@ bool OSExchangeDataProviderAuraX11::Dispatch(const base::NativeEvent& event) {
 }
 
 bool OSExchangeDataProviderAuraX11::GetPlainTextURL(GURL* url) const {
-  NOTIMPLEMENTED();
+  string16 text;
+  if (GetString(&text)) {
+    GURL test_url(text);
+    if (test_url.is_valid()) {
+      *url = test_url;
+      return true;
+    }
+  }
+
   return false;
 }
 

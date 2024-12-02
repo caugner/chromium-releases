@@ -9,14 +9,19 @@
 #include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/extensions/install_extension_handler.h"
 #include "chrome/browser/ui/webui/extensions/pack_extension_handler.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/browser_resources.h"
+#include "grit/theme_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/extensions/chromeos/kiosk_apps_handler.h"
 #endif
+
+namespace extensions {
 
 namespace {
 
@@ -49,8 +54,7 @@ ExtensionsUI::ExtensionsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   pack_handler->GetLocalizedValues(source);
   web_ui->AddMessageHandler(pack_handler);
 
-  extensions::CommandHandler* commands_handler =
-      new extensions::CommandHandler(profile);
+  CommandHandler* commands_handler = new CommandHandler(profile);
   commands_handler->GetLocalizedValues(source);
   web_ui->AddMessageHandler(commands_handler);
 
@@ -66,8 +70,18 @@ ExtensionsUI::ExtensionsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   web_ui->AddMessageHandler(kiosk_app_handler);
 #endif
 
+  web_ui->AddMessageHandler(new MetricsHandler());
+
   content::WebUIDataSource::Add(profile, source);
 }
 
-ExtensionsUI::~ExtensionsUI() {
+ExtensionsUI::~ExtensionsUI() {}
+
+// static
+base::RefCountedMemory* ExtensionsUI::GetFaviconResourceBytes(
+    ui::ScaleFactor scale_factor) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.LoadDataResourceBytesForScale(IDR_EXTENSIONS_FAVICON, scale_factor);
 }
+
+}  // namespace extensions

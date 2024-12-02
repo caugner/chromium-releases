@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/platform_file.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_util.h"
@@ -230,6 +230,18 @@ class DebugDaemonClientImpl : public DebugDaemonClient {
                    callback));
   }
 
+  virtual void GetWiMaxStatus(const GetWiMaxStatusCallback& callback)
+      OVERRIDE {
+    dbus::MethodCall method_call(debugd::kDebugdInterface,
+                                 debugd::kGetWiMaxStatus);
+    debugdaemon_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&DebugDaemonClientImpl::OnGetWiMaxStatus,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   callback));
+  }
+
   virtual void GetNetworkInterfaces(
       const GetNetworkInterfacesCallback& callback) OVERRIDE {
     dbus::MethodCall method_call(debugd::kDebugdInterface,
@@ -253,6 +265,17 @@ class DebugDaemonClientImpl : public DebugDaemonClient {
         &method_call,
         dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
         base::Bind(&DebugDaemonClientImpl::OnGetPerfData,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   callback));
+  }
+
+  virtual void GetScrubbedLogs(const GetLogsCallback& callback) OVERRIDE {
+    dbus::MethodCall method_call(debugd::kDebugdInterface,
+                                 debugd::kGetFeedbackLogs);
+    debugdaemon_proxy_->CallMethod(
+        &method_call,
+        dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&DebugDaemonClientImpl::OnGetAllLogs,
                    weak_ptr_factory_.GetWeakPtr(),
                    callback));
   }
@@ -459,6 +482,15 @@ class DebugDaemonClientImpl : public DebugDaemonClient {
       callback.Run(false, "");
   }
 
+  void OnGetWiMaxStatus(const GetWiMaxStatusCallback& callback,
+                        dbus::Response* response) {
+    std::string status;
+    if (response && dbus::MessageReader(response).PopString(&status))
+      callback.Run(true, status);
+    else
+      callback.Run(false, "");
+  }
+
   void OnGetNetworkInterfaces(const GetNetworkInterfacesCallback& callback,
                               dbus::Response* response) {
     std::string status;
@@ -618,6 +650,11 @@ class DebugDaemonClientStubImpl : public DebugDaemonClient {
     base::MessageLoop::current()->PostTask(FROM_HERE,
                                            base::Bind(callback, false, ""));
   }
+  virtual void GetWiMaxStatus(const GetWiMaxStatusCallback& callback)
+      OVERRIDE {
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::Bind(callback, false, ""));
+  }
   virtual void GetNetworkInterfaces(
       const GetNetworkInterfacesCallback& callback) OVERRIDE {
     base::MessageLoop::current()->PostTask(FROM_HERE,
@@ -627,12 +664,19 @@ class DebugDaemonClientStubImpl : public DebugDaemonClient {
                            const GetPerfDataCallback& callback) OVERRIDE {
     std::vector<uint8> data;
     base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, data));
+    base::Bind(callback, data));
+  }
+  virtual void GetScrubbedLogs(const GetLogsCallback& callback) OVERRIDE {
+    std::map<std::string, std::string> sample;
+    sample["Sample Scrubbed Log"] = "Your email address is xxxxxxxx";
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(callback, false, sample));
   }
   virtual void GetAllLogs(const GetLogsCallback& callback) OVERRIDE {
-    std::map<std::string, std::string> empty;
-    base::MessageLoop::current()->PostTask(FROM_HERE,
-                                           base::Bind(callback, false, empty));
+    std::map<std::string, std::string> sample;
+    sample["Sample Log"] = "Your email address is abc@abc.com";
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(callback, false, sample));
   }
   virtual void GetUserLogFiles(const GetLogsCallback& callback) OVERRIDE {
     std::map<std::string, std::string> user_logs;

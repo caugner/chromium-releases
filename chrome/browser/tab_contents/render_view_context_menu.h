@@ -22,7 +22,6 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/window_open_disposition.h"
 
-class InstantExtendedContextMenuObserver;
 class PrintPreviewContextMenuObserver;
 class Profile;
 class SpellingMenuObserver;
@@ -238,6 +237,9 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   // Copy to the clipboard an image located at a point in the RenderView
   void CopyImageAt(int x, int y);
 
+  // Get an image located at a point in the RenderView for search.
+  void GetImageThumbnailForSearch();
+
   // Launch the inspector targeting a point in the RenderView
   void Inspect(int x, int y);
 
@@ -274,11 +276,10 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   // An observer that handles a 'spell-checker options' submenu.
   scoped_ptr<SpellCheckerSubMenuObserver> spellchecker_submenu_observer_;
 
+#if defined(ENABLE_FULL_PRINTING)
   // An observer that disables menu items when print preview is active.
   scoped_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
-
-  // An observer that disables menu items for instant extended mode.
-  scoped_ptr<InstantExtendedContextMenuObserver> instant_extended_observer_;
+#endif
 
   // Our observers.
   mutable ObserverList<RenderViewContextMenuObserver> observers_;

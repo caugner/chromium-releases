@@ -8,6 +8,8 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -15,7 +17,6 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/chrome_render_view_test.h"
@@ -32,7 +33,6 @@
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebKit.h"
 
 typedef TabRestoreService::Tab Tab;
 typedef TabRestoreService::Window Window;
@@ -79,7 +79,6 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
 
   // testing::Test:
   virtual void SetUp() OVERRIDE {
-    WebKit::initialize(webkit_platform_support_.Get());
     ChromeRenderViewHostTestHarness::SetUp();
     time_factory_ = new PersistentTabRestoreTimeFactory();
     service_.reset(new PersistentTabRestoreService(profile(), time_factory_));
@@ -90,7 +89,6 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
     service_.reset();
     delete time_factory_;
     ChromeRenderViewHostTestHarness::TearDown();
-    WebKit::shutdown();
   }
 
   TabRestoreService::Entries* mutable_entries() {
@@ -119,6 +117,7 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
     // Must set service to null first so that it is destroyed before the new
     // one is created.
     service_->Shutdown();
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
     service_.reset();
     service_.reset(new PersistentTabRestoreService(profile(), time_factory_));
     SynchronousLoadTabsFromLastSession();
@@ -162,7 +161,9 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   void SynchronousLoadTabsFromLastSession() {
     // Ensures that the load is complete before continuing.
     service_->LoadTabsFromLastSession();
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
     base::RunLoop().RunUntilIdle();
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
   }
 
   GURL url1_;
@@ -171,8 +172,6 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   std::string user_agent_override_;
   scoped_ptr<PersistentTabRestoreService> service_;
   PersistentTabRestoreTimeFactory* time_factory_;
-  content::RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox
-      webkit_platform_support_;
 };
 
 namespace {

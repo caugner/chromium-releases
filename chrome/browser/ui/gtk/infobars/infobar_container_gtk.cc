@@ -8,7 +8,7 @@
 
 #include <utility>
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -23,9 +23,8 @@
 #include "ui/gfx/skia_utils_gtk.h"
 
 InfoBarContainerGtk::InfoBarContainerGtk(InfoBarContainer::Delegate* delegate,
-                                         SearchModel* search_model,
                                          Profile* profile)
-    : InfoBarContainer(delegate, search_model),
+    : InfoBarContainer(delegate),
       profile_(profile),
       container_(gtk_vbox_new(FALSE, 0)) {
   gtk_widget_show(widget());

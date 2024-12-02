@@ -12,7 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
 #include "net/http/http_pipelined_host_capability.h"
@@ -67,7 +67,11 @@ class HttpServerPropertiesManager
   void ShutdownOnUIThread();
 
   // Register |prefs| for properties managed here.
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+
+  // Helper function for unit tests to set the version in the dictionary.
+  static void SetVersion(base::DictionaryValue* http_server_properties_dict,
+                         int version_number);
 
   // Deletes all data. Works asynchronously, but if a |completion| callback is
   // provided, it will be fired on the UI thread when everything is done.
@@ -76,6 +80,9 @@ class HttpServerPropertiesManager
   // ----------------------------------
   // net::HttpServerProperties methods:
   // ----------------------------------
+
+  // Gets a weak pointer for this object.
+  virtual base::WeakPtr<net::HttpServerProperties> GetWeakPtr() OVERRIDE;
 
   // Deletes all data. Works asynchronously.
   virtual void Clear() OVERRIDE;
@@ -224,6 +231,10 @@ class HttpServerPropertiesManager
   // ---------
   // IO thread
   // ---------
+
+  // Used to get |weak_ptr_| to self on the IO thread.
+  scoped_ptr<base::WeakPtrFactory<HttpServerPropertiesManager> >
+      io_weak_ptr_factory_;
 
   // Used to post |prefs::kHttpServerProperties| pref update tasks.
   scoped_ptr<base::OneShotTimer<HttpServerPropertiesManager> >

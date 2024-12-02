@@ -3,22 +3,24 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/sync_file_system/drive_file_sync_service.h"
+#include "chrome/browser/sync_file_system/drive_backend/drive_file_sync_service.h"
 #include "chrome/browser/sync_file_system/file_status_observer.h"
 #include "chrome/browser/sync_file_system/local_change_processor.h"
 #include "chrome/browser/sync_file_system/mock_remote_file_sync_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service_factory.h"
+#include "chrome/browser/sync_file_system/sync_status_code.h"
+#include "chrome/browser/sync_file_system/syncable_file_system_util.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/test/base/test_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/browser/fileapi/file_system_url.h"
-#include "webkit/browser/fileapi/syncable/sync_status_code.h"
-#include "webkit/browser/fileapi/syncable/syncable_file_system_util.h"
 #include "webkit/browser/quota/quota_manager.h"
 
 using ::testing::_;
@@ -117,6 +119,12 @@ IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, GetFileStatus) {
 #define MAYBE_GetFileStatuses GetFileStatuses
 #endif
 IN_PROC_BROWSER_TEST_F(SyncFileSystemApiTest, MAYBE_GetFileStatuses) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
   // Mocking to return IsConflicting() == true only for the path "Conflicting".
   base::FilePath conflicting = base::FilePath::FromUTF8Unsafe("Conflicting");
   EXPECT_CALL(*mock_remote_service(),

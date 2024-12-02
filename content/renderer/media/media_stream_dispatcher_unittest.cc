@@ -6,13 +6,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "content/common/media/media_stream_messages.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/renderer/media/media_stream_dispatcher.h"
 #include "content/renderer/media/media_stream_dispatcher_eventhandler.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace content {
 namespace {
@@ -48,6 +48,10 @@ class MockMediaStreamDispatcherEventHandler
 
   virtual void OnStreamGenerationFailed(int request_id) OVERRIDE {
     request_id_ = request_id;
+  }
+
+  virtual void OnStopGeneratedStream(const std::string& label) OVERRIDE {
+    label_ = label;
   }
 
   virtual void OnDevicesEnumerated(
@@ -380,7 +384,7 @@ TEST(MediaStreamDispatcherTest, CancelGenerateStream) {
                              components, GURL());
 
   EXPECT_EQ(2u, dispatcher->requests_.size());
-  dispatcher->CancelGenerateStream(kRequestId2);
+  dispatcher->CancelGenerateStream(kRequestId2, handler.get()->AsWeakPtr());
   EXPECT_EQ(1u, dispatcher->requests_.size());
 
   // Complete the creation of stream1.

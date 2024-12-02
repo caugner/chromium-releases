@@ -13,11 +13,19 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/message_loop.h"
-#include "base/process.h"
-#include "base/process_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/message_loop/message_loop.h"
+#include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process_handle.h"
 #include "base/strings/stringprintf.h"
+#include "base/task_runner.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -28,9 +36,13 @@ namespace {
 const char kTpControl[] = "/opt/google/touchpad/tpcontrol";
 const char kMouseControl[] = "/opt/google/mouse/mousecontrol";
 
+const char kRemoraRequisition[] = "remora";
+
+typedef base::RefCountedData<bool> RefCountedBool;
+
 bool ScriptExists(const std::string& script) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-  return file_util::PathExists(base::FilePath(script));
+  return base::PathExists(base::FilePath(script));
 }
 
 // Executes the input control script asynchronously, if it exists.
@@ -60,13 +72,19 @@ void ExecuteScript(int argc, ...) {
   }
   va_end(vl);
 
-  content::BrowserThread::GetBlockingPool()->PostTask(FROM_HERE,
-      base::Bind(&ExecuteScriptOnFileThread, argv));
+  // Control scripts can take long enough to cause SIGART during shutdown
+  // (http://crbug.com/261426). Run the blocking pool task with
+  // CONTINUE_ON_SHUTDOWN so it won't be joined when Chrome shuts down.
+  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
+  scoped_refptr<base::TaskRunner> runner =
+      pool->GetTaskRunnerWithShutdownBehavior(
+          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  runner->PostTask(FROM_HERE, base::Bind(&ExecuteScriptOnFileThread, argv));
 }
 
 void SetPointerSensitivity(const char* script, int value) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DCHECK(value > 0 && value < 6);
+  DCHECK(value >= kMinPointerSensitivity && value <= kMaxPointerSensitivity);
   ExecuteScript(
       3, script, "sensitivity", base::StringPrintf("%d", value).c_str());
 }
@@ -75,9 +93,10 @@ void SetTPControl(const char* control, bool enabled) {
   ExecuteScript(3, kTpControl, control, enabled ? "on" : "off");
 }
 
-void DeviceExistsBlockingPool(const char* script, bool* exists) {
+void DeviceExistsBlockingPool(const char* script,
+                              scoped_refptr<RefCountedBool> exists) {
   DCHECK(content::BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-  *exists = false;
+  exists->data = false;
   if (!ScriptExists(script))
     return;
 
@@ -86,23 +105,32 @@ void DeviceExistsBlockingPool(const char* script, bool* exists) {
   argv.push_back("status");
   std::string output;
   // Output is empty if the device is not found.
-  *exists = base::GetAppOutput(CommandLine(argv), &output) && !output.empty();
-  DVLOG(1) << "DeviceExistsBlockingPool:" << script << "=" << *exists;
+  exists->data = base::GetAppOutput(CommandLine(argv), &output) &&
+      !output.empty();
+  DVLOG(1) << "DeviceExistsBlockingPool:" << script << "=" << exists->data;
 }
 
-void RunCallbackUIThread(bool* exists, const DeviceExistsCallback& callback) {
+void RunCallbackUIThread(scoped_refptr<RefCountedBool> exists,
+                         const DeviceExistsCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  DVLOG(1) << "RunCallbackUIThread " << *exists;
-  callback.Run(*exists);
+  DVLOG(1) << "RunCallbackUIThread " << exists->data;
+  callback.Run(exists->data);
 }
 
 void DeviceExists(const char* script, const DeviceExistsCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  bool* exists = new bool(false);
-  content::BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
+  // One or both of the control scripts can apparently hang during shutdown
+  // (http://crbug.com/255546). Run the blocking pool task with
+  // CONTINUE_ON_SHUTDOWN so it won't be joined when Chrome shuts down.
+  scoped_refptr<RefCountedBool> exists(new RefCountedBool(false));
+  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
+  scoped_refptr<base::TaskRunner> runner =
+      pool->GetTaskRunnerWithShutdownBehavior(
+          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  runner->PostTaskAndReply(FROM_HERE,
       base::Bind(&DeviceExistsBlockingPool, script, exists),
-      base::Bind(&RunCallbackUIThread, base::Owned(exists), callback));
+      base::Bind(&RunCallbackUIThread, exists, callback));
 }
 
 }  // namespace
@@ -132,11 +160,6 @@ void SetThreeFingerClick(bool enabled) {
   SetTPControl("t5r2_three_finger_click", enabled);
 }
 
-void SetThreeFingerSwipe(bool enabled) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  SetTPControl("three_finger_swipe", enabled);
-}
-
 void SetTapDragging(bool enabled) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   SetTPControl("tap_dragging", enabled);
@@ -163,6 +186,33 @@ void SetPrimaryButtonRight(bool right) {
 }
 
 }  // namespace mouse_settings
+
+namespace keyboard_settings {
+
+bool ForceKeyboardDrivenUINavigation() {
+  policy::BrowserPolicyConnector* connector =
+      g_browser_process->browser_policy_connector();
+  if (!connector)
+    return false;
+
+  policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
+      connector->GetDeviceCloudPolicyManager();
+  if (!policy_manager)
+    return false;
+
+  if (policy_manager->GetDeviceRequisition() == kRemoraRequisition)
+    return true;
+
+  bool keyboard_driven = false;
+  if (chromeos::system::StatisticsProvider::GetInstance()->GetMachineFlag(
+      kOemKeyboardDrivenOobeKey, &keyboard_driven)) {
+    return keyboard_driven;
+  }
+
+  return false;
+}
+
+}  // namespace keyboard_settings
 
 }  // namespace system
 }  // namespace chromeos

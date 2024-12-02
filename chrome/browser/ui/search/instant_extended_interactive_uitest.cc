@@ -5,16 +5,16 @@
 #include <sstream>
 
 #include "base/command_line.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/prefs/pref_service.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -43,15 +44,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
-#include "chrome/browser/ui/search/instant_commit_type.h"
 #include "chrome/browser/ui/search/instant_ntp.h"
-#include "chrome/browser/ui/search/instant_overlay.h"
+#include "chrome/browser/ui/search/instant_ntp_prerenderer.h"
 #include "chrome/browser/ui/search/instant_tab.h"
 #include "chrome/browser/ui/search/instant_test_utils.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/theme_source.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/instant_types.h"
 #include "chrome/common/pref_names.h"
@@ -71,10 +70,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
-#include "content/public/common/renderer_preferences.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "grit/generated_resources.h"
+#include "net/base/network_change_notifier.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -113,6 +112,26 @@ class QuittingHistoryDBTask : public history::HistoryDBTask {
   DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
 };
 
+class FakeNetworkChangeNotifier : public net::NetworkChangeNotifier {
+ public:
+  FakeNetworkChangeNotifier() : connection_type_(CONNECTION_NONE) {}
+
+  virtual ConnectionType GetCurrentConnectionType() const OVERRIDE {
+    return connection_type_;
+  }
+
+  void SetConnectionType(ConnectionType type) {
+    connection_type_ = type;
+    NotifyObserversOfNetworkChange(type);
+    base::RunLoop().RunUntilIdle();
+  }
+
+  virtual ~FakeNetworkChangeNotifier() {}
+
+ private:
+  ConnectionType connection_type_;
+  DISALLOW_COPY_AND_ASSIGN(FakeNetworkChangeNotifier);
+};
 }  // namespace
 
 class InstantExtendedTest : public InProcessBrowserTest,
@@ -148,10 +167,6 @@ class InstantExtendedTest : public InProcessBrowserTest,
       return 0;
     }
     return histogram->SnapshotSamples()->TotalCount();
-  }
-
-  std::string GetOmniboxText() {
-    return UTF16ToUTF8(omnibox()->GetText());
   }
 
   void SendDownArrow() {
@@ -251,6 +266,29 @@ class InstantExtendedTest : public InProcessBrowserTest,
   int on_toggle_voice_search_calls_;
 };
 
+class InstantExtendedNetworkTest : public InstantExtendedTest {
+ protected:
+  virtual void SetUpOnMainThread() OVERRIDE {
+    disable_for_test_.reset(new net::NetworkChangeNotifier::DisableForTest);
+    fake_network_change_notifier_.reset(new FakeNetworkChangeNotifier);
+    InstantExtendedTest::SetUpOnMainThread();
+  }
+
+  virtual void CleanUpOnMainThread() OVERRIDE {
+    InstantExtendedTest::CleanUpOnMainThread();
+    fake_network_change_notifier_.reset();
+    disable_for_test_.reset();
+  }
+
+  void SetConnectionType(net::NetworkChangeNotifier::ConnectionType type) {
+    fake_network_change_notifier_->SetConnectionType(type);
+  }
+
+ private:
+  scoped_ptr<net::NetworkChangeNotifier::DisableForTest> disable_for_test_;
+  scoped_ptr<FakeNetworkChangeNotifier> fake_network_change_notifier_;
+};
+
 // Test class used to verify chrome-search: scheme and access policy from the
 // Instant overlay.  This is a subclass of |ExtensionBrowserTest| because it
 // loads a theme that provides a background image.
@@ -292,7 +330,7 @@ class InstantPolicyTest : public ExtensionBrowserTest, public InstantTestBase {
 
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest, ExtendedModeIsOn) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  EXPECT_TRUE(instant()->extended_enabled_);
+  EXPECT_TRUE(chrome::IsInstantExtendedAPIEnabled());
 }
 
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest, NTPIsPreloaded) {
@@ -305,48 +343,42 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, NTPIsPreloaded) {
   content::WebContents* ntp_contents = instant()->ntp_->contents();
   EXPECT_TRUE(ntp_contents);
 }
+#endif  // HTML_INSTANT_EXTENDED_POPUP
 
-// Test that the local NTP is preloaded.
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, LocalOnlyNTPIsPreloaded) {
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-
-  // The second argument says to use only the local overlay and NTP.
-  instant()->SetInstantEnabled(false, true);
-  FocusOmniboxAndWaitForInstantNTPSupport();
-
-  // NTP contents should be preloaded.
-  ASSERT_NE(static_cast<InstantNTP*>(NULL), instant()->ntp());
-  content::WebContents* ntp_contents = instant()->ntp_->contents();
-  EXPECT_NE(static_cast<content::WebContents*>(NULL), ntp_contents);
-  EXPECT_TRUE(instant()->ntp()->IsLocal());
-}
-
-// Test that the local NTP is not preloaded.
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, LocalOnlyNTPIsNotPreloaded) {
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  ASSERT_TRUE(base::FieldTrialList::CreateTrialsFromString(
-      "InstantExtended/Group1 local_only:1 preload_local_only_ntp:0/"));
-
-  // The second argument says to use only the local overlay and NTP.
-  instant()->SetInstantEnabled(false, true);
-
-  // NTP contents should not be preloaded.
-  EXPECT_EQ(NULL, instant()->ntp());
-}
-
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPIsUsedInNewTab) {
+IN_PROC_BROWSER_TEST_F(InstantExtendedNetworkTest, NTPReactsToNetworkChanges) {
   // Setup Instant.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
 
-  // NTP contents should be preloaded.
-  ASSERT_NE(static_cast<InstantNTP*>(NULL), instant()->ntp());
-  content::WebContents* ntp_contents = instant()->ntp_->contents();
-  EXPECT_TRUE(ntp_contents);
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
 
-  // Open new tab. Preloaded NTP contents should have been used.
+  // The setup first initializes the platform specific NetworkChangeNotifier.
+  // The InstantExtendedNetworkTest replaces it with a fake, but by the time,
+  // InstantNTPPrerenderer has already registered itself. So the
+  // InstantNTPPrerenderer needs to register itself as NetworkChangeObserver
+  // again.
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(
+      instant_service->ntp_prerenderer());
+
+  // The fake network change notifier will provide the network state to be
+  // offline, so the ntp will be local.
+  ASSERT_NE(static_cast<InstantNTP*>(NULL),
+            instant_service->ntp_prerenderer()->ntp());
+  EXPECT_TRUE(instant_service->ntp_prerenderer()->ntp()->IsLocal());
+
+  // Change the connect state, and wait for the notifications to be run, and NTP
+  // support to be determined.
+  SetConnectionType(net::NetworkChangeNotifier::CONNECTION_ETHERNET);
+  FocusOmniboxAndWaitForInstantNTPSupport();
+
+  // Verify the network state is fine, and InstantNTPPrerenderer doesn't want
+  // to switch to local NTP anymore.
+  EXPECT_FALSE(net::NetworkChangeNotifier::IsOffline());
+  EXPECT_FALSE(instant_service->ntp_prerenderer()->ShouldSwitchToLocalNTP());
+
+  // Open new tab.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
       GURL(chrome::kChromeUINewTabURL),
@@ -354,10 +386,41 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPIsUsedInNewTab) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
   content::WebContents* active_tab =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(ntp_contents, active_tab);
+
+  // Verify new NTP is not local.
   EXPECT_TRUE(chrome::IsInstantNTP(active_tab));
+  EXPECT_NE(instant_service->ntp_prerenderer()->GetLocalInstantURL(),
+            active_tab->GetURL().spec());
+  ASSERT_NE(static_cast<InstantNTP*>(NULL),
+            instant_service->ntp_prerenderer()->ntp());
+  EXPECT_FALSE(instant_service->ntp_prerenderer()->ntp()->IsLocal());
+
+  SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+  FocusOmniboxAndWaitForInstantNTPSupport();
+
+  // Verify the network state is fine, and InstantNTPPrerenderer doesn't want
+  // to switch to local NTP anymore.
+  EXPECT_TRUE(net::NetworkChangeNotifier::IsOffline());
+  EXPECT_TRUE(instant_service->ntp_prerenderer()->ShouldSwitchToLocalNTP());
+
+  // Open new tab. Preloaded NTP contents should have been used.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(chrome::kChromeUINewTabURL),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+  active_tab = browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Verify new NTP is not local.
+  EXPECT_TRUE(chrome::IsInstantNTP(active_tab));
+  EXPECT_EQ(instant_service->ntp_prerenderer()->GetLocalInstantURL(),
+            active_tab->GetURL().spec());
+  ASSERT_NE(static_cast<InstantNTP*>(NULL),
+            instant_service->ntp_prerenderer()->ntp());
+  EXPECT_TRUE(instant_service->ntp_prerenderer()->ntp()->IsLocal());
 }
 
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPIsUsedInSameTab) {
   // Setup Instant.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
@@ -405,7 +468,7 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPForWrongProvider) {
   EXPECT_NE(ntp_url, active_tab->GetURL());
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPRenderViewGone) {
+IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPRenderProcessGone) {
   // Setup Instant.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
@@ -415,7 +478,7 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, PreloadedNTPRenderViewGone) {
   EXPECT_FALSE(instant()->ntp()->IsLocal());
 
   // NTP not reloaded after being killed.
-  instant()->InstantPageRenderViewGone(instant()->ntp()->contents());
+  instant()->InstantPageRenderProcessGone(instant()->ntp()->contents());
   EXPECT_EQ(NULL, instant()->ntp());
 
   // Open new tab. Should use local NTP.
@@ -513,48 +576,6 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, NoFaviconOnNewTabPage) {
   active_tab = browser()->tab_strip_model()->GetActiveWebContents();
   favicon_tab_helper = FaviconTabHelper::FromWebContents(active_tab);
   EXPECT_TRUE(favicon_tab_helper->ShouldDisplayFavicon());
-}
-
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, ProcessIsolation) {
-  // Prior to setup, Instant has an ntp with a failed "google.com" load in
-  // it, which is rendered in the dedicated Instant renderer process.
-  //
-  // TODO(sreeram): Fix this up when we stop doing crazy things on init.
-  InstantService* instant_service =
-        InstantServiceFactory::GetForProfile(browser()->profile());
-  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
-#if !defined(OS_MACOSX)
-  // The failed "google.com" load is deleted, which sometimes leads to the
-  // process shutting down on Mac.
-  EXPECT_EQ(1, instant_service->GetInstantProcessCount());
-#endif
-
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-
-  // The registered Instant render process should still exist.
-  EXPECT_EQ(1, instant_service->GetInstantProcessCount());
-  // And the Instant ntp should live inside it.
-  content::WebContents* ntp_contents = instant()->ntp_->contents();
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      ntp_contents->GetRenderProcessHost()->GetID()));
-
-  // Navigating to the NTP should use the Instant render process.
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(chrome::kChromeUINewTabURL),
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
-  content::WebContents* active_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      active_tab->GetRenderProcessHost()->GetID()));
-
-  // Navigating elsewhere should not use the Instant render process.
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIAboutURL));
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      active_tab->GetRenderProcessHost()->GetID()));
 }
 
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest, DISABLED_MostVisited) {
@@ -820,181 +841,6 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, DISABLED_EscapeClearsOmnibox) {
   EXPECT_LT(0, on_esc_key_press_event_calls_);
 }
 
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest, OnDefaultSearchProviderChanged) {
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(browser()->profile());
-  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
-
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-  EXPECT_EQ(1, instant_service->GetInstantProcessCount());
-
-  // Navigating to the NTP should use the Instant render process.
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(chrome::kChromeUINewTabURL),
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
-  content::WebContents* ntp_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(chrome::IsInstantNTP(ntp_contents));
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      ntp_contents->GetRenderProcessHost()->GetID()));
-  GURL ntp_url = ntp_contents->GetURL();
-
-  AddBlankTabAndShow(browser());
-  content::WebContents* active_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_FALSE(chrome::IsInstantNTP(active_tab));
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      active_tab->GetRenderProcessHost()->GetID()));
-
-  TemplateURLData data;
-  data.short_name = ASCIIToUTF16("t");
-  data.SetURL("http://defaultturl/q={searchTerms}");
-  data.suggestions_url = "http://defaultturl2/q={searchTerms}";
-  data.instant_url = "http://does/not/exist";
-  data.alternate_urls.push_back(data.instant_url + "#q={searchTerms}");
-  data.search_terms_replacement_key = "strk";
-
-  TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
-  TemplateURLService* service =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
-  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
-  service->Add(template_url);  // Takes ownership of |template_url|.
-
-  // Change the default search provider.
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::Source<content::NavigationController>(
-          &ntp_contents->GetController()));
-  service->SetDefaultSearchProvider(template_url);
-  observer.Wait();
-
-  // |ntp_contents| should not use the Instant render process.
-  EXPECT_FALSE(chrome::IsInstantNTP(ntp_contents));
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      ntp_contents->GetRenderProcessHost()->GetID()));
-  // Make sure the URL remains the same.
-  EXPECT_EQ(ntp_url, ntp_contents->GetURL());
-}
-
-// Test that renderer initiated navigations to an instant URL from a non
-// Instant page do not end up in an Instant process if they are bounced to the
-// browser.
-IN_PROC_BROWSER_TEST_F(
-    InstantExtendedTest,
-    DISABLED_RendererInitiatedNavigationNotInInstantProcess) {
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(browser()->profile());
-  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
-
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-
-  EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  EXPECT_EQ(1, browser()->tab_strip_model()->count());
-
-  // Don't use https server for the non instant URL so that the browser uses
-  // different RenderViews.
-  GURL non_instant_url = test_server()->GetURL("files/simple.html");
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      non_instant_url,
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      contents->GetRenderProcessHost()->GetID()));
-  EXPECT_EQ(non_instant_url, contents->GetURL());
-
-  int old_render_view_id = contents->GetRenderViewHost()->GetRoutingID();
-  int old_render_process_id = contents->GetRenderProcessHost()->GetID();
-
-  std::string instant_url_with_query = instant_url().spec() + "q=3";
-  std::string add_link_script = base::StringPrintf(
-      "var a = document.createElement('a');"
-      "a.id = 'toClick';"
-      "a.href = '%s';"
-      "document.body.appendChild(a);",
-      instant_url_with_query.c_str());
-  EXPECT_TRUE(content::ExecuteScript(contents, add_link_script));
-
-  // Ensure that navigations are bounced to the browser.
-  contents->GetMutableRendererPrefs()->browser_handles_all_top_level_requests =
-      true;
-  contents->GetRenderViewHost()->SyncRendererPrefs();
-
-  content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::NotificationService::AllSources());
-  EXPECT_TRUE(content::ExecuteScript(
-      contents, "document.getElementById('toClick').click();"));
-  observer.Wait();
-
-  EXPECT_EQ(1, browser()->tab_strip_model()->count());
-  contents = browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      contents->GetRenderProcessHost()->GetID()));
-  EXPECT_EQ(GURL(instant_url_with_query), contents->GetURL());
-  int new_render_view_id = contents->GetRenderViewHost()->GetRoutingID();
-  int new_render_process_id = contents->GetRenderProcessHost()->GetID();
-
-  EXPECT_TRUE(old_render_process_id != new_render_process_id ||
-              old_render_view_id != new_render_view_id);
-}
-
-// Test that renderer initiated navigations to an Instant URL from an
-// Instant process end up in an Instant process.
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
-                       RendererInitiatedNavigationInInstantProcess) {
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(browser()->profile());
-  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
-
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-
-  EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
-  EXPECT_EQ(1, browser()->tab_strip_model()->count());
-
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      instant_url(),
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      contents->GetRenderProcessHost()->GetID()));
-
-  std::string instant_url_with_query = instant_url().spec() + "q=3";
-  std::string add_link_script = base::StringPrintf(
-      "var a = document.createElement('a');"
-      "a.id = 'toClick';"
-      "a.href = '%s';"
-      "document.body.appendChild(a);",
-      instant_url_with_query.c_str());
-  EXPECT_TRUE(content::ExecuteScript(contents, add_link_script));
-
-  content::WindowedNotificationObserver observer(
-        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::NotificationService::AllSources());
-  EXPECT_TRUE(content::ExecuteScript(
-      contents, "document.getElementById('toClick').click();"));
-  observer.Wait();
-
-  EXPECT_EQ(1, browser()->tab_strip_model()->count());
-  contents = browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      contents->GetRenderProcessHost()->GetID()));
-  EXPECT_EQ(GURL(instant_url_with_query), contents->GetURL());
-}
-
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest, AcceptingURLSearchDoesNotNavigate) {
   // Get a committed Instant tab, which will be in the Instant process and thus
   // support chrome::GetSearchTerms().
@@ -1139,10 +985,10 @@ IN_PROC_BROWSER_TEST_F(
       NEW_WINDOW,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
 
-  const BrowserList* native_browser_list = BrowserList::GetInstance(
-      chrome::HOST_DESKTOP_TYPE_NATIVE);
-  ASSERT_EQ(2u, native_browser_list->size());
-  set_browser(native_browser_list->get(1));
+  const BrowserList* browser_list = BrowserList::GetInstance(
+      chrome::GetActiveDesktop());
+  ASSERT_EQ(2u, browser_list->size());
+  set_browser(browser_list->get(1));
 
   FocusOmniboxAndWaitForInstantNTPSupport();
 
@@ -1431,8 +1277,15 @@ IN_PROC_BROWSER_TEST_F(InstantPolicyTest,
   EXPECT_EQ(1, on_theme_changed_calls);
 }
 
+
+// Flaky on Linux: http://crbug.com/265971
+#if defined(OS_LINUX)
+#define MAYBE_SendThemeBackgroundChangedEvent DISABLED_SendThemeBackgroundChangedEvent
+#else
+#define MAYBE_SendThemeBackgroundChangedEvent SendThemeBackgroundChangedEvent
+#endif
 IN_PROC_BROWSER_TEST_F(InstantPolicyTest,
-                       SendThemeBackgroundChangedEvent) {
+                       MAYBE_SendThemeBackgroundChangedEvent) {
   InstallThemeSource();
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
@@ -1640,14 +1493,9 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest, DISABLED_NavigateBackToNTP) {
   EXPECT_TRUE(chrome::IsInstantNTP(active_tab));
 }
 
-// Flaky on Windows and Mac try bots.
-#if defined(OS_CHROMEOS)
-#define MAYBE_DispatchMVChangeEventWhileNavigatingBackToNTP DispatchMVChangeEventWhileNavigatingBackToNTP
-#else
-#define MAYBE_DispatchMVChangeEventWhileNavigatingBackToNTP DISABLED_DispatchMVChangeEventWhileNavigatingBackToNTP
-#endif
+// Flaky: crbug.com/267119
 IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
-                       MAYBE_DispatchMVChangeEventWhileNavigatingBackToNTP) {
+                       DISABLED_DispatchMVChangeEventWhileNavigatingBackToNTP) {
   // Setup Instant.
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
@@ -1687,4 +1535,119 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
   active_tab = browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(UpdateSearchState(active_tab));
   EXPECT_EQ(1, on_most_visited_change_calls_);
+}
+
+// Flaky: crbug.com/267096
+IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
+                       DISABLED_OnDefaultSearchProviderChanged) {
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(browser()->profile());
+  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
+
+  // Setup Instant.
+  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
+  FocusOmniboxAndWaitForInstantNTPSupport();
+  EXPECT_EQ(1, instant_service->GetInstantProcessCount());
+
+  // Navigating to the NTP should use the Instant render process.
+  content::WindowedNotificationObserver new_tab_observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(chrome::kChromeUINewTabURL),
+      CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  new_tab_observer.Wait();
+
+  content::WebContents* ntp_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_TRUE(chrome::IsInstantNTP(ntp_contents));
+  EXPECT_TRUE(instant_service->IsInstantProcess(
+      ntp_contents->GetRenderProcessHost()->GetID()));
+  GURL ntp_url = ntp_contents->GetURL();
+
+  AddBlankTabAndShow(browser());
+  content::WebContents* active_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_FALSE(chrome::IsInstantNTP(active_tab));
+  EXPECT_FALSE(instant_service->IsInstantProcess(
+      active_tab->GetRenderProcessHost()->GetID()));
+
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("t");
+  data.SetURL("http://defaultturl/q={searchTerms}");
+  data.suggestions_url = "http://defaultturl2/q={searchTerms}";
+  data.instant_url = "http://does/not/exist";
+  data.alternate_urls.push_back(data.instant_url + "#q={searchTerms}");
+  data.search_terms_replacement_key = "strk";
+
+  TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
+  TemplateURLService* service =
+      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
+  service->Add(template_url);  // Takes ownership of |template_url|.
+
+  // Change the default search provider.
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<content::NavigationController>(
+          &ntp_contents->GetController()));
+  service->SetDefaultSearchProvider(template_url);
+  observer.Wait();
+
+  // |ntp_contents| should not use the Instant render process.
+  EXPECT_FALSE(chrome::IsInstantNTP(ntp_contents));
+  EXPECT_FALSE(instant_service->IsInstantProcess(
+      ntp_contents->GetRenderProcessHost()->GetID()));
+  // Make sure the URL remains the same.
+  EXPECT_EQ(ntp_url, ntp_contents->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
+                       ReloadLocalNTPOnSearchProviderChange) {
+  // Setup Instant.
+  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
+  FocusOmniboxAndWaitForInstantNTPSupport();
+
+  // Navigate to Local NTP.
+  content::WindowedNotificationObserver new_tab_observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(chrome::kChromeSearchLocalNtpUrl),
+      CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
+  new_tab_observer.Wait();
+
+  content::WebContents* ntp_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  GURL ntp_url = ntp_contents->GetURL();
+
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("t");
+  data.SetURL("http://defaultturl/q={searchTerms}");
+  data.suggestions_url = "http://defaultturl2/q={searchTerms}";
+  data.instant_url = "http://does/not/exist";
+  data.alternate_urls.push_back(data.instant_url + "#q={searchTerms}");
+  data.search_terms_replacement_key = "strk";
+
+  TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
+  TemplateURLService* service =
+      TemplateURLServiceFactory::GetForProfile(browser()->profile());
+  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
+  service->Add(template_url);  // Takes ownership of |template_url|.
+
+  // Change the default search provider. This will reload the local NTP and the
+  // page URL will remain the same.
+  content::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<content::NavigationController>(
+          &ntp_contents->GetController()));
+  service->SetDefaultSearchProvider(template_url);
+  observer.Wait();
+
+  // Make sure the URL remains the same.
+  EXPECT_EQ(ntp_url, ntp_contents->GetURL());
 }

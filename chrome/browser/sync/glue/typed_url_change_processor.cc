@@ -8,12 +8,12 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
@@ -43,7 +43,8 @@ TypedUrlChangeProcessor::TypedUrlChangeProcessor(
       profile_(profile),
       model_associator_(model_associator),
       history_backend_(history_backend),
-      expected_loop_(base::MessageLoop::current()) {
+      backend_loop_(base::MessageLoop::current()),
+      disconnected_(false) {
   DCHECK(model_associator);
   DCHECK(history_backend);
   DCHECK(error_handler);
@@ -55,14 +56,18 @@ TypedUrlChangeProcessor::TypedUrlChangeProcessor(
 }
 
 TypedUrlChangeProcessor::~TypedUrlChangeProcessor() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
 }
 
 void TypedUrlChangeProcessor::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
+
+  base::AutoLock al(disconnect_lock_);
+  if (disconnected_)
+    return;
 
   DVLOG(1) << "Observed typed_url change.";
   if (type == chrome::NOTIFICATION_HISTORY_URLS_MODIFIED) {
@@ -239,7 +244,11 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
     const syncer::BaseTransaction* trans,
     int64 model_version,
     const syncer::ImmutableChangeRecordList& changes) {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
+
+  base::AutoLock al(disconnect_lock_);
+  if (disconnected_)
+    return;
 
   syncer::ReadNode typed_url_root(trans);
   if (typed_url_root.InitByTagLookup(kTypedUrlTag) !=
@@ -295,7 +304,11 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
 }
 
 void TypedUrlChangeProcessor::CommitChangesFromSyncModel() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
+
+  base::AutoLock al(disconnect_lock_);
+  if (disconnected_)
+    return;
 
   // Make sure we stop listening for changes while we're modifying the backend,
   // so we don't try to re-apply these changes to the sync DB.
@@ -317,14 +330,23 @@ void TypedUrlChangeProcessor::CommitChangesFromSyncModel() {
                            model_associator_->GetErrorPercentage());
 }
 
+void TypedUrlChangeProcessor::Disconnect() {
+  base::AutoLock al(disconnect_lock_);
+  disconnected_ = true;
+}
+
 void TypedUrlChangeProcessor::StartImpl(Profile* profile) {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(profile, profile_);
-  StartObserving();
+  DCHECK(history_backend_);
+  DCHECK(backend_loop_);
+  backend_loop_->PostTask(FROM_HERE,
+                          base::Bind(&TypedUrlChangeProcessor::StartObserving,
+                                     base::Unretained(this)));
 }
 
 void TypedUrlChangeProcessor::StartObserving() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
   DCHECK(profile_);
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
@@ -338,7 +360,7 @@ void TypedUrlChangeProcessor::StartObserving() {
 }
 
 void TypedUrlChangeProcessor::StopObserving() {
-  DCHECK(expected_loop_ == base::MessageLoop::current());
+  DCHECK(backend_loop_ == base::MessageLoop::current());
   DCHECK(profile_);
   notification_registrar_.Remove(
       this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,

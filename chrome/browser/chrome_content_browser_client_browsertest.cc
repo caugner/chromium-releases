@@ -3,15 +3,17 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -73,6 +75,37 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
   ASSERT_TRUE(entry != NULL);
   EXPECT_TRUE(entry->GetVirtualURL().is_valid());
   EXPECT_EQ(url, entry->GetVirtualURL());
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
+                       UberURLHandler_InstantExtendedNewTabPage) {
+  const GURL url_original("chrome://newtab");
+  const GURL url_rewritten("http://example.com/newtab");
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kInstantNewTabURL, url_rewritten.spec());
+  chrome::EnableInstantExtendedAPIForTesting();
+
+  ui_test_utils::NavigateToURL(browser(), url_original);
+  NavigationEntry* entry = GetLastCommittedEntry();
+
+  ASSERT_TRUE(entry != NULL);
+  EXPECT_EQ(url_rewritten, entry->GetURL());
+  EXPECT_EQ(url_original, entry->GetVirtualURL());
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientBrowserTest,
+                       UberURLHandler_InstantExtendedNewTabPageDisabled) {
+  const GURL url_original("chrome://newtab");
+  const GURL url_rewritten("http://example.com/newtab");
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kInstantNewTabURL, url_rewritten.spec());
+
+  ui_test_utils::NavigateToURL(browser(), url_original);
+  NavigationEntry* entry = GetLastCommittedEntry();
+
+  ASSERT_TRUE(entry != NULL);
+  EXPECT_EQ(url_original, entry->GetURL());
+  EXPECT_EQ(url_original, entry->GetVirtualURL());
 }
 
 // Test that a basic navigation works in --site-per-process mode.  This prevents

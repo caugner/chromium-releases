@@ -19,12 +19,14 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/perftimer.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/time.h"
+#include "base/sys_info.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "content/public/browser/browser_thread.h"
@@ -55,142 +57,106 @@ bool CheckLinearValues(const std::string& name, int maximum) {
   return CheckValues(name, 1, maximum, maximum + 1);
 }
 
-
-// Helper function for ChromeOS field trials whose group choice is left in a
-// file by an external entity.  The file needs to contain a single character
-// (a trailing newline character is acceptable, as well) indicating the group.
-char GetFieldTrialGroupFromFile(const std::string& name_of_experiment,
-                                const std::string& path_to_group_file) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  // The dice for this experiment have been thrown at boot.  The selected group
-  // number is stored in a file.
-  const base::FilePath kPathToGroupFile(
-      FILE_PATH_LITERAL(path_to_group_file.c_str()));
-  std::string file_content;
-
-  // If the file does not exist, the experiment has not started.
-  if (!file_util::ReadFileToString(kPathToGroupFile, &file_content)) {
-    LOG(INFO) << name_of_experiment << " field trial file "
-              << path_to_group_file << " does not exist.";
-    return '\0';
-  }
-
-  // The file contains a single significant character followed by a newline.
-  if (file_content.empty()) {
-    LOG(WARNING) << name_of_experiment << " field trial: "
-                 << path_to_group_file << " is empty";
-    return '\0';
-  }
-  if (file_content.size() > 2) {
-    // File size includes newline character (since this is only useful under
-    // ChromeOS, we only need to deal with single-character newlines).
-    LOG(WARNING) << name_of_experiment << " field trial: "
-                 << path_to_group_file
-                 << " contains an unexpected number of characters"
-                 << "(" << file_content.size() << ") "
-                 << "'" << file_content << "'";
-    return '\0';
-  }
-
-  return file_content[0];
-}
-
-// Checks to see if the character, potentially describing the field trial,
-// group actually corresponds to a group participating in the field trial.
-// |name_of_experiment| and |path_to_group_file| (the file that contained the
-// character in question) are only for logging. |group_char| is the character
-// in question and |legal_group_chars| is the list of characters describing
-// groups in the field trial.  The character 'x', which is an implied legal
-// character, describes the default/disabled group (i.e., it will not be
-// taking part in the field trial).
-bool IsGroupInFieldTrial(const std::string& name_of_experiment,
-                         const std::string& path_to_group_file,
-                         char group_char,
-                         const std::string& legal_group_chars) {
-  if (group_char == 'x') {
-    LOG(INFO) << name_of_experiment << " in default/disabled group";
-    return false;
-  }
-  if (legal_group_chars.find_first_of(group_char) == std::string::npos) {
-    LOG(WARNING) << name_of_experiment << " field trial: "
-                 << path_to_group_file
-                 << " contains an illegal group (" << group_char << ").";
-    return false;
-  }
-
-  LOG(INFO) << name_of_experiment << " field trial: group " << group_char;
-  return true;
-}
-
-// Establishes field trial for zram (compressed swap) in chromeos.
-// crbug.com/169925
-void SetupZramFieldTrial() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  const char name_of_experiment[] = "ZRAM";
-  const char path_to_group_file[] = "/home/chronos/.swap_exp_enrolled";
-  char group_char = GetFieldTrialGroupFromFile(name_of_experiment,
-                                               path_to_group_file);
-  if (!IsGroupInFieldTrial(name_of_experiment, path_to_group_file, group_char,
-                           "012345678")) {
-    return;
-  }
-
-  const base::FieldTrial::Probability kDivisor = 1;  // on/off only.
-  scoped_refptr<base::FieldTrial> trial =
-      base::FieldTrialList::FactoryGetFieldTrial(name_of_experiment,
-                                                 kDivisor,
-                                                 "default",
-                                                 2013, 12, 31, NULL);
-  // Assign probability of 1 to the group Chrome OS has picked.  Assign 0 to
-  // all other choices.
-  trial->AppendGroup("2GB_RAM_no_swap", group_char == '0' ? kDivisor : 0);
-  trial->AppendGroup("2GB_RAM_2GB_swap", group_char == '1' ? kDivisor : 0);
-  trial->AppendGroup("2GB_RAM_3GB_swap", group_char == '2' ? kDivisor : 0);
-  trial->AppendGroup("4GB_RAM_no_swap", group_char == '3' ? kDivisor : 0);
-  trial->AppendGroup("4GB_RAM_4GB_swap", group_char == '4' ? kDivisor : 0);
-  trial->AppendGroup("4GB_RAM_6GB_swap", group_char == '5' ? kDivisor : 0);
-  trial->AppendGroup("snow_no_swap", group_char == '6' ? kDivisor : 0);
-  trial->AppendGroup("snow_1GB_swap", group_char == '7' ? kDivisor : 0);
-  trial->AppendGroup("snow_2GB_swap", group_char == '8' ? kDivisor : 0);
-
-  // Announce the experiment to any listeners (especially important is the UMA
-  // software, which will append the group names to UMA statistics).
-  trial->group();
-  LOG(INFO) << "Configured in group '" << trial->group_name() << "' for "
-            << name_of_experiment << " field trial";
-}
-
 // Establishes field trial for wifi scanning in chromeos.  crbug.com/242733.
 void SetupProgressiveScanFieldTrial() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   const char name_of_experiment[] = "ProgressiveScan";
   const char path_to_group_file[] = "/home/chronos/.progressive_scan_variation";
-  char group_char = GetFieldTrialGroupFromFile(name_of_experiment,
-                                               path_to_group_file);
-  if (!IsGroupInFieldTrial(name_of_experiment, path_to_group_file, group_char,
-                           "c1234")) {
-    return;
-  }
-
-  const base::FieldTrial::Probability kDivisor = 1;  // on/off only.
+  const base::FieldTrial::Probability kDivisor = 1000;
   scoped_refptr<base::FieldTrial> trial =
-      base::FieldTrialList::FactoryGetFieldTrial(name_of_experiment,
-                                                 kDivisor,
-                                                 "default",
-                                                 2013, 12, 31, NULL);
-  // Assign probability of 1 to the group Chrome OS has picked.  Assign 0 to
-  // all other choices.
-  trial->AppendGroup("FullScan", group_char == 'c' ? kDivisor : 0);
-  trial->AppendGroup("33Percent_4MinMax", group_char == '1' ? kDivisor : 0);
-  trial->AppendGroup("50Percent_4MinMax", group_char == '2' ? kDivisor : 0);
-  trial->AppendGroup("50Percent_8MinMax", group_char == '3' ? kDivisor : 0);
-  trial->AppendGroup("100Percent_8MinMax", group_char == '4' ? kDivisor : 0);
+      base::FieldTrialList::FactoryGetFieldTrial(
+          name_of_experiment, kDivisor, "Default", 2013, 12, 31,
+          base::FieldTrial::SESSION_RANDOMIZED, NULL);
+
+  // Announce the groups with 0 percentage; the actual percentages come from
+  // the server configuration.
+  std::map<int, std::string> group_to_char;
+  group_to_char[trial->AppendGroup("FullScan", 0)] = "c";
+  group_to_char[trial->AppendGroup("33Percent_4MinMax", 0)] = "1";
+  group_to_char[trial->AppendGroup("50Percent_4MinMax", 0)] = "2";
+  group_to_char[trial->AppendGroup("50Percent_8MinMax", 0)] = "3";
+  group_to_char[trial->AppendGroup("100Percent_8MinMax", 0)] = "4";
+
+  // Announce the experiment to any listeners (especially important is the UMA
+  // software, which will append the group names to UMA statistics).
+  const int group_num = trial->group();
+  std::string group_char = "x";
+  if (ContainsKey(group_to_char, group_num))
+    group_char = group_to_char[group_num];
+
+  // Write the group to the file to be read by ChromeOS.
+  const base::FilePath kPathToGroupFile(path_to_group_file);
+
+  if (file_util::WriteFile(kPathToGroupFile, group_char.c_str(),
+                           group_char.length())) {
+    LOG(INFO) << "Configured in group '" << trial->group_name()
+              << "' ('" << group_char << "') for "
+              << name_of_experiment << " field trial";
+  } else {
+    LOG(ERROR) << "Couldn't write to " << path_to_group_file;
+  }
+}
+
+// Finds out if we're on a 2GB Parrot.
+//
+// This code reads and parses /etc/lsb-release. There are at least four other
+// places that open and parse /etc/lsb-release, and I wish I could fix the
+// mess.  At least this code is temporary.
+
+bool Is2GBParrot() {
+  base::FilePath path("/etc/lsb-release");
+  std::string contents;
+  if (!file_util::ReadFileToString(path, &contents))
+    return false;
+  if (contents.find("CHROMEOS_RELEASE_BOARD=parrot") == std::string::npos)
+    return false;
+  // There are 2GB and 4GB models.
+  return base::SysInfo::AmountOfPhysicalMemory() <= 2LL * 1024 * 1024 * 1024;
+}
+
+// Sets up field trial for measuring swap and CPU metrics after tab switch
+// and scroll events. crbug.com/253994
+void SetupSwapJankFieldTrial() {
+  const char name_of_experiment[] = "SwapJank64vs32Parrot";
+
+  // Determine if this is a 32 or 64 bit build of Chrome.
+  bool is_chrome_64 = sizeof(void*) == 8;
+
+  // Determine if this is a 32 or 64 bit kernel.
+  bool is_kernel_64 = base::SysInfo::OperatingSystemArchitecture() == "x86_64";
+
+  // A 32 bit kernel requires 32 bit Chrome.
+  DCHECK(is_kernel_64 || !is_chrome_64);
+
+  // Find out if we're on a 2GB Parrot.
+  bool is_parrot = Is2GBParrot();
+
+  // All groups are either on or off.
+  const base::FieldTrial::Probability kTotalProbability = 1;
+  scoped_refptr<base::FieldTrial> trial =
+      base::FieldTrialList::FactoryGetFieldTrial(
+          name_of_experiment, kTotalProbability, "default", 2013, 12, 31,
+          base::FieldTrial::SESSION_RANDOMIZED, NULL);
+
+  // Assign probability of 1 to this Chrome's group.  Assign 0 to all other
+  // choices.
+  trial->AppendGroup("kernel_64_chrome_64",
+                     is_parrot && is_kernel_64 && is_chrome_64 ?
+                     kTotalProbability : 0);
+  trial->AppendGroup("kernel_64_chrome_32",
+                     is_parrot && is_kernel_64 && !is_chrome_64 ?
+                     kTotalProbability : 0);
+  trial->AppendGroup("kernel_32_chrome_32",
+                     is_parrot && !is_kernel_64 && !is_chrome_64 ?
+                     kTotalProbability : 0);
+  trial->AppendGroup("not_parrot",
+                     !is_parrot ? kTotalProbability : 0);
 
   // Announce the experiment to any listeners (especially important is the UMA
   // software, which will append the group names to UMA statistics).
   trial->group();
-  LOG(INFO) << "Configured in group '" << trial->group_name() << "' for "
-            << name_of_experiment << " field trial";
+  DVLOG(1) << "Configured in group '" << trial->group_name() << "' for "
+           << name_of_experiment << " field trial";
 }
 
 }  // namespace
@@ -212,13 +178,18 @@ void ExternalMetrics::Start() {
   valid_user_actions_.insert("Updater.ServerCertificateChanged");
   valid_user_actions_.insert("Updater.ServerCertificateFailed");
 
+  // Initialize here field trials that don't need to read from files.
+  // (None for the moment.)
+
   // Initialize any chromeos field trials that need to read from a file (e.g.,
   // those that have an upstart script determine their experimental group for
   // them) then schedule the data collection.  All of this is done on the file
   // thread.
   bool task_posted = BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&chromeos::ExternalMetrics::SetupAllFieldTrials, this));
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&chromeos::ExternalMetrics::SetupFieldTrialsOnFileThread,
+                 this));
   DCHECK(task_posted);
 }
 
@@ -438,10 +409,13 @@ void ExternalMetrics::ScheduleCollector() {
   DCHECK(result);
 }
 
-void ExternalMetrics::SetupAllFieldTrials() {
+void ExternalMetrics::SetupFieldTrialsOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  SetupZramFieldTrial();
+  // Field trials that do not read from files can be initialized in
+  // ExternalMetrics::Start() above.
   SetupProgressiveScanFieldTrial();
+  SetupSwapJankFieldTrial();
+
   ScheduleCollector();
 }
 

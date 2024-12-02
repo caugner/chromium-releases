@@ -13,34 +13,71 @@
 
 @class AutofillDetailsContainer;
 @class AutofillDialogWindowController;
+@class AutofillNotificationContainer;
 @class AutofillSectionContainer;
 @class GTMWidthBasedTweaker;
+@class HyperlinkTextView;
 
 namespace autofill {
-  class AutofillDialogController;
+  class AutofillDialogViewDelegate;
 }
 
 // NSViewController for the main portion of the autofill dialog. Contains
 // account chooser, details for current payment instruments, OK/Cancel.
 // Might dynamically add and remove other elements.
-@interface AutofillMainContainer : NSViewController<AutofillLayout> {
+@interface AutofillMainContainer : NSViewController<AutofillLayout,
+                                                    NSTextViewDelegate> {
  @private
   base::scoped_nsobject<GTMWidthBasedTweaker> buttonContainer_;
+  base::scoped_nsobject<NSButton> saveInChromeCheckbox_;
   base::scoped_nsobject<AutofillDetailsContainer> detailsContainer_;
+  base::scoped_nsobject<HyperlinkTextView> legalDocumentsView_;
+  base::scoped_nsobject<AutofillNotificationContainer> notificationContainer_;
   AutofillDialogWindowController* target_;
-  autofill::AutofillDialogController* controller_;  // Not owned.
+
+  // Weak. Owns the dialog.
+  autofill::AutofillDialogViewDelegate* delegate_;
+
+  // Preferred size for legal documents.
+  NSSize legalDocumentsSize_;
+
+  // Dirty marker for preferred size.
+  BOOL legalDocumentsSizeDirty_;
 }
 
 @property(assign, nonatomic) AutofillDialogWindowController* target;
 
 // Designated initializer.
-- (id)initWithController:(autofill::AutofillDialogController*)controller;
+- (id)initWithDelegate:(autofill::AutofillDialogViewDelegate*)delegate;
 
-// Returns the view controller responsible for |section|.
+// Sets the anchor point for the notificationView_.
+- (void)setAnchorView:(NSView*)anchorView;
+
+// Returns the view delegate responsible for |section|.
 - (AutofillSectionContainer*)sectionForId:(autofill::DialogSection)section;
 
-// Called when the controller-maintained suggestions model has changed.
+// Called when the delegate-maintained suggestions model has changed.
 - (void)modelChanged;
+
+// Get status of "Save in Chrome" checkbox.
+- (BOOL)saveDetailsLocally;
+
+// Called when the legal documents text might need to be refreshed.
+- (void)updateLegalDocuments;
+
+// Called when there are changes to the notification area.
+- (void)updateNotificationArea;
+
+// Validates form input data.
+- (BOOL)validate;
+
+@end
+
+
+// AutofillMainContainer helper functions, for testing purposes only.
+@interface AutofillMainContainer (Testing)
+
+@property(readonly, nonatomic) NSButton* saveInChromeCheckboxForTesting;
 
 @end
 

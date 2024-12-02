@@ -12,7 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "chrome/browser/signin/oauth2_token_service.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -66,12 +66,15 @@ class DeviceOAuth2TokenService : public OAuth2TokenService {
                                     PrefService* local_state);
   virtual ~DeviceOAuth2TokenService();
 
-  void OnValidationComplete(ValidatingConsumer* validator, bool token_is_valid);
+  // Implementation of OAuth2TokenService.
+  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+
+  void OnValidationComplete(bool token_is_valid);
 
   bool refresh_token_is_valid_;
   int max_refresh_token_validation_retries_;
 
-  scoped_ptr<std::set<ValidatingConsumer*> > pending_validators_;
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
 
   // Cache the decrypted refresh token, so we only decrypt once.
   std::string refresh_token_;

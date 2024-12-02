@@ -22,11 +22,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/background.h"
 
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#endif
-
 BrowserNonClientFrameView::BrowserNonClientFrameView(BrowserFrame* frame,
                                                      BrowserView* browser_view)
     : frame_(frame),
@@ -56,19 +51,14 @@ void BrowserNonClientFrameView::OnThemeChanged() {
 void BrowserNonClientFrameView::UpdateAvatarInfo() {
   if (browser_view_->ShouldShowAvatar()) {
     if (!avatar_button_) {
+      Profile* profile = browser_view_->browser()->profile();
+      if (profile->IsManaged() && !avatar_label_) {
+        avatar_label_ = new AvatarLabel(browser_view_);
+        AddChildView(avatar_label_);
+      }
       avatar_button_ = new AvatarMenuButton(browser_view_->browser(),
                                             browser_view_->IsOffTheRecord());
       AddChildView(avatar_button_);
-#if defined(ENABLE_MANAGED_USERS)
-      Profile* profile = browser_view_->browser()->profile();
-      ManagedUserService* service =
-          ManagedUserServiceFactory::GetForProfile(profile);
-      if (service->ProfileIsManaged() && !avatar_label_) {
-        avatar_label_ =
-            new AvatarLabel(browser_view_, frame_->GetThemeProvider());
-        AddChildView(avatar_label_);
-      }
-#endif
       frame_->GetRootView()->Layout();
     }
   } else if (avatar_button_) {

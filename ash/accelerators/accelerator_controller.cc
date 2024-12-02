@@ -39,12 +39,13 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/web_notification/web_notification_tray.h"
-#include "ash/touch/touch_observer_hud.h"
+#include "ash/touch/touch_hud_debug.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/partial_screenshot_view.h"
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_cycle_controller.h"
+#include "ash/wm/window_selector_controller.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/bind.h"
@@ -93,9 +94,19 @@ bool HandleCycleWindowMRU(WindowCycleController::Direction direction,
   return true;
 }
 
+bool HandleCycleWindowOverviewMRU(WindowSelector::Direction direction) {
+  Shell::GetInstance()->
+      window_selector_controller()->HandleCycleWindow(direction);
+  return true;
+}
+
 void HandleCycleWindowLinear(CycleDirection direction) {
   Shell::GetInstance()->
-        window_cycle_controller()->HandleLinearCycleWindow();
+      window_cycle_controller()->HandleLinearCycleWindow();
+}
+
+void ToggleOverviewMode() {
+  Shell::GetInstance()->window_selector_controller()->ToggleOverview();
 }
 
 bool HandleAccessibleFocusCycle(bool reverse) {
@@ -513,19 +524,39 @@ bool AcceleratorController::PerformAction(int action,
     case CYCLE_BACKWARD_MRU:
       if (key_code == ui::VKEY_TAB)
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_PREVWINDOW_TAB);
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAshEnableOverviewMode)) {
+        return HandleCycleWindowOverviewMRU(WindowSelector::BACKWARD);
+      }
       return HandleCycleWindowMRU(WindowCycleController::BACKWARD,
                                   accelerator.IsAltDown());
     case CYCLE_FORWARD_MRU:
       if (key_code == ui::VKEY_TAB)
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_NEXTWINDOW_TAB);
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAshEnableOverviewMode)) {
+        return HandleCycleWindowOverviewMRU(WindowSelector::FORWARD);
+      }
       return HandleCycleWindowMRU(WindowCycleController::FORWARD,
                                   accelerator.IsAltDown());
     case CYCLE_BACKWARD_LINEAR:
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAshEnableOverviewMode)) {
+        shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_OVERVIEW_F5);
+        ToggleOverviewMode();
+        return true;
+      }
       if (key_code == ui::VKEY_MEDIA_LAUNCH_APP1)
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_PREVWINDOW_F5);
       HandleCycleWindowLinear(CYCLE_BACKWARD);
       return true;
     case CYCLE_FORWARD_LINEAR:
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAshEnableOverviewMode)) {
+        shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_OVERVIEW_F5);
+        ToggleOverviewMode();
+        return true;
+      }
       if (key_code == ui::VKEY_MEDIA_LAUNCH_APP1)
         shell->delegate()->RecordUserMetricsAction(UMA_ACCEL_NEXTWINDOW_F5);
       HandleCycleWindowLinear(CYCLE_FORWARD);
@@ -561,8 +592,8 @@ bool AcceleratorController::PerformAction(int action,
     case TOUCH_HUD_CLEAR: {
       internal::RootWindowController* controller =
           internal::RootWindowController::ForActiveRootWindow();
-      if (controller->touch_observer_hud()) {
-        controller->touch_observer_hud()->Clear();
+      if (controller->touch_hud_debug()) {
+        controller->touch_hud_debug()->Clear();
         return true;
       }
       return false;
@@ -570,11 +601,16 @@ bool AcceleratorController::PerformAction(int action,
     case TOUCH_HUD_MODE_CHANGE: {
       internal::RootWindowController* controller =
           internal::RootWindowController::ForActiveRootWindow();
-      if (controller->touch_observer_hud()) {
-        controller->touch_observer_hud()->ChangeToNextMode();
+      if (controller->touch_hud_debug()) {
+        controller->touch_hud_debug()->ChangeToNextMode();
         return true;
       }
       return false;
+    }
+    case TOUCH_HUD_PROJECTION_TOGGLE: {
+      bool enabled = Shell::GetInstance()->is_touch_hud_projection_enabled();
+      Shell::GetInstance()->SetTouchHudProjectionEnabled(!enabled);
+      return true;
     }
     case DISABLE_GPU_WATCHDOG:
       content::GpuDataManager::GetInstance()->DisableGpuWatchdog();
@@ -754,7 +790,7 @@ bool AcceleratorController::PerformAction(int action,
       break;
     case PREVIOUS_IME:
       if (ime_control_delegate_)
-        return ime_control_delegate_->HandlePreviousIme();
+        return ime_control_delegate_->HandlePreviousIme(accelerator);
       break;
     case PRINT_UI_HIERARCHIES:
       return HandlePrintUIHierarchies();
@@ -898,14 +934,12 @@ bool AcceleratorController::PerformAction(int action,
       Shell::GetInstance()->power_button_controller()->
           OnLockButtonEvent(action == LOCK_PRESSED, base::TimeTicks());
       return true;
-#if !defined(NDEBUG)
     case PRINT_LAYER_HIERARCHY:
       return HandlePrintLayerHierarchy();
     case PRINT_VIEW_HIERARCHY:
       return HandlePrintViewHierarchy();
     case PRINT_WINDOW_HIERARCHY:
       return HandlePrintWindowHierarchy();
-#endif
     default:
       NOTREACHED() << "Unhandled action " << action;
   }

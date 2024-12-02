@@ -10,10 +10,10 @@
 #include "base/containers/hash_tables.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/timer.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/visit_database.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 class HistoryService;
 
@@ -91,6 +91,11 @@ class PrerenderLocalPredictor : public history::VisitDatabaseObserver {
     EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MATCH = 48,
     EVENT_PRERENDER_URL_LOOKUP_MULTIPLE_SOURCE_WEBCONTENTS_FOUND = 49,
     EVENT_CONTINUE_PRERENDER_CHECK_ON_SIDE_EFFECT_FREE_WHITELIST = 50,
+    EVENT_CONTINUE_PRERENDER_CHECK_EXAMINE_NEXT_URL = 51,
+    EVENT_ISSUE_PRERENDER_ALREADY_PRERENDERING = 52,
+    EVENT_ISSUE_PRERENDER_NEW_PRERENDER = 53,
+    EVENT_ISSUE_PRERENDER_CANCELLED_OLD_PRERENDER = 54,
+    EVENT_CONTINUE_PRERENDER_CHECK_FALLTHROUGH_PRERENDERING = 55,
     EVENT_MAX_VALUE
   };
 

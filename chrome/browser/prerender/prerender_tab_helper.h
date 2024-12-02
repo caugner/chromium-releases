@@ -7,10 +7,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "googleurl/src/gurl.h"
+#include "url/gurl.h"
 
 namespace predictors {
 class LoggedInPredictorTable;
@@ -34,6 +34,10 @@ class PrerenderTabHelper
     EVENT_MAINFRAME_COMMIT = 4,
     EVENT_MAINFRAME_COMMIT_DOMAIN_LOGGED_IN = 5,
     EVENT_LOGIN_ACTION_ADDED = 6,
+    EVENT_LOGIN_ACTION_ADDED_MAINFRAME = 7,
+    EVENT_LOGIN_ACTION_ADDED_MAINFRAME_PW_EMPTY = 8,
+    EVENT_LOGIN_ACTION_ADDED_SUBFRAME = 9,
+    EVENT_LOGIN_ACTION_ADDED_SUBFRAME_PW_EMPTY = 10,
     EVENT_MAX_VALUE
   };
 

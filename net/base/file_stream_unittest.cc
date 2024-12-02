@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
 #include "base/synchronization/waitable_event.h"
@@ -44,7 +44,7 @@ class FileStreamTest : public PlatformTest {
     file_util::WriteFile(temp_file_path_, kTestData, kTestDataSize);
   }
   virtual void TearDown() {
-    EXPECT_TRUE(file_util::Delete(temp_file_path_, false));
+    EXPECT_TRUE(base::DeleteFile(temp_file_path_, false));
 
     PlatformTest::TearDown();
   }
@@ -116,7 +116,7 @@ TEST_F(FileStreamTest, UseFileHandle) {
   read_stream.reset();
 
   // 2. Test writing with a file handle.
-  file_util::Delete(temp_file_path(), false);
+  base::DeleteFile(temp_file_path(), false);
   flags = base::PLATFORM_FILE_OPEN_ALWAYS | base::PLATFORM_FILE_WRITE;
   file = base::CreatePlatformFile(temp_file_path(), flags, &created, NULL);
 

@@ -292,6 +292,8 @@ TEST_F(GLES2DecoderWithShaderTest, DrawArraysDeletedProgramSucceeds) {
   EXPECT_CALL(*gl_, DrawArrays(_, _, _))
       .Times(1)
       .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, DeleteProgram(kServiceProgramId))
+      .Times(1);
   DrawArrays cmd;
   cmd.Init(GL_TRIANGLES, 0, kNumVertices);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -684,6 +686,8 @@ TEST_F(GLES2DecoderWithShaderTest, DrawElementsDeletedProgramSucceeds) {
   DoDeleteProgram(client_program_id_, kServiceProgramId);
 
   EXPECT_CALL(*gl_, DrawElements(_, _, _, _))
+      .Times(1);
+  EXPECT_CALL(*gl_, DeleteProgram(kServiceProgramId))
       .Times(1);
   DrawElements cmd;
   cmd.Init(GL_TRIANGLES, kValidIndexRangeCount, GL_UNSIGNED_SHORT,
@@ -2316,7 +2320,8 @@ void GLES2DecoderTest::CheckReadPixelsOutOfRange(
   cmd.Init(in_read_x, in_read_y, in_read_width, in_read_height,
            kFormat, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 
   GLint unpadded_row_size = emu.ComputeImageDataSize(in_read_width, 1);
@@ -2393,7 +2398,8 @@ TEST_F(GLES2DecoderTest, ReadPixels) {
   ReadPixels cmd;
   cmd.Init(0, 0, kWidth, kHeight, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   for (GLint yy = 0; yy < kHeight; ++yy) {
     EXPECT_TRUE(emu.CompareRowSegment(
@@ -2440,7 +2446,8 @@ TEST_F(GLES2DecoderRGBBackbufferTest, ReadPixelsNoAlphaBackbuffer) {
   ReadPixels cmd;
   cmd.Init(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   for (GLint yy = 0; yy < kHeight; ++yy) {
     EXPECT_TRUE(emu.CompareRowSegment(
@@ -2477,34 +2484,41 @@ TEST_F(GLES2DecoderTest, ReadPixelsInvalidArgs) {
   ReadPixels cmd;
   cmd.Init(0, 0, -1, 1, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(0, 0, 1, -1, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(0, 0, 1, 1, GL_RGB, GL_INT,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
   cmd.Init(0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE,
            kInvalidSharedMemoryId, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
   cmd.Init(0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, kInvalidSharedMemoryOffset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
   cmd.Init(0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           kInvalidSharedMemoryId, result_shm_offset);
+           kInvalidSharedMemoryId, result_shm_offset,
+           false);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
   cmd.Init(0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, kInvalidSharedMemoryOffset);
+           result_shm_id, kInvalidSharedMemoryOffset,
+           false);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
 }
 
@@ -4932,7 +4946,8 @@ TEST_F(GLES2DecoderTest, ReadPixelsGLError) {
   ReadPixels cmd;
   cmd.Init(x, y, width, height, kFormat, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
-           result_shm_id, result_shm_offset);
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_OUT_OF_MEMORY, GetGLError());
 }
@@ -5628,11 +5643,8 @@ TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUM) {
       false,   // request stencil
       true);   // bind generates resource
 
-  StrictMock<MockStreamTextureManager> manager;
-  decoder_->SetStreamTextureManager(&manager);
-
-  EXPECT_CALL(manager, CreateStreamTexture(kServiceTextureId,
-                                           client_texture_id_))
+  EXPECT_CALL(*stream_texture_manager(), CreateStreamTexture(
+      kServiceTextureId, client_texture_id_))
       .WillOnce(Return(kObjectId))
       .RetiresOnSaturation();
 
@@ -5646,6 +5658,10 @@ TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUM) {
   TextureRef* texture_ref = GetTexture(client_texture_id_);
   EXPECT_TRUE(texture_ref != NULL);
   EXPECT_TRUE(texture_ref->texture()->IsStreamTexture());
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
 TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUMBadId) {
@@ -5707,40 +5723,57 @@ TEST_F(GLES2DecoderManualInitTest, CreateStreamTextureCHROMIUMAlreadySet) {
   cmd.Init(client_texture_id_, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
-TEST_F(GLES2DecoderManualInitTest, BindStreamTextureCHROMIUM) {
+TEST_F(GLES2DecoderManualInitTest, DrawStreamTextureCHROMIUM) {
   InitDecoder(
       "GL_CHROMIUM_stream_texture GL_OES_EGL_image_external",  // extensions
-      false,   // has alpha
-      false,   // has depth
-      false,   // has stencil
-      false,   // request alpha
-      false,   // request depth
-      false,   // request stencil
-      true);   // bind generates resource
+      true,                                                    // has alpha
+      true,                                                    // has depth
+      false,                                                   // has stencil
+      true,                                                    // request alpha
+      true,                                                    // request depth
+      false,  // request stencil
+      true);  // bind generates resource
 
-  StrictMock<MockStreamTextureManager> manager;
   StrictMock<MockStreamTexture> stream_texture;
-  decoder_->SetStreamTextureManager(&manager);
 
   TextureRef* texture_ref = GetTexture(client_texture_id_);
   group().texture_manager()->SetStreamTexture(texture_ref, true);
 
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_EXTERNAL_OES, kServiceTextureId))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(manager, LookupStreamTexture(kServiceTextureId))
+  DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  SetupSamplerExternalProgram();
+  SetupIndexBuffer();
+  AddExpectationsForSimulatedAttrib0(kMaxValidIndex + 1, 0);
+  SetupExpectationsForApplyingDefaultDirtyState();
+  EXPECT_TRUE(group().texture_manager()->CanRender(texture_ref));
+
+  InSequence s;
+  EXPECT_CALL(*stream_texture_manager(), LookupStreamTexture(kServiceTextureId))
       .WillOnce(Return(&stream_texture))
       .RetiresOnSaturation();
   EXPECT_CALL(stream_texture, Update())
       .Times(1)
       .RetiresOnSaturation();
-
-  BindTexture cmd;
-  cmd.Init(GL_TEXTURE_EXTERNAL_OES, client_texture_id_);
+  EXPECT_CALL(*gl_, DrawElements(_, _, _, _))
+      .Times(1);
+  DrawElements cmd;
+  cmd.Init(GL_TRIANGLES, kValidIndexRangeCount, GL_UNSIGNED_SHORT,
+           kValidIndexRangeStart * 2);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
 TEST_F(GLES2DecoderManualInitTest, BindStreamTextureCHROMIUMInvalid) {
@@ -5766,6 +5799,11 @@ TEST_F(GLES2DecoderManualInitTest, BindStreamTextureCHROMIUMInvalid) {
   cmd2.Init(GL_TEXTURE_CUBE_MAP, client_texture_id_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd2));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
 TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUM) {
@@ -5779,13 +5817,11 @@ TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUM) {
       false,   // request stencil
       true);   // bind generates resource
 
-  StrictMock<MockStreamTextureManager> manager;
-  decoder_->SetStreamTextureManager(&manager);
-
   TextureRef* texture_ref = GetTexture(client_texture_id_);
   group().texture_manager()->SetStreamTexture(texture_ref, true);
 
-  EXPECT_CALL(manager, DestroyStreamTexture(kServiceTextureId))
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
       .Times(1)
       .RetiresOnSaturation();
 
@@ -5807,9 +5843,6 @@ TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUMInvalid) {
       false,   // request depth
       false,   // request stencil
       true);   // bind generates resource
-
-  TextureRef* texture_ref = GetTexture(client_texture_id_);
-  group().texture_manager()->SetStreamTexture(texture_ref, false);
 
   DestroyStreamTextureCHROMIUM cmd;
   cmd.Init(client_texture_id_);
@@ -5836,7 +5869,7 @@ TEST_F(GLES2DecoderManualInitTest, DestroyStreamTextureCHROMIUMBadId) {
 
 TEST_F(GLES2DecoderManualInitTest, StreamTextureCHROMIUMNullMgr) {
   InitDecoder(
-      "GL_CHROMIUM_stream_texture",  // extensions
+      "",  // extensions
       false,   // has alpha
       false,   // has depth
       false,   // has stencil
@@ -5871,21 +5904,12 @@ TEST_F(GLES2DecoderManualInitTest, ReCreateStreamTextureCHROMIUM) {
       false,   // request stencil
       true);   // bind generates resource
 
-  StrictMock<MockStreamTextureManager> manager;
-  StrictMock<MockStreamTexture> stream_texture;
-  decoder_->SetStreamTextureManager(&manager);
-
-  EXPECT_CALL(manager, LookupStreamTexture(kServiceTextureId))
-      .WillOnce(Return(&stream_texture))
-      .RetiresOnSaturation();
-  EXPECT_CALL(stream_texture, Update())
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
       .Times(1)
       .RetiresOnSaturation();
-  EXPECT_CALL(manager, DestroyStreamTexture(kServiceTextureId))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(manager, CreateStreamTexture(kServiceTextureId,
-                                           client_texture_id_))
+  EXPECT_CALL(*stream_texture_manager(),
+              CreateStreamTexture(kServiceTextureId, client_texture_id_))
       .WillOnce(Return(kObjectId))
       .RetiresOnSaturation();
 
@@ -5906,6 +5930,11 @@ TEST_F(GLES2DecoderManualInitTest, ReCreateStreamTextureCHROMIUM) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd2));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
   EXPECT_TRUE(texture_ref->texture()->IsStreamTexture());
+
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
 TEST_F(GLES2DecoderManualInitTest, ProduceAndConsumeStreamTextureCHROMIUM) {
@@ -5919,27 +5948,10 @@ TEST_F(GLES2DecoderManualInitTest, ProduceAndConsumeStreamTextureCHROMIUM) {
       false,   // request stencil
       true);   // bind generates resource
 
-  StrictMock<MockStreamTextureManager> manager;
-  StrictMock<MockStreamTexture> stream_texture;
-  decoder_->SetStreamTextureManager(&manager);
-
   TextureRef* texture_ref = GetTexture(client_texture_id_);
   group().texture_manager()->SetStreamTexture(texture_ref, true);
 
-  EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_EXTERNAL_OES, kServiceTextureId))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_CALL(manager, LookupStreamTexture(kServiceTextureId))
-      .WillOnce(Return(&stream_texture))
-      .RetiresOnSaturation();
-  EXPECT_CALL(stream_texture, Update())
-      .Times(1)
-      .RetiresOnSaturation();
-
-  BindTexture cmd;
-  cmd.Init(GL_TEXTURE_EXTERNAL_OES, client_texture_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
 
   GLbyte mailbox[GL_MAILBOX_SIZE_CHROMIUM];
   group().mailbox_manager()->GenerateMailboxName(
@@ -5979,6 +5991,11 @@ TEST_F(GLES2DecoderManualInitTest, ProduceAndConsumeStreamTextureCHROMIUM) {
 
   // Service ID is restored.
   EXPECT_EQ(kServiceTextureId, texture_ref->service_id());
+
+  EXPECT_CALL(*stream_texture_manager(),
+              DestroyStreamTexture(kServiceTextureId))
+      .Times(1)
+      .RetiresOnSaturation();
 }
 
 TEST_F(GLES2DecoderManualInitTest, ARBTextureRectangleBindTexture) {
@@ -6648,8 +6665,9 @@ TEST_F(GLES2DecoderWithShaderTest, UnClearedAttachmentsGetClearedOnReadPixels) {
   uint32 pixels_shm_offset = kSharedMemoryOffset + sizeof(*result);
   ReadPixels cmd;
   cmd.Init(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-         pixels_shm_id, pixels_shm_offset,
-         result_shm_id, result_shm_offset);
+           pixels_shm_id, pixels_shm_offset,
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -6708,8 +6726,9 @@ TEST_F(GLES2DecoderManualInitTest,
   uint32 pixels_shm_offset = kSharedMemoryOffset + sizeof(Result);
   ReadPixels cmd;
   cmd.Init(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-         pixels_shm_id, pixels_shm_offset,
-         result_shm_id, result_shm_offset);
+           pixels_shm_id, pixels_shm_offset,
+           result_shm_id, result_shm_offset,
+           false);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }

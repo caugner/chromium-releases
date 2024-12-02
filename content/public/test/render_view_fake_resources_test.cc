@@ -7,10 +7,11 @@
 #include <string.h>
 
 #include "base/command_line.h"
-#include "base/process.h"
+#include "base/memory/shared_memory.h"
+#include "base/process/process.h"
 #include "base/run_loop.h"
-#include "base/shared_memory.h"
-#include "base/time.h"
+#include "base/time/time.h"
+#include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/resource_response.h"
@@ -19,7 +20,6 @@
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "content/test/mock_render_process.h"
-#include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_response_headers.h"
@@ -30,7 +30,7 @@
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/ui_base_switches.h"
-#include "webkit/common/dom_storage/dom_storage_types.h"
+#include "url/gurl.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace content {
@@ -87,8 +87,7 @@ void RenderViewFakeResourcesTest::SetUp() {
   ViewMsg_New_Params params;
   params.view_id = kViewId;
   params.opener_route_id = MSG_ROUTING_NONE;
-  params.session_storage_namespace_id =
-      dom_storage::kInvalidSessionStorageNamespaceId;
+  params.session_storage_namespace_id = kInvalidSessionStorageNamespaceId;
   ASSERT_TRUE(channel_->Send(new ViewMsg_New(params)));
   message_loop_.Run();
 }

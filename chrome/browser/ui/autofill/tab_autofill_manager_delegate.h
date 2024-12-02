@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_types.h"
 #include "components/autofill/content/browser/autocheckout_steps.h"
+#include "components/autofill/core/browser/autocheckout_bubble_state.h"
 #include "components/autofill/core/browser/autofill_manager_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
@@ -24,7 +25,7 @@ class WebContents;
 namespace autofill {
 
 class AutocheckoutBubble;
-class AutofillDialogControllerImpl;
+class AutofillDialogController;
 class AutofillPopupControllerImpl;
 struct FormData;
 
@@ -35,6 +36,9 @@ class TabAutofillManagerDelegate
       public content::WebContentsObserver {
  public:
   virtual ~TabAutofillManagerDelegate();
+
+  // Called when the tab corresponding to |this| instance is activated.
+  void TabActivated(int reason);
 
   // AutofillManagerDelegate implementation.
   virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
@@ -49,10 +53,10 @@ class TabAutofillManagerDelegate
       const AutofillMetrics& metric_logger,
       const CreditCard& credit_card,
       const base::Closure& save_card_callback) OVERRIDE;
-  virtual void ShowAutocheckoutBubble(
+  virtual bool ShowAutocheckoutBubble(
       const gfx::RectF& bounds,
       bool is_google_user,
-      const base::Callback<void(bool)>& callback) OVERRIDE;
+      const base::Callback<void(AutocheckoutBubbleState)>& callback) OVERRIDE;
   virtual void HideAutocheckoutBubble() OVERRIDE;
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
@@ -68,6 +72,9 @@ class TabAutofillManagerDelegate
       const std::vector<string16>& icons,
       const std::vector<int>& identifiers,
       base::WeakPtr<AutofillPopupDelegate> delegate) OVERRIDE;
+  virtual void UpdateAutofillPopupDataListValues(
+      const std::vector<base::string16>& values,
+      const std::vector<base::string16>& labels) OVERRIDE;
   virtual void HideAutofillPopup() OVERRIDE;
   virtual bool IsAutocompleteEnabled() OVERRIDE;
 
@@ -80,9 +87,12 @@ class TabAutofillManagerDelegate
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
+  virtual void WebContentsDestroyed(
+      content::WebContents* web_contents) OVERRIDE;
+  virtual void WasShown() OVERRIDE;
 
   // Exposed for testing.
-  AutofillDialogControllerImpl* GetDialogControllerForTesting() {
+  AutofillDialogController* GetDialogControllerForTesting() {
     return dialog_controller_.get();
   }
 
@@ -91,7 +101,7 @@ class TabAutofillManagerDelegate
   friend class content::WebContentsUserData<TabAutofillManagerDelegate>;
 
   content::WebContents* const web_contents_;
-  base::WeakPtr<AutofillDialogControllerImpl> dialog_controller_;
+  base::WeakPtr<AutofillDialogController> dialog_controller_;
   base::WeakPtr<AutocheckoutBubble> autocheckout_bubble_;
   base::WeakPtr<AutofillPopupControllerImpl> popup_controller_;
 

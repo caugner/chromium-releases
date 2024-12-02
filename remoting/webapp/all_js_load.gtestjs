@@ -44,14 +44,16 @@ AllJsLoadTest.prototype = {
     'host_session.js',
     'host_setup_dialog.js',
     'host_table_entry.js',
+    'identity.js',
     //'jscompiler_hacks.js',  // Only used by jscompiler.
     'l10n.js',
     'log_to_server.js',
     'menu_button.js',
+    'oauth2_api.js',
     'oauth2_callback.js',
     'oauth2.js',
+    'paired_client_manager.js',
     'plugin_settings.js',
-    'xhr_proxy.js',
     'remoting.js',
     'session_connector.js',
     'server_log_entry.js',
@@ -65,6 +67,7 @@ AllJsLoadTest.prototype = {
     'wcs_sandbox_content.js',
     'wcs_sandbox_container.js',
     'xhr.js',
+    'xhr_proxy.js',
   ],
 };
 

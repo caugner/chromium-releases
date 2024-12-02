@@ -6,23 +6,27 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/test/base/testing_profile.h"
 #include "components/autofill/content/browser/wallet/wallet_service_url.h"
 #include "components/autofill/content/browser/wallet/wallet_signin_helper_delegate.h"
-#include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_monster.h"
+#include "net/cookies/cookie_options.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::BrowserThread;
 using testing::_;
 
 namespace autofill {
@@ -39,21 +43,22 @@ const char kGetTokenPairValidResponse[] =
     "}";
 
 const char kGetAccountInfoValidResponseFormat[] =
-    "{"
-    "  \"email\": \"%s\""
-    "}";
+    "{\"user_info\":["
+    "  {"
+    "    \"email\": \"%s\""
+    "  }"
+    "]}";
 
 class MockWalletSigninHelperDelegate : public WalletSigninHelperDelegate {
  public:
   MOCK_METHOD1(OnPassiveSigninSuccess, void(const std::string& username));
-  MOCK_METHOD1(OnAutomaticSigninSuccess, void(const std::string& username));
   MOCK_METHOD1(OnUserNameFetchSuccess, void(const std::string& username));
   MOCK_METHOD1(OnPassiveSigninFailure,
                void(const GoogleServiceAuthError& error));
-  MOCK_METHOD1(OnAutomaticSigninFailure,
-               void(const GoogleServiceAuthError& error));
   MOCK_METHOD1(OnUserNameFetchFailure,
                void(const GoogleServiceAuthError& error));
+  MOCK_METHOD1(OnDidFetchWalletCookieValue,
+               void(const std::string& cookie_value));
 };
 
 class WalletSigninHelperForTesting : public WalletSigninHelper {
@@ -75,9 +80,7 @@ class WalletSigninHelperForTesting : public WalletSigninHelper {
 }  // namespace
 
 class WalletSigninHelperTest : public testing::Test {
- public:
-  WalletSigninHelperTest() {}
-
+ protected:
   virtual void SetUp() OVERRIDE {
     signin_helper_.reset(new WalletSigninHelperForTesting(
         &mock_delegate_,
@@ -89,7 +92,6 @@ class WalletSigninHelperTest : public testing::Test {
     signin_helper_.reset();
   }
 
- protected:
   // Sets up a response for the mock URLFetcher and completes the request.
   void SetUpFetcherResponseAndCompleteRequest(
       const std::string& url,
@@ -106,36 +108,6 @@ class WalletSigninHelperTest : public testing::Test {
     fetcher->SetResponseString(response_string);
     fetcher->set_cookies(cookies);
     fetcher->delegate()->OnURLFetchComplete(fetcher);
-  }
-
-  void MockSuccessfulOAuthLoginResponse() {
-    SetUpFetcherResponseAndCompleteRequest(
-        GaiaUrls::GetInstance()->client_login_url(), net::HTTP_OK,
-        net::ResponseCookies(),
-        "SID=sid\nLSID=lsid\nAuth=auth");
-  }
-
-  void MockFailedOAuthLoginResponse404() {
-    SetUpFetcherResponseAndCompleteRequest(
-        GaiaUrls::GetInstance()->client_login_url(),
-        net::HTTP_NOT_FOUND,
-        net::ResponseCookies(),
-        std::string());
-  }
-
-  void MockSuccessfulGaiaUserInfoResponse(const std::string& username) {
-    SetUpFetcherResponseAndCompleteRequest(
-        GaiaUrls::GetInstance()->get_user_info_url(), net::HTTP_OK,
-        net::ResponseCookies(),
-        "email=" + username);
-  }
-
-  void MockFailedGaiaUserInfoResponse404() {
-    SetUpFetcherResponseAndCompleteRequest(
-        GaiaUrls::GetInstance()->get_user_info_url(),
-        net::HTTP_NOT_FOUND,
-        net::ResponseCookies(),
-        std::string());
   }
 
   void MockSuccessfulGetAccountInfoResponse(const std::string& username) {
@@ -180,12 +152,13 @@ class WalletSigninHelperTest : public testing::Test {
     return signin_helper_->state();
   }
 
+  content::TestBrowserThreadBundle thread_bundle_;
   scoped_ptr<WalletSigninHelperForTesting> signin_helper_;
   MockWalletSigninHelperDelegate mock_delegate_;
+  TestingProfile browser_context_;
 
  private:
   net::TestURLFetcherFactory factory_;
-  content::TestBrowserContext browser_context_;
 };
 
 TEST_F(WalletSigninHelperTest, PassiveSigninSuccessful) {
@@ -226,41 +199,44 @@ TEST_F(WalletSigninHelperTest, PassiveUserInfoFailedUserInfo) {
   MockFailedGetAccountInfoResponse404();
 }
 
-TEST_F(WalletSigninHelperTest, AutomaticSigninSuccessful) {
-  EXPECT_CALL(mock_delegate_, OnAutomaticSigninSuccess("user@gmail.com"));
-  signin_helper_->StartAutomaticSignin("123SID", "123LSID");
-  MockSuccessfulGaiaUserInfoResponse("user@gmail.com");
-  MockSuccessfulOAuthLoginResponse();
-  MockSuccessfulPassiveSignInResponse();
+TEST_F(WalletSigninHelperTest, GetWalletCookieValueWhenPresent) {
+  EXPECT_CALL(mock_delegate_, OnDidFetchWalletCookieValue("gdToken"));
+  net::CookieMonster* cookie_monster = new net::CookieMonster(NULL, NULL);
+  net::CookieOptions httponly_options;
+  httponly_options.set_include_httponly();
+  scoped_ptr<net::CanonicalCookie> cookie(
+      net::CanonicalCookie::Create(GetPassiveAuthUrl().GetWithEmptyPath(),
+                                   "gdToken=gdToken; HttpOnly",
+                                   base::Time::Now(),
+                                   httponly_options));
+
+  net::CookieList cookie_list;
+  cookie_list.push_back(*cookie);
+  cookie_monster->InitializeFrom(cookie_list);
+  browser_context_.GetRequestContext()->GetURLRequestContext()
+      ->set_cookie_store(cookie_monster);
+  signin_helper_->StartWalletCookieValueFetch();
+  base::RunLoop().RunUntilIdle();
 }
 
-TEST_F(WalletSigninHelperTest, AutomaticSigninFailedGetUserInfo) {
-  EXPECT_CALL(mock_delegate_, OnAutomaticSigninFailure(_));
-  signin_helper_->StartAutomaticSignin("123SID", "123LSID");
-  MockFailedGaiaUserInfoResponse404();
-}
+TEST_F(WalletSigninHelperTest, GetWalletCookieValueWhenMissing) {
+  EXPECT_CALL(mock_delegate_, OnDidFetchWalletCookieValue(std::string()));
+  net::CookieMonster* cookie_monster = new net::CookieMonster(NULL, NULL);
+  net::CookieOptions httponly_options;
+  httponly_options.set_include_httponly();
+  scoped_ptr<net::CanonicalCookie> cookie(
+      net::CanonicalCookie::Create(GetPassiveAuthUrl().GetWithEmptyPath(),
+                                   "fake_cookie=monkeys; HttpOnly",
+                                   base::Time::Now(),
+                                   httponly_options));
 
-TEST_F(WalletSigninHelperTest, AutomaticSigninFailedOAuthLogin) {
-  EXPECT_CALL(mock_delegate_, OnAutomaticSigninFailure(_));
-  signin_helper_->StartAutomaticSignin("123SID", "123LSID");
-  MockSuccessfulGaiaUserInfoResponse("user@gmail.com");
-  MockFailedOAuthLoginResponse404();
-}
-
-TEST_F(WalletSigninHelperTest, AutomaticSigninFailedSignin404) {
-  EXPECT_CALL(mock_delegate_, OnAutomaticSigninFailure(_));
-  signin_helper_->StartAutomaticSignin("123SID", "123LSID");
-  MockSuccessfulGaiaUserInfoResponse("user@gmail.com");
-  MockSuccessfulOAuthLoginResponse();
-  MockFailedPassiveSignInResponse404();
-}
-
-TEST_F(WalletSigninHelperTest, AutomaticSigninFailedSigninNo) {
-  EXPECT_CALL(mock_delegate_, OnAutomaticSigninFailure(_));
-  signin_helper_->StartAutomaticSignin("123SID", "123LSID");
-  MockSuccessfulGaiaUserInfoResponse("user@gmail.com");
-  MockSuccessfulOAuthLoginResponse();
-  MockFailedPassiveSignInResponseNo();
+  net::CookieList cookie_list;
+  cookie_list.push_back(*cookie);
+  cookie_monster->InitializeFrom(cookie_list);
+  browser_context_.GetRequestContext()->GetURLRequestContext()
+      ->set_cookie_store(cookie_monster);
+  signin_helper_->StartWalletCookieValueFetch();
+  base::RunLoop().RunUntilIdle();
 }
 
 // TODO(aruslan): http://crbug.com/188317 Need more tests.

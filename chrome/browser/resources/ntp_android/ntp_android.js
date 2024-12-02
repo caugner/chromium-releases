@@ -195,6 +195,12 @@ cr.define('ntp', function() {
   var isIncognito = false;
 
   /**
+   * Whether incognito mode is enabled. (It can be blocked e.g. with a policy.)
+   * @type {boolean}
+   */
+  var isIncognitoEnabled = true;
+
+  /**
    * Whether the initial history state has been replaced.  The state will be
    * replaced once the bookmark data has loaded to ensure the proper folder
    * id is persisted.
@@ -373,6 +379,17 @@ cr.define('ntp', function() {
 
   function setIncognitoMode(incognito) {
     isIncognito = incognito;
+    if (!isIncognito) {
+      chrome.send('getMostVisited');
+      chrome.send('getRecentlyClosedTabs');
+      chrome.send('getForeignSessions');
+      chrome.send('getPromotions');
+      chrome.send('getIncognitoDisabled');
+    }
+  }
+
+  function setIncognitoEnabled(item) {
+    isIncognitoEnabled = item.incognitoEnabled;
   }
 
   /**
@@ -447,11 +464,6 @@ cr.define('ntp', function() {
     // Initialize virtual computers for the sync promo.
     createPromoVirtualComputers();
 
-    chrome.send('getMostVisited');
-    chrome.send('getRecentlyClosedTabs');
-    chrome.send('getForeignSessions');
-    chrome.send('getPromotions');
-
     setCurrentBookmarkFolderData(
         localStorage.getItem(DEFAULT_BOOKMARK_FOLDER_KEY));
 
@@ -523,6 +535,7 @@ cr.define('ntp', function() {
    *     reopen a tab.
    */
   function openRecentlyClosedTab(item, evt) {
+    chrome.send('openedRecentlyClosed');
     chrome.send('reopenTab', [item.sessionId]);
   }
 
@@ -934,7 +947,7 @@ cr.define('ntp', function() {
       return;
 
     var clickFunction = function(item) {
-      chrome.send('metricsHandler:recordAction', ['MobileNTPMostVisited']);
+      chrome.send('openedMostVisited');
       window.location = item.url;
     };
     populateData(findList('most_visited'), SectionType.MOST_VISITED, data,
@@ -1006,7 +1019,7 @@ cr.define('ntp', function() {
         if (item['folder']) {
           browseToBookmarkFolder(item.id);
         } else if (!!item.url) {
-          chrome.send('metricsHandler:recordAction', ['MobileNTPBookmark']);
+          chrome.send('openedBookmark');
           window.location = item.url;
         }
       };
@@ -1183,6 +1196,25 @@ cr.define('ntp', function() {
    *     when chrome.send('showContextMenu') was called.
    */
   function onCustomMenuSelected(itemId) {
+    if (contextMenuUrl != null) {
+      switch (itemId) {
+        case ContextMenuItemIds.BOOKMARK_OPEN_IN_NEW_TAB:
+        case ContextMenuItemIds.BOOKMARK_OPEN_IN_INCOGNITO_TAB:
+          chrome.send('openedBookmark');
+          break;
+
+        case ContextMenuItemIds.MOST_VISITED_OPEN_IN_NEW_TAB:
+        case ContextMenuItemIds.MOST_VISITED_OPEN_IN_INCOGNITO_TAB:
+          chrome.send('openedMostVisited');
+          break;
+
+        case ContextMenuItemIds.RECENTLY_CLOSED_OPEN_IN_NEW_TAB:
+        case ContextMenuItemIds.RECENTLY_CLOSED_OPEN_IN_INCOGNITO_TAB:
+          chrome.send('openedRecentlyClosed');
+          break;
+      }
+    }
+
     switch (itemId) {
       case ContextMenuItemIds.BOOKMARK_OPEN_IN_NEW_TAB:
       case ContextMenuItemIds.MOST_VISITED_OPEN_IN_NEW_TAB:
@@ -1794,8 +1826,7 @@ cr.define('ntp', function() {
           // use a section divider.
           var needSectionDivider =
               (tabNum + 1 == tabs.length) && (winNum + 1 < windows.length);
-          tab.icon = tab.icon ||
-            'chrome://session-favicon/size/16@1x/' + tab.url;
+          tab.icon = tab.icon || 'chrome://favicon/size/16@1x/' + tab.url;
 
           openTabsList.push({
             timestamp: tab.timestamp,
@@ -1823,7 +1854,7 @@ cr.define('ntp', function() {
           metaKeyPressed = evt.metaKey;
           shiftKeyPressed = evt.shiftKey;
         }
-        chrome.send('metricsHandler:recordAction', ['MobileNTPForeignSession']);
+        chrome.send('openedForeignSession');
         chrome.send('openForeignSession', [String(item.sessionTag),
             String(item.winNum), String(item.sessionId), buttonIndex,
             altKeyPressed, ctrlKeyPressed, metaKeyPressed, shiftKeyPressed]);
@@ -2203,7 +2234,7 @@ cr.define('ntp', function() {
     // 'natural' height and width of the thumbnail
     var thumbHeight = 72;
     var thumbWidth = 108;
-    var labelHeight = 20;
+    var labelHeight = 25;
     var labelWidth = thumbWidth + 20;
     var labelLeft = (thumbWidth - labelWidth) / 2;
     var itemHeight = thumbHeight + labelHeight;
@@ -2215,9 +2246,6 @@ cr.define('ntp', function() {
     var itemMarginRight = 20;
 
     var listHeight = 0;
-    // set it to the unscaled size so centerGrid works correctly
-    modifyCssRule('body[device="phone"] .thumbnail-cell',
-        'width', thumbWidth + 'px');
 
     var screenHeight =
         document.documentElement.offsetHeight -
@@ -2226,7 +2254,9 @@ cr.define('ntp', function() {
     if (isPortrait()) {
       mostVisitedList.setAttribute(GRID_COLUMNS, '2');
       listHeight = screenHeight * .85;
-      listHeight = listHeight >= 420 ? 420 : listHeight;
+      // Ensure that listHeight is not too small and not too big.
+      listHeight = Math.max(listHeight, (itemHeight * 3) + 20);
+      listHeight = Math.min(listHeight, 420);
       // Size for 3 rows (4 gutters)
       itemMarginTop = (listHeight - (itemHeight * 3)) / 4;
     } else {
@@ -2242,8 +2272,8 @@ cr.define('ntp', function() {
         var scale = (screenHeight - 2 * labelHeight -
             targetRemainder) / (2 * thumbHeight);
         // update values based on scale
-        thumbWidth *= scale;
-        thumbHeight *= scale;
+        thumbWidth = Math.round(thumbWidth * scale);
+        thumbHeight = Math.round(thumbHeight * scale);
         labelWidth = thumbWidth + 20;
         itemHeight = thumbHeight + labelHeight;
       }
@@ -2431,12 +2461,14 @@ cr.define('ntp', function() {
         [
           ContextMenuItemIds.BOOKMARK_OPEN_IN_NEW_TAB,
           templateData.elementopeninnewtab
-        ],
-        [
-          ContextMenuItemIds.BOOKMARK_OPEN_IN_INCOGNITO_TAB,
-          templateData.elementopeninincognitotab
         ]
       ];
+      if (isIncognitoEnabled) {
+        menuOptions.push([
+          ContextMenuItemIds.BOOKMARK_OPEN_IN_INCOGNITO_TAB,
+          templateData.elementopeninincognitotab
+        ]);
+      }
       if (contextMenuItem.editable) {
         menuOptions.push(
             [ContextMenuItemIds.BOOKMARK_EDIT, templateData.bookmarkedit],
@@ -2472,27 +2504,30 @@ cr.define('ntp', function() {
           ContextMenuItemIds.MOST_VISITED_OPEN_IN_NEW_TAB,
           templateData.elementopeninnewtab
         ],
-        [
+      ];
+      if (isIncognitoEnabled) {
+        menuOptions.push([
           ContextMenuItemIds.MOST_VISITED_OPEN_IN_INCOGNITO_TAB,
           templateData.elementopeninincognitotab
-        ],
-        [ContextMenuItemIds.MOST_VISITED_REMOVE, templateData.elementremove]
-      ];
+        ]);
+      }
+      menuOptions.push(
+        [ContextMenuItemIds.MOST_VISITED_REMOVE, templateData.elementremove]);
     } else if (section == SectionType.RECENTLY_CLOSED) {
       menuOptions = [
         [
           ContextMenuItemIds.RECENTLY_CLOSED_OPEN_IN_NEW_TAB,
           templateData.elementopeninnewtab
         ],
-        [
+      ];
+      if (isIncognitoEnabled) {
+        menuOptions.push([
           ContextMenuItemIds.RECENTLY_CLOSED_OPEN_IN_INCOGNITO_TAB,
           templateData.elementopeninincognitotab
-        ],
-        [
-          ContextMenuItemIds.RECENTLY_CLOSED_REMOVE,
-          templateData.removeall
-        ]
-      ];
+        ]);
+      }
+      menuOptions.push(
+        [ContextMenuItemIds.RECENTLY_CLOSED_REMOVE, templateData.removeall]);
     } else if (section == SectionType.FOREIGN_SESSION_HEADER) {
       menuOptions = [
         [
@@ -2521,6 +2556,7 @@ cr.define('ntp', function() {
     bookmarkChanged: bookmarkChanged,
     clearPromotions: clearPromotions,
     init: init,
+    setIncognitoEnabled: setIncognitoEnabled,
     onCustomMenuSelected: onCustomMenuSelected,
     openSection: openSection,
     setFaviconDominantColor: setFaviconDominantColor,

@@ -4,26 +4,39 @@
 
 #include "chrome/browser/ui/search/instant_ntp.h"
 
+#include "base/metrics/histogram.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/search/instant_ntp_prerenderer.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
-#include "content/public/browser/navigation_entry.h"
+#include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
 #include "content/public/browser/web_contents.h"
+#include "url/gurl.h"
 
-InstantNTP::InstantNTP(InstantPage::Delegate* delegate,
+InstantNTP::InstantNTP(InstantNTPPrerenderer* ntp_prerenderer,
                        const std::string& instant_url,
-                       bool is_incognito)
-    : InstantPage(delegate, instant_url, is_incognito),
-      loader_(this) {
+                       Profile* profile)
+    : InstantPage(ntp_prerenderer, instant_url, profile,
+                  profile->IsOffTheRecord()),
+      loader_(this),
+      ntp_prerenderer_(ntp_prerenderer) {
 }
 
 InstantNTP::~InstantNTP() {
+  if (contents())
+    ReleaseContents().reset();
 }
 
-void InstantNTP::InitContents(Profile* profile,
-                              const content::WebContents* active_tab,
-                              const base::Closure& on_stale_callback) {
-  loader_.Init(GURL(instant_url()), profile, active_tab, on_stale_callback);
+void InstantNTP::InitContents(const base::Closure& on_stale_callback) {
+  DCHECK(!contents());
+  GURL instantNTP_url(instant_url());
+  loader_.Init(instantNTP_url, profile(), on_stale_callback);
   SetContents(loader_.contents());
-  SearchTabHelper::FromWebContents(contents())->InitForPreloadedNTP();
+  content::WebContents* content = contents();
+  SearchTabHelper::FromWebContents(content)->InitForPreloadedNTP();
+
+  NTPUserDataLogger::CreateForWebContents(content);
+  NTPUserDataLogger::FromWebContents(content)->set_ntp_url(instantNTP_url);
+
   loader_.Load();
 }
 
@@ -32,35 +45,25 @@ scoped_ptr<content::WebContents> InstantNTP::ReleaseContents() {
   return loader_.ReleaseContents();
 }
 
+void InstantNTP::LoadCompletedMainFrame() {
+  ntp_prerenderer_->LoadCompletedMainFrame();
+}
+
+void InstantNTP::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  InitializeFonts();
+  InitializePromos();
+}
+
+void InstantNTP::RenderProcessGone(base::TerminationStatus /* status */) {
+  ntp_prerenderer_->RenderProcessGone();
+}
+
 void InstantNTP::OnSwappedContents() {
   SetContents(loader_.contents());
-}
-
-void InstantNTP::OnFocus() {
-  NOTREACHED();
-}
-
-void InstantNTP::OnMouseDown() {
-  NOTREACHED();
-}
-
-void InstantNTP::OnMouseUp() {
-  NOTREACHED();
 }
 
 content::WebContents* InstantNTP::OpenURLFromTab(
     content::WebContents* source,
     const content::OpenURLParams& params) {
   return NULL;
-}
-
-void InstantNTP::LoadCompletedMainFrame() {
-}
-
-bool InstantNTP::ShouldProcessRenderViewCreated() {
-  return true;
-}
-
-bool InstantNTP::ShouldProcessRenderViewGone() {
-  return true;
 }

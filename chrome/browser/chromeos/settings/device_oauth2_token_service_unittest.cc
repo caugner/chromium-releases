@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/signin/oauth2_token_service_test_util.h"
@@ -61,7 +61,7 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
         scoped_testing_local_state_(TestingBrowserProcess::GetGlobal()),
         request_context_getter_(new net::TestURLRequestContextGetter(
             message_loop_.message_loop_proxy())),
-        oauth2_service_(request_context_getter_,
+        oauth2_service_(request_context_getter_.get(),
                         scoped_testing_local_state_.Get()) {
     oauth2_service_.max_refresh_token_validation_retries_ = 0;
     oauth2_service_.set_max_authorization_token_fetch_retries_for_testing(0);
