@@ -18,8 +18,8 @@
 #include "views/controls/label.h"
 #include "views/layout/layout_constants.h"
 #include "views/view.h"
+#include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
 namespace {
 
@@ -61,8 +61,7 @@ const int kHeadingFontSizeDelta = 1;
 }  // namespace
 
 // Implements the extension installation dialog for TOOLKIT_VIEWS.
-class ExtensionInstallDialogView : public views::View,
-                                   public views::DialogDelegate {
+class ExtensionInstallDialogView : public views::DialogDelegateView {
  public:
   ExtensionInstallDialogView(ExtensionInstallUI::Delegate* delegate,
                              const Extension* extension,
@@ -289,7 +288,7 @@ int ExtensionInstallDialogView::GetDefaultDialogButton() const {
 }
 
 bool ExtensionInstallDialogView::Cancel() {
-  delegate_->InstallUIAbort();
+  delegate_->InstallUIAbort(true);
   return true;
 }
 
@@ -325,20 +324,20 @@ void ShowExtensionInstallDialog(
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
 #endif
   if (!browser) {
-    delegate->InstallUIAbort();
+    delegate->InstallUIAbort(false);
     return;
   }
 
   BrowserWindow* browser_window = browser->window();
   if (!browser_window) {
-    delegate->InstallUIAbort();
+    delegate->InstallUIAbort(false);
     return;
   }
 
   ExtensionInstallDialogView* dialog = new ExtensionInstallDialogView(
       delegate, extension, icon, permissions, type);
 
-  views::Window* window =  browser::CreateViewsWindow(
+  views::Widget* window =  browser::CreateViewsWindow(
       browser_window->GetNativeHandle(), gfx::Rect(), dialog);
 
   window->Show();

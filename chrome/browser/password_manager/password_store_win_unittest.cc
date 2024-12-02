@@ -10,7 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/time.h"
 #include "chrome/browser/password_manager/ie7_password.h"
@@ -226,7 +226,8 @@ TEST_F(PasswordStoreWinTest, DISABLED_ConvertIE7Login) {
   store->Shutdown();
 }
 
-TEST_F(PasswordStoreWinTest, OutstandingWDSQueries) {
+// Crashy.  http://crbug.com/86558
+TEST_F(PasswordStoreWinTest, DISABLED_OutstandingWDSQueries) {
   // Prentend that the migration has already taken place.
   profile_->GetPrefs()->RegisterBooleanPref(prefs::kLoginDatabaseMigrated,
                                             true,

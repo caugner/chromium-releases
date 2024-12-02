@@ -30,6 +30,7 @@
           'ipc_message_utils.cc',
           'ipc_message_utils.h',
           'ipc_param_traits.h',
+          'ipc_platform_file.cc',
           'ipc_platform_file.h',
           'ipc_switches.cc',
           'ipc_switches.h',
@@ -83,6 +84,7 @@
           },
           'dependencies': [
             '../base/base.gyp:base_nacl_win64',
+            '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
           ],
           # TODO(gregoryd): direct_dependent_settings should be shared with the
           # 32-bit target, but it doesn't work due to a bug in gyp
@@ -101,9 +103,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

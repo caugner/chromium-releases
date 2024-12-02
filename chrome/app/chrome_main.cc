@@ -4,11 +4,11 @@
 
 #include "chrome/app/chrome_main.h"
 
-#include "app/app_paths.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/i18n/icu_util.h"
+#include "base/lazy_instance.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
@@ -22,7 +22,6 @@
 #include "crypto/nss_util.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_content_plugin_client.h"
@@ -34,6 +33,7 @@
 #include "chrome/common/profiling.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
+#include "chrome/utility/chrome_content_utility_client.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/common/content_client.h"
 #include "content/common/content_counters.h"
@@ -42,12 +42,14 @@
 #include "content/common/sandbox_init_wrapper.h"
 #include "content/common/set_process_title.h"
 #include "ipc/ipc_switches.h"
+#include "media/base/media.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
 #include <algorithm>
+#include <atlbase.h>
 #include <malloc.h>
 #include "base/string_util.h"
 #include "base/win/registry.h"
@@ -59,17 +61,25 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/os_crash_dumps.h"
 #include "base/mach_ipc_mac.h"
+#include "base/system_monitor/system_monitor.h"
 #include "chrome/app/breakpad_mac.h"
-#include "chrome/browser/mach_broker_mac.h"
+#include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "content/browser/mach_broker_mac.h"
 #include "grit/chromium_strings.h"
 #include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+#include "ui/base/l10n/l10n_util.h"
 #endif
 
 #if defined(OS_POSIX)
 #include <locale.h>
 #include <signal.h>
+#endif
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include "chrome/common/nacl_fork_delegate_linux.h"
+#include "content/common/zygote_fork_delegate_linux.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -90,6 +100,16 @@
 #include "chrome/app/breakpad_linux.h"
 #endif
 
+#if !defined(NACL_WIN64)  // We don't build the this code on win nacl64.
+base::LazyInstance<chrome::ChromeContentRendererClient>
+    g_chrome_content_renderer_client(base::LINKER_INITIALIZED);
+base::LazyInstance<chrome::ChromeContentUtilityClient>
+    g_chrome_content_utility_client(base::LINKER_INITIALIZED);
+#endif   // NACL_WIN64
+
+base::LazyInstance<chrome::ChromeContentPluginClient>
+    g_chrome_content_plugin_client(base::LINKER_INITIALIZED);
+
 extern int BrowserMain(const MainFunctionParams&);
 extern int RendererMain(const MainFunctionParams&);
 extern int GpuMain(const MainFunctionParams&);
@@ -100,7 +120,10 @@ extern int WorkerMain(const MainFunctionParams&);
 extern int NaClMain(const MainFunctionParams&);
 extern int UtilityMain(const MainFunctionParams&);
 extern int ProfileImportMain(const MainFunctionParams&);
-extern int ZygoteMain(const MainFunctionParams&);
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+extern int ZygoteMain(const MainFunctionParams&,
+                      ZygoteForkDelegate* forkdelegate);
+#endif
 #if defined(_WIN64)
 extern int NaClBrokerMain(const MainFunctionParams&);
 #endif
@@ -220,18 +243,23 @@ void EnableHeapProfiler(const CommandLine& command_line) {
 
 void InitializeChromeContentRendererClient() {
 #if !defined(NACL_WIN64)  // We don't build the renderer code on win nacl64.
-  static chrome::ChromeContentRendererClient chrome_content_renderer_client;
-  content::GetContentClient()->set_renderer(&chrome_content_renderer_client);
+  content::GetContentClient()->set_renderer(
+      &g_chrome_content_renderer_client.Get());
 #endif
 }
 
 void InitializeChromeContentClient(const std::string& process_type) {
   if (process_type == switches::kPluginProcess) {
-    static chrome::ChromeContentPluginClient chrome_content_plugin_client;
-    content::GetContentClient()->set_plugin(&chrome_content_plugin_client);
+    content::GetContentClient()->set_plugin(
+        &g_chrome_content_plugin_client.Get());
   } else if (process_type == switches::kRendererProcess ||
              process_type == switches::kExtensionProcess) {
     InitializeChromeContentRendererClient();
+  } else if (process_type == switches::kUtilityProcess) {
+#if !defined(NACL_WIN64)  // We don't build this code on win nacl64.
+    content::GetContentClient()->set_utility(
+        &g_chrome_content_utility_client.Get());
+#endif
   }
 }
 
@@ -287,7 +315,11 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
 
 // Returns true if this process is a child of the browser process.
 bool SubprocessIsBrowserChild(const std::string& process_type) {
-  if (process_type.empty() || process_type == switches::kServiceProcess) {
+  if (process_type.empty() ||
+#if defined(OS_MACOSX)
+      process_type == switches::kRelauncherProcess ||
+#endif
+      process_type == switches::kServiceProcess) {
     return false;
   }
   return true;
@@ -377,7 +409,7 @@ bool HandleVersionSwitches(const CommandLine& command_line) {
     printf("%s %s %s\n",
            version_info.Name().c_str(),
            version_info.Version().c_str(),
-           platform_util::GetVersionStringModifier().c_str());
+           chrome::VersionInfo::GetVersionStringModifier().c_str());
     return true;
   }
 
@@ -421,9 +453,25 @@ int RunZygote(const MainFunctionParams& main_function_params) {
 #endif
   };
 
+  // Each Renderer we spawn will re-attempt initialization of the media
+  // libraries, at which point failure will be detected and handled, so
+  // we do not need to cope with initialization failures here.
+  FilePath media_path;
+  if (PathService::Get(chrome::DIR_MEDIA_LIBS, &media_path))
+    media::InitializeMediaLibrary(media_path);
+
   // This function call can return multiple times, once per fork().
-  if (!ZygoteMain(main_function_params))
+#if defined(DISABLE_NACL)
+  if (!ZygoteMain(main_function_params, NULL))
     return 1;
+#else
+  NaClForkDelegate* nacl_delegate = new NaClForkDelegate();
+  int rval = ZygoteMain(main_function_params, nacl_delegate);
+  if (nacl_delegate)
+    delete nacl_delegate;
+  if (!rval)
+    return 1;
+#endif
 
   // Zygote::HandleForkRequest may have reallocated the command
   // line so update it here with the new version.
@@ -483,6 +531,7 @@ int RunNamedProcessTypeMain(const std::string& process_type,
 #if defined(OS_MACOSX)
     // TODO(port): Use OOP profile import - http://crbug.com/22142 .
     { switches::kProfileImportProcess, ProfileImportMain },
+    { switches::kRelauncherProcess,  mac_relauncher::internal::RelauncherMain },
 #endif
 #if !defined(DISABLE_NACL)
     { switches::kNaClLoaderProcess, NaClMain },
@@ -566,8 +615,24 @@ int ChromeMain(int argc, char** argv) {
 
 #if defined(OS_WIN)
   // Must do this before any other usage of command line!
-  if (HasDeprecatedArguments(command_line.command_line_string()))
+  if (HasDeprecatedArguments(command_line.GetCommandLineString()))
     return 1;
+#endif
+
+#if defined(OS_MACOSX)
+  // We need to allocate the IO Ports before the Sandbox is initialized or
+  // the first instance of SystemMonitor is created.
+  // It's important not to allocate the ports for processes which don't register
+  // with the system monitor - see crbug.com/88867.
+  if (process_type.empty() ||
+      process_type == switches::kExtensionProcess ||
+      process_type == switches::kNaClLoaderProcess ||
+      process_type == switches::kPluginProcess ||
+      process_type == switches::kRendererProcess ||
+      process_type == switches::kUtilityProcess ||
+      process_type == switches::kWorkerProcess) {
+    base::SystemMonitor::AllocateSystemIOPorts();
+  }
 #endif
 
   base::ProcessId browser_pid = base::GetCurrentProcId();
@@ -588,8 +653,10 @@ int ChromeMain(int argc, char** argv) {
 #if defined(OS_MACOSX)
     SendTaskPortToParentProcess();
 #endif
+  }
 
 #if defined(OS_POSIX)
+  if (!process_type.empty()) {
     // When you hit Ctrl-C in a terminal running the browser
     // process, a SIGINT is delivered to the entire process group.
     // When debugging the browser process via gdb, gdb catches the
@@ -603,8 +670,9 @@ int ChromeMain(int argc, char** argv) {
     // TODO(evanm): move this to some shared subprocess-init function.
     if (!base::debug::BeingDebugged())
       signal(SIGINT, SIG_IGN);
-#endif
   }
+#endif
+
   SetupCRT(command_line);
 
 #if defined(USE_NSS)
@@ -612,7 +680,6 @@ int ChromeMain(int argc, char** argv) {
 #endif
 
   // Initialize the Chrome path provider.
-  app::RegisterPathProvider();
   ui::RegisterPathProvider();
   chrome::RegisterPathProvider();
   content::RegisterPathProvider();
@@ -737,6 +804,11 @@ int ChromeMain(int argc, char** argv) {
   // done in all processes that work with these URLs (i.e. including renderers).
   chrome::RegisterChromeSchemes();
 
+#if defined(OS_WIN)
+  // TODO(darin): Kill this once http://crbug.com/52609 is fixed.
+  ResourceBundle::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
+#endif
+
   if (SubprocessNeedsResourceBundle(process_type)) {
     // Initialize ResourceBundle which handles files loaded from external
     // sources.  The language should have been passed in to us from the
@@ -789,7 +861,8 @@ int ChromeMain(int argc, char** argv) {
   if (process_type == switches::kRendererProcess ||
       process_type == switches::kExtensionProcess ||
       process_type == switches::kNaClLoaderProcess ||
-      process_type == switches::kGpuProcess) {
+      process_type == switches::kPpapiPluginProcess ||
+      process_type == switches::kRelauncherProcess) {
     initialize_sandbox = false;
   }
 #endif
@@ -811,9 +884,6 @@ int ChromeMain(int argc, char** argv) {
   // AdjustLinuxOOMScore function too.
 #if defined(OS_LINUX)
   AdjustLinuxOOMScore(process_type);
-  // TODO(mdm): look into calling CommandLine::SetProcTitle() here instead of
-  // in each relevant main() function below, to fix /proc/self/exe showing up
-  // as our process name since we exec() via that to be update-safe.
 #endif
 
 #if defined(OS_POSIX)

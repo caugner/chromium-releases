@@ -6,6 +6,7 @@
 
 #include <gtk/gtk.h>
 
+#include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,6 +14,8 @@
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -152,7 +155,6 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
       profile_(browser_->profile()),
       menu_bar_(gtk_menu_bar_new()),
       history_menu_(browser_),
-      bookmark_menu_(browser_),
       dummy_accel_group_(gtk_accel_group_new()),
       block_activation_(false) {
   // The global menu bar should never actually be shown in the app; it should
@@ -168,8 +170,23 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
   BuildGtkMenuFrom(IDS_VIEW_MENU_LINUX, &id_to_menu_item_, view_menu, NULL);
   BuildGtkMenuFrom(IDS_HISTORY_MENU_LINUX, &id_to_menu_item_,
                    history_menu, &history_menu_);
-  BuildGtkMenuFrom(IDS_BOOKMARKS_MENU_LINUX, &id_to_menu_item_, bookmark_menu,
-                   &bookmark_menu_);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableGlobalBookmarkMenu)) {
+    // TODO(erg): dbusmenu-glib in Ubuntu Natty does not like it when we shove
+    // 100k or more of favicon data over it. Users have reported that the
+    // browser hangs on startup for over a minute and breaking during this time
+    // shows a stack entirely of dbus/glib code (See #86715).  For now, just
+    // hide the menu until appmenu-gtk catches up and doesn't hang if we throw
+    // (potentially) megs of icon data at it. (Some of our users have thousands
+    // of bookmarks and we're already unacceptably laggy at 100.)
+    //
+    // http://crbug.com/86715, http://crbug.com/85466
+    bookmark_menu_.reset(new GlobalBookmarkMenu(browser_));
+    BuildGtkMenuFrom(IDS_BOOKMARKS_MENU_LINUX, &id_to_menu_item_, bookmark_menu,
+                     bookmark_menu_.get());
+  }
+
   BuildGtkMenuFrom(IDS_TOOLS_MENU_LINUX, &id_to_menu_item_, tools_menu, NULL);
   BuildGtkMenuFrom(IDS_HELP_MENU_LINUX, &id_to_menu_item_, help_menu, NULL);
 
@@ -197,9 +214,10 @@ GlobalMenuBar::GlobalMenuBar(Browser* browser)
   }
 
   // Listen for bookmark bar visibility changes and set the initial state.
-  registrar_.Add(this, NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
                  NotificationService::AllSources());
-  Observe(NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+  Observe(chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
           NotificationService::AllSources(),
           NotificationService::NoDetails());
 }
@@ -229,7 +247,7 @@ void GlobalMenuBar::BuildGtkMenuFrom(
   gtk_widget_show(menu);
 
   GtkWidget* menu_item = gtk_menu_item_new_with_mnemonic(
-      gfx::ConvertAcceleratorsFromWindowsStyle(
+      gfx::RemoveWindowsStyleAccelerators(
           l10n_util::GetStringUTF8(menu_str_id)).c_str());
 
   // Give the owner a chance to sink the reference before we add it to the menu
@@ -286,10 +304,10 @@ void GlobalMenuBar::EnabledStateChangedForCommand(int id, bool enabled) {
     gtk_widget_set_sensitive(it->second, enabled);
 }
 
-void GlobalMenuBar::Observe(NotificationType type,
+void GlobalMenuBar::Observe(int type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  DCHECK(type.value == NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED);
 
   CommandIDMenuItemMap::iterator it =
       id_to_menu_item_.find(IDC_SHOW_BOOKMARK_BAR);

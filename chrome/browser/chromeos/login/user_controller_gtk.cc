@@ -55,30 +55,37 @@ class ClickNotifyingWidget : public NativeWidgetGtk {
   DISALLOW_COPY_AND_ASSIGN(ClickNotifyingWidget);
 };
 
-views::Widget* InitWidget(views::NativeWidget* native_widget,
-                          const gfx::Rect& bounds) {
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
+views::Widget* InitWidget(
+    views::WidgetDelegate* delegate,
+    views::internal::NativeWidgetPrivate* native_widget_private,
+    const gfx::Rect& bounds) {
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.delegate = delegate;
   params.transparent = true;
   params.bounds = bounds;
-  params.native_widget = native_widget;
-  native_widget->GetWidget()->Init(params);
-  GdkWindow* gdk_window = native_widget->GetWidget()->GetNativeView()->window;
+  params.native_widget = native_widget_private;
+  native_widget_private->GetWidget()->Init(params);
+  GdkWindow* gdk_window =
+      native_widget_private->GetWidget()->GetNativeView()->window;
   gdk_window_set_back_pixmap(gdk_window, NULL, false);
-  return native_widget->GetWidget();
+  return native_widget_private->GetWidget();
 }
 
 }  // namespace
 
 // static
-views::Widget* UserController::CreateControlsWidget(const gfx::Rect& bounds) {
-  return InitWidget(new ControlsWidget(), bounds);
+views::Widget* UserController::CreateControlsWidget(
+    views::WidgetDelegate* delegate,
+    const gfx::Rect& bounds) {
+  return InitWidget(delegate, new ControlsWidget(), bounds);
 }
 
 // static
 views::Widget* UserController::CreateClickNotifyingWidget(
     UserController* controller,
     const gfx::Rect& bounds) {
-  return InitWidget(new ClickNotifyingWidget(controller), bounds);
+  return InitWidget(controller, new ClickNotifyingWidget(controller), bounds);
 }
 
 }  // namespace

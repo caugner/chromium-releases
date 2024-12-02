@@ -31,14 +31,11 @@ class PPB_Graphics2D_Impl
     : public Resource,
       public ::ppapi::thunk::PPB_Graphics2D_API {
  public:
-  PPB_Graphics2D_Impl(PluginInstance* instance);
   virtual ~PPB_Graphics2D_Impl();
 
-  // Returns a pointer to the interface implementing PPB_ImageData that is
-  // exposed to the plugin.
-  static const PPB_Graphics2D* GetInterface();
-
-  bool Init(int width, int height, bool is_always_opaque);
+  static PP_Resource Create(PluginInstance* instance,
+                            const PP_Size& size,
+                            PP_Bool is_always_opaque);
 
   bool is_always_opaque() const { return is_always_opaque_; }
 
@@ -78,6 +75,10 @@ class PPB_Graphics2D_Impl
   PPB_ImageData_Impl* image_data() { return image_data_.get(); }
 
  private:
+  explicit PPB_Graphics2D_Impl(PluginInstance* instance);
+
+  bool Init(int width, int height, bool is_always_opaque);
+
   // Tracks a call to flush that requires a callback.
   class FlushCallbackData {
    public:
@@ -142,10 +143,6 @@ class PPB_Graphics2D_Impl
   struct QueuedOperation;
   typedef std::vector<QueuedOperation> OperationQueue;
   OperationQueue queued_operations_;
-
-  // Indicates whether any changes have been flushed to the backing store.
-  // This is initially false and is set to true at the first Flush() call.
-  bool flushed_any_data_;
 
   // The plugin can give us one "Flush" at a time. This flush will either be in
   // the "unpainted" state (in which case unpainted_flush_callback_ will be

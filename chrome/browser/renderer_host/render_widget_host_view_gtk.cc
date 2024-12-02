@@ -27,7 +27,6 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/renderer_host/gtk_im_context_wrapper.h"
-#include "chrome/browser/renderer_host/gtk_key_bindings_handler.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/renderer_host/backing_store_x.h"
@@ -46,6 +45,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "views/widget/tooltip_window_gtk.h"
+#else
+#include "chrome/browser/renderer_host/gtk_key_bindings_handler.h"
 #endif  // defined(OS_CHROMEOS)
 
 namespace {
@@ -119,7 +120,7 @@ class RenderWidgetHostViewGtkWidget {
                                   GDK_FOCUS_CHANGE_MASK |
                                   GDK_ENTER_NOTIFY_MASK |
                                   GDK_LEAVE_NOTIFY_MASK);
-    GTK_WIDGET_SET_FLAGS(widget, GTK_CAN_FOCUS);
+    gtk_widget_set_can_focus(widget, TRUE);
 
     g_signal_connect(widget, "expose-event",
                      G_CALLBACK(OnExposeEvent), host_view);
@@ -215,7 +216,7 @@ class RenderWidgetHostViewGtkWidget {
       host_view->GetRenderWidgetHost()->Blur();
 
     // Prevents us from stealing input context focus in OnGrabNotify() handler.
-    host_view->was_focused_before_grab_ = false;
+    host_view->was_imcontext_focused_before_grab_ = false;
 
     // Disable the GtkIMContext object.
     host_view->im_context_->OnFocusOut();
@@ -230,11 +231,12 @@ class RenderWidgetHostViewGtkWidget {
   static void OnGrabNotify(GtkWidget* widget, gboolean was_grabbed,
                            RenderWidgetHostViewGtk* host_view) {
     if (was_grabbed) {
-      if (host_view->was_focused_before_grab_)
+      if (host_view->was_imcontext_focused_before_grab_)
         host_view->im_context_->OnFocusIn();
     } else {
-      host_view->was_focused_before_grab_ = host_view->HasFocus();
-      if (host_view->was_focused_before_grab_) {
+      host_view->was_imcontext_focused_before_grab_ =
+          host_view->im_context_->is_focused();
+      if (host_view->was_imcontext_focused_before_grab_) {
         gdk_window_set_cursor(widget->window, NULL);
         host_view->im_context_->OnFocusOut();
       }
@@ -291,7 +293,8 @@ class RenderWidgetHostViewGtkWidget {
 
     // Confirm existing composition text on mouse click events, to make sure
     // the input caret won't be moved with an ongoing composition session.
-    host_view->im_context_->ConfirmComposition();
+    if (event->type != GDK_BUTTON_RELEASE)
+      host_view->im_context_->ConfirmComposition();
 
     // We want to translate the coordinates of events that do not originate
     // from this widget to be relative to the top left of the widget.
@@ -320,7 +323,7 @@ class RenderWidgetHostViewGtkWidget {
 
     // TODO(evanm): why is this necessary here but not in test shell?
     // This logic is the same as GtkButton.
-    if (event->type == GDK_BUTTON_PRESS && !GTK_WIDGET_HAS_FOCUS(widget))
+    if (event->type == GDK_BUTTON_PRESS && !gtk_widget_has_focus(widget))
       gtk_widget_grab_focus(widget);
 
     host_view->is_popup_first_mouse_release_ = false;
@@ -507,7 +510,7 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
       overlay_animation_(this),
       parent_(NULL),
       is_popup_first_mouse_release_(true),
-      was_focused_before_grab_(false),
+      was_imcontext_focused_before_grab_(false),
       do_x_grab_(false),
       is_fullscreen_(false),
       destroy_handler_id_(0),
@@ -515,7 +518,7 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
       dragged_at_vertical_edge_(0),
       compositing_surface_(gfx::kNullPluginWindow),
       last_mouse_down_(NULL) {
-  host_->set_view(this);
+  host_->SetView(this);
 }
 
 RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
@@ -574,7 +577,8 @@ void RenderWidgetHostViewGtk::InitAsPopup(
   }
 }
 
-void RenderWidgetHostViewGtk::InitAsFullscreen() {
+void RenderWidgetHostViewGtk::InitAsFullscreen(
+    RenderWidgetHostView* /*reference_host_view*/) {
   DoSharedInit();
 
   is_fullscreen_ = true;
@@ -694,8 +698,7 @@ void RenderWidgetHostViewGtk::Hide() {
 }
 
 bool RenderWidgetHostViewGtk::IsShowing() {
-  // TODO(jcivelli): use gtk_widget_get_visible once we build with GTK 2.18.
-  return (GTK_WIDGET_FLAGS(view_.get()) & GTK_VISIBLE) != 0;
+  return gtk_widget_get_visible(view_.get());
 }
 
 gfx::Rect RenderWidgetHostViewGtk::GetViewBounds() const {
@@ -883,10 +886,11 @@ bool RenderWidgetHostViewGtk::IsPopup() const {
 void RenderWidgetHostViewGtk::DoSharedInit() {
   view_.Own(RenderWidgetHostViewGtkWidget::CreateNewWidget(this));
   im_context_.reset(new GtkIMContextWrapper(this));
-  key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
   plugin_container_manager_.set_host_widget(view_.get());
 #if defined(OS_CHROMEOS)
   tooltip_window_.reset(new views::TooltipWindowGtk(view_.get()));
+#else
+  key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
 #endif
 }
 
@@ -1113,14 +1117,6 @@ void RenderWidgetHostViewGtk::SetVisuallyDeemphasized(
   }
 }
 
-bool RenderWidgetHostViewGtk::ContainsNativeView(
-    gfx::NativeView native_view) const {
-  // TODO(port)
-  NOTREACHED() <<
-    "RenderWidgetHostViewGtk::ContainsNativeView not implemented.";
-  return false;
-}
-
 void RenderWidgetHostViewGtk::AcceleratedCompositingActivated(bool activated) {
   GtkPreserveWindow* widget =
     reinterpret_cast<GtkPreserveWindow*>(view_.get());
@@ -1145,6 +1141,7 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
   if (!host_)
     return;
 
+#if !defined(OS_CHROMEOS)
   EditCommands edit_commands;
   if (!event.skip_in_browser &&
       key_bindings_handler_->Match(event, &edit_commands)) {
@@ -1155,6 +1152,7 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
     host_->ForwardKeyboardEvent(copy_event);
     return;
   }
+#endif
 
   host_->ForwardKeyboardEvent(event);
 }

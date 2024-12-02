@@ -17,7 +17,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -382,6 +382,10 @@ HttpCache::~HttpCache() {
   }
 
   STLDeleteElements(&doomed_entries_);
+
+  // Before deleting pending_ops_, we have to make sure that the disk cache is
+  // done with said operations, or it will attempt to use deleted data.
+  disk_cache_.reset();
 
   PendingOpsMap::iterator pending_it = pending_ops_.begin();
   for (; pending_it != pending_ops_.end(); ++pending_it) {

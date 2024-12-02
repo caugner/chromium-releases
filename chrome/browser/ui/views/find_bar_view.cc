@@ -76,11 +76,11 @@ FindBarView::FindBarView(FindBarHost* host)
       close_button_(NULL),
       background_(NULL),
       background_left_(NULL) {
-  SetID(VIEW_ID_FIND_IN_PAGE);
+  set_id(VIEW_ID_FIND_IN_PAGE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   find_text_ = new SearchTextfieldView();
-  find_text_->SetID(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD);
+  find_text_->set_id(VIEW_ID_FIND_IN_PAGE_TEXT_FIELD);
   find_text_->SetFont(rb.GetFont(ResourceBundle::BaseFont));
   find_text_->set_default_width_in_chars(kDefaultCharWidth);
   find_text_->SetController(this);
@@ -99,7 +99,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   find_previous_button_ = new views::ImageButton(this);
   find_previous_button_->set_tag(FIND_PREVIOUS_TAG);
-  find_previous_button_->SetFocusable(true);
+  find_previous_button_->set_focusable(true);
   find_previous_button_->SetImage(views::CustomButton::BS_NORMAL,
       rb.GetBitmapNamed(IDR_FINDINPAGE_PREV));
   find_previous_button_->SetImage(views::CustomButton::BS_HOT,
@@ -114,7 +114,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   find_next_button_ = new views::ImageButton(this);
   find_next_button_->set_tag(FIND_NEXT_TAG);
-  find_next_button_->SetFocusable(true);
+  find_next_button_->set_focusable(true);
   find_next_button_->SetImage(views::CustomButton::BS_NORMAL,
       rb.GetBitmapNamed(IDR_FINDINPAGE_NEXT));
   find_next_button_->SetImage(views::CustomButton::BS_HOT,
@@ -129,7 +129,7 @@ FindBarView::FindBarView(FindBarHost* host)
 
   close_button_ = new views::ImageButton(this);
   close_button_->set_tag(CLOSE_TAG);
-  close_button_->SetFocusable(true);
+  close_button_->set_focusable(true);
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
                           rb.GetBitmapNamed(IDR_CLOSE_BAR));
   close_button_->SetImage(views::CustomButton::BS_HOT,
@@ -258,11 +258,16 @@ void FindBarView::OnPaint(gfx::Canvas* canvas) {
 }
 
 void FindBarView::Layout() {
-  gfx::Size panel_size = GetPreferredSize();
+  int panel_width = GetPreferredSize().width();
+
+  // Stay within view bounds.
+  int view_width = width();
+  if (view_width && view_width < panel_width)
+    panel_width = view_width;
 
   // First we draw the close button on the far right.
   gfx::Size sz = close_button_->GetPreferredSize();
-  close_button_->SetBounds(panel_size.width() - sz.width() -
+  close_button_->SetBounds(panel_width - sz.width() -
                                kMarginRightOfCloseButton,
                            (height() - sz.height()) / 2,
                            sz.width(),
@@ -310,8 +315,9 @@ void FindBarView::Layout() {
 
   // And whatever space is left in between, gets filled up by the find edit box.
   sz = find_text_->GetPreferredSize();
-  sz.set_width(match_count_x - kMarginLeftOfFindTextfield);
-  find_text_->SetBounds(match_count_x - sz.width(),
+  sz.set_width(std::max(0, match_count_x - kMarginLeftOfFindTextfield));
+  int find_text_x = std::max(0, match_count_x - sz.width());
+  find_text_->SetBounds(find_text_x,
                         (height() - sz.height()) / 2 + 1,
                         sz.width(),
                         sz.height());

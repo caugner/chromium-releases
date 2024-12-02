@@ -56,6 +56,8 @@ class LoginUtils {
       const std::string& password,
       const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
+      bool using_oauth,
+      bool has_cookies,
       Delegate* delegate) = 0;
 
   // Invoked after the tmpfs is successfully mounted.
@@ -80,8 +82,11 @@ class LoginUtils {
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
 
+  // Starts OAuth2 token retrieval and kicks off services that depend on it.
+  virtual void StartTokenServices(Profile* profile) = 0;
+
   // Supply credentials for sync and others to use.
-  virtual void FetchTokens(
+  virtual void StartSync(
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
 
@@ -90,6 +95,14 @@ class LoginUtils {
 
   // Gets the current background view.
   virtual BackgroundView* GetBackgroundView() = 0;
+
+  // Transfers cookies from the |default_profile| into the |new_profile|.
+  // If authentication was performed by an extension, then
+  // the set of cookies that was acquired through such that process will be
+  // automatically transfered into the profile. Returns true if cookie transfer
+  // was performed successfully.
+  virtual bool TransferDefaultCookies(Profile* default_profile,
+                                      Profile* new_profile) = 0;
 
  protected:
   friend class ::BrowserGuestSessionNavigatorTest;

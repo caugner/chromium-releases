@@ -4,14 +4,15 @@
 
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 
+#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/input_method_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
@@ -20,14 +21,15 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/views_login_display_host.h"
+#include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/system_access.h"
+#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "chrome/common/pref_names.h"
+#include "content/common/content_notification_types.h"
+#include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/cros/chromeos_wm_ipc_enums.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -36,10 +38,6 @@
 // TODO(altimofeev): move to ViewsLoginDisplayHost
 #include "chrome/browser/chromeos/login/views_oobe_display.h"
 
-#if defined(TOUCH_UI)
-#include "base/command_line.h"
-#include "chrome/browser/chromeos/login/dom_login_display_host.h"
-#endif
 
 namespace {
 
@@ -93,9 +91,13 @@ LoginDisplayHost* BaseLoginDisplayHost::default_host_ = NULL;
 
 BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
     : background_bounds_(background_bounds) {
+  // We need to listen to APP_EXITING but not APP_TERMINATING because
+  // APP_TERMINATING will never be fired as long as this keeps ref-count.
+  // APP_EXITING is safe here because there will be no browser instance that
+  // will block the shutdown.
   registrar_.Add(
       this,
-      NotificationType::APP_TERMINATING,
+      content::NOTIFICATION_APP_EXITING,
       NotificationService::AllSources());
   DCHECK(default_host_ == NULL);
   default_host_ = this;
@@ -118,7 +120,18 @@ BaseLoginDisplayHost::~BaseLoginDisplayHost() {
 // LoginDisplayHost implementation ---------------------------------------------
 
 void BaseLoginDisplayHost::OnSessionStart() {
+  registrar_.RemoveAll();
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+}
+
+WizardController* BaseLoginDisplayHost::CreateWizardController() {
+  // TODO(altimofeev): move this code to ViewsLoginDisplayHost when WebUI
+  // implementation will always be used with WebUILoginDisplayHost.
+  oobe_display_.reset(new ViewsOobeDisplay(background_bounds()));
+  WizardController* wizard_controller  =
+      new WizardController(this, oobe_display_.get());
+  oobe_display_->SetScreenObserver(wizard_controller);
+  return wizard_controller;
 }
 
 void BaseLoginDisplayHost::StartWizard(
@@ -131,9 +144,12 @@ void BaseLoginDisplayHost::StartWizard(
   // is done before new controller creation.
   wizard_controller_.reset();
 
-  ViewsOobeDisplay* oobe_display = new ViewsOobeDisplay(background_bounds_);
-  wizard_controller_.reset(new WizardController(this, oobe_display));
-  oobe_display->SetScreenObserver(wizard_controller_.get());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin)) {
+    wizard_controller_.reset(CreateWizardController());
+  } else {
+    // Force views based implementation.
+    wizard_controller_.reset(BaseLoginDisplayHost::CreateWizardController());
+  }
 
   wizard_controller_->set_start_url(start_url);
   ShowBackground();
@@ -143,6 +159,8 @@ void BaseLoginDisplayHost::StartWizard(
 }
 
 void BaseLoginDisplayHost::StartSignInScreen() {
+  oobe_display_.reset();
+
   DVLOG(1) << "Starting sign in screen";
   std::vector<chromeos::UserManager::User> users =
       chromeos::UserManager::Get()->GetUsers();
@@ -170,23 +188,20 @@ void BaseLoginDisplayHost::StartSignInScreen() {
   ServicesCustomizationDocument::GetInstance()->StartFetching();
 
   // Initiate device policy fetching.
-  g_browser_process->browser_policy_connector()->
-      ScheduleServiceInitialization(
-          kPolicyServiceInitializationDelayMilliseconds);
+  g_browser_process->browser_policy_connector()->ScheduleServiceInitialization(
+      kPolicyServiceInitializationDelayMilliseconds);
 }
 
 // BaseLoginDisplayHost --------------------------------------------------------
 
-void BaseLoginDisplayHost::Observe(NotificationType type,
+void BaseLoginDisplayHost::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  CHECK(type == NotificationType::APP_TERMINATING);
+  CHECK(type == content::NOTIFICATION_APP_EXITING);
 
+  registrar_.RemoveAll();
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   MessageLoop::current()->Quit();
-  registrar_.Remove(this,
-                    NotificationType::APP_TERMINATING,
-                    NotificationService::AllSources());
 }
 
 }  // namespace chromeos
@@ -203,7 +218,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
 
   // The login screen will enable alternate keyboard layouts, but we don't want
   // to start the IME process unless one is selected.
-  chromeos::CrosLibrary::Get()->GetInputMethodLibrary()->
+  chromeos::input_method::InputMethodManager::GetInstance()->
       SetDeferImeStartup(true);
   // Tell the window manager that the user isn't logged in.
   chromeos::WmIpc::instance()->SetLoggedInProperty(false);
@@ -234,18 +249,13 @@ void ShowLoginWizard(const std::string& first_screen_name,
       (first_screen_name.empty() && oobe_complete) ||
       first_screen_name == chromeos::WizardController::kLoginScreenName;
 
-  // TODO(nkostylev) Create LoginDisplayHost instance based on flag.
-#if defined(TOUCH_UI)
   chromeos::LoginDisplayHost* display_host;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDOMLogin)) {
-    display_host = new chromeos::DOMLoginDisplayHost(screen_bounds);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin)) {
+    display_host = new chromeos::WebUILoginDisplayHost(screen_bounds);
   } else {
     display_host = new chromeos::ViewsLoginDisplayHost(screen_bounds);
   }
-#else
-  chromeos::LoginDisplayHost* display_host =
-      new chromeos::ViewsLoginDisplayHost(screen_bounds);
-#endif
+
   if (show_login_screen && chromeos::CrosLibrary::Get()->EnsureLoaded()) {
     // R11 > R12 migration fix. See http://crosbug.com/p/4898.
     // If user has manually changed locale during R11 OOBE, locale will be set.
@@ -332,7 +342,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
       icu::TimeZone* timezone = icu::TimeZone::createTimeZone(
           icu::UnicodeString::fromUTF8(timezone_name));
       CHECK(timezone) << "Timezone could not be set for " << timezone_name;
-      chromeos::SystemAccess::GetInstance()->SetTimezone(*timezone);
+      chromeos::system::TimezoneSettings::GetInstance()->SetTimezone(*timezone);
     }
   }
 }

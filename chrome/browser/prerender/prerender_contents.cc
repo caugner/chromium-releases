@@ -14,9 +14,12 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_render_view_host_observer.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
-#include "chrome/browser/ui/download/download_tab_helper.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/icon_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -29,7 +32,7 @@
 #include "ui/gfx/rect.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/browser/mach_broker_mac.h"
+#include "content/browser/mach_broker_mac.h"
 #endif
 
 namespace prerender {
@@ -59,9 +62,10 @@ class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
  public:
   virtual PrerenderContents* CreatePrerenderContents(
       PrerenderManager* prerender_manager, PrerenderTracker* prerender_tracker,
-      Profile* profile, const GURL& url, const GURL& referrer) OVERRIDE {
+      Profile* profile, const GURL& url, const GURL& referrer,
+      Origin origin, uint8 experiment_id) OVERRIDE {
     return new PrerenderContents(prerender_manager, prerender_tracker, profile,
-                                 url, referrer);
+                                 url, referrer, origin, experiment_id);
   }
 };
 
@@ -73,30 +77,37 @@ class PrerenderContents::TabContentsDelegateImpl
   explicit TabContentsDelegateImpl(PrerenderContents* prerender_contents) :
       prerender_contents_(prerender_contents) {
   }
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition) {}
-  virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
-  virtual void ActivateContents(TabContents* contents) {}
-  virtual void DeactivateContents(TabContents* contents) {}
-  virtual void LoadingStateChanged(TabContents* source) {}
-  virtual void CloseContents(TabContents* source) {}
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
+
+  // TabContentsDelegate implementation:
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type) {
+      NavigationType::Type navigation_type) OVERRIDE {
     add_page_vector_.push_back(
         scoped_refptr<history::HistoryAddPageArgs>(add_page_args.Clone()));
     return false;
   }
+
+  virtual bool CanDownload(TabContents* source, int request_id) OVERRIDE {
+    prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
+    // Cancel the download.
+    return false;
+  }
+
+  virtual void OnStartDownload(TabContents* source,
+                               DownloadItem* download) OVERRIDE {
+    // Prerendered pages should never be able to download files.
+    NOTREACHED();
+  }
+
+  virtual bool OnGoToEntryOffset(int offset) OVERRIDE {
+    // This isn't allowed because the history merge operation
+    // does not work if there are renderer issued challenges.
+    // TODO(cbentzel): Cancel in this case? May not need to do
+    // since render-issued offset navigations are not guaranteed,
+    // but indicates that the page cares about the history.
+    return false;
+  }
+
   // Commits the History of Pages to the given TabContents.
   void CommitHistory(TabContentsWrapper* tab) {
     for (size_t i = 0; i < add_page_vector_.size(); ++i)
@@ -118,21 +129,24 @@ PrerenderContents::PrerenderContents(PrerenderManager* prerender_manager,
                                      PrerenderTracker* prerender_tracker,
                                      Profile* profile,
                                      const GURL& url,
-                                     const GURL& referrer)
+                                     const GURL& referrer,
+                                     Origin origin,
+                                     uint8 experiment_id)
     : prerender_manager_(prerender_manager),
       prerender_tracker_(prerender_tracker),
       prerender_url_(url),
       referrer_(referrer),
       profile_(profile),
       page_id_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(tab_contents_observer_registrar_(this)),
       has_stopped_loading_(false),
       final_status_(FINAL_STATUS_MAX),
       prerendering_has_started_(false),
       prerendering_has_been_cancelled_(false),
       child_id_(-1),
       route_id_(-1),
-      starting_page_id_(-1) {
+      starting_page_id_(-1),
+      origin_(origin),
+      experiment_id_(experiment_id) {
   DCHECK(prerender_manager != NULL);
 }
 
@@ -150,37 +164,66 @@ void PrerenderContents::StartPrerendering(
   DCHECK(profile_ != NULL);
   DCHECK(!prerendering_has_started_);
   DCHECK(prerender_contents_.get() == NULL);
-  DCHECK(source_render_view_host != NULL);
-  DCHECK(source_render_view_host->view() != NULL);
 
   prerendering_has_started_ = true;
   TabContents* new_contents = new TabContents(profile_, NULL, MSG_ROUTING_NONE,
                                               NULL, NULL);
   prerender_contents_.reset(new TabContentsWrapper(new_contents));
-  tab_contents_observer_registrar_.Observe(new_contents);
-  prerender_contents_->download_tab_helper()->set_delegate(this);
+  TabContentsObserver::Observe(new_contents);
 
-  TabContents* source_tc =
-      source_render_view_host->delegate()->GetAsTabContents();
-  if (source_tc) {
-    // So that history merging will work, get the max page ID
-    // of the old page, and add a safety margin of 10 to it (for things
-    // such as redirects).
-    starting_page_id_ = source_tc->GetMaxPageID();
-    if (starting_page_id_ < 0)
-      starting_page_id_ = 0;
-    starting_page_id_ += kPrerenderPageIdOffset;
-    prerender_contents_->controller().set_max_restored_page_id(
-        starting_page_id_);
+  gfx::Rect tab_bounds;
+  if (source_render_view_host) {
+    DCHECK(source_render_view_host->view() != NULL);
+    TabContents* source_tc =
+        source_render_view_host->delegate()->GetAsTabContents();
+    if (source_tc) {
+      // So that history merging will work, get the max page ID
+      // of the old page as a starting id.
+      starting_page_id_ = source_tc->GetMaxPageID();
 
-    tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
-    new_contents->set_delegate(tab_contents_delegate_.get());
+      // Set the size of the new TC to that of the old TC.
+      source_tc->view()->GetContainerBounds(&tab_bounds);
+    }
+  } else {
+    int max_page_id = -1;
+    // Get the largest page ID of all open tabs as a starting id.
+    for (BrowserList::BrowserVector::const_iterator browser_iter =
+            BrowserList::begin();
+         browser_iter != BrowserList::end();
+         ++browser_iter) {
+      const Browser* browser = *browser_iter;
+      int num_tabs = browser->tab_count();
+      for (int tab_index = 0; tab_index < num_tabs; ++tab_index) {
+        TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
+        if (tab_contents != NULL)
+          max_page_id = std::max(max_page_id, tab_contents->GetMaxPageID());
+      }
+    }
+    starting_page_id_ = max_page_id;
 
-    // Set the size of the new TC to that of the old TC.
-    gfx::Rect tab_bounds;
-    source_tc->view()->GetContainerBounds(&tab_bounds);
-    prerender_contents_->view()->SizeContents(tab_bounds.size());
+    // Try to get the active tab of the active browser and use that for tab
+    // bounds. If the browser has never been active, we will fail to get a size
+    // but we shouldn't be prerendering in that case anyway.
+    Browser* active_browser = BrowserList::GetLastActive();
+    if (active_browser) {
+      TabContents* active_tab_contents = active_browser->GetTabContentsAt(
+          active_browser->active_index());
+      active_tab_contents->view()->GetContainerBounds(&tab_bounds);
+    }
   }
+
+  // Add a safety margin of kPrerenderPageIdOffset to the starting page id (for
+  // things such as redirects).
+  if (starting_page_id_ < 0)
+    starting_page_id_ = 0;
+  starting_page_id_ += kPrerenderPageIdOffset;
+  prerender_contents_->controller().set_max_restored_page_id(starting_page_id_);
+
+  tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
+  new_contents->set_delegate(tab_contents_delegate_.get());
+
+  // Set the size of the prerender TabContents.
+  prerender_contents_->view()->SizeContents(tab_bounds.size());
 
   // Register as an observer of the RenderViewHost so we get messages.
   render_view_host_observer_.reset(
@@ -199,35 +242,36 @@ void PrerenderContents::StartPrerendering(
       prerender_manager_);
 
   // Close ourselves when the application is shutting down.
-  notification_registrar_.Add(this, NotificationType::APP_TERMINATING,
+  notification_registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
                               NotificationService::AllSources());
 
   // Register for our parent profile to shutdown, so we can shut ourselves down
   // as well (should only be called for OTR profiles, as we should receive
   // APP_TERMINATING before non-OTR profiles are destroyed).
   // TODO(tburkard): figure out if this is needed.
-  notification_registrar_.Add(this, NotificationType::PROFILE_DESTROYED,
+  notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                               Source<Profile>(profile_));
 
   // Register to inform new RenderViews that we're prerendering.
   notification_registrar_.Add(
-      this, NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
+      this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
       Source<TabContents>(new_contents));
 
   // Register to be told when the RenderView is ready, so we can hide it.
   // It will automatically be set to visible when we resize it, otherwise.
-  notification_registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+  notification_registrar_.Add(this,
+                              content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
                               Source<TabContents>(new_contents));
 
   // Register for redirect notifications sourced from |this|.
   notification_registrar_.Add(
-      this, NotificationType::RESOURCE_RECEIVED_REDIRECT,
+      this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
       Source<RenderViewHostDelegate>(GetRenderViewHostDelegate()));
 
   // Register for new windows from any source.
-  notification_registrar_.Add(this,
-                              NotificationType::CREATING_NEW_WINDOW_CANCELLED,
-                              Source<TabContents>(new_contents));
+  notification_registrar_.Add(
+      this, content::NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED,
+      Source<TabContents>(new_contents));
 
   DCHECK(load_start_time_.is_null());
   load_start_time_ = base::TimeTicks::Now();
@@ -263,20 +307,18 @@ void PrerenderContents::set_final_status(FinalStatus final_status) {
   final_status_ = final_status;
 }
 
-FinalStatus PrerenderContents::final_status() const {
-  return final_status_;
-}
-
 PrerenderContents::~PrerenderContents() {
   DCHECK(final_status_ != FINAL_STATUS_MAX);
   DCHECK(prerendering_has_been_cancelled_ ||
          final_status_ == FINAL_STATUS_USED ||
          final_status_ == FINAL_STATUS_CONTROL_GROUP);
+  DCHECK(origin_ != ORIGIN_MAX);
 
   // If we haven't even started prerendering, we were just in the control
   // group, which means we do not want to record the status.
   if (prerendering_has_started())
-    RecordFinalStatus(final_status_);
+    prerender_manager_->RecordFinalStatus(origin_, experiment_id_,
+                                          final_status_);
 
   if (child_id_ != -1 && route_id_ != -1)
     prerender_tracker_->OnPrerenderingFinished(child_id_, route_id_);
@@ -290,19 +332,19 @@ PrerenderContents::~PrerenderContents() {
   prerender_tracker_->RemovePrerenderURLsOnUIThread(alias_urls_);
 }
 
-void PrerenderContents::Observe(NotificationType type,
+void PrerenderContents::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::PROFILE_DESTROYED:
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_DESTROYED:
       Destroy(FINAL_STATUS_PROFILE_DESTROYED);
       return;
 
-    case NotificationType::APP_TERMINATING:
+    case content::NOTIFICATION_APP_TERMINATING:
       Destroy(FINAL_STATUS_APP_TERMINATING);
       return;
 
-    case NotificationType::RESOURCE_RECEIVED_REDIRECT: {
+    case content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT: {
       // RESOURCE_RECEIVED_REDIRECT can come for any resource on a page.
       // If it's a redirect on the top-level resource, the name needs
       // to be remembered for future matching, and if it redirects to
@@ -321,7 +363,7 @@ void PrerenderContents::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
       if (prerender_contents_.get()) {
         DCHECK_EQ(Source<TabContents>(source).ptr(),
                   prerender_contents_->tab_contents());
@@ -341,7 +383,7 @@ void PrerenderContents::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::TAB_CONTENTS_CONNECTED: {
+    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED: {
       if (prerender_contents_.get()) {
         DCHECK_EQ(Source<TabContents>(source).ptr(),
                   prerender_contents_->tab_contents());
@@ -353,7 +395,7 @@ void PrerenderContents::Observe(NotificationType type,
       return;
     }
 
-    case NotificationType::CREATING_NEW_WINDOW_CANCELLED: {
+    case content::NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED: {
       if (prerender_contents_.get()) {
         CHECK(Source<TabContents>(source).ptr() ==
               prerender_contents_->tab_contents());
@@ -406,17 +448,21 @@ void PrerenderContents::OnUpdateFaviconURL(
 }
 
 bool PrerenderContents::AddAliasURL(const GURL& url) {
-  if (!url.SchemeIs(chrome::kHttpScheme)) {
-    if (url.SchemeIs(chrome::kHttpsScheme))
-      Destroy(FINAL_STATUS_HTTPS);
-    else
-      Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
+  const bool http = url.SchemeIs(chrome::kHttpScheme);
+  const bool https = url.SchemeIs(chrome::kHttpsScheme);
+  if (!(http || https)) {
+    Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
+    return false;
+  }
+  if (https && !prerender_manager_->config().https_allowed) {
+    Destroy(FINAL_STATUS_HTTPS);
     return false;
   }
   if (prerender_manager_->HasRecentlyBeenNavigatedTo(url)) {
     Destroy(FINAL_STATUS_RECENTLY_VISITED);
     return false;
   }
+
   alias_urls_.push_back(url);
   prerender_tracker_->AddPrerenderURLOnUIThread(url);
   return true;
@@ -494,18 +540,6 @@ void PrerenderContents::Destroy(FinalStatus final_status) {
     render_view_host_observer_->set_prerender_contents(NULL);
 }
 
-bool PrerenderContents::CanDownload(int request_id) {
-  Destroy(FINAL_STATUS_DOWNLOAD);
-  // Cancel the download.
-  return false;
-}
-
-void PrerenderContents::OnStartDownload(DownloadItem* download,
-                                        TabContentsWrapper* tab) {
-  // Prerendered pages should never be able to download files.
-  NOTREACHED();
-}
-
 base::ProcessMetrics* PrerenderContents::MaybeGetProcessMetrics() {
   if (process_metrics_.get() == NULL) {
     // If a PrenderContents hasn't started prerending, don't be fully formed.
@@ -532,18 +566,16 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
     return;
 
   size_t private_bytes, shared_bytes;
-  if (metrics->GetMemoryBytes(&private_bytes, &shared_bytes)) {
-    if (private_bytes >
-        prerender_manager_->max_prerender_memory_mb() * 1024 * 1024) {
+  if (metrics->GetMemoryBytes(&private_bytes, &shared_bytes) &&
+      private_bytes > prerender_manager_->config().max_bytes) {
       Destroy(FINAL_STATUS_MEMORY_LIMIT_EXCEEDED);
-    }
   }
 }
 
 TabContentsWrapper* PrerenderContents::ReleasePrerenderContents() {
+  prerender_contents_->tab_contents()->set_delegate(NULL);
   render_view_host_observer_.reset();
-  prerender_contents_->download_tab_helper()->set_delegate(NULL);
-  tab_contents_observer_registrar_.Observe(NULL);
+  TabContentsObserver::Observe(NULL);
   return prerender_contents_.release();
 }
 
@@ -567,5 +599,25 @@ void PrerenderContents::CommitHistory(TabContentsWrapper* tab) {
   if (tab_contents_delegate_.get())
     tab_contents_delegate_->CommitHistory(tab);
 }
+
+Value* PrerenderContents::GetAsValue() const {
+  if (!prerender_contents_.get())
+    return NULL;
+  DictionaryValue* dict_value = new DictionaryValue();
+  dict_value->SetString("url", prerender_url_.spec());
+  base::TimeTicks current_time = base::TimeTicks::Now();
+  base::TimeDelta duration = current_time - load_start_time_;
+  dict_value->SetInteger("duration", duration.InSeconds());
+  return dict_value;
+}
+
+bool PrerenderContents::IsCrossSiteNavigationPending() const {
+  if (!prerender_contents_.get() || !prerender_contents_->tab_contents())
+    return false;
+  const TabContents* tab_contents = prerender_contents_->tab_contents();
+  return (tab_contents->GetSiteInstance() !=
+          tab_contents->GetPendingSiteInstance());
+}
+
 
 }  // namespace prerender

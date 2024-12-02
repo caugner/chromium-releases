@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "gpu/command_buffer/service/common_decoder.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 
@@ -109,6 +110,9 @@ class ProgramManager {
     const UniformInfo* GetUniformInfoByLocation(
         GLint location, GLint* array_index) const;
 
+    // Gets all the program info.
+    void GetProgramInfo(CommonDecoder::Bucket* bucket) const;
+
     // Sets the sampler values for a uniform.
     // This is safe to call for any location. If the location is not
     // a sampler uniform nothing will happen.
@@ -196,11 +200,12 @@ class ProgramManager {
     void UpdateLogInfo();
 
     const UniformInfo* AddUniformInfo(
-        GLsizei size, GLenum type, GLint location, const std::string& name);
+        GLsizei size, GLenum type, GLint location, const std::string& name,
+        const std::string& original_name);
 
     void GetCorrectedVariableInfo(
         bool use_uniforms, const std::string& name, std::string* corrected_name,
-        GLsizei* size, GLenum* type) const;
+        std::string* original_name, GLsizei* size, GLenum* type) const;
 
     void DetachShaders(ShaderManager* manager);
 

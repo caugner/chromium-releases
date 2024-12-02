@@ -13,15 +13,17 @@
 #include "base/string_util.h"
 #include "base/system_monitor/system_monitor.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/nacl/nacl_launcher_thread.h"
+#include "chrome/nacl/nacl_listener.h"
 #include "chrome/nacl/nacl_main_platform_delegate.h"
 #include "content/common/child_process.h"
+#include "content/common/child_process_info.h"
 #include "content/common/hi_res_timer_manager.h"
 #include "content/common/main_function_params.h"
-#include "content/common/result_codes.h"
 #include "content/common/sandbox_policy.h"
+#include "ipc/ipc_switches.h"
 
 #if defined(OS_WIN)
 #include "chrome/nacl/broker_thread.h"
@@ -43,7 +45,7 @@ int NaClBrokerMain(const MainFunctionParams& parameters) {
   const CommandLine& parsed_command_line = parameters.command_line_;
 
   DVLOG(1) << "Started NaCL broker with "
-           << parsed_command_line.command_line_string();
+           << parsed_command_line.GetCommandLineString();
 
   // NOTE: this code is duplicated from browser_main.cc
   // IMPORTANT: This piece of code needs to run as early as possible in the
@@ -75,7 +77,7 @@ int NaClBrokerMain(const MainFunctionParams& parameters) {
 }
 #else
 int NaClBrokerMain(const MainFunctionParams& parameters) {
-  return ResultCodes::BAD_PROCESS_TYPE;
+  return chrome::RESULT_CODE_BAD_PROCESS_TYPE;
 }
 #endif  // _WIN64
 
@@ -117,10 +119,10 @@ int NaClMain(const MainFunctionParams& parameters) {
   bool sandbox_test_result = platform.RunSandboxTests();
 
   if (sandbox_test_result) {
-    ChildProcess nacl_process;
     bool debug = parsed_command_line.HasSwitch(switches::kEnableNaClDebug);
-    nacl_process.set_main_thread(new NaClLauncherThread(debug));
-    MessageLoop::current()->Run();
+    NaClListener listener;
+    listener.set_debug_enabled(debug);
+    listener.Listen();
   } else {
     // This indirectly prevents the test-harness-success-cookie from being set,
     // as a way of communicating test failure, because the nexe won't reply.

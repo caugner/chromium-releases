@@ -10,15 +10,18 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "chrome/common/automation_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 class AutomationMessageSender;
 class FilePath;
-class GURL;
+
+namespace base {
 class DictionaryValue;
 class ListValue;
 class Value;
+}
 
 struct WebKeyEvent {
   WebKeyEvent(automation::KeyEventTypes type,
@@ -44,6 +47,14 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                std::string* reply,
                                bool* success) WARN_UNUSED_RESULT;
 
+// Same as above, but uses the given |AutomationMessageSender|'s default timeout
+// value.
+bool SendAutomationJSONRequestWithDefaultTimeout(
+    AutomationMessageSender* sender,
+    const std::string& request,
+    std::string* reply,
+    bool* success);
+
 // Requests the current browser and tab indices for the given tab ID.
 // Returns true on success.
 bool SendGetIndicesFromTabIdJSONRequest(
@@ -68,7 +79,7 @@ bool SendNavigateToURLJSONRequest(
     AutomationMessageSender* sender,
     int browser_index,
     int tab_index,
-    const GURL& url,
+    const std::string& url,
     int navigation_count,
     AutomationMsg_NavigationResponseValues* nav_response,
     std::string* error_msg) WARN_UNUSED_RESULT;
@@ -82,7 +93,7 @@ bool SendExecuteJavascriptJSONRequest(
     int tab_index,
     const std::string& frame_xpath,
     const std::string& javascript,
-    Value** result,
+    base::Value** result,
     std::string* error_msg) WARN_UNUSED_RESULT;
 
 // Requests the specified tab to go forward. Waits for the load to complete.
@@ -141,17 +152,8 @@ bool SendGetTabTitleJSONRequest(
 bool SendGetCookiesJSONRequest(
     AutomationMessageSender* sender,
     const std::string& url,
-    ListValue** cookies,
+    base::ListValue** cookies,
     std::string* error_msg) WARN_UNUSED_RESULT;
-
-// Requests all the cookies for the given URL. Returns true on success.
-// Use |SendGetCookiesJSONRequest| for chrome versions greater than 11.
-// TODO(kkania): Remove this function when version 12 is stable.
-bool SendGetCookiesJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    std::string* cookies) WARN_UNUSED_RESULT;
 
 // Requests deletion of the cookie with the given name and URL. Returns true
 // on success.
@@ -161,33 +163,13 @@ bool SendDeleteCookieJSONRequest(
     const std::string& cookie_name,
     std::string* error_msg) WARN_UNUSED_RESULT;
 
-// Requests deletion of the cookie with the given name and URL. Returns true
-// on success. Use |SendDeleteCookieJSONRequest| for chrome versions greater
-// than 11.
-// TODO(kkania): Remove this function when version 12 is stable.
-bool SendDeleteCookieJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    const std::string& cookie_name) WARN_UNUSED_RESULT;
-
 // Requests setting the given cookie for the given URL. Returns true on
 // success. The caller retains ownership of |cookie_dict|.
 bool SendSetCookieJSONRequest(
     AutomationMessageSender* sender,
     const std::string& url,
-    DictionaryValue* cookie_dict,
+    base::DictionaryValue* cookie_dict,
     std::string* error_msg) WARN_UNUSED_RESULT;
-
-// Requests setting the given cookie for the given URL. Returns true on
-// success. Use |SendSetCookieJSONRequest| instead for chrome versions greater
-// than 11.
-// TODO(kkania): Remove this when version 12 is stable.
-bool SendSetCookieJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    const std::string& cookie) WARN_UNUSED_RESULT;
 
 // Requests the IDs for all open tabs. Returns true on success.
 bool SendGetTabIdsJSONRequest(
@@ -289,6 +271,17 @@ bool SendNativeKeyEventJSONRequest(
     int tab_index,
     ui::KeyboardCode key_code,
     int modifiers,
+    std::string* error_msg) WARN_UNUSED_RESULT;
+
+// Requests to drag and drop the file paths at the given coordinate in the
+// specified tab. Returns true on success.
+bool SendDragAndDropFilePathsJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    int x,
+    int y,
+    const std::vector<FilePath::StringType>& paths,
     std::string* error_msg) WARN_UNUSED_RESULT;
 
 // Requests to get the active JavaScript modal dialog's message. Returns true

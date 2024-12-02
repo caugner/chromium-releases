@@ -25,6 +25,7 @@
 #include "content/renderer/render_view.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
@@ -37,6 +38,7 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
       plugin_handle_(NULL),
 #endif  // defined(OS_MACOSX)
       context_lost_callback_(0),
+      context_lost_reason_(GL_NO_ERROR),
       cached_width_(0),
       cached_height_(0),
       bound_fbo_(0) {
@@ -102,7 +104,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
 
   GURL active_url;
   if (web_view && web_view->mainFrame())
-    active_url = GURL(web_view->mainFrame()->url());
+    active_url = GURL(web_view->mainFrame()->document().url());
 
   if (render_directly_to_web_view) {
     RenderView* renderview = RenderView::FromWebView(web_view);
@@ -112,7 +114,6 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     web_view_ = web_view;
     context_ = RendererGLContext::CreateViewContext(
         host,
-        renderview->compositing_surface(),
         renderview->routing_id(),
         preferred_extensions,
         attribs,
@@ -123,26 +124,8 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
               &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete));
     }
   } else {
-    bool compositing_enabled = !CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kDisableAcceleratedCompositing);
-    RendererGLContext* parent_context = NULL;
-    // If GPU compositing is enabled we need to create a GL context that shares
-    // resources with the compositor's context.
-    if (compositing_enabled) {
-      // Asking for the WebGraphicsContext3D on the WebView will force one to
-      // be created if it doesn't already exist. When the compositor is created
-      // for the view it will use the same context.
-      WebKit::WebGraphicsContext3D* view_context =
-          web_view->graphicsContext3D();
-      if (view_context) {
-        WebGraphicsContext3DCommandBufferImpl* context_impl =
-            static_cast<WebGraphicsContext3DCommandBufferImpl*>(view_context);
-        parent_context = context_impl->context_;
-      }
-    }
     context_ = RendererGLContext::CreateOffscreenContext(
         host,
-        parent_context,
         gfx::Size(1, 1),
         preferred_extensions,
         attribs,
@@ -199,6 +182,14 @@ bool WebGraphicsContext3DCommandBufferImpl::isGLES2Compliant() {
   return true;
 }
 
+bool WebGraphicsContext3DCommandBufferImpl::setParentContext(
+    WebGraphicsContext3D* parent_context) {
+  WebGraphicsContext3DCommandBufferImpl* parent_context_impl =
+      static_cast<WebGraphicsContext3DCommandBufferImpl*>(parent_context);
+  return context_->SetParent(
+      parent_context_impl ? parent_context_impl->context() : NULL);
+}
+
 WebGLId WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
   DCHECK(context_);
   return context_->GetParentTextureId();
@@ -235,16 +226,6 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
 #endif  // FLIP_FRAMEBUFFER_VERTICALLY
 }
 
-WebGLId WebGraphicsContext3DCommandBufferImpl::createCompositorTexture(
-    WGC3Dsizei width, WGC3Dsizei height) {
-  return context_->CreateParentTexture(gfx::Size(width, height));
-}
-
-void WebGraphicsContext3DCommandBufferImpl::deleteCompositorTexture(
-    WebGLId parent_texture) {
-  context_->DeleteParentTexture(parent_texture);
-}
-
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
 void WebGraphicsContext3DCommandBufferImpl::FlipVertically(
     uint8* framebuffer,
@@ -271,8 +252,11 @@ void WebGraphicsContext3DCommandBufferImpl::FlipVertically(
 
 bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
     unsigned char* pixels,
-    size_t buffer_size) {
-  if (buffer_size != static_cast<size_t>(4 * width() * height())) {
+    size_t buffer_size,
+    WebGLId buffer,
+    int width,
+    int height) {
+  if (buffer_size != static_cast<size_t>(4 * width * height)) {
     return false;
   }
 
@@ -283,11 +267,11 @@ bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
   // vertical flip is only a temporary solution anyway until Chrome
   // is fully GPU composited, it wasn't worth the complexity.
 
-  bool mustRestoreFBO = (bound_fbo_ != 0);
+  bool mustRestoreFBO = (bound_fbo_ != buffer);
   if (mustRestoreFBO) {
-    gl_->BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl_->BindFramebuffer(GL_FRAMEBUFFER, buffer);
   }
-   gl_->ReadPixels(0, 0, cached_width_, cached_height_,
+   gl_->ReadPixels(0, 0, width, height,
                    GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
   // Swizzle red and blue channels
@@ -302,11 +286,17 @@ bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   if (pixels) {
-    FlipVertically(pixels, cached_width_, cached_height_);
+    FlipVertically(pixels, width, height);
   }
 #endif
 
   return true;
+}
+
+bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
+    unsigned char* pixels,
+    size_t buffer_size) {
+  return readBackFramebuffer(pixels, buffer_size, 0, width(), height());
 }
 
 void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
@@ -351,7 +341,9 @@ void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
     WebGLId texture, WebGLId parentTexture) {
-  copyTextureToCompositor(texture, parentTexture);
+  TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::copyTextureToCompositor");
+  gl_->CopyTextureToParentTextureCHROMIUM(texture, parentTexture);
+  gl_->Flush();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::getParentToChildLatchCHROMIUM(
@@ -377,14 +369,11 @@ void WebGraphicsContext3DCommandBufferImpl::getChildToParentLatchCHROMIUM(
 void WebGraphicsContext3DCommandBufferImpl::waitLatchCHROMIUM(
     WGC3Duint latch_id)
 {
-  gl_->WaitLatchCHROMIUM(latch_id);
 }
 
 void WebGraphicsContext3DCommandBufferImpl::setLatchCHROMIUM(
     WGC3Duint latch_id)
 {
-  gl_->SetLatchCHROMIUM(latch_id);
-  // required to ensure set command is sent to GPU process
   gl_->Flush();
 }
 
@@ -689,7 +678,8 @@ WGC3Denum WebGraphicsContext3DCommandBufferImpl::getError() {
 }
 
 bool WebGraphicsContext3DCommandBufferImpl::isContextLost() {
-  return context_->IsCommandBufferContextLost();
+  return context_->IsCommandBufferContextLost() ||
+      context_lost_reason_ != GL_NO_ERROR;
 }
 
 DELEGATE_TO_GL_2(getFloatv, GetFloatv, WGC3Denum, WGC3Dfloat*)
@@ -1022,13 +1012,6 @@ void WebGraphicsContext3DCommandBufferImpl::deleteTexture(WebGLId texture) {
   gl_->DeleteTextures(1, &texture);
 }
 
-void WebGraphicsContext3DCommandBufferImpl::copyTextureToCompositor(
-    WebGLId texture, WebGLId parentTexture) {
-  TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::copyTextureToCompositor");
-  gl_->CopyTextureToParentTextureCHROMIUM(texture, parentTexture);
-  gl_->Flush();
-}
-
 void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete() {
   // This may be called after tear-down of the RenderView.
   RenderView* renderview =
@@ -1042,7 +1025,36 @@ void WebGraphicsContext3DCommandBufferImpl::setContextLostCallback(
   context_lost_callback_ = cb;
 }
 
-void WebGraphicsContext3DCommandBufferImpl::OnContextLost() {
+WGC3Denum WebGraphicsContext3DCommandBufferImpl::getGraphicsResetStatusARB() {
+  if (context_->IsCommandBufferContextLost() &&
+      context_lost_reason_ == GL_NO_ERROR) {
+    return GL_UNKNOWN_CONTEXT_RESET_ARB;
+  }
+
+  return context_lost_reason_;
+}
+
+namespace {
+
+WGC3Denum convertReason(RendererGLContext::ContextLostReason reason) {
+  switch (reason) {
+  case RendererGLContext::kGuilty:
+    return GL_GUILTY_CONTEXT_RESET_ARB;
+  case RendererGLContext::kInnocent:
+    return GL_INNOCENT_CONTEXT_RESET_ARB;
+  case RendererGLContext::kUnknown:
+    return GL_UNKNOWN_CONTEXT_RESET_ARB;
+  }
+
+  NOTREACHED();
+  return GL_UNKNOWN_CONTEXT_RESET_ARB;
+}
+
+}  // anonymous namespace
+
+void WebGraphicsContext3DCommandBufferImpl::OnContextLost(
+    RendererGLContext::ContextLostReason reason) {
+  context_lost_reason_ = convertReason(reason);
   if (context_lost_callback_) {
     context_lost_callback_->onContextLost();
   }

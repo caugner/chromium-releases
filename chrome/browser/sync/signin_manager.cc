@@ -4,12 +4,16 @@
 
 #include "chrome/browser/sync/signin_manager.h"
 
+#include "base/command_line.h"
 #include "base/string_util.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/common/notification_service.h"
 
 const char kGetInfoEmailKey[] = "email";
@@ -34,6 +38,22 @@ void SigninManager::Initialize(Profile* profile) {
   if (!username_.empty()) {
     profile_->GetTokenService()->LoadTokensFromDB();
   }
+}
+
+bool SigninManager::IsInitialized() const {
+  return profile_ != NULL;
+}
+
+void SigninManager::CleanupNotificationRegistration() {
+#if !defined(OS_CHROMEOS)
+  if (registrar_.IsRegistered(this,
+                              chrome::NOTIFICATION_TOKEN_AVAILABLE,
+                              NotificationService::AllSources())) {
+    registrar_.Remove(this,
+                      chrome::NOTIFICATION_TOKEN_AVAILABLE,
+                      NotificationService::AllSources());
+  }
+#endif
 }
 
 // If a username already exists, the user is logged in.
@@ -69,6 +89,22 @@ void SigninManager::StartSignIn(const std::string& username,
                                   login_token,
                                   login_captcha,
                                   GaiaAuthFetcher::HostedAccountsNotAllowed);
+
+#if defined(ENABLE_PRE_LOGIN_AFTER_M14)
+  // Pre-login is being taken out of M14, but will be put back in right after
+  // the fork.
+  // Register for token availability.  The signin manager will pre-login the
+  // user when the GAIA service token is ready for use.  Only do this if we
+  // are not running in ChomiumOS, since it handles pre-login itself.
+#if !defined(OS_CHROMEOS)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisablePreLogin)) {
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_TOKEN_AVAILABLE,
+                   NotificationService::AllSources());
+  }
+#endif
+#endif
 }
 
 void SigninManager::ProvideSecondFactorAccessCode(
@@ -90,6 +126,8 @@ void SigninManager::ProvideSecondFactorAccessCode(
 void SigninManager::SignOut() {
   if (!profile_)
     return;
+
+  CleanupNotificationRegistration();
 
   client_login_.reset();
   last_result_ = ClientLoginResult();
@@ -118,7 +156,7 @@ void SigninManager::OnGetUserInfoSuccess(const std::string& key,
 
   GoogleServiceSigninSuccessDetails details(username_, password_);
   NotificationService::current()->Notify(
-      NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
+      chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
       Source<Profile>(profile_),
       Details<const GoogleServiceSigninSuccessDetails>(&details));
 
@@ -142,9 +180,16 @@ void SigninManager::OnGetUserInfoFailure(const GoogleServiceAuthError& error) {
   OnClientLoginFailure(error);
 }
 
+void SigninManager::OnTokenAuthFailure(const GoogleServiceAuthError& error) {
+#if !defined(OS_CHROMEOS)
+  LOG(INFO) << "Unable to retreive the token auth.";
+  CleanupNotificationRegistration();
+#endif
+}
+
 void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
   NotificationService::current()->Notify(
-      NotificationType::GOOGLE_SIGNIN_FAILED,
+      chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
       Source<Profile>(profile_),
       Details<const GoogleServiceAuthError>(&error));
 
@@ -160,4 +205,29 @@ void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
   }
 
   SignOut();
+}
+
+void SigninManager::Observe(int type,
+                            const NotificationSource& source,
+                            const NotificationDetails& details) {
+#if !defined(OS_CHROMEOS)
+  DCHECK(type == chrome::NOTIFICATION_TOKEN_AVAILABLE);
+  TokenService::TokenAvailableDetails* tok_details =
+      Details<TokenService::TokenAvailableDetails>(details).ptr();
+
+  // If a GAIA service token has become available, use it to pre-login the
+  // user to other services that depend on GAIA credentials.
+  if (tok_details->service() == GaiaConstants::kGaiaService) {
+    if (client_login_.get() == NULL) {
+      client_login_.reset(new GaiaAuthFetcher(this,
+                                              GaiaConstants::kChromeSource,
+                                              profile_->GetRequestContext()));
+    }
+
+    client_login_->StartTokenAuth(tok_details->token());
+
+    // We only want to do this once per sign-in.
+    CleanupNotificationRegistration();
+  }
+#endif
 }

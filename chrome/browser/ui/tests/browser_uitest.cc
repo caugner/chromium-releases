@@ -17,6 +17,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
@@ -192,7 +193,17 @@ TEST_F(BrowserTest, MAYBE_OtherRedirectsDontForkProcess) {
   ASSERT_EQ(orig_process_count, process_count);
 }
 
-TEST_F(VisibleBrowserTest, WindowOpenClose) {
+// WindowOpenClose is flaky on ChromeOS and fails consistently on linux views.
+// See http://crbug.com/85763.
+#if defined (OS_CHROMEOS)
+#define MAYBE_WindowOpenClose FLAKY_WindowOpenClose
+#elif defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+#define MAYBE_WindowOpenClose FAILS_WindowOpenClose
+#else
+#define MAYBE_WindowOpenClose WindowOpenClose
+#endif
+
+TEST_F(VisibleBrowserTest, MAYBE_WindowOpenClose) {
   FilePath test_file(test_data_directory_);
   test_file = test_file.AppendASCII("window.close.html");
 

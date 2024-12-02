@@ -17,9 +17,9 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "content/browser/tab_contents/page_navigator.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/gtk_util.h"
@@ -136,7 +136,7 @@ void BookmarkMenuController::NavigateToMenuItem(
   DCHECK(node);
   DCHECK(page_navigator_);
   page_navigator_->OpenURL(
-      node->GetURL(), GURL(), disposition, PageTransition::AUTO_BOOKMARK);
+      node->url(), GURL(), disposition, PageTransition::AUTO_BOOKMARK);
 }
 
 void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
@@ -197,7 +197,7 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
     node_to_menu_widget_map_[node] = menu_item;
   }
 
-  if (parent->child_count() == 0) {
+  if (parent->empty()) {
     GtkWidget* empty_menu = gtk_menu_item_new_with_label(
         l10n_util::GetStringUTF8(IDS_MENU_EMPTY_SUBMENU).c_str());
     gtk_widget_set_sensitive(empty_menu, FALSE);

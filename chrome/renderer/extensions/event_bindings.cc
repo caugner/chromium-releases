@@ -23,6 +23,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
@@ -39,6 +40,7 @@ using bindings_utils::ExtensionBase;
 using bindings_utils::GetPendingRequestMap;
 using bindings_utils::PendingRequestMap;
 using WebKit::WebDataSource;
+using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebURL;
@@ -197,13 +199,12 @@ static bool HasSufficientPermissions(ContextInfo* context,
     return true;
 
   RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
-  bool url_permissions_ok = (!event_url.is_valid() ||
-      (renderview &&
-       GURL(renderview->webview()->mainFrame()->url()).SchemeIs(
-           chrome::kExtensionScheme) &&
-       renderview->webview()->mainFrame()->securityOrigin().canRequest(
-          event_url)));
-  return url_permissions_ok;
+  if (!renderview)
+    return false;
+
+  WebDocument document = renderview->webview()->mainFrame()->document();
+  return GURL(document.url()).SchemeIs(chrome::kExtensionScheme) &&
+       document.securityOrigin().canRequest(event_url);
 }
 
 }  // namespace

@@ -10,7 +10,10 @@
 #include "remoting/host/curtain.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/client_session.h"
+#include "remoting/host/continue_window.h"
+#include "remoting/host/disconnect_window.h"
 #include "remoting/host/event_executor.h"
+#include "remoting/host/local_input_monitor.h"
 #include "remoting/host/user_authenticator.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -42,6 +45,34 @@ class MockCurtain : public Curtain {
   MOCK_METHOD1(EnableCurtainMode, void(bool enable));
 };
 
+class MockDisconnectWindow : public DisconnectWindow {
+ public:
+  MockDisconnectWindow();
+  virtual ~MockDisconnectWindow();
+
+  MOCK_METHOD2(Show, void(remoting::ChromotingHost* host,
+                          const std::string& username));
+  MOCK_METHOD0(Hide, void());
+};
+
+class MockLocalInputMonitor : public LocalInputMonitor {
+ public:
+  MockLocalInputMonitor();
+  virtual ~MockLocalInputMonitor();
+
+  MOCK_METHOD1(Start, void(remoting::ChromotingHost* host));
+  MOCK_METHOD0(Stop, void());
+};
+
+class MockContinueWindow : public ContinueWindow {
+ public:
+  MockContinueWindow();
+  virtual ~MockContinueWindow();
+
+  MOCK_METHOD1(Show, void(remoting::ChromotingHost* host));
+  MOCK_METHOD0(Hide, void());
+};
+
 class MockChromotingHostContext : public ChromotingHostContext {
  public:
   MockChromotingHostContext();
@@ -53,6 +84,7 @@ class MockChromotingHostContext : public ChromotingHostContext {
   MOCK_METHOD0(main_message_loop, MessageLoop*());
   MOCK_METHOD0(encode_message_loop, MessageLoop*());
   MOCK_METHOD0(network_message_loop, MessageLoop*());
+  MOCK_METHOD0(ui_message_loop, MessageLoop*());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockChromotingHostContext);
@@ -69,7 +101,7 @@ class MockClientSessionEventHandler : public ClientSession::EventHandler {
                void(scoped_refptr<protocol::ConnectionToClient>));
 
  private:
-   DISALLOW_COPY_AND_ASSIGN(MockClientSessionEventHandler);
+  DISALLOW_COPY_AND_ASSIGN(MockClientSessionEventHandler);
 };
 
 class MockEventExecutor : public EventExecutor {

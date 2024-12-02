@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/string_util.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
@@ -18,10 +19,10 @@
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/guid.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 
 namespace browser_sync {
 
@@ -46,22 +47,12 @@ AutofillProfileChangeProcessor::AutofillProfileChangeProcessor(
 
 AutofillProfileChangeProcessor::~AutofillProfileChangeProcessor() {}
 
-AutofillProfileChangeProcessor::ScopedStopObserving::ScopedStopObserving(
-    AutofillProfileChangeProcessor* processor) {
-  processor_ = processor;
-  processor_->StopObserving();
-}
-
-AutofillProfileChangeProcessor::ScopedStopObserving::~ScopedStopObserving() {
-  processor_->StartObserving();
-}
-
 void AutofillProfileChangeProcessor::ApplyChangesFromSyncModel(
     const sync_api::BaseTransaction *write_trans,
     const sync_api::SyncManager::ChangeRecord* changes,
     int change_count) {
 
-  ScopedStopObserving observer(this);
+  ScopedStopObserving<AutofillProfileChangeProcessor> observer(this);
 
   sync_api::ReadNode autofill_profile_root(write_trans);
   if (!autofill_profile_root.InitByTagLookup(kAutofillProfileTag)) {
@@ -101,16 +92,16 @@ void AutofillProfileChangeProcessor::ApplyChangesFromSyncModel(
   }
 }
 
-void AutofillProfileChangeProcessor::Observe(NotificationType type,
+void AutofillProfileChangeProcessor::Observe(int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::AUTOFILL_PROFILE_CHANGED);
+  DCHECK_EQ(type, chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED);
   WebDataService* wds = Source<WebDataService>(source).ptr();
 
   if (!wds || wds->GetDatabase() != web_database_)
     return;
 
-  sync_api::WriteTransaction trans(share_handle());
+  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
   sync_api::ReadNode autofill_root(&trans);
   if (!autofill_root.InitByTagLookup(kAutofillProfileTag)) {
     error_handler()->OnUnrecoverableError(FROM_HERE,
@@ -174,7 +165,7 @@ void AutofillProfileChangeProcessor::CommitChangesFromSyncModel() {
   if (!running())
     return;
 
-  ScopedStopObserving observer(this);
+  ScopedStopObserving<AutofillProfileChangeProcessor> observer(this);
 
   for (unsigned int i = 0;i < autofill_changes_.size(); ++i) {
     if (sync_api::SyncManager::ChangeRecord::ACTION_DELETE ==
@@ -307,7 +298,7 @@ void AutofillProfileChangeProcessor::AddAutofillProfileSyncNode(
 void AutofillProfileChangeProcessor::StartObserving() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   notification_registrar_.Add(this,
-      NotificationType::AUTOFILL_PROFILE_CHANGED,
+      chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
       NotificationService::AllSources());
 }
 

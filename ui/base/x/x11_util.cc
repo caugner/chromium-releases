@@ -20,6 +20,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -96,12 +97,7 @@ bool XDisplayExists() {
 }
 
 Display* GetXDisplay() {
-  static Display* display = NULL;
-
-  if (!display)
-    display = gdk_x11_get_default_xdisplay();
-
-  return display;
+  return base::MessagePumpForUI::GetDefaultXDisplay();
 }
 
 static SharedMemorySupport DoQuerySharedMemorySupport(Display* dpy) {
@@ -242,7 +238,7 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
 bool PropertyExists(XID window, const std::string& property_name) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0;
+  unsigned long num_items = 0;
   unsigned char* property = NULL;
 
   int result = GetProperty(window, property_name, 1,
@@ -257,7 +253,7 @@ bool PropertyExists(XID window, const std::string& property_name) {
 bool GetIntProperty(XID window, const std::string& property_name, int* value) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0;
+  unsigned long num_items = 0;
   unsigned char* property = NULL;
 
   int result = GetProperty(window, property_name, 1,
@@ -270,7 +266,7 @@ bool GetIntProperty(XID window, const std::string& property_name, int* value) {
     return false;
   }
 
-  *value = *(reinterpret_cast<int*>(property));
+  *value = static_cast<int>(*(reinterpret_cast<long*>(property)));
   XFree(property);
   return true;
 }
@@ -280,7 +276,7 @@ bool GetIntArrayProperty(XID window,
                          std::vector<int>* value) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0;
+  unsigned long num_items = 0;
   unsigned char* properties = NULL;
 
   int result = GetProperty(window, property_name,
@@ -294,9 +290,11 @@ bool GetIntArrayProperty(XID window,
     return false;
   }
 
-  int* int_properties = reinterpret_cast<int*>(properties);
+  long* int_properties = reinterpret_cast<long*>(properties);
   value->clear();
-  value->insert(value->begin(), int_properties, int_properties + num_items);
+  for (unsigned long i = 0; i < num_items; ++i) {
+    value->push_back(static_cast<int>(int_properties[i]));
+  }
   XFree(properties);
   return true;
 }
@@ -306,7 +304,7 @@ bool GetAtomArrayProperty(XID window,
                           std::vector<Atom>* value) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0;
+  unsigned long num_items = 0;
   unsigned char* properties = NULL;
 
   int result = GetProperty(window, property_name,
@@ -331,7 +329,7 @@ bool GetStringProperty(
     XID window, const std::string& property_name, std::string* value) {
   Atom type = None;
   int format = 0;  // size in bits of each item in 'property'
-  long unsigned int num_items = 0;
+  unsigned long num_items = 0;
   unsigned char* property = NULL;
 
   int result = GetProperty(window, property_name, 1024,
@@ -605,52 +603,6 @@ void FreePicture(Display* display, XID picture) {
 
 void FreePixmap(Display* display, XID pixmap) {
   XFreePixmap(display, pixmap);
-}
-
-// Called on BACKGROUND_X11 thread.
-Display* GetSecondaryDisplay() {
-  static Display* display = NULL;
-  if (!display) {
-    display = XOpenDisplay(NULL);
-    CHECK(display);
-  }
-
-  return display;
-}
-
-// Called on BACKGROUND_X11 thread.
-bool GetWindowGeometry(int* x, int* y, unsigned* width, unsigned* height,
-                       XID window) {
-  Window root_window, child_window;
-  unsigned border_width, depth;
-  int temp;
-
-  if (!XGetGeometry(GetSecondaryDisplay(), window, &root_window, &temp, &temp,
-                    width, height, &border_width, &depth))
-    return false;
-  if (!XTranslateCoordinates(GetSecondaryDisplay(), window, root_window,
-                             0, 0 /* input x, y */, x, y /* output x, y */,
-                             &child_window))
-    return false;
-
-  return true;
-}
-
-// Called on BACKGROUND_X11 thread.
-bool GetWindowParent(XID* parent_window, bool* parent_is_root, XID window) {
-  XID root_window, *children;
-  unsigned num_children;
-
-  Status s = XQueryTree(GetSecondaryDisplay(), window, &root_window,
-                        parent_window, &children, &num_children);
-  if (!s)
-    return false;
-
-  if (children)
-    XFree(children);
-
-  *parent_is_root = root_window == *parent_window;
-  return true;
 }
 
 bool GetWindowManagerName(std::string* wm_name) {

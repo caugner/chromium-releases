@@ -11,8 +11,8 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#import "chrome/browser/cocoa/keystone_glue.h"
 #include "chrome/browser/first_run/first_run.h"
+#import "chrome/browser/mac/keystone_glue.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -84,12 +84,12 @@ KeystonePromotionInfoBarDelegate::~KeystonePromotionInfoBarDelegate() {
 
 bool KeystonePromotionInfoBarDelegate::ShouldExpire(
     const content::LoadCommittedDetails& details) const {
-  return details.is_user_initiated_main_frame_load() && can_expire_;
+  return details.is_navigation_to_different_page() && can_expire_;
 }
 
 gfx::Image* KeystonePromotionInfoBarDelegate::GetIcon() const {
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_PRODUCT_ICON_32);
+      IDR_PRODUCT_LOGO_32);
 }
 
 string16 KeystonePromotionInfoBarDelegate::GetMessageText() const {

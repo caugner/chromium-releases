@@ -59,6 +59,8 @@
 #include "base/threading/thread.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "media/filters/chunk_demuxer.h"
+#include "media/filters/chunk_demuxer_client.h"
 #include "media/base/filters.h"
 #include "media/base/message_loop_factory.h"
 #include "media/base/pipeline.h"
@@ -78,10 +80,12 @@ class WebFrame;
 namespace webkit_glue {
 
 class MediaResourceLoaderBridgeFactory;
+class MediaStreamClient;
 class WebVideoRenderer;
 
-class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
-                           public MessageLoop::DestructionObserver {
+class WebMediaPlayerImpl
+    : public WebKit::WebMediaPlayer,
+      public MessageLoop::DestructionObserver {
  public:
   // A proxy class that dispatches method calls from the media pipeline to
   // WebKit. Since there are multiple threads in the media pipeline and there's
@@ -91,7 +95,9 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   // on the render thread.
   // Because of the nature of this object that it works with different threads,
   // it is made ref-counted.
-  class Proxy : public base::RefCountedThreadSafe<Proxy> {
+  class Proxy
+      : public base::RefCountedThreadSafe<Proxy>,
+        public media::ChunkDemuxerClient {
    public:
     Proxy(MessageLoop* render_loop,
           WebMediaPlayerImpl* webmediaplayer);
@@ -116,6 +122,19 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
     void PipelineEndedCallback(media::PipelineStatus status);
     void PipelineErrorCallback(media::PipelineStatus error);
     void NetworkEventCallback(media::PipelineStatus status);
+
+    // Methods for ChunkDemuxerClient interface.
+    virtual void DemuxerOpened(media::ChunkDemuxer* demuxer);
+    virtual void DemuxerClosed();
+
+    // Methods for Demuxer communication.
+    void DemuxerFlush();
+    bool DemuxerAppend(const uint8* data, size_t length);
+    void DemuxerEndOfStream(media::PipelineStatus status);
+    void DemuxerShutdown();
+
+    void DemuxerOpenedTask(const scoped_refptr<media::ChunkDemuxer>& demuxer);
+    void DemuxerClosedTask();
 
     // Returns the message loop used by the proxy.
     MessageLoop* message_loop() { return render_loop_; }
@@ -160,6 +179,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
 
     base::Lock lock_;
     int outstanding_repaints_;
+
+    scoped_refptr<media::ChunkDemuxer> chunk_demuxer_;
   };
 
   // Construct a WebMediaPlayerImpl with reference to the client, and media
@@ -186,7 +207,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   // Callers must call |Initialize()| before they can use the object.
   WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
                      media::FilterCollection* collection,
-                     media::MessageLoopFactory* message_loop_factory);
+                     media::MessageLoopFactory* message_loop_factory,
+                     MediaStreamClient* media_stream_client);
   virtual ~WebMediaPlayerImpl();
 
   // Finalizes initialization of the object.
@@ -256,6 +278,11 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   virtual WebKit::WebVideoFrame* getCurrentFrame();
   virtual void putCurrentFrame(WebKit::WebVideoFrame* web_video_frame);
 
+  // TODO(acolwell): Uncomment once WebKit changes are checked in.
+  // https://bugs.webkit.org/show_bug.cgi?id=64731
+  //virtual bool sourceAppend(const unsigned char* data, unsigned length);
+  //virtual void sourceEndOfStream(EndOfStreamStatus status);
+
   // As we are closing the tab or even the browser, |main_loop_| is destroyed
   // even before this object gets destructed, so we need to know when
   // |main_loop_| is being destroyed and we can stop posting repaint task
@@ -273,6 +300,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   void OnPipelineError(media::PipelineStatus error);
 
   void OnNetworkEvent(media::PipelineStatus status);
+
+  void OnDemuxerOpened();
 
  private:
   // Helpers that set the network/ready state and notifies the client if
@@ -325,6 +354,8 @@ class WebMediaPlayerImpl : public WebKit::WebMediaPlayer,
   WebKit::WebMediaPlayerClient* client_;
 
   scoped_refptr<Proxy> proxy_;
+
+  MediaStreamClient* media_stream_client_;
 
 #if WEBKIT_USING_CG
   scoped_ptr<skia::PlatformCanvas> skia_canvas_;

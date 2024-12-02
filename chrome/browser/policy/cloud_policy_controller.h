@@ -8,37 +8,30 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/observer_list.h"
-#include "base/task.h"
-#include "base/time.h"
-#include "chrome/browser/policy/cloud_policy_identity_strategy.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/device_management_backend.h"
+#include "chrome/browser/policy/delayed_work_scheduler.h"
 #include "chrome/browser/policy/device_token_fetcher.h"
-
-class Profile;
-class TokenService;
 
 namespace policy {
 
 class CloudPolicyCacheBase;
 class DeviceManagementBackend;
 
-// Coordinates the actions of DeviceTokenFetcher, CloudPolicyIdentityStrategy,
+// Coordinates the actions of DeviceTokenFetcher, CloudPolicyDataStore,
 // DeviceManagementBackend, and CloudPolicyCache: calls their methods and
 // listens to their callbacks/notifications.
 class CloudPolicyController
     : public DeviceManagementBackend::DevicePolicyResponseDelegate,
-      public DeviceTokenFetcher::Observer,
-      public CloudPolicyIdentityStrategy::Observer {
+      public CloudPolicyDataStore::Observer {
  public:
-  // Takes ownership of |backend|; the other parameters are weak pointers.
+  // All parameters are weak pointers.
   CloudPolicyController(DeviceManagementService* service,
                         CloudPolicyCacheBase* cache,
                         DeviceTokenFetcher* token_fetcher,
-                        CloudPolicyIdentityStrategy* identity_strategy,
+                        CloudPolicyDataStore* data_store,
                         PolicyNotifier* notifier);
   virtual ~CloudPolicyController();
 
@@ -54,15 +47,12 @@ class CloudPolicyController
 
   // DevicePolicyResponseDelegate implementation:
   virtual void HandlePolicyResponse(
-      const em::DevicePolicyResponse& response);
-  virtual void OnError(DeviceManagementBackend::ErrorCode code);
+      const em::DevicePolicyResponse& response) OVERRIDE;
+  virtual void OnError(DeviceManagementBackend::ErrorCode code) OVERRIDE;
 
-  // DeviceTokenFetcher::Observer implementation:
-  virtual void OnDeviceTokenAvailable();
-
-  // CloudPolicyIdentityStrategy::Observer implementation:
-  virtual void OnDeviceTokenChanged();
-  virtual void OnCredentialsChanged();
+  // CloudPolicyDataStore::Observer implementation:
+  virtual void OnDeviceTokenChanged() OVERRIDE;
+  virtual void OnCredentialsChanged() OVERRIDE;
 
  private:
   // Indicates the current state the controller is in.
@@ -84,28 +74,24 @@ class CloudPolicyController
   };
 
   friend class CloudPolicyControllerTest;
+  friend class TestingCloudPolicySubsystem;
 
   // More configurable constructor for use by test cases.
+  // Takes ownership of |scheduler|; the other parameters are weak pointers.
   CloudPolicyController(DeviceManagementService* service,
                         CloudPolicyCacheBase* cache,
                         DeviceTokenFetcher* token_fetcher,
-                        CloudPolicyIdentityStrategy* identity_strategy,
+                        CloudPolicyDataStore* data_store,
                         PolicyNotifier* notifier,
-                        int64 policy_refresh_rate_ms,
-                        int policy_refresh_deviation_factor_percent,
-                        int64 policy_refresh_deviation_max_ms,
-                        int64 policy_refresh_error_delay_ms);
+                        DelayedWorkScheduler* scheduler);
 
   // Called by constructors to perform shared initialization.
   void Initialize(DeviceManagementService* service,
                   CloudPolicyCacheBase* cache,
                   DeviceTokenFetcher* token_fetcher,
-                  CloudPolicyIdentityStrategy* identity_strategy,
+                  CloudPolicyDataStore* data_store,
                   PolicyNotifier* notifier,
-                  int64 policy_refresh_rate_ms,
-                  int policy_refresh_deviation_factor_percent,
-                  int64 policy_refresh_deviation_max_ms,
-                  int64 policy_refresh_error_delay_ms);
+                  DelayedWorkScheduler* scheduler);
 
   // Asks the token fetcher to fetch a new token.
   void FetchToken();
@@ -114,15 +100,10 @@ class CloudPolicyController
   // isn't already outstanding.
   void SendPolicyRequest();
 
-  // Called back from the delayed work task. Calls |DoWork()|.
-  void DoDelayedWork();
-
+  // Called back from |scheduler_|.
   // Performs whatever action is required in the current state,
   // e.g. refreshing policy.
   void DoWork();
-
-  // Cancels the delayed work task.
-  void CancelDelayedWork();
 
   // Switches to a new state and triggers any appropriate actions.
   void SetState(ControllerState new_state);
@@ -132,20 +113,16 @@ class CloudPolicyController
 
   DeviceManagementService* service_;
   CloudPolicyCacheBase* cache_;
-  CloudPolicyIdentityStrategy* identity_strategy_;
+  CloudPolicyDataStore* data_store_;
   DeviceTokenFetcher* token_fetcher_;
   scoped_ptr<DeviceManagementBackend> backend_;
   ControllerState state_;
   PolicyNotifier* notifier_;
 
   int64 policy_refresh_rate_ms_;
-  int policy_refresh_deviation_factor_percent_;
-  int64 policy_refresh_deviation_max_ms_;
-  int64 policy_refresh_error_delay_ms_;
   int64 effective_policy_refresh_error_delay_ms_;
 
-  CancelableTask* delayed_work_task_;
-  ScopedRunnableMethodFactory<CloudPolicyController> method_factory_;
+  scoped_ptr<DelayedWorkScheduler> scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPolicyController);
 };

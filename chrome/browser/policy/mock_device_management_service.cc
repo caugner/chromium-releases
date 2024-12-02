@@ -13,11 +13,13 @@ ProxyDeviceManagementBackend::ProxyDeviceManagementBackend(
 ProxyDeviceManagementBackend::~ProxyDeviceManagementBackend() {}
 
 void ProxyDeviceManagementBackend::ProcessRegisterRequest(
-    const std::string& auth_token,
+    const std::string& gaia_auth_token,
+    const std::string& oauth_token,
     const std::string& device_id,
     const em::DeviceRegisterRequest& request,
     DeviceRegisterResponseDelegate* delegate) {
-  backend_->ProcessRegisterRequest(auth_token, device_id, request, delegate);
+  backend_->ProcessRegisterRequest(gaia_auth_token, oauth_token,
+                                   device_id, request, delegate);
 }
 
 void ProxyDeviceManagementBackend::ProcessUnregisterRequest(
@@ -38,13 +40,8 @@ void ProxyDeviceManagementBackend::ProcessPolicyRequest(
 }
 
 MockDeviceManagementService::MockDeviceManagementService()
-    : DeviceManagementService(""),
-      backend_(NULL) {}
+    : DeviceManagementService("") {}
 
 MockDeviceManagementService::~MockDeviceManagementService() {}
-
-DeviceManagementBackend* MockDeviceManagementService::CreateBackend() {
-  return new ProxyDeviceManagementBackend(backend_);
-}
 
 }  // namespace policy

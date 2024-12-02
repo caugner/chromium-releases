@@ -19,13 +19,12 @@ class TestPrerenderManager : public PrerenderManager {
  public:
   explicit TestPrerenderManager(PrerenderTracker* prerender_tracker) :
       PrerenderManager(NULL, prerender_tracker) {
-    rate_limit_enabled_ = false;
+    mutable_config().rate_limit_enabled = false;
   }
 
-  virtual void DestroyPreloadForChildRouteIdPair(
-      const std::pair<int, int>& child_route_id_pair,
-      FinalStatus final_status) OVERRIDE {
-    cancelled_id_pairs_.insert(child_route_id_pair);
+  virtual void DestroyPrerenderForRenderView(
+      int process_id, int view_id, FinalStatus final_status) OVERRIDE {
+    cancelled_id_pairs_.insert(std::make_pair(process_id, view_id));
   }
 
   bool WasPrerenderCancelled(int child_id, int route_id) {
@@ -111,8 +110,8 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerUsed) {
       0, 0, FINAL_STATUS_TIMED_OUT));
   EXPECT_EQ(FINAL_STATUS_USED, GetCurrentStatus(0, 0));
 
-  // This would call DestroyPreloadForChildRouteIdPair(), if the prerender were
-  // cancelled.
+  // This would call DestroyPrerenderForChildRouteIdPair(), if the prerender
+  // were cancelled.
   RunEvents();
 
   // These functions should all behave as before.
@@ -121,7 +120,7 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerUsed) {
       0, 0, FINAL_STATUS_TIMED_OUT));
   EXPECT_EQ(FINAL_STATUS_USED, GetCurrentStatus(0, 0));
 
-  // This calls DestroyPreloadForChildRouteIdPair().
+  // This calls DestroyPrerenderForChildRouteIdPair().
   prerender_tracker()->OnPrerenderingFinished(0, 0);
   EXPECT_TRUE(prerender_tracker()->IsPrerenderingOnIOThread(0, 0));
 
@@ -152,7 +151,7 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerCancelled) {
       0, 0, FINAL_STATUS_TIMED_OUT));
   EXPECT_EQ(FINAL_STATUS_HTTPS, GetCurrentStatus(0, 0));
 
-  // This calls DestroyPreloadForChildRouteIdPair().
+  // This calls DestroyPrerenderForChildRouteIdPair().
   RunEvents();
   EXPECT_TRUE(prerender_manager()->WasPrerenderCancelled(0, 0));
 
@@ -192,7 +191,7 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerCancelledOnIO) {
       0, 0, FINAL_STATUS_HTTPS));
   EXPECT_EQ(FINAL_STATUS_TIMED_OUT, GetCurrentStatus(0, 0));
 
-  // This calls DestroyPreloadForChildRouteIdPair().
+  // This calls DestroyPrerenderForChildRouteIdPair().
   RunEvents();
   EXPECT_TRUE(prerender_manager()->WasPrerenderCancelled(0, 0));
 
@@ -224,7 +223,7 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerCancelledFast) {
   EXPECT_TRUE(prerender_tracker()->TryCancel(0, 0, FINAL_STATUS_TIMED_OUT));
 
   // This calls AddPrerenderOnIOThreadTask() and
-  // DestroyPreloadForChildRouteIdPair().
+  // DestroyPrerenderForChildRouteIdPair().
   RunEvents();
   EXPECT_TRUE(prerender_manager()->WasPrerenderCancelled(0, 0));
 
@@ -275,7 +274,7 @@ TEST_F(PrerenderTrackerTest, PrerenderTrackerMultiple) {
   EXPECT_TRUE(prerender_tracker()->TryCancel(1, 2, FINAL_STATUS_HTTPS));
   EXPECT_EQ(FINAL_STATUS_HTTPS, GetCurrentStatus(1, 2));
 
-  // This calls DestroyPreloadForChildRouteIdPair().
+  // This calls DestroyPrerenderForChildRouteIdPair().
   RunEvents();
   EXPECT_FALSE(prerender_manager()->WasPrerenderCancelled(0, 0));
   EXPECT_TRUE(prerender_manager()->WasPrerenderCancelled(1, 2));

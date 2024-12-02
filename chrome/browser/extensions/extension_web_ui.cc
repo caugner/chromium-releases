@@ -127,7 +127,7 @@ const char ExtensionWebUI::kExtensionURLOverrides[] =
     "extensions.chrome_url_overrides";
 
 ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
-    : WebUI(tab_contents),
+    : ChromeWebUI(tab_contents),
       url_(url) {
   ExtensionService* service = tab_contents->profile()->GetExtensionService();
   const Extension* extension = service->GetExtensionByURL(url);
@@ -159,8 +159,11 @@ ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
 
   // Hack: A few things we specialize just for the bookmark manager.
   if (extension->id() == extension_misc::kBookmarkManagerId) {
+    TabContentsWrapper* tab =
+        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+    DCHECK(tab);
     extension_bookmark_manager_event_router_.reset(
-        new ExtensionBookmarkManagerEventRouter(GetProfile(), tab_contents));
+        new ExtensionBookmarkManagerEventRouter(GetProfile(), tab));
 
     link_transition_type_ = PageTransition::AUTO_BOOKMARK;
   }

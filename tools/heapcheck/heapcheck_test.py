@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -44,6 +44,7 @@ class HeapcheckWrapper(object):
     proc += self._args
     self.PutEnvAndLog('G_SLICE', 'always-malloc')
     self.PutEnvAndLog('NSS_DISABLE_ARENA_FREE_LIST', '1')
+    self.PutEnvAndLog('NSS_DISABLE_UNLOAD', '1')
     self.PutEnvAndLog('GTEST_DEATH_TEST_USE_FORK', '1')
     self.PutEnvAndLog('HEAPCHECK', self._mode)
     self.PutEnvAndLog('HEAP_CHECK_MAX_LEAKS', '-1')
@@ -51,7 +52,8 @@ class HeapcheckWrapper(object):
     self.PutEnvAndLog('PPROF_PATH',
         path_utils.ScriptDir() +
         '/../../third_party/tcmalloc/chromium/src/pprof')
-    self.PutEnvAndLog('LD_PRELOAD', '/usr/lib/debug/libstdc++.so')
+    self.PutEnvAndLog('LD_LIBRARY_PATH',
+                      '/usr/lib/debug/:/usr/lib32/debug/')
 
     common.RunSubprocess(proc, self._timeout)
 

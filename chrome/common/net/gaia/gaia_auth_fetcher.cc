@@ -13,6 +13,7 @@
 #include "base/string_util.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/net/http_return.h"
 #include "net/base/escape.h"
@@ -48,18 +49,29 @@ const char GaiaAuthFetcher::kIssueAuthTokenFormat[] =
 // static
 const char GaiaAuthFetcher::kGetUserInfoFormat[] =
     "LSID=%s";
+// static
+const char GaiaAuthFetcher::kTokenAuthFormat[] =
+    "auth=%s&"
+    "continue=%s&"
+    "source=%s";
 
 // static
 const char GaiaAuthFetcher::kAccountDeletedError[] = "AccountDeleted";
+const char GaiaAuthFetcher::kAccountDeletedErrorCode[] = "adel";
 // static
 const char GaiaAuthFetcher::kAccountDisabledError[] = "AccountDisabled";
+const char GaiaAuthFetcher::kAccountDisabledErrorCode[] = "adis";
 // static
 const char GaiaAuthFetcher::kBadAuthenticationError[] = "BadAuthentication";
+const char GaiaAuthFetcher::kBadAuthenticationErrorCode[] = "badauth";
 // static
 const char GaiaAuthFetcher::kCaptchaError[] = "CaptchaRequired";
+const char GaiaAuthFetcher::kCaptchaErrorCode[] = "cr";
 // static
 const char GaiaAuthFetcher::kServiceUnavailableError[] =
     "ServiceUnavailable";
+const char GaiaAuthFetcher::kServiceUnavailableErrorCode[] =
+    "ire";
 // static
 const char GaiaAuthFetcher::kErrorParam[] = "Error";
 // static
@@ -68,9 +80,6 @@ const char GaiaAuthFetcher::kErrorUrlParam[] = "Url";
 const char GaiaAuthFetcher::kCaptchaUrlParam[] = "CaptchaUrl";
 // static
 const char GaiaAuthFetcher::kCaptchaTokenParam[] = "CaptchaToken";
-// static
-const char GaiaAuthFetcher::kCaptchaUrlPrefix[] =
-    "http://www.google.com/accounts/";
 
 // static
 const char GaiaAuthFetcher::kCookiePersistence[] = "true";
@@ -85,24 +94,16 @@ const char GaiaAuthFetcher::kAccountTypeGoogle[] =
 // static
 const char GaiaAuthFetcher::kSecondFactor[] = "Info=InvalidSecondFactor";
 
-// TODO(chron): These urls are also in auth_response_handler.h.
-// The URLs for different calls in the Google Accounts programmatic login API.
-const char GaiaAuthFetcher::kClientLoginUrl[] =
-    "https://www.google.com/accounts/ClientLogin";
-const char GaiaAuthFetcher::kIssueAuthTokenUrl[] =
-    "https://www.google.com/accounts/IssueAuthToken";
-const char GaiaAuthFetcher::kGetUserInfoUrl[] =
-    "https://www.google.com/accounts/GetUserInfo";
-
 GaiaAuthFetcher::GaiaAuthFetcher(GaiaAuthConsumer* consumer,
                                        const std::string& source,
                                        net::URLRequestContextGetter* getter)
     : consumer_(consumer),
       getter_(getter),
       source_(source),
-      client_login_gurl_(kClientLoginUrl),
-      issue_auth_token_gurl_(kIssueAuthTokenUrl),
-      get_user_info_gurl_(kGetUserInfoUrl),
+      client_login_gurl_(GaiaUrls::GetInstance()->client_login_url()),
+      issue_auth_token_gurl_(GaiaUrls::GetInstance()->issue_auth_token_url()),
+      get_user_info_gurl_(GaiaUrls::GetInstance()->get_user_info_url()),
+      token_auth_gurl_(GaiaUrls::GetInstance()->token_auth_url()),
       fetch_pending_(false) {}
 
 GaiaAuthFetcher::~GaiaAuthFetcher() {}
@@ -143,10 +144,10 @@ std::string GaiaAuthFetcher::MakeClientLoginBody(
     const std::string& login_token,
     const std::string& login_captcha,
     HostedAccountsSetting allow_hosted_accounts) {
-  std::string encoded_username = EscapeUrlEncodedData(username);
-  std::string encoded_password = EscapeUrlEncodedData(password);
-  std::string encoded_login_token = EscapeUrlEncodedData(login_token);
-  std::string encoded_login_captcha = EscapeUrlEncodedData(login_captcha);
+  std::string encoded_username = EscapeUrlEncodedData(username, true);
+  std::string encoded_password = EscapeUrlEncodedData(password, true);
+  std::string encoded_login_token = EscapeUrlEncodedData(login_token, true);
+  std::string encoded_login_captcha = EscapeUrlEncodedData(login_captcha, true);
 
   const char* account_type = allow_hosted_accounts == HostedAccountsAllowed ?
       kAccountTypeHostedOrGoogle :
@@ -171,7 +172,6 @@ std::string GaiaAuthFetcher::MakeClientLoginBody(
                             service,
                             encoded_login_token.c_str(),
                             encoded_login_captcha.c_str());
-
 }
 
 // static
@@ -179,8 +179,8 @@ std::string GaiaAuthFetcher::MakeIssueAuthTokenBody(
     const std::string& sid,
     const std::string& lsid,
     const char* const service) {
-  std::string encoded_sid = EscapeUrlEncodedData(sid);
-  std::string encoded_lsid = EscapeUrlEncodedData(lsid);
+  std::string encoded_sid = EscapeUrlEncodedData(sid, true);
+  std::string encoded_lsid = EscapeUrlEncodedData(lsid, true);
 
   // All tokens should be session tokens except the gaia auth token.
   bool session = true;
@@ -196,8 +196,21 @@ std::string GaiaAuthFetcher::MakeIssueAuthTokenBody(
 
 // static
 std::string GaiaAuthFetcher::MakeGetUserInfoBody(const std::string& lsid) {
-  std::string encoded_lsid = EscapeUrlEncodedData(lsid);
+  std::string encoded_lsid = EscapeUrlEncodedData(lsid, true);
   return base::StringPrintf(kGetUserInfoFormat, encoded_lsid.c_str());
+}
+
+// static
+std::string GaiaAuthFetcher::MakeTokenAuthBody(const std::string& auth_token,
+                                               const std::string& continue_url,
+                                               const std::string& source) {
+  std::string encoded_auth_token = EscapeUrlEncodedData(auth_token, true);
+  std::string encoded_continue_url = EscapeUrlEncodedData(continue_url, true);
+  std::string encoded_source = EscapeUrlEncodedData(source, true);
+  return base::StringPrintf(kTokenAuthFormat,
+                            encoded_auth_token.c_str(),
+                            encoded_continue_url.c_str(),
+                            encoded_source.c_str());
 }
 
 // Helper method that extracts tokens from a successful reply.
@@ -283,7 +296,6 @@ void GaiaAuthFetcher::StartClientLogin(
 void GaiaAuthFetcher::StartIssueAuthToken(const std::string& sid,
                                           const std::string& lsid,
                                           const char* const service) {
-
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
   VLOG(1) << "Starting IssueAuthToken for: " << service;
@@ -312,6 +324,24 @@ void GaiaAuthFetcher::StartGetUserInfo(const std::string& lsid,
   fetcher_->Start();
 }
 
+void GaiaAuthFetcher::StartTokenAuth(const std::string& auth_token) {
+  DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
+
+  VLOG(1) << "Starting TokenAuth with auth_token=" << auth_token;
+
+  // The continue URL is a required parameter of the TokenAuth API, but in this
+  // case we don't actually need or want to navigate to it.  Setting it to
+  // an arbitrary Google URL.
+  std::string continue_url("http://www.google.com");
+  request_body_ = MakeTokenAuthBody(auth_token, continue_url, source_);
+  fetcher_.reset(CreateGaiaFetcher(getter_,
+                                   request_body_,
+                                   token_auth_gurl_,
+                                   this));
+  fetch_pending_ = true;
+  fetcher_->Start();
+}
+
 // static
 GoogleServiceAuthError GaiaAuthFetcher::GenerateAuthError(
     const std::string& data,
@@ -337,7 +367,8 @@ GoogleServiceAuthError GaiaAuthFetcher::GenerateAuthError(
     LOG(WARNING) << "ClientLogin failed with " << error;
 
     if (error == kCaptchaError) {
-      GURL image_url(kCaptchaUrlPrefix + captcha_url);
+      GURL image_url(
+          GaiaUrls::GetInstance()->captcha_url_prefix() + captcha_url);
       GURL unlock_url(url);
       return GoogleServiceAuthError::FromCaptchaChallenge(
           captcha_token, image_url, unlock_url);
@@ -351,6 +382,59 @@ GoogleServiceAuthError GaiaAuthFetcher::GenerateAuthError(
           GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
     }
     if (error == kServiceUnavailableError) {
+      return GoogleServiceAuthError(
+          GoogleServiceAuthError::SERVICE_UNAVAILABLE);
+    }
+
+    LOG(WARNING) << "Incomprehensible response from Google Accounts servers.";
+    return GoogleServiceAuthError(
+        GoogleServiceAuthError::SERVICE_UNAVAILABLE);
+  }
+
+  NOTREACHED();
+  return GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_UNAVAILABLE);
+}
+
+// static
+GoogleServiceAuthError GaiaAuthFetcher::GenerateOAuthLoginError(
+    const std::string& data,
+    const net::URLRequestStatus& status) {
+  if (!status.is_success()) {
+    if (status.status() == net::URLRequestStatus::CANCELED) {
+      return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
+    } else {
+      LOG(WARNING) << "Could not reach Google Accounts servers: errno "
+          << status.os_error();
+      return GoogleServiceAuthError::FromConnectionError(status.os_error());
+    }
+  } else {
+    if (IsSecondFactorSuccess(data)) {
+      return GoogleServiceAuthError(GoogleServiceAuthError::TWO_FACTOR);
+    }
+
+    std::string error;
+    std::string url;
+    std::string captcha_url;
+    std::string captcha_token;
+    ParseClientLoginFailure(data, &error, &url, &captcha_url, &captcha_token);
+    LOG(WARNING) << "OAuthLogin failed with " << error;
+
+    if (error == kCaptchaErrorCode) {
+      GURL image_url(
+          GaiaUrls::GetInstance()->captcha_url_prefix() + captcha_url);
+      GURL unlock_url(url);
+      return GoogleServiceAuthError::FromCaptchaChallenge(
+          captcha_token, image_url, unlock_url);
+    }
+    if (error == kAccountDeletedErrorCode)
+      return GoogleServiceAuthError(GoogleServiceAuthError::ACCOUNT_DELETED);
+    if (error == kAccountDisabledErrorCode)
+      return GoogleServiceAuthError(GoogleServiceAuthError::ACCOUNT_DISABLED);
+    if (error == kBadAuthenticationErrorCode) {
+      return GoogleServiceAuthError(
+          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
+    }
+    if (error == kServiceUnavailableErrorCode) {
       return GoogleServiceAuthError(
           GoogleServiceAuthError::SERVICE_UNAVAILABLE);
     }
@@ -418,6 +502,16 @@ void GaiaAuthFetcher::OnGetUserInfoFetched(
   }
 }
 
+void GaiaAuthFetcher::OnTokenAuthFetched(const std::string& data,
+                                         const net::URLRequestStatus& status,
+                                         int response_code) {
+  if (status.is_success() && response_code == RC_REQUEST_OK) {
+    consumer_->OnTokenAuthSuccess(data);
+  } else {
+    consumer_->OnTokenAuthFailure(GenerateAuthError(data, status));
+  }
+}
+
 void GaiaAuthFetcher::OnURLFetchComplete(const URLFetcher* source,
                                          const GURL& url,
                                          const net::URLRequestStatus& status,
@@ -431,6 +525,8 @@ void GaiaAuthFetcher::OnURLFetchComplete(const URLFetcher* source,
     OnIssueAuthTokenFetched(data, status, response_code);
   } else if (url == get_user_info_gurl_) {
     OnGetUserInfoFetched(data, status, response_code);
+  } else if (url == token_auth_gurl_) {
+    OnTokenAuthFetched(data, status, response_code);
   } else {
     NOTREACHED();
   }

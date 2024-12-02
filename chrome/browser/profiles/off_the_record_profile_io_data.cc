@@ -4,15 +4,18 @@
 
 #include "chrome/browser/profiles/off_the_record_profile_io_data.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/resource_context.h"
@@ -43,7 +46,17 @@ OffTheRecordProfileIOData::Handle::~Handle() {
     iter->second->CleanupOnUIThread();
   }
 
-  io_data_->ShutdownOnUIThread();
+  io_data_->AddRef();
+  io_data_.release()->ShutdownOnUIThread();
+}
+
+base::Callback<ChromeURLDataManagerBackend*(void)>
+OffTheRecordProfileIOData::Handle::
+GetChromeURLDataManagerBackendGetter() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  LazyInitialize();
+  return base::Bind(&ProfileIOData::GetChromeURLDataManagerBackend,
+                    base::Unretained(io_data_.get()));
 }
 
 const content::ResourceContext&
@@ -108,15 +121,18 @@ void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
     io_data_->InitializeProfileParams(profile_);
     ChromeNetworkDelegate::InitializeReferrersEnabled(
         io_data_->enable_referrers(), profile_->GetPrefs());
+#if defined(ENABLE_SAFE_BROWSING)
+    io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
+        profile_->GetPrefs(), NULL);
+    io_data_->safe_browsing_enabled()->MoveToThread(BrowserThread::IO);
+#endif
     initialized_ = true;
   }
 }
 
 OffTheRecordProfileIOData::OffTheRecordProfileIOData()
     : ProfileIOData(true) {}
-OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {
-  STLDeleteValues(&app_http_factory_map_);
-}
+OffTheRecordProfileIOData::~OffTheRecordProfileIOData() {}
 
 void OffTheRecordProfileIOData::LazyInitializeInternal(
     ProfileParams* profile_params) const {
@@ -156,9 +172,7 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   const char* schemes[] = {chrome::kChromeDevToolsScheme,
                            chrome::kExtensionScheme};
   extensions_cookie_store->SetCookieableSchemes(schemes, 2);
-
-  extensions_context->set_cookie_store(
-      new net::CookieMonster(NULL, NULL));
+  extensions_context->set_cookie_store(extensions_cookie_store);
 
   net::HttpCache::BackendFactory* main_backend =
       net::HttpCache::DefaultBackend::InMemory(0);
@@ -190,7 +204,7 @@ scoped_refptr<ProfileIOData::RequestContext>
 OffTheRecordProfileIOData::InitializeAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
-  scoped_refptr<ProfileIOData::RequestContext> context = new RequestContext;
+  AppRequestContext* context = new AppRequestContext(app_id);
 
   // Copy most state from the main context.
   context->CopyFrom(main_context);
@@ -198,8 +212,7 @@ OffTheRecordProfileIOData::InitializeAppRequestContext(
   // Use a separate in-memory cookie store for the app.
   // TODO(creis): We should have a cookie delegate for notifying the cookie
   // extensions API, but we need to update it to understand isolated apps first.
-  context->set_cookie_store(
-      new net::CookieMonster(NULL, NULL));
+  context->SetCookieStore(new net::CookieMonster(NULL, NULL));
 
   // Use a separate in-memory cache for the app.
   net::HttpCache::BackendFactory* app_backend =
@@ -209,11 +222,7 @@ OffTheRecordProfileIOData::InitializeAppRequestContext(
   net::HttpCache* app_http_cache =
       new net::HttpCache(main_network_session, app_backend);
 
-  // Keep track of app_http_cache to delete it when we go away.
-  DCHECK(!app_http_factory_map_[app_id]);
-  app_http_factory_map_[app_id] = app_http_cache;
-  context->set_http_transaction_factory(app_http_cache);
-
+  context->SetHttpTransactionFactory(app_http_cache);
   return context;
 }
 
@@ -223,7 +232,7 @@ OffTheRecordProfileIOData::AcquireMediaRequestContext() const {
   return NULL;
 }
 
-scoped_refptr<ChromeURLRequestContext>
+scoped_refptr<ProfileIOData::RequestContext>
 OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
@@ -231,6 +240,5 @@ OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
   scoped_refptr<RequestContext> app_request_context =
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
-  app_request_context->set_profile_io_data(this);
   return app_request_context;
 }

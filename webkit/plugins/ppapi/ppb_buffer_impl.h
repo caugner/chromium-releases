@@ -9,6 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "ppapi/thunk/ppb_buffer_api.h"
+#include "ppapi/thunk/ppb_buffer_trusted_api.h"
 #include "webkit/plugins/ppapi/resource.h"
 
 struct PPB_Buffer_Dev;
@@ -19,19 +20,21 @@ namespace ppapi {
 class PluginInstance;
 
 class PPB_Buffer_Impl : public Resource,
-                        public ::ppapi::thunk::PPB_Buffer_API {
+                        public ::ppapi::thunk::PPB_Buffer_API,
+                        public ::ppapi::thunk::PPB_BufferTrusted_API {
  public:
   virtual ~PPB_Buffer_Impl();
 
-  static PP_Resource Create(PP_Instance instance, uint32_t size);
+  static PP_Resource Create(PluginInstance* instance, uint32_t size);
 
   virtual PPB_Buffer_Impl* AsPPB_Buffer_Impl();
 
   base::SharedMemory* shared_memory() const { return shared_memory_.get(); }
   uint32_t size() const { return size_; }
 
-  // ResourceObjectBase overries.
+  // ResourceObjectBase overrides.
   virtual ::ppapi::thunk::PPB_Buffer_API* AsPPB_Buffer_API() OVERRIDE;
+  virtual ::ppapi::thunk::PPB_BufferTrusted_API* AsPPB_BufferTrusted_API();
 
   // PPB_Buffer_API implementation.
   virtual PP_Bool Describe(uint32_t* size_in_bytes) OVERRIDE;
@@ -39,17 +42,21 @@ class PPB_Buffer_Impl : public Resource,
   virtual void* Map() OVERRIDE;
   virtual void Unmap() OVERRIDE;
 
+  // PPB_BufferTrusted_API implementation.
+  virtual int32_t GetSharedMemory(int* handle) OVERRIDE;
+
  private:
   explicit PPB_Buffer_Impl(PluginInstance* instance);
   bool Init(uint32_t size);
 
   scoped_ptr<base::SharedMemory> shared_memory_;
   uint32_t size_;
+  int map_count_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Buffer_Impl);
 };
 
-// Ensures that the given buffer is mapped, and retursn it to its previous
+// Ensures that the given buffer is mapped, and returns it to its previous
 // mapped state in the destructor.
 class BufferAutoMapper {
  public:

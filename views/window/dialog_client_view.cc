@@ -15,17 +15,17 @@
 #include <algorithm>
 
 #include "base/utf_string_conversions.h"
-#include "grit/app_strings.h"
+#include "grit/ui_strings.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/layout/layout_constants.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
 
 #if defined(OS_WIN)
 #include "ui/gfx/native_theme.h"
@@ -42,7 +42,7 @@ namespace views {
 namespace {
 
 // Updates any of the standard buttons according to the delegate.
-void UpdateButtonHelper(NativeButton* button_view,
+void UpdateButtonHelper(NativeTextButton* button_view,
                         DialogDelegate* delegate,
                         MessageBoxFlags::DialogButton button) {
   std::wstring label = delegate->GetDialogButtonLabel(button);
@@ -65,14 +65,14 @@ void FillViewWithSysColor(gfx::Canvas* canvas, View* view, COLORREF color) {
 // DialogButtons is used for the ok/cancel buttons of the window. DialogButton
 // forwards AcceleratorPressed to the delegate.
 
-class DialogButton : public NativeButton {
+class DialogButton : public NativeTextButton {
  public:
   DialogButton(ButtonListener* listener,
-               Window* owner,
+               Widget* owner,
                MessageBoxFlags::DialogButton type,
                const std::wstring& title,
                bool is_default)
-      : NativeButton(listener, title),
+      : NativeTextButton(listener, title),
         owner_(owner),
         type_(type) {
     SetIsDefault(is_default);
@@ -80,15 +80,15 @@ class DialogButton : public NativeButton {
 
   // Overridden to forward to the delegate.
   virtual bool AcceleratorPressed(const Accelerator& accelerator) {
-    if (!owner_->window_delegate()->AsDialogDelegate()->
+    if (!owner_->widget_delegate()->AsDialogDelegate()->
         AreAcceleratorsEnabled(type_)) {
       return false;
     }
-    return NativeButton::AcceleratorPressed(accelerator);
+    return NativeTextButton::AcceleratorPressed(accelerator);
   }
 
  private:
-  Window* owner_;
+  Widget* owner_;
   const MessageBoxFlags::DialogButton type_;
 
   DISALLOW_COPY_AND_ASSIGN(DialogButton);
@@ -109,7 +109,7 @@ static const int kButtonGroup = 6666;
 ///////////////////////////////////////////////////////////////////////////////
 // DialogClientView, public:
 
-DialogClientView::DialogClientView(Window* owner, View* contents_view)
+DialogClientView::DialogClientView(Widget* owner, View* contents_view)
     : ClientView(owner, contents_view),
       ok_button_(NULL),
       cancel_button_(NULL),
@@ -136,7 +136,7 @@ void DialogClientView::ShowDialogButtons() {
       label = UTF16ToWide(l10n_util::GetStringUTF16(IDS_APP_OK));
     bool is_default_button =
         (dd->GetDefaultDialogButton() & MessageBoxFlags::DIALOGBUTTON_OK) != 0;
-    ok_button_ = new DialogButton(this, window(),
+    ok_button_ = new DialogButton(this, GetWidget(),
                                   MessageBoxFlags::DIALOGBUTTON_OK, label,
                                   is_default_button);
     ok_button_->SetGroup(kButtonGroup);
@@ -160,7 +160,7 @@ void DialogClientView::ShowDialogButtons() {
     bool is_default_button =
         (dd->GetDefaultDialogButton() & MessageBoxFlags::DIALOGBUTTON_CANCEL)
         != 0;
-    cancel_button_ = new DialogButton(this, window(),
+    cancel_button_ = new DialogButton(this, GetWidget(),
                                       MessageBoxFlags::DIALOGBUTTON_CANCEL,
                                       label, is_default_button);
     cancel_button_->SetGroup(kButtonGroup);
@@ -177,7 +177,7 @@ void DialogClientView::ShowDialogButtons() {
   }
 }
 
-void DialogClientView::SetDefaultButton(NativeButton* new_default_button) {
+void DialogClientView::SetDefaultButton(NativeTextButton* new_default_button) {
   if (default_button_ && default_button_ != new_default_button) {
     default_button_->SetIsDefault(false);
     default_button_ = NULL;
@@ -191,10 +191,10 @@ void DialogClientView::SetDefaultButton(NativeButton* new_default_button) {
 
 void DialogClientView::FocusWillChange(View* focused_before,
                                        View* focused_now) {
-  NativeButton* new_default_button = NULL;
+  NativeTextButton* new_default_button = NULL;
   if (focused_now &&
-      focused_now->GetClassName() == NativeButton::kViewClassName) {
-    new_default_button = static_cast<NativeButton*>(focused_now);
+      focused_now->GetClassName() == NativeTextButton::kViewClassName) {
+    new_default_button = static_cast<NativeTextButton*>(focused_now);
   } else {
     // The focused view is not a button, get the default button from the
     // delegate.
@@ -284,7 +284,7 @@ bool DialogClientView::CanClose() {
   return close;
 }
 
-void DialogClientView::WindowClosing() {
+void DialogClientView::WidgetClosing() {
   if (listening_to_focus_) {
     DCHECK(saved_focus_manager_);
     if (saved_focus_manager_)
@@ -299,6 +299,10 @@ int DialogClientView::NonClientHitTest(const gfx::Point& point) {
 }
 
 DialogClientView* DialogClientView::AsDialogClientView() {
+  return this;
+}
+
+const DialogClientView* DialogClientView::AsDialogClientView() const {
   return this;
 }
 
@@ -321,7 +325,7 @@ void DialogClientView::OnPaint(gfx::Canvas* canvas) {
 
 void DialogClientView::PaintChildren(gfx::Canvas* canvas) {
   View::PaintChildren(canvas);
-  if (!window()->IsMaximized() && !window()->IsMinimized())
+  if (!GetWidget()->IsMaximized() && !GetWidget()->IsMinimized())
     PaintSizeBox(canvas);
 }
 
@@ -426,8 +430,8 @@ void DialogClientView::ButtonPressed(
 // DialogClientView, private:
 
 void DialogClientView::PaintSizeBox(gfx::Canvas* canvas) {
-  if (window()->window_delegate()->CanResize() ||
-      window()->window_delegate()->CanMaximize()) {
+  if (GetWidget()->widget_delegate()->CanResize() ||
+      GetWidget()->widget_delegate()->CanMaximize()) {
 #if defined(OS_WIN)
     gfx::NativeTheme::ExtraParams extra;
     gfx::Size gripper_size = gfx::NativeTheme::instance()->GetPartSize(
@@ -539,11 +543,11 @@ void DialogClientView::CreateExtraView() {
 }
 
 DialogDelegate* DialogClientView::GetDialogDelegate() const {
-  return window()->window_delegate()->AsDialogDelegate();
+  return GetWidget()->widget_delegate()->AsDialogDelegate();
 }
 
 void DialogClientView::Close() {
-  window()->Close();
+  GetWidget()->Close();
   GetDialogDelegate()->OnClose();
 }
 

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/threading/thread.h"
@@ -19,13 +20,12 @@
 #include "ui/gfx/point.h"
 
 class CommandLine;
-class DictionaryValue;
 class FilePath;
-class GURL;
-class ListValue;
-class Value;
 
 namespace base {
+class DictionaryValue;
+class ListValue;
+class Value;
 class WaitableEvent;
 }
 
@@ -60,10 +60,13 @@ class Session {
   ~Session();
 
   // Starts the session thread and a new browser, using the exe found at
-  // |browser_exe|. If |browser_exe| is empty, it will search in all the default
-  // locations. Returns true on success. On failure, the session will delete
+  // |browser_exe| and duplicating the provided |user_data_dir|.
+  // If |browser_exe| is empty, it will search in all the default locations.
+  // It |user_data_dir| is empty, it will use a temporary dir.
+  // Returns true on success. On failure, the session will delete
   // itself and return an error code.
   Error* Init(const FilePath& browser_exe,
+              const FilePath& user_data_dir,
               const CommandLine& options);
 
   // Terminates this session and deletes itself.
@@ -73,30 +76,34 @@ class Session {
   // The |script| should be in the form of a function body
   // (e.g. "return arguments[0]"), where |args| is the list of arguments to
   // pass to the function. The caller is responsible for the script result
-  // |value|.
+  // |value|, which is set only if there is no error.
   Error* ExecuteScript(const FrameId& frame_id,
                        const std::string& script,
-                       const ListValue* const args,
-                       Value** value);
+                       const base::ListValue* const args,
+                       base::Value** value);
 
   // Same as above, but uses the currently targeted window and frame.
   Error* ExecuteScript(const std::string& script,
-                       const ListValue* const args,
-                       Value** value);
+                       const base::ListValue* const args,
+                       base::Value** value);
 
   // Executes given |script| in the context of the given frame.
   // The |script| should be in the form of a function body
   // (e.g. "return arguments[0]"), where |args| is the list of arguments to
   // pass to the function. The caller is responsible for the script result
-  // |value|.
+  // |value|, which is set only if there is no error.
   Error* ExecuteAsyncScript(const FrameId& frame_id,
                             const std::string& script,
-                            const ListValue* const args,
-                            Value** value);
+                            const base::ListValue* const args,
+                            base::Value** value);
 
   // Send the given keys to the given element dictionary. This function takes
   // ownership of |element|.
   Error* SendKeys(const WebElementId& element, const string16& keys);
+
+  // Sets the file paths to the file upload control under the given location.
+  Error* DragAndDropFilePaths(const gfx::Point& location,
+                              const std::vector<FilePath::StringType>& paths);
 
   // Clicks the mouse at the given location using the given button.
   Error* MouseMoveAndClick(const gfx::Point& location,
@@ -113,19 +120,11 @@ class Session {
   Error* GoBack();
   Error* Reload();
   Error* GetURL(std::string* url);
-  Error* GetURL(GURL* url);
   Error* GetTitle(std::string* tab_title);
   Error* GetScreenShot(std::string* png);
-
-  Error* GetCookies(const std::string& url, ListValue** cookies);
-  bool GetCookiesDeprecated(const GURL& url, std::string* cookies);
-  bool GetCookieByNameDeprecated(const GURL& url,
-                                 const std::string& cookie_name,
-                                 std::string* cookie);
+  Error* GetCookies(const std::string& url, base::ListValue** cookies);
   Error* DeleteCookie(const std::string& url, const std::string& cookie_name);
-  bool DeleteCookieDeprecated(const GURL& url, const std::string& cookie_name);
-  Error* SetCookie(const std::string& url, DictionaryValue* cookie_dict);
-  bool SetCookieDeprecated(const GURL& url, const std::string& cookie);
+  Error* SetCookie(const std::string& url, base::DictionaryValue* cookie_dict);
 
   // Gets all the currently existing window IDs. Returns true on success.
   Error* GetWindowIds(std::vector<int>* window_ids);
@@ -195,20 +194,32 @@ class Session {
                       const std::string& query,
                       std::vector<WebElementId>* elements);
 
-  // Checks that the given element meets the WebDriver requirements for
-  // clicking.
-  Error* CheckElementPreconditionsForClicking(const WebElementId& element);
-
-  // Scroll the element into view and get its location relative to the client's
-  // viewport.
+  // Scroll the element into view and get its location relative to
+  // the client's viewport.
   Error* GetElementLocationInView(
-      const WebElementId& element, gfx::Point* location);
+      const WebElementId& element,
+      gfx::Point* location);
+
+  // Scroll the element's region into view and get its location relative to
+  // the client's viewport. If |center| is true, the element will be centered
+  // if it is too big to fit in view.
+  Error* GetElementRegionInView(
+      const WebElementId& element,
+      const gfx::Rect& region,
+      bool center,
+      gfx::Point* location);
 
   // Gets the size of the element from the given window and frame, even if
   // its display is none.
   Error* GetElementSize(const FrameId& frame_id,
                         const WebElementId& element,
                         gfx::Size* size);
+
+  // Gets the size of the element's first client rect. If the element has
+  // no client rects, this will return an error.
+  Error* GetElementFirstClientRect(const FrameId& frame_id,
+                                   const WebElementId& element,
+                                   gfx::Rect* rect);
 
   // Gets the element's effective style for the given property.
   Error* GetElementEffectiveStyle(
@@ -226,12 +237,33 @@ class Session {
   // Gets whether the element is currently displayed.
   Error* IsElementDisplayed(const FrameId& frame_id,
                             const WebElementId& element,
+                            bool ignore_opacity,
                             bool* is_visible);
 
   // Gets whether the element is currently enabled.
   Error* IsElementEnabled(const FrameId& frame_id,
                           const WebElementId& element,
                           bool* is_enabled);
+
+  // Sets the given option element as selected.
+  Error* SelectOptionElement(const FrameId& frame_id,
+                             const WebElementId& element);
+
+  // Gets the tag name of the given element.
+  Error* GetElementTagName(const FrameId& frame_id,
+                           const WebElementId& element,
+                           std::string* tag_name);
+
+  // Gets the clickable location of the given element. It will be the center
+  // location of the element. If the element is not clickable, or if the
+  // location cannot be determined, an error will be returned.
+  Error* GetClickableLocation(const WebElementId& element,
+                              gfx::Point* location);
+
+  // Gets the attribute of the given element. If there are no errors, the
+  // function sets |value| and the caller takes ownership.
+  Error* GetAttribute(const WebElementId& element, const std::string& key,
+                      base::Value** value);
 
   // Waits for all tabs to stop loading. Returns true on success.
   Error* WaitForAllTabsToStopLoading();
@@ -260,6 +292,7 @@ class Session {
       Task* task,
       base::WaitableEvent* done_event);
   void InitOnSessionThread(const FilePath& browser_exe,
+                           const FilePath& user_data_dir,
                            const CommandLine& options,
                            Error** error);
   void TerminateOnSessionThread();
@@ -269,22 +302,24 @@ class Session {
   // The caller is responsible for the script result |value|.
   Error* ExecuteScriptAndParseResponse(const FrameId& frame_id,
                                        const std::string& script,
-                                       Value** value);
+                                       base::Value** value);
 
   void SendKeysOnSessionThread(const string16& keys, Error** error);
   Error* SwitchToFrameWithJavaScriptLocatedFrame(
       const std::string& script,
-      ListValue* args);
+      base::ListValue* args);
   Error* FindElementsHelper(const FrameId& frame_id,
                             const WebElementId& root_element,
                             const std::string& locator,
                             const std::string& query,
                             bool find_one,
                             std::vector<WebElementId>* elements);
-  Error* GetLocationInViewHelper(const FrameId& frame_id,
-                                 const WebElementId& element,
-                                 const gfx::Rect& region,
-                                 gfx::Point* location);
+  Error* GetElementRegionInViewHelper(
+      const FrameId& frame_id,
+      const WebElementId& element,
+      const gfx::Rect& region,
+      bool center,
+      gfx::Point* location);
 
   const std::string id_;
   FrameId current_target_;

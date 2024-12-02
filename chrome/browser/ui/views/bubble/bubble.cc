@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "chrome/browser/ui/views/bubble/border_contents.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -14,7 +15,6 @@
 #include "views/layout/fill_layout.h"
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
-#include "views/window/window.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
@@ -56,6 +56,10 @@ Bubble* Bubble::Show(views::Widget* parent,
   Bubble* bubble = new Bubble;
   bubble->InitBubble(parent, position_relative_to, arrow_location,
                      contents, delegate);
+
+  // Register the Escape accelerator for closing.
+  bubble->RegisterEscapeAccelerator();
+
   return bubble;
 }
 
@@ -134,13 +138,14 @@ Bubble::Bubble()
       show_status_(kOpen),
       fade_away_on_close_(false),
 #if defined(TOOLKIT_USES_GTK)
-      type_(views::Widget::InitParams::TYPE_WINDOW),
+      type_(views::Widget::InitParams::TYPE_WINDOW_FRAMELESS),
 #endif
 #if defined(OS_CHROMEOS)
       show_while_screen_is_locked_(false),
 #endif
       arrow_location_(BubbleBorder::NONE),
-      contents_(NULL) {
+      contents_(NULL),
+      accelerator_registered_(false) {
 }
 
 #if defined(OS_CHROMEOS)
@@ -173,7 +178,7 @@ void Bubble::InitBubble(views::Widget* parent,
 
   // Create the main window.
 #if defined(OS_WIN)
-  views::Window* parent_window = parent->GetContainingWindow();
+  views::Widget* parent_window = parent->GetTopLevelWidget();
   if (parent_window)
     parent_window->DisableInactiveRendering();
   set_window_style(WS_POPUP | WS_CLIPCHILDREN);
@@ -268,14 +273,10 @@ void Bubble::InitBubble(views::Widget* parent,
 #endif
   GetWidget()->SetBounds(window_bounds);
 
-  // Register the Escape accelerator for closing.
-  GetWidget()->GetFocusManager()->RegisterAccelerator(
-      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
-
   // Done creating the bubble.
-  NotificationService::current()->Notify(NotificationType::INFO_BUBBLE_CREATED,
-                                         Source<Bubble>(this),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_INFO_BUBBLE_CREATED, Source<Bubble>(this),
+      NotificationService::NoDetails());
 
   // Show the window.
 #if defined(OS_WIN)
@@ -286,6 +287,19 @@ void Bubble::InitBubble(views::Widget* parent,
 #elif defined(TOOLKIT_USES_GTK)
   GetWidget()->Show();
 #endif
+}
+
+void Bubble::RegisterEscapeAccelerator() {
+  GetWidget()->GetFocusManager()->RegisterAccelerator(
+      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
+  accelerator_registered_ = true;
+}
+
+void Bubble::UnregisterEscapeAccelerator() {
+  DCHECK(accelerator_registered_);
+  GetWidget()->GetFocusManager()->UnregisterAccelerator(
+      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
+  accelerator_registered_ = false;
 }
 
 BorderContents* Bubble::CreateBorderContents() {
@@ -321,11 +335,11 @@ void Bubble::OnActivate(UINT action, BOOL minimized, HWND window) {
     GetWidget()->Close();
   } else if (action == WA_ACTIVE) {
     DCHECK(GetWidget()->GetRootView()->has_children());
-    GetWidget()->GetRootView()->GetChildViewAt(0)->RequestFocus();
+    GetWidget()->GetRootView()->child_at(0)->RequestFocus();
   }
 }
 #elif defined(TOOLKIT_USES_GTK)
-void Bubble::IsActiveChanged() {
+void Bubble::OnActiveChanged() {
   if (!GetWidget()->IsActive())
     GetWidget()->Close();
 }
@@ -335,8 +349,8 @@ void Bubble::DoClose(bool closed_by_escape) {
   if (show_status_ == kClosed)
     return;
 
-  GetWidget()->GetFocusManager()->UnregisterAccelerator(
-      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
+  if (accelerator_registered_)
+    UnregisterEscapeAccelerator();
   if (delegate_)
     delegate_->BubbleClosing(this, closed_by_escape);
   show_status_ = kClosed;

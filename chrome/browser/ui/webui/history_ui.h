@@ -11,13 +11,15 @@
 #include "base/string16.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "content/browser/cancelable_request.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/common/notification_registrar.h"
 
 class GURL;
 
 // The handler for Javascript messages related to the "history" view.
-class BrowsingHistoryHandler : public WebUIMessageHandler {
+class BrowsingHistoryHandler : public WebUIMessageHandler,
+                               public NotificationObserver {
  public:
   BrowsingHistoryHandler();
   virtual ~BrowsingHistoryHandler();
@@ -27,16 +29,21 @@ class BrowsingHistoryHandler : public WebUIMessageHandler {
   virtual void RegisterMessages();
 
   // Callback for the "getHistory" message.
-  void HandleGetHistory(const ListValue* args);
+  void HandleGetHistory(const base::ListValue* args);
 
   // Callback for the "searchHistory" message.
-  void HandleSearchHistory(const ListValue* args);
+  void HandleSearchHistory(const base::ListValue* args);
 
   // Callback for the "removeURLsOnOneDay" message.
-  void HandleRemoveURLsOnOneDay(const ListValue* args);
+  void HandleRemoveURLsOnOneDay(const base::ListValue* args);
 
   // Handle for "clearBrowsingData" message.
-  void HandleClearBrowsingData(const ListValue* args);
+  void HandleClearBrowsingData(const base::ListValue* args);
+
+  // NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  private:
   // Callback from the history system when the history list is available.
@@ -47,12 +54,14 @@ class BrowsingHistoryHandler : public WebUIMessageHandler {
   void RemoveComplete();
 
   // Extract the arguments from the call to HandleSearchHistory.
-  void ExtractSearchHistoryArguments(const ListValue* args,
+  void ExtractSearchHistoryArguments(const base::ListValue* args,
                                      int* month,
                                      string16* query);
 
   // Figure out the query options for a month-wide query.
   history::QueryOptions CreateMonthQueryOptions(int month);
+
+  NotificationRegistrar registrar_;
 
   // Current search text.
   string16 search_text_;
@@ -66,7 +75,7 @@ class BrowsingHistoryHandler : public WebUIMessageHandler {
   DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryHandler);
 };
 
-class HistoryUI : public WebUI {
+class HistoryUI : public ChromeWebUI {
  public:
   explicit HistoryUI(TabContents* contents);
 

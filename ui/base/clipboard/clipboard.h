@@ -14,6 +14,7 @@
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "base/string16.h"
+#include "ui/ui_api.h"
 
 namespace gfx {
 class Size;
@@ -28,7 +29,7 @@ typedef struct _GtkClipboard GtkClipboard;
 
 namespace ui {
 
-class Clipboard {
+class UI_API Clipboard {
  public:
   typedef std::string FormatType;
 
@@ -168,6 +169,11 @@ class Clipboard {
   // TODO(dcheng): Due to platform limitations on Windows, we should make sure
   // format is never controlled by the user.
   void ReadData(const std::string& format, std::string* result);
+
+  // Returns a sequence number which uniquely identifies clipboard state.
+  // This can be used to version the data on the clipboard and determine
+  // whether it has changed.
+  uint64 GetSequenceNumber();
 
   // Get format Identifiers for various types.
   static FormatType GetUrlFormatType();

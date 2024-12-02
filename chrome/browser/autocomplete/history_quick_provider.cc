@@ -22,8 +22,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_parse.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/url_util.h"
 #include "net/base/escape.h"
 #include "net/base/net_util.h"
@@ -31,9 +31,6 @@
 using history::InMemoryURLIndex;
 using history::ScoredHistoryMatch;
 using history::ScoredHistoryMatches;
-
-// The initial maximum allowable score for a match which cannot be inlined.
-const int kMaxNonInliningScore = 1199;
 
 HistoryQuickProvider::HistoryQuickProvider(ACProviderListener* listener,
                                            Profile* profile)
@@ -96,10 +93,6 @@ void HistoryQuickProvider::DeleteMatch(const AutocompleteMatch& match) {}
 void HistoryQuickProvider::DoAutocomplete() {
   // Get the matching URLs from the DB.
   string16 term_string = autocomplete_input_.text();
-  // TODO(mrossetti): Temporary workaround for http://crbug.com/88498.
-  // Just give up after 50 characters.
-  if (term_string.size() > 50)
-    return;
   term_string = UnescapeURLComponent(term_string,
       UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
   history::InMemoryURLIndex::String16Vector terms(
@@ -126,6 +119,10 @@ void HistoryQuickProvider::DoAutocomplete() {
     }
   }
 }
+
+// static
+const int HistoryQuickProvider::kMaxNonInliningScore =
+    AutocompleteResult::kLowestDefaultScore - 1;
 
 AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
     const ScoredHistoryMatch& history_match,

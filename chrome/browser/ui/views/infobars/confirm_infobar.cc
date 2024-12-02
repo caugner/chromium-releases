@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/infobars/confirm_infobar.h"
 
+#include "base/logging.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/views/event_utils.h"
 #include "views/controls/button/text_button.h"
@@ -100,10 +101,10 @@ void ConfirmInfoBar::ButtonPressed(views::Button* sender,
   ConfirmInfoBarDelegate* delegate = GetDelegate();
   if ((ok_button_ != NULL) && sender == ok_button_) {
     if (delegate->Accept())
-      RemoveInfoBar();
+      RemoveSelf();
   } else if ((cancel_button_ != NULL) && (sender == cancel_button_)) {
     if (delegate->Cancel())
-      RemoveInfoBar();
+      RemoveSelf();
   } else {
     InfoBarView::ButtonPressed(sender, event);
   }
@@ -125,7 +126,7 @@ void ConfirmInfoBar::LinkClicked(views::Link* source, int event_flags) {
   DCHECK_EQ(link_, source);
   if (GetDelegate()->LinkClicked(
       event_utils::DispositionFromEventFlags(event_flags)))
-    RemoveInfoBar();
+    RemoveSelf();
 }
 
 ConfirmInfoBarDelegate* ConfirmInfoBar::GetDelegate() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <gtk/gtk.h>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,13 +21,21 @@ typedef unsigned long XID;
 namespace base {
 template <typename T> struct DefaultLazyInstanceTraits;
 }
+namespace gfx {
+class Rect;
+}
 
 namespace chromeos {
 
 class WmIpc {
  public:
   enum AtomType {
-    ATOM_CHROME_LOGGED_IN = 0,
+    ATOM_CHROME_LAYOUT_MODE = 0,
+    ATOM_CHROME_LOGGED_IN,
+    ATOM_CHROME_STATE,
+    ATOM_CHROME_STATE_COLLAPSED_PANEL,
+    ATOM_CHROME_STATE_STATUS_HIDDEN,
+    ATOM_CHROME_STATUS_BOUNDS,
     ATOM_CHROME_WINDOW_TYPE,
     ATOM_CHROME_WM_MESSAGE,
     ATOM_MANAGER,
@@ -84,6 +93,8 @@ class WmIpc {
   // Returns the single instance of WmIpc.
   static WmIpc* instance();
 
+  WmIpcLayoutMode layout_mode() const { return layout_mode_; }
+
   // Gets or sets a property describing a window's type.
   // WmIpcMessageType is defined in chromeos_wm_ipc_enums.h.  Type-specific
   // parameters may also be supplied.  The caller is responsible for trapping
@@ -92,11 +103,18 @@ class WmIpc {
                      WmIpcWindowType type,
                      const std::vector<int>* params);
 
+  // Gets the string name of an atom from the AtomType enum.
+  std::string GetAtomName(AtomType type) const;
+
   // Gets the type of the window, and any associated parameters. The
   // caller is responsible for trapping errors from the X server.  If
   // the parameters are not interesting to the caller, NULL may be
   // passed for |params|.
   WmIpcWindowType GetWindowType(GtkWidget* widget, std::vector<int>* params);
+
+  // Gets the set of atoms contained in a window's _CHROME_STATE property.
+  // Returns false if the property isn't set.
+  bool GetWindowState(GtkWidget* widget, std::set<AtomType>* atom_types);
 
   // Sends a message to the WM.
   void SendMessage(const Message& msg);
@@ -111,9 +129,16 @@ class WmIpc {
   // See ICCCM 2.8 for more info about MANAGER selections.
   void HandleNonChromeClientMessageEvent(const GdkEventClient& event);
 
+  // Handle an event reporting a property change on the root window.
+  void HandleRootWindowPropertyEvent(const GdkEventProperty& event);
+
   // Sets a _CHROME_LOGGED_IN property on the root window describing whether
   // the user is currently logged in or not.
   void SetLoggedInProperty(bool logged_in);
+
+  // Sets a _CHROME_STATUS_BOUNDS property on toplevel window |widget|
+  // describing the status area's bounds within the window.
+  void SetStatusBoundsProperty(GtkWidget* widget, const gfx::Rect& bounds);
 
   // Sends a message to the window manager notifying it that we're signing out.
   void NotifyAboutSignout();
@@ -124,23 +149,29 @@ class WmIpc {
   WmIpc();
   ~WmIpc();
 
-  // Initialize 'wm_' and send the window manager a message telling it the
+  // Initializes 'wm_' and sends the window manager a message telling it the
   // version of the IPC protocol that we support.  This is called in our
   // constructor, but needs to be re-run if the window manager gets restarted.
   void InitWmInfo();
 
-  // Maps from our Atom enum to the X server's atom IDs and from the
-  // server's IDs to atoms' string names.  These maps aren't necessarily in
-  // sync; 'atom_to_xatom_' is constant after the constructor finishes but
-  // GetName() caches additional string mappings in 'xatom_to_string_'.
+  // Updates |layout_mode_| based on the current value of the root window's
+  // _CHROME_LAYOUT_MODE property.
+  void FetchLayoutModeProperty();
+
+  // Maps between our Atom enum and the X server's atom IDs and from the
+  // server's IDs to atoms' string names.
   std::map<AtomType, Atom> type_to_atom_;
+  std::map<Atom, AtomType> atom_to_type_;
   std::map<Atom, std::string> atom_to_string_;
 
   // Cached value of type_to_atom_[ATOM_CHROME_WM_MESSAGE].
   Atom wm_message_atom_;
 
-  // Handle to the wm. Used for sending messages.
+  // Handle to the WM. Used for sending messages.
   XID wm_;
+
+  // The current value of the root window's _CHROME_LAYOUT_MODE property.
+  WmIpcLayoutMode layout_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(WmIpc);
 };

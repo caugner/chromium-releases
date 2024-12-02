@@ -10,6 +10,8 @@
 
 #include "base/basictypes.h"
 #include "content/browser/webui/web_ui.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "content/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/gfx/rect.h"
@@ -25,10 +27,11 @@ class RenderWidgetHost;
 class RenderWidgetHostView;
 class SiteInstance;
 class TabContents;
+struct ViewHostMsg_CreateWindow_Params;
 
 // Provides helper methods that provide common implementations of some
 // RenderViewHostDelegate::View methods.
-class RenderViewHostDelegateViewHelper {
+class RenderViewHostDelegateViewHelper : public NotificationObserver {
  public:
   RenderViewHostDelegateViewHelper();
   virtual ~RenderViewHostDelegateViewHelper();
@@ -37,7 +40,7 @@ class RenderViewHostDelegateViewHelper {
   // BackgroundContents (if the window_container_type ==
   // WINDOW_CONTAINER_TYPE_BACKGROUND and permissions allow) or a TabContents.
   // If a TabContents is created, it is returned. Otherwise NULL is returned.
-  virtual TabContents* CreateNewWindow(
+  TabContents* CreateNewWindow(
       int route_id,
       Profile* profile,
       SiteInstance* site,
@@ -48,28 +51,48 @@ class RenderViewHostDelegateViewHelper {
 
   // Creates a new RenderWidgetHost and saves it for later retrieval by
   // GetCreatedWidget.
-  virtual RenderWidgetHostView* CreateNewWidget(int route_id,
-                                                WebKit::WebPopupType popup_type,
-                                                RenderProcessHost* process);
+  RenderWidgetHostView* CreateNewWidget(int route_id,
+                                        WebKit::WebPopupType popup_type,
+                                        RenderProcessHost* process);
 
-  virtual RenderWidgetHostView* CreateNewFullscreenWidget(
+  RenderWidgetHostView* CreateNewFullscreenWidget(
       int route_id, RenderProcessHost* process);
 
   // Finds the new RenderWidgetHost and returns it. Note that this can only be
   // called once as this call also removes it from the internal map.
-  virtual RenderWidgetHostView* GetCreatedWidget(int route_id);
+  RenderWidgetHostView* GetCreatedWidget(int route_id);
 
   // Finds the new RenderViewHost/Delegate by route_id, initializes it for
   // for renderer-initiated creation, and returns the TabContents that needs
   // to be shown, if there is one (i.e. not a BackgroundContents). Note that
   // this can only be called once as this call also removes it from the internal
   // map.
-  virtual TabContents* GetCreatedWindow(int route_id);
+  TabContents* GetCreatedWindow(int route_id);
 
-  // Removes |host| from the internal map of pending RenderWidgets.
-  void RenderWidgetHostDestroyed(RenderWidgetHost* host);
+  // These methods are meant to be called from TabContentsView implementations.
+  // They take care of notifying the TabContentsDelegate.
+  TabContents* CreateNewWindowFromTabContents(
+      TabContents* tab_contents,
+      int route_id,
+      const ViewHostMsg_CreateWindow_Params& params);
+  // Mirrors the RenderViewHostDelegate::View Show methods.
+  TabContents* ShowCreatedWindow(TabContents* tab_contents,
+                                 int route_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture);
+  RenderWidgetHostView* ShowCreatedWidget(TabContents* tab_contents,
+                                          int route_id,
+                                          const gfx::Rect& initial_pos);
+  RenderWidgetHostView* ShowCreatedFullscreenWidget(TabContents* tab_contents,
+                                                    int route_id);
 
  private:
+  // NotificationObserver implementation
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
   BackgroundContents* MaybeCreateBackgroundContents(
       int route_id,
       Profile* profile,
@@ -87,6 +110,9 @@ class RenderViewHostDelegateViewHelper {
   typedef std::map<int, RenderWidgetHostView*> PendingWidgetViews;
   PendingWidgetViews pending_widget_views_;
 
+  // Registers and unregisters us for notifications.
+  NotificationRegistrar registrar_;
+
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostDelegateViewHelper);
 };
 
@@ -102,16 +128,8 @@ class RenderViewHostDelegateHelper {
                                      const std::string& value);
   static void ClearInspectorSettings(Profile* profile);
 
-  static bool gpu_enabled() { return gpu_enabled_; }
-  static void set_gpu_enabled(bool enabled) { gpu_enabled_ = enabled; }
-
  private:
   RenderViewHostDelegateHelper();
-
-  // Master switch for enabling/disabling GPU acceleration for the current
-  // browser session. It does not change the acceleration settings for
-  // existing tabs, just the future ones.
-  static bool gpu_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostDelegateHelper);
 };

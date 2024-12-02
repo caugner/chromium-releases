@@ -5,6 +5,8 @@
 #include "views/examples/textfield_example.h"
 
 #include "base/utf_string_conversions.h"
+#include "ui/base/range/range.h"
+#include "ui/gfx/render_text.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/layout/grid_layout.h"
@@ -31,6 +33,7 @@ void TextfieldExample::CreateExampleView(views::View* container) {
   clear_all_ = new views::TextButton(this, L"Clear All");
   append_ = new views::TextButton(this, L"Append");
   set_ = new views::TextButton(this, L"Set");
+  set_style_ = new views::TextButton(this, L"Set Styles");
   name_->SetController(this);
   password_->SetController(this);
 
@@ -56,6 +59,8 @@ void TextfieldExample::CreateExampleView(views::View* container) {
   layout->AddView(append_);
   layout->StartRow(0, 0);
   layout->AddView(set_);
+  layout->StartRow(0, 0);
+  layout->AddView(set_style_);
 }
 
 void TextfieldExample::ContentsChanged(views::Textfield* sender,
@@ -84,6 +89,23 @@ void TextfieldExample::ButtonPressed(views::Button* sender,
     name_->AppendText(WideToUTF16(L"[append]"));
   } else if (sender == set_) {
     name_->SetText(WideToUTF16(L"[set]"));
+  } else if (sender == set_style_) {
+    gfx::StyleRange color;
+    color.foreground = SK_ColorYELLOW;
+    color.range = ui::Range(0, 11);
+    name_->ApplyStyleRange(color);
+
+    gfx::StyleRange underline;
+    underline.underline = true;
+    underline.foreground = SK_ColorBLUE;
+    underline.range = ui::Range(1, 7);
+    name_->ApplyStyleRange(underline);
+
+    gfx::StyleRange strike;
+    strike.strike = true;
+    strike.foreground = SK_ColorRED;
+    strike.range = ui::Range(6, 9);
+    name_->ApplyStyleRange(strike);
   }
 }
 

@@ -67,6 +67,7 @@ chrome.sync.events = {
     'onServiceStateChanged'
   ],
 
+  // See chrome/browser/sync/engine/syncapi.h for docs.
   'notifier': [
     'onNotificationStateChange',
     'onIncomingNotification'
@@ -90,11 +91,10 @@ chrome.sync.events = {
     'onClearServerDataFailed'
   ],
 
-  'directory': [
-    'handleCalculateChangesChangeEventFromSyncApi',
-    'handleCalculateChangesChangeEventFromSyncer',
-    'handleTransactionEndingChangeEvent',
-    'handleTransactionCompleteChangeEvent'
+  'transaction': [
+    'onTransactionStart',
+    'onTransactionMutate',
+    'onTransactionEnd'
   ]
 };
 
@@ -134,13 +134,16 @@ var syncFunctions = [
   // Sync service functions.
   'getAboutInfo',
 
-  // Notification functions.
+  // Notification functions.  See chrome/browser/sync/engine/syncapi.h
+  // for docs.
   'getNotificationState',
   'getNotificationInfo',
 
-  // Node lookup functions.
-  'getRootNode',
-  'getNodesById',
+  // Node lookup functions.  See chrome/browser/sync/engine/syncapi.h
+  // for docs.
+  'getRootNodeDetails',
+  'getNodeSummariesById',
+  'getNodeDetailsById',
   'getChildNodeIds',
   'findNodesContainingString'
 ];

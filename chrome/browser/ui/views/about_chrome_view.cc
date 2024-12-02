@@ -9,7 +9,6 @@
 #endif  // defined(OS_WIN)
 
 #include <algorithm>
-#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -18,13 +17,12 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "content/browser/user_metrics.h"
@@ -35,13 +33,13 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/link.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/throbber.h"
 #include "views/layout/layout_constants.h"
 #include "views/view_text_utils.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
@@ -52,12 +50,6 @@
 #endif  // defined(OS_WIN)
 
 namespace {
-// The pixel width of the version text field. Ideally, we'd like to have the
-// bounds set to the edge of the icon. However, the icon is not a view but a
-// part of the background, so we have to hard code the width to make sure
-// the version field doesn't overlap it.
-const int kVersionFieldWidth = 195;
-
 // These are used as placeholder text around the links in the text in the about
 // dialog.
 const wchar_t* kBeginLink = L"BEGIN_LINK";
@@ -82,17 +74,15 @@ std::wstring StringSubRange(const std::wstring& text, size_t start,
 
 namespace browser {
 
-  // Declared in browser_dialogs.h so that others don't
-  // need to depend on our .h.
-  views::Window* ShowAboutChromeView(gfx::NativeWindow parent,
-                                     Profile* profile) {
-      views::Window* about_chrome_window =
-        browser::CreateViewsWindow(parent,
-        gfx::Rect(),
-        new AboutChromeView(profile));
+// Declared in browser_dialogs.h so that others don't
+// need to depend on our .h.
+views::Widget* ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
+  views::Widget* about_chrome_window =
+      browser::CreateViewsWindow(parent, gfx::Rect(),
+                                 new AboutChromeView(profile));
       about_chrome_window->Show();
-      return about_chrome_window;
-  }
+  return about_chrome_window;
+}
 
 }  // namespace browser
 
@@ -153,18 +143,19 @@ void AboutChromeView::Init() {
   // This code only runs as a result of the user opening the About box so
   // doing registry access to get the version string modifier should be fine.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
-  std::string version_modifier = platform_util::GetVersionStringModifier();
+  std::string version_modifier =
+      chrome::VersionInfo::GetVersionStringModifier();
   if (!version_modifier.empty())
-    version_details_ += " " + version_modifier;
+    version_details_ += ASCIIToUTF16(" ") + ASCIIToUTF16(version_modifier);
 
 #if !defined(GOOGLE_CHROME_BUILD)
-  version_details_ += " (";
-  version_details_ += l10n_util::GetStringUTF8(
+  version_details_ += ASCIIToUTF16(" (");
+  version_details_ += l10n_util::GetStringUTF16(
       version_info.IsOfficialBuild() ?
       IDS_ABOUT_VERSION_OFFICIAL : IDS_ABOUT_VERSION_UNOFFICIAL);
-  version_details_ += " ";
-  version_details_ += version_info.LastChange();
-  version_details_ += ")";
+  version_details_ += ASCIIToUTF16(" ");
+  version_details_ += ASCIIToUTF16(version_info.LastChange());
+  version_details_ += ASCIIToUTF16(")");
 #endif
 
   // Views we will add to the *parent* of this dialog, since it will display
@@ -209,7 +200,7 @@ void AboutChromeView::Init() {
 
   // This is a text field so people can copy the version number from the dialog.
   version_label_ = new views::Textfield();
-  version_label_->SetText(ASCIIToUTF16(current_version_ + version_details_));
+  version_label_->SetText(ASCIIToUTF16(current_version_) + version_details_);
   version_label_->SetReadOnly(true);
   version_label_->RemoveBorder();
   version_label_->SetTextColor(SK_ColorBLACK);
@@ -278,7 +269,7 @@ void AboutChromeView::Init() {
                            main_label_chunk2_ + open_source_url_->GetText() +
                            main_label_chunk3_;
 
-  dialog_dimensions_ = views::Window::GetLocalizedContentsSize(
+  dialog_dimensions_ = views::Widget::GetLocalizedContentsSize(
       IDS_ABOUT_DIALOG_WIDTH_CHARS,
       IDS_ABOUT_DIALOG_MINIMUM_HEIGHT_LINES);
 
@@ -352,7 +343,8 @@ void AboutChromeView::Layout() {
                             about_title_label_->y() +
                                 about_title_label_->height() +
                                 views::kRelatedControlVerticalSpacing,
-                            kVersionFieldWidth,
+                            panel_size.width() -
+                                about_dlg_background_logo_->width(),
                             sz.height());
 
   // Then we have the version number right below it.
@@ -362,7 +354,8 @@ void AboutChromeView::Layout() {
       version_label_->y() +
           version_label_->height() +
           views::kRelatedControlVerticalSpacing,
-      kVersionFieldWidth,
+      panel_size.width() -
+          about_dlg_background_logo_->width(),
       sz.height());
 
   // For the width of the main text label we want to use up the whole panel
@@ -409,19 +402,28 @@ void AboutChromeView::Layout() {
   timeout_indicator_.SetBounds(throbber_topleft_x, throbber_topleft_y,
                                sz.width(), sz.height());
 
-  // The update label should be at the bottom of the screen, to the right of
-  // the throbber. We specify width to the end of the dialog because it contains
-  // variable length messages.
+  // The update label should be at the bottom of the screen, to the right of the
+  // throbber. It vertically lines up with the ok button, so we make sure it
+  // doesn't extend into the ok button.
   sz = update_label_.GetPreferredSize();
   int update_label_x = throbber_->x() + throbber_->width() +
                        views::kRelatedControlHorizontalSpacing;
+  views::DialogClientView* dialog_client_view = GetDialogClientView();
+  int max_x = parent_bounds.width();
+  if (dialog_client_view->ok_button() &&
+      dialog_client_view->ok_button()->IsVisible()) {
+    max_x = std::min(dialog_client_view->ok_button()->x(), max_x);
+  }
+  if (dialog_client_view->cancel_button() &&
+      dialog_client_view->cancel_button()->IsVisible()) {
+    max_x = std::min(dialog_client_view->cancel_button()->x(), max_x);
+  }
   update_label_.SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   update_label_.SetBounds(update_label_x,
                           throbber_topleft_y + 1,
-                          parent_bounds.width() - update_label_x,
+                          std::min(max_x - update_label_x, sz.width()),
                           sz.height());
 }
-
 
 void AboutChromeView::OnPaint(gfx::Canvas* canvas) {
   views::View::OnPaint(canvas);
@@ -530,7 +532,7 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
             !base::win::UserAccountControlIsEnabled())) {
         UpdateStatus(UPGRADE_CHECK_STARTED, GOOGLE_UPDATE_NO_ERROR);
         // CheckForUpdate(false, ...) means don't upgrade yet.
-        google_updater_->CheckForUpdate(false, window());
+        google_updater_->CheckForUpdate(false, GetWidget());
       }
 #endif
     } else {
@@ -612,13 +614,7 @@ bool AboutChromeView::IsModal() const {
 }
 
 bool AboutChromeView::Accept() {
-#if defined(OS_WIN)
-  // Set the flag to restore the last session on shutdown.
-  PrefService* pref_service = g_browser_process->local_state();
-  pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);
-  BrowserList::CloseAllBrowsersAndExit();
-#endif
-
+  BrowserList::AttemptRestart();
   return true;
 }
 
@@ -631,12 +627,12 @@ views::View* AboutChromeView::GetContentsView() {
 void AboutChromeView::LinkClicked(views::Link* source, int event_flags) {
   GURL url;
   if (source == terms_of_service_url_) {
-    url = GURL(chrome::kAboutTermsURL);
+    url = GURL(chrome::kChromeUITermsURL);
   } else if (source == chromium_url_) {
     url = google_util::AppendGoogleLocaleParam(
       GURL(chrome::kChromiumProjectURL));
   } else if (source == open_source_url_) {
-    url = GURL(chrome::kAboutCreditsURL);
+    url = GURL(chrome::kChromeUICreditsURL);
   } else {
     NOTREACHED() << "Unknown link source";
   }
@@ -698,7 +694,7 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       google_updater_->set_status_listener(this);
       UpdateStatus(UPGRADE_STARTED, GOOGLE_UPDATE_NO_ERROR);
       // CheckForUpdate(true,...) means perform upgrade if new version found.
-      google_updater_->CheckForUpdate(true, window());
+      google_updater_->CheckForUpdate(true, GetWidget());
       // TODO(seanparent): Need to see if this code needs to change to
       // force a machine restart.
       return;
@@ -784,8 +780,8 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
   parent()->Layout();
 
   // Check button may have appeared/disappeared. We cannot call this during
-  // ViewHierarchyChanged because the |window()| pointer hasn't been set yet.
-  if (window())
+  // ViewHierarchyChanged because the view hasn't been added to a Widget yet.
+  if (GetWidget())
     GetDialogClientView()->UpdateDialogButtons();
 }
 

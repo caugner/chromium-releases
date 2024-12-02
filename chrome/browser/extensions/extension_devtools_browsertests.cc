@@ -4,8 +4,6 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/debugger/devtools_client_host.h"
-#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/extensions/extension_devtools_browsertest.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -18,6 +16,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
+#include "content/browser/debugger/devtools_client_host.h"
+#include "content/browser/debugger/devtools_manager.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -81,7 +81,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionDevToolsBrowserTest, FLAKY_TimelineApi) {
   // Test onPageEvent event.
   result = false;
 
-  DevToolsClientMsg_DispatchOnInspectorFrontend pageEventMessage("");
+  DevToolsClientMsg_DispatchOnInspectorFrontend pageEventMessage(
+      MSG_ROUTING_NONE,
+      "");
   devtools_client_host->SendMessageToClient(pageEventMessage);
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
       host->render_view_host(), L"", L"testReceivePageEvent()", &result));

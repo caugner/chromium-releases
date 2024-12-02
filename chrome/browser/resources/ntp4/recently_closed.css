@@ -6,17 +6,29 @@
 #recently-closed-menu-button {
   background: none;
   border: 0;
+  display: block;
+  font-size: 9pt;
+  font-weight: bold;
   -webkit-appearance: none;
+  -webkit-transition: opacity 0.2s;
+  -webkit-transition-delay: 0.1s;
 }
 
 /* Reserve space for the menu button even when it's hidden. */
-#recently-closed-menu-button[hidden] {
-  display: block;
+#recently-closed-menu-button[hidden],
+#footer.dragging-mode #recently-closed-menu-button {
   visibility: hidden;
+}
+
+#footer.dragging-mode #recently-closed-menu-button {
+  opacity: 0;
+  -webkit-transition-delay: 0;
 }
 
 .recent-menu {
   padding: 6px 8px;
+  /* Needs to be above #footer. */
+  z-index: 10;
 }
 
 .recent-menu-item {
@@ -28,6 +40,7 @@
   font-size: 100%;
   line-height: 20px;
   margin: 4px;
+  max-width: 600px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -44,4 +57,11 @@
 .recent-menu-item:visited,
 .recent-menu-item:link {
   color: hsl(213, 90%, 24%) !important;
+}
+
+.disclosure-triangle {
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+  -webkit-mask-image: url('./ntp4_disclosure_triangle_mask.png');
 }

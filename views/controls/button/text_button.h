@@ -27,7 +27,7 @@ namespace views {
 //  basically the button frame in the hot/pushed states.
 //
 // Note that this type of button is not focusable by default and will not be
-// part of the focus chain.  Call SetFocusable(true) to make it part of the
+// part of the focus chain.  Call set_focusable(true) to make it part of the
 // focus chain.
 //
 ////////////////////////////////////////////////////////////////////////////////
@@ -36,13 +36,14 @@ class TextButtonBorder : public Border {
   TextButtonBorder();
   virtual ~TextButtonBorder();
 
-  // Implementation of Border:
-  virtual void Paint(const View& view, gfx::Canvas* canvas) const;
-  virtual void GetInsets(gfx::Insets* insets) const;
+  // By default BS_NORMAL is drawn with no border.  Call this to instead draw it
+  // with the same border as the "hot" state.
+  // TODO(pkasting): You should also call set_animate_on_state_change(false) on
+  // the button in this case... we should fix this.
+  void copy_normal_set_to_hot_set() { set_normal_set(hot_set_); }
 
  protected:
-  // Images
-  struct MBBImageSet {
+  struct BorderImageSet {
     SkBitmap* top_left;
     SkBitmap* top;
     SkBitmap* top_right;
@@ -53,13 +54,29 @@ class TextButtonBorder : public Border {
     SkBitmap* bottom;
     SkBitmap* bottom_right;
   };
-  MBBImageSet hot_set_;
-  MBBImageSet pushed_set_;
 
-  virtual void Paint(const View& view, gfx::Canvas* canvas,
-      const MBBImageSet& set) const;
+  void Paint(const View& view,
+             gfx::Canvas* canvas,
+             const BorderImageSet& set) const;
+
+  void set_normal_set(const BorderImageSet& set) { normal_set_ = set; }
+  void set_hot_set(const BorderImageSet& set) { hot_set_ = set; }
+  void set_pushed_set(const BorderImageSet& set) { pushed_set_ = set; }
+  void set_vertical_padding(int vertical_padding) {
+    vertical_padding_ = vertical_padding;
+  }
 
  private:
+  // Border:
+  virtual void Paint(const View& view, gfx::Canvas* canvas) const OVERRIDE;
+  virtual void GetInsets(gfx::Insets* insets) const OVERRIDE;
+
+  BorderImageSet normal_set_;
+  BorderImageSet hot_set_;
+  BorderImageSet pushed_set_;
+
+  int vertical_padding_;
+
   DISALLOW_COPY_AND_ASSIGN(TextButtonBorder);
 };
 
@@ -169,9 +186,6 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
   void SetTextShadowColors(SkColor active_color, SkColor inactive_color);
   void SetTextShadowOffset(int x, int y);
 
-  bool normal_has_border() const { return normal_has_border_; }
-  void SetNormalHasBorder(bool normal_has_border);
-
   // Sets whether or not to show the hot and pushed states for the button icon
   // (if present) in addition to the normal state.  Defaults to true.
   bool show_multiple_icon_states() const { return show_multiple_icon_states_; }
@@ -188,6 +202,7 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual int GetHeightForWidth(int w) OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
@@ -198,7 +213,7 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
   static const SkColor kHoverColor;
 
   // Returns views/TextButton.
-  virtual std::string GetClassName() const;
+  virtual std::string GetClassName() const OVERRIDE;
 
  protected:
   TextButtonBase(ButtonListener* listener, const std::wstring& text);
@@ -210,6 +225,9 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
   // Updates text_size_ and max_text_size_ from the current text/font. This is
   // invoked when the font or text changes.
   void UpdateTextSize();
+
+  // Calculate the size of the text size without setting any of the members.
+  void CalculateTextSize(gfx::Size* text_size, int max_width);
 
   // Overridden from NativeThemeDelegate:
   virtual gfx::Rect GetThemePaintRect() const OVERRIDE;
@@ -271,9 +289,6 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
   // indicates the width is not constrained.
   int max_width_;
 
-  // This is true if normal state has a border frame; default is false.
-  bool normal_has_border_;
-
   // Whether or not to show the hot and pushed icon states.
   bool show_multiple_icon_states_;
 
@@ -328,6 +343,8 @@ class TextButton : public TextButtonBase {
     icon_placement_ = icon_placement;
   }
 
+  void set_ignore_minimum_size(bool ignore_minimum_size);
+
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
@@ -337,6 +354,8 @@ class TextButton : public TextButtonBase {
 
  protected:
   SkBitmap icon() const { return icon_; }
+
+  virtual const SkBitmap& GetImageToPaint() const;
 
   // Overridden from NativeThemeDelegate:
   virtual gfx::NativeTheme::Part GetThemePart() const OVERRIDE;
@@ -364,7 +383,54 @@ class TextButton : public TextButtonBase {
   // Space between icon and text.
   int icon_text_spacing_;
 
+  // True if the button should ignore the minimum size for the platform. Default
+  // is true. Set to false to prevent narrower buttons.
+  bool ignore_minimum_size_;
+
   DISALLOW_COPY_AND_ASSIGN(TextButton);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// NativeTextButton
+//
+//  A TextButton that uses the NativeTheme border and sets some properties,
+//  like ignore-minimize-size and text alignment minimum size to mimic the
+//  NativeButton class, making it easier to replace existing NativeButton
+//  instances with NativeTextButton instances.
+//
+////////////////////////////////////////////////////////////////////////////////
+class NativeTextButton : public TextButton {
+ public:
+  // The button's class name.
+  static const char kViewClassName[];
+
+  NativeTextButton(ButtonListener* listener);
+  NativeTextButton(ButtonListener* listener, const std::wstring& text);
+
+  // Sets/Gets the text to be used as the button's label.
+  // TODO: Remove this function and replace all call sites with SetText().
+  void SetLabel(const std::wstring& label) {
+    SetText(label);
+  }
+  std::wstring label() const { return text(); }
+
+  // Overridden from TextButton:
+  virtual gfx::Size GetMinimumSize() OVERRIDE;
+
+  virtual std::string GetClassName() const OVERRIDE;
+
+ private:
+  void Init();
+
+  // Overridden from View:
+  virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
+
+  // Overridden from TextButton:
+  virtual void GetExtraParams(
+      gfx::NativeTheme::ExtraParams* params) const OVERRIDE;
+
+  DISALLOW_COPY_AND_ASSIGN(NativeTextButton);
 };
 
 }  // namespace views

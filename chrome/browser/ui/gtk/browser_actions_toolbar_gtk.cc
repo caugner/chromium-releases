@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
@@ -24,6 +25,8 @@
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
@@ -31,10 +34,9 @@
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
-#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
 
@@ -127,7 +129,7 @@ class BrowserActionButton : public NotificationObserver,
     signals_.ConnectAfter(widget(), "expose-event",
                           G_CALLBACK(OnExposeEvent), this);
 
-    registrar_.Add(this, NotificationType::EXTENSION_BROWSER_ACTION_UPDATED,
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
                    Source<ExtensionAction>(extension->browser_action()));
   }
 
@@ -148,10 +150,10 @@ class BrowserActionButton : public NotificationObserver,
   const Extension* extension() { return extension_; }
 
   // NotificationObserver implementation.
-  void Observe(NotificationType type,
+  void Observe(int type,
                const NotificationSource& source,
                const NotificationDetails& details) {
-    if (type == NotificationType::EXTENSION_BROWSER_ACTION_UPDATED)
+    if (type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED)
       UpdateState();
     else
       NOTREACHED();
@@ -390,7 +392,8 @@ BrowserActionsToolbarGtk::BrowserActionsToolbarGtk(Browser* browser)
 
   GtkWidget* gripper = gtk_button_new();
   gtk_widget_set_size_request(gripper, kResizeGripperWidth, -1);
-  GTK_WIDGET_UNSET_FLAGS(gripper, GTK_CAN_FOCUS);
+  gtk_widget_set_can_focus(gripper, FALSE);
+
   gtk_widget_add_events(gripper, GDK_POINTER_MOTION_MASK);
   signals_.Connect(gripper, "motion-notify-event",
                    G_CALLBACK(OnGripperMotionNotifyThunk), this);
@@ -447,7 +450,7 @@ BrowserActionsToolbarGtk::BrowserActionsToolbarGtk(Browser* browser)
   ViewIDUtil::SetID(button_hbox_.get(), VIEW_ID_BROWSER_ACTION_TOOLBAR);
 
   registrar_.Add(this,
-                 NotificationType::BROWSER_THEME_CHANGED,
+                 chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  NotificationService::AllSources());
   theme_service_->InitThemesFor(this);
 }
@@ -460,11 +463,11 @@ BrowserActionsToolbarGtk::~BrowserActionsToolbarGtk() {
 }
 
 int BrowserActionsToolbarGtk::GetCurrentTabId() {
-  TabContents* selected_tab = browser_->GetSelectedTabContents();
+  TabContentsWrapper* selected_tab = browser_->GetSelectedTabContentsWrapper();
   if (!selected_tab)
     return -1;
 
-  return selected_tab->controller().session_id().id();
+  return selected_tab->restore_tab_helper()->session_id().id();
 }
 
 void BrowserActionsToolbarGtk::Update() {
@@ -474,14 +477,11 @@ void BrowserActionsToolbarGtk::Update() {
   }
 }
 
-void BrowserActionsToolbarGtk::Observe(NotificationType type,
+void BrowserActionsToolbarGtk::Observe(int type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
-  DCHECK(NotificationType::BROWSER_THEME_CHANGED == type);
-  if (theme_service_->UsingNativeTheme())
-    gtk_widget_show(separator_);
-  else
-    gtk_widget_hide(separator_);
+  DCHECK(chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type);
+  gtk_widget_set_visible(separator_, theme_service_->UsingNativeTheme());
 }
 
 void BrowserActionsToolbarGtk::SetupDrags() {
@@ -564,10 +564,7 @@ void BrowserActionsToolbarGtk::RemoveButtonForExtension(
 }
 
 void BrowserActionsToolbarGtk::UpdateVisibility() {
-  if (button_count() == 0)
-    gtk_widget_hide(widget());
-  else
-    gtk_widget_show(widget());
+  gtk_widget_set_visible(widget(), button_count() != 0);
 }
 
 bool BrowserActionsToolbarGtk::ShouldDisplayBrowserAction(
@@ -601,7 +598,7 @@ void BrowserActionsToolbarGtk::BrowserActionAdded(const Extension* extension,
     return;
 
   // Animate the addition if we are showing all browser action buttons.
-  if (!GTK_WIDGET_VISIBLE(overflow_area_)) {
+  if (!gtk_widget_get_visible(overflow_area_)) {
     AnimateToShowNIcons(button_count());
     model_->SetVisibleIconCount(button_count());
   }
@@ -618,7 +615,7 @@ void BrowserActionsToolbarGtk::BrowserActionRemoved(
 
   RemoveButtonForExtension(extension);
 
-  if (!GTK_WIDGET_VISIBLE(overflow_area_)) {
+  if (!gtk_widget_get_visible(overflow_area_)) {
     AnimateToShowNIcons(button_count());
     model_->SetVisibleIconCount(button_count());
   }
@@ -736,7 +733,7 @@ void BrowserActionsToolbarGtk::UpdateChevronVisibility() {
   }
 
   if (button_count() > showing_icon_count) {
-    if (!GTK_WIDGET_VISIBLE(overflow_area_)) {
+    if (!gtk_widget_get_visible(overflow_area_)) {
       if (drag_button_) {
         // During drags, when the overflow chevron shows for the first time,
         // take that much space away from |button_hbox_| to make the drag look

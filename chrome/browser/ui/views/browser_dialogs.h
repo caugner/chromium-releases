@@ -34,13 +34,13 @@ class Size;
 }
 
 namespace views {
-class Window;
+class Widget;
 }
 
 namespace browser {
 
 // Shows or hides the global bookmark bubble for the star button.
-void ShowBookmarkBubbleView(views::Window* parent,
+void ShowBookmarkBubbleView(views::Widget* parent,
                             const gfx::Rect& bounds,
                             BubbleDelegate* delegate,
                             Profile* profile,
@@ -50,7 +50,7 @@ void HideBookmarkBubbleView();
 bool IsBookmarkBubbleViewShowing();
 
 // Shows the about dialog. See AboutChromeView.
-views::Window* ShowAboutChromeView(gfx::NativeWindow parent,
+views::Widget* ShowAboutChromeView(gfx::NativeWindow parent,
                                    Profile* profile);
 
 // Creates and returns a find bar for the given browser window. See FindBarWin.

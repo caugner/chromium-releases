@@ -21,9 +21,12 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 
+class Extension;
 class Notification;
+class NotificationDelegate;
 class NotificationUIManager;
 class NotificationsPrefsCache;
 class PrefService;
@@ -76,7 +79,7 @@ class DesktopNotificationService : public NotificationObserver,
   void DenyPermission(const GURL& origin);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -123,6 +126,11 @@ class DesktopNotificationService : public NotificationObserver,
   static void RegisterUserPrefs(PrefService* user_prefs);
 
   ContentSetting GetContentSetting(const GURL& origin);
+
+  // Checks to see if a given origin has permission to create desktop
+  // notifications.
+  WebKit::WebNotificationPresenter::Permission
+      HasPermission(const GURL& origin);
 
  private:
   void InitPrefs();

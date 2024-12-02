@@ -9,10 +9,11 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/profiles/profile.h"
 #include "net/base/network_delegate.h"
 
 class ExtensionEventRouterForwarder;
+class ExtensionInfoMap;
+class PrefService;
 template<class T> class PrefMember;
 
 typedef PrefMember<bool> BooleanPrefMember;
@@ -21,14 +22,15 @@ typedef PrefMember<bool> BooleanPrefMember;
 // add hooks into the network stack.
 class ChromeNetworkDelegate : public net::NetworkDelegate {
  public:
-  // If |profile_id| is the invalid profile, events will be broadcasted to all
-  // profiles, otherwise, they will only be sent to the specified profile.
+  // If |profile| is NULL, events will be broadcasted to all profiles, otherwise
+  // they will only be sent to the specified profile.
   // |enable_referrers| should be initialized on the UI thread (see below)
   // beforehand. This object's owner is responsible for cleaning it up
   // at shutdown.
   ChromeNetworkDelegate(
       ExtensionEventRouterForwarder* event_router,
-      ProfileId profile_id,
+      ExtensionInfoMap* extension_info_map,
+      void* profile,
       BooleanPrefMember* enable_referrers);
   virtual ~ChromeNetworkDelegate();
 
@@ -42,23 +44,25 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual int OnBeforeURLRequest(net::URLRequest* request,
                                  net::CompletionCallback* callback,
                                  GURL* new_url) OVERRIDE;
-  virtual int OnBeforeSendHeaders(uint64 request_id,
+  virtual int OnBeforeSendHeaders(net::URLRequest* request,
                                   net::CompletionCallback* callback,
                                   net::HttpRequestHeaders* headers) OVERRIDE;
-  virtual void OnRequestSent(uint64 request_id,
-                             const net::HostPortPair& socket_address,
-                             const net::HttpRequestHeaders& headers);
+  virtual void OnSendHeaders(net::URLRequest* request,
+                             const net::HttpRequestHeaders& headers) OVERRIDE;
   virtual void OnBeforeRedirect(net::URLRequest* request,
-                                const GURL& new_location);
-  virtual void OnResponseStarted(net::URLRequest* request);
-  virtual void OnRawBytesRead(const net::URLRequest& request, int bytes_read);
-  virtual void OnCompleted(net::URLRequest* request);
-  virtual void OnURLRequestDestroyed(net::URLRequest* request);
-  virtual void OnHttpTransactionDestroyed(uint64 request_id);
-  virtual void OnPACScriptError(int line_number, const string16& error);
+                                const GURL& new_location) OVERRIDE;
+  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
+  virtual void OnRawBytesRead(const net::URLRequest& request,
+                              int bytes_read) OVERRIDE;
+  virtual void OnCompleted(net::URLRequest* request) OVERRIDE;
+  virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
+  virtual void OnPACScriptError(int line_number,
+                                const string16& error) OVERRIDE;
 
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
-  const ProfileId profile_id_;
+  void* profile_;
+
+  scoped_refptr<ExtensionInfoMap> extension_info_map_;
 
   // Weak, owned by our owner.
   BooleanPrefMember* enable_referrers_;

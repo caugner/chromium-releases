@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/ui/views/accessibility_event_router_views.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/testing_profile.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -19,8 +20,7 @@
 #include "views/widget/native_widget.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
-#include "views/window/window_delegate.h"
+#include "views/widget/widget_delegate.h"
 
 #if defined(TOOLKIT_VIEWS)
 
@@ -30,24 +30,23 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
   virtual ~AccessibilityViewsDelegate() {}
 
   // Overridden from views::ViewsDelegate:
-  virtual ui::Clipboard* GetClipboard() const { return NULL; }
-  virtual void SaveWindowPlacement(views::Window* window,
+  virtual ui::Clipboard* GetClipboard() const OVERRIDE { return NULL; }
+  virtual views::View* GetDefaultParentView() OVERRIDE { return NULL; }
+  virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::wstring& window_name,
                                    const gfx::Rect& bounds,
-                                   bool maximized) {
+                                   bool maximized) OVERRIDE {
   }
-  virtual bool GetSavedWindowBounds(views::Window* window,
-                                    const std::wstring& window_name,
-                                    gfx::Rect* bounds) const {
+  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
+                                    gfx::Rect* bounds) const OVERRIDE {
     return false;
   }
-  virtual bool GetSavedMaximizedState(views::Window* window,
-                                      const std::wstring& window_name,
-                                      bool* maximized) const {
+  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
+                                      bool* maximized) const OVERRIDE {
     return false;
   }
   virtual void NotifyAccessibilityEvent(
-      views::View* view, ui::AccessibilityTypes::Event event_type) {
+      views::View* view, ui::AccessibilityTypes::Event event_type) OVERRIDE {
     AccessibilityEventRouterViews::GetInstance()->HandleAccessibilityEvent(
         view, event_type);
   }
@@ -56,14 +55,14 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
       const std::wstring& menu_item_name,
       int item_index,
       int item_count,
-      bool has_submenu) {}
+      bool has_submenu) OVERRIDE {}
 #if defined(OS_WIN)
-  virtual HICON GetDefaultWindowIcon() const {
+  virtual HICON GetDefaultWindowIcon() const OVERRIDE {
     return NULL;
   }
 #endif
-  virtual void AddRef() {}
-  virtual void ReleaseRef() {}
+  virtual void AddRef() OVERRIDE {}
+  virtual void ReleaseRef() OVERRIDE {}
 
   virtual int GetDispositionForEvent(int event_flags) OVERRIDE {
     return 0;
@@ -72,14 +71,18 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
   DISALLOW_COPY_AND_ASSIGN(AccessibilityViewsDelegate);
 };
 
-class AccessibilityWindowDelegate : public views::WindowDelegate {
+class AccessibilityWindowDelegate : public views::WidgetDelegate {
  public:
   explicit AccessibilityWindowDelegate(views::View* contents)
       : contents_(contents) { }
 
-  virtual void DeleteDelegate() { delete this; }
-
-  virtual views::View* GetContentsView() { return contents_; }
+  // Overridden from views::WidgetDelegate:
+  virtual void DeleteDelegate() OVERRIDE { delete this; }
+  virtual views::View* GetContentsView() OVERRIDE { return contents_; }
+  virtual const views::Widget* GetWidget() const OVERRIDE {
+    return contents_->GetWidget();
+  }
+  virtual views::Widget* GetWidget() OVERRIDE { return contents_->GetWidget(); }
 
  private:
   views::View* contents_;
@@ -101,19 +104,19 @@ class AccessibilityEventRouterViewsTest
       delete window_delegate_;
   }
 
-  views::Window* CreateWindowWithContents(views::View* contents) {
+  views::Widget* CreateWindowWithContents(views::View* contents) {
     window_delegate_ = new AccessibilityWindowDelegate(contents);
-    return views::Window::CreateChromeWindow(
-        NULL, gfx::Rect(0, 0, 500, 500), window_delegate_);
+    return views::Widget::CreateWindowWithBounds(window_delegate_,
+                                                 gfx::Rect(0, 0, 500, 500));
   }
 
  protected:
   // Implement NotificationObserver::Observe and store information about a
   // ACCESSIBILITY_CONTROL_FOCUSED event.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    ASSERT_EQ(type.value, NotificationType::ACCESSIBILITY_CONTROL_FOCUSED);
+    ASSERT_EQ(type, chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED);
     const AccessibilityControlInfo* info =
         Details<const AccessibilityControlInfo>(details).ptr();
     focus_event_count_++;
@@ -145,7 +148,7 @@ TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
   contents->AddChildView(button3);
 
   // Put the view in a window.
-  views::Window* window = CreateWindowWithContents(contents);
+  views::Widget* window = CreateWindowWithContents(contents);
 
   // Set focus to the first button initially.
   button1->RequestFocus();
@@ -153,7 +156,7 @@ TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
   // Start listening to ACCESSIBILITY_CONTROL_FOCUSED notifications.
   NotificationRegistrar registrar;
   registrar.Add(this,
-                NotificationType::ACCESSIBILITY_CONTROL_FOCUSED,
+                chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
                 NotificationService::AllSources());
 
   // Switch on accessibility event notifications.
@@ -163,8 +166,7 @@ TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
 
   // Create a profile and associate it with this window.
   TestingProfile profile;
-  window->AsWidget()->native_widget()->SetNativeWindowProperty(
-      Profile::kProfileKey, &profile);
+  window->SetNativeWindowProperty(Profile::kProfileKey, &profile);
 
   // Change the accessible name of button3.
   button3->SetAccessibleName(ASCIIToUTF16(kButton3NewASCII));

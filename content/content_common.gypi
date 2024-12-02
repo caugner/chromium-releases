@@ -10,12 +10,14 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../ipc/ipc.gyp:ipc',
+        '../media/media.gyp:media',
+        '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icuuc',
         '../third_party/npapi/npapi.gyp:npapi',
         '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '../ui/gfx/gl/gl.gyp:gl',
-        '../ui/ui.gyp:ui_base',
+        '../ui/ui.gyp:ui',
         '../webkit/support/webkit_support.gyp:appcache',
         '../webkit/support/webkit_support.gyp:blob',
         '../webkit/support/webkit_support.gyp:database',
@@ -33,8 +35,6 @@
         'common/appcache/appcache_dispatcher.cc',
         'common/appcache/appcache_dispatcher.h',
         'common/appcache_messages.h',
-        'common/audio_messages.h',
-        'common/audio_stream_state.h',
         'common/bindings_policy.h',
         'common/child_process.cc',
         'common/child_process.h',
@@ -124,16 +124,9 @@
         'common/gpu/gpu_process_launch_causes.h',
         'common/gpu/gpu_surface_stub.cc',
         'common/gpu/gpu_surface_stub.h',
-        'common/gpu/gpu_video_decode_accelerator.cc',
-        'common/gpu/gpu_video_decode_accelerator.h',
-        'common/gpu/gpu_video_service.cc',
-        'common/gpu/gpu_video_service.h',
         'common/gpu/gpu_watchdog.h',
-        'common/gpu/media/gpu_video_device.h',
-        'common/gpu/media/fake_gl_video_decode_engine.cc',
-        'common/gpu/media/fake_gl_video_decode_engine.h',
-        'common/gpu/media/fake_gl_video_device.cc',
-        'common/gpu/media/fake_gl_video_device.h',
+        'common/gpu/media/gpu_video_decode_accelerator.cc',
+        'common/gpu/media/gpu_video_decode_accelerator.h',
         'common/gpu/transport_texture.cc',
         'common/gpu/transport_texture.h',
         'common/hi_res_timer_manager_posix.cc',
@@ -147,6 +140,12 @@
         'common/json_value_serializer.cc',
         'common/json_value_serializer.h',
         'common/main_function_params.h',
+        'common/media/audio_messages.h',
+        'common/media/audio_stream_state.h',
+        'common/media/media_stream_messages.h',
+        'common/media/media_stream_options.cc',
+        'common/media/media_stream_options.h',
+        'common/media/video_capture_messages.h',
         'common/message_router.cc',
         'common/message_router.h',
         'common/mime_registry_messages.h',
@@ -194,6 +193,8 @@
         'common/renderer_preferences.h',
         'common/resource_dispatcher.cc',
         'common/resource_dispatcher.h',
+        'common/resource_dispatcher_delegate.cc',
+        'common/resource_dispatcher_delegate.h',
         'common/resource_messages.h',
         'common/resource_response.cc',
         'common/resource_response.h',
@@ -229,7 +230,7 @@
         'common/url_constants.h',
         'common/url_fetcher.cc',
         'common/url_fetcher.h',
-        'common/video_capture_messages.h',
+        'common/utility_messages.h',
         'common/view_messages.h',
         'common/view_types.cc',
         'common/view_types.h',
@@ -247,23 +248,7 @@
         'common/worker_messages.h',
       ],
       'conditions': [
-        ['OS=="win"', {
-          'msvs_guid': '062E9260-304A-4657-A74C-0D3AA1A0A0A4',
-          'sources': [
-            'common/gpu/media/mft_angle_video_device.cc',
-            'common/gpu/media/mft_angle_video_device.h',
-          ],
-          'include_dirs': [
-            '<(DEPTH)/third_party/angle/include',
-            '<(DEPTH)/third_party/angle/src',
-            '<(DEPTH)/third_party/wtl/include',
-            '$(DXSDK_DIR)/include',
-          ],
-          'dependencies': [
-            '../third_party/angle/src/build_angle.gyp:libEGL',
-            '../third_party/angle/src/build_angle.gyp:libGLESv2',
-          ],
-        }, {  # OS!="win"
+        ['OS!="win"', {
           'sources!': [
             'common/sandbox_policy.cc',
             'common/sandbox_policy.h',
@@ -295,17 +280,34 @@
             'common/native_web_keyboard_event_views.cc',
           ],
         }],
+        ['touchui==1', {
+          'sources': [
+            'common/gpu/image_transport_surface_linux.h',
+            'common/gpu/image_transport_surface_linux.cc',
+          ],
+          'include_dirs': [
+            '<(DEPTH)/third_party/angle/include',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-lXcomposite',
+            ],
+          },
+        }],
         ['enable_gpu==1', {
           'dependencies': [
             '../gpu/gpu.gyp:command_buffer_service',
           ],
         }],
         ['target_arch=="arm"', {
+          'dependencies': [
+            '../media/media.gyp:media',
+          ],
           'sources': [
-            'common/gpu/gles2_texture_to_egl_image_translator.cc',
-            'common/gpu/gles2_texture_to_egl_image_translator.h',
-            'common/gpu/omx_video_decode_accelerator.cc',
-            'common/gpu/omx_video_decode_accelerator.h',
+            'common/gpu/media/gles2_texture_to_egl_image_translator.cc',
+            'common/gpu/media/gles2_texture_to_egl_image_translator.h',
+            'common/gpu/media/omx_video_decode_accelerator.cc',
+            'common/gpu/media/omx_video_decode_accelerator.h',
           ],
           'include_dirs': [
             '<(DEPTH)/third_party/angle/include',
@@ -320,5 +322,28 @@
         }],
       ],
     },
+  ],
+
+  'conditions': [
+    ['target_arch=="arm"', {
+      'targets': [
+        {
+          'target_name': 'omx_video_decode_accelerator_unittest',
+          'type': 'executable',
+          'dependencies': [
+            'content_common',
+            '../testing/gtest.gyp:gtest',
+          ],
+          'include_dirs': [
+            '<(DEPTH)/third_party/angle/include',
+            '<(DEPTH)/third_party/openmax/il',
+          ],
+          'sources': [
+            'common/gpu/media/omx_video_decode_accelerator_unittest.cc',
+          ],
+        }
+      ],
+    },
+   ],
   ],
 }

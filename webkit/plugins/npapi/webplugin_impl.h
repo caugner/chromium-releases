@@ -71,6 +71,7 @@ class WebPluginImpl : public WebPlugin,
       WebKit::WebPluginContainer* container);
   virtual void destroy();
   virtual NPObject* scriptableObject();
+  virtual bool getFormValue(WebKit::WebString* value);
   virtual void paint(
       WebKit::WebCanvas* canvas, const WebKit::WebRect& paint_rect);
   virtual void updateGeometry(
@@ -172,7 +173,8 @@ class WebPluginImpl : public WebPlugin,
                            int len,
                            const char* range_info,
                            Referrer referrer_flag,
-                           bool notify_redirects);
+                           bool notify_redirects,
+                           bool check_mixed_scripting);
 
   gfx::Rect GetWindowClipRect(const gfx::Rect& rect);
 
@@ -243,7 +245,8 @@ class WebPluginImpl : public WebPlugin,
                                 int notify_id,
                                 bool popups_allowed,
                                 Referrer referrer_flag,
-                                bool notify_redirects);
+                                bool notify_redirects,
+                                bool check_mixed_scripting);
 
   // Tears down the existing plugin instance and creates a new plugin instance
   // to handle the response identified by the loader parameter.

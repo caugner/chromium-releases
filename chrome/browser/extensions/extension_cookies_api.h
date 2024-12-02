@@ -12,18 +12,19 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/singleton.h"
 #include "base/time.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/cookie_monster.h"
 
+namespace base {
 class DictionaryValue;
+}
 
 namespace net {
+class CookieList;
 class URLRequestContextGetter;
 }
 
@@ -31,19 +32,14 @@ class URLRequestContextGetter;
 // extension system.
 class ExtensionCookiesEventRouter : public NotificationObserver {
  public:
-  // Single instance of the event router.
-  static ExtensionCookiesEventRouter* GetInstance();
+  explicit ExtensionCookiesEventRouter(Profile* profile);
+  virtual ~ExtensionCookiesEventRouter();
 
   void Init();
 
  private:
-  friend struct DefaultSingletonTraits<ExtensionCookiesEventRouter>;
-
-  ExtensionCookiesEventRouter() {}
-  virtual ~ExtensionCookiesEventRouter() {}
-
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -60,6 +56,8 @@ class ExtensionCookiesEventRouter : public NotificationObserver {
 
   // Used for tracking registrations to CookieMonster notifications.
   NotificationRegistrar registrar_;
+
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionCookiesEventRouter);
 };
@@ -78,7 +76,7 @@ class CookiesFunction : public AsyncExtensionFunction {
   // URL is invalid or isn't found in the dictionary. If check_host_permissions
   // is true, the URL is also checked against the extension's host permissions,
   // and if there is no permission for the URL, this function returns false.
-  bool ParseUrl(const DictionaryValue* details, GURL* url,
+  bool ParseUrl(const base::DictionaryValue* details, GURL* url,
                 bool check_host_permissions);
 
   // Checks the given details dictionary for a 'storeId' value, and retrieves
@@ -88,7 +86,7 @@ class CookiesFunction : public AsyncExtensionFunction {
   // assigns the internal error_ value if that occurs.
   // At least one of the output parameters store and store_id should be
   // non-NULL.
-  bool ParseStoreContext(const DictionaryValue* details,
+  bool ParseStoreContext(const base::DictionaryValue* details,
                          net::URLRequestContextGetter** context,
                          std::string* store_id);
 };
@@ -104,6 +102,7 @@ class GetCookieFunction : public CookiesFunction {
  private:
   void GetCookieOnIOThread();
   void RespondOnUIThread();
+  void GetCookieCallback(const net::CookieList& cookie_list);
 
   std::string name_;
   GURL url_;
@@ -122,8 +121,9 @@ class GetAllCookiesFunction : public CookiesFunction {
  private:
   void GetAllCookiesOnIOThread();
   void RespondOnUIThread();
+  void GetAllCookiesCallback(const net::CookieList& cookie_list);
 
-  DictionaryValue* details_;
+  base::DictionaryValue* details_;
   GURL url_;
   std::string store_id_;
   scoped_refptr<net::URLRequestContextGetter> store_context_;
@@ -140,6 +140,8 @@ class SetCookieFunction : public CookiesFunction {
  private:
   void SetCookieOnIOThread();
   void RespondOnUIThread();
+  void PullCookie(bool set_cookie_);
+  void PullCookieCallback(const net::CookieList& cookie_list);
 
   GURL url_;
   std::string name_;
@@ -165,6 +167,7 @@ class RemoveCookieFunction : public CookiesFunction {
  private:
   void RemoveCookieOnIOThread();
   void RespondOnUIThread();
+  void RemoveCookieCallback();
 
   GURL url_;
   std::string name_;

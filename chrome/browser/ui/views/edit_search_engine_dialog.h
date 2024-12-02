@@ -19,18 +19,16 @@
 namespace views {
 class Label;
 class ImageView;
-class Window;
 }
 
 class EditSearchEngineController;
 class EditSearchEngineControllerDelegate;
 class Profile;
 class TemplateURL;
-class TemplateURLModel;
+class TemplateURLService;
 
-class EditSearchEngineDialog : public views::View,
-                               public views::TextfieldController,
-                               public views::DialogDelegate {
+class EditSearchEngineDialog : public views::TextfieldController,
+                               public views::DialogDelegateView {
  public:
   // The |template_url| and/or |delegate| may be NULL.
   EditSearchEngineDialog(const TemplateURL* template_url,

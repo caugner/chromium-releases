@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,39 +22,6 @@ namespace webkit_glue {
 FormField::FormField()
     : max_length(0),
       is_autofilled(false) {
-}
-
-// TODO(jhawkins): This constructor should probably be deprecated and the
-// functionality moved to FormManager.
-FormField::FormField(WebFormControlElement element)
-    : max_length(0),
-      is_autofilled(false) {
-  name = element.nameForAutofill();
-
-  // TODO(jhawkins): Extract the field label.  For now we just use the field
-  // name.
-  label = name;
-
-  form_control_type = element.formControlType();
-  if (form_control_type == ASCIIToUTF16("text")) {
-    const WebInputElement& input_element = element.toConst<WebInputElement>();
-    value = input_element.value();
-    max_length = input_element.size();
-    is_autofilled = input_element.isAutofilled();
-  } else if (form_control_type == ASCIIToUTF16("select-one")) {
-    WebSelectElement select_element = element.to<WebSelectElement>();
-    value = select_element.value();
-
-    // For select-one elements copy option strings.
-    WebVector<WebElement> list_items = select_element.listItems();
-    option_strings.reserve(list_items.size());
-    for (size_t i = 0; i < list_items.size(); ++i) {
-      if (list_items[i].hasTagName("option"))
-        option_strings.push_back(list_items[i].to<WebOptionElement>().value());
-    }
-  }
-
-  TrimWhitespace(value, TRIM_LEADING, &value);
 }
 
 FormField::FormField(const string16& label,

@@ -9,13 +9,15 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/link_infobar_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
+#import "chrome/browser/ui/cocoa/infobars/infobar_gradient_view.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "webkit/glue/window_open_disposition.h"
 
 namespace {
@@ -80,7 +82,7 @@ const float kAnimateCloseDuration = 0.12;
 
 // Asks the container controller to remove the infobar for this delegate.  This
 // call will trigger a notification that starts the infobar animating closed.
-- (void)removeInfoBar;
+- (void)removeSelf;
 
 // Performs final cleanup after an animation is finished or stopped, including
 // notifying the InfoBarDelegate that the infobar was closed and removing the
@@ -99,11 +101,13 @@ const float kAnimateCloseDuration = 0.12;
 @synthesize containerController = containerController_;
 @synthesize delegate = delegate_;
 
-- (id)initWithDelegate:(InfoBarDelegate*)delegate {
+- (id)initWithDelegate:(InfoBarDelegate*)delegate
+                 owner:(TabContentsWrapper*)owner {
   DCHECK(delegate);
   if ((self = [super initWithNibName:@"InfoBar"
                               bundle:base::mac::MainAppBundle()])) {
     delegate_ = delegate;
+    owner_ = owner;
   }
   return self;
 }
@@ -127,6 +131,8 @@ const float kAnimateCloseDuration = 0.12;
   [self initializeLabel];
 
   [self addAdditionalControls];
+
+  [infoBarView_ setInfobarType:delegate_->GetInfoBarType()];
 }
 
 // Called when someone clicks on the embedded link.
@@ -155,7 +161,7 @@ const float kAnimateCloseDuration = 0.12;
   if (delegate_)
     delegate_->InfoBarDismissed();
 
-  [self removeInfoBar];
+  [self removeSelf];
 }
 
 - (AnimatableView*)animatableView {
@@ -198,6 +204,10 @@ const float kAnimateCloseDuration = 0.12;
   // currently-running animations, so do not set |infoBarClosing_| until after
   // starting the animation.
   infoBarClosing_ = YES;
+
+  // The owner called this method to close the infobar, so there will
+  // be no need to forward future remove events to the owner.
+  owner_ = NULL;
 }
 
 - (void)addAdditionalControls {
@@ -253,12 +263,14 @@ const float kAnimateCloseDuration = 0.12;
   [label_.get() setVerticallyResizable:NO];
 }
 
-- (void)removeInfoBar {
+- (void)removeSelf {
   // TODO(rohitrao): This method can be called even if the infobar has already
   // been removed and |delegate_| is NULL.  Is there a way to rewrite the code
   // so that inner event loops don't cause us to try and remove the infobar
   // twice?  http://crbug.com/54253
-  [containerController_ removeDelegate:delegate_];
+  if (owner_)
+    owner_->RemoveInfoBar(delegate_);
+  owner_ = NULL;
 }
 
 - (void)cleanUpAfterAnimation:(BOOL)finished {
@@ -374,8 +386,18 @@ const float kAnimateCloseDuration = 0.12;
 - (void)linkClicked {
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
-  if (delegate_ && delegate_->AsLinkInfoBarDelegate()->LinkClicked(disposition))
-    [self removeInfoBar];
+  if (delegate_ &&
+      delegate_->AsLinkInfoBarDelegate()->LinkClicked(disposition)) {
+    // Call |-removeSelf| on the outermost runloop to force a delay. As shown in
+    // <http://crbug.com/87201>, the second click event can be delivered after
+    // the animation finishes (and this gets released and deallocated), which
+    // leads to zombie messaging. Unfortunately, the order between the animation
+    // finishing and the click event being delivered is nondeterministic, so
+    // this hack is the best that can be done.
+    [self performSelector:@selector(removeSelf)
+               withObject:nil
+               afterDelay:0.0];
+  }
 }
 
 @end
@@ -389,13 +411,13 @@ const float kAnimateCloseDuration = 0.12;
 // Called when someone clicks on the "OK" button.
 - (IBAction)ok:(id)sender {
   if (delegate_ && delegate_->AsConfirmInfoBarDelegate()->Accept())
-    [self removeInfoBar];
+    [self removeSelf];
 }
 
 // Called when someone clicks on the "Cancel" button.
 - (IBAction)cancel:(id)sender {
   if (delegate_ && delegate_->AsConfirmInfoBarDelegate()->Cancel())
-    [self removeInfoBar];
+    [self removeSelf];
 }
 
 // Confirm infobars can have OK and/or cancel buttons, depending on
@@ -497,7 +519,7 @@ const float kAnimateCloseDuration = 0.12;
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   if (delegate_ &&
       delegate_->AsConfirmInfoBarDelegate()->LinkClicked(disposition))
-    [self removeInfoBar];
+    [self removeSelf];
 }
 
 @end
@@ -508,12 +530,12 @@ const float kAnimateCloseDuration = 0.12;
 
 InfoBar* LinkInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   LinkInfoBarController* controller =
-      [[LinkInfoBarController alloc] initWithDelegate:this];
-  return new InfoBar(controller);
+      [[LinkInfoBarController alloc] initWithDelegate:this owner:owner];
+  return new InfoBar(controller, this);
 }
 
 InfoBar* ConfirmInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
   ConfirmInfoBarController* controller =
-      [[ConfirmInfoBarController alloc] initWithDelegate:this];
-  return new InfoBar(controller);
+      [[ConfirmInfoBarController alloc] initWithDelegate:this owner:owner];
+  return new InfoBar(controller, this);
 }

@@ -16,7 +16,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "ui/gfx/rect.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -130,10 +131,30 @@ void AutocompletePopupModel::ResetToDefaultMatch() {
 
 bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
                                                 string16* keyword) const {
-  // If the current match is a keyword, return that as the selected keyword.
-  if (TemplateURL::SupportsReplacement(match.template_url)) {
-    keyword->assign(match.template_url->keyword());
-    return false;
+  // Assume we have no keyword until we find otherwise.
+  keyword->clear();
+
+  if (match.template_url) {
+    TemplateURLService* url_service =
+        TemplateURLServiceFactory::GetForProfile(profile_);
+    if (!url_service)
+      return false;
+
+    // Only show the keyword for the default provider if the user typed in
+    // the keyword and it isn't SEARCH_WHAT_YOU_TYPED.
+    const TemplateURL* default_url = url_service->GetDefaultSearchProvider();
+    if (default_url && (default_url->id() == match.template_url->id())) {
+      if (StartsWith(autocomplete_controller()->input().text(),
+                     default_url->keyword(), false) &&
+          (match.type != AutocompleteMatch::SEARCH_WHAT_YOU_TYPED)) {
+        keyword->assign(match.template_url->keyword());
+        return false;
+      }
+    } else if (TemplateURL::SupportsReplacement(match.template_url)) {
+      // The current match is a keyword, return that as the selected keyword.
+      keyword->assign(match.template_url->keyword());
+      return false;
+    }
   }
 
   // See if the current match's fill_into_edit corresponds to a keyword.
@@ -143,20 +164,22 @@ bool AutocompletePopupModel::GetKeywordForMatch(const AutocompleteMatch& match,
 bool AutocompletePopupModel::GetKeywordForText(const string16& text,
                                                string16* keyword) const {
   // Creates keyword_hint first in case |keyword| is a pointer to |text|.
-  const string16 keyword_hint(TemplateURLModel::CleanUserInputKeyword(text));
+  const string16 keyword_hint(TemplateURLService::CleanUserInputKeyword(text));
 
   // Assume we have no keyword until we find otherwise.
   keyword->clear();
 
   if (keyword_hint.empty())
     return false;
-  if (!profile_->GetTemplateURLModel())
+  TemplateURLService* url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  if (!url_service)
     return false;
-  profile_->GetTemplateURLModel()->Load();
+  url_service->Load();
 
   // Don't provide a hint if this keyword doesn't support replacement.
   const TemplateURL* const template_url =
-      profile_->GetTemplateURLModel()->GetTemplateURLForKeyword(keyword_hint);
+      url_service->GetTemplateURLForKeyword(keyword_hint);
   if (!TemplateURL::SupportsReplacement(template_url))
     return false;
 

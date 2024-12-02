@@ -5,6 +5,7 @@
 #include "ppapi/proxy/ppb_font_proxy.h"
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -16,6 +17,7 @@
 #include "ppapi/thunk/ppb_image_data_api.h"
 #include "ppapi/thunk/thunk.h"
 
+using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_ImageData_API;
 using ppapi::WebKitForwarding;
 
@@ -32,8 +34,8 @@ bool PPTextRunToTextRun(const PP_TextRun_Dev* run,
     return false;
 
   output->text = *str;
-  output->rtl = PPBoolToBool(run->rtl);
-  output->override_direction = PPBoolToBool(run->override_direction);
+  output->rtl = PP_ToBool(run->rtl);
+  output->override_direction = PP_ToBool(run->override_direction);
   return true;
 }
 
@@ -96,6 +98,7 @@ Font::Font(const HostResource& resource,
            const PP_FontDescription_Dev& desc)
     : PluginResource(resource),
       webkit_event_(false, false) {
+  TRACE_EVENT0("ppapi proxy", "Font::Font");
   const std::string* face = PluginVarTracker::GetInstance()->GetExistingString(
       desc.face);
 
@@ -124,6 +127,7 @@ Font* Font::AsFont() {
 
 PP_Bool Font::Describe(PP_FontDescription_Dev* description,
                        PP_FontMetrics_Dev* metrics) {
+  TRACE_EVENT0("ppapi proxy", "Font::Describe");
   std::string face;
   PP_Bool result = PP_FALSE;
   RunOnWebKitThread(base::Bind(&WebKitForwarding::Font::Describe,
@@ -147,15 +151,12 @@ PP_Bool Font::DrawTextAt(PP_Resource pp_image_data,
                          uint32_t color,
                          const PP_Rect* clip,
                          PP_Bool image_data_is_opaque) {
+  TRACE_EVENT0("ppapi proxy", "Font::DrawTextAt");
   // Convert to an ImageData object.
-  ppapi::ResourceObjectBase* image_base =
-      ppapi::TrackerBase::Get()->GetResourceAPI(pp_image_data);
-  if (!image_base)
+  EnterResourceNoLock<PPB_ImageData_API> enter(pp_image_data, true);
+  if (enter.failed())
     return PP_FALSE;
-  PPB_ImageData_API* image_api = image_base->GetAs<PPB_ImageData_API>();
-  if (!image_api)
-    return PP_FALSE;
-  ImageData* image_data = static_cast<ImageData*>(image_api);
+  ImageData* image_data = static_cast<ImageData*>(enter.object());
 
   skia::PlatformCanvas* canvas = image_data->mapped_canvas();
   bool needs_unmapping = false;
@@ -186,6 +187,7 @@ PP_Bool Font::DrawTextAt(PP_Resource pp_image_data,
 }
 
 int32_t Font::MeasureText(const PP_TextRun_Dev* text) {
+  TRACE_EVENT0("ppapi proxy", "Font::MeasureText");
   WebKitForwarding::Font::TextRun run;
   if (!PPTextRunToTextRun(text, &run))
     return -1;
@@ -198,6 +200,7 @@ int32_t Font::MeasureText(const PP_TextRun_Dev* text) {
 
 uint32_t Font::CharacterOffsetForPixel(const PP_TextRun_Dev* text,
                                        int32_t pixel_position) {
+  TRACE_EVENT0("ppapi proxy", "Font::CharacterOffsetForPixel");
   WebKitForwarding::Font::TextRun run;
   if (!PPTextRunToTextRun(text, &run))
     return -1;
@@ -210,6 +213,7 @@ uint32_t Font::CharacterOffsetForPixel(const PP_TextRun_Dev* text,
 
 int32_t Font::PixelOffsetForCharacter(const PP_TextRun_Dev* text,
                                       uint32_t char_offset) {
+  TRACE_EVENT0("ppapi proxy", "Font::PixelOffsetForCharacter");
   WebKitForwarding::Font::TextRun run;
   if (!PPTextRunToTextRun(text, &run))
     return -1;

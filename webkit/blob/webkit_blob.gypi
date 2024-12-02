@@ -7,9 +7,7 @@
     {
       'target_name': 'blob',
       'type': 'static_library',
-      'msvs_guid': '02567509-F7CA-4E84-8524-4F72DA2D3111',
       'dependencies': [
-        '<(DEPTH)/app/app.gyp:app_base',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/net/net.gyp:net',
       ],

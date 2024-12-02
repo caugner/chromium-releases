@@ -13,17 +13,49 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
+#if defined(TOUCH_UI)
+#include "content/common/content_notification_types.h"
+#include "content/common/notification_service.h"
+#include "views/ime/input_method.h"
+#endif
+
+// static
+const char BrowserRootView::kViewClassName[] =
+    "browser/ui/views/frame/BrowserRootView";
 
 BrowserRootView::BrowserRootView(BrowserView* browser_view,
                                  views::Widget* widget)
     : views::internal::RootView(widget),
       browser_view_(browser_view),
       forwarding_to_tab_strip_(false) { }
+
+#if defined(TOUCH_UI)
+ui::TouchStatus BrowserRootView::OnTouchEvent(const views::TouchEvent& event) {
+  const ui::TouchStatus status = views::internal::RootView::OnTouchEvent(event);
+
+  if (event.type() != ui::ET_TOUCH_PRESSED)
+    return status;
+
+  views::InputMethod* input_method = GetInputMethod();
+  if (!input_method)
+    return status;
+
+  ui::TextInputType text_input_type = input_method->GetTextInputType();
+  if (text_input_type != ui::TEXT_INPUT_TYPE_NONE) {
+    NotificationService::current()->Notify(
+        chrome::NOTIFICATION_EDITABLE_ELEMENT_TOUCHED,
+        Source<View>(this),
+        Details<ui::TextInputType>(&text_input_type));
+  }
+  return status;
+}
+#endif
 
 bool BrowserRootView::GetDropFormats(
       int* formats,
@@ -112,6 +144,10 @@ int BrowserRootView::OnPerformDrop(const views::DropTargetEvent& event) {
 void BrowserRootView::GetAccessibleState(ui::AccessibleViewState* state) {
   views::internal::RootView::GetAccessibleState(state);
   state->name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+}
+
+std::string BrowserRootView::GetClassName() const {
+  return kViewClassName;
 }
 
 bool BrowserRootView::ShouldForwardToTabStrip(

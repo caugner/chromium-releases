@@ -22,15 +22,6 @@ namespace skia {
 
 class BitmapPlatformDevice;
 
-class VectorPlatformDeviceSkiaFactory : public SkDeviceFactory {
- public:
-  virtual SkDevice* newDevice(SkCanvas* notUsed, SkBitmap::Config config,
-                              int width, int height, bool isOpaque,
-                              bool isForLayer);
- private:
-  SkPDFDeviceFactory factory_;
-};
-
 class VectorPlatformDeviceSkia : public PlatformDevice {
  public:
   SK_API VectorPlatformDeviceSkia(SkPDFDevice* pdf_device);
@@ -45,6 +36,10 @@ class VectorPlatformDeviceSkia : public PlatformDevice {
   virtual void EndPlatformPaint();
 #if defined(OS_WIN)
   virtual void DrawToNativeContext(HDC dc, int x, int y, const RECT* src_rect);
+#elif defined(OS_MACOSX)
+  virtual void DrawToNativeContext(CGContext* context, int x, int y,
+                                   const CGRect* src_rect);
+  virtual CGContextRef GetBitmapContext();
 #endif
 
   // SkDevice methods.
@@ -85,8 +80,9 @@ class VectorPlatformDeviceSkia : public PlatformDevice {
                           const SkPaint&);
 
  protected:
-  // Override from SkDevice (through PlatformDevice).
-  virtual SkDeviceFactory* onNewDeviceFactory();
+  virtual SkDevice* onCreateCompatibleDevice(SkBitmap::Config, int width, 
+                                             int height, bool isOpaque,
+                                             Usage usage);
 
  private:
   SkRefPtr<SkPDFDevice> pdf_device_;

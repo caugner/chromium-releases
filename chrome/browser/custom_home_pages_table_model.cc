@@ -14,8 +14,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
+#include "grit/ui_resources.h"
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -62,6 +62,64 @@ void CustomHomePagesTableModel::SetURLs(const std::vector<GURL>& urls) {
     LoadTitleAndFavicon(&(entries_[i]));
   }
   // Complete change, so tell the view to just rebuild itself.
+  if (observer_)
+    observer_->OnModelChanged();
+}
+
+/**
+ * Move a number of existing entries to a new position, reordering the table.
+ *
+ * We determine the range of elements affected by the move, save the moved
+ * elements, compact the remaining ones, and re-insert moved elements.
+ * Expects |index_list| to be ordered ascending.
+ */
+void CustomHomePagesTableModel::MoveURLs(int insert_before,
+                                         const std::vector<int>& index_list)
+{
+  DCHECK(insert_before >= 0 && insert_before <= RowCount());
+
+  // The range of elements that needs to be reshuffled is [ |first|, |last| ).
+  int first = std::min(insert_before, index_list.front());
+  int last = std::max(insert_before, index_list.back() + 1);
+
+  // Save the dragged elements. Also, adjust insertion point if it is before a
+  // dragged element.
+  std::vector<Entry> moved_entries;
+  for (size_t i = 0; i < index_list.size(); ++i) {
+    moved_entries.push_back(entries_[index_list[i]]);
+    if (index_list[i] == insert_before)
+      insert_before++;
+  }
+
+  // Compact the range between beginning and insertion point, moving downwards.
+  size_t skip_count = 0;
+  for (int i = first; i < insert_before; ++i) {
+    if (skip_count < index_list.size() && index_list[skip_count] == i)
+      skip_count++;
+    else
+      entries_[i - skip_count]=entries_[i];
+  }
+
+  // Moving items down created a gap. We start compacting up after it.
+  first = insert_before;
+  insert_before -= skip_count;
+
+  // Now compact up for elements after the insertion point.
+  skip_count = 0;
+  for (int i = last - 1; i >= first; --i) {
+    if (skip_count < index_list.size() &&
+        index_list[index_list.size() - skip_count - 1] == i) {
+      skip_count++;
+    } else {
+      entries_[i + skip_count] = entries_[i];
+    }
+  }
+
+  // Insert moved elements.
+  std::copy(moved_entries.begin(), moved_entries.end(),
+      entries_.begin() + insert_before);
+
+  // Possibly large change, so tell the view to just rebuild itself.
   if (observer_)
     observer_->OnModelChanged();
 }
@@ -157,14 +215,14 @@ void CustomHomePagesTableModel::LoadTitleAndFavicon(Entry* entry) {
       profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   if (history_service) {
     entry->title_handle = history_service->QueryURL(entry->url, false,
-        &query_consumer_,
+        &history_query_consumer_,
         NewCallback(this, &CustomHomePagesTableModel::OnGotTitle));
   }
   FaviconService* favicon_service =
       profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
   if (favicon_service) {
     entry->favicon_handle = favicon_service->GetFaviconForURL(entry->url,
-        history::FAVICON, &query_consumer_,
+        history::FAVICON, &favicon_query_consumer_,
         NewCallback(this, &CustomHomePagesTableModel::OnGotFavicon));
   }
 }

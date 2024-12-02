@@ -16,11 +16,14 @@
 #include "chrome/common/extensions/extension_set.h"
 
 class GURL;
-class ListValue;
 class RenderThread;
 class URLPattern;
 class UserScriptSlave;
 struct ExtensionMsg_Loaded_Params;
+
+namespace base {
+class ListValue;
+}
 
 namespace WebKit {
 class WebFrame;
@@ -45,7 +48,8 @@ class ExtensionDispatcher : public RenderProcessObserver {
   const ExtensionSet* extensions() const { return &extensions_; }
   UserScriptSlave* user_script_slave() { return user_script_slave_.get(); }
 
-  bool IsExtensionActive(const std::string& extension_id);
+  bool IsApplicationActive(const std::string& extension_id) const;
+  bool IsExtensionActive(const std::string& extension_id) const;
 
   // See WebKit::WebPermissionClient::allowScriptExtension
   bool AllowScriptExtension(WebKit::WebFrame* frame,
@@ -62,7 +66,7 @@ class ExtensionDispatcher : public RenderProcessObserver {
 
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& function_name,
-                       const ListValue& args,
+                       const base::ListValue& args,
                        const GURL& event_url);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnLoaded(const ExtensionMsg_Loaded_Params& params);
@@ -71,6 +75,7 @@ class ExtensionDispatcher : public RenderProcessObserver {
       const Extension::ScriptingWhitelist& extension_ids);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
+  void OnActivateApplication(const std::string& extension_id);
   void OnActivateExtension(const std::string& extension_id);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
 
@@ -106,6 +111,9 @@ class ExtensionDispatcher : public RenderProcessObserver {
 
   // The extensions that are active in this process.
   std::set<std::string> active_extension_ids_;
+
+  // The applications that are active in this process.
+  std::set<std::string> active_application_ids_;
 
   // True once WebKit has been initialized (and it is therefore safe to poke).
   bool is_webkit_initialized_;

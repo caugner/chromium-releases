@@ -30,8 +30,6 @@ class Product;
 
 class BrowserDistribution {
  public:
-  virtual ~BrowserDistribution() {}
-
   enum Type {
     CHROME_BROWSER,
     CHROME_FRAME,
@@ -51,6 +49,14 @@ class BrowserDistribution {
                           // group is the group that qualifies for the
                           // experiment but does not participate.
   };
+
+  // An array of the Types representing products;
+  static const Type kProductTypes[];
+
+  // The number of elements in the array |kProductTypes|.
+  static const size_t kNumProductTypes;
+
+  virtual ~BrowserDistribution() {}
 
   static BrowserDistribution* GetDistribution();
 
@@ -87,6 +93,8 @@ class BrowserDistribution {
   virtual std::wstring GetStateMediumKey();
 
   virtual std::wstring GetStatsServerURL();
+
+  virtual std::string GetNetworkStatsServer() const;
 
 #if defined(OS_WIN)
   virtual std::wstring GetDistributionData(HKEY root_key);

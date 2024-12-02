@@ -12,8 +12,6 @@
 #include "base/values.h"
 #include "chrome/browser/prefs/value_map_pref_store.h"
 
-class DictionaryValue;
-
 // This PrefStore keeps track of preferences set by command-line switches,
 // such as proxy settings.
 class CommandLinePrefStore : public ValueMapPrefStore {
@@ -47,6 +45,9 @@ class CommandLinePrefStore : public ValueMapPrefStore {
 
   // Determines the proxy mode preference from the given proxy switches.
   void ApplyProxyMode();
+
+  // Apply the SSL/TLS preferences from the given switches.
+  void ApplySSLSwitches();
 
   // Weak reference.
   const CommandLine* command_line_;

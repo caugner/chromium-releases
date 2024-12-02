@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/url_util.h"
 #include "grit/platform_locale_settings.h"
@@ -220,16 +221,17 @@ void URLRequestChromeJob::StartAsync() {
 namespace {
 
 bool IsViewAppCacheInternalsURL(const GURL& url) {
-  return StartsWithASCII(url.spec(),
-                         chrome::kAppCacheViewInternalsURL,
-                         true /*case_sensitive*/);
+  return url.SchemeIs(chrome::kChromeUIScheme) &&
+         url.host() == chrome::kChromeUIAppCacheInternalsHost;
 }
 
 class ChromeProtocolHandler
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
-  ChromeProtocolHandler(ChromeURLDataManagerBackend* backend,
-                        ChromeAppCacheService* appcache_service);
+  ChromeProtocolHandler(
+      ChromeURLDataManagerBackend* backend,
+      ChromeAppCacheService* appcache_service,
+      webkit_blob::BlobStorageController* blob_storage_controller);
   ~ChromeProtocolHandler();
 
   virtual net::URLRequestJob* MaybeCreateJob(
@@ -239,15 +241,18 @@ class ChromeProtocolHandler
   // These members are owned by ProfileIOData, which owns this ProtocolHandler.
   ChromeURLDataManagerBackend* const backend_;
   ChromeAppCacheService* const appcache_service_;
+  webkit_blob::BlobStorageController* const blob_storage_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeProtocolHandler);
 };
 
 ChromeProtocolHandler::ChromeProtocolHandler(
     ChromeURLDataManagerBackend* backend,
-    ChromeAppCacheService* appcache_service)
+    ChromeAppCacheService* appcache_service,
+    webkit_blob::BlobStorageController* blob_storage_controller)
     : backend_(backend),
-      appcache_service_(appcache_service) {}
+      appcache_service_(appcache_service),
+      blob_storage_controller_(blob_storage_controller) {}
 
 ChromeProtocolHandler::~ChromeProtocolHandler() {}
 
@@ -261,11 +266,13 @@ net::URLRequestJob* ChromeProtocolHandler::MaybeCreateJob(
 
   // Next check for chrome://appcache-internals/, which uses its own job type.
   if (IsViewAppCacheInternalsURL(request->url()))
-    return new appcache::ViewAppCacheInternalsJob(request, appcache_service_);
+    return appcache::ViewAppCacheInternalsJobFactory::CreateJobForRequest(
+        request, appcache_service_);
 
   // Next check for chrome://blob-internals/, which uses its own job type.
   if (ViewBlobInternalsJobFactory::IsSupportedURL(request->url()))
-    return ViewBlobInternalsJobFactory::CreateJobForRequest(request);
+    return ViewBlobInternalsJobFactory::CreateJobForRequest(
+        request, blob_storage_controller_);
 
   // Fall back to using a custom handler
   return new URLRequestChromeJob(request, backend_);
@@ -290,10 +297,13 @@ ChromeURLDataManagerBackend::~ChromeURLDataManagerBackend() {
 net::URLRequestJobFactory::ProtocolHandler*
 ChromeURLDataManagerBackend::CreateProtocolHandler(
     ChromeURLDataManagerBackend* backend,
-    ChromeAppCacheService* appcache_service) {
+    ChromeAppCacheService* appcache_service,
+    webkit_blob::BlobStorageController* blob_storage_controller) {
   DCHECK(appcache_service);
+  DCHECK(blob_storage_controller);
   DCHECK(backend);
-  return new ChromeProtocolHandler(backend, appcache_service);
+  return new ChromeProtocolHandler(
+      backend, appcache_service, blob_storage_controller);
 }
 
 void ChromeURLDataManagerBackend::AddDataSource(
@@ -342,8 +352,8 @@ bool ChromeURLDataManagerBackend::StartRequest(const GURL& url,
   // going to get called once we return.
   job->SetMimeType(source->GetMimeType(path));
 
-  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-      job->request()->context());
+  const ChromeURLRequestContext* context =
+      static_cast<const ChromeURLRequestContext*>(job->request()->context());
 
   // Forward along the request to the data source.
   MessageLoop* target_message_loop = source->MessageLoopForRequestPath(path);

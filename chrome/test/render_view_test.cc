@@ -108,7 +108,6 @@ void RenderViewTest::SetUp() {
   // hacky, but this is the world we live in...
   webkit_glue::SetJavaScriptFlags(" --expose-gc");
   WebKit::initialize(&webkitclient_);
-  WebScriptController::registerExtension(BaseJsV8Extension::Get());
   WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
   WebScriptController::registerExtension(EventBindings::Get(
       extension_dispatcher_));
@@ -126,7 +125,6 @@ void RenderViewTest::SetUp() {
   // This needs to pass the mock render thread to the view.
   view_ = RenderView::Create(&render_thread_,
                              0,
-                             gfx::kNullPluginWindow,
                              kOpenerId,
                              RendererPreferences(),
                              WebPreferences(),
@@ -320,4 +318,11 @@ bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
                            sizeof(WebMouseEvent));
   view_->OnMessageReceived(*input_message);
   return true;
+}
+
+void RenderViewTest::ClearHistory() {
+  view_->page_id_ = -1;
+  view_->history_list_offset_ = -1;
+  view_->history_list_length_ = 0;
+  view_->history_page_ids_.clear();
 }

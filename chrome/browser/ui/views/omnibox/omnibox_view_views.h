@@ -29,12 +29,9 @@ class TabContents;
 // Views-implementation of OmniboxView. This is based on gtk implementation.
 // The following features are not yet supported.
 //
-// IME support.
 // LTR support.
-// Selection behavior.
-// Cut,copy and paste behavior.
 // Drag and drop behavior.
-// URL styles (strikestrough insecure scheme, emphasize host).
+// Adjust paste behavior (should not autocomplete).
 // Custom context menu for omnibox.
 // Instant.
 class OmniboxViewViews : public views::View,
@@ -42,6 +39,9 @@ class OmniboxViewViews : public views::View,
                          public NotificationObserver,
                          public views::TextfieldController {
  public:
+  // The internal view class name.
+  static const char kViewClassName[];
+
   OmniboxViewViews(AutocompleteEditController* controller,
                    ToolbarModel* toolbar_model,
                    Profile* profile,
@@ -69,6 +69,7 @@ class OmniboxViewViews : public views::View,
   // Implements views::View
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
 
   // OmniboxView:
   virtual AutocompleteEditModel* model() OVERRIDE;
@@ -123,7 +124,7 @@ class OmniboxViewViews : public views::View,
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 

@@ -30,6 +30,10 @@
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #endif
 
+namespace gfx {
+struct StyleRange;
+}  // namespace gfx
+
 namespace ui {
 class Range;
 }  // namespace ui
@@ -49,8 +53,7 @@ class Textfield : public View {
   enum StyleFlags {
     STYLE_DEFAULT   = 0,
     STYLE_PASSWORD  = 1 << 0,
-    STYLE_MULTILINE = 1 << 1,
-    STYLE_LOWERCASE = 1 << 2
+    STYLE_LOWERCASE = 1 << 1
   };
 
   Textfield();
@@ -69,12 +72,13 @@ class Textfield : public View {
   bool IsPassword() const;
   void SetPassword(bool password);
 
-  // Whether the text field is multi-line or not, must be set when the text
-  // field is created, using StyleFlags.
-  bool IsMultiLine() const;
-
   // Gets/Sets the text currently displayed in the Textfield.
   const string16& text() const { return text_; }
+
+  // Sets the text currently displayed in the Textfield.  This doesn't
+  // change the cursor position if the current cursor is within the
+  // new text's range, or moves the cursor to the end if the cursor is
+  // out of the new text's range.
   void SetText(const string16& text);
 
   // Appends the given string to the previously-existing text in the field.
@@ -132,10 +136,6 @@ class Textfield : public View {
   // NOTE: in most cases height could be changed instead.
   void SetVerticalMargins(int top, int bottom);
 
-  // Should only be called on a multi-line text field. Sets how many lines of
-  // text can be displayed at once by this text field.
-  void SetHeightInLines(int num_lines);
-
   // Sets the default width of the text control. See default_width_in_chars_.
   void set_default_width_in_chars(int default_width) {
     default_width_in_chars_ = default_width;
@@ -188,6 +188,18 @@ class Textfield : public View {
   // Returns the current cursor position. This is views-implementation
   // only and has to be called after the wrapper is created.
   size_t GetCursorPosition() const;
+
+  // Applies |style| to the text specified by its range. The style will be
+  // ignored if range is empty or invalid. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void ApplyStyleRange(const gfx::StyleRange& style);
+
+  // Applies the default style to the textfield. This is views-implementation
+  // only and has to be called after the wrapper is created.
+  void ApplyDefaultStyle();
+
+  // Clears Edit history.
+  void ClearEditHistory();
 
   // Set the accessible name of the text field.
   void SetAccessibleName(const string16& name);
@@ -265,9 +277,6 @@ class Textfield : public View {
   // this Textfield. When false, the value of |background_color_| determines the
   // Textfield's background color.
   bool use_default_background_color_;
-
-  // The number of lines of text this Textfield displays at once.
-  int num_lines_;
 
   // TODO(beng): remove this once NativeTextfieldWin subclasses
   //             NativeControlWin.

@@ -19,39 +19,18 @@
 #include "media/base/media_switches.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "media/base/pipeline_impl.h"
-#include "media/filters/adaptive_demuxer.h"
 #include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
 #include "media/filters/ffmpeg_demuxer_factory.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/file_data_source_factory.h"
 #include "media/filters/null_audio_renderer.h"
-#include "media/filters/omx_video_decoder.h"
-
-// TODO(jiesun): implement different video decode contexts according to
-// these flags. e.g.
-//     1.  system memory video decode context for x11
-//     2.  gl texture video decode context for OpenGL.
-//     3.  gles texture video decode context for OpenGLES.
-// TODO(jiesun): add an uniform video renderer which take the video
-//       decode context object and delegate renderer request to these
-//       objects. i.e. Seperate "painter" and "pts scheduler".
-#if defined(RENDERER_GL)
 #include "media/tools/player_x11/gl_video_renderer.h"
-typedef GlVideoRenderer Renderer;
-#elif defined(RENDERER_GLES)
-#include "media/tools/player_x11/gles_video_renderer.h"
-typedef GlesVideoRenderer Renderer;
-#elif defined(RENDERER_X11)
 #include "media/tools/player_x11/x11_video_renderer.h"
-typedef X11VideoRenderer Renderer;
-#else
-#error No video renderer defined.
-#endif
 
-Display* g_display = NULL;
-Window g_window = 0;
-bool g_running = false;
+static Display* g_display = NULL;
+static Window g_window = 0;
+static bool g_running = false;
 
 class MessageLoopQuitter {
  public:
@@ -91,18 +70,12 @@ bool InitX11() {
 }
 
 bool InitPipeline(MessageLoop* message_loop,
-                  const char* filename, bool enable_audio,
+                  const char* filename,
+                  bool use_gl,
+                  bool enable_audio,
                   scoped_refptr<media::PipelineImpl>* pipeline,
                   MessageLoop* paint_message_loop,
                   media::MessageLoopFactory* message_loop_factory) {
-  // Initialize OpenMAX.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableOpenMax) &&
-      !media::InitializeOpenMaxLibrary(FilePath())) {
-    std::cout << "Unable to initialize OpenMAX library."<< std::endl;
-    return false;
-  }
-
   // Load media libraries.
   if (!media::InitializeMediaLibrary(FilePath())) {
     std::cout << "Unable to initialize the media library." << std::endl;
@@ -113,24 +86,21 @@ bool InitPipeline(MessageLoop* message_loop,
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
   collection->SetDemuxerFactory(
-      new media::AdaptiveDemuxerFactory(
-          new media::FFmpegDemuxerFactory(
-              new media::FileDataSourceFactory(), message_loop)));
+      new media::FFmpegDemuxerFactory(
+          new media::FileDataSourceFactory(), message_loop));
   collection->AddAudioDecoder(new media::FFmpegAudioDecoder(
       message_loop_factory->GetMessageLoop("AudioDecoderThread")));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableOpenMax)) {
-    collection->AddVideoDecoder(new media::OmxVideoDecoder(
-        message_loop_factory->GetMessageLoop("VideoDecoderThread"),
-        NULL));
+  collection->AddVideoDecoder(new media::FFmpegVideoDecoder(
+      message_loop_factory->GetMessageLoop("VideoDecoderThread"),
+      NULL));
+
+  if (use_gl) {
+    collection->AddVideoRenderer(
+        new GlVideoRenderer(g_display, g_window, paint_message_loop));
   } else {
-    collection->AddVideoDecoder(new media::FFmpegVideoDecoder(
-        message_loop_factory->GetMessageLoop("VideoDecoderThread"),
-        NULL));
+    collection->AddVideoRenderer(
+        new X11VideoRenderer(g_display, g_window, paint_message_loop));
   }
-  collection->AddVideoRenderer(new Renderer(g_display,
-                                            g_window,
-                                            paint_message_loop));
 
   if (enable_audio)
     collection->AddAudioRenderer(new media::AudioRendererImpl());
@@ -176,13 +146,6 @@ void PeriodicalUpdate(
     XEvent e;
     XNextEvent(g_display, &e);
     switch (e.type) {
-      case Expose:
-        if (!audio_only) {
-          // Tell the renderer to paint.
-          DCHECK(Renderer::instance());
-          Renderer::instance()->Paint();
-        }
-        break;
       case ButtonPress:
         {
           Window window;
@@ -234,9 +197,9 @@ int main(int argc, char** argv) {
     std::cout << "Usage: " << argv[0] << " --file=FILE" << std::endl
               << std::endl
               << "Optional arguments:" << std::endl
-              << "  [--enable-openmax]"
               << "  [--audio]"
-              << "  [--alsa-device=DEVICE]" << std::endl
+              << "  [--alsa-device=DEVICE]"
+              << "  [--use-gl]" << std::endl
               << " Press [ESC] to stop" << std::endl
               << " Press [SPACE] to toggle pause/play" << std::endl
               << " Press mouse left button to seek" << std::endl;
@@ -248,6 +211,7 @@ int main(int argc, char** argv) {
   std::string filename =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII("file");
   bool enable_audio = CommandLine::ForCurrentProcess()->HasSwitch("audio");
+  bool use_gl = CommandLine::ForCurrentProcess()->HasSwitch("use-gl");
   bool audio_only = false;
 
   logging::InitLogging(
@@ -275,7 +239,7 @@ int main(int argc, char** argv) {
   thread.reset(new base::Thread("PipelineThread"));
   thread->Start();
   if (InitPipeline(thread->message_loop(), filename.c_str(),
-                   enable_audio, &pipeline, &message_loop,
+                   use_gl, enable_audio, &pipeline, &message_loop,
                    message_loop_factory.get())) {
     // Main loop of the application.
     g_running = true;

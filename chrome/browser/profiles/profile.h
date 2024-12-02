@@ -8,12 +8,20 @@
 #define CHROME_BROWSER_PROFILES_PROFILE_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "chrome/browser/net/preconnect.h" // TODO: remove this.
 #include "chrome/common/extensions/extension.h"
 
 namespace base {
 class Time;
+}
+
+namespace chromeos {
+class LibCrosServiceLibraryImpl;
+class ResetDefaultProxyConfigServiceTask;
 }
 
 namespace content {
@@ -27,6 +35,7 @@ class SandboxedFileSystemContext;
 
 namespace history {
 class TopSites;
+class ShortcutsBackend;
 }
 
 namespace net {
@@ -41,6 +50,10 @@ class PrerenderManager;
 
 namespace quota {
 class QuotaManager;
+}
+
+namespace speech_input {
+class SpeechRecognizer;
 }
 
 namespace webkit_database {
@@ -72,7 +85,6 @@ class GeolocationPermissionContext;
 class HistoryService;
 class HostContentSettingsMap;
 class HostZoomMap;
-class NTPResourceCache;
 class NavigationController;
 class PasswordStore;
 class PersonalDataManager;
@@ -87,7 +99,6 @@ class SSLConfigServiceManager;
 class SSLHostState;
 class SpellCheckHost;
 class TemplateURLFetcher;
-class TemplateURLModel;
 class TokenService;
 class TransportSecurityPersister;
 class UserScriptMaster;
@@ -102,7 +113,13 @@ namespace net {
 class URLRequestContextGetter;
 }
 
-typedef intptr_t ProfileId;
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
+// Local profile ids are used to associate resources stored outside the profile
+// directory, like saved passwords in GNOME Keyring / KWallet, with a profile.
+// With high probability, they are unique on the local machine. They are almost
+// certainly not unique globally, by design. Do not send them over the network.
+typedef int LocalProfileId;
+#endif
 
 class Profile {
  public:
@@ -137,11 +154,43 @@ class Profile {
     virtual void OnProfileCreated(Profile* profile, bool success) = 0;
   };
 
-  // Key used to bind profile to the widget with which it is associated.
-  static const char* kProfileKey;
+  // Whitelist access to deprecated API in order to prevent new regressions.
+  class Deprecated {
+   private:
+    friend bool IsGoogleGAIACookieInstalled();
+    friend void chrome_browser_net::PreconnectOnIOThread(
+        const GURL&,
+        chrome_browser_net::UrlInfo::ResolutionMotivation,
+        int);
 
-  // Value that represents no profile Id.
-  static const ProfileId kInvalidProfileId;
+    friend class AutofillDownloadManager;
+    friend class ChromePluginMessageFilter;
+    friend class DefaultGeolocationArbitratorDependencyFactory;
+    friend class DevToolsHttpProtocolHandler;
+    friend class DevToolsUI;
+    friend class LiveSyncTest;
+    friend class MetricsService;
+    friend class ResolveProxyMsgHelper;
+    friend class SafeBrowsingServiceTestHelper;
+    friend class SdchDictionaryFetcher;
+    friend class Toolbar5Importer;
+    friend class TranslateManager;
+    friend class chromeos::LibCrosServiceLibraryImpl;
+    friend class chromeos::ResetDefaultProxyConfigServiceTask;
+    friend class speech_input::SpeechRecognizer;
+
+    static net::URLRequestContextGetter* GetDefaultRequestContext() {
+      return Profile::GetDefaultRequestContext();
+    }
+  };
+
+  // Key used to bind profile to the widget with which it is associated.
+  static const char* const kProfileKey;
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
+  // Value that represents no local profile id.
+  static const LocalProfileId kInvalidLocalProfileId;
+#endif
 
   Profile();
   virtual ~Profile() {}
@@ -157,19 +206,9 @@ class Profile {
   static Profile* CreateProfileAsync(const FilePath& path,
                                      Delegate* delegate);
 
-  // Returns the request context for the "default" profile.  This may be called
-  // from any thread.  This CAN return NULL if a first request context has not
-  // yet been created.  If necessary, listen on the UI thread for
-  // NOTIFY_DEFAULT_REQUEST_CONTEXT_AVAILABLE.
-  static net::URLRequestContextGetter* GetDefaultRequestContext();
-
   // Returns the name associated with this profile. This name is displayed in
   // the browser frame.
   virtual std::string GetProfileName() = 0;
-
-  // Returns a unique Id that can be used to identify this profile at runtime.
-  // This Id is not persistent and will not survive a restart of the browser.
-  virtual ProfileId GetRuntimeId() = 0;
 
   // Returns the path of the directory where this profile's data is stored.
   virtual FilePath GetPath() = 0;
@@ -283,6 +322,11 @@ class Profile {
   // this method is called.
   virtual AutocompleteClassifier* GetAutocompleteClassifier() = 0;
 
+  // Returns the ShortcutsBackend for this profile. This is owned by
+  // the Profile and created on the first call. Callers that outlive the life of
+  // this profile need to be sure they refcount the returned value.
+  virtual history::ShortcutsBackend* GetShortcutsBackend() = 0;
+
   // Returns the WebDataService for this profile. This is owned by
   // the Profile. Callers that outlive the life of this profile need to be
   // sure they refcount the returned value.
@@ -309,10 +353,6 @@ class Profile {
   // for OffTheRecord Profiles.  This PrefService is lazily created the first
   // time that this method is called.
   virtual PrefService* GetOffTheRecordPrefs() = 0;
-
-  // Returns the TemplateURLModel for this profile. This is owned by the
-  // the Profile.
-  virtual TemplateURLModel* GetTemplateURLModel() = 0;
 
   // Returns the TemplateURLFetcher for this profile. This is owned by the
   // profile.
@@ -468,9 +508,6 @@ class Profile {
   // registerProtocolHandler.
   virtual void InitRegisteredProtocolHandlers() = 0;
 
-  // Returns the new tab page resource cache.
-  virtual NTPResourceCache* GetNTPResourceCache() = 0;
-
   // Returns the last directory that was chosen for uploading or opening a file.
   virtual FilePath last_selected_directory() = 0;
   virtual void set_last_selected_directory(const FilePath& path) = 0;
@@ -522,6 +559,8 @@ class Profile {
   // profile.
   virtual prerender::PrerenderManager* GetPrerenderManager() = 0;
 
+  std::string GetDebugName();
+
   // Returns whether it is a guest session.
   static bool IsGuestSession();
 
@@ -538,6 +577,10 @@ class Profile {
   }
   bool restored_last_session() const {
     return restored_last_session_;
+  }
+
+  bool first_launched() const {
+    return first_launched_;
   }
 
   // Stop sending accessibility events until ResumeAccessibilityEvents().
@@ -569,7 +612,19 @@ class Profile {
   static net::URLRequestContextGetter* default_request_context_;
 
  private:
+  // ***DEPRECATED**: You should be passing in the specific profile's
+  // URLRequestContextGetter or using the system URLRequestContextGetter.
+  //
+  // Returns the request context for the "default" profile.  This may be called
+  // from any thread.  This CAN return NULL if a first request context has not
+  // yet been created.  If necessary, listen on the UI thread for
+  // NOTIFY_DEFAULT_REQUEST_CONTEXT_AVAILABLE.
+  static net::URLRequestContextGetter* GetDefaultRequestContext();
+
   bool restored_last_session_;
+
+  // True only for the very first profile launched in a Chrome session.
+  bool first_launched_;
 
   // Accessibility events will only be propagated when the pause
   // level is zero.  PauseAccessibilityEvents and ResumeAccessibilityEvents
@@ -577,5 +632,18 @@ class Profile {
   // true or false, so that calls can be nested.
   int accessibility_pause_level_;
 };
+
+#if defined(COMPILER_GCC)
+namespace __gnu_cxx {
+
+template<>
+struct hash<Profile*> {
+  std::size_t operator()(Profile* const& p) const {
+    return reinterpret_cast<std::size_t>(p);
+  }
+};
+
+}  // namespace __gnu_cxx
+#endif
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_H_

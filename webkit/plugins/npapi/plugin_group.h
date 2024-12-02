@@ -16,19 +16,20 @@
 #include "base/string16.h"
 #include "webkit/plugins/npapi/webplugininfo.h"
 
-class DictionaryValue;
 class FilePath;
 class TableModelArrayControllerTest;
 class PluginExceptionsTableModelTest;
 class Version;
 
+namespace base {
+class DictionaryValue;
+}
+
 namespace webkit {
 namespace npapi {
 
 class PluginList;
-namespace plugin_test_internal {
-class PluginListWithoutFileIO;
-}
+class MockPluginList;
 
 // Hard-coded version ranges for plugin groups.
 struct VersionRangeDefinition {
@@ -55,7 +56,7 @@ struct PluginGroupDefinition {
 // Run-time structure to hold version range information.
 struct VersionRange {
  public:
-  explicit VersionRange(VersionRangeDefinition definition);
+  explicit VersionRange(const VersionRangeDefinition& definition);
   VersionRange(const VersionRange& other);
   VersionRange& operator=(const VersionRange& other);
   ~VersionRange();
@@ -89,6 +90,7 @@ class PluginGroup {
   static const char* kShockwaveGroupName;
   static const char* kRealPlayerGroupName;
   static const char* kSilverlightGroupName;
+  static const char* kWindowsMediaPlayerGroupName;
 
   PluginGroup(const PluginGroup& other);
 
@@ -166,10 +168,10 @@ class PluginGroup {
   const string16& description() const { return description_; }
 
   // Returns a DictionaryValue with data to display in the UI.
-  DictionaryValue* GetDataForUI() const;
+  base::DictionaryValue* GetDataForUI() const;
 
   // Returns a DictionaryValue with data to save in the preferences.
-  DictionaryValue* GetSummary() const;
+  base::DictionaryValue* GetSummary() const;
 
   // Returns the update URL.
   std::string GetUpdateURL() const { return update_url_; }
@@ -201,7 +203,7 @@ class PluginGroup {
 
  private:
   friend class PluginList;
-  friend class plugin_test_internal::PluginListWithoutFileIO;
+  friend class MockPluginList;
   friend class PluginGroupTest;
   friend class ::TableModelArrayControllerTest;
   friend class ::PluginExceptionsTableModelTest;

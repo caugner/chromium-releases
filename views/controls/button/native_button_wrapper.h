@@ -10,8 +10,8 @@
 
 namespace views {
 
-class Checkbox;
-class NativeButtonBase;
+class NativeCheckbox;
+class NativeButton;
 class NativeRadioButton;
 class View;
 
@@ -68,8 +68,9 @@ class NativeButtonWrapper {
 
   // Creates an appropriate NativeButtonWrapper for the platform.
   static NativeButtonWrapper* CreateNativeButtonWrapper(
-      NativeButtonBase* button);
-  static NativeButtonWrapper* CreateCheckboxWrapper(Checkbox* checkbox);
+      NativeButton* button);
+  static NativeButtonWrapper* CreateCheckboxWrapper(
+      NativeCheckbox* checkbox);
   static NativeButtonWrapper* CreateRadioButtonWrapper(
       NativeRadioButton* radio_button);
 

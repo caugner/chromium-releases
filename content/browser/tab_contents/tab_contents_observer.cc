@@ -8,24 +8,6 @@
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
 
-TabContentsObserver::Registrar::Registrar(TabContentsObserver* observer)
-    : observer_(observer), tab_(NULL) {
-}
-
-TabContentsObserver::Registrar::~Registrar() {
-  if (tab_)
-    tab_->RemoveObserver(observer_);
-}
-
-void TabContentsObserver::Registrar::Observe(TabContents* tab) {
-  observer_->SetTabContents(tab);
-  if (tab_)
-    tab_->RemoveObserver(observer_);
-  tab_ = tab;
-  if (tab_)
-    tab_->AddObserver(observer_);
-}
-
 void TabContentsObserver::RenderViewCreated(RenderViewHost* render_view_host) {
 }
 
@@ -100,9 +82,9 @@ void TabContentsObserver::DidOpenURL(const GURL& url,
                                      PageTransition::Type transition) {
 }
 
-TabContentsObserver::TabContentsObserver(TabContents* tab_contents) {
-  SetTabContents(tab_contents);
-  tab_contents_->AddObserver(this);
+TabContentsObserver::TabContentsObserver(TabContents* tab_contents)
+    : tab_contents_(NULL), routing_id_(MSG_ROUTING_NONE) {
+  Observe(tab_contents);
 }
 
 TabContentsObserver::TabContentsObserver()
@@ -112,6 +94,16 @@ TabContentsObserver::TabContentsObserver()
 TabContentsObserver::~TabContentsObserver() {
   if (tab_contents_)
     tab_contents_->RemoveObserver(this);
+}
+
+void TabContentsObserver::Observe(TabContents* tab_contents) {
+  if (tab_contents_)
+    tab_contents_->RemoveObserver(this);
+  tab_contents_ = tab_contents;
+  if (tab_contents_) {
+    routing_id_ = tab_contents->render_view_host()->routing_id();
+    tab_contents_->AddObserver(this);
+  }
 }
 
 void TabContentsObserver::TabContentsDestroyed(TabContents* tab) {
@@ -135,12 +127,6 @@ int TabContentsObserver::routing_id() const {
     return MSG_ROUTING_NONE;
 
   return tab_contents_->render_view_host()->routing_id();
-}
-
-void TabContentsObserver::SetTabContents(TabContents* tab_contents) {
-  tab_contents_ = tab_contents;
-  if (tab_contents_)
-    routing_id_ = tab_contents->render_view_host()->routing_id();
 }
 
 void TabContentsObserver::TabContentsDestroyed() {

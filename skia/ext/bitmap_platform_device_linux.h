@@ -6,6 +6,7 @@
 #define SKIA_EXT_BITMAP_PLATFORM_DEVICE_LINUX_H_
 #pragma once
 
+#include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "skia/ext/platform_device_linux.h"
 
@@ -43,13 +44,6 @@ typedef struct _cairo_surface cairo_surface_t;
 
 namespace skia {
 
-class BitmapPlatformDeviceFactory : public SkDeviceFactory {
- public:
-  virtual SkDevice* newDevice(SkCanvas* ignored, SkBitmap::Config config,
-                              int width, int height,
-                              bool isOpaque, bool isForLayer);
-};
-
 // -----------------------------------------------------------------------------
 // This is the Linux bitmap backing for Skia. We create a Cairo image surface
 // to store the backing buffer. This buffer is BGRA in memory (on little-endian
@@ -74,13 +68,7 @@ class BitmapPlatformDevice : public PlatformDevice {
   //
   // This object takes ownership of @data.
   BitmapPlatformDevice(const SkBitmap& other, BitmapPlatformDeviceData* data);
-
-  // A stub copy constructor.  Needs to be properly implemented.
-  BitmapPlatformDevice(const BitmapPlatformDevice& other);
-
   virtual ~BitmapPlatformDevice();
-
-  BitmapPlatformDevice& operator=(const BitmapPlatformDevice& other);
 
   static BitmapPlatformDevice* Create(int width, int height, bool is_opaque);
 
@@ -98,14 +86,17 @@ class BitmapPlatformDevice : public PlatformDevice {
   virtual cairo_t* BeginPlatformPaint();
 
  protected:
-  // Override SkDevice.
-  virtual SkDeviceFactory* onNewDeviceFactory();
+  virtual SkDevice* onCreateCompatibleDevice(SkBitmap::Config, int width,
+                                             int height, bool isOpaque, 
+                                             Usage usage);
 
  private:
   static BitmapPlatformDevice* Create(int width, int height, bool is_opaque,
                                       cairo_surface_t* surface);
 
   scoped_refptr<BitmapPlatformDeviceData> data_;
+
+  DISALLOW_COPY_AND_ASSIGN(BitmapPlatformDevice);
 };
 
 }  // namespace skia

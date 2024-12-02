@@ -15,28 +15,30 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
+#include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
-#include "chrome/browser/ui/webui/options/options_managed_banner_handler.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
+#include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 BrowserOptionsHandler::BrowserOptionsHandler()
-    : template_url_model_(NULL), startup_custom_pages_table_model_(NULL) {
+    : template_url_service_(NULL), startup_custom_pages_table_model_(NULL) {
 #if !defined(OS_MACOSX)
   default_browser_worker_ = new ShellIntegration::DefaultBrowserWorker(this);
 #endif
@@ -45,8 +47,8 @@ BrowserOptionsHandler::BrowserOptionsHandler()
 BrowserOptionsHandler::~BrowserOptionsHandler() {
   if (default_browser_worker_.get())
     default_browser_worker_->ObserverDestroyed();
-  if (template_url_model_)
-    template_url_model_->RemoveObserver(this);
+  if (template_url_service_)
+    template_url_service_->RemoveObserver(this);
 }
 
 void BrowserOptionsHandler::GetLocalizedValues(
@@ -113,12 +115,24 @@ void BrowserOptionsHandler::RegisterMessages() {
       "setStartupPagesToCurrentPages",
       NewCallback(this, &BrowserOptionsHandler::SetStartupPagesToCurrentPages));
   web_ui_->RegisterMessageCallback(
+      "dragDropStartupPage",
+      NewCallback(this, &BrowserOptionsHandler::DragDropStartupPage));
+  web_ui_->RegisterMessageCallback(
       "requestAutocompleteSuggestions",
       NewCallback(this,
                   &BrowserOptionsHandler::RequestAutocompleteSuggestions));
   web_ui_->RegisterMessageCallback(
       "toggleShowBookmarksBar",
       NewCallback(this, &BrowserOptionsHandler::ToggleShowBookmarksBar));
+  web_ui_->RegisterMessageCallback(
+      "enableInstant",
+      NewCallback(this, &BrowserOptionsHandler::EnableInstant));
+  web_ui_->RegisterMessageCallback(
+      "disableInstant",
+      NewCallback(this, &BrowserOptionsHandler::DisableInstant));
+  web_ui_->RegisterMessageCallback(
+      "getInstantFieldTrialStatus",
+      NewCallback(this, &BrowserOptionsHandler::GetInstantFieldTrialStatus));
 }
 
 void BrowserOptionsHandler::Initialize() {
@@ -133,12 +147,16 @@ void BrowserOptionsHandler::Initialize() {
                                g_browser_process->local_state(),
                                this);
   UpdateDefaultBrowserState();
+
+  startup_custom_pages_table_model_.reset(
+      new CustomHomePagesTableModel(profile));
+  startup_custom_pages_table_model_->SetObserver(this);
   UpdateStartupPages();
+
+  pref_change_registrar_.Init(profile->GetPrefs());
+  pref_change_registrar_.Add(prefs::kURLsToRestoreOnStartup, this);
+
   UpdateSearchEngines();
-  banner_handler_.reset(
-      new OptionsManagedBannerHandler(web_ui_,
-                                      ASCIIToUTF16("BrowserOptions"),
-                                      OPTIONS_PAGE_GENERAL));
 
   autocomplete_controller_.reset(new AutocompleteController(profile, this));
 }
@@ -161,7 +179,7 @@ void BrowserOptionsHandler::SetHomePage(const ListValue* args) {
 
 void BrowserOptionsHandler::UpdateDefaultBrowserState() {
   // Check for side-by-side first.
-  if (!platform_util::CanSetAsDefaultBrowser()) {
+  if (!ShellIntegration::CanSetAsDefaultBrowser()) {
     SetDefaultBrowserUIString(IDS_OPTIONS_DEFAULTBROWSER_SXS);
     return;
   }
@@ -245,17 +263,17 @@ void BrowserOptionsHandler::SetDefaultBrowserUIString(int status_string_id) {
                                   *status_string, *is_default, *can_be_default);
 }
 
-void BrowserOptionsHandler::OnTemplateURLModelChanged() {
-  if (!template_url_model_ || !template_url_model_->loaded())
+void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
+  if (!template_url_service_ || !template_url_service_->loaded())
     return;
 
   const TemplateURL* default_url =
-      template_url_model_->GetDefaultSearchProvider();
+      template_url_service_->GetDefaultSearchProvider();
 
   int default_index = 0;
   ListValue search_engines;
   std::vector<const TemplateURL*> model_urls =
-      template_url_model_->GetTemplateURLs();
+      template_url_service_->GetTemplateURLs();
   for (size_t i = 0; i < model_urls.size(); ++i) {
     if (!model_urls[i]->ShowInDefaultList())
       continue;
@@ -270,7 +288,7 @@ void BrowserOptionsHandler::OnTemplateURLModelChanged() {
 
   scoped_ptr<Value> default_value(Value::CreateIntegerValue(default_index));
   scoped_ptr<Value> default_managed(Value::CreateBooleanValue(
-      template_url_model_->is_default_search_managed()));
+      template_url_service_->is_default_search_managed()));
 
   web_ui_->CallJavascriptFunction("BrowserOptions.updateSearchEngines",
                                   search_engines, *default_value,
@@ -285,29 +303,26 @@ void BrowserOptionsHandler::SetDefaultSearchEngine(const ListValue* args) {
   }
 
   std::vector<const TemplateURL*> model_urls =
-      template_url_model_->GetTemplateURLs();
+      template_url_service_->GetTemplateURLs();
   if (selected_index >= 0 &&
       selected_index < static_cast<int>(model_urls.size()))
-    template_url_model_->SetDefaultSearchProvider(model_urls[selected_index]);
+    template_url_service_->SetDefaultSearchProvider(model_urls[selected_index]);
 
   UserMetricsRecordAction(UserMetricsAction("Options_SearchEngineChanged"));
 }
 
 void BrowserOptionsHandler::UpdateSearchEngines() {
-  template_url_model_ = web_ui_->GetProfile()->GetTemplateURLModel();
-  if (template_url_model_) {
-    template_url_model_->Load();
-    template_url_model_->AddObserver(this);
-    OnTemplateURLModelChanged();
+  template_url_service_ = TemplateURLServiceFactory::GetForProfile(
+      web_ui_->GetProfile());
+  if (template_url_service_) {
+    template_url_service_->Load();
+    template_url_service_->AddObserver(this);
+    OnTemplateURLServiceChanged();
   }
 }
 
 void BrowserOptionsHandler::UpdateStartupPages() {
   Profile* profile = web_ui_->GetProfile();
-  startup_custom_pages_table_model_.reset(
-      new CustomHomePagesTableModel(profile));
-  startup_custom_pages_table_model_->SetObserver(this);
-
   const SessionStartupPref startup_pref =
       SessionStartupPref::GetStartupPref(profile->GetPrefs());
   startup_custom_pages_table_model_->SetURLs(startup_pref.urls);
@@ -343,10 +358,21 @@ void BrowserOptionsHandler::OnItemsRemoved(int start, int length) {
   OnModelChanged();
 }
 
-void BrowserOptionsHandler::Observe(NotificationType type,
-                     const NotificationSource& source,
-                     const NotificationDetails& details) {
-  UpdateDefaultBrowserState();
+void BrowserOptionsHandler::Observe(int type,
+                                    const NotificationSource& source,
+                                    const NotificationDetails& details) {
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
+    std::string* pref = Details<std::string>(details).ptr();
+    if (*pref == prefs::kDefaultBrowserSettingEnabled) {
+      UpdateDefaultBrowserState();
+    } else if (*pref == prefs::kURLsToRestoreOnStartup) {
+      UpdateStartupPages();
+    } else {
+      NOTREACHED();
+    }
+  } else {
+    NOTREACHED();
+  }
 }
 
 void BrowserOptionsHandler::SetStartupPagesToCurrentPages(
@@ -403,6 +429,30 @@ void BrowserOptionsHandler::EditStartupPage(const ListValue* args) {
   startup_custom_pages_table_model_->SetURLs(urls);
 }
 
+void BrowserOptionsHandler::DragDropStartupPage(const ListValue* args) {
+  CHECK_EQ(args->GetSize(), 2U);
+
+  std::string value;
+  int to_index;
+
+  CHECK(args->GetString(0, &value));
+  base::StringToInt(value, &to_index);
+
+  ListValue* selected;
+  CHECK(args->GetList(1, &selected));
+
+  std::vector<int> index_list;
+  for (size_t i = 0; i < selected->GetSize(); ++i) {
+    int index;
+    CHECK(selected->GetString(i, &value));
+    base::StringToInt(value, &index);
+    index_list.push_back(index);
+  }
+
+  startup_custom_pages_table_model_->MoveURLs(to_index, index_list);
+  SaveStartupPagesPref();
+}
+
 void BrowserOptionsHandler::SaveStartupPagesPref() {
   PrefService* prefs = web_ui_->GetProfile()->GetPrefs();
 
@@ -425,9 +475,24 @@ void BrowserOptionsHandler::RequestAutocompleteSuggestions(
 void BrowserOptionsHandler::ToggleShowBookmarksBar(const ListValue* args) {
   Source<Profile> source(web_ui_->GetProfile());
   NotificationService::current()->Notify(
-      NotificationType::BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
+      chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
       source,
       NotificationService::NoDetails());
+}
+
+void BrowserOptionsHandler::EnableInstant(const ListValue* args) {
+  InstantController::Enable(web_ui_->GetProfile());
+}
+
+void BrowserOptionsHandler::DisableInstant(const ListValue* args) {
+  InstantController::Disable(web_ui_->GetProfile());
+}
+
+void BrowserOptionsHandler::GetInstantFieldTrialStatus(const ListValue* args) {
+  FundamentalValue enabled(
+      InstantFieldTrial::IsExperimentGroup(web_ui_->GetProfile()));
+  web_ui_->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
+                                  enabled);
 }
 
 void BrowserOptionsHandler::OnResultChanged(bool default_match_changed) {

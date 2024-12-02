@@ -21,7 +21,6 @@
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/controls/menu/menu_2.h"
 
 namespace {
 
@@ -44,7 +43,6 @@ ViewsNetworkScreenActor::ViewsNetworkScreenActor(
         kWelcomeScreenHeight),
       bubble_(NULL),
       screen_(NULL) {
-  language_switch_menu_.set_menu_alignment(views::Menu2::ALIGN_TOPLEFT);
 }
 
 ViewsNetworkScreenActor::~ViewsNetworkScreenActor() {
@@ -57,6 +55,20 @@ void ViewsNetworkScreenActor::SetDelegate(Delegate* screen) {
 
 bool ViewsNetworkScreenActor::IsErrorShown() const {
   return bubble_ != NULL;
+}
+
+bool ViewsNetworkScreenActor::IsContinueEnabled() const {
+  DCHECK(view());
+  if (view())
+    return view()->IsContinueEnabled();
+  return false;
+}
+
+bool ViewsNetworkScreenActor::IsConnecting() const {
+  DCHECK(view());
+  if (view())
+    return view()->IsConnecting();
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -112,20 +124,6 @@ void ViewsNetworkScreenActor::EnableContinue(bool enabled) {
   DCHECK(view());
   if (view())
     view()->EnableContinue(enabled);
-}
-
-bool ViewsNetworkScreenActor::IsContinueEnabled() const {
-  DCHECK(view());
-  if (view())
-    return view()->IsContinueEnabled();
-  return false;
-}
-
-bool ViewsNetworkScreenActor::IsConnecting() const {
-  DCHECK(view());
-  if (view())
-    return view()->IsConnecting();
-  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

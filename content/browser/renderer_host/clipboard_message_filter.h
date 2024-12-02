@@ -29,7 +29,7 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
   void OnWriteObjectsSync(const ui::Clipboard::ObjectMap& objects,
                           base::SharedMemoryHandle bitmap_handle);
 
-  void OnIsFormatAvailable(ui::Clipboard::FormatType format,
+  void OnIsFormatAvailable(const ui::Clipboard::FormatType& format,
                            ui::Clipboard::Buffer buffer,
                            bool* result);
   void OnReadAvailableTypes(ui::Clipboard::Buffer buffer,
@@ -39,7 +39,7 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
   void OnReadAsciiText(ui::Clipboard::Buffer buffer, std::string* result);
   void OnReadHTML(ui::Clipboard::Buffer buffer, string16* markup, GURL* url);
   void OnReadImage(ui::Clipboard::Buffer buffer, IPC::Message* reply_msg);
-  void OnReadImageReply(SkBitmap bitmap, IPC::Message* reply_msg);
+  void OnReadImageReply(const SkBitmap& bitmap, IPC::Message* reply_msg);
 #if defined(OS_MACOSX)
   void OnFindPboardWriteString(const string16& text);
 #endif
@@ -47,6 +47,7 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
                   bool* succeeded, string16* data, string16* metadata);
   void OnReadFilenames(ui::Clipboard::Buffer buffer, bool* succeeded,
                        std::vector<string16>* filenames);
+  void OnGetSequenceNumber(uint64* seq_num);
 
   // We have our own clipboard because we want to access the clipboard on the
   // IO thread instead of forwarding (possibly synchronous) messages to the UI

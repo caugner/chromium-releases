@@ -5,8 +5,10 @@
 #include "chrome/browser/search_engines/search_terms_data.h"
 
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/instant/instant_field_trial.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
@@ -26,6 +28,12 @@ std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
   // "http://clients1.google.TLD/complete/".  The key bit we want from the
   // original Google base URL is the TLD.
 
+  // This is being temporarilly modified to (experimentally) use
+  // "http://www.google.TLD/complete/".
+  static bool www = base::FieldTrialList::TrialExists("SuggestHostPrefix") &&
+      base::FieldTrialList::FindFullName("SuggestHostPrefix") == "Www_Prefix";
+  const char* prefix = www ? "www." : "clients1.";
+
   // Start with the Google base URL.
   const GURL base_url(GoogleBaseURLValue());
   DCHECK(base_url.is_valid());
@@ -34,7 +42,7 @@ std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
   // prepend "clients1.".
   const std::string base_host(base_url.host());
   GURL::Replacements repl;
-  const std::string suggest_host("clients1." +
+  const std::string suggest_host(prefix +
       (base_host.compare(0, 4, "www.") ? base_host : base_host.substr(4)));
   repl.SetHostStr(suggest_host);
 
@@ -48,10 +56,14 @@ std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
   return base_url.ReplaceComponents(repl).spec();
 }
 
+std::string SearchTermsData::InstantFieldTrialUrlParam() const {
+  return std::string();
+}
+
 // static
 std::string* UIThreadSearchTermsData::google_base_url_ = NULL;
 
-UIThreadSearchTermsData::UIThreadSearchTermsData() {
+UIThreadSearchTermsData::UIThreadSearchTermsData() : profile_(NULL) {
   // GoogleURLTracker::GoogleURL() DCHECKs this also, but adding it here helps
   // us catch bad behavior at a more common place in this code.
   DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
@@ -89,6 +101,12 @@ string16 UIThreadSearchTermsData::GetRlzParameterValue() const {
   return rlz_string;
 }
 #endif
+
+std::string UIThreadSearchTermsData::InstantFieldTrialUrlParam() const {
+  DCHECK(!BrowserThread::IsWellKnownThread(BrowserThread::UI) ||
+         BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return InstantFieldTrial::GetGroupAsUrlParam(profile_);
+}
 
 // static
 void UIThreadSearchTermsData::SetGoogleBaseURL(std::string* google_base_url) {

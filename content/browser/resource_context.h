@@ -15,6 +15,7 @@ class ChromeAppCacheService;
 class ChromeBlobStorageContext;
 class ExtensionInfoMap;
 class HostZoomMap;
+class MediaObserver;
 namespace fileapi {
 class FileSystemContext;
 }  // namespace fileapi
@@ -71,12 +72,11 @@ class ResourceContext {
   HostZoomMap* host_zoom_map() const;
   void set_host_zoom_map(HostZoomMap* host_zoom_map);
 
+  MediaObserver* media_observer() const;
+  void set_media_observer(MediaObserver* media_observer);
+
   // =======================================================================
   // TODO(willchan): These don't belong in content/. Remove them eventually.
-
-  // TODO(mpcomplete): Kill this one.
-  const ExtensionInfoMap* extension_info_map() const;
-  void set_extension_info_map(ExtensionInfoMap* extension_info_map);
 
   // TODO(cbentzel): Kill this one.
   const base::WeakPtr<prerender::PrerenderManager>& prerender_manager() const;
@@ -97,6 +97,7 @@ class ResourceContext {
   ChromeBlobStorageContext* blob_storage_context_;
   quota::QuotaManager* quota_manager_;
   HostZoomMap* host_zoom_map_;
+  MediaObserver* media_observer_;
 
   // Externally-defined data accessible by key.
   typedef std::map<const void*, void*> UserDataMap;
@@ -106,7 +107,6 @@ class ResourceContext {
   // =======================================================================
   // TODO(willchan): These don't belong in content/. Remove them eventually.
 
-  ExtensionInfoMap* extension_info_map_;
   base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceContext);

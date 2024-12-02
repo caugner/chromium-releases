@@ -11,12 +11,14 @@
 #include <set>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
+#include "chrome/browser/autofill/autofill_feedback_infobar_delegate.h"
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_profile.h"
@@ -33,21 +35,25 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/autofill_messages.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/guid.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/form_data.h"
+#include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
 
+using switches::kEnableAutofillFeedback;
 using webkit_glue::FormData;
+using webkit_glue::FormDataPredictions;
 using webkit_glue::FormField;
 
 namespace {
@@ -102,7 +108,8 @@ void RemoveDuplicateSuggestions(std::vector<string16>* values,
 //  1. The fields in the section must all be profile or credit card fields,
 //     depending on whether |is_filling_credit_card| is true.
 //  2. A logical section should not include multiple fields of the same autofill
-//     type (except for phone/fax numbers, as described below).
+//     type (except for adjacent repeated fields and phone/fax numbers, as
+//     described below).
 void FindSectionBounds(const FormStructure& form,
                        const AutofillField& field,
                        bool is_filling_credit_card,
@@ -117,27 +124,38 @@ void FindSectionBounds(const FormStructure& form,
 
   std::set<AutofillFieldType> seen_types;
   bool initiating_field_is_in_current_section = false;
+  AutofillFieldType previous_type = UNKNOWN_TYPE;
   for (size_t i = 0; i < form.field_count(); ++i) {
     const AutofillField* current_field = form.field(i);
     const AutofillFieldType current_type =
         AutofillType::GetEquivalentFieldType(current_field->type());
 
-    // Fields of unknown type don't help us to distinguish sections.
-    if (current_type == UNKNOWN_TYPE)
-      continue;
-
     bool already_saw_current_type = seen_types.count(current_type) > 0;
     // Forms often ask for multiple phone numbers -- e.g. both a daytime and
     // evening phone number.  Our phone and fax number detection is also
     // generally a little off.  Hence, ignore both field types as a signal here.
-    // Likewise, forms often ask for multiple email addresses, so ignore this
-    // field type as well.
     AutofillType::FieldTypeGroup current_type_group =
         AutofillType(current_type).group();
     if (current_type_group == AutofillType::PHONE_HOME ||
-        current_type_group == AutofillType::PHONE_FAX ||
-        current_type_group == AutofillType::EMAIL)
+        current_type_group == AutofillType::PHONE_FAX)
       already_saw_current_type = false;
+
+    // Some forms have adjacent fields of the same type.  Two common examples:
+    //  * Forms with two email fields, where the second is meant to "confirm"
+    //    the first.
+    //  * Forms with a <select> menu for states in some countries, and a
+    //    freeform <input> field for states in other countries.  (Usually, only
+    //    one of these two will be visible for any given choice of country.)
+    // Generally, adjacent fields of the same type belong in the same logical
+    // section.
+    if (current_type == previous_type)
+      already_saw_current_type = false;
+
+    previous_type = current_type;
+
+    // Fields of unknown type don't help us to distinguish sections.
+    if (current_type == UNKNOWN_TYPE)
+      continue;
 
     // If we are filling credit card data, the relevant section should include
     // only credit card fields; and similarly for profile data.
@@ -221,27 +239,83 @@ bool FormIsHTTPS(FormStructure* form) {
   return form->source_url().SchemeIs(chrome::kHttpsScheme);
 }
 
-// Normalizes phones in multi-info. If |type| is anything but
-// PHONE_HOME_WHOLE_NUMBER or PHONE_FAX_WHOLE_NUMBER does nothing, as it is
-// either not a phone, or already normalized (parts of the phone parsed and
-// normalized from the PHONE_*_WHOLE_NUMBER). |locale| is a profile locale.
-// For whole number does normalization:
-//   (650)2345678 -> 6502345678
-//   1-800-FLOWERS -> 18003569377
-// If phone cannot be normalized, leaves it as it is.
-void NormalizePhoneMultiInfo(AutofillFieldType type,
-                             std::string const& locale,
-                             std::vector<string16>* values) {
-  DCHECK(values);
-  if (type != PHONE_HOME_WHOLE_NUMBER && type != PHONE_FAX_WHOLE_NUMBER)
+// Check for unidentified forms among those with the most query or upload
+// requests.  If found, present an infobar prompting the user to send Google
+// Feedback identifying these forms.  Only executes if the appropriate flag is
+// set in about:flags.
+const char* kPopularFormSignatures[] = {
+  "1730681123057140977",
+  "10135289994685082173",
+  "7883844738557049416",
+  "14651966297402649464",
+  "17177862793067325164",
+  "15222964025577790589",
+  "6231789373382218038",
+  "14138834153984647462",
+  "1522221299769735301",
+  "8604254969743383026",
+  "1080809576396139601",
+  "10157228556492868550",
+  "7112098130084740023",
+  "10591138561307360539",
+  "3483444043750493124",
+  "3764098888295731941",
+  "957190629194980629",
+  "11314948061179499915",
+  "2226179674176240706",
+  "9886974103926218264",
+  "16089161644523512553",
+  "1366685796842051613",
+  "3683416168214161370",
+  "17395441333004474813",
+  "7131540066857838464",
+  "1799736626243038725",
+  "4314535457620699296",
+  "16597101416150066076",
+  "11571064402466920341",
+  "17529644200058912705",
+  "17442663271235869548",
+  "10423886468225016833",
+  "8205718441232482003",
+  "12566467866837059201",
+  "14998753650075003914",
+  "8463873542596795823",
+  "3341181348270175432",
+  "12047213380448477438",
+  "7626117232464424739",
+  "6755316823149690927",
+  "17343480863386343671",
+  "4345267765838738360"
+};
+
+void CheckForPopularForms(const std::vector<FormStructure*>& forms,
+                          TabContentsWrapper* tab_contents_wrapper,
+                          TabContents* tab_contents) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(kEnableAutofillFeedback))
     return;
-  for (std::vector<string16>::iterator it = values->begin();
-       it != values->end();
+
+  for (std::vector<FormStructure*>::const_iterator it = forms.begin();
+       it != forms.end();
        ++it) {
-    string16 normalized_phone = autofill_i18n::NormalizePhoneNumber(*it,
-                                                                    locale);
-    if (!normalized_phone.empty())
-      *it = normalized_phone;
+    std::string form_signature = (*it)->FormSignature();
+    for (size_t i = 0; i < arraysize(kPopularFormSignatures); ++i) {
+      if (form_signature != kPopularFormSignatures[i])
+        continue;
+
+      string16 text =
+          l10n_util::GetStringUTF16(IDS_AUTOFILL_FEEDBACK_INFOBAR_TEXT);
+      string16 link =
+          l10n_util::GetStringUTF16(IDS_AUTOFILL_FEEDBACK_INFOBAR_LINK_TEXT);
+      std::string message =
+          l10n_util::GetStringFUTF8(IDS_AUTOFILL_FEEDBACK_POPULAR_FORM_MESSAGE,
+                                    ASCIIToUTF16(form_signature),
+                                    UTF8ToUTF16((*it)->source_url().spec()));
+
+      tab_contents_wrapper->AddInfoBar(
+          new AutofillFeedbackInfoBarDelegate(tab_contents, text, link,
+                                              message));
+      break;
+    }
   }
 }
 
@@ -348,12 +422,16 @@ void AutofillManager::OnFormSubmitted(const FormData& form) {
   FormStructure* cached_submitted_form;
   if (!FindCachedForm(form, &cached_submitted_form))
     return;
-
-  DeterminePossibleFieldTypesForUpload(&submitted_form);
-  UploadFormData(submitted_form);
-
   submitted_form.UpdateFromCache(*cached_submitted_form);
-  submitted_form.LogQualityMetrics(*metric_logger_);
+
+  // Only upload server statistics and UMA metrics if at least some local data
+  // is available to use as a baseline.
+  if (!personal_data_->profiles().empty() ||
+      !personal_data_->credit_cards().empty()) {
+    DeterminePossibleFieldTypesForUpload(&submitted_form);
+    UploadFormData(submitted_form);
+    submitted_form.LogQualityMetrics(*metric_logger_);
+  }
 
   if (!submitted_form.IsAutofillable(true))
     return;
@@ -605,40 +683,50 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
 }
 
 void AutofillManager::OnShowAutofillDialog() {
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = BrowserList::GetLastActiveWithProfile(
+      tab_contents()->profile());
   if (browser)
     browser->ShowOptionsTab(chrome::kAutofillSubPage);
 }
 
 void AutofillManager::OnDidFillAutofillFormData() {
   NotificationService::current()->Notify(
-      NotificationType::AUTOFILL_DID_FILL_FORM_DATA,
+      chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
       Source<RenderViewHost>(tab_contents()->render_view_host()),
       NotificationService::NoDetails());
 }
 
 void AutofillManager::OnDidShowAutofillSuggestions() {
   NotificationService::current()->Notify(
-      NotificationType::AUTOFILL_DID_SHOW_SUGGESTIONS,
+      chrome::NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS,
       Source<RenderViewHost>(tab_contents()->render_view_host()),
       NotificationService::NoDetails());
 }
 
-void AutofillManager::OnLoadedAutofillHeuristics(
-    const std::string& heuristic_xml) {
-  // TODO(jhawkins): Store |upload_required| in the AutofillManager.
-  UploadRequired upload_required;
-  FormStructure::ParseQueryResponse(heuristic_xml,
+void AutofillManager::OnLoadedServerPredictions(
+    const std::string& response_xml) {
+  // Parse and store the server predictions.
+  FormStructure::ParseQueryResponse(response_xml,
                                     form_structures_.get(),
-                                    &upload_required,
                                     *metric_logger_);
+
+  // If the corresponding flag is set, annotate forms with the predicted types.
+  RenderViewHost* host = tab_contents()->render_view_host();
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kShowAutofillTypePredictions) || !host) {
+    return;
+  }
+
+  std::vector<FormDataPredictions> forms;
+  FormStructure::GetFieldTypePredictions(form_structures_.get(), &forms);
+  host->Send(new AutofillMsg_FieldTypePredictionsAvailable(host->routing_id(),
+                                                           forms));
 }
 
-void AutofillManager::OnUploadedAutofillHeuristics(
-    const std::string& form_signature) {
+void AutofillManager::OnUploadedPossibleFieldTypes() {
 }
 
-void AutofillManager::OnHeuristicsRequestError(
+void AutofillManager::OnServerRequestError(
     const std::string& form_signature,
     AutofillDownloadManager::AutofillRequestType request_type,
     int http_error) {
@@ -651,13 +739,30 @@ bool AutofillManager::IsAutofillEnabled() const {
 
 void AutofillManager::DeterminePossibleFieldTypesForUpload(
     FormStructure* submitted_form) {
+  // Combine all the profiles and credit cards stored in |personal_data_| into
+  // one vector for ease of iteration.
+  const std::vector<AutofillProfile*>& profiles = personal_data_->profiles();
+  const std::vector<CreditCard*>& credit_cards = personal_data_->credit_cards();
+  std::vector<FormGroup*> stored_data;
+  stored_data.insert(stored_data.end(), profiles.begin(), profiles.end());
+  stored_data.insert(stored_data.end(), credit_cards.begin(),
+                     credit_cards.end());
+
+  // For each field in the |submitted_form|, extract the value.  Then for each
+  // profile or credit card, identify any stored types that match the value.
   for (size_t i = 0; i < submitted_form->field_count(); i++) {
     const AutofillField* field = submitted_form->field(i);
-    FieldTypeSet field_types;
-    personal_data_->GetMatchingTypes(field->value, &field_types);
+    string16 value = CollapseWhitespace(field->value, false);
+    FieldTypeSet matching_types;
+    for (std::vector<FormGroup*>::const_iterator it = stored_data.begin();
+         it != stored_data.end(); ++it) {
+      (*it)->GetMatchingTypes(value, &matching_types);
+    }
 
-    DCHECK(!field_types.empty());
-    submitted_form->set_possible_types(i, field_types);
+    if (matching_types.empty())
+      matching_types.insert(UNKNOWN_TYPE);
+
+    submitted_form->set_possible_types(i, matching_types);
   }
 }
 
@@ -684,11 +789,12 @@ void AutofillManager::UploadFormData(const FormStructure& submitted_form) {
 
   // Check if the form is among the forms that were recently auto-filled.
   bool was_autofilled = false;
+  std::string form_signature = submitted_form.FormSignature();
   for (std::list<std::string>::const_iterator it =
            autofilled_form_signatures_.begin();
        it != autofilled_form_signatures_.end() && !was_autofilled;
        ++it) {
-    if (*it == submitted_form.FormSignature())
+    if (*it == form_signature)
       was_autofilled = true;
   }
 
@@ -718,8 +824,7 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
   DCHECK(tab_contents);
 }
 
-void AutofillManager::set_metric_logger(
-    const AutofillMetrics* metric_logger) {
+void AutofillManager::set_metric_logger(const AutofillMetrics* metric_logger) {
   metric_logger_.reset(metric_logger);
 }
 
@@ -804,8 +909,7 @@ void AutofillManager::GetProfileSuggestions(FormStructure* form,
 
       // The value of the stored data for this field type in the |profile|.
       std::vector<string16> multi_values;
-      profile->GetMultiInfo(type, &multi_values);
-      NormalizePhoneMultiInfo(type, profile->CountryCode(), &multi_values);
+      profile->GetCanonicalizedMultiInfo(type, &multi_values);
 
       for (size_t i = 0; i < multi_values.size(); ++i) {
         if (!multi_values[i].empty() &&
@@ -814,7 +918,6 @@ void AutofillManager::GetProfileSuggestions(FormStructure* form,
           values->push_back(multi_values[i]);
           unique_ids->push_back(PackGUIDs(GUIDPair(std::string(), 0),
                                           GUIDPair(profile->guid(), i)));
-          break;
         }
       }
     }
@@ -838,8 +941,7 @@ void AutofillManager::GetProfileSuggestions(FormStructure* form,
 
       // The value of the stored data for this field type in the |profile|.
       std::vector<string16> multi_values;
-      profile->GetMultiInfo(type, &multi_values);
-      NormalizePhoneMultiInfo(type, profile->CountryCode(), &multi_values);
+      profile->GetCanonicalizedMultiInfo(type, &multi_values);
 
       for (size_t i = 0; i < multi_values.size(); ++i) {
         if (multi_values[i].empty())
@@ -891,7 +993,8 @@ void AutofillManager::GetCreditCardSuggestions(FormStructure* form,
     CreditCard* credit_card = *iter;
 
     // The value of the stored data for this field type in the |credit_card|.
-    string16 creditcard_field_value = credit_card->GetInfo(type);
+    string16 creditcard_field_value =
+        credit_card->GetCanonicalizedInfo(type);
     if (!creditcard_field_value.empty() &&
         StartsWith(creditcard_field_value, field.value, false)) {
       if (type == CREDIT_CARD_NUMBER)
@@ -900,7 +1003,7 @@ void AutofillManager::GetCreditCardSuggestions(FormStructure* form,
       string16 label;
       if (credit_card->number().empty()) {
         // If there is no CC number, return name to show something.
-        label = credit_card->GetInfo(CREDIT_CARD_NAME);
+        label = credit_card->GetCanonicalizedInfo(CREDIT_CARD_NAME);
       } else {
         label = kCreditCardPrefix;
         label.append(credit_card->LastFourDigits());
@@ -926,18 +1029,16 @@ void AutofillManager::FillCreditCardFormField(const CreditCard* credit_card,
     autofill::FillSelectControl(*credit_card, type, field);
   } else if (field->form_control_type == ASCIIToUTF16("month")) {
     // HTML5 input="month" consists of year-month.
-    string16 year = credit_card->GetInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
-    string16 month = credit_card->GetInfo(CREDIT_CARD_EXP_MONTH);
+    string16 year =
+        credit_card->GetCanonicalizedInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
+    string16 month = credit_card->GetCanonicalizedInfo(CREDIT_CARD_EXP_MONTH);
     if (!year.empty() && !month.empty()) {
       // Fill the value only if |credit_card| includes both year and month
       // information.
       field->value = year + ASCIIToUTF16("-") + month;
     }
   } else {
-    string16 value = credit_card->GetInfo(type);
-    if (type == CREDIT_CARD_NUMBER)
-      value = CreditCard::StripSeparators(value);
-    field->value = value;
+    field->value = credit_card->GetCanonicalizedInfo(type);
   }
 }
 
@@ -956,8 +1057,7 @@ void AutofillManager::FillFormField(const AutofillProfile* profile,
       autofill::FillSelectControl(*profile, type, field);
     } else {
       std::vector<string16> values;
-      profile->GetMultiInfo(type, &values);
-      NormalizePhoneMultiInfo(type, profile->CountryCode(), &values);
+      profile->GetCanonicalizedMultiInfo(type, &values);
       DCHECK(variant < values.size());
       field->value = values[variant];
     }
@@ -971,8 +1071,7 @@ void AutofillManager::FillPhoneNumberField(const AutofillProfile* profile,
   // If we are filling a phone number, check to see if the size field
   // matches the "prefix" or "suffix" sizes and fill accordingly.
   std::vector<string16> values;
-  profile->GetMultiInfo(type, &values);
-  NormalizePhoneMultiInfo(type, profile->CountryCode(), &values);
+  profile->GetCanonicalizedMultiInfo(type, &values);
   DCHECK(variant < values.size());
   string16 number = values[variant];
   bool has_valid_suffix_and_prefix = (number.length() ==

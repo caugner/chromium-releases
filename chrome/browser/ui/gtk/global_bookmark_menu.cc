@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/gtk/global_menu_bar.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -60,7 +61,7 @@ GlobalBookmarkMenu::GlobalBookmarkMenu(Browser* browser)
 
   default_favicon_ = GtkThemeService::GetDefaultFavicon(true);
   default_folder_ = GtkThemeService::GetFolderIcon(true);
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile_)));
 }
@@ -78,7 +79,7 @@ void GlobalBookmarkMenu::Init(GtkWidget* bookmark_menu,
     BookmarkModel* model = profile_->GetBookmarkModel();
     model->AddObserver(this);
     if (model->IsLoaded())
-      Loaded(model);
+      Loaded(model, false);
   }
 }
 
@@ -96,15 +97,15 @@ void GlobalBookmarkMenu::RebuildMenu() {
 
   ClearBookmarkMenu();
 
-  const BookmarkNode* bar_node = model->GetBookmarkBarNode();
-  if (bar_node->child_count()) {
+  const BookmarkNode* bar_node = model->bookmark_bar_node();
+  if (!bar_node->empty()) {
     AddBookmarkMenuItem(bookmark_menu_.get(), gtk_separator_menu_item_new());
     AddNodeToMenu(bar_node, bookmark_menu_.get());
   }
 
   // Only display the other bookmarks folder in the menu if it has items in it.
   const BookmarkNode* other_node = model->other_node();
-  if (other_node->child_count()) {
+  if (!other_node->empty()) {
     GtkWidget* submenu = gtk_menu_new();
     AddNodeToMenu(other_node, submenu);
 
@@ -225,10 +226,10 @@ void GlobalBookmarkMenu::ClearBookmarkItemCallback(GtkWidget* menu_item,
     gtk_widget_destroy(menu_item);
 }
 
-void GlobalBookmarkMenu::Observe(NotificationType type,
+void GlobalBookmarkMenu::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  DCHECK(type.value == NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   // Change the icon and invalidate the menu.
   default_favicon_ = GtkThemeService::GetDefaultFavicon(true);
@@ -236,7 +237,7 @@ void GlobalBookmarkMenu::Observe(NotificationType type,
   RebuildMenuInFuture();
 }
 
-void GlobalBookmarkMenu::Loaded(BookmarkModel* model) {
+void GlobalBookmarkMenu::Loaded(BookmarkModel* model, bool ids_reassigned) {
   // If we have a Loaded() event, then we need to build the menu immediately
   // for the first time.
   RebuildMenu();
@@ -297,7 +298,7 @@ void GlobalBookmarkMenu::OnBookmarkItemActivated(GtkWidget* menu_item) {
   const BookmarkNode* node = static_cast<const BookmarkNode*>(
       g_object_get_data(G_OBJECT(menu_item), "bookmark-node"));
 
-  browser_->OpenURL(node->GetURL(), GURL(), NEW_FOREGROUND_TAB,
+  browser_->OpenURL(node->url(), GURL(), NEW_FOREGROUND_TAB,
                     PageTransition::AUTO_BOOKMARK);
 }
 

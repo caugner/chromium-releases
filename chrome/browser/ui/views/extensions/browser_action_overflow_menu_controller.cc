@@ -13,8 +13,10 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/menu/menu_2.h"
 #include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/submenu_view.h"
+#include "views/widget/widget.h"
 
 BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     BrowserActionsContainer* owner,
@@ -64,8 +66,7 @@ bool BrowserActionOverflowMenuController::RunMenu(gfx::NativeWindow window,
   bounds.set_x(screen_loc.x());
   bounds.set_y(screen_loc.y());
 
-  views::MenuItemView::AnchorPosition anchor = base::i18n::IsRTL() ?
-      views::MenuItemView::TOPLEFT : views::MenuItemView::TOPRIGHT;
+  views::MenuItemView::AnchorPosition anchor = views::MenuItemView::TOPRIGHT;
   if (for_drop) {
     menu_->RunMenuForDropAt(window, bounds, anchor);
   } else {
@@ -97,13 +98,16 @@ bool BrowserActionOverflowMenuController::ShowContextMenu(
   if (!extension->ShowConfigureContextMenus())
     return false;
 
-  context_menu_contents_ = new ExtensionContextMenuModel(
-      extension,
-      owner_->browser(),
-      owner_);
-  context_menu_menu_.reset(new views::Menu2(context_menu_contents_.get()));
+  scoped_refptr<ExtensionContextMenuModel> context_menu_contents =
+      new ExtensionContextMenuModel(extension, owner_->browser(), owner_);
+  views::MenuModelAdapter context_menu_model_adapter(
+      context_menu_contents.get());
+  views::MenuItemView context_menu(&context_menu_model_adapter);
+  context_menu_model_adapter.BuildMenu(&context_menu);
+
   // This blocks until the user choses something or dismisses the menu.
-  context_menu_menu_->RunContextMenuAt(p);
+  context_menu.RunMenuAt(menu_button_->GetWidget()->GetNativeWindow(),
+      NULL, gfx::Rect(p, gfx::Size()), views::MenuItemView::TOPLEFT, true);
 
   // The user is done with the context menu, so we can close the underlying
   // menu.

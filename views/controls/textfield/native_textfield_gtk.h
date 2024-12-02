@@ -57,6 +57,9 @@ class NativeTextfieldGtk : public NativeControlGtk,
   virtual void HandleFocus() OVERRIDE;
   virtual void HandleBlur() OVERRIDE;
   virtual TextInputClient* GetTextInputClient() OVERRIDE;
+  virtual void ApplyStyleRange(const gfx::StyleRange& style) OVERRIDE;
+  virtual void ApplyDefaultStyle() OVERRIDE;
+  virtual void ClearEditHistory() OVERRIDE;
 
   // Overridden from NativeControlGtk:
   virtual void CreateNativeControl() OVERRIDE;

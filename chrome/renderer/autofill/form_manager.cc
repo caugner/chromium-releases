@@ -6,9 +6,10 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_vector.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "grit/generated_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFormControlElement.h"
@@ -21,12 +22,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSelectElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/form_data.h"
+#include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
+#include "webkit/glue/form_field_predictions.h"
 #include "webkit/glue/web_io_operators.h"
 
-using webkit_glue::FormData;
-using webkit_glue::FormField;
 using WebKit::WebDocument;
 using WebKit::WebElement;
 using WebKit::WebFormControlElement;
@@ -40,6 +42,10 @@ using WebKit::WebOptionElement;
 using WebKit::WebSelectElement;
 using WebKit::WebString;
 using WebKit::WebVector;
+using webkit_glue::FormData;
+using webkit_glue::FormDataPredictions;
+using webkit_glue::FormField;
+using webkit_glue::FormFieldPredictions;
 
 namespace {
 
@@ -50,8 +56,11 @@ namespace {
 const size_t kRequiredAutofillFields = 3;
 
 // The maximum number of form fields we are willing to parse, due to
-// computational costs.  This is a very conservative upper bound.
-const size_t kMaxParseableFields = 1000;
+// computational costs.  Several examples of forms with lots of fields that are
+// not relevant to Autofill: (1) the Netflix queue; (2) the Amazon wishlist;
+// (3) router configuration pages; and (4) other configuration pages, e.g. for
+// Google code project settings.
+const size_t kMaxParseableFields = 100;
 
 // The maximum length allowed for form data.
 const size_t kMaxDataLength = 1024;
@@ -69,12 +78,28 @@ bool IsSelectElement(const WebFormControlElement& element) {
   return element.formControlType() == ASCIIToUTF16("select-one");
 }
 
+bool IsTextContainerElement(const WebElement& element) {
+  return
+      element.hasTagName("p") ||
+      element.hasTagName("b") ||
+      element.hasTagName("span") ||
+      element.hasTagName("font");
+}
+
 bool IsOptionElement(const WebElement& element) {
   return element.hasTagName("option");
 }
 
 bool IsScriptElement(const WebElement& element) {
   return element.hasTagName("script");
+}
+
+bool IsNoScriptElement(const WebElement& element) {
+  return element.hasTagName("noscript");
+}
+
+bool HasTagName(const WebNode& node, const WebKit::WebString& tag) {
+  return node.isElementNode() && node.toConst<WebElement>().hasTagName(tag);
 }
 
 bool IsAutofillableElement(const WebFormControlElement& element) {
@@ -85,153 +110,135 @@ bool IsAutofillableElement(const WebFormControlElement& element) {
 // This is a helper function for the FindChildText() function (see below).
 // Search depth is limited with the |depth| parameter.
 string16 FindChildTextInner(const WebNode& node, int depth) {
-  string16 element_text;
   if (depth <= 0 || node.isNull())
-    return element_text;
+    return string16();
 
   if (node.nodeType() != WebNode::ElementNode &&
       node.nodeType() != WebNode::TextNode)
-    return element_text;
+    return string16();
 
-  // If |node| is WebElement and that has <option> or <script>, ignore the text.
-  // Because this function is only used to infer label and those tags should be
-  // excluded.
+  // Ignore elements known not to contain inferable labels.
   if (node.isElementNode()) {
     const WebElement element = node.toConst<WebElement>();
-    if (IsOptionElement(element) || IsScriptElement(element))
-      return element_text;
+    if (IsOptionElement(element) ||
+        IsScriptElement(element) ||
+        IsNoScriptElement(element)) {
+      return string16();
+    }
   }
 
+  // Extract the text exactly at this node.
   string16 node_text = node.nodeValue();
-  TrimWhitespace(node_text, TRIM_ALL, &node_text);
-  if (!node_text.empty())
-    element_text = node_text;
+  TrimPositions node_trailing_whitespace =
+      TrimWhitespace(node_text, TRIM_TRAILING, &node_text);
 
-  string16 child_text = FindChildTextInner(node.firstChild(), depth-1);
-  if (!child_text.empty())
-    element_text = element_text + child_text;
+  // Recursively compute the children's text.
+  // Preserve inter-element whitespace separation.
+  string16 child_text = FindChildTextInner(node.firstChild(), depth - 1);
+  TrimPositions child_leading_whitespace =
+      TrimWhitespace(child_text, TRIM_LEADING, &child_text);
+  if (node_trailing_whitespace || child_leading_whitespace ||
+      (node.nodeType() == WebNode::TextNode && node_text.empty())) {
+    node_text += ASCIIToUTF16(" ");
+  }
+  node_text += child_text;
+  node_trailing_whitespace =
+      TrimWhitespace(node_text, TRIM_TRAILING, &node_text);
 
-  string16 sibling_text = FindChildTextInner(node.nextSibling(), depth-1);
-  if (!sibling_text.empty())
-    element_text = element_text + sibling_text;
+  // Recursively compute the siblings' text.
+  // Again, preserve inter-element whitespace separation.
+  string16 sibling_text = FindChildTextInner(node.nextSibling(), depth - 1);
+  TrimPositions sibling_leading_whitespace =
+      TrimWhitespace(sibling_text, TRIM_LEADING, &sibling_text);
+  if (node_trailing_whitespace || sibling_leading_whitespace ||
+      (node.nodeType() == WebNode::TextNode && node_text.empty())) {
+    node_text += ASCIIToUTF16(" ");
+  }
+  node_text += sibling_text;
 
-  return element_text;
+  return node_text;
 }
 
-// Returns the aggregated values of the descendants or siblings of |node| that
-// are non-empty text nodes.  This is a faster alternative to |innerText()| for
+// Returns the aggregated values of the descendants of |element| that are
+// non-empty text nodes.  This is a faster alternative to |innerText()| for
 // performance critical operations.  It does a full depth-first search so can be
-// used when the structure is not directly known.  Whitespace is trimmed from
-// text accumulated at descendant and sibling.  Search is limited to within 10
-// siblings and/or descendants.
+// used when the structure is not directly known.  However, unlike with
+// |innerText()|, the search depth and breadth are limited to a fixed threshold.
+// Whitespace is trimmed from text accumulated at descendant nodes.
 string16 FindChildText(const WebElement& element) {
   WebNode child = element.firstChild();
 
   const int kChildSearchDepth = 10;
-  return FindChildTextInner(child, kChildSearchDepth);
+  string16 element_text = FindChildTextInner(child, kChildSearchDepth);
+  TrimWhitespace(element_text, TRIM_ALL, &element_text);
+  return element_text;
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
-// a previous node of |element|.
+// a previous sibling of |element|.
 string16 InferLabelFromPrevious(const WebFormControlElement& element) {
   string16 inferred_label;
   WebNode previous = element.previousSibling();
   if (previous.isNull())
     return string16();
 
+  // Check for text immediately before the |element|.
   if (previous.isTextNode()) {
     inferred_label = previous.nodeValue();
     TrimWhitespace(inferred_label, TRIM_ALL, &inferred_label);
   }
 
-  // If we didn't find text, check for previous paragraph.
-  // Eg. <p>Some Text</p><input ...>
+  // If we didn't find text, check for an immediately preceding text container,
+  // e.g. <p>Some Text</p><input ...>
   // Note the lack of whitespace between <p> and <input> elements.
   if (inferred_label.empty() && previous.isElementNode()) {
-    WebElement element = previous.to<WebElement>();
-    if (element.hasTagName("p")) {
-      inferred_label = FindChildText(element);
-    }
+    WebElement previous_element = previous.to<WebElement>();
+    if (IsTextContainerElement(previous_element))
+      inferred_label = FindChildText(previous_element);
   }
 
-  // If we didn't find paragraph, check for previous paragraph to this.
-  // Eg. <p>Some Text</p>   <input ...>
+  // If we didn't find one immediately preceding, check for a text container
+  // separated from this node only by whitespace,
+  // e.g. <p>Some Text</p>   <input ...>
   // Note the whitespace between <p> and <input> elements.
-  if (inferred_label.empty()) {
+  if (inferred_label.empty() && previous.isTextNode()) {
     WebNode sibling = previous.previousSibling();
     if (!sibling.isNull() && sibling.isElementNode()) {
-      WebElement element = sibling.to<WebElement>();
-      if (element.hasTagName("p")) {
-        inferred_label = FindChildText(element);
-      }
+      WebElement previous_element = sibling.to<WebElement>();
+      if (IsTextContainerElement(previous_element))
+        inferred_label = FindChildText(previous_element);
     }
   }
 
-  // Look for text node prior to <img> tag.
-  // Eg. Some Text<img/><input ...>
-  if (inferred_label.empty()) {
-    while (inferred_label.empty() && !previous.isNull()) {
-      if (previous.isTextNode()) {
-        inferred_label = previous.nodeValue();
-        TrimWhitespace(inferred_label, TRIM_ALL, &inferred_label);
-      } else if (previous.isElementNode()) {
-        WebElement element = previous.to<WebElement>();
-        if (!element.hasTagName("img"))
-          break;
-      } else {
+  // Look for a text node prior to <img> or <br> tags,
+  // e.g. Some Text<img/><input ...> or Some Text<br/><input ...>
+  while (inferred_label.empty() && !previous.isNull()) {
+    if (previous.isTextNode()) {
+      inferred_label = previous.nodeValue();
+      TrimWhitespace(inferred_label, TRIM_ALL, &inferred_label);
+    } else if (previous.isElementNode()) {
+      WebElement previous_element = previous.to<WebElement>();
+      if (IsTextContainerElement(previous_element))
+        inferred_label = FindChildText(previous_element);
+      else if (!HasTagName(previous, "img") && !HasTagName(previous, "br"))
         break;
-      }
-      previous = previous.previousSibling();
+    } else {
+      break;
     }
+
+    previous = previous.previousSibling();
   }
 
-  // Look for label node prior to <input> tag.
-  // Eg. <label>Some Text</label><input ...>
-  if (inferred_label.empty()) {
-    while (inferred_label.empty() && !previous.isNull()) {
-      if (previous.isTextNode()) {
-        inferred_label = previous.nodeValue();
-        TrimWhitespace(inferred_label, TRIM_ALL, &inferred_label);
-      } else if (previous.isElementNode()) {
-        WebElement element = previous.to<WebElement>();
-        if (element.hasTagName("label")) {
-          inferred_label = FindChildText(element);
-        } else {
-          break;
-        }
-      } else {
-        break;
-      }
-
-      previous = previous.previousSibling();
-    }
-  }
-
-  return inferred_label;
-}
-
-// Helper for |InferLabelForElement()| that infers a label, if possible, from
-// surrounding table structure.
-// Eg. <tr><td>Some Text</td><td><input ...></td></tr>
-// Eg. <tr><td><b>Some Text</b></td><td><b><input ...></b></td></tr>
-string16 InferLabelFromTable(const WebFormControlElement& element) {
-  string16 inferred_label;
-  WebNode parent = element.parentNode();
-  while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("td"))
-    parent = parent.parentNode();
-
-  // Check all previous siblings, skipping non-element nodes, until we find a
-  // non-empty text block.
-  WebNode previous = parent;
-  while (!previous.isNull()) {
-    if (previous.isElementNode()) {
-      WebElement e = previous.to<WebElement>();
-      if (e.hasTagName("td")) {
-        inferred_label = FindChildText(e);
-        if (!inferred_label.empty())
-          break;
-      }
+  // Look for a label node prior to the <input> tag,
+  // e.g. <label>Some Text</label><input ...>
+  while (inferred_label.empty() && !previous.isNull()) {
+    if (previous.isTextNode()) {
+      inferred_label = previous.nodeValue();
+      TrimWhitespace(inferred_label, TRIM_ALL, &inferred_label);
+    } else if (HasTagName(previous, "label")) {
+      inferred_label = FindChildText(previous.to<WebElement>());
+    } else {
+      break;
     }
 
     previous = previous.previousSibling();
@@ -241,88 +248,176 @@ string16 InferLabelFromTable(const WebFormControlElement& element) {
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
-// a surrounding div table.
-// Eg. <div>Some Text<span><input ...></span></div>
-string16 InferLabelFromDivTable(const WebFormControlElement& element) {
+// enclosing list item,
+// e.g. <li>Some Text<input ...><input ...><input ...></tr>
+string16 InferLabelFromListItem(const WebFormControlElement& element) {
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("div"))
+         !parent.to<WebElement>().hasTagName("li")) {
     parent = parent.parentNode();
+  }
 
-  if (parent.isNull() || !parent.isElementNode())
-    return string16();
+  if (!parent.isNull() && HasTagName(parent, "li"))
+    return FindChildText(parent.to<WebElement>());
 
-  WebElement e = parent.to<WebElement>();
-  if (e.isNull() || !e.hasTagName("div"))
-    return string16();
-
-  return FindChildText(e);
+  return string16();
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
-// a surrounding definition list.
-// Eg. <dl><dt>Some Text</dt><dd><input ...></dd></dl>
-// Eg. <dl><dt><b>Some Text</b></dt><dd><b><input ...></b></dd></dl>
-string16 InferLabelFromDefinitionList(const WebFormControlElement& element) {
-  string16 inferred_label;
+// surrounding table structure,
+// e.g. <tr><td>Some Text</td><td><input ...></td></tr>
+// or   <tr><th>Some Text</th><td><input ...></td></tr>
+// or   <tr><td><b>Some Text</b></td><td><b><input ...></b></td></tr>
+// or   <tr><th><b>Some Text</b></th><td><b><input ...></b></td></tr>
+string16 InferLabelFromTableColumn(const WebFormControlElement& element) {
   WebNode parent = element.parentNode();
   while (!parent.isNull() && parent.isElementNode() &&
-         !parent.to<WebElement>().hasTagName("dd"))
+         !parent.to<WebElement>().hasTagName("td")) {
     parent = parent.parentNode();
+  }
 
-  if (!parent.isNull() && parent.isElementNode()) {
-    WebElement element = parent.to<WebElement>();
-    if (element.hasTagName("dd")) {
-      WebNode previous = parent.previousSibling();
+  if (parent.isNull())
+    return string16();
 
-      // Skip by any intervening text nodes.
-      while (!previous.isNull() && previous.isTextNode())
-        previous = previous.previousSibling();
+  // Check all previous siblings, skipping non-element nodes, until we find a
+  // non-empty text block.
+  string16 inferred_label;
+  WebNode previous = parent.previousSibling();
+  while (inferred_label.empty() && !previous.isNull()) {
+    if (HasTagName(previous, "td") || HasTagName(previous, "th"))
+      inferred_label = FindChildText(previous.to<WebElement>());
 
-      if (!previous.isNull() && previous.isElementNode()) {
-        element = previous.to<WebElement>();
-        if (element.hasTagName("dt")) {
-          inferred_label = FindChildText(element);
-        }
-      }
-    }
+    previous = previous.previousSibling();
   }
 
   return inferred_label;
 }
 
-// Infers corresponding label for |element| from surrounding context in the DOM.
-// Contents of preceding <p> tag or preceding text element found in the form.
-string16 InferLabelForElement(const WebFormControlElement& element) {
-  string16 inferred_label = InferLabelFromPrevious(element);
+// Helper for |InferLabelForElement()| that infers a label, if possible, from
+// surrounding table structure,
+// e.g. <tr><td>Some Text</td></tr><tr><td><input ...></td></tr>
+string16 InferLabelFromTableRow(const WebFormControlElement& element) {
+  WebNode parent = element.parentNode();
+  while (!parent.isNull() && parent.isElementNode() &&
+         !parent.to<WebElement>().hasTagName("tr")) {
+    parent = parent.parentNode();
+  }
 
-  // If we didn't find a label, check for table cell case.
-  if (inferred_label.empty())
-    inferred_label = InferLabelFromTable(element);
+  if (parent.isNull())
+    return string16();
 
-  // If we didn't find a label, check for div table case.
-  if (inferred_label.empty())
-    inferred_label = InferLabelFromDivTable(element);
+  // Check all previous siblings, skipping non-element nodes, until we find a
+  // non-empty text block.
+  string16 inferred_label;
+  WebNode previous = parent.previousSibling();
+  while (inferred_label.empty() && !previous.isNull()) {
+    if (HasTagName(previous, "tr"))
+      inferred_label = FindChildText(previous.to<WebElement>());
 
-  // If we didn't find a label, check for definition list case.
-  if (inferred_label.empty())
-    inferred_label = InferLabelFromDefinitionList(element);
+    previous = previous.previousSibling();
+  }
 
   return inferred_label;
 }
 
-void GetOptionStringsFromElement(const WebSelectElement& select_element,
-                                 std::vector<string16>* option_strings) {
-  DCHECK(!select_element.isNull());
-  DCHECK(option_strings);
+// Helper for |InferLabelForElement()| that infers a label, if possible, from
+// a surrounding div table,
+// e.g. <div>Some Text<span><input ...></span></div>
+// e.g. <div>Some Text</div><div><input ...></div>
+string16 InferLabelFromDivTable(const WebFormControlElement& element) {
+  WebNode node = element.parentNode();
+  while (!node.isNull() && node.isElementNode() &&
+         !node.to<WebElement>().hasTagName("div")) {
+    node = node.parentNode();
+  }
 
-  option_strings->clear();
+  if (node.isNull() || !HasTagName(node, "div"))
+    return string16();
+
+  // Search the siblings while we cannot find label.
+  string16 inferred_label;
+  while (inferred_label.empty() && !node.isNull()) {
+    if (HasTagName(node, "div"))
+      inferred_label = FindChildText(node.to<WebElement>());
+
+    node = node.previousSibling();
+  }
+
+  return inferred_label;
+}
+
+// Helper for |InferLabelForElement()| that infers a label, if possible, from
+// a surrounding definition list,
+// e.g. <dl><dt>Some Text</dt><dd><input ...></dd></dl>
+// e.g. <dl><dt><b>Some Text</b></dt><dd><b><input ...></b></dd></dl>
+string16 InferLabelFromDefinitionList(const WebFormControlElement& element) {
+  WebNode parent = element.parentNode();
+  while (!parent.isNull() && parent.isElementNode() &&
+         !parent.to<WebElement>().hasTagName("dd"))
+    parent = parent.parentNode();
+
+  if (parent.isNull() || !HasTagName(parent, "dd"))
+    return string16();
+
+  // Skip by any intervening text nodes.
+  WebNode previous = parent.previousSibling();
+  while (!previous.isNull() && previous.isTextNode())
+    previous = previous.previousSibling();
+
+  if (previous.isNull() || !HasTagName(previous, "dt"))
+    return string16();
+
+  return FindChildText(previous.to<WebElement>());
+}
+
+// Infers corresponding label for |element| from surrounding context in the DOM,
+// e.g. the contents of the preceding <p> tag or text element.
+string16 InferLabelForElement(const WebFormControlElement& element) {
+  string16 inferred_label = InferLabelFromPrevious(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
+  // If we didn't find a label, check for list item case.
+  inferred_label = InferLabelFromListItem(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
+  // If we didn't find a label, check for table cell case.
+  inferred_label = InferLabelFromTableColumn(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
+  // If we didn't find a label, check for table row case.
+  inferred_label = InferLabelFromTableRow(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
+  // If we didn't find a label, check for definition list case.
+  inferred_label = InferLabelFromDefinitionList(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
+  // If we didn't find a label, check for div table case.
+  return InferLabelFromDivTable(element);
+}
+
+// Fills |option_strings| with the values of the <option> elements present in
+// |select_element|.
+void GetOptionStringsFromElement(const WebSelectElement& select_element,
+                                 std::vector<string16>* option_values,
+                                 std::vector<string16>* option_contents) {
+  DCHECK(!select_element.isNull());
+
+  option_values->clear();
+  option_contents->clear();
   WebVector<WebElement> list_items = select_element.listItems();
-  option_strings->reserve(list_items.size());
+  option_values->reserve(list_items.size());
+  option_contents->reserve(list_items.size());
   for (size_t i = 0; i < list_items.size(); ++i) {
     if (IsOptionElement(list_items[i])) {
-      option_strings->push_back(
-          list_items[i].toConst<WebOptionElement>().value());
+      const WebOptionElement option = list_items[i].toConst<WebOptionElement>();
+      option_values->push_back(option.value());
+      option_contents->push_back(option.text());
     }
   }
 }
@@ -335,6 +430,123 @@ const string16 GetFormIdentifier(const WebFormElement& form) {
     identifier = form.getAttribute(WebString("id"));
 
   return identifier;
+}
+
+// The callback type used by |ForEachMatchingFormField()|.
+typedef void (*Callback)(WebKit::WebFormControlElement*,
+                         const webkit_glue::FormField*,
+                         bool);
+
+// For each autofillable field in |data| that matches a field in the |form|,
+// the |callback| is invoked with the corresponding |form| field data.
+void ForEachMatchingFormField(
+    std::vector<WebKit::WebFormControlElement>* control_elements,
+    const WebNode& node,
+    const FormData& data,
+    Callback callback) {
+  // It's possible that the site has injected fields into the form after the
+  // page has loaded, so we can't assert that the size of the cached control
+  // elements is equal to the size of the fields in |form|.  Fortunately, the
+  // one case in the wild where this happens, paypal.com signup form, the fields
+  // are appended to the end of the form and are not visible.
+  for (size_t i = 0, j = 0;
+       i < control_elements->size() && j < data.fields.size();
+       ++i) {
+    WebFormControlElement* element = &(*control_elements)[i];
+    string16 element_name(element->nameForAutofill());
+
+    // Search forward in the |form| for a corresponding field.
+    size_t k = j;
+    while (k < data.fields.size() && element_name != data.fields[k].name)
+      k++;
+
+    if (k >= data.fields.size())
+      continue;
+
+    DCHECK_EQ(data.fields[k].name, element_name);
+
+    bool is_initiating_node = false;
+
+    const WebInputElement* input_element = toWebInputElement(element);
+    if (IsTextInput(input_element)) {
+      // TODO(jhawkins): WebKit currently doesn't handle the autocomplete
+      // attribute for select control elements, but it probably should.
+      if (!input_element->autoComplete())
+        continue;
+
+      is_initiating_node = (*input_element == node);
+
+      // Only autofill empty fields and the field that initiated the filling,
+      // i.e. the field the user is currently editing and interacting with.
+      if (!is_initiating_node && !input_element->value().isEmpty())
+        continue;
+    }
+
+    if (!element->isEnabled() || element->isReadOnly() ||
+        !element->isFocusable())
+      continue;
+
+    callback(element, &data.fields[k], is_initiating_node);
+
+    // We found a matching form field so move on to the next.
+    ++j;
+  }
+}
+
+// Sets the |field|'s value to the value in |data|.
+// Also sets the "autofilled" attribute, causing the background to be yellow.
+void FillFormField(WebKit::WebFormControlElement* field,
+                   const webkit_glue::FormField* data,
+                   bool is_initiating_node) {
+  // Nothing to fill.
+  if (data->value.empty())
+    return;
+
+  WebInputElement* input_element = toWebInputElement(field);
+  if (IsTextInput(input_element)) {
+    // If the maxlength attribute contains a negative value, maxLength()
+    // returns the default maxlength value.
+    input_element->setValue(
+        data->value.substr(0, input_element->maxLength()), true);
+    input_element->setAutofilled(true);
+    if (is_initiating_node) {
+      int length = input_element->value().length();
+      input_element->setSelectionRange(length, length);
+    }
+  } else {
+    DCHECK(IsSelectElement(*field));
+    WebSelectElement select_element = field->to<WebSelectElement>();
+    if (select_element.value() != data->value) {
+      select_element.setValue(data->value);
+      select_element.dispatchFormControlChangeEvent();
+    }
+  }
+}
+
+// Sets the |field|'s "suggested" (non JS visible) value to the value in |data|.
+// Also sets the "autofilled" attribute, causing the background to be yellow.
+void PreviewFormField(WebKit::WebFormControlElement* field,
+                      const webkit_glue::FormField* data,
+                      bool is_initiating_node) {
+  // Nothing to preview.
+  if (data->value.empty())
+    return;
+
+  // Only preview input fields.
+  WebInputElement* input_element = toWebInputElement(field);
+  if (!IsTextInput(input_element))
+    return;
+
+  // If the maxlength attribute contains a negative value, maxLength()
+  // returns the default maxlength value.
+  input_element->setSuggestedValue(
+      data->value.substr(0, input_element->maxLength()));
+  input_element->setAutofilled(true);
+  if (is_initiating_node) {
+    // Select the part of the text that the user didn't type.
+    input_element->setSelectionRange(input_element->value().length(),
+                                     input_element->suggestedValue().length());
+  }
 }
 
 }  // namespace
@@ -351,7 +563,6 @@ FormManager::FormManager() {
 }
 
 FormManager::~FormManager() {
-  Reset();
 }
 
 // static
@@ -379,9 +590,9 @@ void FormManager::WebFormControlElementToFormField(
     // Set option strings on the field if available.
     DCHECK(IsSelectElement(element));
     const WebSelectElement select_element = element.toConst<WebSelectElement>();
-    std::vector<string16> option_strings;
-    GetOptionStringsFromElement(select_element, &option_strings);
-    field->option_strings = option_strings;
+    GetOptionStringsFromElement(select_element,
+                                &field->option_values,
+                                &field->option_contents);
   }
 
   if (!(extract_mask & EXTRACT_VALUE))
@@ -411,10 +622,8 @@ void FormManager::WebFormControlElementToFormField(
     }
   }
 
-  // TODO(jhawkins): This is a temporary stop-gap measure designed to prevent
-  // a malicious site from DOS'ing the browser with extremely large profile
-  // data.  The correct solution is to parse this data asynchronously.
-  // See http://crbug.com/49332.
+  // Constrain the maximum data length to prevent a malicious site from DOS'ing
+  // the browser: http://crbug.com/49332
   if (value.size() > kMaxDataLength)
     value = value.substr(0, kMaxDataLength);
 
@@ -455,7 +664,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
 
   form->name = GetFormIdentifier(element);
   form->method = element.method();
-  form->origin = frame->url();
+  form->origin = frame->document().url();
   form->action = frame->document().completeURL(element.action());
   form->user_submitted = element.wasUserSubmitted();
 
@@ -503,7 +712,7 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
     fields_extracted[i] = true;
   }
 
-  // Don't extract field labels if we have no fields.
+  // If we failed to extract any fields, give up.
   if (form_fields.empty())
     return false;
 
@@ -530,14 +739,14 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
       iter->second->label += FindChildText(label);
   }
 
-  // Loop through the form control elements, extracting the label text from the
-  // DOM.  We use the |fields_extracted| vector to make sure we assign the
+  // Loop through the form control elements, extracting the label text from
+  // the DOM.  We use the |fields_extracted| vector to make sure we assign the
   // extracted label to the correct field, as it's possible |form_fields| will
   // not contain all of the elements in |control_elements|.
   for (size_t i = 0, field_idx = 0;
        i < control_elements.size() && field_idx < form_fields.size(); ++i) {
-    // This field didn't meet the requirements, so don't try to find a label for
-    // it.
+    // This field didn't meet the requirements, so don't try to find a label
+    // for it.
     if (!fields_extracted[i])
       continue;
 
@@ -557,15 +766,15 @@ bool FormManager::WebFormElementToFormData(const WebFormElement& element,
   return true;
 }
 
-void FormManager::ExtractForms(const WebFrame* frame) {
-  DCHECK(frame);
-
+void FormManager::ExtractForms(const WebFrame* frame,
+                               std::vector<FormData>* forms) {
   // Reset the vector of FormElements for this frame.
   ResetFrame(frame);
 
   WebVector<WebFormElement> web_forms;
-  frame->forms(web_forms);
+  frame->document().forms(web_forms);
 
+  size_t num_fields_seen = 0;
   for (size_t i = 0; i < web_forms.size(); ++i) {
     // Owned by |form_elements_|.
     FormElement* form_element = new FormElement;
@@ -591,22 +800,6 @@ void FormManager::ExtractForms(const WebFrame* frame) {
     }
 
     form_elements_.push_back(form_element);
-  }
-}
-
-void FormManager::GetFormsInFrame(const WebFrame* frame,
-                                  RequirementsMask requirements,
-                                  std::vector<FormData>* forms) {
-  DCHECK(frame);
-  DCHECK(forms);
-
-  size_t num_fields_seen = 0;
-  for (FormElementList::const_iterator form_iter = form_elements_.begin();
-       form_iter != form_elements_.end(); ++form_iter) {
-    FormElement* form_element = *form_iter;
-
-    if (form_element->form_element.document().frame() != frame)
-      continue;
 
     // To avoid overly expensive computation, we impose both a minimum and a
     // maximum number of allowable fields.
@@ -614,13 +807,9 @@ void FormManager::GetFormsInFrame(const WebFrame* frame,
         form_element->control_elements.size() > kMaxParseableFields)
       continue;
 
-    if (requirements & REQUIRE_AUTOCOMPLETE &&
-        !form_element->form_element.autoComplete())
-      continue;
-
     FormData form;
     WebFormElementToFormData(
-        form_element->form_element, requirements, EXTRACT_VALUE, &form);
+        form_element->form_element, REQUIRE_NONE, EXTRACT_VALUE, &form);
 
     num_fields_seen += form.fields.size();
     if (num_fields_seen > kMaxParseableFields)
@@ -633,7 +822,6 @@ void FormManager::GetFormsInFrame(const WebFrame* frame,
 
 bool FormManager::FindFormWithFormControlElement(
     const WebFormControlElement& element,
-    RequirementsMask requirements,
     FormData* form) {
   DCHECK(form);
 
@@ -655,7 +843,7 @@ bool FormManager::FindFormWithFormControlElement(
         ExtractMask extract_mask =
             static_cast<ExtractMask>(EXTRACT_VALUE | EXTRACT_OPTIONS);
         return WebFormElementToFormData(form_element->form_element,
-                                        requirements,
+                                        REQUIRE_NONE,
                                         extract_mask,
                                         form);
       }
@@ -665,34 +853,65 @@ bool FormManager::FindFormWithFormControlElement(
   return false;
 }
 
-bool FormManager::FillForm(const FormData& form, const WebNode& node) {
+void FormManager::FillForm(const FormData& form, const WebNode& node) {
   FormElement* form_element = NULL;
   if (!FindCachedFormElement(form, &form_element))
-    return false;
+    return;
 
-  RequirementsMask requirements = static_cast<RequirementsMask>(
-      REQUIRE_AUTOCOMPLETE | REQUIRE_ENABLED | REQUIRE_EMPTY);
-  ForEachMatchingFormField(form_element,
+  ForEachMatchingFormField(&form_element->control_elements,
                            node,
-                           requirements,
                            form,
-                           NewCallback(this, &FormManager::FillFormField));
-
-  return true;
+                           &FillFormField);
 }
 
-bool FormManager::PreviewForm(const FormData& form, const WebNode& node) {
+void FormManager::PreviewForm(const FormData& form, const WebNode& node) {
   FormElement* form_element = NULL;
   if (!FindCachedFormElement(form, &form_element))
+    return;
+
+  ForEachMatchingFormField(&form_element->control_elements,
+                           node,
+                           form,
+                           &PreviewFormField);
+}
+
+bool FormManager::ShowPredictions(const FormDataPredictions& form) {
+  FormElement* form_element = NULL;
+  if (!FindCachedFormElement(form.data, &form_element))
     return false;
 
-  RequirementsMask requirements = static_cast<RequirementsMask>(
-      REQUIRE_AUTOCOMPLETE | REQUIRE_ENABLED | REQUIRE_EMPTY);
-  ForEachMatchingFormField(form_element,
-                           node,
-                           requirements,
-                           form,
-                           NewCallback(this, &FormManager::PreviewFormField));
+  DCHECK_EQ(form.data.fields.size(), form.fields.size());
+  for (size_t i = 0, j = 0;
+       i < form_element->control_elements.size() && j < form.fields.size();
+       ++i) {
+    WebFormControlElement* element = &form_element->control_elements[i];
+    string16 element_name(element->nameForAutofill());
+
+    // Search forward in the |form| for a corresponding field.
+    size_t k = j;
+    while (k < form.fields.size() && element_name != form.data.fields[k].name)
+      k++;
+
+    if (k >= form.fields.size())
+      continue;
+
+    DCHECK_EQ(form.data.fields[k].name, element_name);
+
+    std::string placeholder = form.fields[k].overall_type;
+    string16 title = l10n_util::GetStringFUTF16(
+        IDS_AUTOFILL_SHOW_PREDICTIONS_TITLE,
+        UTF8ToUTF16(form.fields[k].heuristic_type),
+        UTF8ToUTF16(form.fields[k].server_type),
+        UTF8ToUTF16(form.fields[k].signature),
+        UTF8ToUTF16(form.signature),
+        UTF8ToUTF16(form.experiment_id));
+    if (!element->hasAttribute("placeholder"))
+      element->setAttribute("placeholder", WebString(UTF8ToUTF16(placeholder)));
+    element->setAttribute("title", WebString(title));
+
+    // We found a matching form field so move on to the next.
+    ++j;
+  }
 
   return true;
 }
@@ -779,10 +998,6 @@ bool FormManager::ClearPreviewedFormWithNode(const WebNode& node,
   return true;
 }
 
-void FormManager::Reset() {
-  form_elements_.reset();
-}
-
 void FormManager::ResetFrame(const WebFrame* frame) {
   FormElementList::iterator iter = form_elements_.begin();
   while (iter != form_elements_.end()) {
@@ -852,114 +1067,6 @@ bool FormManager::FindCachedFormElement(const FormData& form,
   }
 
   return false;
-}
-
-void FormManager::ForEachMatchingFormField(FormElement* form,
-                                           const WebNode& node,
-                                           RequirementsMask requirements,
-                                           const FormData& data,
-                                           Callback* callback) {
-  // It's possible that the site has injected fields into the form after the
-  // page has loaded, so we can't assert that the size of the cached control
-  // elements is equal to the size of the fields in |form|.  Fortunately, the
-  // one case in the wild where this happens, paypal.com signup form, the fields
-  // are appended to the end of the form and are not visible.
-  for (size_t i = 0, j = 0;
-       i < form->control_elements.size() && j < data.fields.size();
-       ++i) {
-    WebFormControlElement* element = &form->control_elements[i];
-    string16 element_name(element->nameForAutofill());
-
-    // Search forward in the |form| for a corresponding field.
-    size_t k = j;
-    while (k < data.fields.size() && element_name != data.fields[k].name)
-      k++;
-
-    if (k >= data.fields.size())
-      continue;
-
-    DCHECK_EQ(data.fields[k].name, element_name);
-
-    bool is_initiating_node = false;
-
-    const WebInputElement* input_element = toWebInputElement(element);
-    if (IsTextInput(input_element)) {
-      // TODO(jhawkins): WebKit currently doesn't handle the autocomplete
-      // attribute for select control elements, but it probably should.
-      if (!input_element->autoComplete())
-        continue;
-
-      is_initiating_node = (*input_element == node);
-
-      // Only autofill empty fields and the field that initiated the filling,
-      // i.e. the field the user is currently editing and interacting with.
-      if (!is_initiating_node && !input_element->value().isEmpty())
-        continue;
-    }
-
-    if (!element->isEnabled() || element->isReadOnly() ||
-        !element->isFocusable())
-      continue;
-
-    callback->Run(element, &data.fields[k], is_initiating_node);
-
-    // We found a matching form field so move on to the next.
-    ++j;
-  }
-
-  delete callback;
-}
-
-void FormManager::FillFormField(WebFormControlElement* field,
-                                const FormField* data,
-                                bool is_initiating_node) {
-  // Nothing to fill.
-  if (data->value.empty())
-    return;
-
-  WebInputElement* input_element = toWebInputElement(field);
-  if (IsTextInput(input_element)) {
-    // If the maxlength attribute contains a negative value, maxLength()
-    // returns the default maxlength value.
-    input_element->setValue(
-        data->value.substr(0, input_element->maxLength()), true);
-    input_element->setAutofilled(true);
-    if (is_initiating_node) {
-      int length = input_element->value().length();
-      input_element->setSelectionRange(length, length);
-    }
-  } else {
-    DCHECK(IsSelectElement(*field));
-    WebSelectElement select_element = field->to<WebSelectElement>();
-    if (select_element.value() != data->value) {
-      select_element.setValue(data->value);
-      select_element.dispatchFormControlChangeEvent();
-    }
-  }
-}
-
-void FormManager::PreviewFormField(WebFormControlElement* field,
-                                   const FormField* data,
-                                   bool is_initiating_node) {
-  // Nothing to preview.
-  if (data->value.empty())
-    return;
-
-  // Only preview input fields.
-  WebInputElement* input_element = toWebInputElement(field);
-  if (!IsTextInput(input_element))
-    return;
-
-  // If the maxlength attribute contains a negative value, maxLength()
-  // returns the default maxlength value.
-  input_element->setSuggestedValue(
-      data->value.substr(0, input_element->maxLength()));
-  input_element->setAutofilled(true);
-  if (is_initiating_node) {
-    // Select the part of the text that the user didn't type.
-    input_element->setSelectionRange(input_element->value().length(),
-                                     input_element->suggestedValue().length());
-  }
 }
 
 }  // namespace autofill

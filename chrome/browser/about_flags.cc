@@ -97,13 +97,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableVerticalTabs)
   },
   {
-    "remoting",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_REMOTING_NAME,
-    IDS_FLAGS_REMOTING_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableRemoting)
-  },
-  {
     "conflicting-modules-check",  // FLAGS:RECORD_UMA
     IDS_FLAGS_CONFLICTS_CHECK_NAME,
     IDS_FLAGS_CONFLICTS_CHECK_DESCRIPTION,
@@ -141,7 +134,7 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kIgnoreGpuBlacklist)
   },
   {
-    "force-compositing-mode",
+    "force-compositing-mode-2",
     IDS_FLAGS_FORCE_COMPOSITING_MODE_NAME,
     IDS_FLAGS_FORCE_COMPOSITING_MODE_DESCRIPTION,
     kOsAll,
@@ -168,22 +161,14 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDisableGpuVsync)
   },
-  {
-    "gpu-canvas-2d",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_ACCELERATED_CANVAS_2D_NAME,
-    IDS_FLAGS_ACCELERATED_CANVAS_2D_DESCRIPTION,
-    kOsWin | kOsLinux | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableAccelerated2dCanvas)
-  },
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_MACOSX)
+#if !defined(GOOGLE_CHROME_BUILD)
   // Only expose this for Chromium builds where users may not have the PDF
-  // plugin. Do not give Google Chrome users the option to disable it here,
-  // except on Mac, where it is disabled.
+  // plugin. Do not give Google Chrome users the option to disable it here.
   {
     "print-preview",  // FLAGS:RECORD_UMA
     IDS_FLAGS_PRINT_PREVIEW_NAME,
     IDS_FLAGS_PRINT_PREVIEW_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux,  // This switch is not available in CrOS.
+    kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnablePrintPreview)
   },
 #endif
@@ -199,7 +184,7 @@ const Experiment kExperiments[] = {
     "dns-server",  // FLAGS:RECORD_UMA
     IDS_FLAGS_DNS_SERVER_NAME,
     IDS_FLAGS_DNS_SERVER_DESCRIPTION,
-    kOsLinux,
+    kOsAll,
     SINGLE_VALUE_TYPE(switches::kDnsServer)
   },
   {
@@ -245,30 +230,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableInteractiveFormValidation)
   },
   {
-    "webaudio",
-    IDS_FLAGS_WEBAUDIO_NAME,
-    IDS_FLAGS_WEBAUDIO_DESCRIPTION,
-// This switch is currently not available in CrOS.
-// TODO(crogers): FFmpeg Windows DLLs need to be rebuilt for chromium.
-#if defined(GOOGLE_CHROME_BUILD)
-    kOsMac | kOsWin | kOsLinux,
-#else
-    kOsMac | kOsLinux,
-#endif
-    SINGLE_VALUE_TYPE(switches::kEnableWebAudio)
-  },
-  {
-    "p2papi",
-    IDS_FLAGS_P2P_API_NAME,
-    IDS_FLAGS_P2P_API_DESCRIPTION,
-    kOsAll,
-#if defined(ENABLE_P2P_APIS)
-    SINGLE_VALUE_TYPE(switches::kEnableP2PApi)
-#else
-    SINGLE_VALUE_TYPE("")
-#endif
-  },
-  {
     "focus-existing-tab-on-open",  // FLAGS:RECORD_UMA
     IDS_FLAGS_FOCUS_EXISTING_TAB_ON_OPEN_NAME,
     IDS_FLAGS_FOCUS_EXISTING_TAB_ON_OPEN_DESCRIPTION,
@@ -307,7 +268,7 @@ const Experiment kExperiments[] = {
     "multi-profiles",
     IDS_FLAGS_MULTI_PROFILES_NAME,
     IDS_FLAGS_MULTI_PROFILES_DESCRIPTION,
-    kOsMac | kOsWin | kOsLinux,  // This switch is not available in CrOS.
+    kOsWin | kOsMac | kOsLinux,  // This switch is not available in CrOS.
     SINGLE_VALUE_TYPE(switches::kMultiProfiles)
   },
   {
@@ -318,19 +279,23 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kRestrictInstantToSearch)
   },
   {
-    "indexeddb-use-leveldb",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_INDEXEDDB_USE_LEVELDB_NAME,
-    IDS_FLAGS_INDEXEDDB_USE_LEVELDB_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kLevelDBIndexedDatabase)
-  },
-  {
     "preload-instant-search",
     IDS_FLAGS_PRELOAD_INSTANT_SEARCH_NAME,
     IDS_FLAGS_PRELOAD_INSTANT_SEARCH_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kPreloadInstantSearch)
   },
+  {
+    "disable-pre-login",
+    IDS_FLAGS_PRE_LOGIN_NAME,
+    IDS_FLAGS_PRE_LOGIN_DESCRIPTION,
+    kOsMac | kOsWin | kOsLinux,
+    SINGLE_VALUE_TYPE(switches::kDisablePreLogin)
+  },
+#if defined(ENABLE_PRE_LOGIN_AFTER_M14)
+  // Pre-login is being taken out of M14, but will be put back in right after
+  // the fork.
+#endif
   {
     "static-ip-config",
     IDS_FLAGS_STATIC_IP_CONFIG_NAME,
@@ -343,6 +308,62 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE("")
 #endif
   },
+  {
+    "show-autofill-type-predictions",
+    IDS_FLAGS_SHOW_AUTOFILL_TYPE_PREDICTIONS_NAME,
+    IDS_FLAGS_SHOW_AUTOFILL_TYPE_PREDICTIONS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kShowAutofillTypePredictions)
+  },
+  {
+    "sync-typed-urls",
+    IDS_FLAGS_SYNC_TYPED_URLS_NAME,
+    IDS_FLAGS_SYNC_TYPED_URLS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSyncTypedUrls)
+  },
+  {
+    "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_NAME,
+    IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_DESCRIPTION,
+    // Can't expose the switch unless the code is compiled in.
+#if defined(ENABLE_SMOOTH_SCROLLING)
+    kOsAll,
+#else
+    0,
+#endif
+    SINGLE_VALUE_TYPE(switches::kEnableSmoothScrolling)
+  },
+  {
+    "prerender-from-omnibox",
+    IDS_FLAGS_PRERENDER_FROM_OMNIBOX_NAME,
+    IDS_FLAGS_PRERENDER_FROM_OMNIBOX_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kPrerenderFromOmnibox)
+  },
+  {
+    "panels",
+    IDS_FLAGS_ENABLE_PANELS_NAME,
+    IDS_FLAGS_ENABLE_PANELS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnablePanels)
+  },
+  {
+    "enable-shortcuts-provider",
+    IDS_FLAGS_ENABLE_SHORTCUTS_PROVIDER,
+    IDS_FLAGS_ENABLE_SHORTCUTS_PROVIDER_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableShortcutsProvider)
+  },
+#if defined(OS_CHROMEOS)
+  {
+    "webui-login",
+    IDS_SYNC_SETUP_TITLE,
+    IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kWebUILogin)
+  },
+#endif
 };
 
 const Experiment* experiments = kExperiments;

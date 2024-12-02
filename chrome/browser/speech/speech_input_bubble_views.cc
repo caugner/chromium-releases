@@ -21,7 +21,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "views/border.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
@@ -65,8 +65,8 @@ class ContentView
   views::ImageView* icon_;
   views::Label* heading_;
   views::Label* message_;
-  views::NativeButton* try_again_;
-  views::NativeButton* cancel_;
+  views::TextButton* try_again_;
+  views::TextButton* cancel_;
   views::Link* mic_settings_;
   SpeechInputBubbleBase::DisplayMode display_mode_;
   const int kIconLayoutMinWidth;
@@ -102,12 +102,12 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   icon_->SetHorizontalAlignment(views::ImageView::CENTER);
   AddChildView(icon_);
 
-  cancel_ = new views::NativeButton(
+  cancel_ = new views::NativeTextButton(
       this,
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANCEL)));
   AddChildView(cancel_);
 
-  try_again_ = new views::NativeButton(
+  try_again_ = new views::NativeTextButton(
       this,
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_TRY_AGAIN)));
   AddChildView(try_again_);
@@ -338,8 +338,8 @@ void SpeechInputBubbleImpl::Show() {
   bubble_content_ = new ContentView(delegate_);
   UpdateLayout();
 
-  views::NativeWidget* toplevel_widget =
-      views::NativeWidget::GetTopLevelNativeWidget(
+  views::Widget* toplevel_widget =
+      views::Widget::GetTopLevelWidgetForNativeView(
           tab_contents()->view()->GetNativeView());
   if (toplevel_widget) {
     gfx::Rect container_rect;
@@ -364,7 +364,7 @@ void SpeechInputBubbleImpl::Show() {
       target_rect.set_origin(point);
       target_rect.set_width(kIconHorizontalOffset);
     }
-    bubble_ = Bubble::Show(toplevel_widget->GetWidget(),
+    bubble_ = Bubble::Show(toplevel_widget,
                            target_rect,
                            BubbleBorder::TOP_LEFT, bubble_content_,
                            this);

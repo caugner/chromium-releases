@@ -71,17 +71,29 @@ cr.define('options', function() {
       $('defaultSearchEngine').onchange = this.setDefaultSearchEngine_;
 
       var self = this;
-      $('instantEnableCheckbox').onclick = function(event) {
-        if (this.checked && !self.instantConfirmDialogShown_) {
-          // Leave disabled for now. The PrefCheckbox handler already set it to
-          // true so undo that.
-          Preferences.setBooleanPref(this.pref, false, this.metric);
-          OptionsPage.navigateToPage('instantConfirm');
+      $('instantEnabledCheckbox').customChangeHandler = function(event) {
+        if (this.checked) {
+          if (self.instantConfirmDialogShown_)
+            chrome.send('enableInstant');
+          else
+            OptionsPage.navigateToPage('instantConfirm');
+        } else {
+          chrome.send('disableInstant');
         }
+        return true;
       };
+
+      $('instantFieldTrialCheckbox').addEventListener('change',
+          function(event) {
+            this.checked = true;
+            chrome.send('disableInstant');
+          });
 
       Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
           this.onInstantConfirmDialogShownChanged_.bind(this));
+
+      Preferences.getInstance().addEventListener('instant.enabled',
+          this.onInstantEnabledChanged_.bind(this));
 
       var homepageField = $('homepageURL');
       $('homepageUseNTPButton').onchange =
@@ -166,6 +178,26 @@ cr.define('options', function() {
     },
 
     /**
+     * Called when the value of the instant.enabled preference changes. Request
+     * the state of the Instant field trial experiment.
+     * @param {Event} event Change event.
+     * @private
+     */
+    onInstantEnabledChanged_: function(event) {
+      chrome.send('getInstantFieldTrialStatus');
+    },
+
+    /**
+     * Called to set the Instant field trial status.
+     * @param {boolean} enabled If true, the experiment is enabled.
+     * @private
+     */
+    setInstantFieldTrialStatus_: function(enabled) {
+      $('instantEnabledCheckbox').hidden = enabled;
+      $('instantFieldTrialCheckbox').hidden = !enabled;
+    },
+
+    /**
      * Update the Default Browsers section based on the current state.
      * @param {string} statusString Description of the current default state.
      * @param {boolean} isDefault Whether or not the browser is currently
@@ -222,7 +254,7 @@ cr.define('options', function() {
      */
     shouldEnableCustomStartupPageControls: function(pages) {
       return $('startupShowPagesButton').checked &&
-          !this.startup_pages_pref_.managed;
+          !this.startup_pages_pref_.controlledBy;
     },
 
     /**
@@ -275,9 +307,10 @@ cr.define('options', function() {
      */
     handleHomepageChange_: function(event) {
       this.homepage_pref_.value = event.value['value'];
-      this.homepage_pref_.managed = event.value['managed'];
-      if (this.isHomepageURLNewTabPageURL_() && !this.homepage_pref_.managed &&
-          !this.homepage_is_newtabpage_pref_.managed) {
+      this.homepage_pref_.controlledBy = event.value['controlledBy'];
+      if (this.isHomepageURLNewTabPageURL_() &&
+          !this.homepage_pref_.controlledBy &&
+          !this.homepage_is_newtabpage_pref_.controlledBy) {
         var useNewTabPage = this.isHomepageIsNewTabPageChoiceSelected_();
         Preferences.setStringPref(this.homepage_pref_.name, '')
         Preferences.setBooleanPref(this.homepage_is_newtabpage_pref_.name,
@@ -293,7 +326,8 @@ cr.define('options', function() {
      */
     handleHomepageIsNewTabPageChange_: function(event) {
       this.homepage_is_newtabpage_pref_.value = event.value['value'];
-      this.homepage_is_newtabpage_pref_.managed = event.value['managed'];
+      this.homepage_is_newtabpage_pref_.controlledBy =
+          event.value['controlledBy'];
       this.updateHomepageControlStates_();
     },
 
@@ -368,8 +402,8 @@ cr.define('options', function() {
     isHomepageIsNewTabPageChoiceSelected_: function() {
       return (this.homepage_is_newtabpage_pref_.value ||
               (this.isHomepageURLNewTabPageURL_() &&
-               (this.homepage_pref_.managed ||
-                !this.homepage_is_newtabpage_pref_.managed)));
+               (this.homepage_pref_.controlledBy ||
+                !this.homepage_is_newtabpage_pref_.controlledBy)));
     },
 
     /**
@@ -378,8 +412,8 @@ cr.define('options', function() {
      * @private
      */
     isHomepageChoiceEnabled_: function() {
-      return (!this.homepage_is_newtabpage_pref_.managed &&
-              !(this.homepage_pref_.managed &&
+      return (!this.homepage_is_newtabpage_pref_.controlledBy &&
+              !(this.homepage_pref_.controlledBy &&
                 this.isHomepageURLNewTabPageURL_()));
     },
 
@@ -390,9 +424,9 @@ cr.define('options', function() {
      */
     isHomepageURLFieldEnabled_: function() {
       return (!this.homepage_is_newtabpage_pref_.value &&
-              !this.homepage_pref_.managed &&
+              !this.homepage_pref_.controlledBy &&
               !(this.isHomepageURLNewTabPageURL_() &&
-                !this.homepage_is_newtabpage_pref_.managed));
+                !this.homepage_is_newtabpage_pref_.controlledBy));
     },
 
     /**
@@ -402,7 +436,12 @@ cr.define('options', function() {
      */
     updateCustomStartupPageControlStates_: function() {
       var disable = !this.shouldEnableCustomStartupPageControls();
-      $('startupPagesList').disabled = disable;
+      var startupPagesList = $('startupPagesList');
+      startupPagesList.disabled = disable;
+      // Explicitly set disabled state for input text elements.
+      var inputs = startupPagesList.querySelectorAll("input[type='text']");
+      for (var i = 0; i < inputs.length; i++)
+        inputs[i].disabled = disable;
       $('startupUseCurrentButton').disabled = disable;
     },
 
@@ -413,7 +452,7 @@ cr.define('options', function() {
      * @private
      */
     handleStartupPageListChange_: function(event) {
-      this.startup_pages_pref_.managed = event.value['managed'];
+      this.startup_pages_pref_.controlledBy = event.value['controlledBy'];
       this.updateCustomStartupPageControlStates_();
     },
 
@@ -477,6 +516,10 @@ cr.define('options', function() {
 
   BrowserOptions.updateAutocompleteSuggestions = function(suggestions) {
     BrowserOptions.getInstance().updateAutocompleteSuggestions_(suggestions);
+  };
+
+  BrowserOptions.setInstantFieldTrialStatus = function(enabled) {
+    BrowserOptions.getInstance().setInstantFieldTrialStatus_(enabled);
   };
 
   // Export

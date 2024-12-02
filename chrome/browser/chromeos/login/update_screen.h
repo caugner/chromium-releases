@@ -101,7 +101,7 @@ class UpdateScreen: public UpdateLibrary::Observer,
   bool ignore_idle_status_;
 
   // Keeps actor which is delegated with all showing operations.
-  scoped_ptr<UpdateScreenActor> actor_;
+  UpdateScreenActor* actor_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateScreen);
 };

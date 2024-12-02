@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/i18n/rtl.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
@@ -21,6 +22,7 @@
 #include "views/accelerator.h"
 #include "views/background.h"
 #include "views/border.h"
+#include "views/layer_helper.h"
 
 using ui::OSExchangeData;
 
@@ -33,11 +35,11 @@ class Path;
 namespace ui {
 struct AccessibleViewState;
 class Compositor;
+class Layer;
 class Texture;
 class ThemeProvider;
 class Transform;
-
-typedef unsigned int TextureID;
+enum TouchStatus;
 }
 
 #if defined(OS_WIN)
@@ -48,73 +50,21 @@ namespace views {
 
 class Background;
 class Border;
+class ContextMenuController;
+class DragController;
 class FocusManager;
 class FocusTraversable;
 class InputMethod;
+class LayerPropertySetter;
 class LayoutManager;
 class ScrollView;
 class TextInputClient;
 class Widget;
-class Window;
 
 namespace internal {
+class NativeWidgetView;
 class RootView;
 }
-
-// ContextMenuController is responsible for showing the context menu for a
-// View. To use a ContextMenuController invoke SetContextMenuController on a
-// View. When the appropriate user gesture occurs ShowContextMenu is invoked
-// on the ContextMenuController.
-//
-// Setting a ContextMenuController on a view makes the view process mouse
-// events.
-//
-// It is up to subclasses that do their own mouse processing to invoke
-// the appropriate ContextMenuController method, typically by invoking super's
-// implementation for mouse processing.
-//
-class ContextMenuController {
- public:
-  // Invoked to show the context menu for the source view. If |is_mouse_gesture|
-  // is true, |p| is the location of the mouse. If |is_mouse_gesture| is false,
-  // this method was not invoked by a mouse gesture and |p| is the recommended
-  // location to show the menu at.
-  //
-  // |p| is in screen coordinates.
-  virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) = 0;
-
- protected:
-  virtual ~ContextMenuController() {}
-};
-
-// DragController is responsible for writing drag data for a view, as well as
-// supplying the supported drag operations. Use DragController if you don't
-// want to subclass.
-
-class DragController {
- public:
-  // Writes the data for the drag.
-  virtual void WriteDragDataForView(View* sender,
-                                    const gfx::Point& press_pt,
-                                    OSExchangeData* data) = 0;
-
-  // Returns the supported drag operations (see DragDropTypes for possible
-  // values). A drag is only started if this returns a non-zero value.
-  virtual int GetDragOperationsForView(View* sender,
-                                       const gfx::Point& p) = 0;
-
-  // Returns true if a drag operation can be started.
-  // |press_pt| represents the coordinates where the mouse was initially
-  // pressed down. |p| is the current mouse coordinates.
-  virtual bool CanStartDragForView(View* sender,
-                                   const gfx::Point& press_pt,
-                                   const gfx::Point& p) = 0;
-
- protected:
-  virtual ~DragController() {}
-};
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -143,21 +93,7 @@ class DragController {
 /////////////////////////////////////////////////////////////////////////////
 class View : public AcceleratorTarget {
  public:
-#if defined(TOUCH_UI)
-  enum TouchStatus {
-    TOUCH_STATUS_UNKNOWN = 0,  // Unknown touch status. This is used to indicate
-                               // that the touch event was not handled.
-    TOUCH_STATUS_START,        // The touch event initiated a touch sequence.
-    TOUCH_STATUS_CONTINUE,     // The touch event is part of a previously
-                               // started touch sequence.
-    TOUCH_STATUS_END,          // The touch event ended the touch sequence.
-    TOUCH_STATUS_CANCEL,       // The touch event was cancelled, but didn't
-                               // terminate the touch sequence.
-    TOUCH_STATUS_SYNTH_MOUSE   // The touch event was not processed, but a
-                               // synthetic mouse event generated from the
-                               // unused touch event was handled.
-  };
-#endif
+  typedef std::vector<View*> Views;
 
   // TO BE MOVED ---------------------------------------------------------------
   // TODO(beng): These methods are to be moved to other files/classes.
@@ -170,10 +106,6 @@ class View : public AcceleratorTarget {
   // TODO(beng): delete
   // Returns whether the view is hot-tracked.
   virtual bool IsHotTracked() const;
-
-  // FATE TBD ------------------------------------------------------------------
-  // TODO(beng): Figure out what these methods are for and delete them.
-  virtual Widget* GetChildWidget();
 
   // Creation and lifetime -----------------------------------------------------
 
@@ -190,49 +122,46 @@ class View : public AcceleratorTarget {
   virtual const Widget* GetWidget() const;
   virtual Widget* GetWidget();
 
-  // Add a child View, optionally at |index|.
+  // Adds |view| as a child of this view, optionally at |index|.
   void AddChildView(View* view);
   void AddChildViewAt(View* view, int index);
 
-  // Remove a child view from this view. The view's parent will change to NULL.
-  void RemoveChildView(View* views);
+  // Moves |view| to the specified |index|. A negative value for |index| moves
+  // the view at the end.
+  void ReorderChildView(View* view, int index);
 
-  // Remove all child view from this view.  If |delete_views| is true, the views
-  // are deleted, unless marked as not parent owned.
-  void RemoveAllChildViews(bool delete_views);
+  // Removes |view| from this view. The view's parent will change to NULL.
+  void RemoveChildView(View* view);
 
-  // Returns the View at the specified |index|.
-  const View* GetChildViewAt(int index) const;
-  View* GetChildViewAt(int index);
+  // Removes all the children from this view. If |delete_children| is true,
+  // the views are deleted, unless marked as not parent owned.
+  void RemoveAllChildViews(bool delete_children);
 
-  // Get the number of child Views.
+  // STL-style accessors.
+  Views::const_iterator children_begin() { return children_.begin(); }
+  Views::const_iterator children_end() { return children_.end(); }
+  Views::const_reverse_iterator children_rbegin() { return children_.rbegin(); }
+  Views::const_reverse_iterator children_rend() { return children_.rend(); }
   int child_count() const { return static_cast<int>(children_.size()); }
   bool has_children() const { return !children_.empty(); }
+  View* child_at(int index) {
+    DCHECK_LT(index, child_count());
+    return children_[index];
+  }
+  const View* child_at(int index) const {
+    return const_cast<View*>(const_cast<const View*>(this))->child_at(index);
+  }
 
-  // Get the parent View
+  // Returns the parent view.
   const View* parent() const { return parent_; }
   View* parent() { return parent_; }
 
-  // Returns true if |child| is contained within this View's hierarchy, even as
-  // an indirect descendant. Will return true if child is also this View.
+  // Returns true if |view| is contained within this View's hierarchy, even as
+  // an indirect descendant. Will return true if child is also this view.
   bool Contains(const View* view) const;
 
-  // Returns the index of the specified |view| in this view's children, or -1
-  // if the specified view is not a child of this view.
+  // Returns the index of |view|, or -1 if |view| is not a child of this view.
   int GetIndexOf(const View* view) const;
-
-  // TODO(beng): REMOVE (Views need not know about Window).
-  // Gets the Widget that most closely contains this View, if any.
-  // NOTE: almost all views displayed on screen have a Widget, but not
-  // necessarily a Window. This is due to widgets being able to create top
-  // level windows (as is done for popups, bubbles and menus).
-  virtual const Window* GetWindow() const;
-  virtual Window* GetWindow();
-
-  // TODO(beng): REMOVE (TBD)
-  // Returns true if the native view |native_view| is contained in the view
-  // hierarchy beneath this view.
-  virtual bool ContainsNativeView(gfx::NativeView native_view) const;
 
   // Size and disposition ------------------------------------------------------
   // Methods for obtaining and modifying the position and size of the view.
@@ -275,9 +204,9 @@ class View : public AcceleratorTarget {
   // system.
   //
   // When traversing the View hierarchy in order to compute the bounds, the
-  // function takes into account the mirroring setting for each View and
-  // therefore it will return the mirrored version of the visible bounds if
-  // need be.
+  // function takes into account the mirroring setting and transformation for
+  // each View and therefore it will return the mirrored and transformed version
+  // of the visible bounds if need be.
   gfx::Rect GetVisibleBounds() const;
 
   // Return the bounds of the View in screen coordinate system.
@@ -337,6 +266,25 @@ class View : public AcceleratorTarget {
 
   // Sets the transform to the supplied transform.
   void SetTransform(const ui::Transform& transform);
+
+  // Sets whether this view paints to a layer. A view paints to a layer if
+  // either of the following are true:
+  // . the view has a non-identity transform.
+  // . SetPaintToLayer(true) has been invoked.
+  // View creates the Layer only when it exists in a Widget with a non-NULL
+  // Compositor.
+  void SetPaintToLayer(bool value);
+
+  // Sets the LayerPropertySetter for this view. A value of NULL resets the
+  // LayerPropertySetter to the default (immediate).
+  void SetLayerPropertySetter(LayerPropertySetter* setter);
+
+  const ui::Layer* layer() const {
+    return layer_helper_.get() ? layer_helper_->layer() : NULL;
+  }
+  ui::Layer* layer() {
+    return layer_helper_.get() ? layer_helper_->layer() : NULL;
+  }
 
   // RTL positioning -----------------------------------------------------------
 
@@ -424,10 +372,10 @@ class View : public AcceleratorTarget {
   virtual const View* GetViewByID(int id) const;
   virtual View* GetViewByID(int id);
 
-  // Sets and gets the ID for this view.  ID should be unique within the subtree
-  // that you intend to search for it.  0 is the default ID for views.
-  void SetID(int id);
-  int GetID() const;
+  // Gets and sets the ID for this view. ID should be unique within the subtree
+  // that you intend to search for it. 0 is the default ID for views.
+  int id() const { return id_; }
+  void set_id(int id) { id_ = id; }
 
   // A group id is used to tag views which are part of the same logical group.
   // Focus can be moved between views with the same group using the arrow keys.
@@ -443,14 +391,14 @@ class View : public AcceleratorTarget {
   // GetSelectedViewForGroup()) is focused.
   virtual bool IsGroupFocusTraversable() const;
 
-  // Fills the provided vector with all the available views which belong to the
-  // provided group.
-  void GetViewsWithGroup(int group_id, std::vector<View*>* out);
+  // Fills |views| with all the available views which belong to the provided
+  // |group|.
+  void GetViewsInGroup(int group, Views* views);
 
-  // Return the View that is currently selected in the specified group.
+  // Returns the View that is currently selected in |group|.
   // The default implementation simply returns the first View found for that
   // group.
-  virtual View* GetSelectedViewForGroup(int group_id);
+  virtual View* GetSelectedViewForGroup(int group);
 
   // Coordinate conversion -----------------------------------------------------
 
@@ -485,6 +433,10 @@ class View : public AcceleratorTarget {
   // system, to convert it into the parent's coordinate system.
   gfx::Rect ConvertRectToParent(const gfx::Rect& rect) const;
 
+  // Converts a rectangle from this views coordinate system to its widget
+  // cooridnate system.
+  gfx::Rect ConvertRectToWidget(const gfx::Rect& rect) const;
+
   // Painting ------------------------------------------------------------------
 
   // Mark all or part of the View's bounds as dirty (needing repaint).
@@ -510,6 +462,7 @@ class View : public AcceleratorTarget {
   // The border object is owned by this object and may be NULL.
   void set_border(Border* b) { border_.reset(b); }
   const Border* border() const { return border_.get(); }
+  Border* border() { return border_.get(); }
 
   // Get the theme provider from the parent widget.
   virtual ui::ThemeProvider* GetThemeProvider() const;
@@ -546,6 +499,7 @@ class View : public AcceleratorTarget {
 
   // Enable/Disable accelerated compositing.
   static void set_use_acceleration_when_possible(bool use);
+  static bool get_use_acceleration_when_possible();
 
   // Input ---------------------------------------------------------------------
   // The points (and mouse locations) in the following functions are in the
@@ -621,11 +575,9 @@ class View : public AcceleratorTarget {
   // Default implementation does nothing. Override as needed.
   virtual void OnMouseExited(const MouseEvent& event);
 
-#if defined(TOUCH_UI)
   // This method is invoked for each touch event. Default implementation
   // does nothing. Override as needed.
-  virtual TouchStatus OnTouchEvent(const TouchEvent& event);
-#endif
+  virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event);
 
   // Set the MouseHandler for a drag session.
   //
@@ -711,7 +663,7 @@ class View : public AcceleratorTarget {
   // Sets whether this view can accept the focus.
   // Note that this is false by default so that a view used as a container does
   // not get the focus.
-  virtual void SetFocusable(bool focusable);
+  void set_focusable(bool focusable) { focusable_ = focusable; }
 
   // Returns true if the view is focusable (IsFocusable) and visible in the root
   // view. See also IsFocusable.
@@ -784,9 +736,11 @@ class View : public AcceleratorTarget {
 
   // Sets the ContextMenuController. Setting this to non-null makes the View
   // process mouse events.
-  void SetContextMenuController(ContextMenuController* menu_controller);
-  ContextMenuController* GetContextMenuController() {
+  ContextMenuController* context_menu_controller() {
     return context_menu_controller_;
+  }
+  void set_context_menu_controller(ContextMenuController* menu_controller) {
+    context_menu_controller_ = menu_controller;
   }
 
   // Provides default implementation for context menu handling. The default
@@ -800,10 +754,10 @@ class View : public AcceleratorTarget {
 
   // Drag and drop -------------------------------------------------------------
 
-  // Set/get the DragController. See description of DragController for more
-  // information.
-  void SetDragController(DragController* drag_controller);
-  DragController* GetDragController();
+  DragController* drag_controller() { return drag_controller_; }
+  void set_drag_controller(DragController* drag_controller) {
+    drag_controller_ = drag_controller;
+  }
 
   // During a drag and drop session when the mouse moves the view under the
   // mouse is queried for the drop types it supports by way of the
@@ -872,11 +826,8 @@ class View : public AcceleratorTarget {
   // Modifies |state| to reflect the current accessible state of this view.
   virtual void GetAccessibleState(ui::AccessibleViewState* state) { }
 
-#if defined(OS_WIN)
-  // Returns an instance of the Windows-specific accessibility interface
-  // for this View.
-  NativeViewAccessibilityWin* GetNativeViewAccessibilityWin();
-#endif
+  // Returns an instance of the native accessibility interface for this view.
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible();
 
   // Scrolling -----------------------------------------------------------------
   // TODO(beng): Figure out if this can live somewhere other than View, i.e.
@@ -1001,29 +952,68 @@ class View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-#if !defined(COMPOSITOR_2)
-  // Performs accelerated painting using the compositor.
-  virtual void PaintComposite(ui::Compositor* compositor);
-#else
-  // If our texture is out of date invokes Paint() with a canvas that is then
-  // copied to the texture. If the texture is not out of date recursively
-  // descends in case any children needed their textures updated.
+  // Invoked from SchedulePaintInRect. Invokes SchedulePaintInternal on the
+  // parent. This does not mark the layer as dirty. It's assumed the caller has
+  // done this. You should not need to invoke this, use SchedulePaint or
+  // SchedulePaintInRect instead.
+  virtual void SchedulePaintInternal(const gfx::Rect& r);
+
+  // If our layer is out of date invokes Paint() with a canvas that is then
+  // copied to the layer. If the layer is not out of date recursively descends
+  // in case any children needed their layers updated.
   //
   // This is invoked internally by Widget and painting code.
-  void PaintToTexture(const gfx::Rect& dirty_rect);
+  virtual void PaintToLayer(const gfx::Rect& dirty_rect);
 
-  // Instructs the compositor to show our texture and all children textures.
+  // Instructs the compositor to show our layer and all children layers.
+  // Invokes OnWillCompositeLayer() for any views that have layers.
   //
   // This is invoked internally by Widget and painting code.
-  void PaintComposite();
-#endif
+  virtual void PaintComposite();
 
-  // Returns true if this view should paint using a texture.
-  virtual bool ShouldPaintToTexture() const;
+  // Invoked from |PaintComposite| if this view has a layer and before the
+  // layer is rendered by the compositor.
+  virtual void OnWillCompositeLayer();
+
+  // This creates a layer for the view, if one does not exist. It then
+  // passes the texture to a layer associated with the view. While an external
+  // texture is set, the view will not update the layer contents.
+  //
+  // Passing NULL resets to default behavior.
+  //
+  // Returns false if it cannot create a layer to which to assign the texture.
+  bool SetExternalTexture(ui::Texture* texture);
 
   // Returns the Compositor.
   virtual const ui::Compositor* GetCompositor() const;
   virtual ui::Compositor* GetCompositor();
+
+  // Marks the layer this view draws into as dirty.
+  virtual void MarkLayerDirty();
+
+  // Returns the offset from this view to the neareset ancestor with a layer.
+  // If |ancestor| is non-NULL it is set to the nearset ancestor with a layer.
+  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                  View** ancestor);
+
+  // Creates a layer for this and recurses through all descendants.
+  virtual void CreateLayerIfNecessary();
+
+  // If this view has a layer, the layer is reparented to |parent_layer| and its
+  // bounds is set based on |point|. If this view does not have a layer, then
+  // recurses through all children. This is used when adding a layer to an
+  // existing view to make sure all descendants that have layers are parented to
+  // the right layer.
+  virtual void MoveLayerToParent(ui::Layer* parent_layer,
+                                 const gfx::Point& point);
+
+  // Destroys the layer on this view and all descendants. Intended for when a
+  // view is being removed or made invisible.
+  virtual void DestroyLayerRecurse();
+
+  // Resets the bounds of the layer associated with this view and all
+  // descendants.
+  virtual void UpdateLayerBounds(const gfx::Point& offset);
 
   // Input ---------------------------------------------------------------------
 
@@ -1052,9 +1042,6 @@ class View : public AcceleratorTarget {
   // Handle view focus/blur events for this view.
   void Focus();
   void Blur();
-
-  // Whether the view can be focused.
-  bool focusable_;
 
   // System events -------------------------------------------------------------
 
@@ -1103,6 +1090,7 @@ class View : public AcceleratorTarget {
   static int GetVerticalDragThreshold();
 
  private:
+  friend class internal::NativeWidgetView;
   friend class internal::RootView;
   friend class FocusManager;
   friend class ViewStorage;
@@ -1126,6 +1114,20 @@ class View : public AcceleratorTarget {
     // Coordinates of the mouse press.
     gfx::Point start_pt;
   };
+
+  // Painting  -----------------------------------------------------------------
+
+  enum SchedulePaintType {
+    // Indicates the size is the same (only the origin changed).
+    SCHEDULE_PAINT_SIZE_SAME,
+
+    // Indicates the size changed (and possibly the origin).
+    SCHEDULE_PAINT_SIZE_CHANGED
+  };
+
+  // Invoked before and after the bounds change to schedule painting the old and
+  // new bounds.
+  void SchedulePaintBoundsChanged(SchedulePaintType type);
 
   // Tree operations -----------------------------------------------------------
 
@@ -1218,8 +1220,27 @@ class View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-  // Releases the texture of this and recurses through all children.
-  void ResetTexture();
+  // Returns true if this view should paint to layer.
+  bool ShouldPaintToLayer() const;
+
+  // Creates the layer and related fields for this view.
+  void CreateLayer();
+
+  // Reparents any descendant layer to our current layer parent and destroys
+  // this views layer.
+  void DestroyLayerAndReparent();
+
+  // Destroys the layer and related fields of this view. This is intended for
+  // use from one of the other destroy methods, normally you shouldn't invoke
+  // this directly.
+  void DestroyLayer();
+
+  // Returns the transform, or NULL if no transform has been set or the identity
+  // transform was set. Be careful in using this as it may return NULL. Use
+  // GetTransform() if you always want a non-NULL transform.
+  const ui::Transform* transform() const {
+    return layer_helper_.get() ? layer_helper_->transform() : NULL;
+  }
 
   // Input ---------------------------------------------------------------------
 
@@ -1229,11 +1250,9 @@ class View : public AcceleratorTarget {
   bool ProcessMouseDragged(const MouseEvent& event, DragInfo* drop_info);
   void ProcessMouseReleased(const MouseEvent& event);
 
-#if defined(TOUCH_UI)
   // RootView will invoke this with incoming TouchEvents. Returns the
   // the result of OnTouchEvent.
-  TouchStatus ProcessTouchEvent(const TouchEvent& event);
-#endif
+  ui::TouchStatus ProcessTouchEvent(const TouchEvent& event);
 
   // Accelerators --------------------------------------------------------------
 
@@ -1312,8 +1331,7 @@ class View : public AcceleratorTarget {
   View* parent_;
 
   // This view's children.
-  typedef std::vector<View*> ViewVector;
-  ViewVector children_;
+  Views children_;
 
   // Size and disposition ------------------------------------------------------
 
@@ -1321,7 +1339,7 @@ class View : public AcceleratorTarget {
   gfx::Rect bounds_;
 
   // Whether this view is visible.
-  bool is_visible_;
+  bool visible_;
 
   // Whether this view is enabled.
   bool enabled_;
@@ -1331,12 +1349,9 @@ class View : public AcceleratorTarget {
   bool registered_for_visible_bounds_notification_;
 
   // List of descendants wanting notification when their visible bounds change.
-  scoped_ptr<ViewVector> descendants_to_notify_;
+  scoped_ptr<Views> descendants_to_notify_;
 
   // Transformations -----------------------------------------------------------
-
-  // The transformation matrix (rotation, translate, scale).
-  scoped_ptr<ui::Transform> transform_;
 
   // Clipping parameters. skia transformation matrix does not give us clipping.
   // So we do it ourselves.
@@ -1369,25 +1384,7 @@ class View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-#if !defined(COMPOSITOR_2)
-  // Each transformed view will maintain its own canvas.
-  scoped_ptr<gfx::Canvas> canvas_;
-
-  // Texture ID used for accelerated painting.
-  // TODO(sadrul): This will eventually be replaced by an abstract texture
-  //               object.
-  ui::TextureID texture_id_;
-#else
-  scoped_ptr<ui::Texture> texture_;
-
-  // If not empty and Paint() is invoked, the canvas is created with the
-  // specified size.
-  // TODO(sky): this should be passed in.
-  gfx::Rect texture_clip_rect_;
-#endif
-
-  // Is the texture out of date?
-  bool texture_needs_updating_;
+  scoped_ptr<internal::LayerHelper> layer_helper_;
 
   // Accelerators --------------------------------------------------------------
 
@@ -1412,6 +1409,9 @@ class View : public AcceleratorTarget {
   // Next view to be focused when the Shift-Tab key combination is pressed.
   View* previous_focusable_view_;
 
+  // Whether this view can be focused.
+  bool focusable_;
+
   // Whether this view is focusable if the user requires full keyboard access,
   // even though it may not be normally focusable.
   bool accessibility_focusable_;
@@ -1427,8 +1427,8 @@ class View : public AcceleratorTarget {
 
   // Accessibility -------------------------------------------------------------
 
+  // The Windows-specific accessibility implementation for this view.
 #if defined(OS_WIN)
-  // The Windows-specific accessibility implementation for this View.
   scoped_refptr<NativeViewAccessibilityWin> native_view_accessibility_win_;
 #endif
 

@@ -8,22 +8,38 @@ import subprocess
 import sys
 
 
-def Main():
+def Main(args):
   pwd = os.environ.get('PWD', '')
   is_integration_bot = 'nacl-chrome' in pwd
 
+  # On the main Chrome waterfall, we may need to control where the tests are
+  # run.
+  # If there is serious skew in the PPAPI interface that causes all of
+  # the NaCl integration tests to fail, you can uncomment the
+  # following block.  (Make sure you comment it out when the issues
+  # are resolved.)  *However*, it is much preferred to add tests to
+  # the 'tests_to_disable' list below.
+  #if not is_integration_bot:
+  #  return
+
+  tests_to_disable = []
+
+  # In general, you should disable tests inside this conditional.  This turns
+  # them off on the main Chrome waterfall, but not on NaCl's integration bots.
+  # This makes it easier to see when things have been fixed NaCl side.
   if not is_integration_bot:
-    # On the main Chrome waterfall, we may need to control where the tests are
-    # run.
+    pass
 
-    # TODO(ncbray): enable on all platforms.
-    if sys.platform in ['win32', 'cygwin']: return
-    if sys.platform == 'darwin': return
-    # if sys.platform in ['linux', 'linux2']: return
-
-    # Uncomment the following line if there is skew in the PPAPI interface
-    # and the tests are failing.  Comment out once the issues are resolved.
-    # return
+  if sys.platform == 'darwin':
+    # The following test is failing on Mac OS X 10.5.  This may be
+    # because of a kernel bug that we might need to work around.
+    # See http://code.google.com/p/nativeclient/issues/detail?id=1835
+    # TODO(mseaborn): Remove this when the issue is resolved.
+    tests_to_disable.append('run_async_messaging_test')
+    # The following test fails on debug builds of Chromium.
+    # See http://code.google.com/p/nativeclient/issues/detail?id=2077
+    # TODO(mseaborn): Remove this when the issue is resolved.
+    tests_to_disable.append('run_ppapi_example_font_test')
 
   script_dir = os.path.dirname(os.path.abspath(__file__))
   test_dir = os.path.dirname(script_dir)
@@ -31,10 +47,13 @@ def Main():
   src_dir = os.path.dirname(chrome_dir)
   nacl_integration_script = os.path.join(
       src_dir, 'native_client/build/buildbot_chrome_nacl_stage.py')
-  cmd = [sys.executable, nacl_integration_script] + sys.argv[1:]
-  print cmd
-  subprocess.check_call(cmd)
+  cmd = [sys.executable,
+         nacl_integration_script,
+         '--disable_tests=%s' % ','.join(tests_to_disable)] + args
+  sys.stdout.write('Running %s\n' % ' '.join(cmd))
+  sys.stdout.flush()
+  return subprocess.call(cmd)
 
 
 if __name__ == '__main__':
-  Main()
+  sys.exit(Main(sys.argv[1:]))

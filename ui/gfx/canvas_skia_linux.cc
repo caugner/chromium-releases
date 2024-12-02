@@ -4,6 +4,8 @@
 
 #include "ui/gfx/canvas_skia.h"
 
+#include <algorithm>
+
 #include <cairo/cairo.h>
 #include <gtk/gtk.h>
 #include <pango/pango.h>
@@ -16,6 +18,9 @@
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/platform_font_gtk.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/skia_util.h"
+
+using std::max;
 
 namespace {
 
@@ -28,12 +33,15 @@ const double kFadeWidthFactor = 1.5;
 // End state of the elliding fade.
 const double kFadeFinalAlpha = 0.15;
 
+// Width of the border drawn around haloed text.
+const double kTextHaloWidth = 1.0;
+
 // Font settings that we initialize once and then use when drawing text in
 // DrawStringInt().
-static cairo_font_options_t* cairo_font_options = NULL;
+cairo_font_options_t* cairo_font_options = NULL;
 
 // Update |cairo_font_options| based on GtkSettings, allocating it if needed.
-static void UpdateCairoFontOptions() {
+void UpdateCairoFontOptions() {
   if (!cairo_font_options)
     cairo_font_options = cairo_font_options_create();
 
@@ -97,11 +105,12 @@ static void UpdateCairoFontOptions() {
 }
 
 // Pass a width > 0 to force wrapping and elliding.
-static void SetupPangoLayout(PangoLayout* layout,
-                             const string16& text,
-                             const gfx::Font& font,
-                             int width,
-                             int flags) {
+void SetupPangoLayout(PangoLayout* layout,
+                      const string16& text,
+                      const gfx::Font& font,
+                      int width,
+                      base::i18n::TextDirection text_direction,
+                      int flags) {
   if (!cairo_font_options)
     UpdateCairoFontOptions();
   // This needs to be done early on; it has no effect when called just before
@@ -129,7 +138,7 @@ static void SetupPangoLayout(PangoLayout* layout,
           (flags & gfx::Canvas::CHARACTER_BREAK) ?
               PANGO_WRAP_WORD_CHAR : PANGO_WRAP_WORD);
     }
-  } else if (base::i18n::IsRTL()){
+  } else if (text_direction == base::i18n::RIGHT_TO_LEFT){
     pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
   } else {
     // Fading the text will be handled in the draw operation.
@@ -162,9 +171,14 @@ static void SetupPangoLayout(PangoLayout* layout,
                                        kAcceleratorChar, NULL);
     g_free(escaped_text);
   } else if (flags & gfx::Canvas::HIDE_PREFIX) {
-    // Remove the ampersand character.
-    utf8 = gfx::RemoveWindowsStyleAccelerators(utf8);
-    pango_layout_set_text(layout, utf8.data(), utf8.size());
+    // Remove the ampersand character.  A double ampersand is output as
+    // a single ampersand.
+    DCHECK_EQ(1, g_unichar_to_utf8(kAcceleratorChar, NULL));
+    const std::string accelerator_removed =
+        gfx::RemoveAcceleratorChar(utf8, static_cast<char>(kAcceleratorChar));
+
+    pango_layout_set_text(layout,
+        accelerator_removed.data(), accelerator_removed.size());
   } else {
     pango_layout_set_text(layout, utf8.data(), utf8.size());
   }
@@ -182,10 +196,14 @@ class DrawStringContext {
   ~DrawStringContext();
 
   void Draw(const SkColor& text_color);
-  void DrawWithHalo(const SkColor& text_color,
-                          const SkColor& halo_color);
+  void DrawWithHalo(const SkColor& text_color, const SkColor& halo_color);
 
  private:
+  // Draw an underline under the text using |cr|, which must already be
+  // initialized with the correct source.  |extra_edge_width| is added to the
+  // outer edge of the line.  Helper method for Draw() and DrawWithHalo().
+  void DrawUnderline(cairo_t* cr, double extra_edge_width);
+
   const gfx::Rect& bounds_;
   int flags_;
   const gfx::Font& font_;
@@ -198,6 +216,8 @@ class DrawStringContext {
   int text_y_;
   int text_width_;
   int text_height_;
+
+  base::i18n::TextDirection text_direction_;
 
   DISALLOW_COPY_AND_ASSIGN(DrawStringContext);
 };
@@ -217,13 +237,15 @@ DrawStringContext::DrawStringContext(gfx::CanvasSkia* canvas,
       text_x_(bounds.x()),
       text_y_(bounds.y()),
       text_width_(0),
-      text_height_(0) {
+      text_height_(0),
+      text_direction_(base::i18n::GetFirstStrongCharacterDirection(text)) {
   DCHECK(!bounds_.IsEmpty());
 
   cr_ = skia::BeginPlatformPaint(canvas_);
   layout_ = pango_cairo_create_layout(cr_);
 
-  SetupPangoLayout(layout_, text, font, bounds_.width(), flags_);
+  SetupPangoLayout(
+      layout_, text, font, bounds_.width(), text_direction_, flags_);
 
   pango_layout_set_height(layout_, bounds_.height() * PANGO_SCALE);
 
@@ -245,21 +267,8 @@ DrawStringContext::DrawStringContext(gfx::CanvasSkia* canvas,
 }
 
 DrawStringContext::~DrawStringContext() {
-  if (font_.GetStyle() & gfx::Font::UNDERLINED) {
-    gfx::PlatformFontGtk* platform_font =
-        static_cast<gfx::PlatformFontGtk*>(font_.platform_font());
-    double underline_y =
-        static_cast<double>(text_y_) + text_height_ +
-        platform_font->underline_position();
-    cairo_set_line_width(cr_, platform_font->underline_thickness());
-    cairo_move_to(cr_, text_x_, underline_y);
-    cairo_line_to(cr_, text_x_ + text_width_, underline_y);
-    cairo_stroke(cr_);
-  }
   cairo_restore(cr_);
-
   skia::EndPlatformPaint(canvas_);
-
   g_object_unref(layout_);
   // NOTE: BeginPlatformPaint returned its surface, we shouldn't destroy it.
 }
@@ -276,7 +285,7 @@ void DrawStringContext::Draw(const SkColor& text_color) {
 
   // If we're not eliding, use a fixed color.
   // Otherwise, create a gradient pattern to use as the source.
-  if (base::i18n::IsRTL() ||
+  if (text_direction_ == base::i18n::RIGHT_TO_LEFT ||
       (flags_ & gfx::Canvas::NO_ELLIPSIS) ||
       text_width_ <= bounds_.width()) {
     cairo_set_source_rgba(cr_, r, g, b, a);
@@ -299,6 +308,9 @@ void DrawStringContext::Draw(const SkColor& text_color) {
   cairo_move_to(cr_, text_x_, text_y_);
   pango_cairo_show_layout(cr_, layout_);
 
+  if (font_.GetStyle() & gfx::Font::UNDERLINED)
+    DrawUnderline(cr_, 0.0);
+
   if (pattern)
     cairo_pattern_destroy(pattern);
 
@@ -315,15 +327,27 @@ void DrawStringContext::DrawWithHalo(const SkColor& text_color,
     skia::ScopedPlatformPaint scoped_platform_paint(&text_canvas);
     cairo_t* text_cr = scoped_platform_paint.GetPlatformSurface();
 
-    cairo_move_to(text_cr, 2, 1);
-    pango_cairo_layout_path(text_cr, layout_);
-
+    // TODO: The current approach (stroking the text path to generate the halo
+    // and then filling it for the main text) won't work if |text_color| is
+    // non-opaque.  If we need to do this at some later point,
+    // http://lists.freedesktop.org/archives/cairo/2004-September/001829.html
+    // suggests "do[ing] the stroke and fill with opaque paint onto an
+    // intermediate surface, and then us[ing] cairo_show_surface to composite
+    // that intermediate result with the desired compositing operator."
     cairo_set_source_rgba(text_cr,
                           SkColorGetR(halo_color) / 255.0,
                           SkColorGetG(halo_color) / 255.0,
                           SkColorGetB(halo_color) / 255.0,
                           SkColorGetA(halo_color) / 255.0);
-    cairo_set_line_width(text_cr, 2.0);
+
+    // Draw the halo underline first so that we can use the same path for the
+    // outer/halo text and inner text.
+    if (font_.GetStyle() & gfx::Font::UNDERLINED)
+      DrawUnderline(text_cr, kTextHaloWidth);
+
+    cairo_move_to(text_cr, 2, 1);
+    pango_cairo_layout_path(text_cr, layout_);
+    cairo_set_line_width(text_cr, 2 * kTextHaloWidth);
     cairo_set_line_join(text_cr, CAIRO_LINE_JOIN_ROUND);
     cairo_stroke_preserve(text_cr);
 
@@ -334,11 +358,27 @@ void DrawStringContext::DrawWithHalo(const SkColor& text_color,
                           SkColorGetB(text_color) / 255.0,
                           SkColorGetA(text_color) / 255.0);
     cairo_fill(text_cr);
+
+    if (font_.GetStyle() & gfx::Font::UNDERLINED)
+      DrawUnderline(text_cr, 0.0);
   }
 
   const SkBitmap& text_bitmap = const_cast<SkBitmap&>(
       skia::GetTopDevice(text_canvas)->accessBitmap(false));
   canvas_->DrawBitmapInt(text_bitmap, text_x_ - 1, text_y_ - 1);
+}
+
+void DrawStringContext::DrawUnderline(cairo_t* cr, double extra_edge_width) {
+  gfx::PlatformFontGtk* platform_font =
+      static_cast<gfx::PlatformFontGtk*>(font_.platform_font());
+  const double underline_y =
+      static_cast<double>(text_y_) + text_height_ +
+      platform_font->underline_position();
+  cairo_set_line_width(
+      cr, platform_font->underline_thickness() + 2 * extra_edge_width);
+  cairo_move_to(cr, text_x_ - extra_edge_width, underline_y);
+  cairo_line_to(cr, text_x_ + text_width_ + extra_edge_width, underline_y);
+  cairo_stroke(cr);
 }
 
 }  // namespace
@@ -366,9 +406,29 @@ void CanvasSkia::SizeStringInt(const string16& text,
   cairo_t* cr = cairo_create(surface);
   PangoLayout* layout = pango_cairo_create_layout(cr);
 
-  SetupPangoLayout(layout, text, font, *width, flags);
+  SetupPangoLayout(
+      layout,
+      text,
+      font,
+      *width,
+      base::i18n::GetFirstStrongCharacterDirection(text),
+      flags);
 
   pango_layout_get_pixel_size(layout, width, height);
+
+  if (font.GetStyle() & gfx::Font::UNDERLINED) {
+    gfx::PlatformFontGtk* platform_font =
+        static_cast<gfx::PlatformFontGtk*>(font.platform_font());
+    *height += max(platform_font->underline_position() +
+                   platform_font->underline_thickness(), 0.0);
+  }
+
+  // TODO: If the text is being drawn with a halo, we should also pad each of
+  // the edges by |kTextHaloWidth|... except haloing is currently a drawing-time
+  // thing, and we don't know how the text will be drawn here. :-(  This only
+  // seems to come into play at present if the text is both haloed and
+  // underlined; otherwise, the size returned by Pango is (at least sometimes)
+  // large enough to include the halo.
 
   if (org_width > 0 && flags & Canvas::MULTI_LINE &&
       pango_layout_is_wrapped(layout)) {

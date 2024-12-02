@@ -14,12 +14,8 @@
 #include "ui/gfx/canvas_skia.h"
 #include "views/focus/view_storage.h"
 #include "views/layout/fill_layout.h"
-#include "views/widget/widget.h"
-#include "views/window/window.h"
-
-#if defined(TOUCH_UI)
 #include "views/touchui/gesture_manager.h"
-#endif
+#include "views/widget/widget.h"
 
 namespace views {
 namespace internal {
@@ -34,6 +30,7 @@ const char RootView::kViewClassName[] = "views/RootView";
 
 RootView::RootView(Widget* widget)
     : widget_(widget),
+      capture_view_(NULL),
       mouse_pressed_handler_(NULL),
       mouse_move_handler_(NULL),
       last_click_handler_(NULL),
@@ -41,10 +38,8 @@ RootView::RootView(Widget* widget)
       last_mouse_event_flags_(0),
       last_mouse_event_x_(-1),
       last_mouse_event_y_(-1),
-#if defined(TOUCH_UI)
       gesture_manager_(GestureManager::GetInstance()),
       touch_pressed_handler_(NULL),
-#endif
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_search_(this, false, false)),
       focus_traversable_parent_(NULL),
       focus_traversable_parent_view_(NULL) {
@@ -60,8 +55,8 @@ RootView::~RootView() {
 // Tree operations -------------------------------------------------------------
 
 void RootView::SetContentsView(View* contents_view) {
-  DCHECK(contents_view && GetWidget()->GetNativeView()) <<
-      "Can't be called until after the native view is created!";
+  DCHECK(contents_view && GetWidget()->native_widget()) <<
+      "Can't be called until after the native widget is created!";
   // The ContentsView must be set up _after_ the window is created so that its
   // Widget pointer is valid.
   SetLayoutManager(new FillLayout);
@@ -74,6 +69,10 @@ void RootView::SetContentsView(View* contents_view) {
   // calling the widget's size changed handler, since the RootView's bounds may
   // not have changed, which will cause the Layout not to be done otherwise.
   Layout();
+}
+
+View* RootView::GetContentsView() {
+  return child_count() > 0 ? child_at(0) : NULL;
 }
 
 void RootView::NotifyNativeViewHierarchyChanged(bool attached,
@@ -157,6 +156,11 @@ std::string RootView::GetClassName() const {
 }
 
 void RootView::SchedulePaintInRect(const gfx::Rect& rect) {
+  MarkLayerDirty();
+  SchedulePaintInternal(rect);
+}
+
+void RootView::SchedulePaintInternal(const gfx::Rect& rect) {
   gfx::Rect xrect = ConvertRectToParent(rect);
   gfx::Rect invalid_rect = GetLocalBounds().Intersect(xrect);
   if (!invalid_rect.IsEmpty())
@@ -165,6 +169,10 @@ void RootView::SchedulePaintInRect(const gfx::Rect& rect) {
 
 bool RootView::OnMousePressed(const MouseEvent& event) {
   MouseEvent e(event, this);
+  if (capture_view_) {
+    MouseEvent ce(e, this, capture_view_);
+    return capture_view_->OnMousePressed(ce);
+  }
 
   UpdateCursor(e);
   SetMouseLocationAndFlags(e);
@@ -240,6 +248,11 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
 
 bool RootView::OnMouseDragged(const MouseEvent& event) {
   MouseEvent e(event, this);
+  if (capture_view_) {
+    MouseEvent ce(e, this, capture_view_);
+    return capture_view_->OnMouseDragged(ce);
+  }
+
   UpdateCursor(e);
 
   if (mouse_pressed_handler_) {
@@ -253,6 +266,12 @@ bool RootView::OnMouseDragged(const MouseEvent& event) {
 
 void RootView::OnMouseReleased(const MouseEvent& event) {
   MouseEvent e(event, this);
+  if (capture_view_) {
+    MouseEvent ce(e, this, capture_view_);
+    capture_view_->OnMouseReleased(ce);
+    return;
+  }
+
   UpdateCursor(e);
 
   if (mouse_pressed_handler_) {
@@ -267,6 +286,13 @@ void RootView::OnMouseReleased(const MouseEvent& event) {
 }
 
 void RootView::OnMouseCaptureLost() {
+  if (capture_view_) {
+    View* capture_view = capture_view_;
+    capture_view_ = NULL;
+    capture_view->OnMouseCaptureLost();
+    return;
+  }
+
   if (mouse_pressed_handler_) {
     // Synthesize a release event for UpdateCursor.
     MouseEvent release_event(ui::ET_MOUSE_RELEASED, last_mouse_event_x_,
@@ -283,6 +309,12 @@ void RootView::OnMouseCaptureLost() {
 
 void RootView::OnMouseMoved(const MouseEvent& event) {
   MouseEvent e(event, this);
+  if (capture_view_) {
+    MouseEvent ce(e, this, capture_view_);
+    capture_view_->OnMouseMoved(ce);
+    return;
+  }
+
   View* v = GetEventHandlerForPoint(e.location());
   // Find the first enabled view, or the existing move handler, whichever comes
   // first.  The check for the existing handler is because if a view becomes
@@ -309,6 +341,12 @@ void RootView::OnMouseMoved(const MouseEvent& event) {
 }
 
 void RootView::OnMouseExited(const MouseEvent& event) {
+  if (capture_view_) {
+    MouseEvent e(event, this, capture_view_);
+    capture_view_->OnMouseExited(e);
+    return;
+  }
+
   if (mouse_move_handler_ != NULL) {
     mouse_move_handler_->OnMouseExited(event);
     mouse_move_handler_ = NULL;
@@ -316,6 +354,9 @@ void RootView::OnMouseExited(const MouseEvent& event) {
 }
 
 bool RootView::OnMouseWheel(const MouseWheelEvent& event) {
+  if (capture_view_)
+    return capture_view_->OnMouseWheel(event);
+
   MouseWheelEvent e(event, this);
   bool consumed = false;
   View* v = GetFocusManager()->GetFocusedView();
@@ -324,21 +365,20 @@ bool RootView::OnMouseWheel(const MouseWheelEvent& event) {
   return consumed;
 }
 
-#if defined(TOUCH_UI)
-View::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
+ui::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
   TouchEvent e(event, this);
 
   // If touch_pressed_handler_ is non null, we are currently processing
   // a touch down on the screen situation. In that case we send the
   // event to touch_pressed_handler_
-  View::TouchStatus status = TOUCH_STATUS_UNKNOWN;
+  ui::TouchStatus status = ui::TOUCH_STATUS_UNKNOWN;
 
   if (touch_pressed_handler_) {
     TouchEvent touch_event(e, this, touch_pressed_handler_);
     status = touch_pressed_handler_->ProcessTouchEvent(touch_event);
     if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-      status = View::TOUCH_STATUS_SYNTH_MOUSE;
-    if (status == TOUCH_STATUS_END)
+      status = ui::TOUCH_STATUS_SYNTH_MOUSE;
+    if (status == ui::TOUCH_STATUS_END)
       touch_pressed_handler_ = NULL;
     return status;
   }
@@ -350,7 +390,7 @@ View::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
     if (!touch_pressed_handler_->IsEnabled()) {
       // Disabled views eat events but are treated as not handled by the
       // the GestureManager.
-      status = TOUCH_STATUS_UNKNOWN;
+      status = ui::TOUCH_STATUS_UNKNOWN;
       break;
     }
 
@@ -366,17 +406,17 @@ View::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
 
     // The touch event wasn't processed. Go up the view hierarchy and dispatch
     // the touch event.
-    if (status == TOUCH_STATUS_UNKNOWN)
+    if (status == ui::TOUCH_STATUS_UNKNOWN)
       continue;
 
     // If the touch didn't initiate a touch-sequence, then reset the touch event
     // handler. Otherwise, leave it set so that subsequent touch events are
     // dispatched to the same handler.
-    if (status != TOUCH_STATUS_START)
+    if (status != ui::TOUCH_STATUS_START)
       touch_pressed_handler_ = NULL;
 
     if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-      status = View::TOUCH_STATUS_SYNTH_MOUSE;
+      status = ui::TOUCH_STATUS_SYNTH_MOUSE;
     return status;
   }
 
@@ -385,10 +425,9 @@ View::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
 
   // Give the touch event to the gesture manager.
   if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-    status = View::TOUCH_STATUS_SYNTH_MOUSE;
+    status = ui::TOUCH_STATUS_SYNTH_MOUSE;
   return status;
 }
-#endif
 
 void RootView::SetMouseHandler(View *new_mh) {
   // If we're clearing the mouse handler, clear explicit_mouse_handler_ as well.
@@ -411,28 +450,36 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
       mouse_pressed_handler_ = NULL;
     if (mouse_move_handler_ == child)
       mouse_move_handler_ = NULL;
-#if defined(TOUCH_UI)
-    if (touch_pressed_handler_)
+    if (touch_pressed_handler_ == child)
       touch_pressed_handler_ = NULL;
-#endif
+    if (capture_view_ == child)
+      capture_view_ = NULL;
   }
 }
-
 
 void RootView::OnPaint(gfx::Canvas* canvas) {
   canvas->AsCanvasSkia()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
 }
 
-bool RootView::ShouldPaintToTexture() const {
-  return widget_->compositor() != NULL;
-}
-
 const ui::Compositor* RootView::GetCompositor() const {
-  return widget_->compositor();
+  return widget_->GetCompositor();
 }
 
 ui::Compositor* RootView::GetCompositor() {
-  return widget_->compositor();
+  return widget_->GetCompositor();
+}
+
+void RootView::MarkLayerDirty() {
+  View::MarkLayerDirty();
+  if (!layer())
+    widget_->MarkLayerDirty();
+}
+
+void RootView::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                                  View** ancestor) {
+  View::CalculateOffsetToAncestorWithLayer(offset, ancestor);
+  if (!layer())
+    widget_->CalculateOffsetToAncestorWithLayer(offset, ancestor);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

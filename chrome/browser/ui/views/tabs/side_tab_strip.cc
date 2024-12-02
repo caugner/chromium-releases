@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/tabs/side_tab_strip.h"
 
+#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/side_tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
@@ -128,7 +129,7 @@ SideTabStrip::SideTabStrip(TabStripController* controller)
       separator_(new views::View()),
       first_tab_y_offset_(0),
       ideal_height_(0) {
-  SetID(VIEW_ID_TAB_STRIP);
+  set_id(VIEW_ID_TAB_STRIP);
   set_background(views::Background::CreateSolidBackground(kBackgroundColor));
   AddChildView(newtab_button_);
   separator_->set_background(
@@ -175,11 +176,11 @@ void SideTabStrip::RemoveTabAt(int model_index) {
   StartRemoveTabAnimation(model_index);
 }
 
-void SideTabStrip::SelectTabAt(int old_model_index, int new_model_index) {
-  GetBaseTabAtModelIndex(new_model_index)->SchedulePaint();
-
-  if (controller()->IsActiveTab(new_model_index))
-    MakeTabVisible(ModelIndexToTabIndex(new_model_index));
+void SideTabStrip::SetSelection(const TabStripSelectionModel& old_selection,
+                                const TabStripSelectionModel& new_selection) {
+  GetBaseTabAtModelIndex(new_selection.active())->SchedulePaint();
+  if (old_selection.active() != new_selection.active())
+    MakeTabVisible(ModelIndexToTabIndex(new_selection.active()));
 }
 
 void SideTabStrip::TabTitleChangedNotLoading(int model_index) {

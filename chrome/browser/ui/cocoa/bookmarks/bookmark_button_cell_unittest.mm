@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/mac/nsimage_cache.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -12,7 +11,8 @@
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 // Simple class to remember how many mouseEntered: and mouseExited:
 // calls it gets.  Only used by BookmarkMouseForwarding but placed
@@ -66,7 +66,7 @@ TEST_F(BookmarkButtonCellTest, IconOnlySqueeze) {
   [[test_window() contentView] addSubview:view];
 
   scoped_nsobject<NSImage> image(
-      [app::mac::GetCachedImageWithName(@"nav.pdf") retain]);
+      [gfx::GetCachedImageWithName(@"nav.pdf") retain]);
   EXPECT_TRUE(image.get());
 
   NSRect r = NSMakeRect(0, 0, 100, 100);
@@ -95,7 +95,7 @@ TEST_F(BookmarkButtonCellTest, MouseEnterStuff) {
   EXPECT_FALSE([cell menu]);
 
   BookmarkModel* model = helper_.profile()->GetBookmarkModel();
-  const BookmarkNode* node = model->GetBookmarkBarNode();
+  const BookmarkNode* node = model->bookmark_bar_node();
   [cell setEmpty:NO];
   [cell setBookmarkNode:node];
   EXPECT_TRUE([cell showsBorderOnlyWhileMouseInside]);
@@ -111,7 +111,7 @@ TEST_F(BookmarkButtonCellTest, BookmarkNode) {
   scoped_nsobject<BookmarkButtonCell> cell(
       [[BookmarkButtonCell alloc] initTextCell:@"Testing"]);
 
-  const BookmarkNode* node = model.GetBookmarkBarNode();
+  const BookmarkNode* node = model.bookmark_bar_node();
   [cell setBookmarkNode:node];
   EXPECT_EQ(node, [cell bookmarkNode]);
 
@@ -157,7 +157,7 @@ TEST_F(BookmarkButtonCellTest, Awake) {
 // Subfolder arrow details.
 TEST_F(BookmarkButtonCellTest, FolderArrow) {
   BookmarkModel* model = helper_.profile()->GetBookmarkModel();
-  const BookmarkNode* bar = model->GetBookmarkBarNode();
+  const BookmarkNode* bar = model->bookmark_bar_node();
   const BookmarkNode* node = model->AddURL(bar, bar->child_count(),
                                            ASCIIToUTF16("title"),
                                            GURL("http://www.google.com"));

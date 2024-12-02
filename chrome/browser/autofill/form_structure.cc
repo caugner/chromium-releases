@@ -9,15 +9,22 @@
 #include "base/sha1.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
+#include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/autofill_xml_parser.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_field.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
+#include "webkit/glue/form_data.h"
+#include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
+#include "webkit/glue/form_field_predictions.h"
 
 using webkit_glue::FormData;
+using webkit_glue::FormDataPredictions;
+using webkit_glue::FormFieldPredictions;
 
 namespace {
 
@@ -84,7 +91,9 @@ FormStructure::FormStructure(const FormData& form)
     : form_name_(form.name),
       source_url_(form.origin),
       target_url_(form.action),
-      autofill_count_(0) {
+      autofill_count_(0),
+      upload_required_(USE_UPLOAD_RATES),
+      server_experiment_id_("no server response") {
   // Copy the form fields.
   std::vector<webkit_glue::FormField>::const_iterator field;
   for (field = form.fields.begin();
@@ -183,7 +192,8 @@ bool FormStructure::EncodeUploadRequest(
 }
 
 // static
-bool FormStructure::EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
+bool FormStructure::EncodeQueryRequest(
+    const ScopedVector<FormStructure>& forms,
     std::vector<std::string>* encoded_signatures,
     std::string* encoded_xml) {
   DCHECK(encoded_signatures);
@@ -236,14 +246,14 @@ bool FormStructure::EncodeQueryRequest(const ScopedVector<FormStructure>& forms,
 // static
 void FormStructure::ParseQueryResponse(const std::string& response_xml,
                                        const std::vector<FormStructure*>& forms,
-                                       UploadRequired* upload_required,
                                        const AutofillMetrics& metric_logger) {
   metric_logger.LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_RECEIVED);
 
   // Parse the field types from the server response to the query.
   std::vector<AutofillFieldType> field_types;
+  UploadRequired upload_required;
   std::string experiment_id;
-  AutofillQueryXmlParser parse_handler(&field_types, upload_required,
+  AutofillQueryXmlParser parse_handler(&field_types, &upload_required,
                                        &experiment_id);
   buzz::XmlParser parser(&parse_handler);
   parser.Parse(response_xml.c_str(), response_xml.length(), true);
@@ -251,6 +261,7 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
     return;
 
   metric_logger.LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_PARSED);
+  metric_logger.LogServerExperimentIdForQuery(experiment_id);
 
   bool heuristics_detected_fillable_field = false;
   bool query_response_overrode_heuristics = false;
@@ -260,6 +271,7 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
   for (std::vector<FormStructure*>::const_iterator iter = forms.begin();
        iter != forms.end(); ++iter) {
     FormStructure* form = *iter;
+    form->upload_required_ = upload_required;
     form->server_experiment_id_ = experiment_id;
 
     for (std::vector<AutofillField*>::iterator field = form->fields_.begin();
@@ -295,6 +307,43 @@ void FormStructure::ParseQueryResponse(const std::string& response_xml,
     metric = AutofillMetrics::QUERY_RESPONSE_MATCHED_LOCAL_HEURISTICS;
   }
   metric_logger.LogServerQueryMetric(metric);
+}
+
+// static
+void FormStructure::GetFieldTypePredictions(
+    const std::vector<FormStructure*>& form_structures,
+    std::vector<FormDataPredictions>* forms) {
+  forms->clear();
+  forms->reserve(form_structures.size());
+  for (size_t i = 0; i < form_structures.size(); ++i) {
+    FormStructure* form_structure = form_structures[i];
+    FormDataPredictions form;
+    form.data.name = form_structure->form_name_;
+    form.data.method =
+        ASCIIToUTF16((form_structure->method_ == POST) ? "POST" : "GET");
+    form.data.origin = form_structure->source_url_;
+    form.data.action = form_structure->target_url_;
+    form.signature = form_structure->FormSignature();
+    form.experiment_id = form_structure->server_experiment_id_;
+
+    for (std::vector<AutofillField*>::const_iterator field =
+             form_structure->fields_.begin();
+         field != form_structure->fields_.end(); ++field) {
+      form.data.fields.push_back(webkit_glue::FormField(**field));
+
+      FormFieldPredictions annotated_field;
+      annotated_field.signature = (*field)->FieldSignature();
+      annotated_field.heuristic_type =
+          AutofillType::FieldTypeToString((*field)->heuristic_type());
+      annotated_field.server_type =
+          AutofillType::FieldTypeToString((*field)->server_type());
+      annotated_field.overall_type =
+          AutofillType::FieldTypeToString((*field)->type());
+      form.fields.push_back(annotated_field);
+    }
+
+    forms->push_back(form);
+  }
 }
 
 std::string FormStructure::FormSignature() const {
@@ -342,6 +391,15 @@ bool FormStructure::ShouldBeParsed(bool require_method_post) const {
   if (target_url_.path() == "/search")
     return false;
 
+  // Make sure there as at least one text field.
+  bool has_text_field = false;
+  for (std::vector<AutofillField*>::const_iterator it = begin();
+       it != end() && !has_text_field; ++it) {
+    has_text_field |= (*it)->form_control_type != ASCIIToUTF16("select-one");
+  }
+  if (!has_text_field)
+    return false;
+
   return !require_method_post || (method_ == POST);
 }
 
@@ -360,6 +418,13 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
     std::map<std::string, const AutofillField*>::const_iterator
         cached_field = cached_fields.find(field->FieldSignature());
     if (cached_field != cached_fields.end()) {
+      if (field->form_control_type != ASCIIToUTF16("select-one") &&
+          field->value == cached_field->second->value) {
+        // From the perspective of learning user data, text fields containing
+        // default values are equivalent to empty fields.
+        field->value = string16();
+      }
+
       field->set_heuristic_type(cached_field->second->heuristic_type());
       field->set_server_type(cached_field->second->server_type());
     }
@@ -368,11 +433,23 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
   UpdateAutofillCount();
 
   server_experiment_id_ = cached_form.server_experiment_id();
+
+  // The form signature should match between query and upload requests to the
+  // server. On many websites, form elements are dynamically added, removed, or
+  // rearranged via JavaScript between page load and form submission, so we
+  // copy over the |form_signature_field_names_| corresponding to the query
+  // request.
+  DCHECK_EQ(cached_form.form_name_, form_name_);
+  DCHECK_EQ(cached_form.source_url_, source_url_);
+  DCHECK_EQ(cached_form.target_url_, target_url_);
+  form_signature_field_names_ = cached_form.form_signature_field_names_;
 }
 
 void FormStructure::LogQualityMetrics(
     const AutofillMetrics& metric_logger) const {
   std::string experiment_id = server_experiment_id();
+  metric_logger.LogServerExperimentIdForUpload(experiment_id);
+
   for (size_t i = 0; i < field_count(); ++i) {
     const AutofillField* field = this->field(i);
     metric_logger.LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,

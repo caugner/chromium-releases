@@ -18,7 +18,7 @@ namespace views {
 class Checkbox;
 class Label;
 class Link;
-class NativeButton;
+class NativeTextButton;
 
 }  // namespace views
 
@@ -27,6 +27,7 @@ class DOMView;
 namespace chromeos {
 
 class HelpAppLauncher;
+class TpmInfoView;
 class ViewsEulaScreenActor;
 
 // Delegate for TabContents that will show EULA.
@@ -38,27 +39,10 @@ class EULATabContentsDelegate : public TabContentsDelegate {
 
  protected:
   // TabContentsDelegate implementation:
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition) {}
-  virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
-  virtual void ActivateContents(TabContents* contents) {}
-  virtual void DeactivateContents(TabContents* contents) {}
-  virtual void LoadingStateChanged(TabContents* source) {}
-  virtual void CloseContents(TabContents* source) {}
   virtual bool IsPopup(TabContents* source);
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
       NavigationType::Type navigation_type);
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
   virtual bool HandleContextMenu(const ContextMenuParams& params);
 
  private:
@@ -83,6 +67,12 @@ class EulaView
 
   // Returns the state of usage stats checkbox.
   bool IsUsageStatsChecked() const;
+
+  // Shows given TPM password.
+  void ShowTpmPassword(const std::string& tpm_password);
+
+  // This method is called by the TpmInfoView dialog when it is closed.
+  void OnTpmInfoViewClosed(TpmInfoView* tpm_info_view);
 
  protected:
   // views::View implementation.
@@ -124,8 +114,11 @@ class EulaView
   views::Label* oem_eula_label_;
   DOMView* oem_eula_view_;
   views::Link* system_security_settings_link_;
-  views::NativeButton* back_button_;
-  views::NativeButton* continue_button_;
+  views::NativeTextButton* back_button_;
+  views::NativeTextButton* continue_button_;
+
+  // Keeps pointer to the active TpmInfoView if it is opened, NULL if is not.
+  TpmInfoView* tpm_info_view_;
 
   ViewsEulaScreenActor* actor_;
 

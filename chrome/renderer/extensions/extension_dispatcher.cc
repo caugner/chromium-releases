@@ -64,6 +64,7 @@ bool ExtensionDispatcher::OnControlMessageReceived(
     IPC_MESSAGE_HANDLER(ExtensionMsg_SetScriptingWhitelist,
                         OnSetScriptingWhitelist)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateExtension, OnActivateExtension)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateApplication, OnActivateApplication)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateUserScripts, OnUpdateUserScripts)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -84,7 +85,6 @@ void ExtensionDispatcher::WebKitInitialized() {
 
   // Add v8 extensions related to chrome extensions.
   RegisterExtension(ExtensionProcessBindings::Get(this), true);
-  RegisterExtension(BaseJsV8Extension::Get(), true);
   RegisterExtension(JsonSchemaJsV8Extension::Get(), true);
   RegisterExtension(EventBindings::Get(this), true);
   RegisterExtension(RendererExtensionBindings::Get(this), true);
@@ -164,7 +164,14 @@ void ExtensionDispatcher::OnSetScriptingWhitelist(
   Extension::SetScriptingWhitelist(extension_ids);
 }
 
-bool ExtensionDispatcher::IsExtensionActive(const std::string& extension_id) {
+bool ExtensionDispatcher::IsApplicationActive(
+    const std::string& extension_id) const {
+  return active_application_ids_.find(extension_id) !=
+      active_application_ids_.end();
+}
+
+bool ExtensionDispatcher::IsExtensionActive(
+    const std::string& extension_id) const {
   return active_extension_ids_.find(extension_id) !=
       active_extension_ids_.end();
 }
@@ -203,6 +210,11 @@ bool ExtensionDispatcher::AllowScriptExtension(
 
 }
 
+void ExtensionDispatcher::OnActivateApplication(
+    const std::string& extension_id) {
+  active_application_ids_.insert(extension_id);
+}
+
 void ExtensionDispatcher::OnActivateExtension(
     const std::string& extension_id) {
   active_extension_ids_.insert(extension_id);
@@ -223,7 +235,7 @@ void ExtensionDispatcher::OnActivateExtension(
 }
 
 void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
-  if (extension->HasApiPermission(Extension::kManagementPermission)) {
+  if (extension->HasAPIPermission(ExtensionAPIPermission::kManagement)) {
     WebSecurityPolicy::addOriginAccessWhitelistEntry(
         extension->url(),
         WebString::fromUTF8(chrome::kChromeUIScheme),
@@ -231,8 +243,10 @@ void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
         false);
   }
 
-  const URLPatternList& permissions = extension->host_permissions();
-  for (size_t i = 0; i < permissions.size(); ++i) {
+  const URLPatternSet& permissions =
+      extension->permission_set()->explicit_hosts();
+  for (URLPatternSet::const_iterator i = permissions.begin();
+       i != permissions.end(); ++i) {
     const char* schemes[] = {
       chrome::kHttpScheme,
       chrome::kHttpsScheme,
@@ -240,12 +254,12 @@ void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
       chrome::kChromeUIScheme,
     };
     for (size_t j = 0; j < arraysize(schemes); ++j) {
-      if (permissions[i].MatchesScheme(schemes[j])) {
+      if (i->MatchesScheme(schemes[j])) {
         WebSecurityPolicy::addOriginAccessWhitelistEntry(
             extension->url(),
             WebString::fromUTF8(schemes[j]),
-            WebString::fromUTF8(permissions[i].host()),
-            permissions[i].match_subdomains());
+            WebString::fromUTF8(i->host()),
+            i->match_subdomains());
       }
     }
   }

@@ -15,19 +15,21 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/navigation_details.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -101,7 +103,7 @@ HintInfoBar::~HintInfoBar() {
 
 bool HintInfoBar::ShouldExpire(
     const content::LoadCommittedDetails& details) const {
-  return details.is_user_initiated_main_frame_load() && should_expire_;
+  return details.is_navigation_to_different_page() && should_expire_;
 }
 
 void HintInfoBar::InfoBarDismissed() {
@@ -148,7 +150,7 @@ bool HintInfoBar::Accept() {
 OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
   NavigationController* controller = &(tab->controller());
   notification_registrar_.Add(this,
-                              NotificationType::NAV_ENTRY_COMMITTED,
+                              content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                               Source<NavigationController>(controller));
   // Fill the search_engine_urls_ map, used for faster look-up (overkill?).
   for (size_t i = 0;
@@ -158,17 +160,17 @@ OmniboxSearchHint::OmniboxSearchHint(TabContentsWrapper* tab) : tab_(tab) {
 
   // Listen for omnibox to figure-out when the user searches from the omnibox.
   notification_registrar_.Add(this,
-                              NotificationType::OMNIBOX_OPENED_URL,
+                              chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                               Source<Profile>(tab->profile()));
 }
 
 OmniboxSearchHint::~OmniboxSearchHint() {
 }
 
-void OmniboxSearchHint::Observe(NotificationType type,
+void OmniboxSearchHint::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  if (type == NotificationType::NAV_ENTRY_COMMITTED) {
+  if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     NavigationEntry* entry = tab_->controller().GetActiveEntry();
     if (search_engine_urls_.find(entry->url().spec()) ==
         search_engine_urls_.end()) {
@@ -176,14 +178,15 @@ void OmniboxSearchHint::Observe(NotificationType type,
       return;
     }
     const TemplateURL* const default_provider =
-        tab_->profile()->GetTemplateURLModel()->GetDefaultSearchProvider();
+        TemplateURLServiceFactory::GetForProfile(tab_->profile())->
+        GetDefaultSearchProvider();
     if (!default_provider)
       return;
 
     const TemplateURLRef* const search_url = default_provider->url();
     if (search_url->GetHost() == entry->url().host())
       ShowInfoBar();
-  } else if (type == NotificationType::OMNIBOX_OPENED_URL) {
+  } else if (type == chrome::NOTIFICATION_OMNIBOX_OPENED_URL) {
     AutocompleteLog* log = Details<AutocompleteLog>(details).ptr();
     AutocompleteMatch::Type type =
         log->result.match_at(log->selected_index).type;
@@ -202,8 +205,8 @@ void OmniboxSearchHint::ShowInfoBar() {
 }
 
 void OmniboxSearchHint::ShowEnteringQuery() {
-  LocationBar* location_bar = BrowserList::GetLastActive()->window()->
-      GetLocationBar();
+  LocationBar* location_bar = BrowserList::GetLastActiveWithProfile(
+      tab_->profile())->window()->GetLocationBar();
   OmniboxView* omnibox_view = location_bar->location_entry();
   location_bar->FocusLocation(true);
   omnibox_view->SetUserText(

@@ -59,7 +59,7 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
 
   // TabStripModelObserver
   virtual void TabInsertedAt(TabContentsWrapper* contents, int index,
-                             bool foreground);
+                             bool active);
   virtual void TabClosingAt(TabStripModel* tab_strip_model,
                             TabContentsWrapper* contents,
                             int index);
@@ -92,12 +92,12 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
                              Browser* browser);
 
   // NotificationObserver.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
  private:
   // "Synthetic" event. Called from TabInsertedAt if new tab is detected.
-  void TabCreatedAt(TabContents* contents, int index, bool foreground);
+  void TabCreatedAt(TabContents* contents, int index, bool active);
 
   // Internal processing of tab updated events. Is called by both TabChangedAt
   // and Observe/NAV_ENTRY_COMMITTED.
@@ -115,10 +115,16 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
                                 const char* event_name,
                                 const std::string& json_args);
 
+  void DispatchEventsAcrossIncognito(Profile* profile,
+                                     const char* event_name,
+                                     const std::string& json_args,
+                                     const std::string& cross_incognito_args);
+
   void DispatchEventWithTab(Profile* profile,
                             const std::string& extension_id,
                             const char* event_name,
-                            const TabContents* tab_contents);
+                            const TabContents* tab_contents,
+                            bool active);
 
   void DispatchSimpleBrowserEvent(Profile* profile,
                                   const int window_id,
@@ -195,13 +201,17 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
 
   std::map<int, TabEntry> tab_entries_;
 
+  // The main profile that owns this event router.
+  Profile* profile_;
+
+  // The profile the currently focused window belongs to; either the main or
+  // incognito profile or NULL (none of the above). We remember this in order
+  // to correctly handle focus changes between non-OTR and OTR windows.
+  Profile* focused_profile_;
+
   // The currently focused window. We keep this so as to avoid sending multiple
   // windows.onFocusChanged events with the same windowId.
   int focused_window_id_;
-
-  // The main profile (non-OTR) profile which will be used to send events not
-  // associated with any browser.
-  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionBrowserEventRouter);
 };

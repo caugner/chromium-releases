@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
@@ -14,10 +15,13 @@ class MockTabContentsDelegate : public TabContentsDelegate {
  public:
   virtual ~MockTabContentsDelegate() {}
 
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition) {}
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const GURL& url,
+                                      const GURL& referrer,
+                                      WindowOpenDisposition disposition,
+                                      PageTransition::Type transition) {
+    return NULL;
+  }
 
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) {}

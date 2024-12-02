@@ -68,19 +68,18 @@ class AutofillDownloadTestHelper : public AutofillDownloadManager::Observer {
   }
 
   // AutofillDownloadManager::Observer overridables:
-  virtual void OnLoadedAutofillHeuristics(
-      const std::string& heuristic_xml) {
+  virtual void OnLoadedServerPredictions(const std::string& response_xml) {
     ResponseData response;
-    response.response = heuristic_xml;
+    response.response = response_xml;
     response.type_of_response = QUERY_SUCCESSFULL;
     responses_.push_back(response);
   };
-  virtual void OnUploadedAutofillHeuristics(const std::string& form_signature) {
+  virtual void OnUploadedPossibleFieldTypes() {
     ResponseData response;
     response.type_of_response = UPLOAD_SUCCESSFULL;
     responses_.push_back(response);
   }
-  virtual void OnHeuristicsRequestError(
+  virtual void OnServerRequestError(
       const std::string& form_signature,
       AutofillDownloadManager::AutofillRequestType request_type,
       int http_error) {
@@ -339,8 +338,8 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   fetcher = factory.GetFetcherByID(4);
   EXPECT_EQ(NULL, fetcher);
 
-  // Set upload to 100% so requests happen.
-  helper.download_manager.SetPositiveUploadRate(1.0);
+  // Set upload required to true so requests happen.
+  form_structures[0]->upload_required_ = UPLOAD_REQUIRED;
   // Request with id 4.
   EXPECT_TRUE(helper.download_manager.StartUploadRequest(*(form_structures[0]),
                                                          true,

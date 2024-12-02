@@ -16,17 +16,20 @@
 #include "base/tuple.h"
 #include "chrome/browser/content_settings/content_settings_pattern.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
+#include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/common/content_settings.h"
 #include "googleurl/src/gurl.h"
 
-class DictionaryValue;
+namespace base {
 class ListValue;
+}
 
 // This class is the backend for extension-defined content settings. It is used
 // by the content_settings::ExtensionProvider to integrate its settings into the
 // HostContentSettingsMap and by the content settings extension API to provide
 // extensions with access to content settings.
-class ExtensionContentSettingsStore {
+class ExtensionContentSettingsStore
+    : public base::RefCountedThreadSafe<ExtensionContentSettingsStore> {
  public:
   class Observer {
    public:
@@ -37,14 +40,9 @@ class ExtensionContentSettingsStore {
     virtual void OnContentSettingChanged(
         const std::string& extension_id,
         bool incognito) = 0;
-
-    // Called when the ExtensionContentSettingsStore is being destroyed, so
-    // observers can invalidate their weak references.
-    virtual void OnDestruction() = 0;
   };
 
   ExtensionContentSettingsStore();
-  virtual ~ExtensionContentSettingsStore();
 
   // //////////////////////////////////////////////////////////////////////////
 
@@ -60,7 +58,7 @@ class ExtensionContentSettingsStore {
       ContentSettingsType type,
       const content_settings::ResourceIdentifier& identifier,
       ContentSetting setting,
-      bool incognito);
+      ExtensionPrefsScope scope);
 
   ContentSetting GetEffectiveContentSetting(
       const GURL& embedded_url,
@@ -68,6 +66,10 @@ class ExtensionContentSettingsStore {
       ContentSettingsType type,
       const content_settings::ResourceIdentifier& identifier,
       bool incognito) const;
+
+  // Clears all contents settings set by the extension |ext_id|.
+  void ClearContentSettingsForExtension(const std::string& ext_id,
+                                        ExtensionPrefsScope scope);
 
   // Returns a list of all content setting rules for the content type |type|
   // and the resource identifier (if specified and the content type uses
@@ -81,12 +83,14 @@ class ExtensionContentSettingsStore {
   // Serializes all content settings set by the extension with ID |extension_id|
   // and returns them as a ListValue. The caller takes ownership of the returned
   // value.
-  ListValue* GetSettingsForExtension(const std::string& extension_id) const;
+  base::ListValue* GetSettingsForExtension(const std::string& extension_id,
+                                           ExtensionPrefsScope scope) const;
 
   // Deserializes content settings rules from |list| and applies them as set by
   // the extension with ID |extension_id|.
   void SetExtensionContentSettingsFromList(const std::string& extension_id,
-                                           const ListValue* dict);
+                                           const base::ListValue* list,
+                                           ExtensionPrefsScope scope);
 
   // //////////////////////////////////////////////////////////////////////////
 
@@ -109,16 +113,18 @@ class ExtensionContentSettingsStore {
   void RemoveObserver(Observer* observer);
 
  private:
+  friend class base::RefCountedThreadSafe<ExtensionContentSettingsStore>;
+
   struct ExtensionEntry;
   struct ContentSettingSpec {
-    ContentSettingSpec(const ContentSettingsPattern& pattern,
-                       const ContentSettingsPattern& embedder_pattern,
+    ContentSettingSpec(const ContentSettingsPattern& primary_pattern,
+                       const ContentSettingsPattern& secondary_pattern,
                        ContentSettingsType type,
                        const content_settings::ResourceIdentifier& identifier,
                        ContentSetting setting);
 
-    ContentSettingsPattern embedded_pattern;
-    ContentSettingsPattern top_level_pattern;
+    ContentSettingsPattern primary_pattern;
+    ContentSettingsPattern secondary_pattern;
     ContentSettingsType content_type;
     content_settings::ResourceIdentifier resource_identifier;
     ContentSetting setting;
@@ -127,6 +133,8 @@ class ExtensionContentSettingsStore {
   typedef std::map<std::string, ExtensionEntry*> ExtensionEntryMap;
 
   typedef std::list<ContentSettingSpec> ContentSettingSpecList;
+
+  virtual ~ExtensionContentSettingsStore();
 
   ContentSetting GetContentSettingFromSpecList(
       const GURL& embedded_url,
@@ -137,16 +145,21 @@ class ExtensionContentSettingsStore {
 
   ContentSettingSpecList* GetContentSettingSpecList(
       const std::string& ext_id,
-      bool incognito);
+      ExtensionPrefsScope scope);
 
   const ContentSettingSpecList* GetContentSettingSpecList(
       const std::string& ext_id,
-      bool incognito) const;
+      ExtensionPrefsScope scope) const;
+
+  // Adds all content setting rules for |type| and |identifier| found in
+  // |setting_spec_list| to |rules|.
+  static void AddRules(ContentSettingsType type,
+                       const content_settings::ResourceIdentifier& identifier,
+                       const ContentSettingSpecList* setting_spec_list,
+                       content_settings::ProviderInterface::Rules* rules);
 
   void NotifyOfContentSettingChanged(const std::string& extension_id,
                                      bool incognito);
-
-  void NotifyOfDestruction();
 
   bool OnCorrectThread();
 

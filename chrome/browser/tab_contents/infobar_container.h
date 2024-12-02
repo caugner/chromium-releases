@@ -72,11 +72,6 @@ class InfoBarContainer : public NotificationObserver {
   // anything necessary to respond, e.g. re-layout.
   void OnInfoBarStateChanged(bool is_animating);
 
-  // Removes the specified InfoBarDelegate from the selected TabContentsWrapper.
-  // This will notify us back and cause us to close the InfoBar.  This is called
-  // from the InfoBar's close button handler.
-  void RemoveDelegate(InfoBarDelegate* delegate);
-
   // Called by |infobar| to request that it be removed from the container, as it
   // is about to delete itself.  At this point, |infobar| should already be
   // hidden.
@@ -92,29 +87,35 @@ class InfoBarContainer : public NotificationObserver {
 
   // These must be implemented on each platform to e.g. adjust the visible
   // object hierarchy.
-  virtual void PlatformSpecificAddInfoBar(InfoBar* infobar) = 0;
+  virtual void PlatformSpecificAddInfoBar(InfoBar* infobar,
+                                          size_t position) = 0;
   virtual void PlatformSpecificRemoveInfoBar(InfoBar* infobar) = 0;
+  virtual void PlatformSpecificInfoBarStateChanged(bool is_animating) {}
 
  private:
   typedef std::vector<InfoBar*> InfoBars;
 
   // NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
-  // Removes an InfoBar for the specified delegate, in response to a
-  // notification from the selected TabContentsWrapper. The InfoBar's
-  // disappearance will be animated if |use_animation| is true.
-  void RemoveInfoBar(InfoBarDelegate* delegate, bool use_animation);
+  // Hides an InfoBar for the specified delegate, in response to a notification
+  // from the selected TabContentsWrapper.  The InfoBar's disappearance will be
+  // animated if |use_animation| is true.  The InfoBar will call back to
+  // RemoveInfoBar() to remove itself once it's hidden (which may mean
+  // synchronously).  Returns the position within |infobars_| the infobar was
+  // previously at.
+  size_t HideInfoBar(InfoBarDelegate* delegate, bool use_animation);
 
-  // Adds |infobar| to this container and calls Show() on it.  |animate| is
-  // passed along to infobar->Show().  Depending on the value of
-  // |callback_status|, this calls infobar->set_container(this) either before or
-  // after the call to Show() so that OnInfoBarAnimated() either will or won't
-  // be called as a result.
+  // Adds |infobar| to this container before the existing infobar at position
+  // |position| and calls Show() on it.  |animate| is passed along to
+  // infobar->Show().  Depending on the value of |callback_status|, this calls
+  // infobar->set_container(this) either before or after the call to Show() so
+  // that OnInfoBarStateChanged() either will or won't be called as a result.
   enum CallbackStatus { NO_CALLBACK, WANT_CALLBACK };
   void AddInfoBar(InfoBar* infobar,
+                  size_t position,
                   bool animate,
                   CallbackStatus callback_status);
 

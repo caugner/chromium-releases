@@ -6,14 +6,13 @@
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_VIEW_H_
 #pragma once
 
-#include "base/task.h"
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/tab_contents/infobar_container.h"
-#include "chrome/browser/ui/views/infobars/infobar_background.h"
+#include "third_party/skia/include/core/SkPath.h"
 #include "views/controls/button/button.h"
 #include "views/focus/focus_manager.h"
-
-class SkPath;
 
 namespace views {
 class ExternalFocusTracker;
@@ -34,8 +33,8 @@ class InfoBarView : public InfoBar,
  public:
   InfoBarView(TabContentsWrapper* owner, InfoBarDelegate* delegate);
 
-  SkPath* fill_path() const { return fill_path_.get(); }
-  SkPath* stroke_path() const { return stroke_path_.get(); }
+  const SkPath& fill_path() const { return fill_path_; }
+  const SkPath& stroke_path() const { return stroke_path_; }
 
  protected:
   static const int kButtonButtonSpacing;
@@ -54,7 +53,6 @@ class InfoBarView : public InfoBar,
   // Creates a menu button with an infobar-specific appearance.
   static views::MenuButton* CreateMenuButton(
       const string16& text,
-      bool normal_has_border,
       views::ViewMenuDelegate* menu_delegate);
 
   // Creates a text button with an infobar-specific appearance.
@@ -89,6 +87,7 @@ class InfoBarView : public InfoBar,
   static const int kHorizontalPadding;
 
   // InfoBar:
+  virtual void PlatformSpecificShow(bool animate) OVERRIDE;
   virtual void PlatformSpecificHide(bool animate) OVERRIDE;
   virtual void PlatformSpecificOnHeightsRecalculated() OVERRIDE;
 
@@ -101,15 +100,6 @@ class InfoBarView : public InfoBar,
   virtual void FocusWillChange(View* focused_before,
                                View* focused_now) OVERRIDE;
 
-  // Destroys the external focus tracker, if present. If |restore_focus| is
-  // true, restores focus to the view tracked by the focus tracker before doing
-  // so.
-  void DestroyFocusTracker(bool restore_focus);
-
-  // Deletes this object (called after a return to the message loop to allow
-  // the stack in ViewHierarchyChanged to unwind).
-  void DeleteSelf();
-
   // The optional icon at the left edge of the InfoBar.
   views::ImageView* icon_;
 
@@ -120,13 +110,10 @@ class InfoBarView : public InfoBar,
   // its children. Used to restore focus once the InfoBar is closed.
   scoped_ptr<views::ExternalFocusTracker> focus_tracker_;
 
-  // Used to delete this object after a return to the message loop.
-  ScopedRunnableMethodFactory<InfoBarView> delete_factory_;
-
   // The paths for the InfoBarBackground to draw, sized according to the heights
   // above.
-  scoped_ptr<SkPath> fill_path_;
-  scoped_ptr<SkPath> stroke_path_;
+  SkPath fill_path_;
+  SkPath stroke_path_;
 
   DISALLOW_COPY_AND_ASSIGN(InfoBarView);
 };

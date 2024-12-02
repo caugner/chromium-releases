@@ -25,7 +25,7 @@
 #include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -52,14 +52,12 @@ void GetFrames(std::string file_name,
   long frame_size = CalculateYUVFrameSize(file_handle, num_frames);
 
   for (int i = 0; i < num_frames; i++) {
-    scoped_refptr<media::VideoFrame> video_frame;
-
-    media::VideoFrame::CreateFrame(media::VideoFrame::YV12,
-                                   width,
-                                   height,
-                                   base::TimeDelta(),
-                                   base::TimeDelta(),
-                                   &video_frame);
+    scoped_refptr<media::VideoFrame> video_frame =
+        media::VideoFrame::CreateFrame(media::VideoFrame::YV12,
+                                       width,
+                                       height,
+                                       base::TimeDelta(),
+                                       base::TimeDelta());
     long bytes_read =
         fread(video_frame->data(0), 1, frame_size, file_handle);
 
@@ -98,7 +96,7 @@ int main(int argc, char** argv) {
   }
 
   // Read command line.
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
   gtk_init(&argc, &argv);
 #endif
   CommandLine::Init(argc, argv);
@@ -134,7 +132,7 @@ int main(int argc, char** argv) {
   gfx::GLSurface::InitializeOneOff();
   scoped_ptr<media::Window> window(new media::Window(width, height));
   gfx::GLSurface* surface =
-      gfx::GLSurface::CreateViewGLSurface(window->PluginWindow());
+      gfx::GLSurface::CreateViewGLSurface(false, window->PluginWindow());
   gfx::GLContext* context = gfx::GLContext::CreateGLContext(NULL, surface);
   context->MakeCurrent(surface);
   // This sets D3DPRESENT_INTERVAL_IMMEDIATE on Windows.

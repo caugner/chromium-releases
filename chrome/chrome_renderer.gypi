@@ -7,15 +7,14 @@
     {
       'target_name': 'renderer',
       'type': 'static_library',
-      'msvs_guid': '9301A569-5D2B-4D11-9332-B1E30AEACB8D',
       'dependencies': [
         'common',
         'common_net',
         'chrome_resources',
         'chrome_strings',
-        'safe_browsing_proto',
         '../content/content.gyp:content_renderer',
         '../content/content.gyp:content_plugin',
+        '../net/net.gyp:net',
         '../ppapi/ppapi_internal.gyp:ppapi_proxy',
         '../printing/printing.gyp:printing',
         '../skia/skia.gyp:skia',
@@ -96,19 +95,16 @@
         'renderer/blocked_plugin.h',
         'renderer/chrome_content_renderer_client.cc',
         'renderer/chrome_content_renderer_client.h',
+        'renderer/chrome_ppapi_interfaces.cc',
+        'renderer/chrome_ppapi_interfaces.h',
+        'renderer/chrome_ppb_pdf_impl.cc',
+        'renderer/chrome_ppb_pdf_impl.h',
         'renderer/chrome_render_process_observer.cc',
         'renderer/chrome_render_process_observer.h',
         'renderer/chrome_render_view_observer.cc',
         'renderer/chrome_render_view_observer.h',
-        'renderer/chrome_renderer_glue.cc',
         'renderer/content_settings_observer.cc',
         'renderer/content_settings_observer.h',
-        'renderer/devtools_agent.cc',
-        'renderer/devtools_agent.h',
-        'renderer/devtools_agent_filter.cc',
-        'renderer/devtools_agent_filter.h',
-        'renderer/devtools_client.cc',
-        'renderer/devtools_client.h',
         'renderer/external_host_bindings.cc',
         'renderer/external_host_bindings.h',
         'renderer/external_extension.cc',
@@ -120,6 +116,8 @@
         'renderer/page_click_tracker.h',
         'renderer/page_load_histograms.cc',
         'renderer/page_load_histograms.h',
+        'renderer/plugin_uma.cc',
+        'renderer/plugin_uma.h',
         'renderer/prerender/prerender_helper.cc',
         'renderer/prerender/prerender_helper.h',
         'renderer/print_web_view_helper.cc',
@@ -129,9 +127,6 @@
         'renderer/print_web_view_helper_win.cc',
         'renderer/renderer_histogram_snapshots.cc',
         'renderer/renderer_histogram_snapshots.h',
-        # TODO(noelutz): Find a better way to include these files
-        '<(protoc_out_dir)/chrome/renderer/safe_browsing/client_model.pb.cc',
-        '<(protoc_out_dir)/chrome/renderer/safe_browsing/client_model.pb.h',
         'renderer/safe_browsing/feature_extractor_clock.cc',
         'renderer/safe_browsing/feature_extractor_clock.h',
         'renderer/safe_browsing/features.cc',
@@ -182,6 +177,15 @@
             'renderer/nacl_desc_wrapper_chrome.cc',
           ],
         }],
+        ['safe_browsing==1', {
+          'defines': [
+            'ENABLE_SAFE_BROWSING',
+          ],
+        }, {  # safe_browsing==0
+          'sources/': [
+            ['exclude', '^renderer/safe_browsing/'],
+          ],
+        }],
         ['OS=="mac"', {
           'dependencies': [
             '../third_party/mach_override/mach_override.gyp:mach_override',
@@ -218,55 +222,5 @@
         }],
       ],
     },
-    {
-      # Protobuf compiler / generator for the safebrowsing client model proto.
-      'target_name': 'safe_browsing_proto',
-      'type': 'none',
-      'sources': [ 'renderer/safe_browsing/client_model.proto' ],
-      'rules': [
-        {
-          'rule_name': 'genproto',
-          'extension': 'proto',
-          'inputs': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-          ],
-          'variables': {
-            # The protoc compiler requires a proto_path argument with the
-            # directory containing the .proto file.
-            # There's no generator variable that corresponds to this, so fake it.
-            'rule_input_relpath': 'renderer/safe_browsing',
-          },
-          'outputs': [
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.h',
-            '<(protoc_out_dir)/chrome/<(rule_input_relpath)/<(RULE_INPUT_ROOT).pb.cc',
-          ],
-          'action': [
-            '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
-            '--proto_path=./<(rule_input_relpath)',
-            './<(rule_input_relpath)/<(RULE_INPUT_ROOT)<(RULE_INPUT_EXT)',
-            '--cpp_out=<(protoc_out_dir)/chrome/<(rule_input_relpath)',
-          ],
-          'message': 'Generating C++ code from <(RULE_INPUT_PATH)',
-        },
-      ],
-      'dependencies': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-        '../third_party/protobuf/protobuf.gyp:protoc#host',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '<(protoc_out_dir)',
-        ]
-      },
-      'export_dependent_settings': [
-        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-      ],
-    },
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

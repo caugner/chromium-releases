@@ -5,9 +5,9 @@
 #include "chrome/renderer/print_web_view_helper.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "chrome/common/print_messages.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
@@ -84,13 +84,14 @@ void PrintWebViewHelper::PrintPageInternal(
   skia::InitializeDC(metafile->context());
 
   int page_number = params.page_number;
+  int page_slot = params.page_slot;
 
   // Calculate the dpi adjustment.
   float scale_factor = static_cast<float>(params.params.desired_dpi /
                                           params.params.dpi);
 
   // Render page for printing.
-  RenderPage(params.params, &scale_factor, page_number, false, frame,
+  RenderPage(params.params, &scale_factor, page_number, page_slot, false, frame,
              &metafile);
 
   // Close the device context to retrieve the compiled metafile.
@@ -117,99 +118,45 @@ void PrintWebViewHelper::PrintPageInternal(
                                    &(page_params.metafile_data_handle))) {
     page_params.data_size = 0;
   }
-  Send(new PrintHostMsg_DuplicateSection(routing_id(),
-                                         page_params.metafile_data_handle,
-                                         &page_params.metafile_data_handle));
+
   Send(new PrintHostMsg_DidPrintPage(routing_id(), page_params));
 }
 
-bool PrintWebViewHelper::CreatePreviewDocument(
-    const PrintMsg_PrintPages_Params& params, WebKit::WebFrame* frame,
-    WebKit::WebNode* node) {
-  int page_count = 0;
-  PrintMsg_Print_Params print_params = params.params;
-  UpdatePrintableSizeInPrintParameters(frame, node, &print_params);
-  PrepareFrameAndViewForPrint prep_frame_view(print_params, frame, node,
-                                              frame->view());
-  page_count = prep_frame_view.GetExpectedPageCount();
-  if (!page_count)
-    return false;
-
-  scoped_ptr<Metafile> metafile(new printing::PreviewMetafile);
-  metafile->Init();
-
+void PrintWebViewHelper::RenderPreviewPage(int page_number) {
+  PrintMsg_Print_Params print_params = print_preview_context_.print_params();
   // Calculate the dpi adjustment.
-  float shrink = static_cast<float>(print_params.desired_dpi /
-                                    print_params.dpi);
+  float scale_factor = static_cast<float>(print_params.desired_dpi /
+                                          print_params.dpi);
+
+  // |metafile| is needed for RenderPage() below. |metafile| will not take the
+  // ownership of |print_preview_context_| metafile.
+  scoped_ptr<Metafile> metafile(print_preview_context_.metafile());
 
   base::TimeTicks begin_time = base::TimeTicks::Now();
-  base::TimeTicks page_begin_time = begin_time;
+  RenderPage(print_params, &scale_factor, page_number,
+             print_preview_context_.GetPageSlotForPage(page_number), true,
+             print_preview_context_.frame(), &metafile);
 
-  if (params.pages.empty()) {
-    for (int i = 0; i < page_count; ++i) {
-      float scale_factor = shrink;
-      RenderPage(print_params, &scale_factor, i, true, frame, &metafile);
-      page_begin_time = ReportPreviewPageRenderTime(page_begin_time);
-    }
-  } else {
-    for (size_t i = 0; i < params.pages.size(); ++i) {
-      if (params.pages[i] >= page_count)
-        break;
-      float scale_factor = shrink;
-      RenderPage(print_params, &scale_factor,
-                 static_cast<int>(params.pages[i]), true, frame, &metafile);
-      page_begin_time = ReportPreviewPageRenderTime(page_begin_time);
-    }
+  print_preview_context_.RenderedPreviewPage(
+      base::TimeTicks::Now() - begin_time);
+
+  // Release since |print_preview_context_| is the real owner.
+  metafile.release();
+  scoped_ptr<printing::Metafile> page_metafile;
+  if (print_preview_context_.IsModifiable()) {
+    page_metafile.reset(reinterpret_cast<printing::PreviewMetafile*>(
+        print_preview_context_.metafile())->GetMetafileForCurrentPage());
   }
-
-  base::TimeDelta render_time = base::TimeTicks::Now() - begin_time;
-
-  // Ensure that printing has finished before we start cleaning up and
-  // allocating buffers; this causes prep_frame_view to flush anything pending
-  // into the metafile. Then we can get the final size and copy it into a
-  // shared segment.
-  prep_frame_view.FinishPrinting();
-
-  if (!metafile->FinishDocument())
-    NOTREACHED();
-
-  ReportTotalPreviewGenerationTime(params.pages.size(), page_count,
-                                   render_time,
-                                   base::TimeTicks::Now() - begin_time);
-
-  // Get the size of the compiled metafile.
-  uint32 buf_size = metafile->GetDataSize();
-  DCHECK_GT(buf_size, 128u);
-
-  PrintHostMsg_DidPreviewDocument_Params preview_params;
-  preview_params.data_size = buf_size;
-  preview_params.document_cookie = params.params.document_cookie;
-  preview_params.expected_pages_count = page_count;
-  preview_params.modifiable = IsModifiable(frame, node);
-
-  if (!CopyMetafileDataToSharedMem(metafile.get(),
-                                   &(preview_params.metafile_data_handle))) {
-    return false;
-  }
-  Send(new PrintHostMsg_DuplicateSection(routing_id(),
-                                         preview_params.metafile_data_handle,
-                                         &preview_params.metafile_data_handle));
-  Send(new PrintHostMsg_PagesReadyForPreview(routing_id(), preview_params));
-  return true;
+  PreviewPageRendered(page_number, page_metafile.get());
 }
 
 void PrintWebViewHelper::RenderPage(
     const PrintMsg_Print_Params& params, float* scale_factor, int page_number,
-    bool is_preview, WebFrame* frame, scoped_ptr<Metafile>* metafile) {
-  double content_width_in_points;
-  double content_height_in_points;
-  double margin_top_in_points;
-  double margin_left_in_points;
+    int page_slot, bool is_preview, WebFrame* frame,
+    scoped_ptr<Metafile>* metafile) {
+  PageSizeMargins page_layout_in_points;
   GetPageSizeAndMarginsInPoints(frame, page_number, params,
-                                &content_width_in_points,
-                                &content_height_in_points,
-                                &margin_top_in_points, NULL, NULL,
-                                &margin_left_in_points);
+                                &page_layout_in_points);
 
   int width;
   int height;
@@ -222,17 +169,21 @@ void PrintWebViewHelper::RenderPage(
     // Since WebKit extends the page width depending on the magical scale factor
     // we make sure the canvas covers the worst case scenario (x2.0 currently).
     // PrintContext will then set the correct clipping region.
-    width = static_cast<int>(content_width_in_points * params.max_shrink);
-    height = static_cast<int>(content_height_in_points * params.max_shrink);
+    width = static_cast<int>(page_layout_in_points.content_width *
+                             params.max_shrink);
+    height = static_cast<int>(page_layout_in_points.content_height *
+                              params.max_shrink);
   }
 
   gfx::Size page_size(width, height);
-  gfx::Rect content_area(static_cast<int>(margin_left_in_points),
-                         static_cast<int>(margin_top_in_points),
-                         static_cast<int>(content_width_in_points),
-                         static_cast<int>(content_height_in_points));
+  gfx::Rect content_area(
+      static_cast<int>(page_layout_in_points.margin_left),
+      static_cast<int>(page_layout_in_points.margin_top),
+      static_cast<int>(page_layout_in_points.content_width),
+      static_cast<int>(page_layout_in_points.content_height));
   SkDevice* device = (*metafile)->StartPageForVectorCanvas(
-      page_size, content_area, frame->getPrintPageShrink(page_number));
+      page_slot, page_size, content_area,
+      frame->getPrintPageShrink(page_number));
   DCHECK(device);
   // The printPage method may take a reference to the canvas we pass down, so it
   // can't be a stack object.
@@ -315,7 +266,6 @@ bool PrintWebViewHelper::CopyMetafileDataToSharedMem(
     Metafile* metafile, base::SharedMemoryHandle* shared_mem_handle) {
   uint32 buf_size = metafile->GetDataSize();
   base::SharedMemory shared_buf;
-
   // http://msdn2.microsoft.com/en-us/library/ms535522.aspx
   // Windows 2000/XP: When a page in a spooled file exceeds approximately 350
   // MB, it can fail to print and not send an error message.
@@ -338,5 +288,8 @@ bool PrintWebViewHelper::CopyMetafileDataToSharedMem(
   }
   shared_buf.GiveToProcess(base::GetCurrentProcessHandle(), shared_mem_handle);
   shared_buf.Unmap();
+
+  Send(new PrintHostMsg_DuplicateSection(routing_id(), *shared_mem_handle,
+                                         shared_mem_handle));
   return true;
 }

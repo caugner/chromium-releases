@@ -6,12 +6,13 @@
 #define CHROME_BROWSER_UI_GTK_INFOBARS_INFOBAR_GTK_H_
 #pragma once
 
+#include <gtk/gtk.h>
+
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
-#include "chrome/browser/ui/gtk/infobars/infobar_arrow_model.h"
+#include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/ui/gtk/owned_widget_gtk.h"
-#include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -19,56 +20,28 @@
 
 class CustomDrawButton;
 class GtkThemeService;
-class InfoBarContainerGtk;
 class InfoBarDelegate;
 
-class InfoBar : public SlideAnimatorGtk::Delegate,
-                public NotificationObserver,
-                public InfoBarArrowModel::Observer {
+class InfoBarGtk : public InfoBar,
+                   public NotificationObserver {
  public:
-  explicit InfoBar(InfoBarDelegate* delegate);
-  virtual ~InfoBar();
-
-  InfoBarDelegate* delegate() const { return delegate_; }
+  explicit InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate);
+  virtual ~InfoBarGtk();
 
   // Get the top level native GTK widget for this infobar.
   GtkWidget* widget();
 
-  // Set a link to the parent InfoBarContainer. This must be set before the
-  // InfoBar is added to the view hierarchy.
-  void set_container(InfoBarContainerGtk* container) { container_ = container; }
+  GdkColor GetBorderColor() const;
 
-  // Makes the infobar visible. If |animate| is true, the infobar is then
-  // animated to full size.
-  void Show(bool animate);
+  // Returns the target height of the infobar if the bar is animating,
+  // otherwise 0. We care about this number since we want to prevent
+  // unnecessary renderer repaints while animating.
+  int AnimatingHeight() const;
 
-  // Makes the infobar hidden. If |animate| is true, the infobar is first
-  // animated to zero size. Once the infobar is hidden it notifies the delegate
-  // that it has closed.
-  void Hide(bool animate);
-
-  // Returns true if the infobar is showing the its open or close animation.
-  bool IsAnimating();
-
-  // Returns true if the infobar is showing the close animation.
-  bool IsClosing();
-
-  void SetThemeProvider(GtkThemeService* theme_provider);
-
-  // Show an arrow that originates from another infobar (i.e. a bar was added
-  // below this one). If |other| is NULL, stop showing the arrow.
-  void ShowArrowFor(InfoBar* other, bool animate);
-
-  // InfoBarArrowModel::Observer implementation.
-  virtual void PaintStateChanged();
-
-  // SlideAnimatorGtk::Delegate implementation.
-  virtual void Closed();
-
-  // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+  // Conversion from cairo colors to SkColor.
+  typedef void (InfoBarGtk::*ColorGetter)(InfoBarDelegate::Type,
+                                          double* r, double* g, double* b);
+  SkColor ConvertGetColor(ColorGetter getter);
 
   // Retrieves the component colors for the infobar's background
   // gradient. (This varies by infobars and can be animated to change).
@@ -77,18 +50,17 @@ class InfoBar : public SlideAnimatorGtk::Delegate,
   virtual void GetBottomColor(InfoBarDelegate::Type type,
                               double* r, double* g, double *b);
 
-  // The total height of the info bar.
-  static const int kInfoBarHeight;
-
  protected:
   // Spacing after message (and before buttons).
   static const int kEndOfLabelSpacing;
-  // Spacing between buttons.
-  static const int kButtonButtonSpacing;
 
-  // Removes our associated InfoBarDelegate from the associated TabContents.
-  // (Will lead to this InfoBar being closed).
-  void RemoveInfoBar() const;
+  // Creates a label with the appropriate font and color for the current
+  // gtk-theme state. It is InfoBarGtk's responsibility to observe browser
+  // theme changes and update the label's state.
+  GtkWidget* CreateLabel(const std::string& text);
+
+  // Creates a link button with the appropriate current gtk-theme state.
+  GtkWidget* CreateLinkButton(const std::string& text);
 
   // Adds |display_text| to the infobar. If |link_text| is not empty, it is
   // rendered as a hyperlink and inserted into |display_text| at |link_offset|,
@@ -99,10 +71,16 @@ class InfoBar : public SlideAnimatorGtk::Delegate,
                               size_t link_offset,
                               GCallback callback);
 
-  // The top level widget of the infobar.
-  scoped_ptr<SlideAnimatorGtk> slide_widget_;
+  // InfoBar:
+  virtual void PlatformSpecificShow(bool animate) OVERRIDE;
+  virtual void PlatformSpecificOnHeightsRecalculated() OVERRIDE;
 
-  // The second highest widget in the hierarchy (after the slide widget).
+  // NotificationObserver:
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
+  // The second highest widget in the hierarchy (after the |widget_|).
   GtkWidget* bg_box_;
 
   // The hbox that holds infobar elements (button, text, icon, etc.).
@@ -111,28 +89,26 @@ class InfoBar : public SlideAnimatorGtk::Delegate,
   // The x that closes the bar.
   scoped_ptr<CustomDrawButton> close_button_;
 
-  // The InfoBar's container
-  InfoBarContainerGtk* container_;
-
-  // The InfoBar's delegate.
-  InfoBarDelegate* delegate_;
-
   // The theme provider, used for getting border colors.
   GtkThemeService* theme_service_;
-
-  // The model that tracks the paint state of the arrow for the infobar
-  // below this one (if it exists).
-  InfoBarArrowModel arrow_model_;
 
   NotificationRegistrar registrar_;
 
  private:
-  CHROMEGTK_CALLBACK_0(InfoBar, void, OnCloseButton);
-  CHROMEGTK_CALLBACK_1(InfoBar, gboolean, OnBackgroundExpose, GdkEventExpose*);
+  CHROMEGTK_CALLBACK_0(InfoBarGtk, void, OnCloseButton);
+  CHROMEGTK_CALLBACK_1(InfoBarGtk, gboolean, OnBackgroundExpose,
+                       GdkEventExpose*);
+
+  CHROMEGTK_CALLBACK_2(InfoBarGtk, void, OnChildSizeRequest, GtkWidget*,
+                       GtkRequisition*);
 
   void UpdateBorderColor();
 
-  DISALLOW_COPY_AND_ASSIGN(InfoBar);
+  // A GtkExpandedContainer that contains |bg_box_| so we can varry the height
+  // of the infobar.
+  OwnedWidgetGtk widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(InfoBarGtk);
 };
 
 #endif  // CHROME_BROWSER_UI_GTK_INFOBARS_INFOBAR_GTK_H_

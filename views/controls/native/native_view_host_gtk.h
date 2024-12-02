@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,7 @@ class NativeViewHostGtk : public NativeViewHostWrapper {
   virtual void ShowWidget(int x, int y, int w, int h);
   virtual void HideWidget();
   virtual void SetFocus();
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible();
 
  private:
   // Create and Destroy the GtkFixed that performs clipping on our hosted
@@ -55,6 +56,9 @@ class NativeViewHostGtk : public NativeViewHostWrapper {
   // Returns the descendant of fixed_ that has focus, or NULL if focus is not
   // on a descendant of fixed_.
   GtkWidget* GetFocusedDescendant();
+
+  // Connects a new host widget.
+  void AttachHostWidget();
 
   // Invoked from the 'destroy' signal.
   static void CallDestroy(GtkObject* object, NativeViewHostGtk* host);

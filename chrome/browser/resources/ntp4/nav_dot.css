@@ -20,30 +20,59 @@
 
 /* TODO(estade): improve focus indicator. */
 .dot {
-  border-top: 5px solid;
+  box-sizing: border-box;
   cursor: pointer;
-  font-size: 9pt;
-  height: 100%;
-  margin: 0 10px;
-  padding-top: 5px;
+  margin-right: 10px;
   text-align: left;
-  width: 60px;
-  -webkit-box-sizing: border-box;
-  -webkit-padding-start: 5px;
-  -webkit-transition: -webkit-transform 500ms,
-                      background-color 250ms;
+  width: 80px;
+  -webkit-padding-start: 2px;
+  -webkit-transition: width 0.25s, margin-right 0.25s;
 }
 
-.dot.new {
-  -webkit-transform: translate(0, 40px);
+.dot.small {
+  margin-right: 0;
+  width: 0;
 }
 
-.dot span {
-  /* Inline block looks better when the multi-line text is selected. */
-  display: inline-block;
+.dot .selection-bar {
+  border-bottom: 5px solid;
+  border-color: rgba(0, 0, 0, 0.1);
+  height: 10px;
+  -webkit-transition: border-color 0.2s;
 }
 
-.dot span:focus {
-  background-color: white;
-  -webkit-user-select: text;
+.dot input {
+  background-color: transparent;
+  cursor: inherit;
+  /* TODO(estade): the font needs tweaking. */
+  font-size: 8pt;
+  font-weight: bold;
+  padding-top: 0;
+  /* 10 less than the width of the dot. */
+  width: 70px;
+  -webkit-appearance: caret;
+  -webkit-transition: color 0.2s;
+}
+
+.dot input:focus {
+  cursor: auto;
+}
+
+/* Everything below here should be themed but we don't have appropriate colors
+ * yet.
+ */
+.dot input {
+  color: #b2b2b2;
+}
+
+.dot:hover input, .dot.selected input {
+  color: #7f7f7f;
+}
+
+.dot:hover .selection-bar {
+  border-color: #b2b2b2;
+}
+
+.dot.selected .selection-bar {
+  border-color: #7f7f7f;
 }

@@ -12,11 +12,11 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_info_map.h"
 #include "content/browser/appcache/appcache_dispatcher_host.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/content_browser_client.h"
+#include "content/browser/debugger/worker_devtools_message_filter.h"
 #include "content/browser/file_system/file_system_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
 #include "content/browser/renderer_host/blob_message_filter.h"
@@ -256,6 +256,7 @@ void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
       new SocketStreamDispatcherHost(
           new URLRequestContextSelector(request_context), resource_context_);
   AddFilter(socket_stream_dispatcher_host);
+  AddFilter(new WorkerDevToolsMessageFilter(id()));
 }
 
 void WorkerProcessHost::CreateWorker(const WorkerInstance& instance) {
@@ -315,7 +316,7 @@ bool WorkerProcessHost::OnMessageReceived(const IPC::Message& message) {
   if (!msg_is_ok) {
     NOTREACHED();
     UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_WPH"));
-    base::KillProcess(handle(), ResultCodes::KILLED_BAD_MESSAGE, false);
+    base::KillProcess(handle(), content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
   }
 
   if (handled)
@@ -457,20 +458,18 @@ bool WorkerProcessHost::CanShutdown() {
 void WorkerProcessHost::UpdateTitle() {
   std::set<std::string> titles;
   for (Instances::iterator i = instances_.begin(); i != instances_.end(); ++i) {
-    std::string title =
-        net::RegistryControlledDomainService::GetDomainAndRegistry(i->url());
+    // Allow the embedder first crack at special casing the title.
+    std::string title = content::GetContentClient()->browser()->
+        GetWorkerProcessTitle(i->url(), *resource_context_);
+
+    if (title.empty()) {
+      title = net::RegistryControlledDomainService::GetDomainAndRegistry(
+          i->url());
+    }
+
     // Use the host name if the domain is empty, i.e. localhost or IP address.
     if (title.empty())
       title = i->url().host();
-
-    // Check if it's an extension-created worker, in which case we want to use
-    // the name of the extension.
-    std::string extension_name = resource_context_->
-        extension_info_map()->GetNameForExtension(title);
-    if (!extension_name.empty()) {
-      titles.insert(extension_name);
-      continue;
-    }
 
     // If the host name is empty, i.e. file url, use the path.
     if (title.empty())

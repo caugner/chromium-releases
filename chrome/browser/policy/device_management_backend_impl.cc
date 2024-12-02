@@ -11,34 +11,37 @@
 #include <sys/utsname.h>
 #endif
 
+#include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "chrome/browser/policy/device_management_service.h"
+#include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/common/chrome_version_info.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/system_access.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #endif
 
 namespace policy {
 
 // Name constants for URL query parameters.
-const char DeviceManagementBackendImpl::kParamRequest[] = "request";
-const char DeviceManagementBackendImpl::kParamDeviceType[] = "devicetype";
+const char DeviceManagementBackendImpl::kParamAgent[] = "agent";
 const char DeviceManagementBackendImpl::kParamAppType[] = "apptype";
 const char DeviceManagementBackendImpl::kParamDeviceID[] = "deviceid";
-const char DeviceManagementBackendImpl::kParamAgent[] = "agent";
+const char DeviceManagementBackendImpl::kParamDeviceType[] = "devicetype";
+const char DeviceManagementBackendImpl::kParamOAuthToken[] = "oauth_token";
 const char DeviceManagementBackendImpl::kParamPlatform[] = "platform";
+const char DeviceManagementBackendImpl::kParamRequest[] = "request";
 
 // String constants for the device and app type we report to the server.
+const char DeviceManagementBackendImpl::kValueAppType[] = "Chrome";
+const char DeviceManagementBackendImpl::kValueDeviceType[] = "2";
+const char DeviceManagementBackendImpl::kValueRequestPolicy[] = "policy";
 const char DeviceManagementBackendImpl::kValueRequestRegister[] = "register";
 const char DeviceManagementBackendImpl::kValueRequestUnregister[] =
     "unregister";
-const char DeviceManagementBackendImpl::kValueRequestPolicy[] = "policy";
-const char DeviceManagementBackendImpl::kValueDeviceType[] = "2";
-const char DeviceManagementBackendImpl::kValueAppType[] = "Chrome";
 
 namespace {
 
@@ -153,8 +156,8 @@ class DeviceManagementJobBase
     query_params_.Put(name, value);
   }
 
-  void SetAuthToken(const std::string& auth_token) {
-    auth_token_ = auth_token;
+  void SetGaiaAuthToken(const std::string& gaia_auth_token) {
+    gaia_auth_token_ = gaia_auth_token;
   }
 
   void SetDeviceManagementToken(const std::string& device_management_token) {
@@ -181,7 +184,7 @@ class DeviceManagementJobBase
   URLQueryParameters query_params_;
 
   // Auth token (if applicaple).
-  std::string auth_token_;
+  std::string gaia_auth_token_;
 
   // Device management token (if applicable).
   std::string device_management_token_;
@@ -271,8 +274,8 @@ GURL DeviceManagementJobBase::GetURL(
 void DeviceManagementJobBase::ConfigureRequest(URLFetcher* fetcher) {
   fetcher->set_upload_data(kPostContentType, payload_);
   std::string extra_headers;
-  if (!auth_token_.empty())
-    extra_headers += kServiceTokenAuthHeader + auth_token_ + "\n";
+  if (!gaia_auth_token_.empty())
+    extra_headers += kServiceTokenAuthHeader + gaia_auth_token_ + "\n";
   if (!device_management_token_.empty())
     extra_headers += kDMTokenAuthHeader + device_management_token_ + "\n";
   fetcher->set_extra_request_headers(extra_headers);
@@ -283,7 +286,8 @@ class DeviceManagementRegisterJob : public DeviceManagementJobBase {
  public:
   DeviceManagementRegisterJob(
       DeviceManagementBackendImpl* backend_impl,
-      const std::string& auth_token,
+      const std::string& gaia_auth_token,
+      const std::string& oauth_token,
       const std::string& device_id,
       const em::DeviceRegisterRequest& request,
       DeviceManagementBackend::DeviceRegisterResponseDelegate* delegate)
@@ -292,7 +296,10 @@ class DeviceManagementRegisterJob : public DeviceManagementJobBase {
           DeviceManagementBackendImpl::kValueRequestRegister,
           device_id),
         delegate_(delegate) {
-    SetAuthToken(auth_token);
+    if (!oauth_token.empty())
+      SetQueryParam(DeviceManagementBackendImpl::kParamOAuthToken, oauth_token);
+    else if (!gaia_auth_token.empty())
+      SetGaiaAuthToken(gaia_auth_token);
     em::DeviceManagementRequest request_wrapper;
     request_wrapper.mutable_register_request()->CopyFrom(request);
     SetPayload(request_wrapper);
@@ -302,9 +309,31 @@ class DeviceManagementRegisterJob : public DeviceManagementJobBase {
  private:
   // DeviceManagementJobBase overrides.
   virtual void OnError(DeviceManagementBackend::ErrorCode error) {
+    MetricToken sample;
+    switch (error) {
+      case DeviceManagementBackend::kErrorRequestInvalid:
+      case DeviceManagementBackend::kErrorRequestFailed:
+        sample = kMetricTokenFetchRequestFailed;
+        break;
+      case DeviceManagementBackend::kErrorServiceDeviceNotFound:
+        sample = kMetricTokenFetchDeviceNotFound;
+        break;
+      case DeviceManagementBackend::kErrorServiceManagementNotSupported:
+        sample = kMetricTokenFetchManagementNotSupported;
+        break;
+      case DeviceManagementBackend::kErrorResponseDecoding:
+        sample = kMetricTokenFetchBadResponse;
+        break;
+      default:
+        sample = kMetricTokenFetchServerFailed;
+        break;
+    }
+    UMA_HISTOGRAM_ENUMERATION(kMetricToken, sample, kMetricTokenSize);
     delegate_->OnError(error);
   }
   virtual void OnResponse(const em::DeviceManagementResponse& response) {
+    UMA_HISTOGRAM_ENUMERATION(kMetricToken, kMetricTokenFetchResponseReceived,
+                              kMetricTokenSize);
     delegate_->HandleRegisterResponse(response.register_response());
   }
 
@@ -372,9 +401,31 @@ class DeviceManagementPolicyJob : public DeviceManagementJobBase {
  private:
   // DeviceManagementJobBase overrides.
   virtual void OnError(DeviceManagementBackend::ErrorCode error) {
+    MetricPolicy sample;
+    switch (error) {
+      case DeviceManagementBackend::kErrorRequestInvalid:
+      case DeviceManagementBackend::kErrorRequestFailed:
+        sample = kMetricPolicyFetchRequestFailed;
+        break;
+      case DeviceManagementBackend::kErrorServicePolicyNotFound:
+        sample = kMetricPolicyFetchNotFound;
+        break;
+      case DeviceManagementBackend::kErrorServiceManagementTokenInvalid:
+        sample = kMetricPolicyFetchInvalidToken;
+        break;
+      case DeviceManagementBackend::kErrorResponseDecoding:
+        sample = kMetricPolicyFetchBadResponse;
+        break;
+      default:
+        sample = kMetricPolicyFetchServerFailed;
+        break;
+    }
+    UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, sample, kMetricPolicySize);
     delegate_->OnError(error);
   }
   virtual void OnResponse(const em::DeviceManagementResponse& response) {
+    UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchResponseReceived,
+                              kMetricPolicySize);
     delegate_->HandlePolicyResponse(response.policy_response());
   }
 
@@ -420,12 +471,13 @@ std::string DeviceManagementBackendImpl::GetPlatformString() {
   std::string os_hardware(base::SysInfo::CPUArchitecture());
 
 #if defined(OS_CHROMEOS)
-  chromeos::SystemAccess* sys_lib = chromeos::SystemAccess::GetInstance();
+  chromeos::system::StatisticsProvider* provider =
+      chromeos::system::StatisticsProvider::GetInstance();
 
   std::string hwclass;
   std::string board;
-  if (!sys_lib->GetMachineStatistic(kMachineInfoHWClass, &hwclass) ||
-      !sys_lib->GetMachineStatistic(kMachineInfoBoard, &board)) {
+  if (!provider->GetMachineStatistic(kMachineInfoHWClass, &hwclass) ||
+      !provider->GetMachineStatistic(kMachineInfoBoard, &board)) {
     LOG(ERROR) << "Failed to get machine information";
   }
   os_name += ",CrOS," + board;
@@ -463,12 +515,15 @@ void DeviceManagementBackendImpl::AddJob(DeviceManagementJobBase* job) {
 }
 
 void DeviceManagementBackendImpl::ProcessRegisterRequest(
-    const std::string& auth_token,
+    const std::string& gaia_auth_token,
+    const std::string& oauth_token,
     const std::string& device_id,
     const em::DeviceRegisterRequest& request,
     DeviceRegisterResponseDelegate* delegate) {
-  AddJob(new DeviceManagementRegisterJob(this, auth_token, device_id, request,
-                                         delegate));
+  UMA_HISTOGRAM_ENUMERATION(kMetricToken, kMetricTokenFetchRequested,
+                            kMetricTokenSize);
+  AddJob(new DeviceManagementRegisterJob(this, gaia_auth_token, oauth_token,
+                                         device_id, request, delegate));
 }
 
 void DeviceManagementBackendImpl::ProcessUnregisterRequest(
@@ -485,6 +540,8 @@ void DeviceManagementBackendImpl::ProcessPolicyRequest(
     const std::string& device_id,
     const em::DevicePolicyRequest& request,
     DevicePolicyResponseDelegate* delegate) {
+  UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchRequested,
+                            kMetricPolicySize);
   AddJob(new DeviceManagementPolicyJob(this, device_management_token, device_id,
                                        request, delegate));
 }

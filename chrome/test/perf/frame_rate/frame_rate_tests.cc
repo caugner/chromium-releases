@@ -30,6 +30,7 @@ class FrameRateTest : public UIPerfTest {
     PathService::Get(chrome::DIR_TEST_DATA, &test_path);
     test_path = test_path.Append(FILE_PATH_LITERAL("perf"));
     test_path = test_path.Append(FILE_PATH_LITERAL("frame_rate"));
+    test_path = test_path.Append(FILE_PATH_LITERAL("content"));
     test_path = test_path.AppendASCII(name);
     return test_path;
   }
@@ -47,12 +48,12 @@ class FrameRateTest : public UIPerfTest {
     ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
               tab->NavigateToURL(net::FilePathToFileURL(test_path)));
 
-    // Start the test.
-    ASSERT_TRUE(tab->NavigateToURLAsync(GURL("javascript:__start();")));
+    // Start the tests.
+    ASSERT_TRUE(tab->NavigateToURLAsync(GURL("javascript:__start_all();")));
 
-    // Block until the test completes.
+    // Block until the tests completes.
     ASSERT_TRUE(WaitUntilJavaScriptCondition(
-        tab, L"", L"window.domAutomationController.send(!__running);",
+        tab, L"", L"window.domAutomationController.send(!__running_all);",
         TestTimeouts::huge_test_timeout_ms()));
 
     // Read out the results.
@@ -60,7 +61,7 @@ class FrameRateTest : public UIPerfTest {
     ASSERT_TRUE(tab->ExecuteAndExtractString(
         L"",
         L"window.domAutomationController.send("
-        L"JSON.stringify(__calc_results()));",
+        L"JSON.stringify(__calc_results_total()));",
         &json));
 
     std::map<std::string, std::string> results;
@@ -68,43 +69,38 @@ class FrameRateTest : public UIPerfTest {
 
     ASSERT_TRUE(results.find("mean") != results.end());
     ASSERT_TRUE(results.find("sigma") != results.end());
+    ASSERT_TRUE(results.find("gestures") != results.end());
+    ASSERT_TRUE(results.find("means") != results.end());
+    ASSERT_TRUE(results.find("sigmas") != results.end());
+
+    std::cout << "Gestures: " + results["gestures"] + "\n";
+    std::cout << "Means:    " + results["means"] + "\n";
+    std::cout << "Sigmas:   " + results["sigmas"] + "\n";
+    PrintResultList("fps", suffix, "", results["means"],
+                    "frames-per-second", true);
 
     std::string mean_and_error = results["mean"] + "," + results["sigma"];
-    PrintResultMeanAndError("fps" + suffix, "", "", mean_and_error,
-                            "frames-per-second", false);
+    PrintResultMeanAndError("fps", suffix, "", mean_and_error,
+                            "frames-per-second", true);
   }
 };
 
 class FrameRateTest_Reference : public FrameRateTest {
  public:
-  // Override the browser directory that is used by UITest::SetUp to cause it
-  // to use the reference build instead.
   void SetUp() {
-    FilePath dir;
-    PathService::Get(chrome::DIR_TEST_TOOLS, &dir);
-    dir = dir.AppendASCII("reference_build");
-#if defined(OS_WIN)
-    dir = dir.AppendASCII("chrome");
-#elif defined(OS_LINUX)
-    dir = dir.AppendASCII("chrome_linux");
-#elif defined(OS_MACOSX)
-    dir = dir.AppendASCII("chrome_mac");
-#endif
-    browser_directory_ = dir;
+    UseReferenceBuild();
     FrameRateTest::SetUp();
   }
 };
 
-TEST_F(FrameRateTest, Blank) {
-  RunTest("blank", "");
+#define FRAME_RATE_TEST(content) \
+TEST_F(FrameRateTest, content) { \
+  RunTest(#content, ""); \
+} \
+TEST_F(FrameRateTest_Reference, content) { \
+  RunTest(#content, "_ref"); \
 }
-
-// TODO(darin): Need to update the reference build to a version that supports
-// the webkitRequestAnimationFrame API.
-#if 0
-TEST_F(FrameRateTest_Reference, Blank) {
-  RunTest("blank", "_ref");
-}
-#endif
+FRAME_RATE_TEST(blank);
+FRAME_RATE_TEST(googleblog);
 
 }  // namespace

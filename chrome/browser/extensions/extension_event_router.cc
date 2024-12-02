@@ -22,24 +22,12 @@ namespace {
 
 const char kDispatchEvent[] = "Event.dispatchJSON";
 
-static void DispatchEvent(RenderProcessHost* renderer,
-                          const std::string& extension_id,
-                          const std::string& event_name,
-                          const std::string& event_args,
-                          const GURL& event_url) {
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(event_name));
-  args.Set(1, Value::CreateStringValue(event_args));
-  renderer->Send(new ExtensionMsg_MessageInvoke(MSG_ROUTING_CONTROL,
-      extension_id, kDispatchEvent, args, event_url));
-}
-
 static void NotifyEventListenerRemovedOnIOThread(
-    ProfileId profile_id,
+    void* profile,
     const std::string& extension_id,
     const std::string& sub_event_name) {
   ExtensionWebRequestEventRouter::GetInstance()->RemoveEventListener(
-      profile_id, extension_id, sub_event_name);
+      profile, extension_id, sub_event_name);
 }
 
 }  // namespace
@@ -62,30 +50,24 @@ struct ExtensionEventRouter::EventListener {
 };
 
 // static
-bool ExtensionEventRouter::CanCrossIncognito(Profile* profile,
-                                             const std::string& extension_id) {
-  const Extension* extension =
-      profile->GetExtensionService()->GetExtensionById(extension_id, false);
-  return CanCrossIncognito(profile, extension);
-}
-
-// static
-bool ExtensionEventRouter::CanCrossIncognito(Profile* profile,
-                                             const Extension* extension) {
-  // We allow the extension to see events and data from another profile iff it
-  // uses "spanning" behavior and it has incognito access. "split" mode
-  // extensions only see events for a matching profile.
-  return
-      (profile->GetExtensionService()->IsIncognitoEnabled(extension->id()) &&
-       !extension->incognito_split_mode());
+void ExtensionEventRouter::DispatchEvent(IPC::Message::Sender* ipc_sender,
+                                         const std::string& extension_id,
+                                         const std::string& event_name,
+                                         const std::string& event_args,
+                                         const GURL& event_url) {
+  ListValue args;
+  args.Set(0, Value::CreateStringValue(event_name));
+  args.Set(1, Value::CreateStringValue(event_args));
+  ipc_sender->Send(new ExtensionMsg_MessageInvoke(MSG_ROUTING_CONTROL,
+      extension_id, kDispatchEvent, args, event_url));
 }
 
 ExtensionEventRouter::ExtensionEventRouter(Profile* profile)
     : profile_(profile),
       extension_devtools_manager_(profile->GetExtensionDevToolsManager()) {
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_TERMINATED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                  NotificationService::AllSources());
 }
 
@@ -133,7 +115,7 @@ void ExtensionEventRouter::RemoveEventListener(
       BrowserThread::IO, FROM_HERE,
       NewRunnableFunction(
           &NotifyEventListenerRemovedOnIOThread,
-          profile_->GetRuntimeId(), listener.extension_id, event_name));
+          profile_, listener.extension_id, event_name));
 }
 
 bool ExtensionEventRouter::HasEventListener(const std::string& event_name) {
@@ -157,24 +139,42 @@ bool ExtensionEventRouter::ExtensionHasEventListener(
 }
 
 void ExtensionEventRouter::DispatchEventToRenderers(
-    const std::string& event_name, const std::string& event_args,
-    Profile* restrict_to_profile, const GURL& event_url) {
-  DispatchEventImpl("", event_name, event_args, restrict_to_profile, event_url);
+    const std::string& event_name,
+    const std::string& event_args,
+    Profile* restrict_to_profile,
+    const GURL& event_url) {
+  DispatchEventImpl("", event_name, event_args, restrict_to_profile, "",
+                    event_url);
 }
 
 void ExtensionEventRouter::DispatchEventToExtension(
     const std::string& extension_id,
-    const std::string& event_name, const std::string& event_args,
-    Profile* restrict_to_profile, const GURL& event_url) {
+    const std::string& event_name,
+    const std::string& event_args,
+    Profile* restrict_to_profile,
+    const GURL& event_url) {
   DCHECK(!extension_id.empty());
   DispatchEventImpl(extension_id, event_name, event_args, restrict_to_profile,
-                    event_url);
+                    "", event_url);
+}
+
+void ExtensionEventRouter::DispatchEventsToRenderersAcrossIncognito(
+    const std::string& event_name,
+    const std::string& event_args,
+    Profile* restrict_to_profile,
+    const std::string& cross_incognito_args,
+    const GURL& event_url) {
+  DispatchEventImpl("", event_name, event_args, restrict_to_profile,
+                    cross_incognito_args, event_url);
 }
 
 void ExtensionEventRouter::DispatchEventImpl(
     const std::string& extension_id,
-    const std::string& event_name, const std::string& event_args,
-    Profile* restrict_to_profile, const GURL& event_url) {
+    const std::string& event_name,
+    const std::string& event_args,
+    Profile* restrict_to_profile,
+    const std::string& cross_incognito_args,
+    const GURL& event_url) {
   if (!profile_)
     return;
 
@@ -206,20 +206,27 @@ void ExtensionEventRouter::DispatchEventImpl(
         listener->process->profile() != restrict_to_profile;
     const Extension* extension = service->GetExtensionById(
         listener->extension_id, false);
-    if (cross_incognito && !service->CanCrossIncognito(extension))
+    // Send the event with different arguments to extensions that can't
+    // cross incognito, if necessary.
+    if (cross_incognito && !service->CanCrossIncognito(extension)) {
+      if (!cross_incognito_args.empty()) {
+        DispatchEvent(listener->process, listener->extension_id,
+                      event_name, cross_incognito_args, event_url);
+      }
       continue;
+    }
 
     DispatchEvent(listener->process, listener->extension_id,
                   event_name, event_args, event_url);
   }
 }
 
-void ExtensionEventRouter::Observe(NotificationType type,
+void ExtensionEventRouter::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::RENDERER_PROCESS_TERMINATED:
-    case NotificationType::RENDERER_PROCESS_CLOSED: {
+  switch (type) {
+    case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED:
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
       RenderProcessHost* renderer = Source<RenderProcessHost>(source).ptr();
       // Remove all event listeners associated with this renderer
       for (ListenerMap::iterator it = listeners_.begin();

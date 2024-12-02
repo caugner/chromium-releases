@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -81,9 +81,11 @@ function changeClassName(node, classNameToAddOrRemove, isAdd) {
   var currentNames = node.className.split(' ');
 
   if (isAdd) {
-    if (!(classNameToAddOrRemove in currentNames)) {
-      currentNames.push(classNameToAddOrRemove);
+    for (var i = 0; i < currentNames.length; ++i) {
+      if (currentNames[i] == classNameToAddOrRemove)
+        return;
     }
+    currentNames.push(classNameToAddOrRemove);
   } else {
     for (var i = 0; i < currentNames.length; ++i) {
       if (currentNames[i] == classNameToAddOrRemove) {
@@ -97,7 +99,7 @@ function changeClassName(node, classNameToAddOrRemove, isAdd) {
 }
 
 function getKeyWithValue(map, value) {
-  for (key in map) {
+  for (var key in map) {
     if (map[key] == value)
       return key;
   }
@@ -124,6 +126,20 @@ function makeRepeatedString(str, count) {
   for (var i = 0; i < count; ++i)
     out.push(str);
   return out.join('');
+}
+
+/**
+ * Clones a basic POD object.  Only a new top level object will be cloned.  It
+ * will continue to reference the same values as the original object.
+ */
+function shallowCloneObject(object) {
+  if (!(object instanceof Object))
+    return object;
+  var copy = {};
+  for (var key in object) {
+    copy[key] = object[key];
+  }
+  return copy;
 }
 
 /**

@@ -10,8 +10,8 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 
 TemplateURLFetcherUICallbacks::TemplateURLFetcherUICallbacks(
     SearchEngineTabHelper* tab_helper,
@@ -19,7 +19,7 @@ TemplateURLFetcherUICallbacks::TemplateURLFetcherUICallbacks(
     : source_(tab_helper),
       tab_contents_(tab_contents) {
   registrar_.Add(this,
-                 NotificationType::TAB_CONTENTS_DESTROYED,
+                 content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                  Source<TabContents>(tab_contents_));
 }
 
@@ -28,7 +28,7 @@ TemplateURLFetcherUICallbacks::~TemplateURLFetcherUICallbacks() {
 
 void TemplateURLFetcherUICallbacks::ConfirmSetDefaultSearchProvider(
     TemplateURL* template_url,
-    TemplateURLModel* template_url_model) {
+    TemplateURLService* template_url_service) {
   scoped_ptr<TemplateURL> owned_template_url(template_url);
   if (!source_ || !source_->delegate() || !tab_contents_)
       return;
@@ -36,7 +36,7 @@ void TemplateURLFetcherUICallbacks::ConfirmSetDefaultSearchProvider(
   source_->delegate()->ConfirmSetDefaultSearchProvider(
       tab_contents_,
       owned_template_url.release(),
-      template_url_model);
+      template_url_service);
 }
 
 void TemplateURLFetcherUICallbacks::ConfirmAddSearchProvider(
@@ -51,10 +51,10 @@ void TemplateURLFetcherUICallbacks::ConfirmAddSearchProvider(
 }
 
 void TemplateURLFetcherUICallbacks::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
+  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
   DCHECK(source == Source<TabContents>(tab_contents_));
   source_ = NULL;
   tab_contents_ = NULL;

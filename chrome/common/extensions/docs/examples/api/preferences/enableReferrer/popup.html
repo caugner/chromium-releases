@@ -2,8 +2,7 @@
 <html>
 <head>
   <script>
-var cs = chrome.experimental.contentSettings;
-var pref = cs.misc.enableReferrers;
+var pref = chrome.experimental.contentSettings.global.referrersEnabled;
 
 /**
  * Returns whether the |levelOfControl| means that the extension can change the
@@ -86,7 +85,8 @@ function init() {
  * @param incognito{boolean} Whether the value is specific to incognito mode.
  */
 function setPrefValue(enabled, incognito) {
-  pref.set({'value':enabled, 'incognito': incognito});
+  var scope = incognito ? 'incognito_session_only' : 'regular';
+  pref.set({'value': enabled, 'scope': scope});
 }
 
 /**

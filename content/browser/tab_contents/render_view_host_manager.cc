@@ -20,7 +20,7 @@
 #include "content/common/content_client.h"
 #include "content/common/content_switches.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
 
@@ -69,7 +69,7 @@ void RenderViewHostManager::Init(Profile* profile,
       GetControllerForRenderManager().session_storage_namespace());
 
   // Keep track of renderer processes as they start to shut down.
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSING,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSING,
                  NotificationService::AllSources());
 }
 
@@ -114,7 +114,7 @@ RenderViewHost* RenderViewHostManager::Navigate(const NavigationEntry& entry) {
       details.new_host = render_view_host_;
       details.old_host = NULL;
       NotificationService::current()->Notify(
-          NotificationType::RENDER_VIEW_HOST_CHANGED,
+          content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
           Source<NavigationController>(
               &delegate_->GetControllerForRenderManager()),
           Details<RenderViewHostSwitchedDetails>(&details));
@@ -314,11 +314,11 @@ void RenderViewHostManager::OnCrossSiteNavigationCanceled() {
     CancelPending();
 }
 
-void RenderViewHostManager::Observe(NotificationType type,
+void RenderViewHostManager::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::RENDERER_PROCESS_CLOSING:
+  switch (type) {
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSING:
       RendererProcessClosing(Source<RenderProcessHost>(source).ptr());
       break;
 
@@ -621,7 +621,7 @@ void RenderViewHostManager::CommitPending() {
   details.new_host = render_view_host_;
   details.old_host = old_render_view_host;
   NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_CHANGED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
       Source<NavigationController>(&delegate_->GetControllerForRenderManager()),
       Details<RenderViewHostSwitchedDetails>(&details));
 
@@ -670,8 +670,7 @@ RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
   // is safe to use a normal pointer here.
   SiteInstance* new_instance = curr_instance;
   bool force_swap = ShouldSwapProcessesForNavigation(
-          delegate_->GetLastCommittedNavigationEntryForRenderManager(),
-          &entry);
+      delegate_->GetLastCommittedNavigationEntryForRenderManager(), &entry);
   if (ShouldTransitionCrossSite() || force_swap)
     new_instance = GetSiteInstanceForEntry(entry, curr_instance);
 
@@ -814,7 +813,7 @@ void RenderViewHostManager::SwapInRenderViewHost(RenderViewHost* rvh) {
   // Remove old RenderWidgetHostView with mocked out methods so it can be
   // replaced with a new one that's a child of |delegate_|'s view.
   scoped_ptr<RenderWidgetHostView> old_view(render_view_host_->view());
-  render_view_host_->set_view(NULL);
+  render_view_host_->SetView(NULL);
   delegate_->CreateViewAndSetSizeForRVH(render_view_host_);
   render_view_host_->ActivateDeferredPluginHandles();
   // If the view is gone, then this RenderViewHost died while it was hidden.
@@ -842,7 +841,7 @@ void RenderViewHostManager::SwapInRenderViewHost(RenderViewHost* rvh) {
   details.new_host = render_view_host_;
   details.old_host = old_render_view_host;
   NotificationService::current()->Notify(
-      NotificationType::RENDER_VIEW_HOST_CHANGED,
+      content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
       Source<NavigationController>(&delegate_->GetControllerForRenderManager()),
       Details<RenderViewHostSwitchedDetails>(&details));
 

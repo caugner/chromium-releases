@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -140,6 +140,18 @@ void FakeSession::SetStateChangeCallback(
   callback_.reset(callback);
 }
 
+void FakeSession::CreateStreamChannel(
+    const std::string& name, const StreamChannelCallback& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(name, NULL);
+}
+
+void FakeSession::CreateDatagramChannel(
+    const std::string& name, const DatagramChannelCallback& callback) {
+  NOTIMPLEMENTED();
+  callback.Run(name, NULL);
+}
+
 FakeSocket* FakeSession::control_channel() {
   return &control_channel_;
 }
@@ -162,10 +174,6 @@ FakeUdpSocket* FakeSession::video_rtcp_channel() {
 
 const std::string& FakeSession::jid() {
   return jid_;
-}
-
-MessageLoop* FakeSession::message_loop() {
-  return message_loop_;
 }
 
 const CandidateSessionConfig* FakeSession::candidate_config() {
@@ -197,10 +205,16 @@ void FakeSession::set_receiver_token(const std::string& receiver_token) {
   receiver_token_ = receiver_token;
 }
 
-void FakeSession::Close(Task* closed_task) {
+void FakeSession::set_shared_secret(const std::string& shared_secret) {
+  shared_secret_ = shared_secret;
+}
+
+const std::string& FakeSession::shared_secret() {
+  return shared_secret_;
+}
+
+void FakeSession::Close() {
   closed_ = true;
-  closed_task->Run();
-  delete closed_task;
 }
 
 }  // namespace protocol

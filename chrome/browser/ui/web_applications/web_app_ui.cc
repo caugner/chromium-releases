@@ -7,6 +7,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/task.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -43,7 +44,7 @@ class UpdateShortcutWorker : public NotificationObserver {
 
  private:
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -98,7 +99,7 @@ UpdateShortcutWorker::UpdateShortcutWorker(TabContentsWrapper* tab_contents)
                         &unprocessed_icons_);
   file_name_ = web_app::internals::GetSanitizedFileName(shortcut_info_.title);
 
-  registrar_.Add(this, NotificationType::TAB_CLOSING,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSING,
                  Source<NavigationController>(&tab_contents_->controller()));
 }
 
@@ -107,10 +108,10 @@ void UpdateShortcutWorker::Run() {
   DownloadIcon();
 }
 
-void UpdateShortcutWorker::Observe(NotificationType type,
+void UpdateShortcutWorker::Observe(int type,
                                    const NotificationSource& source,
                                    const NotificationDetails& details) {
-  if (type == NotificationType::TAB_CLOSING &&
+  if (type == content::NOTIFICATION_TAB_CLOSING &&
       Source<NavigationController>(source).ptr() ==
         &tab_contents_->controller()) {
     // Underlying tab is closing.

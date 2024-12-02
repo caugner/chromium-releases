@@ -21,15 +21,31 @@
           # Whether we're building a ChromeOS build.
           'chromeos%': 0,
 
+          # Whether the Views toolkit can use its Pure form when available
+          # or if it must only use GTK (the default at the moment).
+          # This is an intermediate step until all of Views is 'Pure',
+          # at which point we plan to remove those switches.
+          # This turns on the TOOLKIT_USES_PURE_VIEWS macro which is used
+          # to replace the corresponding GTK implementation in such a way
+          # that GTK and PureViews can coexist. This intermediate solution
+          # allow us to switch the view implementations using
+          # --use-pure-views, without breaking exiting gtk implementation.
+          'toolkit_uses_pure_views%': 0,
+
           # Disable touch support by default.
           'touchui%': 0,
+
+          # Disable webui certificate viewer until it is complete.
+          'webui_certificate_viewer%': 0,
 
           # Whether the compositor is enabled on views.
           'views_compositor%': 0,
         },
         # Copy conditionally-set variables out one scope.
         'chromeos%': '<(chromeos)',
+        'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
         'touchui%': '<(touchui)',
+        'webui_certificate_viewer%': '<(webui_certificate_viewer)',
         'views_compositor%': '<(views_compositor)',
 
         # Compute the architecture that we're building on.
@@ -46,10 +62,22 @@
 
           # Set default value of toolkit_views on for Windows, Chrome OS
           # and the touch UI.
-          ['OS=="win" or chromeos==1 or touchui==1', {
+          ['OS=="win" or chromeos==1 or touchui==1 or toolkit_uses_pure_views==1', {
             'toolkit_views%': 1,
           }, {
             'toolkit_views%': 0,
+          }],
+
+          # Views are always Pure in Touch case
+          ['touchui==1', {
+            'toolkit_uses_pure_views%': 1,
+          }, {
+            'toolkit_uses_pure_views%': 0,
+          }],
+
+          # Use WebUI certificate viewer in Touch case
+          ['touchui==1', {
+            'webui_certificate_viewer%': 1
           }],
         ],
       },
@@ -57,8 +85,10 @@
       # Copy conditionally-set variables out one scope.
       'chromeos%': '<(chromeos)',
       'touchui%': '<(touchui)',
+      'webui_certificate_viewer%': '<(webui_certificate_viewer)',
       'host_arch%': '<(host_arch)',
       'toolkit_views%': '<(toolkit_views)',
+      'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
       'views_compositor%': '<(views_compositor)',
 
       # We used to provide a variable for changing how libraries were built.
@@ -96,6 +126,9 @@
 
        # Disable file manager component extension by default.
       'file_manager_extension%': 0,
+
+      # Disable WebUI TaskManager by default.
+      'webui_task_manager%': 0,
 
       # Python version.
       'python_ver%': '2.6',
@@ -136,13 +169,39 @@
       # Also note that this should be enabled for remoting to compile.
       'p2p_apis%': 1,
 
+      # Configuration policy is enabled by default. Set to 0 to disable.
+      'configuration_policy%': 1,
+
+      # Safe browsing is compiled in by default. Set to 0 to disable.
+      'safe_browsing%': 1,
+
       # If this is set, the clang plugins used on the buildbot will be used.
       # Run tools/clang/scripts/update.sh to make sure they are compiled.
       # This causes 'clang_chrome_plugins_flags' to be set.
       # Has no effect if 'clang' is not set as well.
       'clang_use_chrome_plugins%': 0,
 
+      # Set to 1 compile with -fPIC cflag on linux. This is a must for shared
+      # libraries on linux x86-64 and arm, plus ASLR.
+      'linux_fpic%': 1,
+
+      # Enable navigator.registerProtocolHandler and supporting UI.
+      'enable_register_protocol_handler%': 1,
+
+      # Smooth scrolling is disabled by default.
+      'enable_smooth_scrolling%': 0,
+
+      # Webrtc compilation is enabled by default. Set to 0 to disable.
+      'enable_webrtc%': 1,
+
       'conditions': [
+        # Use Skia as WebKit renderer on Mac
+        ['OS=="mac"', {
+          'use_skia%': 0,
+        }, {
+          'use_skia%': 1,
+        }],
+
         # A flag for POSIX platforms
         ['OS=="win"', {
           'os_posix%': 0,
@@ -169,14 +228,6 @@
           'use_gnome_keyring%': 1,
         }],
 
-        # Set to 1 compile with -fPIC cflag on linux. This is a must for shared
-        # libraries on linux x86-64 and arm.
-        ['host_arch=="ia32"', {
-          'linux_fpic%': 0,
-        }, {
-          'linux_fpic%': 1,
-        }],
-
         ['toolkit_views==0 or OS=="mac"', {
           # GTK+ and Mac wants Title Case strings
           'use_titlecase_in_grd_files%': 1,
@@ -195,14 +246,19 @@
         }, {
           'file_manager_extension%': 0,
         }],
-
-        # Enable navigator.registerProtocolHandler and supporting UI.
-        # We disable on Linux because the OS-level component of RPH isn't
-        # implemented.
-        ['OS=="linux"', {
-          'enable_register_protocol_handler%': 0,
+        
+        # Enable WebUI TaskManager only on Chrome OS and Touch UI.
+        ['chromeos==1 or touchui==1', {
+          'webui_task_manager%': 1,
         }, {
-          'enable_register_protocol_handler%': 1,
+          'webui_task_manager%': 0,
+        }],
+
+        # Enable smooth scrolling for Linux and ChromeOS
+        ['OS=="linux"', {
+          'enable_smooth_scrolling%': 1,
+        }, {
+          'enable_smooth_scrolling%': 0,
         }],
       ],
     },
@@ -214,16 +270,20 @@
     'host_arch%': '<(host_arch)',
     'library%': 'static_library',
     'toolkit_views%': '<(toolkit_views)',
+    'toolkit_uses_pure_views%': '<(toolkit_uses_pure_views)',
     'views_compositor%': '<(views_compositor)',
     'os_posix%': '<(os_posix)',
     'toolkit_uses_gtk%': '<(toolkit_uses_gtk)',
+    'use_skia%': '<(use_skia)',
     'use_x11%': '<(use_x11)',
     'use_gnome_keyring%': '<(use_gnome_keyring)',
     'linux_fpic%': '<(linux_fpic)',
     'enable_flapper_hacks%': '<(enable_flapper_hacks)',
     'chromeos%': '<(chromeos)',
     'touchui%': '<(touchui)',
+    'webui_certificate_viewer%': '<(webui_certificate_viewer)',
     'file_manager_extension%': '<(file_manager_extension)',
+    'webui_task_manager%': '<(webui_task_manager)',
     'inside_chromium_build%': '<(inside_chromium_build)',
     'fastbuild%': '<(fastbuild)',
     'python_ver%': '<(python_ver)',
@@ -235,9 +295,13 @@
     'use_titlecase_in_grd_files%': '<(use_titlecase_in_grd_files)',
     'use_third_party_translations%': '<(use_third_party_translations)',
     'remoting%': '<(remoting)',
+    'enable_webrtc%': '<(enable_webrtc)',
     'p2p_apis%': '<(p2p_apis)',
+    'configuration_policy%': '<(configuration_policy)',
+    'safe_browsing%': '<(safe_browsing)',
     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
     'enable_register_protocol_handler%': '<(enable_register_protocol_handler)',
+    'enable_smooth_scrolling%': '<(enable_smooth_scrolling)',
 
     # The release channel that this build targets. This is used to restrict
     # channel-specific build options, like which installer packages to create.
@@ -424,6 +488,13 @@
       'vi', 'zh-CN', 'zh-TW',
     ],
 
+    # Pseudo locales are special locales which are used for testing and
+    # debugging. They don't get copied to the final app. For more info,
+    # check out https://sites.google.com/a/chromium.org/dev/Home/fake-bidi
+    'pseudo_locales': [
+      'fake-bidi',
+    ],
+
     'grit_defines': [],
 
     # Use Harfbuzz-NG instead of Harfbuzz.
@@ -558,11 +629,20 @@
       ['toolkit_views==1', {
         'grit_defines': ['-D', 'toolkit_views'],
       }],
+      ['toolkit_uses_pure_views==1', {
+        'grit_defines': ['-D', 'toolkit_uses_pure_views'],
+      }],
       ['touchui==1', {
         'grit_defines': ['-D', 'touchui'],
       }],
+      ['webui_certificate_viewer==1', {
+        'grit_defines': ['-D', 'webui_certificate_viewer'],
+      }],
       ['file_manager_extension==1', {
         'grit_defines': ['-D', 'file_manager_extension'],
+      }],
+      ['webui_task_manager==1', {
+        'grit_defines': ['-D', 'webui_task_manager'],
       }],
       ['remoting==1', {
         'grit_defines': ['-D', 'remoting'],
@@ -572,7 +652,10 @@
       }],
       ['use_third_party_translations==1', {
         'grit_defines': ['-D', 'use_third_party_translations'],
-        'locales': ['ast', 'ca@valencia', 'eo', 'eu', 'gl', 'hy', 'ka', 'ku', 'ug'],
+        'locales': [
+          'ast', 'bs', 'ca@valencia', 'eo', 'eu', 'gl', 'hy', 'ka', 'ku', 'kw',
+          'ug',
+        ],
       }],
 
       ['clang_use_chrome_plugins==1', {
@@ -637,10 +720,6 @@
           'win_release_RuntimeLibrary%': '0', # 0 = /MT (nondebug static)
           'win_debug_RuntimeLibrary%': '1',   # 1 = /MTd (debug static)
         }],
-        ['OS=="mac" and clang==1', {
-          # TODO(thakis): Remove this once http://llvm.org/PR10031 is fixed.
-          'mac_release_optimization%': '2',
-        }],
       ],
     },
     'conditions': [
@@ -649,12 +728,17 @@
       }, {  # else: branding!="Chrome"
         'defines': ['CHROMIUM_BUILD'],
       }],
+      ['component=="shared_library"', {
+        'defines': ['COMPONENT_BUILD'],
+      }],
       ['toolkit_views==1', {
         'defines': ['TOOLKIT_VIEWS=1'],
       }],
+      ['toolkit_uses_pure_views==1', {
+        'defines': ['TOOLKIT_USES_PURE_VIEWS=1'],
+      }],
       ['views_compositor==1', {
-        # TODO(sky): nuke COMPOSITOR_2 when we remove it from views.
-        'defines': ['VIEWS_COMPOSITOR=1', 'COMPOSITOR_2=1'],
+        'defines': ['VIEWS_COMPOSITOR=1'],
       }],
       ['chromeos==1', {
         'defines': ['OS_CHROMEOS=1'],
@@ -664,6 +748,9 @@
       }],
       ['file_manager_extension==1', {
         'defines': ['FILE_MANAGER_EXTENSION=1'],
+      }],
+      ['webui_task_manager==1', {
+        'defines': ['WEBUI_TASK_MANAGER=1'],
       }],
       ['profiling==1', {
         'defines': ['ENABLE_PROFILING=1'],
@@ -679,6 +766,9 @@
       }],
       ['enable_flapper_hacks==1', {
         'defines': ['ENABLE_FLAPPER_HACKS=1'],
+      }],
+      ['configuration_policy==1', {
+        'defines': ['ENABLE_CONFIGURATION_POLICY'],
       }],
       ['fastbuild!=0', {
         'conditions': [
@@ -732,6 +822,11 @@
           'ENABLE_EGLIMAGE=1',
         ],
       }],
+      ['use_skia==1', {
+        'defines': [
+          'USE_SKIA=1',
+        ],
+      }],
       ['coverage!=0', {
         'conditions': [
           ['OS=="mac"', {
@@ -780,7 +875,7 @@
       }],  # OS==win
       ['enable_register_protocol_handler==1', {
         'defines': [
-          'ENABLE_REGISTER_PROTOCOL_HANDLER',
+          'ENABLE_REGISTER_PROTOCOL_HANDLER=1',
         ],
       }],
     ],  # conditions for 'target_defaults'
@@ -802,6 +897,11 @@
               # This is off by default in gcc but on in Ubuntu's gcc(!).
               '-Wno-format',
             ],
+            'cflags_cc!': [
+              # TODO(fischman): remove this.
+              # http://code.google.com/p/chromium/issues/detail?id=90453
+              '-Wsign-compare',
+            ]
           }],
           [ 'OS=="win"', {
             'defines': [
@@ -818,6 +918,12 @@
                 'Detect64BitPortabilityProblems': 'false',
               },
             },
+          }],
+          # TODO(darin): Unfortunately, some third_party code depends on base/
+          [ 'OS=="win" and component=="shared_library"', {
+            'msvs_disabled_warnings': [
+              4251,  # class 'std::xx' needs to have dll-interface.
+            ],
           }],
           [ 'OS=="mac"', {
             'xcode_settings': {
@@ -865,6 +971,11 @@
                 'AdditionalOptions': ['/we4389'],
               },
             },
+          }],
+          ['OS=="win" and component=="shared_library"', {
+            'msvs_disabled_warnings': [
+              4251,  # class 'std::xx' needs to have dll-interface.
+            ],
           }],
           ['chromeos!=1', {
             'sources/': [ ['exclude', '_chromeos\\.(h|cc)$'] ]
@@ -934,7 +1045,9 @@
         'xcode_settings': {
           'COPY_PHASE_STRIP': 'NO',
           'GCC_OPTIMIZATION_LEVEL': '<(mac_debug_optimization)',
-          'OTHER_CFLAGS': [ '<@(debug_extra_cflags)', ],
+          'OTHER_CFLAGS': [
+            '<@(debug_extra_cflags)',
+          ],
         },
         'msvs_settings': {
           'VCCLCompilerTool': {
@@ -960,6 +1073,15 @@
           },
           'VCLinkerTool': {
             'LinkIncremental': '<(msvs_debug_link_incremental)',
+            # ASLR makes debugging with windbg difficult because Chrome.exe and
+            # Chrome.dll share the same base name. As result, windbg will
+            # name the Chrome.dll module like chrome_<base address>, where
+            # <base address> typically changes with each launch. This in turn
+            # means that breakpoints in Chrome.dll don't stick from one launch
+            # to the next. For this reason, we turn ASLR off in debug builds.
+            # Note that this is a three-way bool, where 0 means to pick up
+            # the default setting, 1 is off and 2 is on.
+            'RandomizedBaseAddress': 1,
           },
           'VCResourceCompilerTool': {
             'PreprocessorDefinitions': ['_DEBUG'],
@@ -970,6 +1092,13 @@
             'cflags': [
               '<@(debug_extra_cflags)',
             ],
+          }],
+          ['release_valgrind_build==0', {
+            'xcode_settings': {
+              'OTHER_CFLAGS': [
+                '-fstack-protector-all',  # Implies -fstack-protector
+              ],
+            },
           }],
         ],
       },
@@ -1116,6 +1245,11 @@
           # Make inline functions have hidden visiblity by default.
           # Surprisingly, not covered by -fvisibility=hidden.
           '-fvisibility-inlines-hidden',
+          # GCC turns on -Wsign-compare for C++ under -Wall, but clang doesn't,
+          # so we specify it explicitly.
+          # TODO(fischman): remove this if http://llvm.org/PR10448 obsoletes it.
+          # http://code.google.com/p/chromium/issues/detail?id=90453
+          '-Wsign-compare',
         ],
         'ldflags': [
           '-pthread', '-Wl,-z,noexecstack',
@@ -1184,9 +1318,17 @@
               # At gyp time, we test the linker for ICF support; this flag
               # is then provided to us by gyp.  (Currently only gold supports
               # an --icf flag.)
+              # There seems to be a conflict of --icf and -pie in gold which
+              # can generate crashy binaries. As a security measure, -pie
+              # takes precendence for now.
               ['LINKER_SUPPORTS_ICF==1 and release_valgrind_build==0', {
-                'ldflags': [
-                  '-Wl,--icf=safe',
+                'target_conditions': [
+                  ['_toolset=="target"', {
+                    'ldflags': [
+                      #'-Wl,--icf=safe',
+                      '-Wl,--icf=none',
+                    ]
+                  }]
                 ]
               }],
             ]
@@ -1460,6 +1602,9 @@
                 # http://code.google.com/p/googletest/source/detail?r=446 .
                 # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).
                 '-Wno-unnamed-type-template-args',
+                # TODO(thakis): Reenable once the one instance this warns on
+                # is fixed.
+                '-Wno-parentheses',
               ],
               'OTHER_CFLAGS': [
                 # TODO(thakis): Causes many warnings - http://crbug.com/75001
@@ -1485,6 +1630,19 @@
           }],
           ['_mac_bundle', {
             'xcode_settings': {'OTHER_LDFLAGS': ['-Wl,-ObjC']},
+          }],
+          ['_type=="executable" and release_valgrind_build==0', {
+            # Turn on position-independence (ASLR) for executables. When PIE
+            # is on for the Chrome executables, the framework will also be
+            # subject to ASLR.
+            # Don't do this when building for Valgrind because Valgrind
+            # doesn't understand slide. TODO: Make Valgrind on Mac OS X
+            # understand slide, and get rid of the Valgrind check.
+            'xcode_settings': {
+              'OTHER_LDFLAGS': [
+                '-Wl,-pie',  # Position-independent executable (MH_PIE)
+              ],
+            },
           }],
           ['(_type=="executable" or _type=="shared_library" or \
              _type=="loadable_module") and mac_strip!=0', {
@@ -1754,9 +1912,3 @@
     'SYMROOT': '<(DEPTH)/xcodebuild',
   },
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

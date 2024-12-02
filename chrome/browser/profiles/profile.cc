@@ -14,20 +14,21 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/background_contents_service_factory.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
+#include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/off_the_record_profile_io_data.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
-#include "chrome/browser/ssl/ssl_host_state.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/transport_security_persister.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -48,6 +50,7 @@
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/browser/ssl/ssl_host_state.h"
 #include "content/common/notification_service.h"
 #include "grit/locale_settings.h"
 #include "net/base/transport_security_state.h"
@@ -59,16 +62,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #endif
 
-#if defined(OS_WIN)
-#include "chrome/browser/password_manager/password_store_win.h"
-#elif defined(OS_MACOSX)
-#include "chrome/browser/keychain_mac.h"
-#include "chrome/browser/password_manager/password_store_mac.h"
-#elif defined(OS_POSIX) && !defined(OS_CHROMEOS)
-#include "chrome/browser/password_manager/native_backend_gnome_x.h"
-#include "chrome/browser/password_manager/native_backend_kwallet_x.h"
-#include "chrome/browser/password_manager/password_store_x.h"
-#elif defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/preferences.h"
 #endif
 
@@ -81,18 +75,38 @@ net::URLRequestContextGetter* Profile::default_request_context_;
 
 namespace {
 
+// Used to tag the first profile launched in a Chrome session.
+bool g_first_profile_launched = true;
+
+void NotifyOTRProfileCreatedOnIOThread(void* original_profile,
+                                       void* otr_profile) {
+  ExtensionWebRequestEventRouter::GetInstance()->OnOTRProfileCreated(
+      original_profile, otr_profile);
+}
+
+void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
+                                         void* otr_profile) {
+  ExtensionWebRequestEventRouter::GetInstance()->OnOTRProfileDestroyed(
+      original_profile, otr_profile);
+}
+
 }  // namespace
 
 Profile::Profile()
     : restored_last_session_(false),
+      first_launched_(g_first_profile_launched),
       accessibility_pause_level_(0) {
+  g_first_profile_launched = false;
 }
 
 // static
-const char* Profile::kProfileKey = "__PROFILE__";
+const char* const Profile::kProfileKey = "__PROFILE__";
 
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
 // static
-const ProfileId Profile::kInvalidProfileId = static_cast<ProfileId>(0);
+const LocalProfileId Profile::kInvalidLocalProfileId =
+    static_cast<LocalProfileId>(0);
+#endif
 
 // static
 void Profile::RegisterUserPrefs(PrefService* prefs) {
@@ -171,6 +185,14 @@ net::URLRequestContextGetter* Profile::GetDefaultRequestContext() {
   return default_request_context_;
 }
 
+std::string Profile::GetDebugName() {
+  std::string name = GetPath().BaseName().MaybeAsASCII();
+  if (name.empty()) {
+    name = "UnknownProfile";
+  }
+  return name;
+}
+
 bool Profile::IsGuestSession() {
 #if defined(OS_CHROMEOS)
   static bool is_guest_session =
@@ -200,15 +222,11 @@ class OffTheRecordProfileImpl : public Profile,
         prefs_(real_profile->GetOffTheRecordPrefs()),
         ALLOW_THIS_IN_INITIALIZER_LIST(io_data_(this)),
         start_time_(Time::Now()) {
-#ifndef NDEBUG
-    ProfileDependencyManager::GetInstance()->ProfileNowExists(this);
-#endif
-
     extension_process_manager_.reset(ExtensionProcessManager::Create(this));
 
     BrowserList::AddObserver(this);
 
-    BackgroundContentsServiceFactory::GetForProfile(this);
+    ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
     DCHECK(real_profile->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled));
 
@@ -223,31 +241,46 @@ class OffTheRecordProfileImpl : public Profile,
     // Make the chrome//extension-icon/ resource available.
     ExtensionIconSource* icon_source = new ExtensionIconSource(real_profile);
     GetChromeURLDataManager()->AddDataSource(icon_source);
+
+    BrowserThread::PostTask(
+    BrowserThread::IO, FROM_HERE,
+    NewRunnableFunction(&NotifyOTRProfileCreatedOnIOThread, profile_, this));
   }
 
   virtual ~OffTheRecordProfileImpl() {
-    NotificationService::current()->Notify(NotificationType::PROFILE_DESTROYED,
-                                           Source<Profile>(this),
-                                           NotificationService::NoDetails());
+    NotificationService::current()->Notify(
+        chrome::NOTIFICATION_PROFILE_DESTROYED, Source<Profile>(this),
+        NotificationService::NoDetails());
 
     ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableFunction(
+            &NotifyOTRProfileDestroyedOnIOThread, profile_, this));
+
     // Clean up all DB files/directories
-    if (db_tracker_)
+    if (db_tracker_) {
       BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
           NewRunnableMethod(
               db_tracker_.get(),
-              &webkit_database::DatabaseTracker::DeleteIncognitoDBDirectory));
+              &webkit_database::DatabaseTracker::Shutdown));
+    }
 
     BrowserList::RemoveObserver(this);
 
+    if (host_content_settings_map_)
+      host_content_settings_map_->ShutdownOnUIThread();
+
     if (pref_proxy_config_tracker_)
       pref_proxy_config_tracker_->DetachFromPrefService();
-  }
 
-  virtual ProfileId GetRuntimeId() {
-    return reinterpret_cast<ProfileId>(this);
+    ExtensionService* extension_service = GetExtensionService();
+    if (extension_service) {
+      ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
+      extension_prefs->ClearIncognitoSessionOnlyContentSettings();
+    }
   }
 
   virtual std::string GetProfileName() {
@@ -370,6 +403,10 @@ class OffTheRecordProfileImpl : public Profile,
     return profile_->GetAutocompleteClassifier();
   }
 
+  virtual history::ShortcutsBackend* GetShortcutsBackend() {
+    return NULL;
+  }
+
   virtual WebDataService* GetWebDataService(ServiceAccessType sat) {
     if (sat == EXPLICIT_ACCESS)
       return profile_->GetWebDataService(sat);
@@ -396,10 +433,6 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual PrefService* GetOffTheRecordPrefs() {
     return prefs_;
-  }
-
-  virtual TemplateURLModel* GetTemplateURLModel() {
-    return profile_->GetTemplateURLModel();
   }
 
   virtual TemplateURLFetcher* GetTemplateURLFetcher() {
@@ -440,14 +473,15 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kEnableExperimentalAppManifests)) {
+    if (GetExtensionService()) {
       const Extension* installed_app = GetExtensionService()->
           GetInstalledAppForRenderer(renderer_child_id);
-      if (installed_app != NULL && installed_app->is_storage_isolated())
+      if (installed_app != NULL && installed_app->is_storage_isolated() &&
+          installed_app->HasAPIPermission(
+              ExtensionAPIPermission::kExperimental)) {
         return GetRequestContextForIsolatedApp(installed_app->id());
+      }
     }
-
     return GetRequestContext();
   }
 
@@ -477,8 +511,10 @@ class OffTheRecordProfileImpl : public Profile,
     // Retrieve the host content settings map of the parent profile in order to
     // ensure the preferences have been migrated.
     profile_->GetHostContentSettingsMap();
-    if (!host_content_settings_map_.get())
-      host_content_settings_map_ = new HostContentSettingsMap(this);
+    if (!host_content_settings_map_.get()) {
+      host_content_settings_map_ = new HostContentSettingsMap(
+          GetPrefs(), GetExtensionService(), true);
+    }
     return host_content_settings_map_.get();
   }
 
@@ -561,11 +597,7 @@ class OffTheRecordProfileImpl : public Profile,
   }
 
   virtual WebKitContext* GetWebKitContext() {
-    if (!webkit_context_.get()) {
-      webkit_context_ = new WebKitContext(
-          IsOffTheRecord(), GetPath(), GetExtensionSpecialStoragePolicy(),
-          false);
-    }
+    CreateQuotaManagerAndClients();
     return webkit_context_.get();
   }
 
@@ -590,11 +622,6 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual void InitRegisteredProtocolHandlers() {
     NOTREACHED();
-  }
-
-  virtual NTPResourceCache* GetNTPResourceCache() {
-    // Just return the real profile resource cache.
-    return profile_->GetNTPResourceCache();
   }
 
   virtual FilePath last_selected_directory() {
@@ -656,7 +683,8 @@ class OffTheRecordProfileImpl : public Profile,
 
   virtual ChromeURLDataManager* GetChromeURLDataManager() {
     if (!chrome_url_data_manager_.get())
-      chrome_url_data_manager_.reset(new ChromeURLDataManager(this));
+      chrome_url_data_manager_.reset(new ChromeURLDataManager(
+          io_data_.GetChromeURLDataManagerBackendGetter()));
     return chrome_url_data_manager_.get();
   }
 
@@ -690,6 +718,7 @@ class OffTheRecordProfileImpl : public Profile,
     if (quota_manager_.get()) {
       DCHECK(file_system_context_.get());
       DCHECK(db_tracker_.get());
+      DCHECK(webkit_context_.get());
       return;
     }
 
@@ -711,9 +740,13 @@ class OffTheRecordProfileImpl : public Profile,
         GetExtensionSpecialStoragePolicy(),
         quota_manager_->proxy());
     db_tracker_ = new webkit_database::DatabaseTracker(
-        GetPath(), IsOffTheRecord(), GetExtensionSpecialStoragePolicy(),
+        GetPath(), IsOffTheRecord(), false, GetExtensionSpecialStoragePolicy(),
         quota_manager_->proxy(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
+    webkit_context_ = new WebKitContext(
+        IsOffTheRecord(), GetPath(), GetExtensionSpecialStoragePolicy(),
+        false, quota_manager_->proxy(),
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT));
     appcache_service_ = new ChromeAppCacheService(quota_manager_->proxy());
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
@@ -723,8 +756,7 @@ class OffTheRecordProfileImpl : public Profile,
             IsOffTheRecord()
                 ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
             &GetResourceContext(),
-            make_scoped_refptr(GetExtensionSpecialStoragePolicy()),
-            false));
+            make_scoped_refptr(GetExtensionSpecialStoragePolicy())));
   }
 
   NotificationRegistrar registrar_;
@@ -742,7 +774,7 @@ class OffTheRecordProfileImpl : public Profile,
   // The download manager that only stores downloaded items in memory.
   scoped_refptr<DownloadManager> download_manager_;
 
-  // We use a non-writable content settings map for OTR.
+  // We use a non-persistent content settings map for OTR.
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
   // Use a separate zoom map for OTR.

@@ -8,25 +8,43 @@
 
 #include "base/callback.h"
 #include "base/file_path.h"
-#include "base/file_util.h"
-#include "base/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/platform_file.h"
 #include "base/scoped_temp_dir.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/common/safe_browsing/client_model.pb.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/test_url_fetcher_factory.h"
 #include "content/common/url_fetcher.h"
+#include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using ::testing::Mock;
+
 namespace safe_browsing {
+namespace {
+class MockClientSideDetectionService : public ClientSideDetectionService {
+ public:
+  MockClientSideDetectionService() : ClientSideDetectionService(NULL) {}
+  virtual ~MockClientSideDetectionService() {}
+
+  MOCK_METHOD1(EndFetchModel, void(ClientModelStatus));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockClientSideDetectionService);
+};
+
+ACTION(QuitCurrentMessageLoop) {
+  MessageLoop::current()->Quit();
+}
+}  // namespace
 
 class ClientSideDetectionServiceTest : public testing::Test {
  protected:
@@ -45,13 +63,6 @@ class ClientSideDetectionServiceTest : public testing::Test {
     URLFetcher::set_factory(NULL);
     file_thread_.reset();
     browser_thread_.reset();
-  }
-
-  std::string ReadModelFile(base::PlatformFile model_file) {
-    char buf[1024];
-    int n = base::ReadPlatformFile(model_file, 0, buf, 1024);
-    EXPECT_LE(0, n);
-    return (n < 0) ? "" : std::string(buf, n);
   }
 
   bool SendClientReportPhishingRequest(const GURL& phishing_url,
@@ -159,12 +170,122 @@ class ClientSideDetectionServiceTest : public testing::Test {
   bool is_phishing_;
 };
 
+TEST_F(ClientSideDetectionServiceTest, FetchModelTest) {
+  // We don't want to use a real service class here because we can't call
+  // the real EndFetchModel.  It would reschedule a reload which might
+  // make the test flaky.
+  MockClientSideDetectionService service;
+
+  // The model fetch failed.
+  SetModelFetchResponse("blamodel", false /* failure */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_FETCH_FAILED))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Empty model file.
+  SetModelFetchResponse("", true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_EMPTY))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Model is too large.
+  SetModelFetchResponse(
+      std::string(ClientSideDetectionService::kMaxModelSizeBytes + 1, 'x'),
+      true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_TOO_LARGE))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Unable to parse the model file.
+  SetModelFetchResponse("Invalid model file", true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_PARSE_ERROR))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Model that is missing some required fields (missing the version field).
+  ClientSideModel model;
+  model.set_max_words_per_term(4);
+  SetModelFetchResponse(model.SerializePartialAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_MISSING_FIELDS))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Model that points to hashes that don't exist.
+  model.set_version(10);
+  model.add_hashes("bla");
+  model.add_page_term(1);  // Should be 0 instead of 1.
+  SetModelFetchResponse(model.SerializePartialAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_BAD_HASH_IDS))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+  model.set_page_term(0, 0);
+
+  // Model version number is wrong.
+  model.set_version(-1);
+  SetModelFetchResponse(model.SerializeAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_INVALID_VERSION_NUMBER))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Normal model.
+  model.set_version(10);
+  SetModelFetchResponse(model.SerializeAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_SUCCESS))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Model version number is decreasing.  Set the model version number of the
+  // model that is currently loaded in the service object to 11.
+  service.model_.reset(new ClientSideModel(model));
+  service.model_->set_version(11);
+  SetModelFetchResponse(model.SerializeAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_INVALID_VERSION_NUMBER))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+
+  // Model version hasn't changed since the last reload.
+  service.model_->set_version(10);
+  SetModelFetchResponse(model.SerializeAsString(), true /* success */);
+  EXPECT_CALL(service, EndFetchModel(
+      ClientSideDetectionService::MODEL_NOT_CHANGED))
+      .WillOnce(QuitCurrentMessageLoop());
+  service.StartFetchModel();
+  msg_loop_.Run();  // EndFetchModel will quit the message loop.
+  Mock::VerifyAndClearExpectations(&service);
+}
+
 TEST_F(ClientSideDetectionServiceTest, ServiceObjectDeletedBeforeCallbackDone) {
   SetModelFetchResponse("bogus model", true /* success */);
   ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  csd_service_.reset(ClientSideDetectionService::Create(
-      tmp_dir.path().AppendASCII("model"), NULL));
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
   EXPECT_TRUE(csd_service_.get() != NULL);
   // We delete the client-side detection service class even though the callbacks
   // haven't run yet.
@@ -178,8 +299,7 @@ TEST_F(ClientSideDetectionServiceTest, SendClientReportPhishingRequest) {
   SetModelFetchResponse("bogus model", true /* success */);
   ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  csd_service_.reset(ClientSideDetectionService::Create(
-      tmp_dir.path().AppendASCII("model"), NULL));
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
 
   GURL url("http://a.com/");
   float score = 0.4f;  // Some random client score.
@@ -228,8 +348,7 @@ TEST_F(ClientSideDetectionServiceTest, GetNumReportTest) {
   SetModelFetchResponse("bogus model", true /* success */);
   ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  csd_service_.reset(ClientSideDetectionService::Create(
-      tmp_dir.path().AppendASCII("model"), NULL));
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
 
   std::queue<base::Time>& report_times = GetPhishingReportTimes();
   base::Time now = base::Time::Now();
@@ -246,8 +365,7 @@ TEST_F(ClientSideDetectionServiceTest, CacheTest) {
   SetModelFetchResponse("bogus model", true /* success */);
   ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  csd_service_.reset(ClientSideDetectionService::Create(
-      tmp_dir.path().AppendASCII("model"), NULL));
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
 
   TestCache();
 }
@@ -256,8 +374,7 @@ TEST_F(ClientSideDetectionServiceTest, IsPrivateIPAddress) {
   SetModelFetchResponse("bogus model", true /* success */);
   ScopedTempDir tmp_dir;
   ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
-  csd_service_.reset(ClientSideDetectionService::Create(
-      tmp_dir.path().AppendASCII("model"), NULL));
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
 
   EXPECT_TRUE(csd_service_->IsPrivateIPAddress("10.1.2.3"));
   EXPECT_TRUE(csd_service_->IsPrivateIPAddress("127.0.0.1"));
@@ -276,4 +393,185 @@ TEST_F(ClientSideDetectionServiceTest, IsPrivateIPAddress) {
   EXPECT_TRUE(csd_service_->IsPrivateIPAddress("blah"));
 }
 
+TEST_F(ClientSideDetectionServiceTest, SetBadSubnets) {
+  ClientSideModel model;
+  ClientSideDetectionService::BadSubnetMap bad_subnets;
+  ClientSideDetectionService::SetBadSubnets(model, &bad_subnets);
+  EXPECT_EQ(0U, bad_subnets.size());
+
+  // Bad subnets are skipped.
+  ClientSideModel::IPSubnet* subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, '.'));
+  subnet->set_size(130);  // Invalid size.
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, '.'));
+  subnet->set_size(-1);  // Invalid size.
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(16, '.'));  // Invalid len.
+  subnet->set_size(64);
+
+  ClientSideDetectionService::SetBadSubnets(model, &bad_subnets);
+  EXPECT_EQ(0U, bad_subnets.size());
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, '.'));
+  subnet->set_size(64);
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, ','));
+  subnet->set_size(64);
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, '.'));
+  subnet->set_size(128);
+
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(std::string(crypto::SHA256_LENGTH, '.'));
+  subnet->set_size(100);
+
+  ClientSideDetectionService::SetBadSubnets(model, &bad_subnets);
+  EXPECT_EQ(3U, bad_subnets.size());
+  ClientSideDetectionService::BadSubnetMap::const_iterator it;
+  std::string mask = std::string(8, '\xFF') + std::string(8, '\x00');
+  EXPECT_TRUE(bad_subnets.count(mask));
+  EXPECT_TRUE(bad_subnets[mask].count(std::string(crypto::SHA256_LENGTH, '.')));
+  EXPECT_TRUE(bad_subnets[mask].count(std::string(crypto::SHA256_LENGTH, ',')));
+
+  mask = std::string(16, '\xFF');
+  EXPECT_TRUE(bad_subnets.count(mask));
+  EXPECT_TRUE(bad_subnets[mask].count(std::string(crypto::SHA256_LENGTH, '.')));
+
+  mask = std::string(12, '\xFF') + "\xF0" + std::string(3, '\x00');
+  EXPECT_TRUE(bad_subnets.count(mask));
+  EXPECT_TRUE(bad_subnets[mask].count(std::string(crypto::SHA256_LENGTH, '.')));
+}
+
+TEST_F(ClientSideDetectionServiceTest, IsBadIpAddress) {
+  ClientSideModel model;
+  // IPv6 exact match for: 2620:0:1000:3103:21a:a0ff:fe10:786e.
+  ClientSideModel::IPSubnet* subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\x26\x20\x00\x00\x10\x00\x31\x03\x02\x1a\xa0\xff\xfe\x10\x78\x6e", 16)));
+  subnet->set_size(128);
+
+  // IPv6 prefix match for: fe80::21a:a0ff:fe10:786e/64.
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\xfe\x80\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 16)));
+  subnet->set_size(64);
+
+  // IPv4 exact match for ::ffff:192.0.2.128.
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80", 16)));
+  subnet->set_size(128);
+
+  // IPv4 prefix match (/8) for ::ffff:192.1.1.0.
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x01\x01\x00", 16)));
+  subnet->set_size(120);
+
+  // IPv4 prefix match (/9) for ::ffff:192.1.122.0.
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x01\x7a\x00", 16)));
+  subnet->set_size(119);
+
+  // IPv4 prefix match (/15) for ::ffff:192.1.128.0.
+  subnet = model.add_bad_subnet();
+  subnet->set_prefix(crypto::SHA256HashString(std::string(
+      "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x01\x80\x00", 16)));
+  subnet->set_size(113);
+
+  ScopedTempDir tmp_dir;
+  ASSERT_TRUE(tmp_dir.CreateUniqueTempDir());
+  csd_service_.reset(ClientSideDetectionService::Create(tmp_dir.path(), NULL));
+  ClientSideDetectionService::SetBadSubnets(
+      model, &(csd_service_->bad_subnets_));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("blabla"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress(""));
+
+  EXPECT_TRUE(csd_service_->IsBadIpAddress(
+      "2620:0:1000:3103:21a:a0ff:fe10:786e"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress(
+      "2620:0:1000:3103:21a:a0ff:fe10:786f"));
+
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("fe80::21a:a0ff:fe10:786e"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("fe80::31a:a0ff:fe10:786e"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("fe80::21a:a0ff:fe10:786f"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("fe81::21a:a0ff:fe10:786e"));
+
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.0.2.128"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("::ffff:192.0.2.128"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("192.0.2.129"));
+
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.1.0"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.1.255"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.1.10"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("::ffff:192.1.1.2"));
+
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("192.1.121.255"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.122.0"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("::ffff:192.1.122.1"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.122.255"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.123.0"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.123.255"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("192.1.124.0"));
+
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("192.1.127.255"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.128.0"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("::ffff:192.1.128.1"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.128.255"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.255.0"));
+  EXPECT_TRUE(csd_service_->IsBadIpAddress("192.1.255.255"));
+  EXPECT_FALSE(csd_service_->IsBadIpAddress("192.2.0.0"));
+}
+
+TEST_F(ClientSideDetectionServiceTest, ModelHasValidHashIds) {
+  ClientSideModel model;
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.add_hashes("bla");
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.add_page_term(0);
+  model.add_page_word(0);
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  model.add_page_term(-1);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.set_page_term(1, 1);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.set_page_term(1, 0);
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  model.add_page_word(-2);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.set_page_word(1, 2);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+  model.set_page_word(1, 0);
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  // Test bad rules.
+  model.add_hashes("blu");
+  ClientSideModel::Rule* rule = model.add_rule();
+  rule->add_feature(0);
+  rule->add_feature(1);
+  rule->set_weight(0.1f);
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  rule = model.add_rule();
+  rule->add_feature(0);
+  rule->add_feature(1);
+  rule->add_feature(-1);
+  rule->set_weight(0.2f);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  rule->set_feature(2, 2);
+  EXPECT_FALSE(ClientSideDetectionService::ModelHasValidHashIds(model));
+
+  rule->set_feature(2, 1);
+  EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
+}
 }  // namespace safe_browsing

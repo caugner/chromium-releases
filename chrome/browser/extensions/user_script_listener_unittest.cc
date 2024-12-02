@@ -6,6 +6,7 @@
 #include "base/threading/thread.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
 #include "chrome/browser/extensions/user_script_listener.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "content/browser/mock_resource_context.h"
@@ -14,7 +15,6 @@
 #include "content/browser/renderer_host/resource_handler.h"
 #include "content/browser/renderer_host/resource_queue.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
@@ -90,8 +90,8 @@ class DummyResourceHandler : public ResourceHandler {
 ResourceDispatcherHostRequestInfo* CreateRequestInfo(int request_id) {
   return new ResourceDispatcherHostRequestInfo(
       new DummyResourceHandler(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
-      request_id, ResourceType::MAIN_FRAME, 0, false, false, false,
-      &content::MockResourceContext::GetInstance());
+      request_id, false, -1, ResourceType::MAIN_FRAME, 0, false, false, false,
+      content::MockResourceContext::GetInstance());
 }
 
 // A simple test net::URLRequestJob. We don't care what it does, only that
@@ -104,16 +104,18 @@ class SimpleTestJob : public net::URLRequestTestJob {
   ~SimpleTestJob() {}
 };
 
+}  // namespace
+
 class UserScriptListenerTest
     : public ExtensionServiceTestBase,
       public net::URLRequest::Interceptor {
  public:
   UserScriptListenerTest() {
-    net::URLRequest::RegisterRequestInterceptor(this);
+    net::URLRequest::Deprecated::RegisterRequestInterceptor(this);
   }
 
   ~UserScriptListenerTest() {
-    net::URLRequest::UnregisterRequestInterceptor(this);
+    net::URLRequest::Deprecated::UnregisterRequestInterceptor(this);
   }
 
   virtual void SetUp() {
@@ -175,6 +177,8 @@ class UserScriptListenerTest
   ResourceQueue resource_queue_;
 };
 
+namespace {
+
 TEST_F(UserScriptListenerTest, DelayAndUpdate) {
   LoadTestExtension();
   MessageLoop::current()->RunAllPending();
@@ -184,7 +188,7 @@ TEST_F(UserScriptListenerTest, DelayAndUpdate) {
   ASSERT_FALSE(request->is_pending());
 
   NotificationService::current()->Notify(
-      NotificationType::USER_SCRIPTS_UPDATED,
+      chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
       Source<Profile>(profile_.get()),
       NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();
@@ -207,7 +211,7 @@ TEST_F(UserScriptListenerTest, DelayAndUnload) {
   ASSERT_FALSE(request->is_pending());
 
   NotificationService::current()->Notify(
-      NotificationType::USER_SCRIPTS_UPDATED,
+      chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
       Source<Profile>(profile_.get()),
       NotificationService::NoDetails());
   MessageLoop::current()->RunAllPending();

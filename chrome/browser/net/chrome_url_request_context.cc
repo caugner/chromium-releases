@@ -4,20 +4,20 @@
 
 #include "chrome/browser/net/chrome_url_request_context.h"
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/io_thread.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
 #include "net/base/cookie_store.h"
-#include "net/ftp/ftp_transaction_factory.h"
-#include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -272,12 +272,12 @@ void ChromeURLRequestContextGetter::CleanupOnUIThread() {
 
 // NotificationObserver implementation.
 void ChromeURLRequestContextGetter::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (NotificationType::PREF_CHANGED == type) {
+  if (chrome::NOTIFICATION_PREF_CHANGED == type) {
     std::string* pref_name_in = Details<std::string>(details).ptr();
     PrefService* prefs = Source<PrefService>(source).ptr();
     DCHECK(pref_name_in && prefs);
@@ -352,7 +352,8 @@ void ChromeURLRequestContextGetter::GetCookieStoreAsyncHelper(
 // ----------------------------------------------------------------------------
 
 ChromeURLRequestContext::ChromeURLRequestContext()
-    : is_incognito_(false) {
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
+      is_incognito_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
@@ -360,22 +361,17 @@ void ChromeURLRequestContext::CopyFrom(ChromeURLRequestContext* other) {
   URLRequestContext::CopyFrom(other);
 
   // Copy ChromeURLRequestContext parameters.
-  set_user_script_dir_path(other->user_script_dir_path());
-  set_appcache_service(other->appcache_service());
-  set_blob_storage_context(other->blob_storage_context());
-  set_file_system_context(other->file_system_context());
-  set_extension_info_map(other->extension_info_map_);
   // ChromeURLDataManagerBackend is unique per context.
   set_is_incognito(other->is_incognito());
 }
 
 ChromeURLDataManagerBackend*
 ChromeURLRequestContext::chrome_url_data_manager_backend() const {
-  return chrome_url_data_manager_backend_;
+    return chrome_url_data_manager_backend_;
 }
 
 void ChromeURLRequestContext::set_chrome_url_data_manager_backend(
-    ChromeURLDataManagerBackend* backend) {
+        ChromeURLDataManagerBackend* backend) {
   DCHECK(backend);
   chrome_url_data_manager_backend_ = backend;
 }
@@ -383,11 +379,8 @@ void ChromeURLRequestContext::set_chrome_url_data_manager_backend(
 ChromeURLRequestContext::~ChromeURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (appcache_service_.get() && appcache_service_->request_context() == this)
-    appcache_service_->set_request_context(NULL);
-
   NotificationService::current()->Notify(
-      NotificationType::URL_REQUEST_CONTEXT_RELEASED,
+      chrome::NOTIFICATION_URL_REQUEST_CONTEXT_RELEASED,
       Source<net::URLRequestContext>(this),
       NotificationService::NoDetails());
 }

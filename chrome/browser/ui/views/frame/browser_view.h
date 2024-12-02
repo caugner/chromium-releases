@@ -27,8 +27,8 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/native_widget_types.h"
 #include "views/controls/single_split_view.h"
+#include "views/widget/widget_delegate.h"
 #include "views/window/client_view.h"
-#include "views/window/window_delegate.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/hang_monitor/hung_plugin_action.h"
@@ -84,7 +84,8 @@ class BrowserView : public BrowserBubbleHost,
                     public NotificationObserver,
                     public TabStripModelObserver,
                     public ui::SimpleMenuModel::Delegate,
-                    public views::WindowDelegate,
+                    public views::WidgetDelegate,
+                    public views::Widget::Observer,
                     public views::ClientView,
                     public InfoBarContainer::Delegate,
                     public views::SingleSplitView::Observer {
@@ -165,9 +166,8 @@ class BrowserView : public BrowserBubbleHost,
   // incognito.
   bool IsOffTheRecord() const;
 
-  // Returns true if the non-client view should render the Incognito
-  // avatar icon if the window is incognito.
-  virtual bool ShouldShowOffTheRecordAvatar() const;
+  // Returns true if the non-client view should render an avatar icon.
+  virtual bool ShouldShowAvatar() const;
 
   // Handle the specified |accelerator| being pressed.
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
@@ -262,7 +262,8 @@ class BrowserView : public BrowserBubbleHost,
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
   virtual void ToolbarSizeChanged(bool is_animating) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
-  virtual void ShelfVisibilityChanged() OVERRIDE;
+  virtual void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type) OVERRIDE;
   virtual void UpdateDevTools() OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
@@ -290,7 +291,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual void ConfirmSetDefaultSearchProvider(
       TabContents* tab_contents,
       TemplateURL* template_url,
-      TemplateURLModel* template_url_model) OVERRIDE;
+      TemplateURLService* template_url_service) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
@@ -349,13 +350,13 @@ class BrowserView : public BrowserBubbleHost,
   virtual ToolbarView* GetToolbarView() const OVERRIDE;
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
   virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
-  virtual void TabDeselected(TabContentsWrapper* contents) OVERRIDE;
+  virtual void TabDeactivated(TabContentsWrapper* contents) OVERRIDE;
   virtual void ActiveTabChanged(TabContentsWrapper* old_contents,
                                 TabContentsWrapper* new_contents,
                                 int index,
@@ -375,7 +376,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual string16 GetLabelForCommandId(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
-  // Overridden from views::WindowDelegate:
+  // Overridden from views::WidgetDelegate:
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual bool CanActivate() const OVERRIDE;
@@ -394,10 +395,15 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool GetSavedWindowBounds(gfx::Rect* bounds) const OVERRIDE;
   virtual bool GetSavedMaximizedState(bool* maximized) const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::ClientView* CreateClientView(views::Window* window) OVERRIDE;
-  virtual void OnWindowActivationChanged(bool active) OVERRIDE;
+  virtual views::ClientView* CreateClientView(views::Widget* widget) OVERRIDE;
   virtual void OnWindowBeginUserBoundsChange() OVERRIDE;
   virtual void OnWidgetMove() OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
+
+  // Overridden from views::Widget::Observer
+  virtual void OnWidgetActivationChanged(views::Widget* widget,
+                                         bool active) OVERRIDE;
 
   // Overridden from views::ClientView:
   virtual bool CanClose() OVERRIDE;
@@ -551,7 +557,7 @@ class BrowserView : public BrowserBubbleHost,
   gfx::Size GetResizeCornerSize() const;
 
   // Shows the about chrome modal dialog and returns the Window object.
-  views::Window* DoShowAboutChromeDialog();
+  views::Widget* DoShowAboutChromeDialog();
 
   // Shows the Compact Location Bar under the selected tab.
   void ShowCompactLocationBarUnderSelectedTab();
@@ -636,8 +642,11 @@ class BrowserView : public BrowserBubbleHost,
   // The Bookmark Bar View for this window. Lazily created.
   scoped_ptr<BookmarkBarView> bookmark_bar_view_;
 
-  // The download shelf view (view at the bottom of the page).
+#if !defined(OS_CHROMEOS)
+  // The download shelf view (view at the bottom of the page).  ChromiumOS
+  // uses ActiveDownloadsUI instead.
   scoped_ptr<DownloadShelfView> download_shelf_;
+#endif
 
   // The InfoBarContainerView that contains InfoBars for the current tab.
   InfoBarContainerView* infobar_container_;

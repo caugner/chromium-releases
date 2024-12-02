@@ -8,13 +8,13 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string_split.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/spellcheck_host_metrics.h"
 #include "chrome/browser/spellcheck_host_observer.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
 #include "chrome/common/chrome_constants.h"
@@ -82,16 +82,15 @@ FilePath GetFallbackFilePath(const FilePath& first_choice) {
 SpellCheckHostImpl::SpellCheckHostImpl(
     SpellCheckHostObserver* observer,
     const std::string& language,
-    net::URLRequestContextGetter* request_context_getter)
+    net::URLRequestContextGetter* request_context_getter,
+    SpellCheckHostMetrics* metrics)
     : observer_(observer),
       language_(language),
       file_(base::kInvalidPlatformFileValue),
       tried_to_download_(false),
       use_platform_spellchecker_(false),
       request_context_getter_(request_context_getter),
-      misspelled_word_count_(0),
-      spellchecked_word_count_(0),
-      replaced_word_count_(0) {
+      metrics_(metrics) {
   DCHECK(observer_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -100,7 +99,7 @@ SpellCheckHostImpl::SpellCheckHostImpl(
   custom_dictionary_file_ =
       personal_file_directory.Append(chrome::kCustomDictionaryFileName);
 
-  registrar_.Add(this, NotificationType::RENDERER_PROCESS_CREATED,
+  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  NotificationService::AllSources());
 }
 
@@ -172,7 +171,8 @@ void SpellCheckHostImpl::AddWord(const std::string& word) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   custom_words_.push_back(word);
-  SpellCheckHost::RecordCustomWordCountStats(custom_words_.size());
+  if (metrics_)
+    metrics_->RecordCustomWordCountStats(custom_words_.size());
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(this,
           &SpellCheckHostImpl::WriteWordToCustomDictionary, word));
@@ -240,7 +240,8 @@ void SpellCheckHostImpl::InitializeInternal() {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
       NewRunnableMethod(this,
           &SpellCheckHostImpl::InformObserverOfInitialization));
-  SpellCheckHost::RecordCustomWordCountStats(custom_words_.size());
+  if (metrics_)
+    metrics_->RecordCustomWordCountStats(custom_words_.size());
 }
 
 void SpellCheckHostImpl::InitializeOnFileThread() {
@@ -300,33 +301,6 @@ void SpellCheckHostImpl::WriteWordToCustomDictionary(const std::string& word) {
   file_util::CloseFile(f);
 }
 
-void SpellCheckHostImpl::RecordCheckedWordStats(bool misspell) {
-  spellchecked_word_count_++;
-  if (misspell) {
-    misspelled_word_count_++;
-    // If an user misspelled, that user should be counted as a part of
-    // the population.  So we ensure to instantiate the histogram
-    // entries here at the first time.
-    if (misspelled_word_count_ == 1)
-      RecordReplacedWordStats(0);
-  }
-
-  int percentage = (100 * misspelled_word_count_) / spellchecked_word_count_;
-  UMA_HISTOGRAM_PERCENTAGE("SpellCheck.MisspellRatio", percentage);
-}
-
-void SpellCheckHostImpl::RecordReplacedWordStats(int delta) {
-  replaced_word_count_ += delta;
-  if (!misspelled_word_count_) {
-    // This is possible when an extension gives the misspelling,
-    // which is not recorded as a part of this metrics.
-    return;
-  }
-
-  int percentage = (100 * replaced_word_count_) / misspelled_word_count_;
-  UMA_HISTOGRAM_PERCENTAGE("SpellCheck.ReplaceRatio", percentage);
-}
-
 void SpellCheckHostImpl::OnURLFetchComplete(const URLFetcher* source,
                                             const GURL& url,
                                             const net::URLRequestStatus& status,
@@ -359,10 +333,10 @@ void SpellCheckHostImpl::OnURLFetchComplete(const URLFetcher* source,
       NewRunnableMethod(this, &SpellCheckHostImpl::SaveDictionaryData));
 }
 
-void SpellCheckHostImpl::Observe(NotificationType type,
+void SpellCheckHostImpl::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  DCHECK(type == NotificationType::RENDERER_PROCESS_CREATED);
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_CREATED);
   RenderProcessHost* process = Source<RenderProcessHost>(source).ptr();
   InitForRenderer(process);
 }
@@ -372,7 +346,10 @@ void SpellCheckHostImpl::SaveDictionaryData() {
 
   // To prevent corrupted dictionary data from causing a renderer crash, scan
   // the dictionary data and verify it is sane before save it to a file.
-  if (!hunspell::BDict::Verify(data_.data(), data_.size())) {
+  bool verified = hunspell::BDict::Verify(data_.data(), data_.size());
+  if (metrics_)
+    metrics_->RecordDictionaryCorruptionStats(!verified);
+  if (!verified) {
     LOG(ERROR) << "Failure to verify the downloaded dictionary.";
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
         NewRunnableMethod(this,
@@ -408,6 +385,10 @@ void SpellCheckHostImpl::SaveDictionaryData() {
 
   data_.clear();
   Initialize();
+}
+
+SpellCheckHostMetrics* SpellCheckHostImpl::GetMetrics() const {
+  return metrics_;
 }
 
 const base::PlatformFile& SpellCheckHostImpl::GetDictionaryFile() const {

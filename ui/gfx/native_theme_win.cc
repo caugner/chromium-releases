@@ -11,11 +11,13 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_handle.h"
+#include "base/scoped_ptr.h"
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/windows_version.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/rect.h"
@@ -124,7 +126,87 @@ gfx::Size NativeThemeWin::GetPartSize(Part part,
                                 NULL, TS_TRUE, &size);
   ReleaseDC(NULL, hdc);
 
-  return SUCCEEDED(hr) ? Size(size.cx, size.cy) : Size();
+  if (FAILED(hr)) {
+    // TODO(rogerta): For now, we need to support radio buttons and checkboxes
+    // when theming is not enabled.  Support for other parts can be added
+    // if/when needed.
+    switch (part) {
+      case kCheckbox:
+      case kRadio:
+        // TODO(rogerta): I was not able to find any API to get the default
+        // size of these controls, so determined these values empirically.
+        size.cx = 13;
+        size.cy = 13;
+        break;
+      default:
+        size.cx = 0;
+        size.cy = 0;
+        break;
+    }
+  }
+
+  return Size(size.cx, size.cy);
+}
+
+void NativeThemeWin::PaintToNonPlatformCanvas(SkCanvas* canvas,
+                                              Part part,
+                                              State state,
+                                              const gfx::Rect& rect,
+                                              const ExtraParams& extra) const {
+  // TODO(asvitkine): This path is pretty inefficient - for each paint operation
+  //                  it creates a new offscreen bitmap Skia canvas. This can
+  //                  be sped up by doing it only once per part/state and
+  //                  keeping a cache of the resulting bitmaps.
+
+  // Create an offscreen canvas that is backed by an HDC.
+  scoped_ptr<SkCanvas> offscreen_canvas(
+      skia::CreateBitmapCanvas(rect.width(), rect.height(), false));
+  DCHECK(offscreen_canvas.get());
+  DCHECK(skia::SupportsPlatformPaint(offscreen_canvas.get()));
+
+  // Some of the Windows theme drawing operations do not write correct alpha
+  // values for fully-opaque pixels; instead the pixels get alpha 0. This is
+  // especially a problem on Windows XP or when using the Classic theme.
+  //
+  // To work-around this, mark all pixels with a placeholder value, to detect
+  // which pixels get touched by the paint operation. After paint, set any
+  // pixels that have alpha 0 to opaque and placeholders to fully-transparent.
+  const SkColor placeholder = SkColorSetARGB(1, 0, 0, 0);
+  offscreen_canvas->clear(placeholder);
+
+  // Offset destination rects to have origin (0,0).
+  gfx::Rect adjusted_rect(rect.width(), rect.height());
+  ExtraParams adjusted_extra(extra);
+  adjusted_extra.progress_bar.value_rect_x = 0;
+  adjusted_extra.progress_bar.value_rect_y = 0;
+  // Draw the theme controls using existing HDC-drawing code.
+  Paint(offscreen_canvas.get(), part, state, adjusted_rect, adjusted_extra);
+
+  // Copy the pixels to a bitmap that has ref-counted pixel storage, which is
+  // necessary to have when drawing to a SkPicture.
+  const SkBitmap& bitmap = offscreen_canvas->getDevice()->accessBitmap(false);
+  SkBitmap ref_counted;
+  bitmap.copyTo(&ref_counted, SkBitmap::kARGB_8888_Config);
+
+  // Post-process the pixels to fix up the alpha values (see big comment above).
+  const SkPMColor placeholder_value = SkPreMultiplyColor(placeholder);
+  const int pixel_count = rect.width() * rect.height();
+  SkPMColor* pixels = bitmap.getAddr32(0, 0);
+  for (int i = 0; i < pixel_count; i++) {
+    if (pixels[i] == placeholder_value) {
+      // Pixel wasn't touched - make it fully transparent.
+      pixels[i] = SkPackARGB32(0, 0, 0, 0);
+    } else if (SkGetPackedA32(pixels[i]) == 0) {
+      // Pixel was touched but has incorrect alpha of 0, make it fully opaque.
+      pixels[i] = SkPackARGB32(0xFF,
+                               SkGetPackedR32(pixels[i]),
+                               SkGetPackedG32(pixels[i]),
+                               SkGetPackedB32(pixels[i]));
+    }
+  }
+
+  // Draw the offscreen bitmap to the destination canvas.
+  canvas->drawBitmap(ref_counted, rect.x(), rect.y());
 }
 
 void NativeThemeWin::Paint(SkCanvas* canvas,
@@ -133,9 +215,8 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
                            const gfx::Rect& rect,
                            const ExtraParams& extra) const {
   if (!skia::SupportsPlatformPaint(canvas)) {
-    // TODO(alokp): Implement this path.
     // This block will only get hit with --enable-accelerated-drawing flag.
-    DLOG(INFO) << "Could not paint native UI control";
+    PaintToNonPlatformCanvas(canvas, part, state, rect, extra);
     return;
   }
 
@@ -435,8 +516,7 @@ HRESULT NativeThemeWin::PaintPushButton(HDC hdc,
   }
 
   RECT rect_win = rect.ToRECT();
-  return PaintButton(hdc, BP_PUSHBUTTON, state_id, extra.classic_state,
-                     &rect_win);
+  return PaintButton(hdc, state, extra, BP_PUSHBUTTON, state_id, &rect_win);
 }
 
 HRESULT NativeThemeWin::PaintRadioButton(HDC hdc,
@@ -464,8 +544,7 @@ HRESULT NativeThemeWin::PaintRadioButton(HDC hdc,
   }
 
   RECT rect_win = rect.ToRECT();
-  return PaintButton(hdc, BP_RADIOBUTTON, state_id, extra.classic_state,
-                     &rect_win);
+  return PaintButton(hdc, state, extra, BP_RADIOBUTTON, state_id, &rect_win);
 }
 
 HRESULT NativeThemeWin::PaintCheckbox(HDC hdc,
@@ -501,18 +580,53 @@ HRESULT NativeThemeWin::PaintCheckbox(HDC hdc,
   }
 
   RECT rect_win = rect.ToRECT();
-  return PaintButton(hdc, BP_CHECKBOX, state_id, extra.classic_state,
-                     &rect_win);
+  return PaintButton(hdc, state, extra, BP_CHECKBOX, state_id, &rect_win);
 }
 
 HRESULT NativeThemeWin::PaintButton(HDC hdc,
+                                    State state,
+                                    const ButtonExtraParams& extra,
                                     int part_id,
                                     int state_id,
-                                    int classic_state,
                                     RECT* rect) const {
   HANDLE handle = GetThemeHandle(BUTTON);
   if (handle && draw_theme_)
     return draw_theme_(handle, hdc, part_id, state_id, rect, NULL);
+
+  // Adjust classic_state based on part, state, and extras.
+  int classic_state = extra.classic_state;
+  switch(part_id) {
+    case BP_CHECKBOX:
+      classic_state |= DFCS_BUTTONCHECK;
+      break;
+    case BP_RADIOBUTTON:
+      classic_state |= DFCS_BUTTONRADIO;
+      break;
+    case BP_PUSHBUTTON:
+      classic_state |= DFCS_BUTTONPUSH;
+      break;
+    default:
+      NOTREACHED() << "Unknown part_id: " << part_id;
+      break;
+  }
+
+  switch(state) {
+    case kDisabled:
+      classic_state |= DFCS_INACTIVE;
+      break;
+    case kPressed:
+      classic_state |= DFCS_PUSHED;
+      break;
+    case kNormal:
+    case kHovered:
+      break;
+    default:
+      NOTREACHED() << "Unknown state: " << state;
+      break;
+  }
+
+  if (extra.checked)
+    classic_state |= DFCS_CHECKED;
 
   // Draw it manually.
   // All pressed states have both low bits set, and no other states do.

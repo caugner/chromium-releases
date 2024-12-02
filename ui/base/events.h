@@ -20,13 +20,11 @@ enum EventType {
   ET_KEY_PRESSED,
   ET_KEY_RELEASED,
   ET_MOUSEWHEEL,
-#if defined(TOUCH_UI)
   ET_TOUCH_RELEASED,
   ET_TOUCH_PRESSED,
   ET_TOUCH_MOVED,
   ET_TOUCH_STATIONARY,
   ET_TOUCH_CANCELLED,
-#endif
   ET_DROP_TARGET_EVENT
 };
 
@@ -49,6 +47,20 @@ enum EventFlags {
 enum MouseEventFlags {
   EF_IS_DOUBLE_CLICK    = 1 << 16,
   EF_IS_NON_CLIENT      = 1 << 17
+};
+
+enum TouchStatus {
+  TOUCH_STATUS_UNKNOWN = 0,  // Unknown touch status. This is used to indicate
+                             // that the touch event was not handled.
+  TOUCH_STATUS_START,        // The touch event initiated a touch sequence.
+  TOUCH_STATUS_CONTINUE,     // The touch event is part of a previously
+                             // started touch sequence.
+  TOUCH_STATUS_END,          // The touch event ended the touch sequence.
+  TOUCH_STATUS_CANCEL,       // The touch event was cancelled, but didn't
+                             // terminate the touch sequence.
+  TOUCH_STATUS_SYNTH_MOUSE   // The touch event was not processed, but a
+                             // synthetic mouse event generated from the
+                             // unused touch event was handled.
 };
 
 }  // namespace ui

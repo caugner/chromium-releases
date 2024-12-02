@@ -13,7 +13,9 @@
 
 #include "base/hash_tables.h"
 
+namespace base {
 class StringValue;
+}
 
 namespace syncable {
 struct EntryKernel;
@@ -93,9 +95,12 @@ class Id {
   // by operator<.
   Id GetLexicographicSuccessor() const;
 
+  // Note: |lowercase_query| should be passed in as lower case.
+  bool ContainsStringCaseInsensitive(const std::string& lowercase_query) const;
+
   // Dumps the ID as a value and returns it.  Transfers ownership of
   // the StringValue to the caller.
-  StringValue* ToValue() const;
+  base::StringValue* ToValue() const;
 
   // Three functions are used to work with our proto buffers.
   std::string GetServerId() const;

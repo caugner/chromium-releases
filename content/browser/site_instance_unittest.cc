@@ -3,14 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/compiler_specific.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string16.h"
-#include "chrome/common/chrome_constants.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/content_browser_client.h"
+#include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -19,15 +18,12 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/empty_web_ui_factory.h"
 #include "content/common/content_client.h"
+#include "content/common/content_constants.h"
 #include "content/common/url_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
-// TODO(estade): this shouldn't need to be chrome:, but it does (or else GURL
-// doesn't think that the webui URLs have a host). Figure out where this is
-// coming from and fix it.
-const char kWebUIScheme[] = "chrome";
 const char kSameAsAnyInstanceURL[] = "about:internets";
 
 class SiteInstanceTestWebUIFactory : public content::EmptyWebUIFactory {
@@ -36,18 +32,28 @@ class SiteInstanceTestWebUIFactory : public content::EmptyWebUIFactory {
     return HasWebUIScheme(url);
   }
   virtual bool HasWebUIScheme(const GURL& url) const {
-    return url.SchemeIs(kWebUIScheme);
+    return url.SchemeIs(chrome::kChromeUIScheme);
   }
 };
 
-class SiteInstanceTestBrowserClient : public content::ContentBrowserClient {
+class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
  public:
   virtual content::WebUIFactory* GetWebUIFactory() OVERRIDE {
     return &factory_;
   }
 
+  virtual bool ShouldUseProcessPerSite(Profile* profile,
+                                       const GURL& effective_url) OVERRIDE {
+    return false;
+  }
+
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE {
-    return url.spec() == kSameAsAnyInstanceURL;
+    return url == GURL(kSameAsAnyInstanceURL) ||
+           url == GURL(chrome::kAboutCrashURL);
+  }
+
+  virtual GURL GetEffectiveURL(Profile* profile, const GURL& url) OVERRIDE {
+    return url;
   }
 
  private:
@@ -475,7 +481,7 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
 
   // Make a bunch of mock renderers so that we hit the limit.
   std::vector<MockRenderProcessHost*> hosts;
-  for (size_t i = 0; i < chrome::kMaxRendererProcessCount; ++i)
+  for (size_t i = 0; i < content::kMaxRendererProcessCount; ++i)
     hosts.push_back(new MockRenderProcessHost(NULL));
 
   // Create some extension instances and make sure they share a process.
@@ -492,14 +498,12 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
             extension2_instance->GetProcess());
 
   // Create some WebUI instances and make sure they share a process.
-  scoped_refptr<SiteInstance> webui1_instance(
-      CreateSiteInstance(&rph_factory,
-                         GURL(kWebUIScheme + std::string("://newtab"))));
+  scoped_refptr<SiteInstance> webui1_instance(CreateSiteInstance(&rph_factory,
+      GURL(chrome::kChromeUIScheme + std::string("://newtab"))));
   policy->GrantWebUIBindings(webui1_instance->GetProcess()->id());
 
-  scoped_refptr<SiteInstance> webui2_instance(
-      CreateSiteInstance(&rph_factory,
-                         GURL(kWebUIScheme + std::string("://history"))));
+  scoped_refptr<SiteInstance> webui2_instance( CreateSiteInstance(&rph_factory,
+      GURL(chrome::kChromeUIScheme + std::string("://history"))));
 
   scoped_ptr<RenderProcessHost> dom_host(webui1_instance->GetProcess());
   EXPECT_EQ(webui1_instance->GetProcess(), webui2_instance->GetProcess());
@@ -507,77 +511,10 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Make sure none of differing privilege processes are mixed.
   EXPECT_NE(extension1_instance->GetProcess(), webui1_instance->GetProcess());
 
-  for (size_t i = 0; i < chrome::kMaxRendererProcessCount; ++i) {
+  for (size_t i = 0; i < content::kMaxRendererProcessCount; ++i) {
     EXPECT_NE(extension1_instance->GetProcess(), hosts[i]);
     EXPECT_NE(webui1_instance->GetProcess(), hosts[i]);
   }
 
   STLDeleteContainerPointers(hosts.begin(), hosts.end());
-}
-
-// Test to ensure that profiles that derive from each other share site
-// information.
-TEST_F(SiteInstanceTest, GetSiteInstanceMap) {
-  int deleteCounter = 0;
-
-  scoped_ptr<Profile> p1(new TestingProfile());
-  scoped_ptr<Profile> p2(new TestingProfile());
-  scoped_ptr<Profile> p3(new DerivedTestingProfile(p1.get()));
-
-  // In this test, instances 1 and 2 will be deleted automatically when the
-  // SiteInstance objects they return are deleted.  However, instance 3 never
-  // returns any SitesIntance objects in this test, so will not be automatically
-  // deleted.  It must be deleted manually.
-  TestBrowsingInstance* instance1(new TestBrowsingInstance(p1.get(),
-      &deleteCounter));
-  TestBrowsingInstance* instance2(new TestBrowsingInstance(p2.get(),
-      &deleteCounter));
-  scoped_refptr<TestBrowsingInstance> instance3(
-      new TestBrowsingInstance(p3.get(), &deleteCounter));
-
-  instance1->use_process_per_site = true;
-  instance2->use_process_per_site = true;
-  instance3->use_process_per_site = true;
-
-  // The same profile with the same site.
-  scoped_refptr<SiteInstance> s1a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s1b(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  EXPECT_EQ(s1a, s1b);
-
-  // The same profile with different sites.
-  scoped_refptr<SiteInstance> s2a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s2b(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://foo/boo")));
-  EXPECT_NE(s2a, s2b);
-
-  // The different profiles with the same site.
-  scoped_refptr<SiteInstance> s3a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s3b(instance2->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  EXPECT_NE(s3a, s3b);
-
-  // The different profiles with different sites.
-  scoped_refptr<SiteInstance> s4a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s4b(instance2->GetSiteInstanceForURL(
-      GURL("chrome-extension://foo/boo")));
-  EXPECT_NE(s4a, s4b);
-
-  // The derived profiles with the same site.
-  scoped_refptr<SiteInstance> s5a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s5b(instance3->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  EXPECT_EQ(s5a, s5b);
-
-  // The derived profiles with the different sites.
-  scoped_refptr<SiteInstance> s6a(instance1->GetSiteInstanceForURL(
-      GURL("chrome-extension://baz/bar")));
-  scoped_refptr<SiteInstance> s6b(instance3->GetSiteInstanceForURL(
-      GURL("chrome-extension://foo/boo")));
-  EXPECT_NE(s6a, s6b);
 }

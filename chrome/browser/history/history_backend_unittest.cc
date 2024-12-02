@@ -55,7 +55,7 @@ class HistoryBackendTestDelegate : public HistoryBackend::Delegate {
 
   virtual void NotifyProfileError(sql::InitStatus init_status) OVERRIDE {}
   virtual void SetInMemoryBackend(InMemoryHistoryBackend* backend) OVERRIDE;
-  virtual void BroadcastNotifications(NotificationType type,
+  virtual void BroadcastNotifications(int type,
                                       HistoryDetails* details) OVERRIDE;
   virtual void DBLoaded() OVERRIDE;
   virtual void StartTopSitesMigration() OVERRIDE;
@@ -169,7 +169,7 @@ class HistoryBackendTest : public testing::Test {
     mem_backend_.reset(backend);
   }
 
-  void BroadcastNotifications(NotificationType type,
+  void BroadcastNotifications(int type,
                                       HistoryDetails* details) {
     // Send the notifications directly to the in-memory database.
     Details<HistoryDetails> det(details);
@@ -189,7 +189,7 @@ void HistoryBackendTestDelegate::SetInMemoryBackend(
 }
 
 void HistoryBackendTestDelegate::BroadcastNotifications(
-    NotificationType type,
+    int type,
     HistoryDetails* details) {
   test_->BroadcastNotifications(type, details);
 }
@@ -283,7 +283,7 @@ TEST_F(HistoryBackendTest, DeleteAll) {
 
   // Star row1.
   bookmark_model_.AddURL(
-      bookmark_model_.GetBookmarkBarNode(), 0, string16(), row1.url());
+      bookmark_model_.bookmark_bar_node(), 0, string16(), row1.url());
 
   // Set full text index for each one.
   backend_->text_database_->AddPageData(row1.url(), row1_id, visit1_id,
@@ -577,7 +577,7 @@ TEST_F(HistoryBackendTest, ImportedFaviconsTest) {
   EXPECT_TRUE(backend_->db_->GetRowForURL(url3, &url_row3) == 0);
 
   // If the URL is bookmarked, it should get added to history with 0 visits.
-  bookmark_model_.AddURL(bookmark_model_.GetBookmarkBarNode(), 0, string16(),
+  bookmark_model_.AddURL(bookmark_model_.bookmark_bar_node(), 0, string16(),
                          url3);
   backend_->SetImportedFavicons(favicons);
   EXPECT_FALSE(backend_->db_->GetRowForURL(url3, &url_row3) == 0);
@@ -696,15 +696,18 @@ TEST_F(HistoryBackendTest, AddVisitsSource) {
   ASSERT_TRUE(backend_.get());
 
   GURL url1("http://www.cnn.com");
-  std::vector<base::Time> visits1;
-  visits1.push_back(Time::Now() - base::TimeDelta::FromDays(5));
-  visits1.push_back(Time::Now() - base::TimeDelta::FromDays(1));
-  visits1.push_back(Time::Now());
+  std::vector<VisitInfo> visits1, visits2;
+  visits1.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(5), PageTransition::LINK));
+  visits1.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(1), PageTransition::LINK));
+  visits1.push_back(VisitInfo(
+      Time::Now(), PageTransition::LINK));
 
   GURL url2("http://www.example.com");
-  std::vector<base::Time> visits2;
-  visits2.push_back(Time::Now() - base::TimeDelta::FromDays(10));
-  visits2.push_back(Time::Now());
+  visits2.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(10), PageTransition::LINK));
+  visits2.push_back(VisitInfo(Time::Now(), PageTransition::LINK));
 
   // Clear all history.
   backend_->DeleteAllHistory();
@@ -733,18 +736,71 @@ TEST_F(HistoryBackendTest, AddVisitsSource) {
     EXPECT_EQ(history::SOURCE_SYNCED, visit_sources[visits[i].visit_id]);
 }
 
+TEST_F(HistoryBackendTest, RemoveVisitsTransitions) {
+  ASSERT_TRUE(backend_.get());
+
+  // Clear all history.
+  backend_->DeleteAllHistory();
+
+  GURL url1("http://www.cnn.com");
+  VisitInfo typed_visit(
+      Time::Now() - base::TimeDelta::FromDays(6), PageTransition::TYPED);
+  VisitInfo reload_visit(
+      Time::Now() - base::TimeDelta::FromDays(5), PageTransition::RELOAD);
+  VisitInfo link_visit(
+      Time::Now() - base::TimeDelta::FromDays(4), PageTransition::LINK);
+  std::vector<VisitInfo> visits_to_add;
+  visits_to_add.push_back(typed_visit);
+  visits_to_add.push_back(reload_visit);
+  visits_to_add.push_back(link_visit);
+
+  // Add the visits.
+  backend_->AddVisits(url1, visits_to_add, history::SOURCE_SYNCED);
+
+  // Verify that the various counts are what we expect.
+  VisitVector visits;
+  URLRow row;
+  URLID id = backend_->db()->GetRowForURL(url1, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  ASSERT_EQ(3U, visits.size());
+  ASSERT_EQ(1, row.typed_count());
+  ASSERT_EQ(2, row.visit_count());
+
+  // Now, delete the typed visit and verify that typed_count is updated.
+  ASSERT_TRUE(backend_->RemoveVisits(VisitVector(1, visits[0])));
+  id = backend_->db()->GetRowForURL(url1, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  ASSERT_EQ(2U, visits.size());
+  ASSERT_EQ(0, row.typed_count());
+  ASSERT_EQ(1, row.visit_count());
+
+  // Delete the reload visit now and verify that none of the counts have
+  // changed.
+  ASSERT_TRUE(backend_->RemoveVisits(VisitVector(1, visits[0])));
+  id = backend_->db()->GetRowForURL(url1, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  ASSERT_EQ(1U, visits.size());
+  ASSERT_EQ(0, row.typed_count());
+  ASSERT_EQ(1, row.visit_count());
+
+  // Delete the last visit and verify that we delete the URL.
+  ASSERT_TRUE(backend_->RemoveVisits(VisitVector(1, visits[0])));
+  ASSERT_EQ(0, backend_->db()->GetRowForURL(url1, &row));
+}
+
 TEST_F(HistoryBackendTest, RemoveVisitsSource) {
   ASSERT_TRUE(backend_.get());
 
   GURL url1("http://www.cnn.com");
-  std::vector<base::Time> visits1;
-  visits1.push_back(Time::Now() - base::TimeDelta::FromDays(5));
-  visits1.push_back(Time::Now());
+  std::vector<VisitInfo> visits1, visits2;
+  visits1.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(5), PageTransition::LINK));
+  visits1.push_back(VisitInfo(Time::Now(), PageTransition::LINK));
 
   GURL url2("http://www.example.com");
-  std::vector<base::Time> visits2;
-  visits2.push_back(Time::Now() - base::TimeDelta::FromDays(10));
-  visits2.push_back(Time::Now());
+  visits2.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(10), PageTransition::LINK));
+  visits2.push_back(VisitInfo(Time::Now(), PageTransition::LINK));
 
   // Clear all history.
   backend_->DeleteAllHistory();

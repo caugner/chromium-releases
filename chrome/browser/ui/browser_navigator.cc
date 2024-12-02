@@ -7,52 +7,26 @@
 #include <algorithm>
 
 #include "base/command_line.h"
-#include "chrome/browser/browser_url_handler.h"
+#include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/browser_url_handler.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
 
 namespace {
-
-// Returns an appropriate SiteInstance for WebUI URLs, or the SiteInstance for
-// |source_contents| if it represents the same website as |url|.  Returns NULL
-// otherwise.
-SiteInstance* GetSiteInstance(TabContents* source_contents, Profile* profile,
-                              const GURL& url) {
-  // If url is a WebUI or extension, we need to be sure to use the right type
-  // of renderer process up front.  Otherwise, we create a normal SiteInstance
-  // as part of creating the tab.
-  ExtensionService* service = profile->GetExtensionService();
-  if (ChromeWebUIFactory::GetInstance()->UseWebUIForURL(profile, url) ||
-      (service && service->GetExtensionByWebExtent(url))) {
-    return SiteInstance::CreateSiteInstanceForURL(profile, url);
-  }
-
-  if (!source_contents)
-    return NULL;
-
-  // Don't use this logic when "--process-per-tab" is specified.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kProcessPerTab) &&
-      SiteInstance::IsSameWebSite(source_contents->profile(),
-                                  source_contents->GetURL(),
-                                  url)) {
-    return source_contents->GetSiteInstance();
-  }
-  return NULL;
-}
 
 // Returns true if the specified Browser can open tabs. Not all Browsers support
 // multiple tabs, such as app frames and popups. This function returns false for
@@ -82,50 +56,6 @@ bool CompareURLsWithReplacements(
   return url_replaced == other_replaced;
 }
 
-// Returns the index of an existing singleton tab in |params->browser| matching
-// the URL specified in |params|.
-int GetIndexOfSingletonTab(browser::NavigateParams* params) {
-  if (params->disposition != SINGLETON_TAB)
-    return -1;
-
-  // In case the URL was rewritten by the BrowserURLHandler we need to ensure
-  // that we do not open another URL that will get redirected to the rewritten
-  // URL.
-  GURL rewritten_url(params->url);
-  bool reverse_on_redirect = false;
-  BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-      &rewritten_url,
-      params->browser->profile(),
-      &reverse_on_redirect);
-
-  // If there are several matches: prefer the active tab by starting there.
-  int start_index = std::max(0, params->browser->active_index());
-  int tab_count = params->browser->tab_count();
-  for (int i = 0; i < tab_count; ++i) {
-    int tab_index = (start_index + i) % tab_count;
-    TabContentsWrapper* tab =
-        params->browser->GetTabContentsWrapperAt(tab_index);
-
-    url_canon::Replacements<char> replacements;
-    replacements.ClearRef();
-    if (params->path_behavior == browser::NavigateParams::IGNORE_AND_NAVIGATE ||
-        params->path_behavior == browser::NavigateParams::IGNORE_AND_STAY_PUT) {
-      replacements.ClearPath();
-      replacements.ClearQuery();
-    }
-
-    if (CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
-                                    params->url, replacements) ||
-        CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
-                                    rewritten_url, replacements)) {
-      params->target_contents = tab;
-      return tab_index;
-    }
-  }
-
-  return -1;
-}
-
 // Change some of the navigation parameters based on the particular URL.
 // Currently this applies to chrome://settings and the bookmark manager,
 // which we always want to open in a normal (not incognito) window. Guest
@@ -138,7 +68,8 @@ void AdjustNavigateParamsForURL(browser::NavigateParams* params) {
     Profile* profile =
         params->browser ? params->browser->profile() : params->profile;
 
-    if (profile->IsOffTheRecord() && !Profile::IsGuestSession()) {
+    if ((profile->IsOffTheRecord() && !Profile::IsGuestSession()) ||
+        params->disposition == OFF_THE_RECORD) {
       profile = profile->GetOriginalProfile();
 
       params->disposition = SINGLETON_TAB;
@@ -187,13 +118,15 @@ Browser* GetBrowserForDisposition(browser::NavigateParams* params) {
         // Coerce app-style if |params->browser| or |source| represents an app.
         std::string app_name;
         if (!params->extension_app_id.empty()) {
-          app_name = params->extension_app_id;
+          app_name = web_app::GenerateApplicationNameFromExtensionId(
+              params->extension_app_id);
         } else if (params->browser && !params->browser->app_name().empty()) {
           app_name = params->browser->app_name();
         } else if (params->source_contents &&
                    params->source_contents->extension_tab_helper()->is_app()) {
-          app_name = params->source_contents->extension_tab_helper()->
-              extension_app()->id();
+          app_name = web_app::GenerateApplicationNameFromExtensionId(
+              params->source_contents->extension_tab_helper()->
+                  extension_app()->id());
         }
         if (app_name.empty()) {
           Browser::CreateParams browser_params(Browser::TYPE_POPUP, profile);
@@ -451,7 +384,8 @@ void Navigate(NavigateParams* params) {
       params->target_contents =
           Browser::TabContentsFactory(
               params->browser->profile(),
-              GetSiteInstance(source_contents, params->browser->profile(), url),
+              tab_util::GetSiteInstanceForNewTab(
+                  source_contents, params->browser->profile(), url),
               MSG_ROUTING_NONE,
               source_contents,
               NULL);
@@ -480,14 +414,27 @@ void Navigate(NavigateParams* params) {
           tab_contents())->OnUserGesture();
     }
 
-    // Perform the actual navigation.
-    params->target_contents->controller().LoadURL(url, params->referrer,
-                                                  params->transition);
+    // Try to handle non-navigational URLs that popup dialogs and such, these
+    // should not actually navigate.
+    if (!HandleNonNavigationAboutURL(url)) {
+      // Perform the actual navigation.
+      params->target_contents->controller().LoadURL(url, params->referrer,
+                                                    params->transition);
+    }
   } else {
     // |target_contents| was specified non-NULL, and so we assume it has already
     // been navigated appropriately. We need to do nothing more other than
     // add it to the appropriate tabstrip.
   }
+
+  // If the user navigated from the omnibox, and the selected tab is going to
+  // lose focus, then make sure the focus for the source tab goes away from the
+  // omnibox.
+  if (params->source_contents &&
+      (params->disposition == NEW_FOREGROUND_TAB ||
+       params->disposition == NEW_WINDOW) &&
+      (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
+    params->source_contents->tab_contents()->Focus();
 
   if (params->source_contents == params->target_contents) {
     // The navigation occurred in the source tab.
@@ -527,6 +474,50 @@ void Navigate(NavigateParams* params) {
     if (params->source_contents != params->target_contents)
       params->browser->ActivateTabAt(singleton_index, user_initiated);
   }
+}
+
+// Returns the index of an existing singleton tab in |params->browser| matching
+// the URL specified in |params|.
+int GetIndexOfSingletonTab(browser::NavigateParams* params) {
+  if (params->disposition != SINGLETON_TAB)
+    return -1;
+
+  // In case the URL was rewritten by the BrowserURLHandler we need to ensure
+  // that we do not open another URL that will get redirected to the rewritten
+  // URL.
+  GURL rewritten_url(params->url);
+  bool reverse_on_redirect = false;
+  BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
+      &rewritten_url,
+      params->browser->profile(),
+      &reverse_on_redirect);
+
+  // If there are several matches: prefer the active tab by starting there.
+  int start_index = std::max(0, params->browser->active_index());
+  int tab_count = params->browser->tab_count();
+  for (int i = 0; i < tab_count; ++i) {
+    int tab_index = (start_index + i) % tab_count;
+    TabContentsWrapper* tab =
+        params->browser->GetTabContentsWrapperAt(tab_index);
+
+    url_canon::Replacements<char> replacements;
+    replacements.ClearRef();
+    if (params->path_behavior == browser::NavigateParams::IGNORE_AND_NAVIGATE ||
+        params->path_behavior == browser::NavigateParams::IGNORE_AND_STAY_PUT) {
+      replacements.ClearPath();
+      replacements.ClearQuery();
+    }
+
+    if (CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
+                                    params->url, replacements) ||
+        CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
+                                    rewritten_url, replacements)) {
+      params->target_contents = tab;
+      return tab_index;
+    }
+  }
+
+  return -1;
 }
 
 }  // namespace browser

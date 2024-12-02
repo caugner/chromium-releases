@@ -11,11 +11,14 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_temp_dir.h"
-#include "chrome/browser/utility_process_host.h"
+#include "content/browser/utility_process_host.h"
 
-class DictionaryValue;
 class Extension;
 class ResourceDispatcherHost;
+
+namespace base {
+class DictionaryValue;
+}
 
 class SandboxedExtensionUnpackerClient
     : public base::RefCountedThreadSafe<SandboxedExtensionUnpackerClient> {
@@ -32,7 +35,7 @@ class SandboxedExtensionUnpackerClient
   // for deleting this memory.
   virtual void OnUnpackSuccess(const FilePath& temp_dir,
                                const FilePath& extension_root,
-                               const DictionaryValue* original_manifest,
+                               const base::DictionaryValue* original_manifest,
                                const Extension* extension) = 0;
   virtual void OnUnpackFailure(const std::string& error) = 0;
 
@@ -187,17 +190,21 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   // Starts the utility process that unpacks our extension.
   void StartProcessOnIOThread(const FilePath& temp_crx_path);
 
-  // SandboxedExtensionUnpacker
-  virtual void OnUnpackExtensionSucceeded(const DictionaryValue& manifest);
-  virtual void OnUnpackExtensionFailed(const std::string& error_message);
+  // UtilityProcessHost::Client
+  virtual bool OnMessageReceived(const IPC::Message& message);
   virtual void OnProcessCrashed(int exit_code);
 
+  // IPC message handlers.
+  void OnUnpackExtensionSucceeded(const base::DictionaryValue& manifest);
+  void OnUnpackExtensionFailed(const std::string& error_message);
+
   void ReportFailure(FailureReason reason, const std::string& message);
-  void ReportSuccess(const DictionaryValue& original_manifest);
+  void ReportSuccess(const base::DictionaryValue& original_manifest);
 
   // Overwrites original manifest with safe result from utility process.
   // Returns NULL on error. Caller owns the returned object.
-  DictionaryValue* RewriteManifestFile(const DictionaryValue& manifest);
+  base::DictionaryValue* RewriteManifestFile(
+      const base::DictionaryValue& manifest);
 
   // Overwrites original files with safe results from utility process.
   // Reports error and returns false if it fails.

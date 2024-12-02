@@ -19,11 +19,6 @@
 #include "ipc/ipc_message.h"
 
 class AutomationProviderList;
-
-namespace safe_browsing {
-class ClientSideDetectionService;
-}
-
 class BackgroundModeManager;
 class ChromeNetLog;
 class DevToolsManager;
@@ -35,10 +30,12 @@ class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
 class MetricsService;
+class MHTMLGenerationManager;
 class NotificationUIManager;
 class PrefService;
 class ProfileManager;
 class ResourceDispatcherHost;
+class SafeBrowsingService;
 class SidebarManager;
 class StatusTray;
 class TabCloseableStateWatcher;
@@ -47,7 +44,6 @@ class WatchDogThread;
 
 namespace base {
 class Thread;
-class WaitableEvent;
 }
 
 #if defined(OS_CHROMEOS)
@@ -72,6 +68,10 @@ class PrintPreviewTabController;
 
 namespace policy {
 class BrowserPolicyConnector;
+}
+
+namespace safe_browsing {
+class ClientSideDetectionService;
 }
 
 namespace ui {
@@ -136,15 +136,6 @@ class BrowserProcess {
   // Returns the thread that is used for background cache operations.
   virtual base::Thread* cache_thread() = 0;
 
-#if defined(USE_X11)
-  // Returns the thread that is used to process UI requests in cases where
-  // we can't route the request to the UI thread. Note that this thread
-  // should only be used by the IO thread and this method is only safe to call
-  // from the UI thread so, if you've ended up here, something has gone wrong.
-  // This method is only included for uniformity.
-  virtual base::Thread* background_x11_thread() = 0;
-#endif
-
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
@@ -188,11 +179,7 @@ class BrowserProcess {
   virtual const std::string& GetApplicationLocale() = 0;
   virtual void SetApplicationLocale(const std::string& locale) = 0;
 
-  DownloadRequestLimiter* download_request_limiter();
   virtual DownloadStatusUpdater* download_status_updater() = 0;
-
-  // Returns an event that is signaled when the browser shutdown.
-  virtual base::WaitableEvent* shutdown_event() = 0;
 
   // Returns a reference to the user-data-dir based profiles vector.
   std::vector<std::wstring>& user_data_dir_profiles() {
@@ -209,6 +196,9 @@ class BrowserProcess {
   // in the system status tray. Returns NULL if status icons are not supported
   // on this platform (or this is a unit test).
   virtual StatusTray* status_tray() = 0;
+
+  // Returns the SafeBrowsing service.
+  virtual SafeBrowsingService* safe_browsing_service() = 0;
 
   // Returns an object which handles communication with the SafeBrowsing
   // client-side detection servers.
@@ -248,6 +238,8 @@ class BrowserProcess {
   void set_plugin_data_remover_mime_type(const std::string& mime_type) {
     plugin_data_remover_mime_type_ = mime_type;
   }
+
+  virtual MHTMLGenerationManager* mhtml_generation_manager() = 0;
 
  private:
   // User-data-dir based profiles.

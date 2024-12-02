@@ -43,7 +43,8 @@ class SpellCheckHostImpl : public SpellCheckHost,
  public:
   SpellCheckHostImpl(SpellCheckHostObserver* observer,
                      const std::string& language,
-                     net::URLRequestContextGetter* request_context_getter);
+                     net::URLRequestContextGetter* request_context_getter,
+                     SpellCheckHostMetrics* metrics);
 
   void Initialize();
 
@@ -87,13 +88,9 @@ class SpellCheckHostImpl : public SpellCheckHost,
   // Write a custom dictionary addition to disk.
   void WriteWordToCustomDictionary(const std::string& word);
 
-  // Collects status of spellchecking enabling state, which is
-  // to be uploaded via UMA
-  virtual void RecordCheckedWordStats(bool misspell);
-
-  // Collects a histogram for misspelled word replacement
-  // to be uploaded via UMA
-  virtual void RecordReplacedWordStats(int delta);
+  // Returns a metrics counter associated with this object,
+  // or null when metrics recording is disabled.
+  virtual SpellCheckHostMetrics* GetMetrics() const;
 
   // URLFetcher::Delegate implementation.  Called when we finish downloading the
   // spellcheck dictionary; saves the dictionary to |data_|.
@@ -105,7 +102,7 @@ class SpellCheckHostImpl : public SpellCheckHost,
                                   const std::string& data);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -149,12 +146,8 @@ class SpellCheckHostImpl : public SpellCheckHost,
 
   NotificationRegistrar registrar_;
 
-  // Number of corrected words of checked words.
-  int misspelled_word_count_;
-  // Number of checked words.
-  int spellchecked_word_count_;
-  // Number of misspelled words replaced by a user.
-  int replaced_word_count_;
+  // An optional metrics counter given by the constructor.
+  SpellCheckHostMetrics* metrics_;
 };
 
 #endif  // CHROME_BROWSER_SPELLCHECK_HOST_IMPL_H_

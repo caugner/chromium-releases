@@ -10,7 +10,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/scoped_temp_dir.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/utility_messages.h"
+#include "chrome/common/chrome_utility_messages.h"
 #include "ipc/ipc_switches.h"
 #include "printing/page_range.h"
 #include "ui/base/ui_base_switches.h"
@@ -180,8 +180,9 @@ void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafileSucceeded(
 
 bool ServiceUtilityProcessHost::Client::OnMessageReceived(
     const IPC::Message& message) {
+  bool msg_is_ok = true;
   bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(ServiceUtilityProcessHost, message)
+  IPC_BEGIN_MESSAGE_MAP_EX(ServiceUtilityProcessHost, message, msg_is_ok)
     IPC_MESSAGE_HANDLER(UtilityHostMsg_RenderPDFPagesToMetafile_Failed,
                         Client::OnRenderPDFPagesToMetafileFailed)
     IPC_MESSAGE_HANDLER(UtilityHostMsg_GetPrinterCapsAndDefaults_Succeeded,

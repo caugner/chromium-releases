@@ -13,7 +13,7 @@
 #include "ui/base/message_box_flags.h"
 #include "views/controls/message_box_view.h"
 #include "views/controls/textfield/textfield.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // JSModalDialogViews, public:
@@ -23,7 +23,8 @@ JSModalDialogViews::JSModalDialogViews(
     : parent_(parent),
       message_box_view_(new views::MessageBoxView(
           parent->dialog_flags() | ui::MessageBoxFlags::kAutoDetectAlignment,
-          parent->message_text(), parent->default_prompt_text())) {
+          UTF16ToWideHack(parent->message_text()),
+          UTF16ToWideHack(parent->default_prompt_text()))) {
   DCHECK(message_box_view_);
 
   message_box_view_->AddAccelerator(
@@ -45,16 +46,16 @@ int JSModalDialogViews::GetAppModalDialogButtons() const {
 }
 
 void JSModalDialogViews::ShowAppModalDialog() {
-  window()->Show();
+  GetWidget()->Show();
 }
 
 void JSModalDialogViews::ActivateAppModalDialog() {
-  window()->Show();
-  window()->Activate();
+  GetWidget()->Show();
+  GetWidget()->Activate();
 }
 
 void JSModalDialogViews::CloseAppModalDialog() {
-  window()->Close();
+  GetWidget()->Close();
 }
 
 void JSModalDialogViews::AcceptAppModalDialog() {
@@ -90,7 +91,7 @@ int JSModalDialogViews::GetDialogButtons() const {
 }
 
 std::wstring JSModalDialogViews::GetWindowTitle() const {
-  return parent_->title();
+  return UTF16ToWideHack(parent_->title());
 }
 
 
@@ -108,13 +109,21 @@ bool JSModalDialogViews::Cancel() {
 }
 
 bool JSModalDialogViews::Accept() {
-  parent_->OnAccept(message_box_view_->GetInputText(),
+  parent_->OnAccept(WideToUTF16Hack(message_box_view_->GetInputText()),
                     message_box_view_->IsCheckBoxSelected());
   return true;
 }
 
 void JSModalDialogViews::OnClose() {
   parent_->OnClose();
+}
+
+views::Widget* JSModalDialogViews::GetWidget() {
+  return message_box_view_->GetWidget();
+}
+
+const views::Widget* JSModalDialogViews::GetWidget() const {
+  return message_box_view_->GetWidget();
 }
 
 std::wstring JSModalDialogViews::GetDialogButtonLabel(

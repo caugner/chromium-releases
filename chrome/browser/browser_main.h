@@ -7,8 +7,10 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/scoped_ptr.h"
 #include "base/tracked_objects.h"
 
 class BrowserThread;
@@ -125,12 +127,15 @@ class BrowserMainParts {
   // A/B test for spdy when --use-spdy not set.
   void SpdyFieldTrial();
 
+  // A/B test for warmest socket vs. most recently used socket.
+  void WarmConnectionFieldTrial();
+
   // A/B test for automatically establishing a backup TCP connection when a
   // specified timeout value is reached.
   void ConnectBackupJobsFieldTrial();
 
-  // A/B test for SSL False Start.
-  void SSLFalseStartFieldTrial();
+  // A/B test for using a different host prefix in Google search suggest.
+  void SuggestPrefixFieldTrial();
 
   // Used to initialize NSPR where appropriate.
   virtual void InitializeSSL() = 0;
@@ -146,7 +151,8 @@ class BrowserMainParts {
       const PrefService* local_state);
 
   // Add an invocation of your field trial init function to this method.
-  void SetupFieldTrials(bool metrics_recording_enabled);
+  void SetupFieldTrials(bool metrics_recording_enabled,
+                        bool proxy_policy_is_set);
 
   // Members initialized on construction ---------------------------------------
 
@@ -174,6 +180,9 @@ class BrowserMainParts {
   // Initialized in SetupMetricsAndFieldTrials.
   scoped_refptr<FieldTrialSynchronizer> field_trial_synchronizer_;
 
+  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_WarmestSocket);
+  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_Random);
+  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_Invalid);
   DISALLOW_COPY_AND_ASSIGN(BrowserMainParts);
 };
 

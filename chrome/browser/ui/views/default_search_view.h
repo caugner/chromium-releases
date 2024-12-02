@@ -19,7 +19,7 @@
 class PrefService;
 class TabContents;
 class TemplateURL;
-class TemplateURLModel;
+class TemplateURLService;
 
 namespace gfx {
 class Canvas;
@@ -42,30 +42,34 @@ class DefaultSearchView
   // Takes ownership of |proposed_default_turl|.
   static void Show(TabContents* tab_contents,
                    TemplateURL* ,
-                   TemplateURLModel* template_url_model);
+                   TemplateURLService* template_url_service);
 
   virtual ~DefaultSearchView();
 
  protected:
   // Overridden from views::View:
   // Draws the gray background at the top of the dialog.
-  virtual void OnPaint(gfx::Canvas* canvas);
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
   // ConstrainedDialogDelegate:
+  // TODO(beng): Figure out why adding OVERRIDE to these methods annoys Clang.
   virtual std::wstring GetWindowTitle() const;
   virtual views::View* GetInitiallyFocusedView();
   virtual views::View* GetContentsView();
   virtual int GetDialogButtons() const;
   virtual bool Accept();
+  virtual views::Widget* GetWidget();
+  virtual const views::Widget* GetWidget() const;
 
  private:
   // Takes ownership of |proposed_default_turl|.
   DefaultSearchView(TabContents* tab_contents,
                     TemplateURL* proposed_default_turl,
-                    TemplateURLModel* template_url_model);
+                    TemplateURLService* template_url_service);
 
   // Initializes the labels and controls in the view.
   void SetupControls(PrefService* prefs);
@@ -82,7 +86,7 @@ class DefaultSearchView
   // The proposed new default search engine.
   scoped_ptr<TemplateURL> proposed_turl_;
 
-  TemplateURLModel* template_url_model_;
+  TemplateURLService* template_url_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultSearchView);
 };

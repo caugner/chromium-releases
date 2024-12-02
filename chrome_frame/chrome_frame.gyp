@@ -37,7 +37,6 @@
       '../chrome/chrome.gyp:chrome_strings',
       '../chrome/chrome.gyp:theme_resources',
       '../skia/skia.gyp:skia',
-      '../third_party/npapi/npapi.gyp:npapi',
     ],
     'defines': [ 'ISOLATION_AWARE_ENABLED=1' ],
     'include_dirs': [
@@ -78,6 +77,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../chrome/app/policy/cloud_policy_codegen.gyp:policy',
+        '../net/net.gyp:net',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         'chrome_frame_launcher.gyp:chrome_frame_helper_lib',
@@ -87,8 +87,6 @@
       ],
       'sources': [
         '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
-        'chrome_frame_histograms.h',
-        'chrome_frame_histograms.cc',
         'chrome_frame_unittest_main.cc',
         'chrome_launcher.cc',
         'chrome_launcher.h',
@@ -116,31 +114,25 @@
         'test/win_event_receiver.cc',
         'unittest_precompile.h',
         'unittest_precompile.cc',
-        'urlmon_upload_data_stream.cc',
         'urlmon_upload_data_stream_unittest.cc',
         'vtable_patch_manager_unittest.cc',
       ],
       'include_dirs': [
+        '<(DEPTH)/breakpad/src',
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
         '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'conditions': [
-        # We needed to extract this test from the chrome_frame_unittests because
-        # we can't instrument code for coverage if it depends on 3rd party
+        # We can't instrument code for coverage if it depends on 3rd party
         # binaries that we don't have PDBs for. See here for more details:
         # http://connect.microsoft.com/VisualStudio/feedback/details/176188/can-not-disable-warning-lnk4099
         ['coverage==0', {
-          'dependencies': [
-            'chrome_frame_npapi',
-          ],
-          'sources': [
-            'chrome_frame_npapi_unittest.cc',
-          ],
           'conditions': [
             ['OS=="win"', {
               'dependencies': [
+                '../breakpad/breakpad.gyp:breakpad_handler',              
                 # TODO(slightlyoff): Get automation targets working on OS X
                 '../chrome/chrome.gyp:automation',
               ],
@@ -189,7 +181,6 @@
     },
     {
       'target_name': 'chrome_frame_tests',
-      'msvs_guid': '1D25715A-C8CE-4448-AFA3-8515AF22D235',
       'type': 'executable',
       'dependencies': [
         '../base/base.gyp:test_support_base',
@@ -202,6 +193,7 @@
         '../chrome/chrome.gyp:renderer',
         '../chrome/installer/upgrade_test.gyp:alternate_version_generator_lib',
         '../content/content.gyp:content_gpu',
+        '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
@@ -209,7 +201,6 @@
         '../third_party/iaccessible2/iaccessible2.gyp:IAccessible2Proxy',
         '../third_party/libxslt/libxslt.gyp:libxslt',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
         'chrome_tab_idl',
@@ -299,7 +290,6 @@
     },
     {
       'target_name': 'chrome_frame_perftests',
-      'msvs_guid': '3767888B-76ED-4D2A-B1F5-263CC56A12AA',
       'type': 'executable',
       'dependencies': [
         '../base/base.gyp:base',
@@ -317,7 +307,6 @@
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/libxslt/libxslt.gyp:libxslt',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
         'chrome_tab_idl',
@@ -379,7 +368,6 @@
 
     {
       'target_name': 'chrome_frame_net_tests',
-      'msvs_guid': '8FDA8275-0415-4B08-A1DC-C95B0D3708DB',
       'type': 'executable',
       'dependencies': [
         '../base/base.gyp:test_support_base',
@@ -387,14 +375,15 @@
         '../chrome/chrome.gyp:chrome_resources',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
-        '../chrome/chrome.gyp:syncapi',
+        '../chrome/chrome.gyp:syncapi_core',
         '../content/content.gyp:content_gpu',
+        '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
-        'chrome_frame_npapi',
+        '../ui/ui.gyp:ui_resources',
         'chrome_frame_ie',
         'chrome_tab_idl',
         'npchrome_frame',
@@ -421,6 +410,7 @@
         'test/net/test_automation_resource_message_filter.cc',
         'test/net/test_automation_resource_message_filter.h',
         '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
         'test_utils.cc',
         'test_utils.h',
       ],
@@ -440,7 +430,7 @@
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
             '../chrome/chrome.gyp:crash_service',
-            '../chrome/chrome.gyp:chrome_dll_version',
+            '../chrome/chrome.gyp:chrome_version_resources',
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ],
@@ -460,7 +450,6 @@
     {
       'target_name': 'chrome_frame_reliability_tests',
       'type': 'executable',
-      'msvs_guid': 'A1440368-4089-4E14-8864-D84D3C5714A7',
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
@@ -472,7 +461,6 @@
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_tab_idl',
       ],
@@ -532,17 +520,16 @@
     },
     {
       'target_name': 'chrome_frame_qa_tests',
-      'msvs_guid': 'D6B3174D-31DD-49D6-83C0-A63A6A135E0E',
       'type': 'executable',
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../net/net.gyp:net',
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         '../third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
         'npchrome_frame',
       ],
@@ -599,38 +586,6 @@
       ],
     },
     {
-      'target_name': 'chrome_frame_npapi_core',
-      'type': 'static_library',
-      'dependencies': [
-        '../base/base.gyp:base',
-      ],
-      'sources': [
-        'np_browser_functions.cc',
-        'np_browser_functions.h',
-      ],
-    },
-    {
-      'target_name': 'chrome_frame_npapi',
-      'type': 'static_library',
-      'dependencies': [
-        'chrome_frame_common',
-        'chrome_frame_npapi_core',
-        'chrome_frame_strings',
-        'chrome_frame_utils',
-        '../chrome/chrome.gyp:common',
-      ],
-      'sources': [
-        'chrome_frame_npapi.cc',
-        'chrome_frame_npapi.h',
-        'np_utils.cc',
-        'np_utils.h',
-        'npapi_url_request.cc',
-        'npapi_url_request.h',
-      ],
-      'include_dirs': [
-      ],
-    },
-    {
       'target_name': 'chrome_frame_strings',
       'type': 'none',
       'variables': {
@@ -675,10 +630,11 @@
         'chrome_frame_strings',
         'chrome_frame_utils',
         'chrome_tab_idl',
-        '../chrome/chrome.gyp:common',
-        '../chrome/app/policy/cloud_policy_codegen.gyp:policy',
-        '../chrome/chrome.gyp:utility',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../chrome/app/policy/cloud_policy_codegen.gyp:policy',
+        '../chrome/chrome.gyp:common',
+        '../chrome/chrome.gyp:utility',
+        '../net/net.gyp:net',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/bzip2/bzip2.gyp:bzip2',
         '../webkit/support/webkit_support.gyp:webkit_user_agent',
@@ -700,8 +656,6 @@
         'chrome_frame_activex.h',
         'chrome_frame_activex.rgs',
         'chrome_frame_activex_base.h',
-        'chrome_frame_histograms.cc',
-        'chrome_frame_histograms.h',
         'chrome_protocol.cc',
         'chrome_protocol.h',
         'chrome_protocol.rgs',
@@ -790,7 +744,7 @@
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
             # Make the archive build happy.
-            '../chrome/chrome.gyp:syncapi',
+            '../chrome/chrome.gyp:syncapi_core',
             # Installer
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
@@ -858,6 +812,7 @@
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../net/net.gyp:net',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
@@ -866,11 +821,9 @@
     {
       'target_name': 'npchrome_frame',
       'type': 'shared_library',
-      'msvs_guid': 'E3DE7E63-D3B6-4A9F-BCC4-5C8169E9C9F2',
       'dependencies': [
         '../base/base.gyp:base',
         'chrome_frame_ie',
-        'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
         'chrome_tab_idl',
@@ -880,14 +833,11 @@
         'chrome_frame_launcher.gyp:chrome_frame_helper_dll',
         '../chrome/chrome.gyp:chrome',
         '../chrome/chrome.gyp:chrome_dll',
-        '../chrome/chrome.gyp:chrome_dll_version',
+        '../chrome/chrome.gyp:chrome_version_resources',
         '../chrome/chrome.gyp:common',
       ],
       'sources': [
         'chrome_frame_elevation.rgs',
-        'chrome_frame_npapi.rgs',
-        'chrome_frame_npapi_entrypoints.cc',
-        'chrome_frame_npapi_entrypoints.h',
         'chrome_frame_reporting.cc',
         'chrome_frame_reporting.h',
         'chrome_tab.cc',
@@ -921,7 +871,7 @@
             '../breakpad/breakpad.gyp:breakpad_handler_dll',
             '../chrome/chrome.gyp:automation',
             # Make the archive build happy.
-            '../chrome/chrome.gyp:syncapi',
+            '../chrome/chrome.gyp:syncapi_core',
             # Installer
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
@@ -1089,11 +1039,3 @@
     }, ],  # 'coverage!=0'
   ],  # 'conditions'
 }
-
-# vim: shiftwidth=2:et:ai:tabstop=2
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

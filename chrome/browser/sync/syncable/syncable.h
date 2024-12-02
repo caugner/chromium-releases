@@ -18,11 +18,13 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/observer_list.h"
+#include "base/logging.h"
+#include "base/memory/ref_counted.h"
+#include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
+#include "base/tracked.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/dir_open_result.h"
 #include "chrome/browser/sync/syncable/directory_event.h"
@@ -31,17 +33,22 @@
 #include "chrome/browser/sync/util/dbgq.h"
 #include "chrome/common/deprecated/event_sys.h"
 
-class DictionaryValue;
 struct PurgeInfo;
+
+namespace base {
+class DictionaryValue;
+class ListValue;
+}
 
 namespace sync_api {
 class ReadTransaction;
 class WriteNode;
 class ReadNode;
-}
+}  // sync_api
 
 namespace syncable {
-class DirectoryChangeListener;
+class DirectoryChangeDelegate;
+class TransactionObserver;
 class Entry;
 
 std::ostream& operator<<(std::ostream& s, const Entry& e);
@@ -335,9 +342,13 @@ struct EntryKernel {
     return id_fields[field - ID_FIELDS_BEGIN];
   }
 
+  // Does a case in-sensitive search for a given string, which must be
+  // lower case.
+  bool ContainsString(const std::string& lowercase_query) const;
+
   // Dumps all kernel info into a DictionaryValue and returns it.
   // Transfers ownership of the DictionaryValue to the caller.
-  DictionaryValue* ToValue() const;
+  base::DictionaryValue* ToValue() const;
 
  private:
   // Tracks whether this entry needs to be saved to the database.
@@ -403,12 +414,6 @@ class Entry {
   ModelType GetServerModelType() const;
   ModelType GetModelType() const;
 
-  // If this returns false, we shouldn't bother maintaining
-  // a position value (sibling ordering) for this item.
-  bool ShouldMaintainPosition() const {
-    return GetModelType() == BOOKMARKS;
-  }
-
   inline bool ExistsOnClientBecauseNameIsNonEmpty() const {
     DCHECK(kernel_);
     return !kernel_->ref(NON_UNIQUE_NAME).empty();
@@ -433,7 +438,7 @@ class Entry {
 
   // Dumps all entry info into a DictionaryValue and returns it.
   // Transfers ownership of the DictionaryValue to the caller.
-  DictionaryValue* ToValue() const;
+  base::DictionaryValue* ToValue() const;
 
  protected:  // Don't allow creation on heap, except by sync API wrappers.
   friend class sync_api::ReadNode;
@@ -539,20 +544,35 @@ class MutableEntry : public Entry {
   DISALLOW_COPY_AND_ASSIGN(MutableEntry);
 };
 
-class LessParentIdAndHandle;
-template <typename FieldType, FieldType field_index>
-class LessField;
-class LessEntryMetaHandles {
+template <typename FieldType, FieldType field_index> class LessField;
+
+class EntryKernelLessByMetaHandle {
  public:
-  inline bool operator()(const syncable::EntryKernel& a,
-                         const syncable::EntryKernel& b) const {
+  inline bool operator()(const EntryKernel& a,
+                         const EntryKernel& b) const {
     return a.ref(META_HANDLE) < b.ref(META_HANDLE);
   }
 };
-typedef std::set<EntryKernel, LessEntryMetaHandles> OriginalEntries;
+typedef std::set<EntryKernel, EntryKernelLessByMetaHandle> EntryKernelSet;
+
+struct EntryKernelMutation {
+  EntryKernel original, mutated;
+};
+class EntryKernelMutationLessByMetaHandle {
+ public:
+  inline bool operator()(const EntryKernelMutation& a,
+                         const EntryKernelMutation& b) const {
+    DCHECK_EQ(a.original.ref(META_HANDLE), a.mutated.ref(META_HANDLE));
+    DCHECK_EQ(b.original.ref(META_HANDLE), b.mutated.ref(META_HANDLE));
+    return a.original.ref(META_HANDLE) < b.original.ref(META_HANDLE);
+  }
+};
+typedef std::set<EntryKernelMutation, EntryKernelMutationLessByMetaHandle>
+    EntryKernelMutationSet;
 
 // Caller owns the return value.
-ListValue* OriginalEntriesToValue(const OriginalEntries& original_entries);
+base::ListValue* EntryKernelMutationSetToValue(
+    const EntryKernelMutationSet& mutations);
 
 // How syncable indices & Indexers work.
 //
@@ -691,8 +711,6 @@ class Directory {
   // Various data that the Directory::Kernel we are backing (persisting data
   // for) needs saved across runs of the application.
   struct PersistedKernelInfo {
-    AutofillMigrationDebugInfo autofill_migration_debug_info;
-
     PersistedKernelInfo();
     ~PersistedKernelInfo();
 
@@ -712,8 +730,6 @@ class Directory {
     int64 next_id;
     // The persisted notification state.
     std::string notification_state;
-
-    AutofillMigrationState autofill_migration_state;
   };
 
   // What the Directory needs on initialization to create itself and its Kernel.
@@ -743,15 +759,21 @@ class Directory {
 
     KernelShareInfoStatus kernel_info_status;
     PersistedKernelInfo kernel_info;
-    OriginalEntries dirty_metas;
+    EntryKernelSet dirty_metas;
     MetahandleSet metahandles_to_purge;
   };
 
   Directory();
   virtual ~Directory();
 
-  DirOpenResult Open(const FilePath& file_path, const std::string& name);
+  // Does not take ownership of |delegate|, which must not be NULL.
+  // Starts sending events to |delegate| if the returned result is
+  // OPENED.  Note that events to |delegate| may be sent from *any*
+  // thread.
+  DirOpenResult Open(const FilePath& file_path, const std::string& name,
+                     DirectoryChangeDelegate* delegate);
 
+  // Stops sending events to the delegate.
   void Close();
 
   int64 NextMetahandle();
@@ -777,15 +799,6 @@ class Directory {
 
   bool initial_sync_ended_for_type(ModelType type) const;
   void set_initial_sync_ended_for_type(ModelType type, bool value);
-  AutofillMigrationState get_autofill_migration_state() const;
-
-  AutofillMigrationDebugInfo get_autofill_migration_debug_info() const;
-
-  void set_autofill_migration_state(AutofillMigrationState state);
-
-  void set_autofill_migration_state_debug_info(
-      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
-      const syncable::AutofillMigrationDebugInfo& info);
 
   const std::string& name() const { return kernel_->name; }
 
@@ -795,14 +808,17 @@ class Directory {
   std::string store_birthday() const;
   void set_store_birthday(const std::string& store_birthday);
 
-  std::string GetAndClearNotificationState();
+  std::string GetNotificationState() const;
   void SetNotificationState(const std::string& notification_state);
 
   // Unique to each account / client pair.
   std::string cache_guid() const;
 
-  void AddChangeListener(DirectoryChangeListener* listener);
-  void RemoveChangeListener(DirectoryChangeListener* listener);
+  // These are backed by a thread-safe observer list, and so can be
+  // called on any thread, and events will be sent to the observer on
+  // the same thread that it was added on.
+  void AddTransactionObserver(TransactionObserver* observer);
+  void RemoveTransactionObserver(TransactionObserver* observer);
 
  protected:  // for friends, mainly used by Entry constructors
   virtual EntryKernel* GetEntryByHandle(int64 handle);
@@ -832,7 +848,8 @@ class Directory {
   // before calling.
   EntryKernel* GetEntryById(const Id& id, ScopedKernelLock* const lock);
 
-  DirOpenResult OpenImpl(const FilePath& file_path, const std::string& name);
+  DirOpenResult OpenImpl(const FilePath& file_path, const std::string& name,
+                         DirectoryChangeDelegate* delegate);
 
   template <class T> void TestAndSet(T* kernel_data, const T* data_to_set);
 
@@ -846,8 +863,14 @@ class Directory {
   typedef EventChannel<DirectoryEventTraits, base::Lock> Channel;
   typedef std::vector<int64> ChildHandles;
 
-  // Returns the child meta handles for given parent id.
-  void GetChildHandles(BaseTransaction*, const Id& parent_id,
+  // Returns the child meta handles for given parent id.  Clears
+  // |result| if there are no children.
+  void GetChildHandlesById(BaseTransaction*, const Id& parent_id,
+      ChildHandles* result);
+
+  // Returns the child meta handles for given meta handle.  Clears
+  // |result| if there are no children.
+  void GetChildHandlesByHandle(BaseTransaction*, int64 handle,
       ChildHandles* result);
 
   // Find the first or last child in the positional ordering under a parent,
@@ -872,6 +895,10 @@ class Directory {
   //
   // WARNING: THIS METHOD PERFORMS SYNCHRONOUS I/O VIA SQLITE.
   bool SaveChanges();
+
+  // Fill in |result| with all entry kernels.
+  void GetAllEntryKernels(BaseTransaction* trans,
+                          std::vector<const EntryKernel*>* result);
 
   // Returns the number of entities with the unsynced bit set.
   int64 unsynced_entity_count() const;
@@ -903,7 +930,7 @@ class Directory {
                            bool full_scan);
 
   void CheckTreeInvariants(syncable::BaseTransaction* trans,
-                           const OriginalEntries* originals);
+                           const EntryKernelMutationSet& mutations);
 
   void CheckTreeInvariants(syncable::BaseTransaction* trans,
                            const MetahandleSet& handles,
@@ -969,24 +996,19 @@ class Directory {
 
  protected:
   // Used by tests.
-  void init_kernel(const std::string& name);
+  void InitKernel(const std::string& name, DirectoryChangeDelegate* delegate);
 
  private:
 
   struct Kernel {
+    // |delegate| can be NULL.
     Kernel(const FilePath& db_path, const std::string& name,
-           const KernelLoadInfo& info);
+           const KernelLoadInfo& info, DirectoryChangeDelegate* delegate);
 
     ~Kernel();
 
     void AddRef();  // For convenience.
     void Release();
-
-    void AddChangeListener(DirectoryChangeListener* listener);
-    void RemoveChangeListener(DirectoryChangeListener* listener);
-
-    void CopyChangeListeners(
-        ObserverList<DirectoryChangeListener>* change_listeners);
 
     FilePath const db_path;
     // TODO(timsteele): audit use of the member and remove if possible
@@ -1054,11 +1076,11 @@ class Directory {
     // purposes.  Protected by the save_changes_mutex.
     DebugQueue<int64, 1000> flushed_metahandles;
 
-   private:
-    // The listeners for directory change events, triggered when the
-    // transaction is ending (and its lock).
-    base::Lock change_listeners_lock_;
-    ObserverList<DirectoryChangeListener> change_listeners_;
+    // The delegate for directory change events.  Can be NULL.
+    DirectoryChangeDelegate* const delegate;
+
+    // The transaction observers.
+    scoped_refptr<ObserverListThreadSafe<TransactionObserver> > observers;
   };
 
   // Helper method used to do searches on |parent_id_child_index|.
@@ -1079,6 +1101,11 @@ class Directory {
   ParentIdChildIndex::iterator GetParentChildIndexUpperBound(
       const ScopedKernelLock& lock,
       const Id& parent_id);
+
+  // Append the handles of the children of |parent_id| to |result|.
+  void AppendChildHandles(
+      const ScopedKernelLock& lock,
+      const Id& parent_id, Directory::ChildHandles* result);
 
   Kernel* kernel_;
 
@@ -1105,39 +1132,32 @@ class BaseTransaction {
   virtual ~BaseTransaction();
 
  protected:
-  BaseTransaction(Directory* directory, const char* name,
-                  const char* source_file, int line, WriterTag writer);
+  BaseTransaction(const tracked_objects::Location& from_here,
+                  const char* name,
+                  WriterTag writer,
+                  Directory* directory);
 
-  // For unit testing. Everything will be mocked out no point initializing.
-  explicit BaseTransaction(Directory* directory);
+  void Lock();
+  void Unlock();
 
-  void UnlockAndLog(OriginalEntries* entries);
-  virtual bool NotifyTransactionChangingAndEnding(
-      OriginalEntries* entries,
-      ModelTypeBitSet* models_with_changes);
-  virtual void NotifyTransactionComplete(ModelTypeBitSet models_with_changes);
-
+  const tracked_objects::Location from_here_;
+  const char* const name_;
+  WriterTag writer_;
   Directory* const directory_;
   Directory::Kernel* const dirkernel_;  // for brevity
-  const char* const name_;
   base::TimeTicks time_acquired_;
-  const char* const source_file_;
-  const int line_;
-  WriterTag writer_;
 
  private:
-  void Lock();
-
   DISALLOW_COPY_AND_ASSIGN(BaseTransaction);
 };
 
 // Locks db in constructor, unlocks in destructor.
 class ReadTransaction : public BaseTransaction {
  public:
-  ReadTransaction(Directory* directory, const char* source_file,
-                  int line);
-  ReadTransaction(const ScopedDirLookup& scoped_dir,
-                  const char* source_file, int line);
+  ReadTransaction(const tracked_objects::Location& from_here,
+                  Directory* directory);
+  ReadTransaction(const tracked_objects::Location& from_here,
+                  const ScopedDirLookup& scoped_dir);
 
   virtual ~ReadTransaction();
 
@@ -1152,22 +1172,29 @@ class ReadTransaction : public BaseTransaction {
 class WriteTransaction : public BaseTransaction {
   friend class MutableEntry;
  public:
-  explicit WriteTransaction(Directory* directory, WriterTag writer,
-                            const char* source_file, int line);
-  explicit WriteTransaction(const ScopedDirLookup& directory,
-                            WriterTag writer, const char* source_file,
-                            int line);
+  WriteTransaction(const tracked_objects::Location& from_here,
+                   WriterTag writer, Directory* directory);
+  WriteTransaction(const tracked_objects::Location& from_here,
+                   WriterTag writer, const ScopedDirLookup& directory);
+
   virtual ~WriteTransaction();
 
-  void SaveOriginal(EntryKernel* entry);
+  void SaveOriginal(const EntryKernel* entry);
 
  protected:
-  // Before an entry gets modified, we copy the original into a list
-  // so that we can issue change notifications when the transaction
-  // is done.
-  OriginalEntries* const originals_;
+  // Overridden by tests.
+  virtual void NotifyTransactionComplete(
+      ModelTypeBitSet models_with_changes);
 
-  explicit WriteTransaction(Directory *directory);
+ private:
+  EntryKernelMutationSet RecordMutations();
+
+  void UnlockAndNotify(const EntryKernelMutationSet& mutations);
+
+  ModelTypeBitSet NotifyTransactionChangingAndEnding(
+      const EntryKernelMutationSet& mutations);
+
+  EntryKernelSet originals_;
 
   DISALLOW_COPY_AND_ASSIGN(WriteTransaction);
 };

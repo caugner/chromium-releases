@@ -10,11 +10,14 @@
 
 #include "base/callback.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/common/gpu/gpu_messages.h"
 
-GpuMessageFilter::GpuMessageFilter(int render_process_id)
+GpuMessageFilter::GpuMessageFilter(int render_process_id,
+                                   RenderWidgetHelper* render_widget_helper)
     : gpu_host_id_(0),
-      render_process_id_(render_process_id) {
+      render_process_id_(render_process_id),
+      render_widget_helper_(render_widget_helper) {
 }
 
 // WeakPtrs to a GpuMessageFilter need to be Invalidated from
@@ -28,10 +31,8 @@ bool GpuMessageFilter::OnMessageReceived(
     bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(GpuMessageFilter, message, *message_was_ok)
-    IPC_MESSAGE_HANDLER(GpuHostMsg_EstablishGpuChannel,
-                        OnEstablishGpuChannel)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuHostMsg_SynchronizeGpu,
-                                    OnSynchronizeGpu)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuHostMsg_EstablishGpuChannel,
+                                    OnEstablishGpuChannel)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuHostMsg_CreateViewCommandBuffer,
                                     OnCreateViewCommandBuffer)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -51,8 +52,10 @@ class EstablishChannelCallback
                                    base::ProcessHandle,
                                    const GPUInfo&> > {
  public:
-  explicit EstablishChannelCallback(GpuMessageFilter* filter):
-      filter_(filter->AsWeakPtr()) {
+  explicit EstablishChannelCallback(GpuMessageFilter* filter,
+                                    IPC::Message* reply) :
+      filter_(filter->AsWeakPtr()),
+      reply_(reply) {
   }
 
   virtual void RunWithParams(const TupleType& params) {
@@ -84,35 +87,11 @@ class EstablishChannelCallback
       renderer_process_for_gpu = 0;
     }
 
-    IPC::Message* reply = new GpuMsg_GpuChannelEstablished(
-        channel, renderer_process_for_gpu, gpu_info);
-
-    // If the renderer process is performing synchronous initialization,
-    // it needs to handle this message before receiving the reply for
-    // the synchronous GpuHostMsg_SynchronizeGpu message.
-    reply->set_unblock(true);
-
-    filter_->Send(reply);
-  }
-
- private:
-  base::WeakPtr<GpuMessageFilter> filter_;
-};
-
-class SynchronizeCallback : public CallbackRunner<Tuple0> {
- public:
-  SynchronizeCallback(GpuMessageFilter* filter, IPC::Message* reply):
-      filter_(filter->AsWeakPtr()),
-      reply_(reply) {
-  }
-
-  virtual void RunWithParams(const TupleType& params) {
-    DispatchToMethod(this, &SynchronizeCallback::Send, params);
-  }
-
-  void Send() {
-    if (filter_)
-      filter_->Send(reply_);
+    GpuHostMsg_EstablishGpuChannel::WriteReplyParams(reply_,
+                                                     channel,
+                                                     renderer_process_for_gpu,
+                                                     gpu_info);
+    filter_->Send(reply_);
   }
 
  private:
@@ -148,9 +127,10 @@ class CreateCommandBufferCallback : public CallbackRunner<Tuple1<int32> > {
 }  // namespace
 
 void GpuMessageFilter::OnEstablishGpuChannel(
-    content::CauseForGpuLaunch cause_for_gpu_launch) {
+    content::CauseForGpuLaunch cause_for_gpu_launch,
+    IPC::Message* reply) {
   scoped_ptr<EstablishChannelCallback> callback(
-      new EstablishChannelCallback(this));
+      new EstablishChannelCallback(this, reply));
 
   // TODO(apatrick): Eventually, this will return the route ID of a
   // GpuProcessStub, from which the renderer process will create a
@@ -164,9 +144,8 @@ void GpuMessageFilter::OnEstablishGpuChannel(
     host = GpuProcessHost::GetForRenderer(
         render_process_id_, cause_for_gpu_launch);
     if (!host) {
-      callback->Run(IPC::ChannelHandle(),
-                    static_cast<base::ProcessHandle>(NULL),
-                    GPUInfo());
+      reply->set_reply_error();
+      Send(reply);
       return;
     }
 
@@ -176,27 +155,16 @@ void GpuMessageFilter::OnEstablishGpuChannel(
   host->EstablishGpuChannel(render_process_id_, callback.release());
 }
 
-void GpuMessageFilter::OnSynchronizeGpu(IPC::Message* reply) {
-  GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
-  if (!host) {
-    // TODO(apatrick): Eventually, this IPC message will be routed to a
-    // GpuProcessStub with a particular routing ID. The error will be set if
-    // the GpuProcessStub with that routing ID is not in the MessageRouter.
-    reply->set_reply_error();
-    Send(reply);
-    return;
-  }
-
-  host->Synchronize(new SynchronizeCallback(this, reply));
-}
-
 void GpuMessageFilter::OnCreateViewCommandBuffer(
-    gfx::PluginWindowHandle compositing_surface,
     int32 render_view_id,
     const GPUCreateCommandBufferConfig& init_params,
     IPC::Message* reply) {
   GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
-  if (!host) {
+
+  gfx::PluginWindowHandle compositing_surface =
+      render_widget_helper_->LookupCompositingSurface(render_view_id);
+
+  if (!host || compositing_surface == gfx::kNullPluginWindow) {
     // TODO(apatrick): Eventually, this IPC message will be routed to a
     // GpuProcessStub with a particular routing ID. The error will be set if
     // the GpuProcessStub with that routing ID is not in the MessageRouter.

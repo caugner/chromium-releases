@@ -10,7 +10,7 @@
 #include "views/controls/menu/submenu_view.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/widget/root_view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 // This is a convenience base class for all tests to provide some
 // common functionality.  It sets up a MenuButton and a MenuItemView
@@ -68,7 +68,7 @@ class MenuItemViewTestBase : public ViewEventTestBase,
     views::View::ConvertPointToScreen(source, &screen_location);
     gfx::Rect bounds(screen_location, source->size());
     menu_->RunMenuAt(
-        source->GetWindow()->GetNativeWindow(),
+        source->GetWidget()->GetNativeWindow(),
         button_,
         bounds,
         views::MenuItemView::TOPLEFT,

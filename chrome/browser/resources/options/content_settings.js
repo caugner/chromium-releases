@@ -54,11 +54,6 @@ cr.define('options', function() {
       }
 
       // Cookies filter page ---------------------------------------------------
-      $('block-third-party-cookies').onclick = function(event) {
-        chrome.send('setAllowThirdPartyCookies',
-                    [String($('block-third-party-cookies').checked)]);
-      };
-
       $('show-cookies-button').onclick = function(event) {
         chrome.send('coreOptionsUserMetricsAction', ['Options_ShowCookies']);
         OptionsPage.navigateToPage('cookies');
@@ -87,8 +82,9 @@ cr.define('options', function() {
       var radios = document.querySelectorAll('input[type=radio][name=' +
                                              group + ']');
       for (var i = 0, len = radios.length; i < len; i++) {
-        radios[i].disabled = dict[group]['managed'];
-        radios[i].managed = dict[group]['managed'];
+        var managed = dict[group]['managed'];
+        radios[i].disabled = managed;
+        radios[i].controlledBy = managed ? 'policy': null;
       }
     }
     OptionsPage.updateManagedBannerVisibility();
@@ -111,6 +107,10 @@ cr.define('options', function() {
     $('handlers-list').setHandlers(list);
   };
 
+  ContentSettings.setIgnoredHandlers = function(list) {
+    $('ignored-handlers-list').setHandlers(list);
+  };
+
   ContentSettings.setOTRExceptions = function(type, list) {
     var exceptionsList =
         document.querySelector('div[contentType=' + type + ']' +
@@ -118,14 +118,6 @@ cr.define('options', function() {
 
     exceptionsList.parentNode.hidden = false;
     exceptionsList.setExceptions(list);
-  };
-
-  /**
-   * Sets the initial value for the Third Party Cookies checkbox.
-   * @param {boolean=} block True if we are blocking third party cookies.
-   */
-  ContentSettings.setBlockThirdPartyCookies = function(block) {
-    $('block-third-party-cookies').checked = block;
   };
 
   /**

@@ -14,14 +14,21 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_proxy.h"
-#include "base/stl_util-inl.h"
+#include "base/metrics/histogram.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_info.h"
+#include "base/time.h"
 #include "net/base/net_util.h"
 #include "webkit/quota/quota_database.h"
 #include "webkit/quota/quota_temporary_storage_evictor.h"
 #include "webkit/quota/quota_types.h"
 #include "webkit/quota/usage_tracker.h"
+
+#define UMA_HISTOGRAM_MBYTES(name, sample)          \
+  UMA_HISTOGRAM_CUSTOM_COUNTS(                      \
+      (name), static_cast<int>((sample) / kMBytes), \
+      1, 10 * 1024 * 1024 /* 10TB */, 100)
 
 using base::ScopedCallbackFactory;
 
@@ -30,6 +37,8 @@ namespace quota {
 namespace {
 
 const char kEnableQuotaEviction[] = "enable-quota-eviction";
+const int64 kMBytes = 1024 * 1024;
+const int kMinutesInMilliSeconds = 60 * 1000;
 
 // Returns the initial size of the temporary storage quota.
 // (This just gives a default initial size; once its initial size is determined
@@ -37,6 +46,7 @@ const char kEnableQuotaEviction[] = "enable-quota-eviction";
 int64 GetInitialTemporaryStorageQuotaSize(const FilePath& path,
                                           bool is_incognito) {
   int64 free_space = base::SysInfo::AmountOfFreeDiskSpace(path);
+  UMA_HISTOGRAM_MBYTES("Quota.FreeDiskSpaceForProfile", free_space);
 
   // Returns 0 (disables the temporary storage) if the available space is
   // less than the twice of the default quota size.
@@ -59,9 +69,6 @@ int64 GetInitialTemporaryStorageQuotaSize(const FilePath& path,
   return QuotaManager::kTemporaryStorageQuotaMaxSize;
 }
 
-const int64 kMBytes = 1024 * 1024;
-const int kMinutesInMilliSeconds = 60 * 1000;
-
 }  // anonymous namespace
 
 // TODO(kinuko): We will need to have different sizes for different platforms
@@ -78,6 +85,9 @@ const int QuotaManager::kThresholdOfErrorsToBeBlacklisted = 3;
 
 const int QuotaManager::kEvictionIntervalInMilliSeconds =
     30 * kMinutesInMilliSeconds;
+
+const base::TimeDelta QuotaManager::kReportHistogramInterval =
+    base::TimeDelta::FromMilliseconds(60 * 60 * 1000);  // 1 hour
 
 // This class is for posting GetUsage/GetQuota tasks, gathering
 // results and dispatching GetAndQuota callbacks.
@@ -264,7 +274,7 @@ class QuotaManager::UsageAndQuotaDispatcherTaskForTemporary
     : public QuotaManager::UsageAndQuotaDispatcherTask {
  public:
   UsageAndQuotaDispatcherTaskForTemporary(
-      QuotaManager* manager, const std::string host)
+      QuotaManager* manager, const std::string& host)
       : UsageAndQuotaDispatcherTask(manager, host, kStorageTypeTemporary) {}
 
  protected:
@@ -308,7 +318,7 @@ class QuotaManager::UsageAndQuotaDispatcherTaskForPersistent
     : public QuotaManager::UsageAndQuotaDispatcherTask {
  public:
   UsageAndQuotaDispatcherTaskForPersistent(
-      QuotaManager* manager, const std::string host)
+      QuotaManager* manager, const std::string& host)
       : UsageAndQuotaDispatcherTask(manager, host, kStorageTypePersistent) {}
 
  protected:
@@ -344,15 +354,76 @@ QuotaManager::UsageAndQuotaDispatcherTask::Create(
   return NULL;
 }
 
+class QuotaManager::OriginDataDeleter : public QuotaTask {
+ public:
+  OriginDataDeleter(QuotaManager* manager,
+                    const GURL& origin,
+                    StorageType type,
+                    StatusCallback* callback)
+      : QuotaTask(manager),
+        origin_(origin),
+        type_(type),
+        error_count_(0),
+        remaining_clients_(-1),
+        callback_(callback),
+        callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
+
+ protected:
+  virtual void Run() OVERRIDE {
+    error_count_ = 0;
+    remaining_clients_ = manager()->clients_.size();
+    for (QuotaClientList::iterator iter = manager()->clients_.begin();
+         iter != manager()->clients_.end(); ++iter) {
+      (*iter)->DeleteOriginData(origin_, type_, callback_factory_.NewCallback(
+          &OriginDataDeleter::DidDeleteOriginData));
+    }
+  }
+
+  virtual void Completed() OVERRIDE {
+    if (error_count_ == 0) {
+      manager()->DeleteOriginFromDatabase(origin_, type_);
+      callback_->Run(kQuotaStatusOk);
+    } else {
+      callback_->Run(kQuotaErrorInvalidModification);
+    }
+    DeleteSoon();
+  }
+
+  virtual void Aborted() OVERRIDE {
+    callback_->Run(kQuotaErrorAbort);
+    DeleteSoon();
+  }
+
+  void DidDeleteOriginData(QuotaStatusCode status) {
+    DCHECK_GT(remaining_clients_, 0);
+
+    if (status != kQuotaStatusOk)
+      ++error_count_;
+
+    if (--remaining_clients_ == 0)
+      CallCompleted();
+  }
+
+  QuotaManager* manager() const {
+    return static_cast<QuotaManager*>(observer());
+  }
+
+  GURL origin_;
+  StorageType type_;
+  int error_count_;
+  int remaining_clients_;
+  scoped_ptr<StatusCallback> callback_;
+
+  ScopedCallbackFactory<OriginDataDeleter> callback_factory_;
+  DISALLOW_COPY_AND_ASSIGN(OriginDataDeleter);
+};
+
 class QuotaManager::DatabaseTaskBase : public QuotaThreadTask {
  public:
-  DatabaseTaskBase(
-      QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop)
-      : QuotaThreadTask(manager, db_message_loop),
+  explicit DatabaseTaskBase(QuotaManager* manager)
+      : QuotaThreadTask(manager, manager->db_thread_),
         manager_(manager),
-        database_(database),
+        database_(manager->database_.get()),
         db_disabled_(false) {
     DCHECK(manager_);
     DCHECK(database_);
@@ -384,11 +455,9 @@ class QuotaManager::InitializeTask : public QuotaManager::DatabaseTaskBase {
  public:
   InitializeTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       const FilePath& profile_path,
       bool is_incognito)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         profile_path_(profile_path),
         is_incognito_(is_incognito),
         need_initialize_origins_(false),
@@ -404,6 +473,8 @@ class QuotaManager::InitializeTask : public QuotaManager::DatabaseTaskBase {
       // make up one and store it in the database.
       temporary_storage_quota_ = GetInitialTemporaryStorageQuotaSize(
           profile_path_, is_incognito_);
+      UMA_HISTOGRAM_MBYTES("Quota.InitialTemporaryGlobalStorageQuota",
+                           temporary_storage_quota_);
       if (!database()->SetGlobalQuota(
               kStorageTypeTemporary, temporary_storage_quota_)) {
         set_db_disabled(true);
@@ -416,6 +487,9 @@ class QuotaManager::InitializeTask : public QuotaManager::DatabaseTaskBase {
   virtual void DatabaseTaskCompleted() OVERRIDE {
     manager()->need_initialize_origins_ = need_initialize_origins_;
     manager()->DidInitializeTemporaryGlobalQuota(temporary_storage_quota_);
+    manager()->histogram_timer_.Start(QuotaManager::kReportHistogramInterval,
+                                      manager(),
+                                      &QuotaManager::ReportHistogram);
   }
 
  private:
@@ -425,16 +499,14 @@ class QuotaManager::InitializeTask : public QuotaManager::DatabaseTaskBase {
   int64 temporary_storage_quota_;
 };
 
-class QuotaManager::TemporaryGlobalQuotaUpdateTask
+class QuotaManager::UpdateTemporaryGlobalQuotaTask
     : public QuotaManager::DatabaseTaskBase {
  public:
-  TemporaryGlobalQuotaUpdateTask(
+  UpdateTemporaryGlobalQuotaTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       int64 new_quota,
       QuotaCallback* callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         new_quota_(new_quota),
         callback_(callback) {
     DCHECK_GE(new_quota, 0);
@@ -461,16 +533,14 @@ class QuotaManager::TemporaryGlobalQuotaUpdateTask
   scoped_ptr<QuotaCallback> callback_;
 };
 
-class QuotaManager::PersistentHostQuotaQueryTask
+class QuotaManager::GetPersistentHostQuotaTask
     : public QuotaManager::DatabaseTaskBase {
  public:
-  PersistentHostQuotaQueryTask(
+  GetPersistentHostQuotaTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       const std::string& host,
       HostQuotaCallback* callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         host_(host),
         quota_(-1),
         callback_(callback) {
@@ -490,17 +560,15 @@ class QuotaManager::PersistentHostQuotaQueryTask
   scoped_ptr<HostQuotaCallback> callback_;
 };
 
-class QuotaManager::PersistentHostQuotaUpdateTask
+class QuotaManager::UpdatePersistentHostQuotaTask
     : public QuotaManager::DatabaseTaskBase {
  public:
-  PersistentHostQuotaUpdateTask(
+  UpdatePersistentHostQuotaTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       const std::string& host,
       int new_quota,
       HostQuotaCallback* callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         host_(host),
         new_quota_(new_quota),
         callback_(callback) {
@@ -534,13 +602,11 @@ class QuotaManager::GetLRUOriginTask
  public:
   GetLRUOriginTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       StorageType type,
       const std::map<GURL, int>& origins_in_use,
       const std::map<GURL, int>& origins_in_error,
       GetLRUOriginCallback *callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         type_(type),
         callback_(callback),
         special_storage_policy_(manager->special_storage_policy_) {
@@ -581,22 +647,20 @@ class QuotaManager::GetLRUOriginTask
   GURL url_;
 };
 
-class QuotaManager::OriginDeletionDatabaseTask
+class QuotaManager::DeleteOriginInfo
     : public QuotaManager::DatabaseTaskBase {
  public:
-  OriginDeletionDatabaseTask(
+  DeleteOriginInfo(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       const GURL& origin,
       StorageType type)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         origin_(origin),
         type_(type) {}
 
  protected:
   virtual void RunOnTargetThread() OVERRIDE {
-    if (!database()->DeleteOriginLastAccessTime(origin_, type_)) {
+    if (!database()->DeleteOriginInfo(origin_, type_)) {
       set_db_disabled(true);
     }
   }
@@ -607,15 +671,13 @@ class QuotaManager::OriginDeletionDatabaseTask
   StorageType type_;
 };
 
-class QuotaManager::TemporaryOriginsRegistrationTask
+class QuotaManager::InitializeTemporaryOriginsInfoTask
     : public QuotaManager::DatabaseTaskBase {
  public:
-  TemporaryOriginsRegistrationTask(
+  InitializeTemporaryOriginsInfoTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       UsageTracker* temporary_usage_tracker)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         has_registered_origins_(false) {
     DCHECK(temporary_usage_tracker);
     temporary_usage_tracker->GetCachedOrigins(&origins_);
@@ -625,9 +687,8 @@ class QuotaManager::TemporaryOriginsRegistrationTask
   virtual void RunOnTargetThread() OVERRIDE {
     if (!database()->IsOriginDatabaseBootstrapped()) {
       // Register existing origins with 0 last time access.
-      if (!database()->RegisterOrigins(origins_,
-                                       kStorageTypeTemporary,
-                                       base::Time::FromInternalValue(0))) {
+      if (!database()->RegisterInitialOriginInfo(
+              origins_, kStorageTypeTemporary)) {
         set_db_disabled(true);
       } else {
         has_registered_origins_ = true;
@@ -664,7 +725,7 @@ class QuotaManager::AvailableSpaceQueryTask : public QuotaThreadTask {
   }
 
   virtual void Aborted() OVERRIDE {
-    callback_->Run(kQuotaErrorAbort, space_);
+    callback_->Run(kQuotaErrorAbort, -1);
   }
 
   virtual void Completed() OVERRIDE {
@@ -677,23 +738,22 @@ class QuotaManager::AvailableSpaceQueryTask : public QuotaThreadTask {
   scoped_ptr<AvailableSpaceCallback> callback_;
 };
 
-class QuotaManager::OriginAccessRecordDatabaseTask
+class QuotaManager::UpdateAccessTimeTask
     : public QuotaManager::DatabaseTaskBase {
  public:
-  OriginAccessRecordDatabaseTask(
+  UpdateAccessTimeTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       const GURL& origin,
-      StorageType type)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      StorageType type,
+      base::Time accessed_time)
+      : DatabaseTaskBase(manager),
         origin_(origin),
-        type_(type) {}
+        type_(type),
+        accessed_time_(accessed_time) {}
 
  protected:
   virtual void RunOnTargetThread() OVERRIDE {
-    if (!database()->SetOriginLastAccessTime(
-            origin_, type_, base::Time::Now())) {
+    if (!database()->SetOriginLastAccessTime(origin_, type_, accessed_time_)) {
       set_db_disabled(true);
     }
   }
@@ -702,6 +762,71 @@ class QuotaManager::OriginAccessRecordDatabaseTask
  private:
   GURL origin_;
   StorageType type_;
+  base::Time accessed_time_;
+};
+
+class QuotaManager::UpdateModifiedTimeTask
+    : public QuotaManager::DatabaseTaskBase {
+ public:
+  UpdateModifiedTimeTask(
+      QuotaManager* manager,
+      const GURL& origin,
+      StorageType type,
+      base::Time modified_time)
+      : DatabaseTaskBase(manager),
+        origin_(origin),
+        type_(type),
+        modified_time_(modified_time) {}
+
+ protected:
+  virtual void RunOnTargetThread() OVERRIDE {
+    if (!database()->SetOriginLastModifiedTime(
+            origin_, type_, modified_time_)) {
+      set_db_disabled(true);
+    }
+  }
+  virtual void DatabaseTaskCompleted() OVERRIDE {}
+
+ private:
+  GURL origin_;
+  StorageType type_;
+  base::Time modified_time_;
+};
+
+class QuotaManager::GetModifiedSinceTask
+    : public QuotaManager::DatabaseTaskBase {
+ public:
+  GetModifiedSinceTask(
+      QuotaManager* manager,
+      StorageType type,
+      base::Time modified_since,
+      GetOriginsCallback* callback)
+      : DatabaseTaskBase(manager),
+        type_(type),
+        modified_since_(modified_since),
+        callback_(callback) {}
+
+ protected:
+  virtual void RunOnTargetThread() OVERRIDE {
+    if (!database()->GetOriginsModifiedSince(
+            type_, &origins_, modified_since_)) {
+      set_db_disabled(true);
+    }
+  }
+
+  virtual void DatabaseTaskCompleted() OVERRIDE {
+    callback_->Run(origins_);
+  }
+
+  virtual void Aborted() OVERRIDE {
+    callback_->Run(std::set<GURL>());
+  }
+
+ private:
+  StorageType type_;
+  base::Time modified_since_;
+  std::set<GURL> origins_;
+  scoped_ptr<GetOriginsCallback> callback_;
 };
 
 class QuotaManager::DumpQuotaTableTask
@@ -716,10 +841,8 @@ class QuotaManager::DumpQuotaTableTask
  public:
   DumpQuotaTableTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       Callback* callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         callback_(callback) {
   }
  protected:
@@ -731,7 +854,7 @@ class QuotaManager::DumpQuotaTableTask
   }
 
   virtual void Aborted() OVERRIDE {
-    callback_->Run(entries_);
+    callback_->Run(TableEntries());
   }
 
   virtual void DatabaseTaskCompleted() OVERRIDE {
@@ -748,34 +871,32 @@ class QuotaManager::DumpQuotaTableTask
   TableEntries entries_;
 };
 
-class QuotaManager::DumpLastAccessTimeTableTask
+class QuotaManager::DumpOriginInfoTableTask
     : public QuotaManager::DatabaseTaskBase {
  private:
-  typedef QuotaManager::DumpLastAccessTimeTableTask self_type;
-  typedef QuotaManager::DumpLastAccessTimeTableCallback Callback;
-  typedef QuotaManager::LastAccessTimeTableEntry TableEntry;
-  typedef QuotaManager::LastAccessTimeTableEntries TableEntries;
-  typedef QuotaDatabase::LastAccessTimeTableCallback TableCallback;
+  typedef QuotaManager::DumpOriginInfoTableTask self_type;
+  typedef QuotaManager::DumpOriginInfoTableCallback Callback;
+  typedef QuotaManager::OriginInfoTableEntry TableEntry;
+  typedef QuotaManager::OriginInfoTableEntries TableEntries;
+  typedef QuotaDatabase::OriginInfoTableCallback TableCallback;
 
  public:
-  DumpLastAccessTimeTableTask(
+  DumpOriginInfoTableTask(
       QuotaManager* manager,
-      QuotaDatabase* database,
-      scoped_refptr<base::MessageLoopProxy> db_message_loop,
       Callback* callback)
-      : DatabaseTaskBase(manager, database, db_message_loop),
+      : DatabaseTaskBase(manager),
         callback_(callback) {
   }
  protected:
   virtual void RunOnTargetThread() OVERRIDE {
-    if (!database()->DumpLastAccessTimeTable(
+    if (!database()->DumpOriginInfoTable(
             new TableCallback(
                 base::Bind(&self_type::AppendEntry, this))))
       set_db_disabled(true);
   }
 
   virtual void Aborted() OVERRIDE {
-    callback_->Run(entries_);
+    callback_->Run(TableEntries());
   }
 
   virtual void DatabaseTaskCompleted() OVERRIDE {
@@ -880,9 +1001,8 @@ void QuotaManager::SetTemporaryGlobalQuota(int64 new_quota,
   }
 
   if (!db_disabled_) {
-    scoped_refptr<TemporaryGlobalQuotaUpdateTask> task(
-        new TemporaryGlobalQuotaUpdateTask(
-            this, database_.get(), db_thread_, new_quota, callback));
+    scoped_refptr<UpdateTemporaryGlobalQuotaTask> task(
+        new UpdateTemporaryGlobalQuotaTask(this, new_quota, callback));
     task->Start();
   } else {
     callback->Run(kQuotaErrorInvalidAccess,
@@ -902,9 +1022,8 @@ void QuotaManager::GetPersistentHostQuota(const std::string& host,
     callback->Run(kQuotaStatusOk, host, kStorageTypePersistent, 0);
     return;
   }
-  scoped_refptr<PersistentHostQuotaQueryTask> task(
-      new PersistentHostQuotaQueryTask(
-          this, database_.get(), db_thread_, host, callback.release()));
+  scoped_refptr<GetPersistentHostQuotaTask> task(
+      new GetPersistentHostQuotaTask(this, host, callback.release()));
   task->Start();
 }
 
@@ -925,10 +1044,9 @@ void QuotaManager::SetPersistentHostQuota(const std::string& host,
   }
 
   if (!db_disabled_) {
-    scoped_refptr<PersistentHostQuotaUpdateTask> task(
-        new PersistentHostQuotaUpdateTask(
-            this, database_.get(), db_thread_, host, new_quota,
-            callback.release()));
+    scoped_refptr<UpdatePersistentHostQuotaTask> task(
+        new UpdatePersistentHostQuotaTask(
+            this, host, new_quota, callback.release()));
     task->Start();
   } else {
     callback->Run(kQuotaErrorInvalidAccess,
@@ -962,6 +1080,15 @@ void QuotaManager::GetStatistics(
   }
 }
 
+void QuotaManager::GetOriginsModifiedSince(
+    StorageType type,
+    base::Time modified_since,
+    GetOriginsCallback* callback) {
+  LazyInitialize();
+  make_scoped_refptr(new GetModifiedSinceTask(
+      this, type, modified_since, callback))->Start();
+}
+
 void QuotaManager::LazyInitialize() {
   DCHECK(io_thread_->BelongsToCurrentThread());
   if (database_.get()) {
@@ -981,8 +1108,7 @@ void QuotaManager::LazyInitialize() {
                        special_storage_policy_));
 
   scoped_refptr<InitializeTask> task(
-      new InitializeTask(this, database_.get(), db_thread_,
-                         profile_path_, is_incognito_));
+      new InitializeTask(this, profile_path_, is_incognito_));
   task->Start();
 }
 
@@ -995,26 +1121,14 @@ void QuotaManager::RegisterClient(QuotaClient* client) {
 void QuotaManager::NotifyStorageAccessed(
     QuotaClient::ID client_id,
     const GURL& origin, StorageType type) {
-  LazyInitialize();
-  if (type == kStorageTypeTemporary && lru_origin_callback_.get()) {
-    // Record the accessed origins while GetLRUOrigin task is runing
-    // to filter out them from eviction.
-    access_notified_origins_.insert(origin);
-  }
-
-  if (db_disabled_)
-    return;
-  scoped_refptr<OriginAccessRecordDatabaseTask> task(
-      new OriginAccessRecordDatabaseTask(
-          this, database_.get(), db_thread_, origin, type));
-  task->Start();
+  NotifyStorageAccessedInternal(client_id, origin, type, base::Time::Now());
 }
 
 void QuotaManager::NotifyStorageModified(
     QuotaClient::ID client_id,
     const GURL& origin, StorageType type, int64 delta) {
-  LazyInitialize();
-  GetUsageTracker(type)->UpdateUsageCache(client_id, origin, delta);
+  NotifyStorageModifiedInternal(client_id, origin, type, delta,
+                                base::Time::Now());
 }
 
 void QuotaManager::NotifyOriginInUse(const GURL& origin) {
@@ -1028,6 +1142,43 @@ void QuotaManager::NotifyOriginNoLongerInUse(const GURL& origin) {
   int& count = origins_in_use_[origin];
   if (--count == 0)
     origins_in_use_.erase(origin);
+}
+
+void QuotaManager::DeleteOriginData(
+    const GURL& origin, StorageType type, StatusCallback* callback) {
+  LazyInitialize();
+
+  if (origin.is_empty() || clients_.empty()) {
+    callback->Run(kQuotaStatusOk);
+    delete callback;
+    return;
+  }
+
+  OriginDataDeleter* deleter =
+      new OriginDataDeleter(this, origin, type, callback);
+  deleter->Start();
+}
+
+bool QuotaManager::ResetUsageTracker(StorageType type) {
+  switch (type) {
+    case kStorageTypeTemporary:
+      if (!temporary_usage_tracker_->IsWorking())
+        return false;
+      temporary_usage_tracker_.reset(
+          new UsageTracker(clients_, kStorageTypeTemporary,
+                           special_storage_policy_));
+      return true;
+    case kStorageTypePersistent:
+      if (!persistent_usage_tracker_->IsWorking())
+        return false;
+      persistent_usage_tracker_.reset(
+          new UsageTracker(clients_, kStorageTypePersistent,
+                           special_storage_policy_));
+      return true;
+    default:
+      NOTREACHED();
+  }
+  return true;
 }
 
 UsageTracker* QuotaManager::GetUsageTracker(StorageType type) const {
@@ -1060,15 +1211,42 @@ void QuotaManager::GetCachedOrigins(
   }
 }
 
-void QuotaManager::DumpQuotaTable(DumpQuotaTableCallback* callback) {
-  make_scoped_refptr(new DumpQuotaTableTask(
-      this, database_.get(), db_thread_.get(), callback))->Start();
+void QuotaManager::NotifyStorageAccessedInternal(
+    QuotaClient::ID client_id,
+    const GURL& origin, StorageType type,
+    base::Time accessed_time) {
+  LazyInitialize();
+  if (type == kStorageTypeTemporary && lru_origin_callback_.get()) {
+    // Record the accessed origins while GetLRUOrigin task is runing
+    // to filter out them from eviction.
+    access_notified_origins_.insert(origin);
+  }
+
+  if (db_disabled_)
+    return;
+  make_scoped_refptr(new UpdateAccessTimeTask(
+      this, origin, type, accessed_time))->Start();
 }
 
-void QuotaManager::DumpLastAccessTimeTable(
-    DumpLastAccessTimeTableCallback* callback) {
-  make_scoped_refptr(new DumpLastAccessTimeTableTask(
-      this, database_.get(), db_thread_.get(), callback))->Start();
+void QuotaManager::NotifyStorageModifiedInternal(
+    QuotaClient::ID client_id,
+    const GURL& origin,
+    StorageType type,
+    int64 delta,
+    base::Time modified_time) {
+  LazyInitialize();
+  GetUsageTracker(type)->UpdateUsageCache(client_id, origin, delta);
+  make_scoped_refptr(new UpdateModifiedTimeTask(
+      this, origin, type, modified_time))->Start();
+}
+
+void QuotaManager::DumpQuotaTable(DumpQuotaTableCallback* callback) {
+  make_scoped_refptr(new DumpQuotaTableTask(this, callback))->Start();
+}
+
+void QuotaManager::DumpOriginInfoTable(
+    DumpOriginInfoTableCallback* callback) {
+  make_scoped_refptr(new DumpOriginInfoTableTask(this, callback))->Start();
 }
 
 
@@ -1077,9 +1255,8 @@ void QuotaManager::DeleteOriginFromDatabase(
   LazyInitialize();
   if (db_disabled_)
     return;
-  scoped_refptr<OriginDeletionDatabaseTask> task =
-      new OriginDeletionDatabaseTask(
-          this, database_.get(), db_thread_, origin, type);
+  scoped_refptr<DeleteOriginInfo> task =
+      new DeleteOriginInfo(this, origin, type);
   task->Start();
 }
 
@@ -1096,7 +1273,7 @@ void QuotaManager::GetLRUOrigin(
     return;
   }
   scoped_refptr<GetLRUOriginTask> task(new GetLRUOriginTask(
-      this, database_.get(), db_thread_, type, origins_in_use_,
+      this, type, origins_in_use_,
       origins_in_error_, callback_factory_.NewCallback(
           &QuotaManager::DidGetDatabaseLRUOrigin)));
   task->Start();
@@ -1106,28 +1283,15 @@ void QuotaManager::DidOriginDataEvicted(
     QuotaStatusCode status) {
   DCHECK(io_thread_->BelongsToCurrentThread());
 
+  // We only try evict origins that are not in use, so basically
+  // deletion attempt for eviction should not fail.  Let's record
+  // the origin if we get error and exclude it from future eviction
+  // if the error happens consistently (> kThresholdOfErrorsToBeBlacklisted).
   if (status != kQuotaStatusOk)
-    ++eviction_context_.num_eviction_error;
+    origins_in_error_[eviction_context_.evicted_origin]++;
 
-  ++eviction_context_.num_evicted_clients;
-  DCHECK(eviction_context_.num_evicted_clients <=
-      eviction_context_.num_eviction_requested_clients);
-  if (eviction_context_.num_evicted_clients ==
-      eviction_context_.num_eviction_requested_clients) {
-    eviction_context_.num_eviction_requested_clients = 0;
-    eviction_context_.num_evicted_clients = 0;
-
-    if (eviction_context_.num_eviction_error == 0) {
-      DeleteOriginFromDatabase(eviction_context_.evicted_origin,
-                               eviction_context_.evicted_type);
-      eviction_context_.evict_origin_data_callback->Run(kQuotaStatusOk);
-    } else {
-      origins_in_error_[eviction_context_.evicted_origin]++;
-      eviction_context_.evict_origin_data_callback->Run(
-          kQuotaErrorInvalidModification);
-    }
-    eviction_context_.evict_origin_data_callback.reset();
-  }
+  eviction_context_.evict_origin_data_callback->Run(status);
+  eviction_context_.evict_origin_data_callback.reset();
 }
 
 void QuotaManager::EvictOriginData(
@@ -1135,31 +1299,14 @@ void QuotaManager::EvictOriginData(
     StorageType type,
     EvictOriginDataCallback* callback) {
   DCHECK(io_thread_->BelongsToCurrentThread());
-  DCHECK(database_.get());
-  DCHECK_EQ(eviction_context_.num_eviction_requested_clients, 0);
   DCHECK_EQ(type, kStorageTypeTemporary);
-
-  int num_clients = clients_.size();
-
-  if (origin.is_empty() || num_clients == 0) {
-    callback->Run(kQuotaStatusOk);
-    delete callback;
-    return;
-  }
-
-  eviction_context_.num_eviction_requested_clients = num_clients;
-  eviction_context_.num_evicted_clients = 0;
-  eviction_context_.num_eviction_error = 0;
 
   eviction_context_.evicted_origin = origin;
   eviction_context_.evicted_type = type;
   eviction_context_.evict_origin_data_callback.reset(callback);
-  for (QuotaClientList::iterator p = clients_.begin();
-       p != clients_.end();
-       ++p) {
-    (*p)->DeleteOriginData(origin, type, callback_factory_.
-        NewCallback(&QuotaManager::DidOriginDataEvicted));
-  }
+
+  DeleteOriginData(origin, type, callback_factory_.NewCallback(
+      &QuotaManager::DidOriginDataEvicted));
 }
 
 void QuotaManager::DidGetAvailableSpaceForEviction(
@@ -1217,6 +1364,39 @@ void QuotaManager::StartEviction() {
   temporary_storage_evictor_->Start();
 }
 
+void QuotaManager::ReportHistogram() {
+  GetGlobalUsage(kStorageTypeTemporary,
+                 callback_factory_.NewCallback(
+                     &QuotaManager::DidGetTemporaryGlobalUsageForHistogram));
+  GetGlobalUsage(kStorageTypePersistent,
+                 callback_factory_.NewCallback(
+                     &QuotaManager::DidGetPersistentGlobalUsageForHistogram));
+}
+
+void QuotaManager::DidGetTemporaryGlobalUsageForHistogram(
+    StorageType type,
+    int64 usage,
+    int64 unlimited_usage) {
+  UMA_HISTOGRAM_MBYTES("Quota.GlobalUsageOfTemporaryStorage", usage);
+
+  std::set<GURL> origins;
+  GetCachedOrigins(type, &origins);
+  UMA_HISTOGRAM_COUNTS("Quota.NumberOfTemporaryStorageOrigins",
+                       origins.size());
+}
+
+void QuotaManager::DidGetPersistentGlobalUsageForHistogram(
+    StorageType type,
+    int64 usage,
+    int64 unlimited_usage) {
+  UMA_HISTOGRAM_MBYTES("Quota.GlobalUsageOfPersistentStorage", usage);
+
+  std::set<GURL> origins;
+  GetCachedOrigins(type, &origins);
+  UMA_HISTOGRAM_COUNTS("Quota.NumberOfPersistentStorageOrigins",
+                       origins.size());
+}
+
 void QuotaManager::DidInitializeTemporaryGlobalQuota(int64 quota) {
   temporary_global_quota_ = quota;
   temporary_global_quota_callbacks_.Run(
@@ -1245,9 +1425,9 @@ void QuotaManager::DidRunInitialGetTemporaryGlobalUsage(
   DCHECK_EQ(type, kStorageTypeTemporary);
   // This will call the StartEviction() when initial origin registration
   // is completed.
-  scoped_refptr<TemporaryOriginsRegistrationTask> task(
-      new TemporaryOriginsRegistrationTask(
-          this, database_.get(), db_thread_, temporary_usage_tracker_.get()));
+  scoped_refptr<InitializeTemporaryOriginsInfoTask> task(
+      new InitializeTemporaryOriginsInfoTask(
+          this, temporary_usage_tracker_.get()));
   task->Start();
 }
 

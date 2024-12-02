@@ -45,7 +45,8 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual StatusBubble* GetStatusBubble();
   virtual void ToolbarSizeChanged(bool is_animating);
   virtual void UpdateTitleBar();
-  virtual void ShelfVisibilityChanged();
+  virtual void BookmarkBarStateChanged(
+      BookmarkBar::AnimateChangeType change_type);
   virtual void UpdateDevTools();
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
@@ -106,6 +107,8 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ToggleTabStripMode();
   virtual void ToggleUseCompactNavigationBar() {}
   virtual void OpenTabpose();
+  virtual void SetPresentationMode(bool presentation_mode);
+  virtual bool InPresentationMode();
   virtual void PrepareForInstant();
   virtual void ShowInstant(TabContentsWrapper* preview);
   virtual void HideInstant(bool instant_is_active);
@@ -114,7 +117,7 @@ class BrowserWindowCocoa : public BrowserWindow,
       const gfx::Rect& bounds);
 
   // Overridden from NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

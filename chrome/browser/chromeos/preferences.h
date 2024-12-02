@@ -33,7 +33,7 @@ class Preferences : public NotificationObserver {
   void Init(PrefService* prefs);
 
   // Overridden from NotificationObserver:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -122,6 +122,8 @@ class Preferences : public NotificationObserver {
   IntegerPrefMember language_xkb_auto_repeat_interval_pref_;
 
   BooleanPrefMember enable_screen_lock_;
+
+  BooleanPrefMember use_shared_proxies_;
 
   DISALLOW_COPY_AND_ASSIGN(Preferences);
 };

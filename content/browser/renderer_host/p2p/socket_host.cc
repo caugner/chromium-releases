@@ -32,12 +32,9 @@ bool P2PSocketHost::GetStunPacketType(
   if (data_size < kStunHeaderSize)
     return false;
 
-  // TODO(sergeyu): Fix libjingle to format STUN message according to
-  // RFC5389 and validate STUN magic cookie here.
-  //
-  // uint32 cookie = ntohl(*reinterpret_cast<const uint32*>(data + 4));
-  // if (cookie != kStunMagicCookie)
-  //   return false;
+  uint32 cookie = ntohl(*reinterpret_cast<const uint32*>(data + 4));
+  if (cookie != kStunMagicCookie)
+    return false;
 
   uint16 length = ntohs(*reinterpret_cast<const uint16*>(data + 2));
   if (length != data_size - kStunHeaderSize)
@@ -66,6 +63,12 @@ bool P2PSocketHost::GetStunPacketType(
     default:
       return false;
   }
+}
+
+// static
+bool P2PSocketHost::IsRequestOrResponse(StunMessageType type) {
+  return type == STUN_BINDING_REQUEST || type == STUN_BINDING_RESPONSE ||
+      type == STUN_ALLOCATE_REQUEST || type == STUN_ALLOCATE_RESPONSE;
 }
 
 // static

@@ -3,8 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/stringprintf.h"
-#include "chrome/browser/background_contents_service.h"
-#include "chrome/browser/background_contents_service_factory.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/background/background_contents_service.h"
+#include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"

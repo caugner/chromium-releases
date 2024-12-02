@@ -10,6 +10,7 @@
 #pragma once
 
 #include <deque>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,14 +18,17 @@
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/glue/resource_type.h"
 
 class MalwareDetails;
+class PrefChangeRegistrar;
 class PrefService;
 class SafeBrowsingDatabase;
 class SafeBrowsingProtocolManager;
@@ -40,7 +44,8 @@ class URLRequestContextGetter;
 
 // Construction needs to happen on the main thread.
 class SafeBrowsingService
-    : public base::RefCountedThreadSafe<SafeBrowsingService> {
+    : public base::RefCountedThreadSafe<SafeBrowsingService>,
+      public NotificationObserver {
  public:
   class Client;
   // Users of this service implement this interface to be notified
@@ -66,7 +71,7 @@ class SafeBrowsingService
     GURL url;
     GURL original_url;
     std::vector<GURL> redirect_urls;
-    ResourceType::Type resource_type;
+    bool is_subresource;
     UrlCheckResult threat_type;
     Client* client;
     int render_process_host_id;
@@ -102,6 +107,22 @@ class SafeBrowsingService
     DISALLOW_COPY_AND_ASSIGN(SafeBrowsingCheck);
   };
 
+  // Observer class can be used to get notified when a SafeBrowsing hit
+  // was found.
+  class Observer {
+   public:
+    // The |resource| must not be accessed after OnSafeBrowsingHit returns.
+    // This method will be called on the UI thread.
+    virtual void OnSafeBrowsingHit(const UnsafeResource& resource) = 0;
+
+   protected:
+    Observer() {}
+    virtual ~Observer() {}
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Observer);
+  };
+
   class Client {
    public:
     virtual ~Client() {}
@@ -125,7 +146,6 @@ class SafeBrowsingService
     virtual void OnDownloadHashCheckResult(const std::string& hash,
                                            UrlCheckResult result) {}
   };
-
 
   // Makes the passed |factory| the factory used to instanciate
   // a SafeBrowsingService. Useful for tests.
@@ -183,14 +203,21 @@ class SafeBrowsingService
   // If the request contained a chain of redirects, |url| is the last url
   // in the chain, and |original_url| is the first one (the root of the
   // chain). Otherwise, |original_url| = |url|.
-  virtual void DisplayBlockingPage(const GURL& url,
-                                   const GURL& original_url,
-                                   const std::vector<GURL>& redirect_urls,
-                                   ResourceType::Type resource_type,
-                                   UrlCheckResult result,
-                                   Client* client,
-                                   int render_process_host_id,
-                                   int render_view_id);
+  void DisplayBlockingPage(const GURL& url,
+                           const GURL& original_url,
+                           const std::vector<GURL>& redirect_urls,
+                           bool is_subresource,
+                           UrlCheckResult result,
+                           Client* client,
+                           int render_process_host_id,
+                           int render_view_id);
+
+  // Same as above but gets invoked on the UI thread.
+  virtual void DoDisplayBlockingPage(const UnsafeResource& resource);
+
+  // Returns true if we already displayed an interstitial for that resource.
+  // Called on the UI thread.
+  bool IsWhitelisted(const UnsafeResource& resource);
 
   // Called on the IO thread when the SafeBrowsingProtocolManager has received
   // the full hash results for prefix hits detected in the database.
@@ -218,9 +245,6 @@ class SafeBrowsingService
   void OnNewMacKeys(const std::string& client_key,
                     const std::string& wrapped_key);
 
-  // Notification on the UI thread from the advanced options UI.
-  void OnEnable(bool enabled);
-
   bool enabled() const { return enabled_; }
 
   bool download_protection_enabled() const {
@@ -229,14 +253,6 @@ class SafeBrowsingService
 
   // Preference handling.
   static void RegisterPrefs(PrefService* prefs);
-
-  // Called on the IO thread to try to close the database, freeing the memory
-  // associated with it.  The database will be automatically reopened as needed.
-  //
-  // NOTE: Actual database closure is asynchronous, and until it happens, the IO
-  // thread is not allowed to access it; may not actually trigger a close if one
-  // is already pending or doing so would cause problems.
-  void CloseDatabase();
 
   // Called on the IO thread to reset the database.
   void ResetDatabase();
@@ -260,6 +276,10 @@ class SafeBrowsingService
                                      bool is_subresource,
                                      UrlCheckResult threat_type,
                                      const std::string& post_data);
+
+  // Add and remove observers.  These methods must be invoked on the UI thread.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* remove);
 
  protected:
   // Creates the safe browsing service.  Need to initialize before using.
@@ -304,6 +324,14 @@ class SafeBrowsingService
   // Note that this is only needed outside the db thread, since functions on the
   // db thread can call GetDatabase() directly.
   bool MakeDatabaseAvailable();
+
+  // Called on the IO thread to try to close the database, freeing the memory
+  // associated with it.  The database will be automatically reopened as needed.
+  //
+  // NOTE: Actual database closure is asynchronous, and until it happens, the IO
+  // thread is not allowed to access it; may not actually trigger a close if one
+  // is already pending or doing so would cause problems.
+  void CloseDatabase();
 
   // Should only be called on db thread as SafeBrowsingDatabase is not
   // threadsafe.
@@ -365,9 +393,6 @@ class SafeBrowsingService
   bool HandleOneCheck(SafeBrowsingCheck* check,
                       const std::vector<SBFullHashResult>& full_hashes);
 
-  // Invoked on the UI thread to show the blocking page.
-  void DoDisplayBlockingPage(const UnsafeResource& resource);
-
   // Call protocol manager on IO thread to report hits of unsafe contents.
   void ReportSafeBrowsingHitOnIOThread(const GURL& malicious_url,
                                        const GURL& page_url,
@@ -404,6 +429,24 @@ class SafeBrowsingService
                           CancelableTask* task,
                           int64 timeout_ms);
 
+  // Adds the given entry to the whitelist.  Called on the UI thread.
+  void UpdateWhitelist(const UnsafeResource& resource);
+
+  // NotificationObserver override
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
+
+  // Starts following the safe browsing preference on |pref_service|.
+  void AddPrefService(PrefService* pref_service);
+
+  // Stop following the safe browsing preference on |pref_service|.
+  void RemovePrefService(PrefService* pref_service);
+
+  // Checks if any profile is currently using the safe browsing service, and
+  // starts or stops the service accordingly.
+  void RefreshState();
+
   // The factory used to instanciate a SafeBrowsingService object.
   // Useful for tests, so they can provide their own implementation of
   // SafeBrowsingService.
@@ -424,6 +467,7 @@ class SafeBrowsingService
   // Handles interaction with SafeBrowsing servers.
   SafeBrowsingProtocolManager* protocol_manager_;
 
+  // Only access this whitelist from the UI thread.
   std::vector<WhiteListedEntry> white_listed_entries_;
 
   // Whether the service is running. 'enabled_' is used by SafeBrowsingService
@@ -464,6 +508,19 @@ class SafeBrowsingService
 
   // Similar to |download_urlcheck_timeout_ms_|, but for download hash checks.
   int64 download_hashcheck_timeout_ms_;
+
+  ObserverList<Observer> observer_list_;
+
+  // Used to track purge memory notifications. Lives on the IO thread.
+  NotificationRegistrar registrar_;
+
+  // Tracks existing PrefServices, and the safe browsing preference on each.
+  // This is used to determine if any profile is currently using the safe
+  // browsing service, and to start it up or shut it down accordingly.
+  std::map<PrefService*, PrefChangeRegistrar*> prefs_map_;
+
+  // Used to track creation and destruction of profiles on the UI thread.
+  NotificationRegistrar prefs_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingService);
 };

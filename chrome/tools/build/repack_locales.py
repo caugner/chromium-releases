@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -35,6 +35,10 @@ class Usage(Exception):
 def calc_output(locale):
   """Determine the file that will be generated for the given locale."""
   #e.g. '<(INTERMEDIATE_DIR)/repack/da.pak',
+  # For Fake Bidi, generate it at a fixed path so that tests can safely
+  # reference it.
+  if locale == 'fake-bidi':
+    return '%s/%s.pak' % (INT_DIR, locale)
   if sys.platform in ('darwin',):
     # For Cocoa to find the locale at runtime, it needs to use '_' instead
     # of '-' (http://crbug.com/20441).  Also, 'en-US' should be represented
@@ -62,12 +66,12 @@ def calc_inputs(locale):
   #e.g. '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_da.pak'
   inputs.append('%s/webkit/webkit_strings_%s.pak' % (SHARE_INT_DIR, locale))
 
-  #e.g. '<(SHARED_INTERMEDIATE_DIR)/app/app_strings_da.pak',
-  inputs.append('%s/app/app_strings/app_strings_%s.pak' % (
+  #e.g. '<(SHARED_INTERMEDIATE_DIR)/ui/ui_strings_da.pak',
+  inputs.append('%s/ui/ui_strings/ui_strings_%s.pak' % (
       SHARE_INT_DIR, locale))
 
-  #e.g. '<(SHARED_INTERMEDIATE_DIR)/app/app_locale_settings_da.pak',
-  inputs.append('%s/app/app_locale_settings/app_locale_settings_%s.pak' % (
+  #e.g. '<(SHARED_INTERMEDIATE_DIR)/ui/app_locale_settings_da.pak',
+  inputs.append('%s/ui/app_locale_settings/app_locale_settings_%s.pak' % (
       SHARE_INT_DIR, locale))
 
   #e.g. '<(grit_out_dir)/google_chrome_strings_da.pak'

@@ -14,6 +14,7 @@ extern "C" {
 #include <list>
 
 #include "base/at_exit.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/test/mock_chrome_application_mac.h"
 #include "base/time.h"
@@ -23,8 +24,8 @@ extern "C" {
 #include "net/base/net_errors.h"
 #include "net/socket/socket.h"
 #include "remoting/base/constants.h"
-#include "remoting/jingle_glue/jingle_client.h"
 #include "remoting/jingle_glue/jingle_thread.h"
+#include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/jingle_session_manager.h"
 
 namespace remoting {
@@ -40,17 +41,18 @@ class ProtocolTestClient;
 class ProtocolTestConnection
     : public base::RefCountedThreadSafe<ProtocolTestConnection> {
  public:
-  ProtocolTestConnection(ProtocolTestClient* client, MessageLoop* message_loop)
+  ProtocolTestConnection(ProtocolTestClient* client)
       : client_(client),
-        message_loop_(message_loop),
+        message_loop_(MessageLoop::current()),
         session_(NULL),
         ALLOW_THIS_IN_INITIALIZER_LIST(
             write_cb_(this, &ProtocolTestConnection::OnWritten)),
         pending_write_(false),
         ALLOW_THIS_IN_INITIALIZER_LIST(
-            read_cb_(this, &ProtocolTestConnection::OnRead)),
-        closed_event_(true, false) {
+            read_cb_(this, &ProtocolTestConnection::OnRead)) {
   }
+
+  virtual ~ProtocolTestConnection() {}
 
   void Init(Session* session);
   void Write(const std::string& str);
@@ -68,24 +70,21 @@ class ProtocolTestConnection
   void OnWritten(int result);
   void OnRead(int result);
 
-  void OnFinishedClosing();
-
   ProtocolTestClient* client_;
   MessageLoop* message_loop_;
-  scoped_refptr<Session> session_;
+  scoped_ptr<Session> session_;
   net::CompletionCallbackImpl<ProtocolTestConnection> write_cb_;
   bool pending_write_;
   net::CompletionCallbackImpl<ProtocolTestConnection> read_cb_;
   scoped_refptr<net::IOBuffer> read_buffer_;
-  base::WaitableEvent closed_event_;
 };
 
 class ProtocolTestClient
-    : public JingleClient::Callback,
+    : public SignalStrategy::StatusObserver,
+      public SessionManager::Listener,
       public base::RefCountedThreadSafe<ProtocolTestClient> {
  public:
-  ProtocolTestClient()
-      : closed_event_(true, false) {
+  ProtocolTestClient() {
   }
 
   virtual ~ProtocolTestClient() {}
@@ -95,32 +94,31 @@ class ProtocolTestClient
 
   void OnConnectionClosed(ProtocolTestConnection* connection);
 
-  // JingleClient::Callback interface.
-  virtual void OnStateChange(JingleClient* client, JingleClient::State state);
+  // SignalStrategy::StatusObserver interface.
+  virtual void OnStateChange(
+      SignalStrategy::StatusObserver::State state) OVERRIDE;
+  virtual void OnJidChange(const std::string& full_jid) OVERRIDE;
 
-  // callback for JingleSessionManager interface.
-  virtual void OnNewSession(
+  // SessionManager::Listener interface.
+  virtual void OnSessionManagerInitialized() OVERRIDE;
+  virtual void OnIncomingSession(
       Session* session,
-      SessionManager::IncomingSessionResponse* response);
+      SessionManager::IncomingSessionResponse* response) OVERRIDE;
 
  private:
   typedef std::list<scoped_refptr<ProtocolTestConnection> > ConnectionsList;
 
-  void OnFinishedClosing();
-  void DestroyConnection(scoped_refptr<ProtocolTestConnection> connection);
-
   std::string host_jid_;
   scoped_ptr<SignalStrategy> signal_strategy_;
-  scoped_refptr<JingleClient> client_;
-  scoped_refptr<JingleSessionManager> session_manager_;
+  std::string local_jid_;
+  scoped_ptr<JingleSessionManager> session_manager_;
   ConnectionsList connections_;
   base::Lock connections_lock_;
-  base::WaitableEvent closed_event_;
 };
 
 
 void ProtocolTestConnection::Init(Session* session) {
-  session_ = session;
+  session_.reset(session);
 }
 
 void ProtocolTestConnection::Write(const std::string& str) {
@@ -177,13 +175,7 @@ void ProtocolTestConnection::DoRead() {
 }
 
 void ProtocolTestConnection::Close() {
-  session_->Close(
-      NewRunnableMethod(this, &ProtocolTestConnection::OnFinishedClosing));
-  closed_event_.Wait();
-}
-
-void ProtocolTestConnection::OnFinishedClosing() {
-  closed_event_.Signal();
+  session_->Close();
 }
 
 void ProtocolTestConnection::OnStateChange(Session::State state) {
@@ -225,14 +217,12 @@ void ProtocolTestClient::Run(const std::string& username,
                              const std::string& host_jid) {
   remoting::JingleThread jingle_thread;
   jingle_thread.Start();
+
   signal_strategy_.reset(
       new XmppSignalStrategy(&jingle_thread, username, auth_token,
                              auth_service));
-  client_ = new JingleClient(&jingle_thread, signal_strategy_.get(),
-                             NULL, NULL, NULL, this);
-  client_->Init();
-
-  session_manager_ = new JingleSessionManager(&jingle_thread);
+  signal_strategy_->Init(this);
+  session_manager_.reset(JingleSessionManager::CreateNotSandboxed());
 
   host_jid_ = host_jid;
 
@@ -259,71 +249,17 @@ void ProtocolTestClient::Run(const std::string& username,
     connections_.pop_front();
   }
 
-  if (session_manager_) {
-    session_manager_->Close(
-        NewRunnableMethod(this, &ProtocolTestClient::OnFinishedClosing));
-    closed_event_.Wait();
+  if (session_manager_.get()) {
+    session_manager_->Close();
+    session_manager_.reset();
   }
 
-  client_->Close();
+  signal_strategy_->Close();
   jingle_thread.Stop();
 }
 
 void ProtocolTestClient::OnConnectionClosed(
     ProtocolTestConnection* connection) {
-  client_->message_loop()->PostTask(
-      FROM_HERE, NewRunnableMethod(
-          this, &ProtocolTestClient::DestroyConnection,
-          scoped_refptr<ProtocolTestConnection>(connection)));
-}
-
-void ProtocolTestClient::OnStateChange(
-    JingleClient* client, JingleClient::State state) {
-  if (state == JingleClient::CONNECTED) {
-    std::cerr << "Connected as " << client->GetFullJid() << std::endl;
-
-    session_manager_->Init(
-        client_->GetFullJid(), client_->session_manager(),
-        NewCallback(this, &ProtocolTestClient::OnNewSession), NULL, NULL);
-    session_manager_->set_allow_local_ips(true);
-
-    if (host_jid_ != "") {
-      ProtocolTestConnection* connection =
-          new ProtocolTestConnection(this, client_->message_loop());
-      connection->Init(session_manager_->Connect(
-          host_jid_, kDummyAuthToken, CandidateSessionConfig::CreateDefault(),
-          NewCallback(connection,
-                      &ProtocolTestConnection::OnStateChange)));
-      connections_.push_back(make_scoped_refptr(connection));
-    }
-  } else if (state == JingleClient::CLOSED) {
-    std::cerr << "Connection closed" << std::endl;
-  }
-}
-
-void ProtocolTestClient::OnNewSession(
-    Session* session,
-    SessionManager::IncomingSessionResponse* response) {
-  std::cerr << "Accepting connection from " << session->jid() << std::endl;
-
-  session->set_config(SessionConfig::CreateDefault());
-  *response = SessionManager::ACCEPT;
-
-  ProtocolTestConnection* test_connection =
-      new ProtocolTestConnection(this, client_->message_loop());
-  session->SetStateChangeCallback(
-      NewCallback(test_connection, &ProtocolTestConnection::OnStateChange));
-  test_connection->Init(session);
-  base::AutoLock auto_lock(connections_lock_);
-  connections_.push_back(make_scoped_refptr(test_connection));
-}
-
-void ProtocolTestClient::OnFinishedClosing() {
-  closed_event_.Signal();
-}
-
-void ProtocolTestClient::DestroyConnection(
-    scoped_refptr<ProtocolTestConnection> connection) {
   connection->Close();
   base::AutoLock auto_lock(connections_lock_);
   for (ConnectionsList::iterator it = connections_.begin();
@@ -333,6 +269,50 @@ void ProtocolTestClient::DestroyConnection(
       return;
     }
   }
+}
+
+void ProtocolTestClient::OnStateChange(
+    SignalStrategy::StatusObserver::State state) {
+  if (state == SignalStrategy::StatusObserver::CONNECTED) {
+    std::cerr << "Connected as " << local_jid_ << std::endl;
+
+    session_manager_->Init(
+        local_jid_, signal_strategy_.get(), this, NULL, "", true);
+    session_manager_->set_allow_local_ips(true);
+  } else if (state == SignalStrategy::StatusObserver::CLOSED) {
+    std::cerr << "Connection closed" << std::endl;
+  }
+}
+
+void ProtocolTestClient::OnJidChange(const std::string& full_jid) {
+  local_jid_ = full_jid;
+}
+
+void ProtocolTestClient::OnSessionManagerInitialized() {
+  if (host_jid_ != "") {
+    ProtocolTestConnection* connection = new ProtocolTestConnection(this);
+    connection->Init(session_manager_->Connect(
+        host_jid_, "", kDummyAuthToken,
+        CandidateSessionConfig::CreateDefault(),
+        NewCallback(connection, &ProtocolTestConnection::OnStateChange)));
+    connections_.push_back(make_scoped_refptr(connection));
+  }
+}
+
+void ProtocolTestClient::OnIncomingSession(
+    Session* session,
+    SessionManager::IncomingSessionResponse* response) {
+  std::cerr << "Accepting connection from " << session->jid() << std::endl;
+
+  session->set_config(SessionConfig::CreateDefault());
+  *response = SessionManager::ACCEPT;
+
+  ProtocolTestConnection* test_connection = new ProtocolTestConnection(this);
+  session->SetStateChangeCallback(
+      NewCallback(test_connection, &ProtocolTestConnection::OnStateChange));
+  test_connection->Init(session);
+  base::AutoLock auto_lock(connections_lock_);
+  connections_.push_back(make_scoped_refptr(test_connection));
 }
 
 }  // namespace protocol
@@ -351,7 +331,7 @@ int main(int argc, char** argv) {
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
-  if (!cmd_line->args().empty() || cmd_line->HasSwitch("help"))
+  if (!cmd_line->GetArgs().empty() || cmd_line->HasSwitch("help"))
     usage(argv[0]);
 
   base::AtExitManager exit_manager;

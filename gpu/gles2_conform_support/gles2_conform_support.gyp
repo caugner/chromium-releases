@@ -54,7 +54,7 @@
         'egl_native',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['toolkit_uses_gtk == 1', {
           'dependencies': ['../../build/linux/system.gyp:gtk'],
         }],
       ],
@@ -72,11 +72,12 @@
       'type': 'executable',
       'dependencies': [
         'egl_native',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '<(DEPTH)/gpu/gpu.gyp:gles2_c_lib_nocheck',
         '<(DEPTH)/third_party/expat/expat.gyp:expat',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['toolkit_uses_gtk == 1', {
           'dependencies': ['../../build/linux/system.gyp:gtk'],
         }],
       ],
@@ -91,10 +92,3 @@
     },
   ],
 }
-
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

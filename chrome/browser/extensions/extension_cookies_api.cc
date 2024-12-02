@@ -6,6 +6,7 @@
 
 #include "chrome/browser/extensions/extension_cookies_api.h"
 
+#include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/task.h"
 #include "base/values.h"
@@ -14,37 +15,40 @@
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace keys = extension_cookies_api_constants;
 
-// static
-ExtensionCookiesEventRouter* ExtensionCookiesEventRouter::GetInstance() {
-  return Singleton<ExtensionCookiesEventRouter>::get();
-}
+ExtensionCookiesEventRouter::ExtensionCookiesEventRouter(Profile* profile)
+    : profile_(profile) {}
+
+ExtensionCookiesEventRouter::~ExtensionCookiesEventRouter() {}
 
 void ExtensionCookiesEventRouter::Init() {
-  if (registrar_.IsEmpty()) {
-    registrar_.Add(this,
-                   NotificationType::COOKIE_CHANGED,
-                   NotificationService::AllSources());
-  }
+  CHECK(registrar_.IsEmpty());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_COOKIE_CHANGED,
+                 NotificationService::AllSources());
 }
 
-void ExtensionCookiesEventRouter::Observe(NotificationType type,
+void ExtensionCookiesEventRouter::Observe(int type,
                                           const NotificationSource& source,
                                           const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::COOKIE_CHANGED:
+  Profile* profile = Source<Profile>(source).ptr();
+  if (!profile_->IsSameProfile(profile)) {
+    return;
+  }
+  switch (type) {
+    case chrome::NOTIFICATION_COOKIE_CHANGED:
       CookieChanged(
-          Source<Profile>(source).ptr(),
+          profile,
           Details<ChromeCookieDetails>(details).ptr());
       break;
 
@@ -210,9 +214,13 @@ void GetCookieFunction::GetCookieOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   net::CookieStore* cookie_store =
       store_context_->GetURLRequestContext()->cookie_store();
-  net::CookieList cookie_list =
-      extension_cookies_helpers::GetCookieListFromStore(cookie_store, url_);
-  net::CookieList::iterator it;
+  extension_cookies_helpers::GetCookieListFromStore(
+      cookie_store, url_,
+      base::Bind(&GetCookieFunction::GetCookieCallback, this));
+}
+
+void GetCookieFunction::GetCookieCallback(const net::CookieList& cookie_list) {
+  net::CookieList::const_iterator it;
   for (it = cookie_list.begin(); it != cookie_list.end(); ++it) {
     // Return the first matching cookie. Relies on the fact that the
     // CookieMonster returns them in canonical order (longest path, then
@@ -271,9 +279,13 @@ void GetAllCookiesFunction::GetAllCookiesOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   net::CookieStore* cookie_store =
       store_context_->GetURLRequestContext()->cookie_store();
-  net::CookieList cookie_list =
-      extension_cookies_helpers::GetCookieListFromStore(cookie_store, url_);
+  extension_cookies_helpers::GetCookieListFromStore(
+      cookie_store, url_,
+      base::Bind(&GetAllCookiesFunction::GetAllCookiesCallback, this));
+}
 
+void GetAllCookiesFunction::GetAllCookiesCallback(
+    const net::CookieList& cookie_list) {
   const Extension* extension = GetExtension();
   if (extension) {
     ListValue* matching_list = new ListValue();
@@ -369,14 +381,24 @@ void SetCookieFunction::SetCookieOnIOThread() {
   net::CookieMonster* cookie_monster =
       store_context_->GetURLRequestContext()->cookie_store()->
       GetCookieMonster();
-  success_ = cookie_monster->SetCookieWithDetails(
+  cookie_monster->SetCookieWithDetailsAsync(
       url_, name_, value_, domain_, path_, expiration_time_,
-      secure_, http_only_);
+      secure_, http_only_, base::Bind(&SetCookieFunction::PullCookie, this));
+}
 
+void SetCookieFunction::PullCookie(bool set_cookie_result) {
   // Pull the newly set cookie.
-  net::CookieList cookie_list =
-      extension_cookies_helpers::GetCookieListFromStore(cookie_monster, url_);
-  net::CookieList::iterator it;
+  net::CookieMonster* cookie_monster =
+      store_context_->GetURLRequestContext()->cookie_store()->
+      GetCookieMonster();
+  success_ = set_cookie_result;
+  extension_cookies_helpers::GetCookieListFromStore(
+      cookie_monster, url_,
+      base::Bind(&SetCookieFunction::PullCookieCallback, this));
+}
+
+void SetCookieFunction::PullCookieCallback(const net::CookieList& cookie_list) {
+  net::CookieList::const_iterator it;
   for (it = cookie_list.begin(); it != cookie_list.end(); ++it) {
     // Return the first matching cookie. Relies on the fact that the
     // CookieMonster returns them in canonical order (longest path, then
@@ -444,8 +466,12 @@ void RemoveCookieFunction::RemoveCookieOnIOThread() {
   // Remove the cookie
   net::CookieStore* cookie_store =
       store_context_->GetURLRequestContext()->cookie_store();
-  cookie_store->DeleteCookie(url_, name_);
+  cookie_store->DeleteCookieAsync(
+      url_, name_,
+      base::Bind(&RemoveCookieFunction::RemoveCookieCallback, this));
+}
 
+void RemoveCookieFunction::RemoveCookieCallback() {
   // Build the callback result
   DictionaryValue* resultDictionary = new DictionaryValue();
   resultDictionary->SetString(keys::kNameKey, name_);
@@ -500,7 +526,8 @@ bool GetAllCookieStoresFunction::RunImpl() {
         extension_cookies_helpers::CreateCookieStoreValue(
             original_profile, original_tab_ids.release()));
   }
-  if (incognito_tab_ids.get() && incognito_tab_ids->GetSize() > 0) {
+  if (incognito_tab_ids.get() && incognito_tab_ids->GetSize() > 0 &&
+      incognito_profile) {
     cookie_store_list->Append(
         extension_cookies_helpers::CreateCookieStoreValue(
             incognito_profile, incognito_tab_ids.release()));

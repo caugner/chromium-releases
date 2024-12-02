@@ -5,11 +5,13 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 
 #include <algorithm>
+#include <iterator>
+#include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/defaults.h"
+#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
@@ -27,20 +29,11 @@
 #include "ui/gfx/size.h"
 #include "views/controls/image_view.h"
 #include "views/widget/default_theme_provider.h"
+#include "views/widget/widget.h"
 #include "views/window/non_client_view.h"
-#include "views/window/window.h"
 
 #if defined(OS_WIN)
 #include "views/widget/monitor_win.h"
-#endif
-
-#undef min
-#undef max
-
-#if defined(COMPILER_GCC)
-// Squash false positive signed overflow warning in GenerateStartAndEndWidths
-// when doing 'start_tab_count < end_tab_count'.
-#pragma GCC diagnostic ignored "-Wstrict-overflow"
 #endif
 
 using views::DropTargetEvent;
@@ -74,8 +67,9 @@ namespace {
 
 class NewTabButton : public views::ImageButton {
  public:
-  explicit NewTabButton(views::ButtonListener* listener)
-      : views::ImageButton(listener) {
+  explicit NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener)
+      : views::ImageButton(listener),
+        tab_strip_(tab_strip) {
   }
   virtual ~NewTabButton() {}
 
@@ -85,7 +79,7 @@ class NewTabButton : public views::ImageButton {
     // When the button is sized to the top of the tab strip we want the user to
     // be able to click on complete bounds, and so don't return a custom hit
     // mask.
-    return !browser_defaults::kSizeTabButtonToTopOfTabStrip;
+    return !tab_strip_->SizeTabButtonToTopOfTabStrip();
   }
   virtual void GetHitTestMask(gfx::Path* path) const {
     DCHECK(path);
@@ -107,6 +101,9 @@ class NewTabButton : public views::ImageButton {
   }
 
  private:
+  // Tab strip that contains this button.
+  TabStrip* tab_strip_;
+
   DISALLOW_COPY_AND_ASSIGN(NewTabButton);
 };
 
@@ -146,20 +143,12 @@ TabStrip::~TabStrip() {
   RemoveAllChildViews(true);
 }
 
-void TabStrip::InitTabStripButtons() {
-  newtab_button_ = new NewTabButton(this);
-  if (browser_defaults::kSizeTabButtonToTopOfTabStrip) {
-    newtab_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
-                                      views::ImageButton::ALIGN_BOTTOM);
-  }
-  LoadNewTabButtonImage();
-  newtab_button_->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
-  AddChildView(newtab_button_);
-}
-
 gfx::Rect TabStrip::GetNewTabButtonBounds() {
   return newtab_button_->bounds();
+}
+
+bool TabStrip::SizeTabButtonToTopOfTabStrip() {
+  return controller()->SizeTabButtonToTopOfTabStrip();
 }
 
 void TabStrip::MouseMovedOutOfView() {
@@ -182,7 +171,7 @@ bool TabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
   // visual portions of the button we treat it as a click to the caption.
   gfx::Point point_in_newtab_coords(point);
   View::ConvertPointToView(this, newtab_button_, &point_in_newtab_coords);
-  if (newtab_button_->bounds().Contains(point) &&
+  if (newtab_button_->GetLocalBounds().Contains(point_in_newtab_coords) &&
       !newtab_button_->HitTest(point_in_newtab_coords)) {
     return true;
   }
@@ -214,8 +203,14 @@ void TabStrip::PrepareForCloseAt(int model_index) {
     // available_width_for_tabs_ so that if we do a layout we don't position a
     // tab past the end of the second to last tab. We do this so that as the
     // user closes tabs with the mouse a tab continues to fall under the mouse.
-    available_width_for_tabs_ = GetAvailableWidthForTabs(
-        GetTabAtModelIndex(model_count - 2));
+    Tab* last_tab = GetTabAtModelIndex(model_count - 1);
+    Tab* tab_being_removed = GetTabAtModelIndex(model_index);
+    available_width_for_tabs_ = last_tab->x() + last_tab->width() -
+        tab_being_removed->width() - kTabHOffset;
+    if (model_index == 0 && tab_being_removed->data().mini &&
+        !GetTabAtModelIndex(1)->data().mini) {
+      available_width_for_tabs_ -= mini_to_non_mini_gap_;
+    }
   }
 
   in_tab_close_ = true;
@@ -229,7 +224,8 @@ void TabStrip::RemoveTabAt(int model_index) {
     StartRemoveTabAnimation(model_index);
 }
 
-void TabStrip::SelectTabAt(int old_model_index, int new_model_index) {
+void TabStrip::SetSelection(const TabStripSelectionModel& old_selection,
+                            const TabStripSelectionModel& new_selection) {
   // We have "tiny tabs" if the tabs are so tiny that the unselected ones are
   // a different size to the selected ones.
   bool tiny_tabs = current_unselected_width_ != current_selected_width_;
@@ -239,8 +235,16 @@ void TabStrip::SelectTabAt(int old_model_index, int new_model_index) {
     SchedulePaint();
   }
 
-  if (old_model_index >= 0) {
-    GetTabAtTabDataIndex(ModelIndexToTabIndex(old_model_index))->
+  TabStripSelectionModel::SelectedIndices no_longer_selected;
+  std::insert_iterator<TabStripSelectionModel::SelectedIndices>
+      it(no_longer_selected, no_longer_selected.begin());
+  std::set_difference(old_selection.selected_indices().begin(),
+                      old_selection.selected_indices().end(),
+                      new_selection.selected_indices().begin(),
+                      new_selection.selected_indices().end(),
+                      it);
+  for (size_t i = 0; i < no_longer_selected.size(); ++i) {
+    GetTabAtTabDataIndex(ModelIndexToTabIndex(no_longer_selected[i]))->
         StopMiniTabTitleAnimation();
   }
 }
@@ -299,7 +303,7 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas) {
     }
   }
 
-  if (GetWindow()->ShouldUseNativeFrame()) {
+  if (GetWidget()->ShouldUseNativeFrame()) {
     bool multiple_tabs_selected = (!selected_tabs.empty() ||
                                    tabs_dragging.size() > 1);
     // Make sure non-active tabs are somewhat transparent.
@@ -337,7 +341,14 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas) {
 }
 
 gfx::Size TabStrip::GetPreferredSize() {
-  return gfx::Size(0, Tab::GetMinimumUnselectedSize().height());
+  // Report the minimum width as the size required for a single selected tab
+  // plus the new tab button. Don't base it on the actual number of tabs because
+  // it's undesirable to have the minimum window size change when a new tab is
+  // opened.
+  int needed_width = Tab::GetMinimumSelectedSize().width();
+  needed_width += kNewTabButtonHOffset - kTabHOffset;
+  needed_width += newtab_button_bounds_.width();
+  return gfx::Size(needed_width, Tab::GetMinimumUnselectedSize().height());
 }
 
 void TabStrip::OnDragEntered(const DropTargetEvent& event) {
@@ -455,7 +466,20 @@ bool TabStrip::ShouldHighlightCloseButtonAfterRemove() {
 void TabStrip::DoLayout() {
   BaseTabStrip::DoLayout();
 
-  newtab_button_->SetBoundsRect(newtab_button_bounds_);
+  // It is possible we don't have a new tab button yet.
+  if (newtab_button_) {
+    if (SizeTabButtonToTopOfTabStrip()) {
+      newtab_button_bounds_.set_height(
+          kNewTabButtonHeight + kNewTabButtonVOffset);
+      newtab_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
+                                        views::ImageButton::ALIGN_BOTTOM);
+    } else {
+      newtab_button_bounds_.set_height(kNewTabButtonHeight);
+      newtab_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
+                                        views::ImageButton::ALIGN_TOP);
+    }
+    newtab_button_->SetBoundsRect(newtab_button_bounds_);
+  }
 }
 
 void TabStrip::LayoutDraggedTabsAt(const std::vector<BaseTab*>& tabs,
@@ -533,18 +557,22 @@ void TabStrip::ButtonPressed(views::Button* sender, const views::Event& event) {
 // TabStrip, private:
 
 void TabStrip::Init() {
-  SetID(VIEW_ID_TAB_STRIP);
+  set_id(VIEW_ID_TAB_STRIP);
   newtab_button_bounds_.SetRect(0, 0, kNewTabButtonWidth, kNewTabButtonHeight);
-  if (browser_defaults::kSizeTabButtonToTopOfTabStrip) {
-    newtab_button_bounds_.set_height(
-        kNewTabButtonHeight + kNewTabButtonVOffset);
-  }
   if (drop_indicator_width == 0) {
     // Direction doesn't matter, both images are the same size.
     SkBitmap* drop_image = GetDropArrowImage(true);
     drop_indicator_width = drop_image->width();
     drop_indicator_height = drop_image->height();
   }
+}
+
+void TabStrip::InitTabStripButtons() {
+  newtab_button_ = new NewTabButton(this, this);
+  LoadNewTabButtonImage();
+  newtab_button_->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
+  AddChildView(newtab_button_);
 }
 
 void TabStrip::LoadNewTabButtonImage() {
@@ -715,7 +743,7 @@ void TabStrip::RemoveMessageLoopObserver() {
 gfx::Rect TabStrip::GetDropBounds(int drop_index,
                                   bool drop_before,
                                   bool* is_beneath) {
-  DCHECK(drop_index != -1);
+  DCHECK_NE(drop_index, -1);
   int center_x;
   if (drop_index < tab_count()) {
     Tab* tab = GetTabAtTabDataIndex(drop_index);
@@ -911,8 +939,7 @@ void TabStrip::GenerateIdealBounds() {
 
   // Update bounds of new tab button.
   int new_tab_x;
-  int new_tab_y = browser_defaults::kSizeTabButtonToTopOfTabStrip ?
-      0 : kNewTabButtonVOffset;
+  int new_tab_y = SizeTabButtonToTopOfTabStrip() ? 0 : kNewTabButtonVOffset;
   if (abs(Round(unselected) - Tab::GetStandardSize().width()) > 1 &&
       !in_tab_close_) {
     // We're shrinking tabs, so we need to anchor the New Tab button to the
@@ -948,8 +975,12 @@ void TabStrip::StartMouseInitiatedRemoveTabAnimation(int model_index) {
   DCHECK(tab_data_index != tab_count());
   BaseTab* tab_closing = base_tab_at_tab_index(tab_data_index);
   int delta = tab_closing->width() + kTabHOffset;
-  if (tab_closing->data().mini && model_index + 1 < GetModelCount() &&
-      !GetBaseTabAtModelIndex(model_index + 1)->data().mini) {
+  // If the tab being closed is a mini-tab next to a non-mini-tab, be sure to
+  // add the extra padding.
+  int next_tab_data_index = ModelIndexToTabIndex(model_index + 1);
+  DCHECK_NE(next_tab_data_index, tab_count());
+  if (tab_closing->data().mini && next_tab_data_index < tab_count() &&
+      !base_tab_at_tab_index(next_tab_data_index)->data().mini) {
     delta += mini_to_non_mini_gap_;
   }
 
@@ -994,10 +1025,6 @@ int TabStrip::GetMiniTabCount() const {
       return mini_count;
   }
   return mini_count;
-}
-
-int TabStrip::GetAvailableWidthForTabs(Tab* last_tab) const {
-  return last_tab->x() + last_tab->width();
 }
 
 bool TabStrip::IsPointInTab(Tab* tab,

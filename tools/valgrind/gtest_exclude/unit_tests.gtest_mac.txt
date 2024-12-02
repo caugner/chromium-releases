@@ -26,3 +26,16 @@ BookmarkBarControllerTest.DeleteFromOffTheSideWhileItIsOpen
 # Hangs
 # See http://crbug.com/78521
 SyncBackendHostTest.InitShutdown
+
+# Crashes, see http://crbug.com/86656
+MacSandboxTest.FileAccess
+
+# http://crbug.com/87769
+BalloonControllerTest.ShowAndCloseTest
+BalloonControllerTest.SizesTest
+
+# http://crbug.com/87839
+LinkInfoBarControllerTest.ShowAndClickLink
+
+# htt://crbug.com/89030
+ConnectionTesterTest.DeleteWhileInProgress

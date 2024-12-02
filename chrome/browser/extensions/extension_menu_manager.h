@@ -193,10 +193,6 @@ class ExtensionMenuItem {
 // This class keeps track of menu items added by extensions.
 class ExtensionMenuManager : public NotificationObserver {
  public:
-  // A bitmask of values from URLPattern::SchemeMasks indicating the schemes
-  // of pages where we'll show extension menu items.
-  static const int kAllowedSchemes;
-
   ExtensionMenuManager();
   virtual ~ExtensionMenuManager();
 
@@ -250,12 +246,8 @@ class ExtensionMenuManager : public NotificationObserver {
   const SkBitmap& GetIconForExtension(const std::string& extension_id);
 
   // Implements the NotificationObserver interface.
-  virtual void Observe(NotificationType type, const NotificationSource& source,
+  virtual void Observe(int type, const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // Returns true if |url| has an allowed scheme for extension context menu
-  // items. This checks against kAllowedSchemes.
-  static bool HasAllowedScheme(const GURL& url);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtensionMenuManagerTest, DeleteParent);

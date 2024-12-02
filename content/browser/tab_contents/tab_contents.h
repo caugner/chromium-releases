@@ -13,8 +13,10 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "base/string16.h"
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "content/browser/download/save_package.h"
+#include "content/browser/javascript_dialogs.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/tab_contents/constrained_window.h"
 #include "content/browser/tab_contents/navigation_controller.h"
@@ -23,11 +25,9 @@
 #include "content/browser/tab_contents/render_view_host_manager.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_registrar.h"
 #include "content/common/property_bag.h"
 #include "content/common/renderer_preferences.h"
 #include "net/base/load_states.h"
-#include "net/base/network_change_notifier.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_WIN)
@@ -38,7 +38,7 @@ namespace gfx {
 class Rect;
 }
 
-class Extension;
+class DownloadItem;
 class LoadNotificationDetails;
 class Profile;
 struct RendererPreferences;
@@ -58,11 +58,9 @@ class WebUI;
 // Describes what goes in the main content area of a tab. TabContents is
 // the only type of TabContents, and these should be merged together.
 class TabContents : public PageNavigator,
-                    public NotificationObserver,
                     public RenderViewHostDelegate,
                     public RenderViewHostManager::Delegate,
-                    public JavaScriptAppModalDialogDelegate,
-                    public net::NetworkChangeNotifier::OnlineStateObserver {
+                    public content::JavaScriptDialogDelegate {
  public:
   // Flags passed to the TabContentsDelegate.NavigationStateChanged to tell it
   // what has changed. Combine them to update more than one thing.
@@ -72,9 +70,7 @@ class TabContents : public PageNavigator,
                                           // state changed.
     INVALIDATE_LOAD            = 1 << 2,  // The loading state has changed.
     INVALIDATE_PAGE_ACTIONS    = 1 << 3,  // Page action icons have changed.
-    INVALIDATE_BOOKMARK_BAR    = 1 << 4,  // State of ShouldShowBookmarkBar
-                                          // changed.
-    INVALIDATE_TITLE           = 1 << 5,  // The title changed.
+    INVALIDATE_TITLE           = 1 << 4,  // The title changed.
   };
 
   // |base_tab_contents| is used if we want to size the new tab contents view
@@ -110,14 +106,18 @@ class TabContents : public PageNavigator,
   // NavigationController).
   Profile* profile() const { return controller_.profile(); }
 
-  // Returns true if contains content rendered by an extension.
-  bool HostsExtension() const;
+  // Returns the SavePackage which manages the page saving job. May be NULL.
+  SavePackage* save_package() const { return save_package_.get(); }
 
   // Return the currently active RenderProcessHost and RenderViewHost. Each of
   // these may change over time.
   RenderProcessHost* GetRenderProcessHost() const;
   RenderViewHost* render_view_host() const {
     return render_manager_.current_host();
+  }
+
+  WebUI* committed_web_ui() const {
+    return render_manager_.web_ui();
   }
 
   WebUI* web_ui() const {
@@ -158,14 +158,19 @@ class TabContents : public PageNavigator,
   // access to its site instance.
   virtual SiteInstance* GetSiteInstance() const;
 
+  // Returns the SiteInstance for the pending navigation, if any.  Otherwise
+  // returns the current SiteInstance.
+  SiteInstance* GetPendingSiteInstance() const;
+
   // Defines whether this tab's URL should be displayed in the browser's URL
   // bar. Normally this is true so you can see the URL. This is set to false
   // for the new tab page and related pages so that the URL bar is empty and
   // the user is invited to type into it.
   virtual bool ShouldDisplayURL();
 
-  // Return whether this tab contents is loading a resource.
-  bool is_loading() const { return is_loading_; }
+  // Return whether this tab contents is loading a resource, or whether its
+  // web_ui is.
+  bool IsLoading() const;
 
   // Returns whether this tab contents is waiting for a first-response for the
   // main resource of the page. This controls whether the throbber state is
@@ -225,13 +230,6 @@ class TabContents : public PageNavigator,
   // NOTE: If you override this, call the superclass version too!
   virtual void WasHidden();
 
-  // Activates this contents within its containing window, bringing that window
-  // to the foreground if necessary.
-  void Activate();
-
-  // Deactivates this contents by deactivating its containing window.
-  void Deactivate();
-
   // TODO(brettw) document these.
   virtual void ShowContents();
   virtual void HideContents();
@@ -255,9 +253,10 @@ class TabContents : public PageNavigator,
   // Commands ------------------------------------------------------------------
 
   // Implementation of PageNavigator.
-  virtual void OpenURL(const GURL& url, const GURL& referrer,
-                       WindowOpenDisposition disposition,
-                       PageTransition::Type transition);
+  virtual TabContents* OpenURL(const GURL& url,
+                               const GURL& referrer,
+                               WindowOpenDisposition disposition,
+                               PageTransition::Type transition) OVERRIDE;
 
   // Called by the NavigationController to cause the TabContents to navigate to
   // the current pending entry. The NavigationController should be called back
@@ -350,8 +349,12 @@ class TabContents : public PageNavigator,
 
   // Toolbars and such ---------------------------------------------------------
 
-  // Returns true if a Bookmark Bar should be shown for this tab.
-  virtual bool ShouldShowBookmarkBar();
+  // Notifies the delegate that a download is about to be started.
+  // This notification is fired before a local temporary file has been created.
+  bool CanDownload(int request_id);
+
+  // Notifies the delegate that a download started.
+  void OnStartDownload(DownloadItem* download);
 
   // Called when a ConstrainedWindow we own is about to be closed.
   void WillClose(ConstrainedWindow* window);
@@ -384,11 +387,18 @@ class TabContents : public PageNavigator,
 
   // Misc state & callbacks ----------------------------------------------------
 
-  // Set whether the contents should block javascript message boxes or not.
-  // Default is not to block any message boxes.
-  void set_suppress_javascript_messages(bool suppress_javascript_messages) {
-    suppress_javascript_messages_ = suppress_javascript_messages;
-  }
+  // Prepare for saving the current web page to disk.
+  void OnSavePage();
+
+  // Save page with the main HTML file path, the directory for saving resources,
+  // and the save type: HTML only or complete web page. Returns true if the
+  // saving process has been initiated successfully.
+  bool SavePage(const FilePath& main_file, const FilePath& dir_path,
+                SavePackage::SavePackageType save_type);
+
+  // Prepare for saving the URL to disk.
+  // URL may refer to the iframe on the page.
+  void OnSaveURL(const GURL& url);
 
   // Returns true if the active NavigationEntry's page_id equals page_id.
   bool IsActiveEntry(int32 page_id);
@@ -446,24 +456,12 @@ class TabContents : public PageNavigator,
   }
   bool closed_by_user_gesture() const { return closed_by_user_gesture_; }
 
-  // Overridden from JavaScriptAppModalDialogDelegate:
-  virtual void OnMessageBoxClosed(IPC::Message* reply_msg,
-                                  bool success,
-                                  const std::wstring& user_input);
-  virtual void SetSuppressMessageBoxes(bool suppress_message_boxes);
-  virtual gfx::NativeWindow GetMessageBoxRootWindow();
-  virtual TabContents* AsTabContents();
-  virtual ExtensionHost* AsExtensionHost();
-
-  // The BookmarkDragDelegate is used to forward bookmark drag and drop events
-  // to extensions.
-  virtual RenderViewHostDelegate::BookmarkDrag* GetBookmarkDragDelegate();
-
-  // It is up to callers to call SetBookmarkDragDelegate(NULL) when
-  // |bookmark_drag| is deleted since this class does not take ownership of
-  // |bookmark_drag|.
-  virtual void SetBookmarkDragDelegate(
-      RenderViewHostDelegate::BookmarkDrag* bookmark_drag);
+  // Overridden from JavaScriptDialogDelegate:
+  virtual void OnDialogClosed(IPC::Message* reply_msg,
+                              bool success,
+                              const string16& user_input) OVERRIDE;
+  virtual gfx::NativeWindow GetDialogRootWindow() OVERRIDE;
+  virtual void OnDialogShown() OVERRIDE;
 
   // Gets the zoom level for this tab.
   double GetZoomLevel() const;
@@ -493,7 +491,6 @@ class TabContents : public PageNavigator,
 
  protected:
   friend class TabContentsObserver;
-  friend class TabContentsObserver::Registrar;
 
   // Add and remove observers for page navigation notifications. Adding or
   // removing multiple times has no effect. The order in which notifications
@@ -534,9 +531,6 @@ class TabContents : public PageNavigator,
 
   // TODO(brettw) TestTabContents shouldn't exist!
   friend class TestTabContents;
-
-  // Add all the TabContentObservers.
-  void AddObservers();
 
   // Message handlers.
   void OnDidStartProvisionalLoadForFrame(int64 frame_id,
@@ -620,6 +614,14 @@ class TabContents : public PageNavigator,
   bool NavigateToEntry(const NavigationEntry& entry,
                        NavigationController::ReloadType reload_type);
 
+  // Sets the history for this tab_contents to |history_length| entries, and
+  // moves the current page_id to the last entry in the list if it's valid.
+  // This is mainly used when a prerendered page is swapped into the current
+  // tab. The method is virtual for testing.
+  virtual void SetHistoryLengthAndPrune(const SiteInstance* site_instance,
+                                        int merge_history_length,
+                                        int32 minimum_page_id);
+
   // Misc non-view stuff -------------------------------------------------------
 
   // Helper functions for sending notifications.
@@ -630,68 +632,71 @@ class TabContents : public PageNavigator,
   // RenderViewHostDelegate ----------------------------------------------------
 
   // RenderViewHostDelegate implementation.
-  virtual RenderViewHostDelegate::View* GetViewDelegate();
+  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
   virtual RenderViewHostDelegate::RendererManagement*
-      GetRendererManagementDelegate();
-  virtual TabContents* GetAsTabContents();
-  virtual ViewType::Type GetRenderViewType() const;
-  virtual int GetBrowserWindowID() const;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host);
-  virtual void RenderViewReady(RenderViewHost* render_view_host);
+      GetRendererManagementDelegate() OVERRIDE;
+  virtual TabContents* GetAsTabContents() OVERRIDE;
+  virtual ViewType::Type GetRenderViewType() const OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewReady(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* render_view_host,
                               base::TerminationStatus status,
-                              int error_code);
-  virtual void RenderViewDeleted(RenderViewHost* render_view_host);
-  virtual void DidNavigate(RenderViewHost* render_view_host,
-                           const ViewHostMsg_FrameNavigate_Params& params);
+                              int error_code) OVERRIDE;
+  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidNavigate(
+      RenderViewHost* render_view_host,
+      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
   virtual void UpdateState(RenderViewHost* render_view_host,
                            int32 page_id,
-                           const std::string& state);
+                           const std::string& state) OVERRIDE;
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id,
-                           const std::wstring& title);
+                           const std::wstring& title) OVERRIDE;
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
-                              const std::string& encoding);
-  virtual void UpdateTargetURL(int32 page_id, const GURL& url);
-  virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value);
-  virtual void ClearInspectorSettings();
-  virtual void Close(RenderViewHost* render_view_host);
-  virtual void RequestMove(const gfx::Rect& new_bounds);
-  virtual void DidStartLoading();
-  virtual void DidStopLoading();
-  virtual void DidCancelLoading();
-  virtual void DidChangeLoadProgress(double progress);
+                              const std::string& encoding) OVERRIDE;
+  virtual void UpdateTargetURL(int32 page_id, const GURL& url) OVERRIDE;
+  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RequestMove(const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void DidStartLoading() OVERRIDE;
+  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidCancelLoading() OVERRIDE;
+  virtual void DidChangeLoadProgress(double progress) OVERRIDE;
   virtual void DocumentOnLoadCompletedInMainFrame(
       RenderViewHost* render_view_host,
-      int32 page_id);
+      int32 page_id) OVERRIDE;
   virtual void RequestOpenURL(const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition);
+                              WindowOpenDisposition disposition) OVERRIDE;
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
                                     const string16& message,
                                     const string16& default_prompt,
                                     const GURL& frame_url,
                                     const int flags,
                                     IPC::Message* reply_msg,
-                                    bool* did_suppress_message);
+                                    bool* did_suppress_message) OVERRIDE;
   virtual void RunBeforeUnloadConfirm(const RenderViewHost* rvh,
                                       const string16& message,
-                                      IPC::Message* reply_msg);
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
-  virtual WebPreferences GetWebkitPrefs();
-  virtual void OnUserGesture();
-  virtual void OnIgnoredUIEvent();
-  virtual void OnCrossSiteResponse(int new_render_process_host_id,
-                                   int new_request_id);
+                                      IPC::Message* reply_msg) OVERRIDE;
+  virtual RendererPreferences GetRendererPrefs(Profile* profile) const OVERRIDE;
+  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
+  virtual void OnUserGesture() OVERRIDE;
+  virtual void OnIgnoredUIEvent() OVERRIDE;
   virtual void RendererUnresponsive(RenderViewHost* render_view_host,
-                                    bool is_during_unload);
-  virtual void RendererResponsive(RenderViewHost* render_view_host);
-  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state,
-                                uint64 upload_position, uint64 upload_size);
-  virtual bool IsExternalTabContainer() const;
-  virtual void WorkerCrashed();
-  virtual void RequestDesktopNotificationPermission(const GURL& source_origin,
-                                                    int callback_context);
+                                    bool is_during_unload) OVERRIDE;
+  virtual void RendererResponsive(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void LoadStateChanged(const GURL& url,
+                                net::LoadState load_state,
+                                uint64 upload_position,
+                                uint64 upload_size) OVERRIDE;
+  virtual void WorkerCrashed() OVERRIDE;
+  virtual void Activate() OVERRIDE;
+  virtual void Deactivate() OVERRIDE;
+  virtual void LostCapture() OVERRIDE;
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void HandleMouseUp() OVERRIDE;
+  virtual void HandleMouseActivate() OVERRIDE;
 
   // RenderViewHostManager::Delegate -------------------------------------------
 
@@ -722,18 +727,13 @@ class TabContents : public PageNavigator,
   virtual bool CreateRenderViewForRenderManager(
       RenderViewHost* render_view_host);
 
-  // NotificationObserver ------------------------------------------------------
-
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
-  // NetworkChangeNotifier::OnlineStateObserver:
-  virtual void OnOnlineStateChanged(bool online);
-
   // Adds the given window to the list of child windows. The window will notify
   // via WillClose() when it is being destroyed.
   void AddConstrainedDialog(ConstrainedWindow* window);
+
+  // Stores random bits of data for others to associate with this object.
+  // WARNING: this needs to be deleted after NavigationController.
+  PropertyBag property_bag_;
 
   // Data for core operation ---------------------------------------------------
 
@@ -751,14 +751,8 @@ class TabContents : public PageNavigator,
   // Manages creation and swapping of render views.
   RenderViewHostManager render_manager_;
 
-  // Stores random bits of data for others to associate with this object.
-  PropertyBag property_bag_;
-
-  // Registers and unregisters us for notifications.
-  NotificationRegistrar registrar_;
-
-  // Handles drag and drop event forwarding to extensions.
-  BookmarkDrag* bookmark_drag_;
+  // SavePackage, lazily created.
+  scoped_refptr<SavePackage> save_package_;
 
   // Data for loading state ----------------------------------------------------
 
@@ -824,13 +818,6 @@ class TabContents : public PageNavigator,
   // they should pump messages then.
   base::win::ScopedHandle message_box_active_;
 #endif
-
-  // The time that the last javascript message was dismissed.
-  base::TimeTicks last_javascript_message_dismissal_;
-
-  // True if the user has decided to block future javascript messages. This is
-  // reset on navigations to false on navigations.
-  bool suppress_javascript_messages_;
 
   // Set to true when there is an active "before unload" dialog.  When true,
   // we've forced the throbber to start in Navigate, and we need to remember to

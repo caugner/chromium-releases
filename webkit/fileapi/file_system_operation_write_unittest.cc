@@ -29,6 +29,7 @@
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/local_file_system_file_util.h"
+#include "webkit/fileapi/quota_file_util.h"
 #include "webkit/quota/quota_manager.h"
 
 using quota::QuotaManager;
@@ -66,7 +67,9 @@ class MockQuotaManager : public QuotaManager {
 class FileSystemOperationWriteTest : public testing::Test {
  public:
   FileSystemOperationWriteTest()
-      : loop_(MessageLoop::TYPE_IO),
+      : local_file_util_(
+            new LocalFileSystemFileUtil(QuotaFileUtil::GetInstance())),
+        loop_(MessageLoop::TYPE_IO),
         status_(base::PLATFORM_FILE_OK),
         bytes_written_(0),
         complete_(false) {}
@@ -97,6 +100,7 @@ class FileSystemOperationWriteTest : public testing::Test {
     return test_helper_.GetURLForPath(path);
   }
 
+  scoped_ptr<LocalFileSystemFileUtil> local_file_util_;
   scoped_refptr<MockQuotaManager> quota_manager_;
   FileSystemTestOriginHelper test_helper_;
 
@@ -119,18 +123,23 @@ namespace {
 
 class TestURLRequestContext : public net::URLRequestContext {
  public:
-  webkit_blob::BlobStorageController* blob_storage_controller() {
-    return &blob_storage_controller_;
+  TestURLRequestContext()
+      : blob_storage_controller_(new webkit_blob::BlobStorageController) {}
+
+  virtual ~TestURLRequestContext() {}
+
+  webkit_blob::BlobStorageController* blob_storage_controller() const {
+    return blob_storage_controller_.get();
   }
 
  private:
-  webkit_blob::BlobStorageController blob_storage_controller_;
+  scoped_ptr<webkit_blob::BlobStorageController> blob_storage_controller_;
 };
 
 static net::URLRequestJob* BlobURLRequestJobFactory(net::URLRequest* request,
                                                     const std::string& scheme) {
   webkit_blob::BlobStorageController* blob_storage_controller =
-      static_cast<TestURLRequestContext*>(request->context())->
+      static_cast<const TestURLRequestContext*>(request->context())->
           blob_storage_controller();
   return new webkit_blob::BlobURLRequestJob(
       request,
@@ -188,17 +197,18 @@ void FileSystemOperationWriteTest::SetUp() {
                      false /* incognito */,
                      false /* unlimited quota */,
                      quota_manager_->proxy(),
-                     LocalFileSystemFileUtil::GetInstance());
+                     local_file_util_.get());
   filesystem_dir_ = test_helper_.GetOriginRootPath();
 
   ASSERT_TRUE(file_util::CreateTemporaryFileInDir(filesystem_dir_, &file_));
   virtual_path_ = file_.BaseName();
 
-  net::URLRequest::RegisterProtocolFactory("blob", &BlobURLRequestJobFactory);
+  net::URLRequest::Deprecated::RegisterProtocolFactory(
+      "blob", &BlobURLRequestJobFactory);
 }
 
 void FileSystemOperationWriteTest::TearDown() {
-  net::URLRequest::RegisterProtocolFactory("blob", NULL);
+  net::URLRequest::Deprecated::RegisterProtocolFactory("blob", NULL);
   quota_manager_ = NULL;
   test_helper_.TearDown();
 }

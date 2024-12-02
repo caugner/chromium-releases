@@ -7,7 +7,7 @@
 #include <vssym32.h>
 
 #include "base/logging.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/win/hwnd_util.h"
@@ -57,7 +57,7 @@ class TabLayout : public LayoutManager {
   // Switches to the tab page identified by the given index.
   void SwitchToPage(View* host, View* page) {
     for (int i = 0; i < host->child_count(); ++i) {
-      View* child = host->GetChildViewAt(i);
+      View* child = host->child_at(i);
       // The child might not have been laid out yet.
       if (child == page)
         child->SetBoundsRect(host->GetContentsBounds());
@@ -77,7 +77,7 @@ class TabLayout : public LayoutManager {
   virtual void Layout(View* host) {
     gfx::Rect bounds(host->GetContentsBounds());
     for (int i = 0; i < host->child_count(); ++i) {
-      View* child = host->GetChildViewAt(i);
+      View* child = host->child_at(i);
       // We only layout visible children, since it may be expensive.
       if (child->IsVisible() && child->bounds() != bounds)
         child->SetBoundsRect(bounds);
@@ -88,7 +88,7 @@ class TabLayout : public LayoutManager {
     // First, query the preferred sizes to determine a good width.
     int width = 0;
     for (int i = 0; i < host->child_count(); ++i) {
-      View* page = host->GetChildViewAt(i);
+      View* page = host->child_at(i);
       width = std::max(width, page->GetPreferredSize().width());
     }
     // After we know the width, decide on the height.
@@ -98,7 +98,7 @@ class TabLayout : public LayoutManager {
   virtual int GetPreferredHeightForWidth(View* host, int width) {
     int height = 0;
     for (int i = 0; i < host->child_count(); ++i) {
-      View* page = host->GetChildViewAt(i);
+      View* page = host->child_at(i);
       height = std::max(height, page->GetHeightForWidth(width));
     }
     return height;
@@ -364,10 +364,6 @@ void NativeTabbedPaneWin::ViewHierarchyChanged(bool is_add,
   }
 }
 
-Widget* NativeTabbedPaneWin::GetChildWidget() {
-  return content_window_;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabbedPaneWin, private:
 
@@ -385,7 +381,7 @@ void NativeTabbedPaneWin::DoSelectTabAt(int index, boolean invoke_listener) {
   selected_index_ = index;
   if (content_window_) {
     View* content_root = content_window_->GetRootView();
-    tab_layout_manager_->SwitchToPage(content_root, tab_views_.at(index));
+    tab_layout_manager_->SwitchToPage(content_root, tab_views_[index]);
   }
   if (invoke_listener && tabbed_pane_->listener())
     tabbed_pane_->listener()->TabSelectedAt(index);

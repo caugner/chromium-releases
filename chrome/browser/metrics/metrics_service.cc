@@ -174,12 +174,14 @@
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_reporting_scheduler.h"
+#include "chrome/browser/net/network_stats.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/child_process_logging.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/guid.h"
 #include "chrome/common/pref_names.h"
@@ -199,7 +201,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/external_metrics.h"
-#include "chrome/browser/chromeos/system_access.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #endif
 
 namespace {
@@ -342,7 +344,7 @@ class MetricsService::InitTask : public Task {
     webkit::npapi::PluginList::Singleton()->GetPlugins(false, &plugins);
     std::string hardware_class;  // Empty string by default.
 #if defined(OS_CHROMEOS)
-    chromeos::SystemAccess::GetInstance()->GetMachineStatistic(
+    chromeos::system::StatisticsProvider::GetInstance()->GetMachineStatistic(
         "hardware_class", &hardware_class);
 #endif  // OS_CHROMEOS
     callback_loop_->PostTask(FROM_HERE, new InitTaskComplete(
@@ -438,6 +440,7 @@ MetricsService::MetricsService()
       reporting_active_(false),
       state_(INITIALIZED),
       current_fetch_(NULL),
+      io_thread_(NULL),
       idle_since_last_transmission_(false),
       next_window_id_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(log_sender_factory_(this)),
@@ -531,39 +534,39 @@ bool MetricsService::reporting_active() const {
 // static
 void MetricsService::SetUpNotifications(NotificationRegistrar* registrar,
                                         NotificationObserver* observer) {
-    registrar->Add(observer, NotificationType::BROWSER_OPENED,
+    registrar->Add(observer, chrome::NOTIFICATION_BROWSER_OPENED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::BROWSER_CLOSED,
+    registrar->Add(observer, chrome::NOTIFICATION_BROWSER_CLOSED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::USER_ACTION,
+    registrar->Add(observer, content::NOTIFICATION_USER_ACTION,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::TAB_PARENTED,
+    registrar->Add(observer, content::NOTIFICATION_TAB_PARENTED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::TAB_CLOSING,
+    registrar->Add(observer, content::NOTIFICATION_TAB_CLOSING,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::LOAD_START,
+    registrar->Add(observer, content::NOTIFICATION_LOAD_START,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::LOAD_STOP,
+    registrar->Add(observer, content::NOTIFICATION_LOAD_STOP,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::RENDERER_PROCESS_CLOSED,
+    registrar->Add(observer, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::RENDERER_PROCESS_HANG,
+    registrar->Add(observer, content::NOTIFICATION_RENDERER_PROCESS_HANG,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::CHILD_PROCESS_HOST_CONNECTED,
+    registrar->Add(observer, content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::CHILD_INSTANCE_CREATED,
+    registrar->Add(observer, content::NOTIFICATION_CHILD_INSTANCE_CREATED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::CHILD_PROCESS_CRASHED,
+    registrar->Add(observer, content::NOTIFICATION_CHILD_PROCESS_CRASHED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::TEMPLATE_URL_MODEL_LOADED,
+    registrar->Add(observer, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::OMNIBOX_OPENED_URL,
+    registrar->Add(observer, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
                    NotificationService::AllSources());
-    registrar->Add(observer, NotificationType::BOOKMARK_MODEL_LOADED,
+    registrar->Add(observer, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
                    NotificationService::AllSources());
 }
 
-void MetricsService::Observe(NotificationType type,
+void MetricsService::Observe(int type,
                              const NotificationSource& source,
                              const NotificationDetails& details) {
   DCHECK(current_log_);
@@ -572,30 +575,30 @@ void MetricsService::Observe(NotificationType type,
   if (!CanLogNotification(type, source, details))
     return;
 
-  switch (type.value) {
-    case NotificationType::USER_ACTION:
+  switch (type) {
+    case content::NOTIFICATION_USER_ACTION:
         current_log_->RecordUserAction(*Details<const char*>(details).ptr());
       break;
 
-    case NotificationType::BROWSER_OPENED:
-    case NotificationType::BROWSER_CLOSED:
+    case chrome::NOTIFICATION_BROWSER_OPENED:
+    case chrome::NOTIFICATION_BROWSER_CLOSED:
       LogWindowChange(type, source, details);
       break;
 
-    case NotificationType::TAB_PARENTED:
-    case NotificationType::TAB_CLOSING:
+    case content::NOTIFICATION_TAB_PARENTED:
+    case content::NOTIFICATION_TAB_CLOSING:
       LogWindowChange(type, source, details);
       break;
 
-    case NotificationType::LOAD_STOP:
+    case content::NOTIFICATION_LOAD_STOP:
       LogLoadComplete(type, source, details);
       break;
 
-    case NotificationType::LOAD_START:
+    case content::NOTIFICATION_LOAD_START:
       LogLoadStarted();
       break;
 
-    case NotificationType::RENDERER_PROCESS_CLOSED: {
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
         RenderProcessHost::RendererClosedDetails* process_details =
             Details<RenderProcessHost::RendererClosedDetails>(details).ptr();
         if (process_details->status ==
@@ -611,21 +614,21 @@ void MetricsService::Observe(NotificationType type,
       }
       break;
 
-    case NotificationType::RENDERER_PROCESS_HANG:
+    case content::NOTIFICATION_RENDERER_PROCESS_HANG:
       LogRendererHang();
       break;
 
-    case NotificationType::CHILD_PROCESS_HOST_CONNECTED:
-    case NotificationType::CHILD_PROCESS_CRASHED:
-    case NotificationType::CHILD_INSTANCE_CREATED:
+    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
+    case content::NOTIFICATION_CHILD_PROCESS_CRASHED:
+    case content::NOTIFICATION_CHILD_INSTANCE_CREATED:
       LogChildProcessChange(type, source, details);
       break;
 
-    case NotificationType::TEMPLATE_URL_MODEL_LOADED:
-      LogKeywords(Source<TemplateURLModel>(source).ptr());
+    case chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED:
+      LogKeywords(Source<TemplateURLService>(source).ptr());
       break;
 
-    case NotificationType::OMNIBOX_OPENED_URL: {
+    case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
       MetricsLog* current_log = current_log_->AsMetricsLog();
       DCHECK(current_log);
       current_log->RecordOmniboxOpenedURL(
@@ -633,7 +636,7 @@ void MetricsService::Observe(NotificationType type,
       break;
     }
 
-    case NotificationType::BOOKMARK_MODEL_LOADED: {
+    case chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED: {
       Profile* p = Source<Profile>(source).ptr();
       if (p)
         LogBookmarks(p->GetBookmarkModel());
@@ -694,9 +697,12 @@ void MetricsService::RecordBreakpadHasDebugger(bool has_debugger) {
 void MetricsService::InitializeMetricsState() {
 #if defined(OS_POSIX)
   server_url_ = L"https://clients4.google.com/firefox/metrics/collect";
+  // TODO(rtenneti): Return the network stats server name.
+  network_stats_server_ = "";
 #else
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   server_url_ = dist->GetStatsServerURL();
+  network_stats_server_ = dist->GetNetworkStatsServer();
 #endif
 
   PrefService* pref = g_browser_process->local_state();
@@ -776,10 +782,10 @@ void MetricsService::InitializeMetricsState() {
     UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineAppModeCount", 1);
   }
 
-  UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineFlagCount",
-                           command_line->GetSwitchCount());
+  size_t switch_count = command_line->GetSwitches().size();
+  UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineFlagCount", switch_count);
   UMA_HISTOGRAM_COUNTS_100("Chrome.CommandLineUncommonFlagCount",
-                           command_line->GetSwitchCount() - common_commands);
+                           switch_count - common_commands);
 
   // Kick off the process of saving the state (so the uptime numbers keep
   // getting updated) every n minutes.
@@ -792,6 +798,7 @@ void MetricsService::OnInitTaskComplete(
   DCHECK(state_ == INIT_TASK_SCHEDULED);
   hardware_class_ = hardware_class;
   plugins_ = plugins;
+  io_thread_ = g_browser_process->io_thread();
   if (state_ == INIT_TASK_SCHEDULED)
     state_ = INIT_TASK_DONE;
 }
@@ -1048,6 +1055,7 @@ void MetricsService::MakePendingLog() {
     case SEND_OLD_INITIAL_LOGS:
       if (!unsent_initial_logs_.empty()) {
         compressed_log_ = unsent_initial_logs_.back();
+        unsent_initial_logs_.pop_back();
         break;
       }
       state_ = SENDING_OLD_LOGS;
@@ -1056,6 +1064,7 @@ void MetricsService::MakePendingLog() {
     case SENDING_OLD_LOGS:
       if (!unsent_ongoing_logs_.empty()) {
         compressed_log_ = unsent_ongoing_logs_.back();
+        unsent_ongoing_logs_.pop_back();
         break;
       }
       state_ = SENDING_CURRENT_LOGS;
@@ -1113,8 +1122,8 @@ MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
       list.GetSize() - kChecksumEntryCount)
     return MakeRecallStatusHistogram(LIST_SIZE_CORRUPTION);
 
-  MD5Context ctx;
-  MD5Init(&ctx);
+  base::MD5Context ctx;
+  base::MD5Init(&ctx);
   std::string encoded_log;
   std::string decoded_log;
   for (ListValue::const_iterator it = list.begin() + 1;
@@ -1125,7 +1134,7 @@ MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
       return MakeRecallStatusHistogram(LOG_STRING_CORRUPTION);
     }
 
-    MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+    base::MD5Update(&ctx, encoded_log.data(), encoded_log.length());
 
     if (!base::Base64Decode(encoded_log, &decoded_log)) {
       local_list->clear();
@@ -1135,8 +1144,8 @@ MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
   }
 
   // Verify checksum.
-  MD5Digest digest;
-  MD5Final(&digest, &ctx);
+  base::MD5Digest digest;
+  base::MD5Final(&digest, &ctx);
   std::string recovered_md5;
   // We store the hash at the end of the list.
   valid = (*(list.end() - 1))->GetAsString(&recovered_md5);
@@ -1144,7 +1153,7 @@ MetricsService::LogRecallStatus MetricsService::RecallUnsentLogsHelper(
     local_list->clear();
     return MakeRecallStatusHistogram(CHECKSUM_STRING_CORRUPTION);
   }
-  if (recovered_md5 != MD5DigestToBase16(digest)) {
+  if (recovered_md5 != base::MD5DigestToBase16(digest)) {
     local_list->clear();
     return MakeRecallStatusHistogram(CHECKSUM_CORRUPTION);
   }
@@ -1179,8 +1188,8 @@ void MetricsService::StoreUnsentLogsHelper(
   // Store size at the beginning of the list.
   list->Append(Value::CreateIntegerValue(local_list.size() - start));
 
-  MD5Context ctx;
-  MD5Init(&ctx);
+  base::MD5Context ctx;
+  base::MD5Init(&ctx);
   std::string encoded_log;
   for (std::vector<std::string>::const_iterator it = local_list.begin() + start;
        it != local_list.end(); ++it) {
@@ -1191,14 +1200,14 @@ void MetricsService::StoreUnsentLogsHelper(
       list->Clear();
       return;
     }
-    MD5Update(&ctx, encoded_log.data(), encoded_log.length());
+    base::MD5Update(&ctx, encoded_log.data(), encoded_log.length());
     list->Append(Value::CreateStringValue(encoded_log));
   }
 
   // Append hash to the end of the list.
-  MD5Digest digest;
-  MD5Final(&digest, &ctx);
-  list->Append(Value::CreateStringValue(MD5DigestToBase16(digest)));
+  base::MD5Digest digest;
+  base::MD5Final(&digest, &ctx);
+  list->Append(Value::CreateStringValue(base::MD5DigestToBase16(digest)));
   DCHECK(list->GetSize() >= 3);  // Minimum of 3 elements (size, data, hash).
   MakeStoreStatusHistogram(STORE_SUCCESS);
 }
@@ -1259,7 +1268,8 @@ void MetricsService::PrepareFetchWithPendingLog() {
   current_fetch_.reset(new URLFetcher(GURL(WideToUTF16(server_url_)),
                                       URLFetcher::POST,
                                       this));
-  current_fetch_->set_request_context(Profile::GetDefaultRequestContext());
+  current_fetch_->set_request_context(
+      g_browser_process->system_request_context());
   current_fetch_->set_upload_data(kMetricsType, compressed_log_);
 }
 
@@ -1330,14 +1340,8 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
         break;
 
       case SEND_OLD_INITIAL_LOGS:
-        DCHECK(!unsent_initial_logs_.empty());
-        unsent_initial_logs_.pop_back();
-        StoreUnsentLogs();
-        break;
-
       case SENDING_OLD_LOGS:
-        DCHECK(!unsent_ongoing_logs_.empty());
-        unsent_ongoing_logs_.pop_back();
+        // Store the updated list to disk now that the removed log is uploaded.
         StoreUnsentLogs();
         break;
 
@@ -1365,6 +1369,10 @@ void MetricsService::OnURLFetchComplete(const URLFetcher* source,
   bool server_is_healthy = upload_succeeded || response_code == 400;
 
   scheduler_->UploadFinished(server_is_healthy, unsent_logs());
+
+  // Collect network stats if UMA upload succeeded.
+  if (server_is_healthy && io_thread_)
+    chrome_browser_net::CollectNetworkStats(network_stats_server_, io_thread_);
 }
 
 void MetricsService::LogBadResponseCode() {
@@ -1378,7 +1386,7 @@ void MetricsService::LogBadResponseCode() {
   }
 }
 
-void MetricsService::LogWindowChange(NotificationType type,
+void MetricsService::LogWindowChange(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
   int controller_id = -1;
@@ -1396,14 +1404,14 @@ void MetricsService::LogWindowChange(NotificationType type,
   }
   DCHECK_NE(controller_id, -1);
 
-  switch (type.value) {
-    case NotificationType::TAB_PARENTED:
-    case NotificationType::BROWSER_OPENED:
+  switch (type) {
+    case content::NOTIFICATION_TAB_PARENTED:
+    case chrome::NOTIFICATION_BROWSER_OPENED:
       window_type = MetricsLog::WINDOW_CREATE;
       break;
 
-    case NotificationType::TAB_CLOSING:
-    case NotificationType::BROWSER_CLOSED:
+    case content::NOTIFICATION_TAB_CLOSING:
+    case chrome::NOTIFICATION_BROWSER_CLOSED:
       window_map_.erase(window_map_.find(window_or_tab));
       window_type = MetricsLog::WINDOW_DESTROY;
       break;
@@ -1417,7 +1425,7 @@ void MetricsService::LogWindowChange(NotificationType type,
   current_log_->RecordWindowEvent(window_type, controller_id, 0);
 }
 
-void MetricsService::LogLoadComplete(NotificationType type,
+void MetricsService::LogLoadComplete(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
   if (details == NotificationService::NoDetails())
@@ -1491,7 +1499,7 @@ void MetricsService::LogChromeOSCrash(const std::string &crash_type) {
 #endif  // OS_CHROMEOS
 
 void MetricsService::LogChildProcessChange(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   Details<ChildProcessInfo> child_details(details);
@@ -1504,16 +1512,16 @@ void MetricsService::LogChildProcessChange(
   }
 
   ChildProcessStats& stats = child_process_stats_buffer_[child_name];
-  switch (type.value) {
-    case NotificationType::CHILD_PROCESS_HOST_CONNECTED:
+  switch (type) {
+    case content::NOTIFICATION_CHILD_PROCESS_HOST_CONNECTED:
       stats.process_launches++;
       break;
 
-    case NotificationType::CHILD_INSTANCE_CREATED:
+    case content::NOTIFICATION_CHILD_INSTANCE_CREATED:
       stats.instances++;
       break;
 
-    case NotificationType::CHILD_PROCESS_CRASHED:
+    case content::NOTIFICATION_CHILD_PROCESS_CRASHED:
       stats.process_crashes++;
       // Exclude plugin crashes from the count below because we report them via
       // a separate UMA metric.
@@ -1523,7 +1531,7 @@ void MetricsService::LogChildProcessChange(
       break;
 
     default:
-      NOTREACHED() << "Unexpected notification type " << type.value;
+      NOTREACHED() << "Unexpected notification type " << type;
       return;
   }
 }
@@ -1532,7 +1540,7 @@ void MetricsService::LogChildProcessChange(
 static void CountBookmarks(const BookmarkNode* node,
                            int* bookmarks,
                            int* folders) {
-  if (node->type() == BookmarkNode::URL)
+  if (node->is_url())
     (*bookmarks)++;
   else
     (*folders)++;
@@ -1557,7 +1565,7 @@ void MetricsService::LogBookmarks(const BookmarkNode* node,
 
 void MetricsService::LogBookmarks(BookmarkModel* model) {
   DCHECK(model);
-  LogBookmarks(model->GetBookmarkBarNode(),
+  LogBookmarks(model->bookmark_bar_node(),
                prefs::kNumBookmarksOnBookmarkBar,
                prefs::kNumFoldersOnBookmarkBar);
   LogBookmarks(model->other_node(),
@@ -1566,7 +1574,7 @@ void MetricsService::LogBookmarks(BookmarkModel* model) {
   ScheduleNextStateSave();
 }
 
-void MetricsService::LogKeywords(const TemplateURLModel* url_model) {
+void MetricsService::LogKeywords(const TemplateURLService* url_model) {
   DCHECK(url_model);
 
   PrefService* pref = g_browser_process->local_state();
@@ -1653,7 +1661,7 @@ void MetricsService::RecordPluginChanges(PrefService* pref) {
   child_process_stats_buffer_.clear();
 }
 
-bool MetricsService::CanLogNotification(NotificationType type,
+bool MetricsService::CanLogNotification(int type,
                                         const NotificationSource& source,
                                         const NotificationDetails& details) {
   // We simply don't log anything to UMA if there is a single incognito

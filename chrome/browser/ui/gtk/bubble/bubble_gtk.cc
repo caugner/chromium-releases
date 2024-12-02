@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/gtk/bubble/bubble_accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "ui/base/gtk/gtk_windowing.h"
 #include "ui/gfx/gtk_util.h"
@@ -59,7 +60,7 @@ BubbleGtk* BubbleGtk::Show(GtkWidget* anchor_widget,
 }
 
 BubbleGtk::BubbleGtk(GtkThemeService* provider,
-                    bool match_system_theme)
+                     bool match_system_theme)
     : delegate_(NULL),
       window_(NULL),
       theme_service_(provider),
@@ -112,15 +113,11 @@ void BubbleGtk::Init(GtkWidget* anchor_widget,
   gtk_window_set_resizable(GTK_WINDOW(window_), FALSE);
 
   // Attach all of the accelerators to the bubble.
-  BubbleAcceleratorGtkList acceleratorList =
-      BubbleAcceleratorsGtk::GetList();
-  for (BubbleAcceleratorGtkList::const_iterator iter =
-           acceleratorList.begin();
-       iter != acceleratorList.end();
-       ++iter) {
+  for (BubbleAcceleratorsGtk::const_iterator i(BubbleAcceleratorsGtk::begin());
+       i != BubbleAcceleratorsGtk::end(); ++i) {
     gtk_accel_group_connect(accel_group_,
-                            iter->keyval,
-                            iter->modifier_type,
+                            i->keyval,
+                            i->modifier_type,
                             GtkAccelFlags(0),
                             g_cclosure_new(G_CALLBACK(&OnGtkAcceleratorThunk),
                                            this,
@@ -179,8 +176,8 @@ void BubbleGtk::Init(GtkWidget* anchor_widget,
     GrabPointerAndKeyboard();
   }
 
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 }
 
@@ -343,10 +340,10 @@ void BubbleGtk::StackWindow() {
     ui::StackPopupWindow(window_, GTK_WIDGET(toplevel_window_));
 }
 
-void BubbleGtk::Observe(NotificationType type,
+void BubbleGtk::Observe(int type,
                         const NotificationSource& source,
                         const NotificationDetails& details) {
-  DCHECK_EQ(type.value, NotificationType::BROWSER_THEME_CHANGED);
+  DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   if (theme_service_->UsingNativeTheme() && match_system_theme_) {
     gtk_widget_modify_bg(window_, GTK_STATE_NORMAL, NULL);
   } else {

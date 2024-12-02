@@ -28,14 +28,15 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/window.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace chromeos {
 
@@ -51,6 +52,11 @@ const char kGetStartedURLPattern[] =
 // URL for account creation.
 const char kCreateAccountURL[] =
     "https://www.google.com/accounts/NewAccount?service=mail";
+
+// ChromeVox tutorial URL.
+const char kChromeVoxTutorialURL[] =
+    "http://google-axs-chrome.googlecode.com/"
+    "svn/trunk/chromevox_tutorial/interactive_tutorial_start.html";
 
 // Landing URL when launching Guest mode to fix captive portal.
 const char kCaptivePortalLaunchURL[] = "http://www.google.com/";
@@ -75,7 +81,7 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
   login_display_ = host_->CreateLoginDisplay(this);
 
   registrar_.Add(this,
-                 NotificationType::LOGIN_USER_IMAGE_CHANGED,
+                 chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
                  NotificationService::AllSources());
 }
 
@@ -109,10 +115,10 @@ void ExistingUserController::Init(const UserVector& users) {
 // ExistingUserController, NotificationObserver implementation:
 //
 
-void ExistingUserController::Observe(NotificationType type,
+void ExistingUserController::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
-  if (type != NotificationType::LOGIN_USER_IMAGE_CHANGED)
+  if (type != chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED)
     return;
 
   UserManager::User* user = Details<UserManager::User>(details).ptr();
@@ -150,6 +156,23 @@ string16 ExistingUserController::GetConnectedNetworkName() {
 void ExistingUserController::FixCaptivePortal() {
   guest_mode_url_ = GURL(kCaptivePortalLaunchURL);
   LoginAsGuest();
+}
+
+void ExistingUserController::CompleteLogin(const std::string& username,
+                                           const std::string& password) {
+  GaiaAuthConsumer::ClientLoginResult credentials;
+  if (!login_performer_.get()) {
+    LoginPerformer::Delegate* delegate = this;
+    if (login_performer_delegate_.get())
+      delegate = login_performer_delegate_.get();
+    // Only one instance of LoginPerformer should exist at a time.
+    login_performer_.reset(new LoginPerformer(delegate));
+  }
+
+  login_performer_->CompleteLogin(username, password);
+  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
+      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN).c_str(),
+      false, true);
 }
 
 void ExistingUserController::Login(const std::string& username,
@@ -266,7 +289,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
             new CaptchaView(failure.error().captcha().image_url, false);
         view->Init();
         view->set_delegate(this);
-        views::Window* window = browser::CreateViewsWindow(
+        views::Widget* window = browser::CreateViewsWindow(
             GetNativeWindow(), gfx::Rect(), view);
         window->SetAlwaysOnTop(true);
         window->Show();
@@ -311,7 +334,8 @@ void ExistingUserController::OnLoginSuccess(
     const std::string& username,
     const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& credentials,
-    bool pending_requests) {
+    bool pending_requests,
+    bool using_oauth) {
   bool known_user = UserManager::Get()->IsKnownUser(username);
   bool login_only =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -319,6 +343,9 @@ void ExistingUserController::OnLoginSuccess(
   ready_for_browser_launch_ = known_user || login_only;
 
   two_factor_credentials_ = credentials.two_factor;
+
+  bool has_cookies =
+      login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION;
 
   // LoginPerformer instance will delete itself once online auth result is OK.
   // In case of failure it'll bring up ScreenLock and ask for
@@ -334,12 +361,18 @@ void ExistingUserController::OnLoginSuccess(
                                     password,
                                     credentials,
                                     pending_requests,
+                                    using_oauth,
+                                    has_cookies,
                                     this);
 
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginSuccess(username, password,
-                                           credentials, pending_requests);
+                                           credentials, pending_requests,
+                                           using_oauth);
+
+  // Notifiy LoginDisplay to allow it provide visual feedback to user.
+  login_display_->OnLoginSuccess(username);
 }
 
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
@@ -348,8 +381,14 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
     PrefService* prefs = g_browser_process->local_state();
     const std::string current_locale =
         StringToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
-    std::string start_url =
-      base::StringPrintf(kGetStartedURLPattern, current_locale.c_str());
+    std::string start_url;
+    if (prefs->GetBoolean(prefs::kAccessibilityEnabled) &&
+        current_locale.find("en") != std::string::npos) {
+      start_url = kChromeVoxTutorialURL;
+    } else {
+      start_url = base::StringPrintf(kGetStartedURLPattern,
+                                     current_locale.c_str());
+    }
     CommandLine::ForCurrentProcess()->AppendArg(start_url);
 
     ServicesCustomizationDocument* customization =
@@ -371,9 +410,20 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
       CommandLine::ForCurrentProcess()->AppendArg(kSettingsSyncLoginURL);
     }
 
-    ActivateWizard(WizardController::IsDeviceRegistered() ?
-        WizardController::kUserImageScreenName :
-        WizardController::kRegistrationScreenName);
+#ifndef NDEBUG
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kOobeSkipPostLogin)) {
+      ready_for_browser_launch_ = true;
+      LoginUtils::DoBrowserLaunch(profile, host_);
+      host_ = NULL;
+    } else {
+#endif
+      ActivateWizard(WizardController::IsDeviceRegistered() ?
+          WizardController::kUserImageScreenName :
+          WizardController::kRegistrationScreenName);
+#ifndef NDEBUG
+    }
+#endif
   } else {
     LoginUtils::DoBrowserLaunch(profile, host_);
     host_ = NULL;
@@ -412,7 +462,7 @@ void ExistingUserController::OnPasswordChangeDetected(
   // TODO(gspencer): We shouldn't have to erase stateful data when
   // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
   PasswordChangedView* view = new PasswordChangedView(this, false);
-  views::Window* window = browser::CreateViewsWindow(GetNativeWindow(),
+  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(),
                                                      gfx::Rect(),
                                                      view);
   window->SetAlwaysOnTop(true);

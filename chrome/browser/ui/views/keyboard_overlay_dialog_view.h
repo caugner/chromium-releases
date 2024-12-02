@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
-#include "views/window/window_delegate.h"
 
 class BrowserView;
 
@@ -23,9 +22,6 @@ class KeyboardOverlayDialogView : public HtmlDialogView {
                             BrowserView* parent_view);
   virtual ~KeyboardOverlayDialogView();
 
-  // Initializes the contents of the dialog (the DOMView and the callbacks).
-  void InitDialog();
-
   // Overridden from views::View:
   virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
 
@@ -33,6 +29,8 @@ class KeyboardOverlayDialogView : public HtmlDialogView {
   static void ShowDialog(gfx::NativeWindow owning_window, BrowserView* parent);
 
  private:
+  virtual void RegisterDialogAccelerators() OVERRIDE;
+
   // Returns true if |accelerator| is an accelerator for closing the dialog.
   bool IsCloseAccelerator(const views::Accelerator& accelerator);
 

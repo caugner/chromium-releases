@@ -35,6 +35,31 @@ static const char kSyncServerSyncPath[] = "/command/";
 // server time.
 static const char kSyncServerGetTimePath[] = "/time";
 
+HttpResponse::HttpResponse()
+    : response_code(kUnsetResponseCode),
+      content_length(kUnsetContentLength),
+      payload_length(kUnsetPayloadLength),
+      server_status(NONE) {}
+
+#define ENUM_CASE(x) case x: return #x; break
+
+const char* HttpResponse::GetServerConnectionCodeString(
+    ServerConnectionCode code) {
+  switch (code) {
+    ENUM_CASE(NONE);
+    ENUM_CASE(CONNECTION_UNAVAILABLE);
+    ENUM_CASE(IO_ERROR);
+    ENUM_CASE(SYNC_SERVER_ERROR);
+    ENUM_CASE(SYNC_AUTH_ERROR);
+    ENUM_CASE(SERVER_CONNECTION_OK);
+    ENUM_CASE(RETRY);
+  }
+  NOTREACHED();
+  return "";
+}
+
+#undef ENUM_CASE
+
 bool ServerConnectionManager::Post::ReadBufferResponse(
     string* buffer_out,
     HttpResponse* response,
@@ -167,10 +192,20 @@ bool ServerConnectionManager::PostBufferToPath(const PostBufferParams* params,
     const string& path, const string& auth_token,
     ScopedServerStatusWatcher* watcher) {
   DCHECK(watcher != NULL);
+
+  if (auth_token.empty()) {
+    params->response->server_status = HttpResponse::SYNC_AUTH_ERROR;
+    return false;
+  }
+
   scoped_ptr<Post> post(MakePost());
   post->set_timing_info(params->timing_info);
   bool ok = post->Init(path.c_str(), auth_token, params->buffer_in,
                        params->response);
+
+  if (params->response->server_status == HttpResponse::SYNC_AUTH_ERROR) {
+    InvalidateAndClearAuthToken();
+  }
 
   if (!ok || RC_REQUEST_OK != params->response->response_code) {
     IncrementErrorCount();

@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "content/browser/debugger/devtools_client_host.h"
 
 class Profile;
 
@@ -31,7 +31,7 @@ class ExtensionDevToolsBridge : public DevToolsClientHost {
   // DevToolsClientHost, called to send a message to this host.
   virtual void SendMessageToClient(const IPC::Message& msg);
 
-  virtual void TabReplaced(TabContentsWrapper* new_tab);
+  virtual void TabReplaced(TabContents* new_tab);
 
  private:
   void OnDispatchOnInspectorFrontend(const std::string& data);
@@ -42,7 +42,6 @@ class ExtensionDevToolsBridge : public DevToolsClientHost {
   int tab_id_;
 
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
-  scoped_refptr<ExtensionMessageService> extension_message_service_;
 
   // Profile that owns our tab
   Profile* profile_;
@@ -56,4 +55,3 @@ class ExtensionDevToolsBridge : public DevToolsClientHost {
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_DEVTOOLS_BRIDGE_H_
-

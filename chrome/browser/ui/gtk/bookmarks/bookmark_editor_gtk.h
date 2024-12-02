@@ -61,7 +61,7 @@ class BookmarkEditorGtk : public BookmarkEditor,
 
   // BookmarkModel observer methods. Any structural change results in
   // resetting the tree model.
-  virtual void Loaded(BookmarkModel* model) OVERRIDE { }
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {}
   virtual void BookmarkNodeMoved(BookmarkModel* model,
                                  const BookmarkNode* old_parent,
                                  int old_index,
@@ -155,6 +155,9 @@ class BookmarkEditorGtk : public BookmarkEditor,
 
   // Is the tree shown?
   bool show_tree_;
+
+  // List of deleted bookmark folders.
+  std::vector<int64> deletes_;
 
   // The context menu controller.
   scoped_ptr<ContextMenuController> menu_controller_;

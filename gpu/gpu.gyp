@@ -46,6 +46,7 @@
         'command_buffer/common/buffer.h',
         'command_buffer/common/cmd_buffer_common.h',
         'command_buffer/common/cmd_buffer_common.cc',
+        'command_buffer/common/command_buffer.cc',
         'command_buffer/common/command_buffer.h',
         'command_buffer/common/constants.h',
         'command_buffer/common/gles2_cmd_ids_autogen.h',
@@ -81,6 +82,7 @@
       'type': 'static_library',
       'dependencies': [
         '../base/base.gyp:base',
+        '../ui/gfx/gl/gl.gyp:gl',
         'gles2_cmd_helper',
       ],
       'all_dependent_settings': {
@@ -98,7 +100,8 @@
       'target_name': 'gles2_implementation_client_side_arrays',
       'type': 'static_library',
       'defines': [
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1'
+        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
+        'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
         '../base/base.gyp:base',
@@ -120,6 +123,7 @@
       'target_name': 'gles2_c_lib',
       'type': 'static_library',
       'dependencies': [
+        '../base/base.gyp:base',
         'gles2_implementation',
       ],
       'sources': [
@@ -182,7 +186,7 @@
         '../base/base.gyp:base',
         '../ui/gfx/gl/gl.gyp:gl',
         '../ui/gfx/surface/surface.gyp:surface',
-        '../ui/ui.gyp:ui_gfx',
+        '../ui/ui.gyp:ui',
         '../third_party/angle/src/build_angle.gyp:translator_glsl',
       ],
       'sources': [
@@ -230,11 +234,18 @@
         'command_buffer/service/surface_manager.h',
         'command_buffer/service/texture_manager.h',
         'command_buffer/service/texture_manager.cc',
+        'command_buffer/service/vertex_attrib_manager.h',
+        'command_buffer/service/vertex_attrib_manager.cc',
       ],
       'conditions': [
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+          ],
+        }],
+        ['touchui==1', {
+          'include_dirs': [
+            '<(DEPTH)/third_party/angle/include',
           ],
         }],
       ],
@@ -243,7 +254,7 @@
       'target_name': 'gpu_unittests',
       'type': 'executable',
       'dependencies': [
-        '../app/app.gyp:app_base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../testing/gmock.gyp:gmock',
         '../testing/gmock.gyp:gmock_main',
         '../testing/gtest.gyp:gtest',
@@ -269,6 +280,7 @@
         'command_buffer/common/gles2_cmd_format_test_autogen.h',
         'command_buffer/common/gles2_cmd_id_test.cc',
         'command_buffer/common/gles2_cmd_id_test_autogen.h',
+        'command_buffer/common/gles2_cmd_utils_unittest.cc',
         'command_buffer/common/id_allocator_test.cc',
         'command_buffer/common/trace_event.h',
         'command_buffer/common/unittest_main.cc',
@@ -300,6 +312,7 @@
         'command_buffer/service/test_helper.cc',
         'command_buffer/service/test_helper.h',
         'command_buffer/service/texture_manager_unittest.cc',
+        'command_buffer/service/vertex_attrib_manager_unittest.cc',
       ],
     },
     {
@@ -359,6 +372,7 @@
             'target_name': 'gles2_demo',
             'type': 'executable',
             'dependencies': [
+              '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
               'command_buffer_service',
               'gles2_demo_lib',
             ],
@@ -379,9 +393,3 @@
     ],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

@@ -17,6 +17,7 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
@@ -64,7 +65,7 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
     bool root_exists = false;
     syncable::ModelType type = model_type();
     {
-      sync_api::WriteTransaction trans(user_share_);
+      sync_api::WriteTransaction trans(FROM_HERE, user_share_);
       sync_api::ReadNode uber_root(&trans);
       uber_root.InitByRootLookup();
 
@@ -82,7 +83,7 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
         return false;
     }
 
-    sync_api::WriteTransaction trans(user_share_);
+    sync_api::WriteTransaction trans(FROM_HERE, user_share_);
     sync_api::ReadNode root(&trans);
     EXPECT_TRUE(root.InitByTagLookup(
         ProfileSyncServiceTestHelper::GetTagForType(type)));
@@ -373,7 +374,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     }
     EXPECT_EQ(bnode->is_folder(), gnode.GetIsFolder());
     if (bnode->is_url())
-      EXPECT_EQ(bnode->GetURL(), gnode.GetURL());
+      EXPECT_EQ(bnode->url(), gnode.GetURL());
 
     // Check for position matches.
     int browser_index = bnode->parent()->GetIndexOf(bnode);
@@ -397,13 +398,12 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
       EXPECT_EQ(gnode.GetSuccessorId(), gnext.GetId());
       EXPECT_EQ(gnode.GetParentId(), gnext.GetParentId());
     }
-    if (bnode->child_count()) {
+    if (!bnode->empty())
       EXPECT_TRUE(gnode.GetFirstChildId());
-    }
   }
 
   void ExpectSyncerNodeMatching(const BookmarkNode* bnode) {
-    sync_api::ReadTransaction trans(test_user_share_.user_share());
+    sync_api::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ExpectSyncerNodeMatching(&trans, bnode);
   }
 
@@ -447,7 +447,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     const BookmarkNode* bnode =
         model_associator_->GetChromeNodeFromSyncId(sync_id);
     ASSERT_TRUE(bnode);
-    EXPECT_EQ(GURL(url), bnode->GetURL());
+    EXPECT_EQ(GURL(url), bnode->url());
   }
 
   void ExpectBrowserNodeParent(int64 sync_id, int64 parent_sync_id) {
@@ -462,7 +462,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
 
   void ExpectModelMatch(sync_api::BaseTransaction* trans) {
     const BookmarkNode* root = model_->root_node();
-    EXPECT_EQ(root->GetIndexOf(model_->GetBookmarkBarNode()), 0);
+    EXPECT_EQ(root->GetIndexOf(model_->bookmark_bar_node()), 0);
     EXPECT_EQ(root->GetIndexOf(model_->other_node()), 1);
     EXPECT_EQ(root->GetIndexOf(model_->synced_node()), 2);
 
@@ -483,7 +483,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   }
 
   void ExpectModelMatch() {
-    sync_api::ReadTransaction trans(test_user_share_.user_share());
+    sync_api::ReadTransaction trans(FROM_HERE, test_user_share_.user_share());
     ExpectModelMatch(&trans);
   }
 
@@ -499,7 +499,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
 
   int64 bookmark_bar_id() {
     return model_associator_->GetSyncIdFromChromeId(
-        model_->GetBookmarkBarNode()->id());
+        model_->bookmark_bar_node()->id());
   }
 
  private:
@@ -564,7 +564,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, BookmarkModelOperations) {
   ExpectModelMatch();
   model_->Move(url1, folder2, 0);
   ExpectModelMatch();
-  model_->Move(folder2, model_->GetBookmarkBarNode(), 0);
+  model_->Move(folder2, model_->bookmark_bar_node(), 0);
   ExpectModelMatch();
   model_->SetTitle(folder2, ASCIIToUTF16("Not Nested"));
   ExpectModelMatch();
@@ -572,7 +572,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, BookmarkModelOperations) {
   ExpectModelMatch();
   model_->SetTitle(folder, ASCIIToUTF16("who's nested now?"));
   ExpectModelMatch();
-  model_->Copy(url2, model_->GetBookmarkBarNode(), 0);
+  model_->Copy(url2, model_->bookmark_bar_node(), 0);
   ExpectModelMatch();
   model_->SetTitle(synced_folder, ASCIIToUTF16("strawberry"));
   ExpectModelMatch();
@@ -593,7 +593,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeProcessing) {
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSync();
 
-  sync_api::WriteTransaction trans(test_user_share_.user_share());
+  sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
   FakeServerChange adds(&trans);
   int64 f1 = adds.AddFolder(L"Server Folder B", bookmark_bar_id(), 0);
@@ -690,7 +690,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeRequiringFosterParent) {
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
   StartSync();
 
-  sync_api::WriteTransaction trans(test_user_share_.user_share());
+  sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
   // Stress the immediate children of other_node because that's where
   // ApplyModelChanges puts a temporary foster parent node.
@@ -739,7 +739,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, ServerChangeWithNonCanonicalURL) {
   StartSync();
 
   {
-    sync_api::WriteTransaction trans(test_user_share_.user_share());
+    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
     FakeServerChange adds(&trans);
     std::string url("http://dev.chromium.org");
@@ -770,7 +770,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, DISABLED_ServerChangeWithInvalidURL) {
 
   int child_count = 0;
   {
-    sync_api::WriteTransaction trans(test_user_share_.user_share());
+    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
 
     FakeServerChange adds(&trans);
     std::string url("x");
@@ -887,7 +887,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, UnrecoverableErrorSuspendsService) {
   // updating the ProfileSyncService state.  This should introduce
   // inconsistency between the two models.
   {
-    sync_api::WriteTransaction trans(test_user_share_.user_share());
+    sync_api::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     sync_api::WriteNode sync_node(&trans);
     ASSERT_TRUE(InitSyncNodeFromChromeNode(node, &sync_node));
     sync_node.Remove();
@@ -1080,7 +1080,7 @@ void ProfileSyncServiceBookmarkTestWithData::CompareWithTestData(
     if (item.url) {
       EXPECT_FALSE(child_node->is_folder());
       EXPECT_TRUE(child_node->is_url());
-      EXPECT_EQ(child_node->GetURL(), GURL(item.url));
+      EXPECT_EQ(child_node->url(), GURL(item.url));
     } else {
       EXPECT_TRUE(child_node->is_folder());
       EXPECT_FALSE(child_node->is_url());
@@ -1091,7 +1091,7 @@ void ProfileSyncServiceBookmarkTestWithData::CompareWithTestData(
 // TODO(munjal): We should implement some way of generating random data and can
 // use the same seed to generate the same sequence.
 void ProfileSyncServiceBookmarkTestWithData::WriteTestDataToBookmarkModel() {
-  const BookmarkNode* bookmarks_bar_node = model_->GetBookmarkBarNode();
+  const BookmarkNode* bookmarks_bar_node = model_->bookmark_bar_node();
   PopulateFromTestData(bookmarks_bar_node,
                        kBookmarkBarChildren,
                        arraysize(kBookmarkBarChildren));
@@ -1133,7 +1133,7 @@ void ProfileSyncServiceBookmarkTestWithData::WriteTestDataToBookmarkModel() {
 
 void ProfileSyncServiceBookmarkTestWithData::
     ExpectBookmarkModelMatchesTestData() {
-  const BookmarkNode* bookmark_bar_node = model_->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar_node = model_->bookmark_bar_node();
   CompareWithTestData(bookmark_bar_node,
                       kBookmarkBarChildren,
                       arraysize(kBookmarkBarChildren));
@@ -1234,7 +1234,7 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData, MergeWithEmptyBookmarkModel) {
   // Blow away the bookmark model -- it should be empty afterwards.
   UnloadBookmarkModel();
   LoadBookmarkModel(DELETE_EXISTING_STORAGE, DONT_SAVE_TO_STORAGE);
-  EXPECT_EQ(model_->GetBookmarkBarNode()->child_count(), 0);
+  EXPECT_EQ(model_->bookmark_bar_node()->child_count(), 0);
   EXPECT_EQ(model_->other_node()->child_count(), 0);
   EXPECT_EQ(model_->synced_node()->child_count(), 0);
 
@@ -1268,7 +1268,7 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData, MergeExpectedIdenticalModels) {
   // sure we get the order of the server after merge.
   LoadBookmarkModel(LOAD_FROM_STORAGE, DONT_SAVE_TO_STORAGE);
   ExpectBookmarkModelMatchesTestData();
-  const BookmarkNode* bookmark_bar = model_->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar = model_->bookmark_bar_node();
   ASSERT_TRUE(bookmark_bar);
   ASSERT_GT(bookmark_bar->child_count(), 1);
   model_->Move(bookmark_bar->GetChild(0), bookmark_bar, 1);
@@ -1285,7 +1285,7 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData, MergeModelsWithSomeExtras) {
   ExpectBookmarkModelMatchesTestData();
 
   // Remove some nodes and reorder some nodes.
-  const BookmarkNode* bookmark_bar_node = model_->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar_node = model_->bookmark_bar_node();
   int remove_index = 2;
   ASSERT_GT(bookmark_bar_node->child_count(), remove_index);
   const BookmarkNode* child_node = bookmark_bar_node->GetChild(remove_index);
@@ -1318,7 +1318,7 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData, MergeModelsWithSomeExtras) {
   ExpectBookmarkModelMatchesTestData();
 
   // Remove some nodes and reorder some nodes.
-  bookmark_bar_node = model_->GetBookmarkBarNode();
+  bookmark_bar_node = model_->bookmark_bar_node();
   remove_index = 0;
   ASSERT_GT(bookmark_bar_node->child_count(), remove_index);
   child_node = bookmark_bar_node->GetChild(remove_index);
@@ -1382,7 +1382,7 @@ TEST_F(ProfileSyncServiceBookmarkTestWithData,
   // Change the bookmark model before restarting sync service to simulate
   // the situation where bookmark model is different from sync model and
   // make sure model associator correctly rebuilds associations.
-  const BookmarkNode* bookmark_bar_node = model_->GetBookmarkBarNode();
+  const BookmarkNode* bookmark_bar_node = model_->bookmark_bar_node();
   model_->AddURL(bookmark_bar_node, 0, ASCIIToUTF16("xtra"),
                  GURL("http://www.xtra.com"));
   // Now restart sync. This time it will try to use the persistent

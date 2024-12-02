@@ -5,7 +5,9 @@
 #include "webkit/plugins/ppapi/ppb_font_impl.h"
 
 #include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/shared_impl/font_impl.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
+#include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -14,7 +16,9 @@
 #include "webkit/plugins/ppapi/string.h"
 #include "webkit/plugins/ppapi/var.h"
 
-using ::ppapi::WebKitForwarding;
+using ppapi::thunk::EnterResource;
+using ppapi::thunk::PPB_ImageData_API;
+using ppapi::WebKitForwarding;
 
 namespace webkit {
 namespace ppapi {
@@ -52,11 +56,16 @@ PPB_Font_Impl::PPB_Font_Impl(PluginInstance* instance,
 PPB_Font_Impl::~PPB_Font_Impl() {
 }
 
-::ppapi::thunk::PPB_Font_API* PPB_Font_Impl::AsPPB_Font_API() {
-  return this;
+// static
+PP_Resource PPB_Font_Impl::Create(PluginInstance* instance,
+                                  const PP_FontDescription_Dev& description) {
+  if (!::ppapi::FontImpl::IsPPFontDescriptionValid(description))
+    return 0;
+  scoped_refptr<PPB_Font_Impl> font(new PPB_Font_Impl(instance, description));
+  return font->GetReference();
 }
 
-PPB_Font_Impl* PPB_Font_Impl::AsPPB_Font_Impl() {
+::ppapi::thunk::PPB_Font_API* PPB_Font_Impl::AsPPB_Font_API() {
   return this;
 }
 
@@ -69,7 +78,8 @@ PP_Bool PPB_Font_Impl::Describe(PP_FontDescription_Dev* description,
     return PP_FALSE;
 
   // Convert the string.
-  description->face = StringVar::StringToPPVar(instance()->module(), face);
+  description->face = StringVar::StringToPPVar(
+      instance()->module()->pp_module(), face);
   return PP_TRUE;
 }
 
@@ -80,10 +90,12 @@ PP_Bool PPB_Font_Impl::DrawTextAt(PP_Resource image_data,
                                   const PP_Rect* clip,
                                   PP_Bool image_data_is_opaque) {
   // Get and map the image data we're painting to.
-  scoped_refptr<PPB_ImageData_Impl> image_resource(
-      Resource::GetAs<PPB_ImageData_Impl>(image_data));
-  if (!image_resource.get())
+  EnterResource<PPB_ImageData_API> enter(image_data, true);
+  if (enter.failed())
     return PP_FALSE;
+  PPB_ImageData_Impl* image_resource =
+      static_cast<PPB_ImageData_Impl*>(enter.object());
+
   ImageDataAutoMapper mapper(image_resource);
   if (!mapper.is_valid())
     return PP_FALSE;

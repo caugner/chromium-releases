@@ -152,6 +152,10 @@ WebKit::WebCanvas* ToWebCanvas(skia::PlatformCanvas*);
 // used to get memory usage statistics.
 int GetGlyphPageCount();
 
+// Construct the User-Agent header, filling in |result|.
+// - If mimic_windows is true, produce a fake Windows Chrome string.
+std::string BuildUserAgent(bool mimic_windows);
+
 //---- END FUNCTIONS IMPLEMENTED BY WEBKIT/GLUE -------------------------------
 
 
@@ -166,11 +170,6 @@ string16 GetLocalizedString(int message_id);
 // Returns the raw data for a resource.  This resource must have been
 // specified as BINDATA in the relevant .rc file.
 base::StringPiece GetDataResource(int resource_id);
-
-#if defined(OS_WIN)
-// Loads and returns a cursor.
-HCURSOR LoadCursor(int cursor_id);
-#endif
 
 // Glue to access the clipboard.
 
@@ -201,6 +200,9 @@ void ClipboardReadImage(ui::Clipboard::Buffer buffer, std::string* data);
 // Reads one type of data from the clipboard, if available.
 bool ClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
                        string16* data, string16* metadata);
+
+// Get a sequence number which uniquely identifies clipboard state.
+uint64 ClipboardGetSequenceNumber();
 
 // Reads filenames from the clipboard, if available.
 bool ClipboardReadFilenames(ui::Clipboard::Buffer buffer,
@@ -239,23 +241,11 @@ void ClearHostResolverCache();
 // debugging.
 void ClearPredictorCache();
 
-// Returns the product version.  E.g., Chrome/4.1.333.0
-std::string GetProductVersion();
-
 // Returns true if the embedder is running in single process mode.
 bool IsSingleProcess();
 
 // Enables/Disables Spdy for requests afterwards. Used for benchmarking.
 void EnableSpdy(bool enable);
-
-// Notifies the browser that the given action has been performed.
-void UserMetricsRecordAction(const std::string& action);
-
-#if !defined(DISABLE_NACL)
-// Launch NaCl's sel_ldr process.
-bool LaunchSelLdr(const char* alleged_url, int socket_count, void* imc_handles,
-                  void* nacl_process_handle, int* nacl_process_id);
-#endif
 
 #if defined(OS_LINUX)
 // Return a read-only file descriptor to the font which best matches the given

@@ -9,7 +9,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/metrics/field_trial.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
@@ -25,6 +25,7 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_registrar.h"
@@ -257,11 +258,10 @@ void InitialObserver::Append(const GURL& url) {
   if (kStartupResolutionCount <= first_navigations_.size())
     return;
 
-  if (url.SchemeIs("http") || url.SchemeIs("https")) {
-    const GURL url_without_path(Predictor::CanonicalizeUrl(url));
-    if (first_navigations_.find(url_without_path) == first_navigations_.end())
-      first_navigations_[url_without_path] = base::TimeTicks::Now();
-  }
+  DCHECK(url.SchemeIs("http") || url.SchemeIs("https"));
+  DCHECK_EQ(url, Predictor::CanonicalizeUrl(url));
+  if (first_navigations_.find(url) == first_navigations_.end())
+    first_navigations_[url] = base::TimeTicks::Now();
 }
 
 void InitialObserver::GetInitialDnsResolutionList(ListValue* startup_list) {
@@ -305,24 +305,24 @@ class OffTheRecordObserver : public NotificationObserver {
   void Register() {
     // TODO(pkasting): This test should not be necessary.  See crbug.com/12475.
     if (registrar_.IsEmpty()) {
-      registrar_.Add(this, NotificationType::BROWSER_CLOSED,
+      registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
                      NotificationService::AllSources());
-      registrar_.Add(this, NotificationType::BROWSER_OPENED,
+      registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
                      NotificationService::AllSources());
     }
   }
 
-  void Observe(NotificationType type, const NotificationSource& source,
+  void Observe(int type, const NotificationSource& source,
                const NotificationDetails& details) {
-    switch (type.value) {
-      case NotificationType::BROWSER_OPENED:
+    switch (type) {
+      case chrome::NOTIFICATION_BROWSER_OPENED:
         if (!Source<Browser>(source)->profile()->IsOffTheRecord())
           break;
         ++count_off_the_record_windows_;
         OnTheRecord(false);
         break;
 
-      case NotificationType::BROWSER_CLOSED:
+      case chrome::NOTIFICATION_BROWSER_CLOSED:
         if (!Source<Browser>(source)->profile()->IsOffTheRecord())
         break;  // Ignore ordinary windows.
         DCHECK_LT(0, count_off_the_record_windows_);
@@ -361,10 +361,6 @@ static base::LazyInstance<OffTheRecordObserver> g_off_the_record_observer(
 void PredictorGetHtmlInfo(std::string* output) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  output->append("<html><head><title>About DNS</title>"
-                 // We'd like the following no-cache... but it doesn't work.
-                 // "<META HTTP-EQUIV=\"Pragma\" CONTENT=\"no-cache\">"
-                 "</head><body>");
   if (!predictor_enabled  || NULL == g_predictor) {
     output->append("DNS pre-resolution and TCP pre-connection is disabled.");
   } else {
@@ -380,7 +376,6 @@ void PredictorGetHtmlInfo(std::string* output) {
       g_predictor->GetHtmlInfo(output);
     }
   }
-  output->append("</body></html>");
 }
 
 void ClearPredictorCache() {

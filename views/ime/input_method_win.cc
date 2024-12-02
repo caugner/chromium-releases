@@ -25,10 +25,10 @@ InputMethodWin::~InputMethodWin() {
 }
 
 void InputMethodWin::Init(Widget* widget) {
-  InputMethodBase::Init(widget);
-
   // Gets the initial input locale and text direction information.
   OnInputLangChange(0, 0);
+
+  InputMethodBase::Init(widget);
 }
 
 void InputMethodWin::OnFocus() {
@@ -72,6 +72,7 @@ void InputMethodWin::OnTextInputTypeChanged(View* view) {
     ime_input_.CancelIME(hwnd());
     UpdateIMEState();
   }
+  InputMethodBase::OnTextInputTypeChanged(view);
 }
 
 void InputMethodWin::OnCaretBoundsChanged(View* view) {

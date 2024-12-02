@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/views/tabs/side_tab.h"
 
 #include "base/utf_string_conversions.h"
-#include "grit/app_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/favicon_size.h"
@@ -17,7 +17,7 @@
 namespace {
 const int kVerticalTabHeight = 27;
 const int kTitleCloseSpacing = 4;
-const SkScalar kRoundRectRadius = 4;
+const int kRoundRectRadius = 4;
 const SkColor kTabBackgroundColor = SK_ColorWHITE;
 const SkColor kTextColor = SK_ColorBLACK;
 

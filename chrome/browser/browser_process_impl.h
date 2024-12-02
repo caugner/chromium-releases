@@ -27,8 +27,9 @@
 #include "content/common/notification_registrar.h"
 #include "ipc/ipc_message.h"
 
+class BrowserOnlineStateObserver;
 class ChromeNetLog;
-class ChromeResourceDispatcherHostObserver;
+class ChromeResourceDispatcherHostDelegate;
 class CommandLine;
 class DevToolsHttpProtocolHandler;
 class DevToolsProtocolHandler;
@@ -36,6 +37,10 @@ class FilePath;
 class NotificationService;
 class PluginDataRemover;
 class TabCloseableStateWatcher;
+
+namespace policy{
+class BrowserPolicyConnector;
+};
 
 // Real implementation of BrowserProcess that creates and returns the services.
 class BrowserProcessImpl : public BrowserProcess,
@@ -55,9 +60,6 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual base::Thread* db_thread();
   virtual base::Thread* process_launcher_thread();
   virtual base::Thread* cache_thread();
-#if defined(USE_X11)
-  virtual base::Thread* background_x11_thread();
-#endif
   virtual WatchDogThread* watchdog_thread();
 #if defined(OS_CHROMEOS)
   virtual base::Thread* web_socket_proxy_thread();
@@ -94,16 +96,16 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual const std::string& GetApplicationLocale();
   virtual void SetApplicationLocale(const std::string& locale);
   virtual DownloadStatusUpdater* download_status_updater();
-  virtual base::WaitableEvent* shutdown_event();
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher();
   virtual BackgroundModeManager* background_mode_manager();
   virtual StatusTray* status_tray();
+  virtual SafeBrowsingService* safe_browsing_service();
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service();
   virtual bool plugin_finder_disabled() const;
 
   // NotificationObserver methods
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -119,17 +121,14 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual void SetIPCLoggingEnabled(bool enable);
 #endif
 
- private:
-  void ClearLocalState(const FilePath& profile_path);
-  bool ShouldClearLocalState(FilePath* profile_path);
+  virtual MHTMLGenerationManager* mhtml_generation_manager();
 
+ private:
   void CreateResourceDispatcherHost();
   void CreateMetricsService();
 
   void CreateIOThread();
   static void CleanupOnIOThread();
-
-  void WaitForPluginDataRemoverToFinish();
 
   void CreateFileThread();
   void CreateDBThread();
@@ -140,7 +139,7 @@ class BrowserProcessImpl : public BrowserProcess,
 #if defined(OS_CHROMEOS)
   void CreateWebSocketProxyThread();
 #endif
-  void CreateTemplateURLModel();
+  void CreateTemplateURLService();
   void CreateProfileManager();
   void CreateWebDataService();
   void CreateLocalState();
@@ -155,6 +154,7 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateTabCloseableStateWatcher();
   void CreatePrintPreviewTabController();
   void CreateBackgroundPrintingManager();
+  void CreateSafeBrowsingService();
   void CreateSafeBrowsingDetectionService();
   void CreateStatusTray();
   void CreateBackgroundModeManager();
@@ -250,6 +250,9 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<StatusTray> status_tray_;
 
+  bool created_safe_browsing_service_;
+  scoped_refptr<SafeBrowsingService> safe_browsing_service_;
+
   bool created_safe_browsing_detection_service_;
   scoped_ptr<safe_browsing::ClientSideDetectionService>
      safe_browsing_detection_service_;
@@ -274,9 +277,6 @@ class BrowserProcessImpl : public BrowserProcess,
   // so we don't have to worry about lazy initialization.
   DownloadStatusUpdater download_status_updater_;
 
-  // An event that notifies when we are shutting-down.
-  scoped_ptr<base::WaitableEvent> shutdown_event_;
-
   // Ensures that the observers of plugin/print disable/enable state
   // notifications are properly added and removed.
   PrefChangeRegistrar pref_change_registrar_;
@@ -284,15 +284,16 @@ class BrowserProcessImpl : public BrowserProcess,
   // Lives here so can safely log events on shutdown.
   scoped_ptr<ChromeNetLog> net_log_;
 
-  // Ordered before resource_dispatcher_host_observer_ due to destruction
+  // Ordered before resource_dispatcher_host_delegate_ due to destruction
   // ordering.
   scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
 
-  scoped_ptr<ChromeResourceDispatcherHostObserver>
-      resource_dispatcher_host_observer_;
+  scoped_ptr<ChromeResourceDispatcherHostDelegate>
+      resource_dispatcher_host_delegate_;
 
   NotificationRegistrar notification_registrar_;
-  scoped_refptr<PluginDataRemover> plugin_data_remover_;
+
+  scoped_refptr<MHTMLGenerationManager> mhtml_generation_manager_;
 
   // Monitors the state of the 'DisablePluginFinder' policy.
   BooleanPrefMember plugin_finder_disabled_pref_;
@@ -311,6 +312,9 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<chromeos::ProxyConfigServiceImpl>
       chromeos_proxy_config_service_impl_;
 #endif
+
+  // Per-process listener for online state changes.
+  scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

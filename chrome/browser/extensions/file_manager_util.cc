@@ -16,7 +16,7 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
-#include "third_party/libjingle/source/talk/base/urlencode.h"
+#include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
@@ -27,6 +27,7 @@
 // This is the "well known" url for the file manager extension from
 // browser/resources/file_manager.  In the future we may provide a way to swap
 // out this file manager for an aftermarket part, but not yet.
+const char kFileBrowserExtensionUrl[] = FILEBROWSER_URL("");
 const char kBaseFileBrowserUrl[] = FILEBROWSER_URL("main.html");
 const char kMediaPlayerUrl[] = FILEBROWSER_URL("mediaplayer.html");
 const char kMediaPlayerPlaylistUrl[] = FILEBROWSER_URL("playlist.html");
@@ -38,10 +39,12 @@ const char* kBrowserSupportedExtensions[] = {
 };
 // List of file extension that can be handled with the media player.
 const char* kAVExtensions[] = {
-    ".webm", ".mp4", ".m4v", ".mov", ".ogm", ".ogv", ".ogx",
-    ".mp3", ".m4a", ".ogg", ".oga", ".wav",
+#if defined(GOOGLE_CHROME_BUILD)
+    ".3gp", ".avi", ".mp3", ".mp4", ".m4v", ".mov", ".m4a",
+#endif
+    ".flac", ".ogm", ".ogv", ".ogx", ".ogg", ".oga", ".wav", ".webm",
 /* TODO(zelidrag): Add unsupported ones as we enable them:
-    ".3gp", ".mkv", ".avi", ".divx", ".xvid", ".wmv", ".asf", ".mpeg", ".mpg",
+    ".mkv", ".divx", ".xvid", ".wmv", ".asf", ".mpeg", ".mpg",
     ".wma", ".aiff",
 */
 };
@@ -65,6 +68,11 @@ bool IsSupportedAVExtension(const char* ext) {
 }
 
 // static
+GURL FileManagerUtil::GetFileBrowserExtensionUrl() {
+  return GURL(kFileBrowserExtensionUrl);
+}
+
+// static
 GURL FileManagerUtil::GetFileBrowserUrl() {
   return GURL(kBaseFileBrowserUrl);
 }
@@ -83,6 +91,21 @@ GURL FileManagerUtil::GetMediaPlayerPlaylistUrl() {
 bool FileManagerUtil::ConvertFileToFileSystemUrl(
     Profile* profile, const FilePath& full_file_path, const GURL& origin_url,
     GURL* url) {
+  FilePath virtual_path;
+  if (!ConvertFileToRelativeFileSystemPath(profile, full_file_path,
+                                           &virtual_path)) {
+    return false;
+  }
+
+  GURL base_url = fileapi::GetFileSystemRootURI(origin_url,
+      fileapi::kFileSystemTypeExternal);
+  *url = GURL(base_url.spec() + virtual_path.value());
+  return true;
+}
+
+// static
+bool FileManagerUtil::ConvertFileToRelativeFileSystemPath(
+    Profile* profile, const FilePath& full_file_path, FilePath* virtual_path) {
   fileapi::FileSystemPathManager* path_manager =
       profile->GetFileSystemContext()->path_manager();
   fileapi::ExternalFileSystemMountPointProvider* provider =
@@ -91,13 +114,9 @@ bool FileManagerUtil::ConvertFileToFileSystemUrl(
     return false;
 
   // Find if this file path is managed by the external provider.
-  FilePath virtual_path;
-  if (!provider->GetVirtualPath(full_file_path, &virtual_path))
+  if (!provider->GetVirtualPath(full_file_path, virtual_path))
     return false;
 
-  GURL base_url = fileapi::GetFileSystemRootURI(origin_url,
-      fileapi::kFileSystemTypeExternal);
-  *url = GURL(base_url.spec() + virtual_path.value());
   return true;
 }
 
@@ -112,16 +131,17 @@ GURL FileManagerUtil::GetFileBrowserUrlWithParams(
   std::string json = GetArgumentsJson(type, title, default_path, file_types,
                                       file_type_index, default_extension);
   return GURL(FileManagerUtil::GetFileBrowserUrl().spec() + "?" +
-              UrlEncodeStringWithoutEncodingSpaceAsPlus(json));
+              EscapeUrlEncodedData(json, false));
 
 }
+
 // static
 void FileManagerUtil::ShowFullTabUrl(Profile*,
                                      const FilePath& default_path) {
   std::string json = GetArgumentsJson(SelectFileDialog::SELECT_NONE, string16(),
       default_path, NULL, 0, FilePath::StringType());
   GURL url(std::string(kBaseFileBrowserUrl) + "?" +
-           UrlEncodeStringWithoutEncodingSpaceAsPlus(json));
+           EscapeUrlEncodedData(json, false));
   Browser* browser = BrowserList::GetLastActive();
   if (!browser)
     return;
@@ -130,7 +150,6 @@ void FileManagerUtil::ShowFullTabUrl(Profile*,
   browser->ShowSingletonTab(GURL(url));
 }
 
-
 void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
   std::string ext = full_path.Extension();
   // For things supported natively by the browser, we should open it
@@ -138,7 +157,7 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
   if (IsSupportedBrowserExtension(ext.data())) {
     std::string path;
     path = "file://";
-    path.append(full_path.value());
+    path.append(EscapeUrlEncodedData(full_path.value(), false));
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       bool result = BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
@@ -190,9 +209,9 @@ std::string FileManagerUtil::GetArgumentsJson(
   arg_value.SetString("defaultPath", default_path.value());
   arg_value.SetString("defaultExtension", default_extension);
 
-  ListValue* types_list = new ListValue();
 
   if (file_types) {
+    ListValue* types_list = new ListValue();
     for (size_t i = 0; i < file_types->extensions.size(); ++i) {
       ListValue* extensions_list = new ListValue();
       for (size_t j = 0; j < file_types->extensions[i].size(); ++j) {
@@ -213,6 +232,7 @@ std::string FileManagerUtil::GetArgumentsJson(
 
       types_list->Set(i, dict);
     }
+    arg_value.Set("typeList", types_list);
   }
 
   std::string rv;

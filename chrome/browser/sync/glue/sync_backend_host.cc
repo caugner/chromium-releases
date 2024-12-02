@@ -6,11 +6,13 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/task.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -27,19 +29,18 @@
 #include "chrome/browser/sync/js_arg_list.h"
 #include "chrome/browser/sync/js_event_details.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
-#include "chrome/browser/sync/notifier/sync_notifier_factory.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 // TODO(tim): Remove this! We should have a syncapi pass-thru instead.
 #include "chrome/browser/sync/syncable/directory_manager.h"  // Cryptographer.
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/nigori_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -48,7 +49,6 @@ static const FilePath::CharType kSyncDataFolderName[] =
     FILE_PATH_LITERAL("Sync Data");
 
 using browser_sync::DataTypeController;
-using sync_notifier::SyncNotifierFactory;
 typedef TokenService::TokenAvailableDetails TokenAvailableDetails;
 
 typedef GoogleServiceAuthError AuthError;
@@ -59,24 +59,31 @@ using sessions::SyncSessionSnapshot;
 using sync_api::SyncCredentials;
 
 SyncBackendHost::SyncBackendHost(Profile* profile)
-    : core_(new Core(ALLOW_THIS_IN_INITIALIZER_LIST(this))),
-      core_thread_("Chrome_SyncCoreThread"),
+    : core_(new Core(profile->GetDebugName(),
+                     ALLOW_THIS_IN_INITIALIZER_LIST(this))),
+      initialization_state_(NOT_INITIALIZED),
+      sync_thread_("Chrome_SyncThread"),
       frontend_loop_(MessageLoop::current()),
       profile_(profile),
+      sync_notifier_factory_(webkit_glue::GetUserAgent(GURL()),
+                             profile_->GetRequestContext(),
+                             *CommandLine::ForCurrentProcess()),
       frontend_(NULL),
       sync_data_folder_path_(
           profile_->GetPath().Append(kSyncDataFolderName)),
-      last_auth_error_(AuthError::None()),
-      syncapi_initialized_(false) {
+      last_auth_error_(AuthError::None()) {
 }
 
 SyncBackendHost::SyncBackendHost()
-    : core_thread_("Chrome_SyncCoreThread"),
+    : initialization_state_(NOT_INITIALIZED),
+      sync_thread_("Chrome_SyncThread"),
       frontend_loop_(MessageLoop::current()),
       profile_(NULL),
+      sync_notifier_factory_(webkit_glue::GetUserAgent(GURL()),
+                             NULL,
+                             *CommandLine::ForCurrentProcess()),
       frontend_(NULL),
-      last_auth_error_(AuthError::None()),
-      syncapi_initialized_(false) {
+      last_auth_error_(AuthError::None()) {
 }
 
 SyncBackendHost::~SyncBackendHost() {
@@ -88,21 +95,14 @@ void SyncBackendHost::Initialize(
     SyncFrontend* frontend,
     const GURL& sync_service_url,
     const syncable::ModelTypeSet& types,
-    net::URLRequestContextGetter* baseline_context_getter,
     const SyncCredentials& credentials,
     bool delete_sync_data_folder) {
-  if (!core_thread_.Start())
+  if (!sync_thread_.Start())
     return;
 
   frontend_ = frontend;
   DCHECK(frontend);
 
-  // Create a worker for the UI thread and route bookmark changes to it.
-  // TODO(tim): Pull this into a method to reuse.  For now we don't even
-  // need to lock because we init before the syncapi exists and we tear down
-  // after the syncapi is destroyed.  Make sure to NULL-check workers_ indices
-  // when a new type is synced as the worker may already exist and you just
-  // need to update routing_info_.
   registrar_.workers[GROUP_DB] = new DatabaseModelWorker();
   registrar_.workers[GROUP_UI] = new UIModelWorker();
   registrar_.workers[GROUP_PASSIVE] = new ModelSafeWorker();
@@ -111,11 +111,14 @@ void SyncBackendHost::Initialize(
 
   // Any datatypes that we want the syncer to pull down must
   // be in the routing_info map.  We set them to group passive, meaning that
-  // updates will be applied, but not dispatched to the UI thread yet.
+  // updates will be applied to sync, but not dispatched to the native models.
   for (syncable::ModelTypeSet::const_iterator it = types.begin();
       it != types.end(); ++it) {
     registrar_.routing_info[(*it)] = GROUP_PASSIVE;
   }
+
+  if (profile_->GetPrefs()->GetBoolean(prefs::kSyncHasSetupCompleted))
+    registrar_.routing_info[syncable::NIGORI] = GROUP_PASSIVE;
 
   PasswordStore* password_store =
       profile_->GetPasswordStore(Profile::IMPLICIT_ACCESS);
@@ -128,16 +131,9 @@ void SyncBackendHost::Initialize(
     registrar_.routing_info.erase(syncable::PASSWORDS);
   }
 
-  // Nigori is populated by default now.
-  registrar_.routing_info[syncable::NIGORI] = GROUP_PASSIVE;
-
-  // TODO(akalin): Create SyncNotifier here and pass it in as part of
-  // DoInitializeOptions.
-  core_->CreateSyncNotifier(baseline_context_getter);
-
   InitCore(Core::DoInitializeOptions(
       sync_service_url,
-      MakeHttpBridgeFactory(baseline_context_getter),
+      profile_->GetRequestContext(),
       credentials,
       delete_sync_data_folder,
       RestoreEncryptionBootstrapToken(),
@@ -165,18 +161,18 @@ bool SyncBackendHost::IsNigoriEnabled() const {
 }
 
 bool SyncBackendHost::IsUsingExplicitPassphrase() {
-  return IsNigoriEnabled() && syncapi_initialized_ &&
-      core_->syncapi()->InitialSyncEndedForAllEnabledTypes() &&
-      core_->syncapi()->IsUsingExplicitPassphrase();
+  return IsNigoriEnabled() && initialized() &&
+      core_->sync_manager()->InitialSyncEndedForAllEnabledTypes() &&
+      core_->sync_manager()->IsUsingExplicitPassphrase();
 }
 
 bool SyncBackendHost::IsCryptographerReady(
     const sync_api::BaseTransaction* trans) const {
-  return syncapi_initialized_ && trans->GetCryptographer()->is_ready();
+  return initialized() && trans->GetCryptographer()->is_ready();
 }
 
 JsBackend* SyncBackendHost::GetJsBackend() {
-  if (syncapi_initialized_) {
+  if (initialized()) {
     return core_.get();
   } else {
     NOTREACHED();
@@ -185,18 +181,18 @@ JsBackend* SyncBackendHost::GetJsBackend() {
 }
 
 sync_api::HttpPostProviderFactory* SyncBackendHost::MakeHttpBridgeFactory(
-    net::URLRequestContextGetter* getter) {
+    const scoped_refptr<net::URLRequestContextGetter>& getter) {
   return new HttpBridgeFactory(getter);
 }
 
 void SyncBackendHost::InitCore(const Core::DoInitializeOptions& options) {
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoInitialize,
                         options));
 }
 
 void SyncBackendHost::UpdateCredentials(const SyncCredentials& credentials) {
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(),
                         &SyncBackendHost::Core::DoUpdateCredentials,
                         credentials));
@@ -204,7 +200,7 @@ void SyncBackendHost::UpdateCredentials(const SyncCredentials& credentials) {
 
 void SyncBackendHost::StartSyncingWithServer() {
   VLOG(1) << "SyncBackendHost::StartSyncingWithServer called.";
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoStartSyncing));
 }
 
@@ -225,24 +221,27 @@ void SyncBackendHost::SetPassphrase(const std::string& passphrase,
   core_->set_processing_passphrase();
 
   // If encryption is enabled and we've got a SetPassphrase
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoSetPassphrase,
                         passphrase, is_explicit));
 }
 
 void SyncBackendHost::Shutdown(bool sync_disabled) {
   // Thread shutdown should occur in the following order:
-  // - SyncerThread
-  // - CoreThread
+  // - Sync Thread
   // - UI Thread (stops some time after we return from this call).
-  if (core_thread_.IsRunning()) {  // Not running in tests.
-    core_thread_.message_loop()->PostTask(FROM_HERE,
+  if (sync_thread_.IsRunning()) {  // Not running in tests.
+    // TODO(akalin): Remove the need for this.
+    if (initialization_state_ > NOT_INITIALIZED) {
+      core_->sync_manager()->RequestEarlyExit();
+    }
+    sync_thread_.message_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(core_.get(),
                           &SyncBackendHost::Core::DoShutdown,
                           sync_disabled));
   }
 
-  // Before joining the core_thread_, we wait for the UIModelWorker to
+  // Before joining the sync_thread_, we wait for the UIModelWorker to
   // give us the green light that it is not depending on the frontend_loop_ to
   // process any more tasks. Stop() blocks until this termination condition
   // is true.
@@ -250,7 +249,7 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
     ui_worker()->Stop();
 
   // Stop will return once the thread exits, which will be after DoShutdown
-  // runs. DoShutdown needs to run from core_thread_ because the sync backend
+  // runs. DoShutdown needs to run from sync_thread_ because the sync backend
   // requires any thread that opened sqlite handles to relinquish them
   // personally. We need to join threads, because otherwise the main Chrome
   // thread (ui loop) can exit before DoShutdown finishes, at which point
@@ -262,7 +261,7 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
   // this, see bug 19757.
   {
     base::ThreadRestrictions::ScopedAllowIO allow_io;
-    core_thread_.Stop();
+    sync_thread_.Stop();
   }
 
   registrar_.routing_info.clear();
@@ -280,86 +279,31 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
   core_ = NULL;  // Releases reference to core_.
 }
 
-syncable::AutofillMigrationState
-    SyncBackendHost::GetAutofillMigrationState() {
-  return core_->syncapi()->GetAutofillMigrationState();
-}
-
-void SyncBackendHost::SetAutofillMigrationState(
-    syncable::AutofillMigrationState state) {
-  return core_->syncapi()->SetAutofillMigrationState(state);
-}
-
-syncable::AutofillMigrationDebugInfo
-    SyncBackendHost::GetAutofillMigrationDebugInfo() {
-  return core_->syncapi()->GetAutofillMigrationDebugInfo();
-}
-
-void SyncBackendHost::SetAutofillMigrationDebugInfo(
-    syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
-    const syncable::AutofillMigrationDebugInfo& info) {
-  return core_->syncapi()->SetAutofillMigrationDebugInfo(property_to_set, info);
-}
-
-void SyncBackendHost::ConfigureAutofillMigration() {
-  if (GetAutofillMigrationState() == syncable::NOT_DETERMINED) {
-    sync_api::ReadTransaction trans(GetUserShare());
-    sync_api::ReadNode autofil_root_node(&trans);
-
-    // Check for the presence of autofill node.
-    if (!autofil_root_node.InitByTagLookup(browser_sync::kAutofillTag)) {
-        SetAutofillMigrationState(syncable::INSUFFICIENT_INFO_TO_DETERMINE);
-      return;
-    }
-
-    // Check for children under autofill node.
-    if (autofil_root_node.GetFirstChildId() == static_cast<int64>(0)) {
-      SetAutofillMigrationState(syncable::INSUFFICIENT_INFO_TO_DETERMINE);
-      return;
-    }
-
-    sync_api::ReadNode autofill_profile_root_node(&trans);
-
-    // Check for the presence of autofill profile root node.
-    if (!autofill_profile_root_node.InitByTagLookup(
-       browser_sync::kAutofillProfileTag)) {
-      SetAutofillMigrationState(syncable::NOT_MIGRATED);
-      return;
-    }
-
-    // If our state is not determined then we should not have the autofill
-    // profile node.
-    DCHECK(false);
-
-    // just set it as not migrated.
-    SetAutofillMigrationState(syncable::NOT_MIGRATED);
-    return;
-  }
-}
-
 SyncBackendHost::PendingConfigureDataTypesState::
-PendingConfigureDataTypesState() : deleted_type(false),
-    reason(sync_api::CONFIGURE_REASON_UNKNOWN) {}
+PendingConfigureDataTypesState()
+    : reason(sync_api::CONFIGURE_REASON_UNKNOWN) {}
 
 SyncBackendHost::PendingConfigureDataTypesState::
 ~PendingConfigureDataTypesState() {}
 
-SyncBackendHost::PendingConfigureDataTypesState*
-    SyncBackendHost::MakePendingConfigModeState(
-        const DataTypeController::TypeMap& data_type_controllers,
-        const syncable::ModelTypeSet& types,
-        CancelableTask* ready_task,
-        ModelSafeRoutingInfo* routing_info,
-        sync_api::ConfigureReason reason,
-        bool nigori_enabled) {
-  PendingConfigureDataTypesState* state = new PendingConfigureDataTypesState();
+void SyncBackendHost::GetPendingConfigModeState(
+    const DataTypeController::TypeMap& data_type_controllers,
+    const syncable::ModelTypeSet& types,
+    base::Callback<void(bool)> ready_task,
+    ModelSafeRoutingInfo* routing_info,
+    sync_api::ConfigureReason reason,
+    bool nigori_enabled,
+    SyncBackendHost::PendingConfigureDataTypesState* state,
+    bool* deleted_type) {
+  *state = SyncBackendHost::PendingConfigureDataTypesState();
+  *deleted_type = false;
   for (DataTypeController::TypeMap::const_iterator it =
            data_type_controllers.begin();
        it != data_type_controllers.end(); ++it) {
     syncable::ModelType type = it->first;
     // If a type is not specified, remove it from the routing_info.
     if (types.count(type) == 0) {
-      state->deleted_type = true;
+      *deleted_type = true;
       routing_info->erase(type);
     } else {
       // Add a newly specified data type as GROUP_PASSIVE into the
@@ -371,10 +315,12 @@ SyncBackendHost::PendingConfigureDataTypesState*
     }
   }
 
+  // We must handle NIGORI separately as it has no DataTypeController.
   if (types.count(syncable::NIGORI) == 0) {
     if (nigori_enabled) { // Nigori is currently enabled.
-      state->deleted_type = true;
+      *deleted_type = true;
       routing_info->erase(syncable::NIGORI);
+      // IsNigoriEnabled is now false.
     }
   } else { // Nigori needs to be enabled.
     if (!nigori_enabled) {
@@ -384,38 +330,44 @@ SyncBackendHost::PendingConfigureDataTypesState*
     }
   }
 
-  state->ready_task.reset(ready_task);
+  state->ready_task = ready_task;
   state->initial_types = types;
   state->reason = reason;
-  return state;
 }
 
 void SyncBackendHost::ConfigureDataTypes(
     const DataTypeController::TypeMap& data_type_controllers,
     const syncable::ModelTypeSet& types,
     sync_api::ConfigureReason reason,
-    CancelableTask* ready_task,
+    base::Callback<void(bool)> ready_task,
     bool enable_nigori) {
   // Only one configure is allowed at a time.
   DCHECK(!pending_config_mode_state_.get());
   DCHECK(!pending_download_state_.get());
-  DCHECK(syncapi_initialized_);
-
-  if (types.count(syncable::AUTOFILL_PROFILE) != 0) {
-    ConfigureAutofillMigration();
-  }
+  DCHECK_GT(initialization_state_, NOT_INITIALIZED);
 
   syncable::ModelTypeSet types_copy = types;
   if (enable_nigori) {
     types_copy.insert(syncable::NIGORI);
   }
   bool nigori_currently_enabled = IsNigoriEnabled();
+  pending_config_mode_state_.reset(new PendingConfigureDataTypesState());
+  bool deleted_type = false;
   {
     base::AutoLock lock(registrar_lock_);
-    pending_config_mode_state_.reset(
-        MakePendingConfigModeState(data_type_controllers, types_copy,
-                                   ready_task, &registrar_.routing_info, reason,
-                                   nigori_currently_enabled));
+    GetPendingConfigModeState(data_type_controllers, types_copy,
+                              ready_task, &registrar_.routing_info, reason,
+                              nigori_currently_enabled,
+                              pending_config_mode_state_.get(),
+                              &deleted_type);
+  }
+
+  if (deleted_type) {
+    sync_thread_.message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(
+            core_.get(),
+            &SyncBackendHost::Core::DoRequestCleanupDisabledTypes));
   }
 
   StartConfiguration(NewCallback(core_.get(),
@@ -423,11 +375,11 @@ void SyncBackendHost::ConfigureDataTypes(
 }
 
 void SyncBackendHost::StartConfiguration(Callback0::Type* callback) {
-  // Put syncer in the config mode. DTM will put us in normal mode once it is.
+  // Put syncer in the config mode. DTM will put us in normal mode once it is
   // done. This is to ensure we dont do a normal sync when we are doing model
   // association.
-  core_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-    core_.get(),&SyncBackendHost::Core::DoStartConfiguration, callback));
+  sync_thread_.message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+      core_.get(), &SyncBackendHost::Core::DoStartConfiguration, callback));
 }
 
 void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
@@ -445,14 +397,9 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
 
   VLOG(1) << "Syncer in config mode. SBH executing"
           << "FinishConfigureDataTypesOnFrontendLoop";
-  if (pending_config_mode_state_->deleted_type) {
-    core_thread_.message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(core_.get(),
-        &SyncBackendHost::Core::DeferNudgeForCleanup));
-  }
 
   if (pending_config_mode_state_->added_types.none() &&
-      !core_->syncapi()->InitialSyncEndedForAllEnabledTypes()) {
+      !core_->sync_manager()->InitialSyncEndedForAllEnabledTypes()) {
     LOG(WARNING) << "No new types, but initial sync not finished."
                  << "Possible sync db corruption / removal.";
     // TODO(tim): Log / UMA / count this somehow?
@@ -470,7 +417,7 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
     VLOG(1) << "SyncBackendHost(" << this << "): No new types added. "
             << "Calling ready_task directly";
     // No new types - just notify the caller that the types are available.
-    pending_config_mode_state_->ready_task->Run();
+    pending_config_mode_state_->ready_task.Run(true);
   } else {
     pending_download_state_.reset(pending_config_mode_state_.release());
 
@@ -479,7 +426,7 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
       types_copy.set(syncable::NIGORI);
     VLOG(1) <<  "SyncBackendHost(" << this << "):New Types added. "
             << "Calling DoRequestConfig";
-    core_thread_.message_loop()->PostTask(FROM_HERE,
+    sync_thread_.message_loop()->PostTask(FROM_HERE,
          NewRunnableMethod(core_.get(),
                            &SyncBackendHost::Core::DoRequestConfig,
                            types_copy,
@@ -489,23 +436,22 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
   pending_config_mode_state_.reset();
 
   // Notify the SyncManager about the new types.
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(),
                         &SyncBackendHost::Core::DoUpdateEnabledTypes));
 }
 
 void SyncBackendHost::EncryptDataTypes(
     const syncable::ModelTypeSet& encrypted_types) {
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
      NewRunnableMethod(core_.get(),
                        &SyncBackendHost::Core::DoEncryptDataTypes,
                        encrypted_types));
 }
 
-void SyncBackendHost::RequestNudge(const tracked_objects::Location& location) {
-  core_thread_.message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoRequestNudge,
-                        location));
+syncable::ModelTypeSet SyncBackendHost::GetEncryptedDataTypes() const {
+  DCHECK_GT(initialization_state_, NOT_INITIALIZED);
+  return core_->sync_manager()->GetEncryptedDataTypes();
 }
 
 void SyncBackendHost::ActivateDataType(
@@ -545,13 +491,14 @@ void SyncBackendHost::DeactivateDataType(
 }
 
 bool SyncBackendHost::RequestClearServerData() {
-  core_thread_.message_loop()->PostTask(FROM_HERE,
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
      NewRunnableMethod(core_.get(),
      &SyncBackendHost::Core::DoRequestClearServerData));
   return true;
 }
 
 SyncBackendHost::Core::~Core() {
+  DCHECK(!sync_manager_.get());
 }
 
 void SyncBackendHost::Core::NotifyPassphraseRequired(
@@ -592,7 +539,7 @@ void SyncBackendHost::Core::NotifyUpdatedToken(const std::string& token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TokenAvailableDetails details(GaiaConstants::kSyncService, token);
   NotificationService::current()->Notify(
-      NotificationType::TOKEN_UPDATED,
+      chrome::NOTIFICATION_TOKEN_UPDATED,
       NotificationService::AllSources(),
       Details<const TokenAvailableDetails>(&details));
 }
@@ -615,24 +562,16 @@ void SyncBackendHost::Core::FinishConfigureDataTypesOnFrontendLoop() {
 }
 
 
-void SyncBackendHost::Core::CreateSyncNotifier(
-    const scoped_refptr<net::URLRequestContextGetter>& request_context_getter) {
-  const std::string& client_info = webkit_glue::GetUserAgent(GURL());
-  SyncNotifierFactory sync_notifier_factory(client_info);
-  sync_notifier_.reset(sync_notifier_factory.CreateSyncNotifier(
-      *CommandLine::ForCurrentProcess(),
-      request_context_getter));
-}
-
 SyncBackendHost::Core::DoInitializeOptions::DoInitializeOptions(
     const GURL& service_url,
-    sync_api::HttpPostProviderFactory* http_bridge_factory,
+    const scoped_refptr<net::URLRequestContextGetter>&
+        request_context_getter,
     const sync_api::SyncCredentials& credentials,
     bool delete_sync_data_folder,
     const std::string& restored_key_for_bootstrapping,
     bool setup_for_test_mode)
     : service_url(service_url),
-      http_bridge_factory(http_bridge_factory),
+      request_context_getter(request_context_getter),
       credentials(credentials),
       delete_sync_data_folder(delete_sync_data_folder),
       restored_key_for_bootstrapping(restored_key_for_bootstrapping),
@@ -642,23 +581,23 @@ SyncBackendHost::Core::DoInitializeOptions::DoInitializeOptions(
 SyncBackendHost::Core::DoInitializeOptions::~DoInitializeOptions() {}
 
 sync_api::UserShare* SyncBackendHost::GetUserShare() const {
-  DCHECK(syncapi_initialized_);
-  return core_->syncapi()->GetUserShare();
+  DCHECK(initialized());
+  return core_->sync_manager()->GetUserShare();
 }
 
 SyncBackendHost::Status SyncBackendHost::GetDetailedStatus() {
-  DCHECK(syncapi_initialized_);
-  return core_->syncapi()->GetDetailedStatus();
+  DCHECK(initialized());
+  return core_->sync_manager()->GetDetailedStatus();
 }
 
 SyncBackendHost::StatusSummary SyncBackendHost::GetStatusSummary() {
-  DCHECK(syncapi_initialized_);
-  return core_->syncapi()->GetStatusSummary();
+  DCHECK(initialized());
+  return core_->sync_manager()->GetStatusSummary();
 }
 
 string16 SyncBackendHost::GetAuthenticatedUsername() const {
-  DCHECK(syncapi_initialized_);
-  return UTF8ToUTF16(core_->syncapi()->GetAuthenticatedUsername());
+  DCHECK(initialized());
+  return UTF8ToUTF16(core_->sync_manager()->GetAuthenticatedUsername());
 }
 
 const GoogleServiceAuthError& SyncBackendHost::GetAuthError() const {
@@ -685,28 +624,27 @@ void SyncBackendHost::GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
 }
 
 bool SyncBackendHost::HasUnsyncedItems() const {
-  DCHECK(syncapi_initialized_);
-  return core_->syncapi()->HasUnsyncedItems();
+  DCHECK(initialized());
+  return core_->sync_manager()->HasUnsyncedItems();
 }
 
 void SyncBackendHost::LogUnsyncedItems(int level) const {
-  DCHECK(syncapi_initialized_);
-  return core_->syncapi()->LogUnsyncedItems(level);
+  DCHECK(initialized());
+  return core_->sync_manager()->LogUnsyncedItems(level);
 }
 
-SyncBackendHost::Core::Core(SyncBackendHost* backend)
-    : host_(backend),
-      syncapi_(new sync_api::SyncManager()),
+SyncBackendHost::Core::Core(const std::string& name, SyncBackendHost* backend)
+    : name_(name),
+      host_(backend),
       sync_manager_observer_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       parent_router_(NULL),
-      processing_passphrase_(false),
-      deferred_nudge_for_cleanup_requested_(false) {
+      processing_passphrase_(false) {
 }
 
 // Helper to construct a user agent string (ASCII) suitable for use by
 // the syncapi for any HTTP communication. This string is used by the sync
 // backend for classifying client types when calculating statistics.
-std::string MakeUserAgentForSyncapi() {
+std::string MakeUserAgentForSyncApi() {
   std::string user_agent;
   user_agent = "Chrome ";
 #if defined(OS_WIN)
@@ -734,7 +672,7 @@ std::string MakeUserAgentForSyncapi() {
 }
 
 void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
   processing_passphrase_ = false;
 
   // Blow away the partial or corrupt sync data folder before doing any more
@@ -748,18 +686,19 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
   bool success = file_util::CreateDirectory(host_->sync_data_folder_path());
   DCHECK(success);
 
-  syncapi_->AddObserver(this);
+  sync_manager_.reset(new sync_api::SyncManager(name_)),
+  sync_manager_->AddObserver(this);
   const FilePath& path_str = host_->sync_data_folder_path();
-  success = syncapi_->Init(
+  success = sync_manager_->Init(
       path_str,
-      (options.service_url.host() + options.service_url.path()).c_str(),
+      options.service_url.host() + options.service_url.path(),
       options.service_url.EffectiveIntPort(),
       options.service_url.SchemeIsSecure(),
-      options.http_bridge_factory,
+      host_->MakeHttpBridgeFactory(options.request_context_getter),
       host_,  // ModelSafeWorkerRegistrar.
-      MakeUserAgentForSyncapi().c_str(),
+      MakeUserAgentForSyncApi(),
       options.credentials,
-      sync_notifier_.get(),
+      host_->sync_notifier_factory_.CreateSyncNotifier(),
       options.restored_key_for_bootstrapping,
       options.setup_for_test_mode);
   DCHECK(success) << "Syncapi initialization failed!";
@@ -767,27 +706,24 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
 
 void SyncBackendHost::Core::DoUpdateCredentials(
     const SyncCredentials& credentials) {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->UpdateCredentials(credentials);
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
+  sync_manager_->UpdateCredentials(credentials);
 }
 
 void SyncBackendHost::Core::DoUpdateEnabledTypes() {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->UpdateEnabledTypes();
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
+  sync_manager_->UpdateEnabledTypes();
 }
 
 void SyncBackendHost::Core::DoStartSyncing() {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->StartSyncingNormally();
-  if (deferred_nudge_for_cleanup_requested_)
-    syncapi_->RequestNudge(FROM_HERE);
-  deferred_nudge_for_cleanup_requested_ = false;
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
+  sync_manager_->StartSyncingNormally();
 }
 
 void SyncBackendHost::Core::DoSetPassphrase(const std::string& passphrase,
                                             bool is_explicit) {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->SetPassphrase(passphrase, is_explicit);
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
+  sync_manager_->SetPassphrase(passphrase, is_explicit);
 }
 
 bool SyncBackendHost::Core::processing_passphrase() const {
@@ -802,18 +738,18 @@ void SyncBackendHost::Core::set_processing_passphrase() {
 
 void SyncBackendHost::Core::DoEncryptDataTypes(
     const syncable::ModelTypeSet& encrypted_types) {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->EncryptDataTypes(encrypted_types);
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
+  sync_manager_->EncryptDataTypes(encrypted_types);
 }
 
 void SyncBackendHost::Core::DoRequestConfig(
     const syncable::ModelTypeBitSet& added_types,
     sync_api::ConfigureReason reason) {
-  syncapi_->RequestConfig(added_types, reason);
+  sync_manager_->RequestConfig(added_types, reason);
 }
 
 void SyncBackendHost::Core::DoStartConfiguration(Callback0::Type* callback) {
-  syncapi_->StartConfigurationMode(callback);
+  sync_manager_->StartConfigurationMode(callback);
 }
 
 UIModelWorker* SyncBackendHost::ui_worker() {
@@ -826,12 +762,13 @@ UIModelWorker* SyncBackendHost::ui_worker() {
 }
 
 void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
-  DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
+  DCHECK(MessageLoop::current() == host_->sync_thread_.message_loop());
 
   save_changes_timer_.Stop();
-  syncapi_->Shutdown();  // Stops the SyncerThread.
-  syncapi_->RemoveObserver(this);
+  sync_manager_->Shutdown();  // Stops the SyncerThread.
+  sync_manager_->RemoveObserver(this);
   DisconnectChildJsEventRouter();
+  sync_manager_.reset();
   host_->ui_worker()->OnSyncerShutdownComplete();
 
   if (sync_disabled)
@@ -856,7 +793,8 @@ ChangeProcessor* SyncBackendHost::Core::GetProcessor(
     return NULL;
 
   if (!IsCurrentThreadSafeForModel(model_type)) {
-    NOTREACHED() << "Changes applied on wrong thread.";
+    NOTREACHED() << "Changes applied on wrong thread. Model: "
+                 <<  syncable::ModelTypeToString(model_type);
     return NULL;
   }
 
@@ -903,7 +841,6 @@ void SyncBackendHost::Core::OnChangesComplete(
   processor->CommitChangesFromSyncModel();
 }
 
-
 void SyncBackendHost::Core::OnSyncCycleCompleted(
     const SyncSessionSnapshot* snapshot) {
   host_->frontend_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
@@ -928,22 +865,22 @@ void SyncBackendHost::Core::HandleSyncCycleCompletedOnFrontendLoop(
   // if this sync cycle has initialized all of the types we've been
   // waiting for.
   if (host_->pending_download_state_.get()) {
+    scoped_ptr<PendingConfigureDataTypesState> state(
+        host_->pending_download_state_.release());
     bool found_all_added = true;
-    for (syncable::ModelTypeSet::const_iterator it =
-             host_->pending_download_state_->initial_types.begin();
-         it != host_->pending_download_state_->initial_types.end();
+    syncable::ModelTypeSet::const_iterator it;
+    for (it = state->initial_types.begin(); it != state->initial_types.end();
          ++it) {
-      if (host_->pending_download_state_->added_types.test(*it))
+      if (state->added_types.test(*it))
         found_all_added &= snapshot->initial_sync_ended.test(*it);
     }
-    if (!found_all_added) {
-      NOTREACHED() << "Update didn't return updates for all types requested.";
-    } else {
-      host_->pending_download_state_->ready_task->Run();
-    }
-    host_->pending_download_state_.reset();
+    state->ready_task.Run(found_all_added);
+    if (!found_all_added)
+      return;
   }
-  host_->frontend_->OnSyncCycleCompleted();
+
+  if (host_->initialized())
+    host_->frontend_->OnSyncCycleCompleted();
 }
 
 void SyncBackendHost::Core::OnInitializationComplete() {
@@ -955,27 +892,53 @@ void SyncBackendHost::Core::OnInitializationComplete() {
   // can definitely be null in here.
   host_->frontend_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this,
-                        &Core::HandleInitalizationCompletedOnFrontendLoop));
+                        &Core::HandleInitializationCompletedOnFrontendLoop,
+                        true));
 
   // Initialization is complete, so we can schedule recurring SaveChanges.
-  host_->core_thread_.message_loop()->PostTask(FROM_HERE,
+  host_->sync_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(this, &Core::StartSavingChanges));
 }
 
-void SyncBackendHost::Core::HandleInitalizationCompletedOnFrontendLoop() {
+void SyncBackendHost::Core::HandleInitializationCompletedOnFrontendLoop(
+    bool success) {
   if (!host_)
     return;
-  host_->HandleInitializationCompletedOnFrontendLoop();
+  host_->HandleInitializationCompletedOnFrontendLoop(success);
 }
 
-void SyncBackendHost::HandleInitializationCompletedOnFrontendLoop() {
+void SyncBackendHost::HandleInitializationCompletedOnFrontendLoop(
+    bool success) {
   if (!frontend_)
     return;
-  syncapi_initialized_ = true;
-  // Now that the syncapi is initialized, we can update the cryptographer (and
-  // can handle any ON_PASSPHRASE_REQUIRED notifications that may arise).
-  core_->syncapi()->RefreshEncryption();
-  frontend_->OnBackendInitialized();
+  if (!success) {
+    frontend_->OnBackendInitialized(false);
+    return;
+  }
+
+  bool setup_completed =
+      profile_->GetPrefs()->GetBoolean(prefs::kSyncHasSetupCompleted);
+  if (setup_completed || initialization_state_ == DOWNLOADING_NIGORI) {
+    // Now that the syncapi is initialized, we can update the cryptographer
+    // and can handle any ON_PASSPHRASE_REQUIRED notifications that may arise.
+    // TODO(tim): Bug 87797. We should be able to RefreshEncryption
+    // unconditionally as soon as the UI supports having this info early on.
+    if (setup_completed)
+      core_->sync_manager()->RefreshEncryption();
+    initialization_state_ = INITIALIZED;
+    frontend_->OnBackendInitialized(true);
+    return;
+  }
+
+  initialization_state_ = DOWNLOADING_NIGORI;
+  ConfigureDataTypes(
+      DataTypeController::TypeMap(),
+      syncable::ModelTypeSet(),
+      sync_api::CONFIGURE_REASON_NEW_CLIENT,
+      base::Bind(
+          &SyncBackendHost::Core::HandleInitializationCompletedOnFrontendLoop,
+          core_.get()),
+      true);
 }
 
 bool SyncBackendHost::Core::IsCurrentThreadSafeForModel(
@@ -1114,17 +1077,16 @@ void SyncBackendHost::Core::StartSavingChanges() {
       this, &Core::SaveChanges);
 }
 
-void SyncBackendHost::Core::DoRequestNudge(
-    const tracked_objects::Location& nudge_location) {
-  syncapi_->RequestNudge(nudge_location);
+void SyncBackendHost::Core::DoRequestClearServerData() {
+  sync_manager_->RequestClearServerData();
 }
 
-void SyncBackendHost::Core::DoRequestClearServerData() {
-  syncapi_->RequestClearServerData();
+void SyncBackendHost::Core::DoRequestCleanupDisabledTypes() {
+  sync_manager_->RequestCleanupDisabledTypes();
 }
 
 void SyncBackendHost::Core::SaveChanges() {
-  syncapi_->SaveChanges();
+  sync_manager_->SaveChanges();
 }
 
 void SyncBackendHost::Core::DeleteSyncDataFolder() {
@@ -1138,9 +1100,9 @@ void SyncBackendHost::Core::SetParentJsEventRouter(JsEventRouter* router) {
   DCHECK_EQ(MessageLoop::current(), host_->frontend_loop_);
   DCHECK(router);
   parent_router_ = router;
-  MessageLoop* core_message_loop = host_->core_thread_.message_loop();
-  CHECK(core_message_loop);
-  core_message_loop->PostTask(
+  MessageLoop* sync_loop = host_->sync_thread_.message_loop();
+  CHECK(sync_loop);
+  sync_loop->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
                         &SyncBackendHost::Core::ConnectChildJsEventRouter));
@@ -1149,9 +1111,9 @@ void SyncBackendHost::Core::SetParentJsEventRouter(JsEventRouter* router) {
 void SyncBackendHost::Core::RemoveParentJsEventRouter() {
   DCHECK_EQ(MessageLoop::current(), host_->frontend_loop_);
   parent_router_ = NULL;
-  MessageLoop* core_message_loop = host_->core_thread_.message_loop();
-  CHECK(core_message_loop);
-  core_message_loop->PostTask(
+  MessageLoop* sync_loop = host_->sync_thread_.message_loop();
+  CHECK(sync_loop);
+  sync_loop->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
                         &SyncBackendHost::Core::DisconnectChildJsEventRouter));
@@ -1166,9 +1128,9 @@ void SyncBackendHost::Core::ProcessMessage(
     const std::string& name, const JsArgList& args,
     const JsEventHandler* sender) {
   DCHECK_EQ(MessageLoop::current(), host_->frontend_loop_);
-  MessageLoop* core_message_loop = host_->core_thread_.message_loop();
-  CHECK(core_message_loop);
-  core_message_loop->PostTask(
+  MessageLoop* sync_loop = host_->sync_thread_.message_loop();
+  CHECK(sync_loop);
+  sync_loop->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
                         &SyncBackendHost::Core::DoProcessMessage,
@@ -1176,31 +1138,26 @@ void SyncBackendHost::Core::ProcessMessage(
 }
 
 void SyncBackendHost::Core::ConnectChildJsEventRouter() {
-  DCHECK_EQ(MessageLoop::current(), host_->core_thread_.message_loop());
+  DCHECK_EQ(MessageLoop::current(), host_->sync_thread_.message_loop());
   // We need this check since AddObserver() can be called at most once
   // for a given observer.
-  if (!syncapi_->GetJsBackend()->GetParentJsEventRouter()) {
-    syncapi_->GetJsBackend()->SetParentJsEventRouter(this);
-    syncapi_->AddObserver(&sync_manager_observer_);
+  if (!sync_manager_->GetJsBackend()->GetParentJsEventRouter()) {
+    sync_manager_->GetJsBackend()->SetParentJsEventRouter(this);
+    sync_manager_->AddObserver(&sync_manager_observer_);
   }
 }
 
 void SyncBackendHost::Core::DisconnectChildJsEventRouter() {
-  DCHECK_EQ(MessageLoop::current(), host_->core_thread_.message_loop());
-  syncapi_->GetJsBackend()->RemoveParentJsEventRouter();
-  syncapi_->RemoveObserver(&sync_manager_observer_);
+  DCHECK_EQ(MessageLoop::current(), host_->sync_thread_.message_loop());
+  sync_manager_->GetJsBackend()->RemoveParentJsEventRouter();
+  sync_manager_->RemoveObserver(&sync_manager_observer_);
 }
 
 void SyncBackendHost::Core::DoProcessMessage(
     const std::string& name, const JsArgList& args,
     const JsEventHandler* sender) {
-  DCHECK_EQ(MessageLoop::current(), host_->core_thread_.message_loop());
-  syncapi_->GetJsBackend()->ProcessMessage(name, args, sender);
-}
-
-void SyncBackendHost::Core::DeferNudgeForCleanup() {
-  DCHECK_EQ(MessageLoop::current(), host_->core_thread_.message_loop());
-  deferred_nudge_for_cleanup_requested_ = true;
+  DCHECK_EQ(MessageLoop::current(), host_->sync_thread_.message_loop());
+  sync_manager_->GetJsBackend()->ProcessMessage(name, args, sender);
 }
 
 }  // namespace browser_sync

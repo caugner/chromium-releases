@@ -5,21 +5,36 @@
 #include "chrome/browser/ui/panels/panel.h"
 
 #include "base/logging.h"
+#include "chrome/browser/extensions/extension_prefs.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/window_sizer.h"
+#include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/extensions/extension.h"
 #include "ui/gfx/rect.h"
 
+// static
+const Extension* Panel::GetExtension(Browser* browser) {
+  // Find the extension. When we create a panel from an extension, the extension
+  // ID is passed as the app name to the Browser.
+  ExtensionService* extension_service =
+      browser->GetProfile()->GetExtensionService();
+  return extension_service->GetExtensionById(
+      web_app::GetExtensionIdFromApplicationName(browser->app_name()), false);
+}
+
 Panel::Panel(Browser* browser, const gfx::Rect& bounds)
-    : bounds_(bounds),
-#ifndef NDEBUG
-      closing_(false),
-#endif
-      minimized_(false) {
-  browser_window_.reset(CreateNativePanel(browser, this));
+    : browser_(browser),
+      native_panel_(NULL),
+      expansion_state_(EXPANDED) {
+  native_panel_ = CreateNativePanel(browser, this, bounds);
 }
 
 Panel::~Panel() {
-  Close();
+  // Invoked by native panel so do not access native_panel_ here.
 }
 
 PanelManager* Panel::manager() const {
@@ -27,34 +42,41 @@ PanelManager* Panel::manager() const {
 }
 
 void Panel::SetPanelBounds(const gfx::Rect& bounds) {
-  if (bounds_ == bounds)
-    return;
-  bounds_ = bounds;
-  browser_window_->SetBounds(bounds);
+  native_panel_->SetPanelBounds(bounds);
 }
 
-void Panel::Minimize() {
-  if (minimized_)
+void Panel::SetExpansionState(ExpansionState new_expansion_state) {
+  if (expansion_state_ == new_expansion_state)
     return;
-  minimized_ = true;
 
-  NOTIMPLEMENTED();
+  expansion_state_ = new_expansion_state;
+
+  native_panel_->OnPanelExpansionStateChanged(expansion_state_);
+
+  // The minimized panel should not get the focus.
+  if (expansion_state_ == MINIMIZED)
+    Deactivate();
 }
 
-void Panel::Restore() {
-  if (!minimized_)
-    return;
-  minimized_ = false;
+bool Panel::ShouldBringUpTitleBar(int mouse_x, int mouse_y) const {
+  // Skip the expanded panel.
+  if (expansion_state_ == Panel::EXPANDED)
+    return false;
 
-  NOTIMPLEMENTED();
+  // Let the native panel decide.
+  return native_panel_->ShouldBringUpPanelTitleBar(mouse_x, mouse_y);
+}
+
+bool Panel::IsDrawingAttention() const {
+  return native_panel_->IsDrawingAttention();
 }
 
 void Panel::Show() {
-  browser_window_->Show();
+  native_panel_->ShowPanel();
 }
 
 void Panel::ShowInactive() {
-  NOTIMPLEMENTED();
+  native_panel_->ShowPanelInactive();
 }
 
 void Panel::SetBounds(const gfx::Rect& bounds) {
@@ -62,39 +84,31 @@ void Panel::SetBounds(const gfx::Rect& bounds) {
   // by panel manager.
 }
 
+// Close() may be called multiple times if the browser window is not ready to
+// close on the first attempt.
 void Panel::Close() {
-  if (!browser_window_.get())
-    return;
-
-  // Mark that we're starting the closing process. This is used by the platform
-  // specific BrowserWindow implementation to ensure Panel::Close() should be
-  // called to close a panel.
-#ifndef NDEBUG
-  closing_ = true;
-#endif
-
-  browser_window_->Close();
+  native_panel_->ClosePanel();
   manager()->Remove(this);
 }
 
 void Panel::Activate() {
-  browser_window_->Activate();
+  native_panel_->ActivatePanel();
 }
 
 void Panel::Deactivate() {
-  browser_window_->Deactivate();
+  native_panel_->DeactivatePanel();
 }
 
 bool Panel::IsActive() const {
-  return browser_window_->IsActive();
+  return native_panel_->IsPanelActive();
 }
 
 void Panel::FlashFrame() {
-  NOTIMPLEMENTED();
+  native_panel_->DrawAttention();
 }
 
 gfx::NativeWindow Panel::GetNativeHandle() {
-  return browser_window_->GetNativeHandle();
+  return native_panel_->GetNativePanelHandle();
 }
 
 BrowserWindowTesting* Panel::GetBrowserWindowTesting() {
@@ -112,10 +126,11 @@ void Panel::ToolbarSizeChanged(bool is_animating){
 }
 
 void Panel::UpdateTitleBar() {
-  browser_window_->UpdateTitleBar();
+  native_panel_->UpdatePanelTitleBar();
 }
 
-void Panel::ShelfVisibilityChanged() {
+void Panel::BookmarkBarStateChanged(
+    BookmarkBar::AnimateChangeType change_type) {
   NOTIMPLEMENTED();
 }
 
@@ -132,11 +147,11 @@ void Panel::SetStarredState(bool is_starred) {
 }
 
 gfx::Rect Panel::GetRestoredBounds() const {
-  return bounds_;
+  return native_panel_->GetPanelBounds();
 }
 
 gfx::Rect Panel::GetBounds() const {
-  return minimized_ ? minimized_bounds_ : bounds_;
+  return native_panel_->GetPanelBounds();
 }
 
 bool Panel::IsMaximized() const {
@@ -203,8 +218,11 @@ bool Panel::IsBookmarkBarAnimating() const {
   return false;
 }
 
+// This is used by extensions to decide if a window can be closed.
+// Always return true as panels do not have tabs that can be dragged,
+// during which extensions will avoid closing a window.
 bool Panel::IsTabStripEditable() const {
-  return false;
+  return true;
 }
 
 bool Panel::IsToolbarVisible() const {
@@ -219,7 +237,7 @@ void Panel::DisableInactiveFrame() {
 void Panel::ConfirmSetDefaultSearchProvider(
     TabContents* tab_contents,
     TemplateURL* template_url,
-    TemplateURLModel* template_url_model) {
+    TemplateURLService* template_url_service) {
   NOTIMPLEMENTED();
 }
 
@@ -241,7 +259,7 @@ void Panel::ShowUpdateChromeDialog() {
 }
 
 void Panel::ShowTaskManager() {
-  NOTIMPLEMENTED();
+  native_panel_->ShowTaskManagerForPanel();
 }
 
 void Panel::ShowBackgroundPages() {
@@ -253,13 +271,28 @@ void Panel::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
 }
 
 bool Panel::IsDownloadShelfVisible() const {
-  NOTIMPLEMENTED();
   return false;
 }
 
 DownloadShelf* Panel::GetDownloadShelf() {
-  NOTIMPLEMENTED();
-  return NULL;
+  Profile* profile = browser_->GetProfile();
+  Browser* browser = Browser::GetTabbedBrowser(profile, true);
+
+  if (!browser) {
+    // Set initial bounds so window will not be positioned at an offset
+    // to this panel as panels are at the bottom of the screen.
+    gfx::Rect window_bounds;
+    bool maximized;
+    WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
+                                        browser_, &window_bounds, &maximized);
+    Browser::CreateParams params(Browser::TYPE_TABBED, profile);
+    params.initial_bounds = window_bounds;
+    browser = Browser::CreateWithParams(params);
+    browser->NewTab();
+  }
+
+  browser->window()->Show();  // Ensure download shelf is visible.
+  return browser->window()->GetDownloadShelf();
 }
 
 void Panel::ShowRepostFormWarningDialog(TabContents* tab_contents) {
@@ -284,7 +317,7 @@ void Panel::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
 }
 
 void Panel::UserChangedTheme() {
-  browser_window_->UserChangedTheme();
+  native_panel_->NotifyPanelOnUserChangedTheme();
 }
 
 int Panel::GetExtraRenderViewHeight() const {
@@ -350,6 +383,15 @@ void Panel::ToggleTabStripMode() {
 void Panel::OpenTabpose() {
   NOTIMPLEMENTED();
 }
+
+void Panel::SetPresentationMode(bool presentation_mode) {
+  NOTIMPLEMENTED();
+}
+
+bool Panel::InPresentationMode() {
+  NOTIMPLEMENTED();
+  return false;
+}
 #endif
 
 void Panel::PrepareForInstant() {
@@ -382,5 +424,5 @@ void Panel::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
 #endif
 
 void Panel::DestroyBrowser() {
-  NOTIMPLEMENTED();
+  native_panel_->DestroyPanelBrowser();
 }

@@ -4,6 +4,7 @@
 
 #include "net/url_request/url_request_http_job.h"
 
+#include "base/bind.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -16,13 +17,14 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "net/base/cert_status_flags.h"
-#include "net/base/cookie_store.h"
+#include "net/base/cookie_monster.h"
 #include "net/base/filter.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/base/network_delegate.h"
 #include "net/base/sdch_manager.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_config_service.h"
@@ -248,6 +250,8 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
           this, &URLRequestHttpJob::OnStartCompleted)),
       ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
           this, &URLRequestHttpJob::OnReadCompleted)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(notify_before_headers_sent_callback_(
+          this, &URLRequestHttpJob::NotifyBeforeSendHeadersCallback)),
       read_in_progress_(false),
       transaction_(NULL),
       throttling_entry_(URLRequestThrottlerManager::GetInstance()->
@@ -258,6 +262,7 @@ URLRequestHttpJob::URLRequestHttpJob(URLRequest* request)
       is_cached_content_(false),
       request_creation_time_(),
       packet_timing_enabled_(false),
+      done_(false),
       bytes_observed_in_packets_(0),
       packet_times_(),
       request_time_snapshot_(),
@@ -312,6 +317,10 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
   // notified of the headers completion so that we can update the cookie store.
   if (transaction_->IsReadyToRestartForAuth()) {
     DCHECK(!response_info_->auth_challenge.get());
+    // TODO(battre): This breaks the webrequest API for
+    // URLRequestTestHTTP.BasicAuthWithCookies
+    // where OnBeforeSendHeaders -> OnSendHeaders -> OnBeforeSendHeaders
+    // occurs.
     RestartTransactionWithAuth(string16(), string16());
     return;
   }
@@ -319,47 +328,63 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
   URLRequestJob::NotifyHeadersComplete();
 }
 
-void URLRequestHttpJob::NotifyDone(const URLRequestStatus& original_status) {
-  URLRequestStatus status(original_status);
-  // Some servers send the body compressed, but specify the content length as
-  // the uncompressed size.  Although this violates the HTTP spec we want to
-  // support it (as IE and FireFox do), but *only* for an exact match.
-  // See http://crbug.com/79694.
-  if (status.os_error() == net::ERR_CONNECTION_CLOSED) {
-    if (request_ && request_->response_headers()) {
-      int64 expected_length = request_->response_headers()->GetContentLength();
-      VLOG(1) << __FUNCTION__ << "() "
-              << "\"" << request_->url().spec() << "\""
-              << " content-length = " << expected_length
-              << " pre total = " << prefilter_bytes_read()
-              << " post total = " << postfilter_bytes_read();
-      if (postfilter_bytes_read() == expected_length) {
-        // Clear the error.
-        status.set_status(URLRequestStatus::SUCCESS);
-        status.set_os_error(0);
-      }
-    }
-  }
-
-  RecordCompressionHistograms();
+void URLRequestHttpJob::NotifyDone(const URLRequestStatus& status) {
+  DoneWithRequest(FINISHED);
   URLRequestJob::NotifyDone(status);
 }
 
 void URLRequestHttpJob::DestroyTransaction() {
   DCHECK(transaction_.get());
 
+  DoneWithRequest(ABORTED);
   transaction_.reset();
   response_info_ = NULL;
   context_ = NULL;
 }
 
 void URLRequestHttpJob::StartTransaction() {
+  if (request_->context() && request_->context()->network_delegate()) {
+    int rv = request_->context()->network_delegate()->NotifyBeforeSendHeaders(
+        request_, &notify_before_headers_sent_callback_,
+        &request_info_.extra_headers);
+    // If an extension blocks the request, we rely on the callback to
+    // StartTransactionInternal().
+    if (rv == ERR_IO_PENDING) {
+      request_->net_log().BeginEvent(
+          NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+      return;
+    }
+  }
+  StartTransactionInternal();
+}
+
+void URLRequestHttpJob::NotifyBeforeSendHeadersCallback(int result) {
+  request_->net_log().EndEvent(
+      NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+
+  if (result == OK) {
+    StartTransactionInternal();
+  } else {
+    // TODO(battre): Allow passing information of the extension that canceled
+    // the event.
+    request_->net_log().AddEvent(NetLog::TYPE_CANCELLED,
+        make_scoped_refptr(new NetLogStringParameter("source", "delegate")));
+    NotifyCanceled();
+  }
+}
+
+void URLRequestHttpJob::StartTransactionInternal() {
   // NOTE: This method assumes that request_info_ is already setup properly.
 
   // If we already have a transaction, then we should restart the transaction
   // with auth provided by username_ and password_.
 
   int rv;
+
+  if (request_->context() && request_->context()->network_delegate()) {
+    request_->context()->network_delegate()->NotifySendHeaders(
+        request_, request_info_.extra_headers);
+  }
 
   if (transaction_.get()) {
     rv = transaction_->RestartWithAuth(username_, password_, &start_callback_);
@@ -376,6 +401,7 @@ void URLRequestHttpJob::StartTransaction() {
           !throttling_entry_->IsDuringExponentialBackoff()) {
         rv = transaction_->Start(
             &request_info_, &start_callback_, request_->net_log());
+        start_time_ = base::TimeTicks::Now();
       } else {
         // Special error code for the exponential back-off module.
         rv = ERR_TEMPORARILY_THROTTLED;
@@ -398,60 +424,70 @@ void URLRequestHttpJob::StartTransaction() {
 }
 
 void URLRequestHttpJob::AddExtraHeaders() {
-  // TODO(jar): Consider optimizing away SDCH advertising bytes when the URL is
-  // probably an img or such (and SDCH encoding is not likely).
-  bool advertise_sdch = SdchManager::Global() &&
-      SdchManager::Global()->IsInSupportedDomain(request_->url());
-  std::string avail_dictionaries;
-  if (advertise_sdch) {
-    SdchManager::Global()->GetAvailDictionaryList(request_->url(),
-                                                  &avail_dictionaries);
+  // Supply Accept-Encoding field only if it is not already provided.
+  // It should be provided IF the content is known to have restrictions on
+  // potential encoding, such as streaming multi-media.
+  // For details see bug 47381.
+  // TODO(jar, enal): jpeg files etc. should set up a request header if
+  // possible. Right now it is done only by buffered_resource_loader and
+  // simple_data_source.
+  if (!request_info_.extra_headers.HasHeader(
+      HttpRequestHeaders::kAcceptEncoding)) {
+    bool advertise_sdch = SdchManager::Global() &&
+        SdchManager::Global()->IsInSupportedDomain(request_->url());
+    std::string avail_dictionaries;
+    if (advertise_sdch) {
+      SdchManager::Global()->GetAvailDictionaryList(request_->url(),
+                                                    &avail_dictionaries);
 
-    // The AllowLatencyExperiment() is only true if we've successfully done a
-    // full SDCH compression recently in this browser session for this host.
-    // Note that for this path, there might be no applicable dictionaries, and
-    // hence we can't participate in the experiment.
-    if (!avail_dictionaries.empty() &&
-        SdchManager::Global()->AllowLatencyExperiment(request_->url())) {
-      // We are participating in the test (or control), and hence we'll
-      // eventually record statistics via either SDCH_EXPERIMENT_DECODE or
-      // SDCH_EXPERIMENT_HOLDBACK, and we'll need some packet timing data.
-      packet_timing_enabled_ = true;
-      if (base::RandDouble() < .01) {
-        sdch_test_control_ = true;  // 1% probability.
-        advertise_sdch = false;
-      } else {
-        sdch_test_activated_ = true;
+      // The AllowLatencyExperiment() is only true if we've successfully done a
+      // full SDCH compression recently in this browser session for this host.
+      // Note that for this path, there might be no applicable dictionaries,
+      // and hence we can't participate in the experiment.
+      if (!avail_dictionaries.empty() &&
+          SdchManager::Global()->AllowLatencyExperiment(request_->url())) {
+        // We are participating in the test (or control), and hence we'll
+        // eventually record statistics via either SDCH_EXPERIMENT_DECODE or
+        // SDCH_EXPERIMENT_HOLDBACK, and we'll need some packet timing data.
+        packet_timing_enabled_ = true;
+        if (base::RandDouble() < .01) {
+          sdch_test_control_ = true;  // 1% probability.
+          advertise_sdch = false;
+        } else {
+          sdch_test_activated_ = true;
+        }
+      }
+    }
+
+    // Supply Accept-Encoding headers first so that it is more likely that they
+    // will be in the first transmitted packet.  This can sometimes make it
+    // easier to filter and analyze the streams to assure that a proxy has not
+    // damaged these headers.  Some proxies deliberately corrupt Accept-Encoding
+    // headers.
+    if (!advertise_sdch) {
+      // Tell the server what compression formats we support (other than SDCH).
+      request_info_.extra_headers.SetHeader(
+          HttpRequestHeaders::kAcceptEncoding, "gzip,deflate");
+    } else {
+      // Include SDCH in acceptable list.
+      request_info_.extra_headers.SetHeader(
+          HttpRequestHeaders::kAcceptEncoding, "gzip,deflate,sdch");
+      if (!avail_dictionaries.empty()) {
+        request_info_.extra_headers.SetHeader(
+            kAvailDictionaryHeader,
+            avail_dictionaries);
+        sdch_dictionary_advertised_ = true;
+        // Since we're tagging this transaction as advertising a dictionary,
+        // we'll definitely employ an SDCH filter (or tentative sdch filter)
+        // when we get a response.  When done, we'll record histograms via
+        // SDCH_DECODE or SDCH_PASSTHROUGH.  Hence we need to record packet
+        // arrival times.
+        packet_timing_enabled_ = true;
       }
     }
   }
 
-  // Supply Accept-Encoding headers first so that it is more likely that they
-  // will be in the first transmitted packet.  This can sometimes make it easier
-  // to filter and analyze the streams to assure that a proxy has not damaged
-  // these headers.  Some proxies deliberately corrupt Accept-Encoding headers.
-  if (!advertise_sdch) {
-    // Tell the server what compression formats we support (other than SDCH).
-    request_info_.extra_headers.SetHeader(
-        HttpRequestHeaders::kAcceptEncoding, "gzip,deflate");
-  } else {
-    // Include SDCH in acceptable list.
-    request_info_.extra_headers.SetHeader(
-        HttpRequestHeaders::kAcceptEncoding, "gzip,deflate,sdch");
-    if (!avail_dictionaries.empty()) {
-      request_info_.extra_headers.SetHeader(
-          kAvailDictionaryHeader,
-          avail_dictionaries);
-      sdch_dictionary_advertised_ = true;
-      // Since we're tagging this transaction as advertising a dictionary, we'll
-      // definitely employ an SDCH filter (or tentative sdch filter) when we get
-      // a response.  When done, we'll record histograms via SDCH_DECODE or
-      // SDCH_PASSTHROUGH.  Hence we need to record packet arrival times.
-      packet_timing_enabled_ = true;
-    }
-  }
-
-  URLRequestContext* context = request_->context();
+  const URLRequestContext* context = request_->context();
   if (context) {
     // Only add default Accept-Language and Accept-Charset if the request
     // didn't have them specified.
@@ -478,26 +514,35 @@ void URLRequestHttpJob::AddCookieHeaderAndStart() {
     return;
 
   bool allow = true;
-  if (request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES ||
-      (request_->delegate() &&
-       !request_->delegate()->CanGetCookies(request_))) {
+  if ((request_info_.load_flags & LOAD_DO_NOT_SEND_COOKIES) ||
+      !CanGetCookies()) {
     allow = false;
   }
 
   if (request_->context()->cookie_store() && allow) {
     CookieOptions options;
     options.set_include_httponly();
-    std::string cookie_line;
-    std::vector<CookieStore::CookieInfo> cookie_infos;
-    request_->context()->cookie_store()->GetCookiesWithInfo(
-        request_->url(), options, &cookie_line, &cookie_infos);
-    if (!cookie_line.empty()) {
-      request_info_.extra_headers.SetHeader(
-          HttpRequestHeaders::kCookie, cookie_line);
-    }
-    if (URLRequest::AreMacCookiesEnabled())
-      AddAuthorizationHeader(cookie_infos, &request_info_);
+    request_->context()->cookie_store()->GetCookiesWithInfoAsync(
+        request_->url(), options,
+        base::Bind(&URLRequestHttpJob::OnCookiesLoaded, this));
+  } else {
+    DoStartTransaction();
   }
+}
+
+void URLRequestHttpJob::OnCookiesLoaded(
+    std::string* cookie_line,
+    std::vector<net::CookieStore::CookieInfo>* cookie_infos) {
+  if (!cookie_line->empty()) {
+    request_info_.extra_headers.SetHeader(
+        HttpRequestHeaders::kCookie, *cookie_line);
+  }
+  if (URLRequest::AreMacCookiesEnabled())
+    AddAuthorizationHeader(*cookie_infos, &request_info_);
+  DoStartTransaction();
+}
+
+void URLRequestHttpJob::DoStartTransaction() {
   // We may have been canceled within CanGetCookies.
   if (GetStatus().is_success()) {
     StartTransaction();
@@ -534,22 +579,27 @@ void URLRequestHttpJob::SaveNextCookie() {
   // be notifying our consumer asynchronously via OnStartCompleted.
   SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
 
-  bool allow = true;
   CookieOptions options;
-  if (request_info_.load_flags & LOAD_DO_NOT_SAVE_COOKIES) {
-    allow = false;
-  } else if (request_->delegate() && request_->context()->cookie_store()) {
+  if (!(request_info_.load_flags & LOAD_DO_NOT_SAVE_COOKIES) &&
+      request_->context()->cookie_store()) {
     CookieOptions options;
     options.set_include_httponly();
-    if (request_->delegate()->CanSetCookie(
-            request_,
-            response_cookies_[response_cookies_save_index_], &options)) {
-      request_->context()->cookie_store()->SetCookieWithOptions(
+    if (CanSetCookie(
+        response_cookies_[response_cookies_save_index_], &options)) {
+      request_->context()->cookie_store()->SetCookieWithOptionsAsync(
           request_->url(), response_cookies_[response_cookies_save_index_],
-          options);
+          options, base::Bind(&URLRequestHttpJob::OnCookieSaved, this));
+      return;
     }
   }
+  CookieHandled();
+}
 
+void URLRequestHttpJob::OnCookieSaved(bool cookie_status) {
+  CookieHandled();
+}
+
+void URLRequestHttpJob::CookieHandled() {
   response_cookies_save_index_++;
   // We may have been canceled within OnSetCookie.
   if (GetStatus().is_success()) {
@@ -575,7 +625,7 @@ void URLRequestHttpJob::FetchResponseCookies(
 void URLRequestHttpJob::ProcessStrictTransportSecurityHeader() {
   DCHECK(response_info_);
 
-  URLRequestContext* ctx = request_->context();
+  const URLRequestContext* ctx = request_->context();
   if (!ctx || !ctx->transport_security_state())
     return;
 
@@ -664,7 +714,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
   RecordTimer();
 
   // If the request was destroyed, then there is no more work to do.
-  if (!request_ || !request_->delegate())
+  if (!request_)
     return;
 
   // If the transaction was destroyed, then the job was cancelled, and
@@ -707,11 +757,11 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
     // what we should do.
     // TODO(wtc): also pass ssl_info.cert_status, or just pass the whole
     // ssl_info.
-    request_->delegate()->OnSSLCertificateError(
-        request_, result, transaction_->GetResponseInfo()->ssl_info.cert);
+    NotifySSLCertificateError(
+        result, transaction_->GetResponseInfo()->ssl_info.cert);
   } else if (result == ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
-    request_->delegate()->OnCertificateRequested(
-        request_, transaction_->GetResponseInfo()->cert_request_info);
+    NotifyCertificateRequested(
+        transaction_->GetResponseInfo()->cert_request_info);
   } else {
     NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, result));
   }
@@ -719,6 +769,9 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
 
 void URLRequestHttpJob::OnReadCompleted(int result) {
   read_in_progress_ = false;
+
+  if (ShouldFixMismatchedContentLength(result))
+    result = 0;
 
   if (result == 0) {
     NotifyDone(URLRequestStatus());
@@ -794,11 +847,22 @@ void URLRequestHttpJob::Start() {
   GURL referrer(request_->GetSanitizedReferrer());
 
   request_info_.url = request_->url();
-  request_info_.referrer = referrer;
   request_info_.method = request_->method();
   request_info_.load_flags = request_->load_flags();
   request_info_.priority = request_->priority();
   request_info_.request_id = request_->identifier();
+
+  // Strip Referer from request_info_.extra_headers to prevent, e.g., plugins
+  // from overriding headers that are controlled using other means. Otherwise a
+  // plugin could set a referrer although sending the referrer is inhibited.
+  request_info_.extra_headers.RemoveHeader(HttpRequestHeaders::kReferer);
+
+  // Our consumer should have made sure that this is a safe referrer.  See for
+  // instance WebCore::FrameLoader::HideReferrer.
+  if (referrer.is_valid()) {
+    request_info_.extra_headers.SetHeader(HttpRequestHeaders::kReferer,
+                                          referrer.spec());
+  }
 
   if (request_->context()) {
     request_info_.extra_headers.SetHeaderIfMissing(
@@ -1068,6 +1132,28 @@ void URLRequestHttpJob::ContinueDespiteLastError() {
           &URLRequestHttpJob::OnStartCompleted, rv));
 }
 
+bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
+  // Some servers send the body compressed, but specify the content length as
+  // the uncompressed size.  Although this violates the HTTP spec we want to
+  // support it (as IE and FireFox do), but *only* for an exact match.
+  // See http://crbug.com/79694.
+  if (rv == net::ERR_CONNECTION_CLOSED) {
+    if (request_ && request_->response_headers()) {
+      int64 expected_length = request_->response_headers()->GetContentLength();
+      VLOG(1) << __FUNCTION__ << "() "
+              << "\"" << request_->url().spec() << "\""
+              << " content-length = " << expected_length
+              << " pre total = " << prefilter_bytes_read()
+              << " post total = " << postfilter_bytes_read();
+      if (postfilter_bytes_read() == expected_length) {
+        // Clear the error.
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
                                     int *bytes_read) {
   DCHECK_NE(buf_size, 0);
@@ -1075,8 +1161,14 @@ bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
   DCHECK(!read_in_progress_);
 
   int rv = transaction_->Read(buf, buf_size, &read_callback_);
+
+  if (ShouldFixMismatchedContentLength(rv))
+    rv = 0;
+
   if (rv >= 0) {
     *bytes_read = rv;
+    if (!rv)
+      DoneWithRequest(FINISHED);
     return true;
   }
 
@@ -1125,6 +1217,7 @@ URLRequestHttpJob::~URLRequestHttpJob() {
     if (manager)  // Defensive programming.
       manager->FetchDictionary(request_info_.url, sdch_dictionary_url_);
   }
+  DoneWithRequest(ABORTED);
 }
 
 void URLRequestHttpJob::RecordTimer() {
@@ -1413,6 +1506,65 @@ bool URLRequestHttpJob::IsCompressibleContent() const {
   return GetMimeType(&mime_type) &&
       (IsSupportedJavascriptMimeType(mime_type.c_str()) ||
        IsSupportedNonImageMimeType(mime_type.c_str()));
+}
+
+void URLRequestHttpJob::RecordPerfHistograms(CompletionCause reason) {
+  if (start_time_.is_null())
+    return;
+
+  base::TimeDelta total_time = base::TimeTicks::Now() - start_time_;
+  UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTime", total_time);
+
+  if (reason == FINISHED) {
+    UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeSuccess", total_time);
+  } else {
+    UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeCancel", total_time);
+  }
+
+  static bool cache_experiment = false;
+  if (!cache_experiment)
+    cache_experiment = base::FieldTrialList::TrialExists("CacheListSize");
+  if (cache_experiment) {
+    UMA_HISTOGRAM_TIMES(
+        base::FieldTrial::MakeName("Net.HttpJob.TotalTime", "CacheListSize"),
+        total_time);
+    if (reason == FINISHED) {
+      UMA_HISTOGRAM_TIMES(
+          base::FieldTrial::MakeName("Net.HttpJob.TotalTimeSuccess",
+                                     "CacheListSize"),
+          total_time);
+    } else {
+      UMA_HISTOGRAM_TIMES(
+          base::FieldTrial::MakeName("Net.HttpJob.TotalTimeCancel",
+                                     "CacheListSize"),
+          total_time);
+    }
+    if (response_info_) {
+      if (response_info_->was_cached) {
+        UMA_HISTOGRAM_TIMES(
+            base::FieldTrial::MakeName("Net.HttpJob.TotalTimeCached",
+                                       "CacheListSize"),
+            total_time);
+      } else  {
+        UMA_HISTOGRAM_TIMES(
+            base::FieldTrial::MakeName("Net.HttpJob.TotalTimeNotCached",
+                                       "CacheListSize"),
+            total_time);
+      }
+    }
+  }
+
+  start_time_ = base::TimeTicks();
+}
+
+void URLRequestHttpJob::DoneWithRequest(CompletionCause reason) {
+  if (done_)
+    return;
+  done_ = true;
+
+  RecordPerfHistograms(reason);
+  if (reason == FINISHED)
+    RecordCompressionHistograms();
 }
 
 }  // namespace net

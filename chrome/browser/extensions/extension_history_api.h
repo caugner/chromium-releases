@@ -6,10 +6,8 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_HISTORY_API_H_
 #pragma once
 
-#include <map>
 #include <string>
 
-#include "base/memory/singleton.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
@@ -19,20 +17,14 @@
 // extension system.
 class ExtensionHistoryEventRouter : public NotificationObserver {
  public:
-  // Single instance of the event router.
-  static ExtensionHistoryEventRouter* GetInstance();
+  explicit ExtensionHistoryEventRouter();
+  virtual ~ExtensionHistoryEventRouter();
 
-  // Safe to call multiple times.
   void ObserveProfile(Profile* profile);
 
  private:
-  friend struct DefaultSingletonTraits<ExtensionHistoryEventRouter>;
-
-  ExtensionHistoryEventRouter();
-  virtual ~ExtensionHistoryEventRouter();
-
   // NotificationObserver::Observe.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -49,10 +41,6 @@ class ExtensionHistoryEventRouter : public NotificationObserver {
   // Used for tracking registrations to history service notifications.
   NotificationRegistrar registrar_;
 
-  // Registered profiles.
-  typedef std::map<uintptr_t, Profile*> ProfileMap;
-  ProfileMap profiles_;
-
   DISALLOW_COPY_AND_ASSIGN(ExtensionHistoryEventRouter);
 };
 
@@ -63,8 +51,8 @@ class HistoryFunction : public AsyncExtensionFunction {
   virtual void Run();
   virtual bool RunImpl() = 0;
 
-  bool GetUrlFromValue(Value* value, GURL* url);
-  bool GetTimeFromValue(Value* value, base::Time* time);
+  bool GetUrlFromValue(base::Value* value, GURL* url);
+  bool GetTimeFromValue(base::Value* value, base::Time* time);
 };
 
 // Base class for history funciton APIs which require async interaction with

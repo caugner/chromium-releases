@@ -8,22 +8,25 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/command_line.h"
 #include "base/path_service.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
+#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "base/value_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/ui/webui/options/options_managed_banner_handler.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -42,18 +45,16 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/window.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "views/window/window.h"
 #endif  // defined(OS_CHROMEOS)
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #endif  // defined(TOOLKIT_GTK)
 
 PersonalOptionsHandler::PersonalOptionsHandler() {
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  multiprofile_ = browser_command_line.HasSwitch(switches::kMultiProfiles);
+  multiprofile_ = ProfileManager::IsMultipleProfilesEnabled();
 #if defined(OS_CHROMEOS)
   registrar_.Add(this,
-                 NotificationType::LOGIN_USER_IMAGE_CHANGED,
+                 chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
                  NotificationService::AllSources());
 #endif
 }
@@ -81,19 +82,20 @@ void PersonalOptionsHandler::GetLocalizedValues(
       "syncFurtherOverview",
       l10n_util::GetStringUTF16(IDS_SYNC_FURTHER_OVERVIEW));
   localized_strings->SetString("syncSection",
-      multiprofile_ ?
-          l10n_util::GetStringUTF16(IDS_PROFILES_OPTIONS_GROUP_NAME) :
-          l10n_util::GetStringUTF16(IDS_SYNC_OPTIONS_GROUP_NAME));
+      l10n_util::GetStringUTF16(IDS_SYNC_OPTIONS_GROUP_NAME));
   localized_strings->SetString("customizeSync",
-      multiprofile_ ?
-          l10n_util::GetStringUTF16(IDS_PROFILES_SYNC_CUSTOMIZE_BUTTON_LABEL) :
-          l10n_util::GetStringUTF16(IDS_SYNC_CUSTOMIZE_BUTTON_LABEL));
-  if (multiprofile_) {
-    localized_strings->SetString("createNewProfile",
-        l10n_util::GetStringUTF16(IDS_PROFILES_CREATE_INFO));
-    localized_strings->SetString("createProfileButton",
-        l10n_util::GetStringUTF16(IDS_PROFILES_CREATE_BUTTON_LABEL));
-  }
+      l10n_util::GetStringUTF16(IDS_SYNC_CUSTOMIZE_BUTTON_LABEL));
+
+  localized_strings->SetString("profiles",
+      l10n_util::GetStringUTF16(IDS_PROFILES_OPTIONS_GROUP_NAME));
+  localized_strings->SetString("profilesCreate",
+      l10n_util::GetStringUTF16(IDS_PROFILES_CREATE_BUTTON_LABEL));
+  localized_strings->SetString("profilesManage",
+      l10n_util::GetStringUTF16(IDS_PROFILES_MANAGE_BUTTON_LABEL));
+  localized_strings->SetString("profilesDelete",
+      l10n_util::GetStringUTF16(IDS_PROFILES_DELETE_BUTTON_LABEL));
+  localized_strings->SetString("profilesListItemCurrent",
+      l10n_util::GetStringUTF16(IDS_PROFILES_LIST_ITEM_CURRENT));
 
   localized_strings->SetString("passwords",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_GROUP_NAME));
@@ -103,6 +105,8 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_NEVERSAVE));
   localized_strings->SetString("manage_passwords",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_MANAGE_PASSWORDS));
+  localized_strings->SetString("autologinEnabled",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_AUTOLOGIN));
 
   localized_strings->SetString("autofill",
       l10n_util::GetStringUTF16(IDS_AUTOFILL_SETTING_WINDOWS_GROUP_NAME));
@@ -192,15 +196,6 @@ void PersonalOptionsHandler::GetLocalizedValues(
 void PersonalOptionsHandler::RegisterMessages() {
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback(
-      "showSyncActionDialog",
-      NewCallback(this, &PersonalOptionsHandler::ShowSyncActionDialog));
-  web_ui_->RegisterMessageCallback(
-      "showSyncLoginDialog",
-      NewCallback(this, &PersonalOptionsHandler::ShowSyncLoginDialog));
-  web_ui_->RegisterMessageCallback(
-      "showCustomizeSyncDialog",
-      NewCallback(this, &PersonalOptionsHandler::ShowCustomizeSyncDialog));
-  web_ui_->RegisterMessageCallback(
       "themesReset",
       NewCallback(this, &PersonalOptionsHandler::ThemesReset));
 #if defined(TOOLKIT_GTK)
@@ -213,15 +208,21 @@ void PersonalOptionsHandler::RegisterMessages() {
       "loadAccountPicture",
       NewCallback(this, &PersonalOptionsHandler::LoadAccountPicture));
 #endif
+  web_ui_->RegisterMessageCallback(
+      "createProfile",
+      NewCallback(this, &PersonalOptionsHandler::CreateProfile));
 }
 
-void PersonalOptionsHandler::Observe(NotificationType type,
+void PersonalOptionsHandler::Observe(int type,
                                      const NotificationSource& source,
                                      const NotificationDetails& details) {
-  if (type == NotificationType::BROWSER_THEME_CHANGED) {
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     ObserveThemeChanged();
+  } else if (multiprofile_ &&
+             type == chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED) {
+    SendProfilesInfo();
 #if defined(OS_CHROMEOS)
-  } else if (type == NotificationType::LOGIN_USER_IMAGE_CHANGED) {
+  } else if (type == chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED) {
     LoadAccountPicture(NULL);
 #endif
   } else {
@@ -241,8 +242,12 @@ void PersonalOptionsHandler::OnStateChanged() {
   browser_sync::SyncBackendHost::StatusSummary summary =
       service->QuerySyncStatusSummary();
 
+  // TODO(jhawkins): This is terribly hacky. Sync should pass us this state, but
+  // we have to fix the other callers of
+  // sync_ui_util::GetSyncedStateStatusLabel() to handle returned HTML.
   if (!status_has_error &&
-      summary == browser_sync::SyncBackendHost::Status::SYNCING) {
+      summary == browser_sync::SyncBackendHost::Status::READY &&
+      service->HasSyncSetupCompleted()) {
     string16 user_name(service->GetAuthenticatedUsername());
     status_label.assign(l10n_util::GetStringFUTF16(
         IDS_SYNC_ACCOUNT_SYNCING_TO_USER,
@@ -254,8 +259,7 @@ void PersonalOptionsHandler::OnStateChanged() {
   bool is_start_stop_button_visible = false;
   bool is_start_stop_button_enabled = false;
   if (sync_setup_completed) {
-    start_stop_button_label = multiprofile_ ?
-        l10n_util::GetStringUTF16(IDS_PROFILES_DISCONNECT_BUTTON_LABEL) :
+    start_stop_button_label =
         l10n_util::GetStringUTF16(IDS_SYNC_STOP_SYNCING_BUTTON_LABEL);
 #if defined(OS_CHROMEOS)
     is_start_stop_button_visible = false;
@@ -270,9 +274,7 @@ void PersonalOptionsHandler::OnStateChanged() {
     is_start_stop_button_enabled = false;
   } else {
     start_stop_button_label =
-        multiprofile_ ?
-            l10n_util::GetStringUTF16(IDS_PROFILES_CONNECT_BUTTON_LABEL) :
-            l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL);
+        l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL);
     is_start_stop_button_visible = true;
     is_start_stop_button_enabled = !managed;
   }
@@ -310,21 +312,22 @@ void PersonalOptionsHandler::OnStateChanged() {
   web_ui_->CallJavascriptFunction("PersonalOptions.setSyncStatusErrorVisible",
                                   *visible);
 
-  // Set profile creation text and button if multi-profiles switch is on.
-  if (multiprofile_) {
-    visible.reset(Value::CreateBooleanValue(true));
-    web_ui_->CallJavascriptFunction("PersonalOptions.setProfilesSectionVisible",
-                                    *visible);
+#if defined(ENABLE_AUTO_LOGIN_AFTER_M14)
+  // Pre-login is being taken out of M14, but will be put back in right after
+  // the fork.
+  visible.reset(Value::CreateBooleanValue(service->AreCredentialsAvailable()));
+#else
+  visible.reset(Value::CreateBooleanValue(false));
+#endif
+  web_ui_->CallJavascriptFunction("PersonalOptions.setAutoLoginVisible",
+                                  *visible);
 
-    // TODO(mirandac): enable when back end is ready.
-    enabled.reset(Value::CreateBooleanValue(false));
-    web_ui_->CallJavascriptFunction(
-        "PersonalOptions.setNewProfileButtonEnabled", *enabled);
-  } else {
-    visible.reset(Value::CreateBooleanValue(false));
-    web_ui_->CallJavascriptFunction("PersonalOptions.setProfilesSectionVisible",
-                                    *visible);
-  }
+  // Set profile creation text and button if multi-profiles switch is on.
+  visible.reset(Value::CreateBooleanValue(multiprofile_));
+  web_ui_->CallJavascriptFunction("PersonalOptions.setProfilesSectionVisible",
+                                  *visible);
+  if (multiprofile_)
+    SendProfilesInfo();
 }
 
 void PersonalOptionsHandler::OnLoginSuccess() {
@@ -356,13 +359,10 @@ void PersonalOptionsHandler::ObserveThemeChanged() {
 }
 
 void PersonalOptionsHandler::Initialize() {
-  banner_handler_.reset(
-      new OptionsManagedBannerHandler(web_ui_,
-                                      ASCIIToUTF16("PersonalOptions"),
-                                      OPTIONS_PAGE_CONTENT));
-
   // Listen for theme installation.
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
                  NotificationService::AllSources());
   ObserveThemeChanged();
 
@@ -371,34 +371,9 @@ void PersonalOptionsHandler::Initialize() {
   if (sync_service) {
     sync_service->AddObserver(this);
     OnStateChanged();
-
-    DictionaryValue args;
-    SyncSetupFlow::GetArgsForConfigure(sync_service, &args);
-
-    web_ui_->CallJavascriptFunction("PersonalOptions.setRegisteredDataTypes",
-                                    args);
   } else {
     web_ui_->CallJavascriptFunction("options.PersonalOptions.hideSyncSection");
   }
-}
-
-void PersonalOptionsHandler::ShowSyncActionDialog(const ListValue* args) {
-  ProfileSyncService* service = web_ui_->GetProfile()->GetProfileSyncService();
-  DCHECK(service);
-  service->ShowErrorUI(web_ui_);
-}
-
-void PersonalOptionsHandler::ShowSyncLoginDialog(const ListValue* args) {
-  ProfileSyncService* service = web_ui_->GetProfile()->GetProfileSyncService();
-  DCHECK(service);
-  service->ShowLoginDialog(web_ui_);
-  ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_OPTIONS);
-}
-
-void PersonalOptionsHandler::ShowCustomizeSyncDialog(const ListValue* args) {
-  ProfileSyncService* service = web_ui_->GetProfile()->GetProfileSyncService();
-  DCHECK(service);
-  service->ShowConfigure(web_ui_, false);
 }
 
 void PersonalOptionsHandler::ThemesReset(const ListValue* args) {
@@ -436,3 +411,32 @@ void PersonalOptionsHandler::LoadAccountPicture(const ListValue* args) {
   }
 }
 #endif
+
+void PersonalOptionsHandler::SendProfilesInfo() {
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+  ListValue profile_info_list;
+  FilePath current_profile_path = web_ui_->GetProfile()->GetPath();
+  for (size_t i = 0, e = cache.GetNumberOfProfiles(); i < e; ++i) {
+    DictionaryValue *profile_value = new DictionaryValue();
+    size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
+    FilePath profile_path = cache.GetPathOfProfileAtIndex(i);
+    profile_value->SetString("name", cache.GetNameOfProfileAtIndex(i));
+    profile_value->SetString("iconURL",
+                             cache.GetDefaultAvatarIconUrl(icon_index));
+    profile_value->Set("filePath",
+                       base::CreateFilePathValue(
+                          profile_path));
+    profile_value->SetBoolean("isCurrentProfile",
+                              profile_path == current_profile_path);
+    profile_info_list.Append(profile_value);
+  }
+
+  web_ui_->CallJavascriptFunction("PersonalOptions.setProfilesInfo",
+                                  profile_info_list);
+}
+
+void PersonalOptionsHandler::CreateProfile(const ListValue* args) {
+  ProfileManager::CreateMultiProfileAsync();
+}
+

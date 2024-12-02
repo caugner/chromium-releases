@@ -39,7 +39,6 @@
 #include "views/controls/button/image_button.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 namespace {
 
@@ -58,7 +57,7 @@ CompactLocationBarView::CompactLocationBarView(CompactLocationBarViewHost* host)
       reload_button_(NULL),
       location_bar_view_(NULL),
       initialized_(false) {
-  SetFocusable(true);
+  set_focusable(true);
 }
 
 CompactLocationBarView::~CompactLocationBarView() {
@@ -125,7 +124,7 @@ void CompactLocationBarView::Init() {
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_TOOLTIP_RELOAD)));
   reload_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_RELOAD));
-  reload_button_->SetID(VIEW_ID_RELOAD_BUTTON);
+  reload_button_->set_id(VIEW_ID_RELOAD_BUTTON);
 
   ThemeProvider* tp = GetThemeProvider();
   reload_button_->SetImage(views::CustomButton::BS_NORMAL,

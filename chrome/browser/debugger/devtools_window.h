@@ -7,10 +7,11 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "chrome/browser/debugger/devtools_client_host.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
+#include "content/browser/debugger/devtools_client_host.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -21,9 +22,14 @@ class Message;
 
 class Browser;
 class BrowserWindow;
+class PrefService;
 class Profile;
 class RenderViewHost;
+class TabContentsWrapper;
+
+namespace base {
 class Value;
+}
 
 class DevToolsWindow
     : public DevToolsClientHost,
@@ -31,27 +37,40 @@ class DevToolsWindow
       public TabContentsDelegate {
  public:
   static const char kDevToolsApp[];
+  static void RegisterUserPrefs(PrefService* prefs);
   static TabContentsWrapper* GetDevToolsContents(TabContents* inspected_tab);
+  static DevToolsWindow* FindDevToolsWindow(RenderViewHost* window_rvh);
 
-  DevToolsWindow(Profile* profile, RenderViewHost* inspected_rvh, bool docked);
+  static DevToolsWindow* CreateDevToolsWindowForWorker(Profile* profile);
+  static DevToolsWindow* OpenDevToolsWindow(RenderViewHost* inspected_rvh);
+  static DevToolsWindow* ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
+                                              DevToolsToggleAction action);
+  static void InspectElement(RenderViewHost* inspected_rvh, int x, int y);
+
   virtual ~DevToolsWindow();
 
   // Overridden from DevToolsClientHost.
-  virtual DevToolsWindow* AsDevToolsWindow();
   virtual void SendMessageToClient(const IPC::Message& message);
   virtual void InspectedTabClosing();
-  virtual void TabReplaced(TabContentsWrapper* new_tab);
+  virtual void TabReplaced(TabContents* new_tab);
+  virtual RenderViewHost* GetClientRenderViewHost();
+  virtual void RequestActivate();
+  virtual void RequestSetDocked(bool docked);
+  virtual void RequestClose();
+  virtual void RequestSaveAs(const std::string& suggested_file_name,
+                             const std::string& content);
+  RenderViewHost* GetRenderViewHost();
 
   void Show(DevToolsToggleAction action);
-  void Activate();
-  void SetDocked(bool docked);
-  RenderViewHost* GetRenderViewHost();
 
   TabContentsWrapper* tab_contents() { return tab_contents_; }
   Browser* browser() { return browser_; }  // For tests.
   bool is_docked() { return docked_; }
 
  private:
+  DevToolsWindow(Profile* profile, RenderViewHost* inspected_rvh, bool docked,
+                 bool shared_worker_frontend);
+
   void CreateDevToolsBrowser();
   bool FindInspectedBrowserAndTabIndex(Browser**, int* tab);
   BrowserWindow* GetInspectedBrowserWindow();
@@ -59,7 +78,7 @@ class DevToolsWindow
   void UpdateFrontendAttachedState();
 
   // Overridden from NotificationObserver.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -69,40 +88,41 @@ class DevToolsWindow
   void UpdateTheme();
   void AddDevToolsExtensionsToClient();
   void CallClientFunction(const string16& function_name,
-                          const Value& arg);
+                          const base::Value& arg);
   // Overridden from TabContentsDelegate.
-  virtual void OpenURLFromTab(TabContents* source,
-                              const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              PageTransition::Type transition);
-  virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      PageTransition::Type transition);
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture);
-  virtual void ActivateContents(TabContents* contents) {}
-  virtual void DeactivateContents(TabContents* contents) {}
-  virtual void LoadingStateChanged(TabContents* source) {}
   virtual void CloseContents(TabContents* source) {}
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
   virtual bool CanReloadContents(TabContents* source) const;
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
 
   virtual void FrameNavigating(const std::string& url) {}
 
+  static DevToolsWindow* ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
+                                              bool force_open,
+                                              DevToolsToggleAction action);
+  static DevToolsWindow* AsDevToolsWindow(DevToolsClientHost*);
+
   Profile* profile_;
-  TabContents* inspected_tab_;
+  TabContentsWrapper* inspected_tab_;
   TabContentsWrapper* tab_contents_;
   Browser* browser_;
   bool docked_;
   bool is_loaded_;
   DevToolsToggleAction action_on_load_;
+  const bool shared_worker_frontend_;
   NotificationRegistrar registrar_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };

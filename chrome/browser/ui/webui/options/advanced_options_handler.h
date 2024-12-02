@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
-class OptionsManagedBannerHandler;
 class CloudPrintSetupHandler;
 
 // Chrome advanced options page UI handler.
@@ -33,7 +32,7 @@ class AdvancedOptionsHandler
   virtual void RegisterMessages();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -173,7 +172,6 @@ class AdvancedOptionsHandler
   StringPrefMember auto_open_files_;
   IntegerPrefMember default_font_size_;
   scoped_ptr<PrefSetObserver> proxy_prefs_;
-  scoped_ptr<OptionsManagedBannerHandler> banner_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(AdvancedOptionsHandler);
 };

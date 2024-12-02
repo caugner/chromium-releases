@@ -8,6 +8,11 @@
 
 #include "chrome/browser/ui/views/tabs/base_tab_strip.h"
 
+namespace ui {
+enum TouchStatus;
+}
+
+class TabStripSelectionModel;
 class TouchTab;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -36,7 +41,8 @@ class TouchTabStrip : public BaseTabStrip {
   virtual void StopAllHighlighting();
   virtual BaseTab* CreateTabForDragging();
   virtual void RemoveTabAt(int model_index);
-  virtual void SelectTabAt(int old_model_index, int new_model_index);
+  virtual void SetSelection(const TabStripSelectionModel& old_selection,
+                            const TabStripSelectionModel& new_selection);
   virtual void TabTitleChangedNotLoading(int model_index);
   virtual BaseTab* CreateTab();
   virtual void StartInsertTabAnimation(int model_index);
@@ -62,14 +68,16 @@ class TouchTabStrip : public BaseTabStrip {
   // is in terms of tab_data, *not* the model.
   TouchTab* GetTabAtTabDataIndex(int tab_data_index) const;
 
+  // Retrieves the Tab at the specified *model* index.
+  TouchTab* GetTouchTabAtModelIndex(int model_index) const;
+
  private:
   void Init();
 
   // Overridden from views::View.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
-  virtual views::View::TouchStatus OnTouchEvent(
-      const views::TouchEvent& event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(const views::TouchEvent& event) OVERRIDE;
   virtual void ViewHierarchyChanged(bool is_add,
                                     View* parent,
                                     View* child) OVERRIDE;

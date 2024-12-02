@@ -96,17 +96,22 @@ def _CheckAuthorizedAuthor(input_api, output_api):
   """For non-googler/chromites committers, verify the author's email address is
   in AUTHORS.
   """
+  # TODO(maruel): Add it to input_api?
+  import fnmatch
+
   author = input_api.change.author_email
-  if (author is None or author.endswith('@chromium.org') or
-      author.endswith('@google.com')):
+  if not author:
+    input_api.logging.info('No author, skipping AUTHOR check')
     return []
   authors_path = input_api.os_path.join(
       input_api.PresubmitLocalPath(), 'AUTHORS')
   valid_authors = (
       input_api.re.match(r'[^#]+\s+\<(.+?)\>\s*$', line)
       for line in open(authors_path))
-  valid_authors = [item.group(1) for item in valid_authors if item]
-  if not author in valid_authors:
+  valid_authors = [item.group(1).lower() for item in valid_authors if item]
+  if input_api.verbose:
+    print 'Valid authors are %s' % ', '.join(valid_authors)
+  if not any(fnmatch.fnmatch(author.lower(), valid) for valid in valid_authors):
     return [output_api.PresubmitPromptWarning(
         ('%s is not in AUTHORS file. If you are a new contributor, please visit'
         '\n'

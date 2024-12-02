@@ -16,17 +16,23 @@
 #include "content/common/page_transition_types.h"
 #include "ipc/ipc_channel.h"
 
-class DictionaryValue;
 class WebUIMessageHandler;
 class GURL;
-class ListValue;
 class Profile;
 class RenderViewHost;
 class TabContents;
+
+namespace base {
+class DictionaryValue;
+class ListValue;
 class Value;
+}
 
 // A WebUI sets up the datasources and message handlers for a given HTML-based
-// UI. It is contained by a WebUIManager.
+// UI.
+//
+// NOTE: If you're creating a new WebUI for Chrome code, make sure you extend
+// ChromeWebUI.
 class WebUI : public IPC::Channel::Listener {
  public:
   explicit WebUI(TabContents* contents);
@@ -36,7 +42,7 @@ class WebUI : public IPC::Channel::Listener {
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnWebUISend(const GURL& source_url,
                            const std::string& message,
-                           const ListValue& args);
+                           const base::ListValue& args);
 
   // Called by RenderViewHost when the RenderView is first created. This is
   // *not* called for every page load because in some cases
@@ -60,19 +66,13 @@ class WebUI : public IPC::Channel::Listener {
   virtual void DidBecomeActiveForReusedRenderView() {}
 
   // Used by WebUIMessageHandlers.
-  typedef Callback1<const ListValue*>::Type MessageCallback;
+  typedef Callback1<const base::ListValue*>::Type MessageCallback;
   void RegisterMessageCallback(const std::string& message,
                                MessageCallback* callback);
 
   // Returns true if the favicon should be hidden for the current tab.
   bool hide_favicon() const {
     return hide_favicon_;
-  }
-
-  // Returns true if the bookmark bar should be forced to being visible,
-  // overriding the user's preference.
-  bool force_bookmark_bar_visible() const {
-    return force_bookmark_bar_visible_;
   }
 
   // Returns true if the location bar should be focused by default rather than
@@ -123,21 +123,21 @@ class WebUI : public IPC::Channel::Listener {
   // There are variants for calls with more arguments.
   void CallJavascriptFunction(const std::string& function_name);
   void CallJavascriptFunction(const std::string& function_name,
-                              const Value& arg);
+                              const base::Value& arg);
   void CallJavascriptFunction(const std::string& function_name,
-                              const Value& arg1,
-                              const Value& arg2);
+                              const base::Value& arg1,
+                              const base::Value& arg2);
   void CallJavascriptFunction(const std::string& function_name,
-                              const Value& arg1,
-                              const Value& arg2,
-                              const Value& arg3);
+                              const base::Value& arg1,
+                              const base::Value& arg2,
+                              const base::Value& arg3);
   void CallJavascriptFunction(const std::string& function_name,
-                              const Value& arg1,
-                              const Value& arg2,
-                              const Value& arg3,
-                              const Value& arg4);
+                              const base::Value& arg1,
+                              const base::Value& arg2,
+                              const base::Value& arg3,
+                              const base::Value& arg4);
   void CallJavascriptFunction(const std::string& function_name,
-                              const std::vector<const Value*>& args);
+                              const std::vector<const base::Value*>& args);
 
   // May be overridden by WebUI's which do not have a tab contents.
   // TODO(estade): removing this Profile dependency is predicated on reworking
@@ -149,6 +149,10 @@ class WebUI : public IPC::Channel::Listener {
 
   TabContents* tab_contents() const { return tab_contents_; }
 
+  // Returns true to indicate that the WebUI is performing a long running
+  // operation and wants the tab throbber to run.
+  virtual bool IsLoading() const;
+
   // An opaque identifier used to identify a WebUI. This can only be compared to
   // kNoWebUI or other WebUI types. See GetWebUIType.
   typedef void* TypeID;
@@ -159,8 +163,9 @@ class WebUI : public IPC::Channel::Listener {
 
   // Returns JavaScript code that, when executed, calls the function specified
   // by |function_name| with the arguments specified in |arg_list|.
-  static string16 GetJavascriptCall(const std::string& function_name,
-                                    const std::vector<const Value*>& arg_list);
+  static string16 GetJavascriptCall(
+      const std::string& function_name,
+      const std::vector<const base::Value*>& arg_list);
 
  protected:
   void AddMessageHandler(WebUIMessageHandler* handler);
@@ -172,7 +177,6 @@ class WebUI : public IPC::Channel::Listener {
   // Options that may be overridden by individual Web UI implementations. The
   // bool options default to false. See the public getters for more information.
   bool hide_favicon_;
-  bool force_bookmark_bar_visible_;
   bool focus_location_bar_by_default_;
   bool should_hide_url_;
   string16 overridden_title_;  // Defaults to empty string.
@@ -210,10 +214,14 @@ class WebUIMessageHandler {
   // is provided.  Returns |this| for convenience.
   virtual WebUIMessageHandler* Attach(WebUI* web_ui);
 
+  // Returns true to indicate that a long running operation is in progress and
+  // the tab throbber should be active.
+  virtual bool IsLoading() const;
+
  protected:
   // Adds "url" and "title" keys on incoming dictionary, setting title
   // as the url as a fallback on empty title.
-  static void SetURLAndTitle(DictionaryValue* dictionary,
+  static void SetURLAndTitle(base::DictionaryValue* dictionary,
                              string16 title,
                              const GURL& gurl);
 
@@ -221,10 +229,10 @@ class WebUIMessageHandler {
   virtual void RegisterMessages() = 0;
 
   // Extract an integer value from a list Value.
-  bool ExtractIntegerValue(const ListValue* value, int* out_int);
+  bool ExtractIntegerValue(const base::ListValue* value, int* out_int);
 
   // Extract a string value from a list Value.
-  string16 ExtractStringValue(const ListValue* value);
+  string16 ExtractStringValue(const base::ListValue* value);
 
   WebUI* web_ui_;
 

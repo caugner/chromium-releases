@@ -17,7 +17,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
@@ -36,7 +37,6 @@
 #include "views/layout/layout_constants.h"
 #include "views/view_text_utils.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 namespace {
 
@@ -57,15 +57,13 @@ void ShowFirstRunDialog(Profile* profile,
                         bool randomize_search_engine_experiment) {
   // If the default search is managed via policy, we don't ask the user to
   // choose.
-  TemplateURLModel* model = profile->GetTemplateURLModel();
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(profile);
   if (FirstRun::SearchEngineSelectorDisallowed() || !model ||
       model->is_default_search_managed()) {
     return;
   }
 
-  views::Window* window = views::Window::CreateChromeWindow(
-      NULL,
-      gfx::Rect(),
+  views::Widget* window = views::Widget::CreateWindow(
       new FirstRunSearchEngineView(
           profile, randomize_search_engine_experiment));
   DCHECK(window);
@@ -82,7 +80,7 @@ void ShowFirstRunDialog(Profile* profile,
 SearchEngineChoice::SearchEngineChoice(views::ButtonListener* listener,
                                        const TemplateURL* search_engine,
                                        bool use_small_logos)
-    : NativeButton(
+    : NativeTextButton(
           listener,
           UTF16ToWide(l10n_util::GetStringUTF16(IDS_FR_SEARCH_CHOOSE))),
       is_image_label_(false),
@@ -155,7 +153,7 @@ FirstRunSearchEngineView::FirstRunSearchEngineView(
   SetVisible(false);
 
   // Start loading the search engines for the given profile.
-  search_engines_model_ = profile_->GetTemplateURLModel();
+  search_engines_model_ = TemplateURLServiceFactory::GetForProfile(profile_);
   if (search_engines_model_) {
     DCHECK(!search_engines_model_->loaded());
     search_engines_model_->AddObserver(this);
@@ -173,12 +171,13 @@ FirstRunSearchEngineView::~FirstRunSearchEngineView() {
 void FirstRunSearchEngineView::ButtonPressed(views::Button* sender,
                                              const views::Event& event) {
   SearchEngineChoice* choice = static_cast<SearchEngineChoice*>(sender);
-  TemplateURLModel* template_url_model = profile_->GetTemplateURLModel();
-  DCHECK(template_url_model);
-  template_url_model->SetSearchEngineDialogSlot(choice->slot());
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  DCHECK(template_url_service);
+  template_url_service->SetSearchEngineDialogSlot(choice->slot());
   const TemplateURL* default_search = choice->GetSearchEngine();
   if (default_search)
-    template_url_model->SetDefaultSearchProvider(default_search);
+    template_url_service->SetDefaultSearchProvider(default_search);
 
   MessageLoop::current()->Quit();
 }
@@ -193,7 +192,7 @@ void FirstRunSearchEngineView::OnPaint(gfx::Canvas* canvas) {
                       height() - background_image_->height());
 }
 
-void FirstRunSearchEngineView::OnTemplateURLModelChanged() {
+void FirstRunSearchEngineView::OnTemplateURLServiceChanged() {
   using views::ImageView;
 
   // We only watch the search engine model change once, on load.  Remove
@@ -299,7 +298,7 @@ void FirstRunSearchEngineView::OnTemplateURLModelChanged() {
 }
 
 gfx::Size FirstRunSearchEngineView::GetPreferredSize() {
-  return views::Window::GetLocalizedContentsSize(
+  return views::Widget::GetLocalizedContentsSize(
       IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_WIDTH_CHARS,
       IDS_FIRSTRUN_SEARCH_ENGINE_SELECTION_HEIGHT_LINES);
 }
@@ -308,7 +307,6 @@ void FirstRunSearchEngineView::SetupControls() {
   using views::Background;
   using views::ImageView;
   using views::Label;
-  using views::NativeButton;
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   background_image_ = new views::ImageView();
@@ -347,7 +345,7 @@ void FirstRunSearchEngineView::SetupControls() {
 
 void FirstRunSearchEngineView::Layout() {
   // Disable the close button.
-  GetWindow()->EnableClose(false);
+  GetWidget()->EnableClose(false);
 
   gfx::Size pref_size = background_image_->GetPreferredSize();
   background_image_->SetBounds(0, 0, GetPreferredSize().width(),

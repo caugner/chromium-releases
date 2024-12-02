@@ -202,6 +202,12 @@ INSTANTIATE_TEST_CASE_P(
                     prefs::kWebKitJavascriptEnabled),
         TypeAndName(kPolicyIncognitoEnabled,
                     prefs::kIncognitoEnabled),
+        TypeAndName(kPolicyIncognitoForced,
+                    prefs::kIncognitoForced),
+        TypeAndName(kPolicyRemoteAccessClientFirewallTraversal,
+                    prefs::kRemoteAccessClientFirewallTraversal),
+        TypeAndName(kPolicyRemoteAccessHostFirewallTraversal,
+                    prefs::kRemoteAccessHostFirewallTraversal),
         TypeAndName(kPolicyCloudPrintProxyEnabled,
                     prefs::kCloudPrintProxyEnabled),
         TypeAndName(kPolicySavingBrowserHistoryDisabled,
@@ -273,7 +279,9 @@ INSTANTIATE_TEST_CASE_P(
         TypeAndName(kPolicyRestoreOnStartup,
                     prefs::kRestoreOnStartup),
         TypeAndName(kPolicyPolicyRefreshRate,
-                    prefs::kPolicyRefreshRate)));
+                    prefs::kUserPolicyRefreshRate),
+        TypeAndName(kPolicyMaxConnectionsPerProxy,
+                    prefs::kMaxConnectionsPerProxy)));
 
 // Test cases for the proxy policy settings.
 class ConfigurationPolicyPrefStoreProxyTest : public testing::Test {

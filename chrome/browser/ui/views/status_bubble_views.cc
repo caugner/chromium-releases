@@ -24,12 +24,11 @@
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/point.h"
+#include "ui/gfx/screen.h"
 #include "views/controls/label.h"
 #include "views/controls/scrollbar/native_scroll_bar.h"
-#include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
-#include "views/window/window.h"
 
 using views::Widget;
 
@@ -756,7 +755,7 @@ void StatusBubbleViews::AvoidMouse(const gfx::Point& location) {
     // download shelf.
     gfx::NativeView widget = base_view_->GetWidget()->GetNativeView();
     gfx::Rect monitor_rect =
-        views::Screen::GetMonitorWorkAreaNearestWindow(widget);
+        gfx::Screen::GetMonitorWorkAreaNearestWindow(widget);
     const int bubble_bottom_y = top_left.y() + position_.y() + size_.height();
 
     if (bubble_bottom_y + offset > monitor_rect.height() ||
@@ -794,7 +793,7 @@ bool StatusBubbleViews::IsFrameVisible() {
   if (!frame->IsVisible())
     return false;
 
-  views::Window* window = frame->GetContainingWindow();
+  views::Widget* window = frame->GetTopLevelWidget();
   return !window || !window->IsMinimized();
 }
 

@@ -11,6 +11,7 @@
 // Keys used in JSON representation of extensions.
 namespace extension_manifest_keys {
   extern const char* kAllFrames;
+  extern const char* kAltKey;
   extern const char* kApp;
   extern const char* kBackground;
   extern const char* kBrowserAction;
@@ -20,6 +21,7 @@ namespace extension_manifest_keys {
   extern const char* kContentSecurityPolicy;
   extern const char* kConvertedFromUserScript;
   extern const char* kCss;
+  extern const char* kCtrlKey;
   extern const char* kCurrentLocale;
   extern const char* kDefaultLocale;
   extern const char* kDescription;
@@ -30,16 +32,21 @@ namespace extension_manifest_keys {
   extern const char* kFileBrowserHandlers;
   extern const char* kHomepageURL;
   extern const char* kIcons;
+  extern const char* kId;
   extern const char* kIncognito;
   extern const char* kIncludeGlobs;
+  extern const char* kInputComponents;
   extern const char* kIsolation;
   extern const char* kJs;
+  extern const char* kKeycode;
+  extern const char* kLanguage;
   extern const char* kLaunch;
   extern const char* kLaunchContainer;
   extern const char* kLaunchHeight;
   extern const char* kLaunchLocalPath;
   extern const char* kLaunchWebURL;
   extern const char* kLaunchWidth;
+  extern const char* kLayouts;
   extern const char* kMatches;
   extern const char* kMinimumChromeVersion;
   extern const char* kNaClModules;
@@ -65,6 +72,8 @@ namespace extension_manifest_keys {
   extern const char* kPluginsPublic;
   extern const char* kPublicKey;
   extern const char* kRunAt;
+  extern const char* kShiftKey;
+  extern const char* kShortcutKey;
   extern const char* kSidebar;
   extern const char* kSidebarDefaultIcon;
   extern const char* kSidebarDefaultPage;
@@ -77,12 +86,19 @@ namespace extension_manifest_keys {
   extern const char* kThemeTints;
   extern const char* kToolstripPath;
   extern const char* kToolstrips;
-  extern const char* kTts;
+  extern const char* kTtsEngine;
   extern const char* kTtsGenderFemale;
   extern const char* kTtsGenderMale;
   extern const char* kTtsVoices;
+  extern const char* kTtsVoicesEventTypeEnd;
+  extern const char* kTtsVoicesEventTypeError;
+  extern const char* kTtsVoicesEventTypeMarker;
+  extern const char* kTtsVoicesEventTypeSentence;
+  extern const char* kTtsVoicesEventTypeStart;
+  extern const char* kTtsVoicesEventTypeWord;
+  extern const char* kTtsVoicesEventTypes;
   extern const char* kTtsVoicesGender;
-  extern const char* kTtsVoicesLocale;
+  extern const char* kTtsVoicesLang;
   extern const char* kTtsVoicesVoiceName;
   extern const char* kType;
   extern const char* kUpdateURL;
@@ -147,6 +163,14 @@ namespace extension_manifest_errors {
   extern const char* kInvalidIconPath;
   extern const char* kInvalidIcons;
   extern const char* kInvalidIncognitoBehavior;
+  extern const char* kInvalidInputComponents;
+  extern const char* kInvalidInputComponentDescription;
+  extern const char* kInvalidInputComponentLayoutName;
+  extern const char* kInvalidInputComponentLayouts;
+  extern const char* kInvalidInputComponentName;
+  extern const char* kInvalidInputComponentShortcutKey;
+  extern const char* kInvalidInputComponentShortcutKeycode;
+  extern const char* kInvalidInputComponentType;
   extern const char* kInvalidIsolation;
   extern const char* kInvalidIsolationValue;
   extern const char* kInvalidJs;
@@ -205,8 +229,9 @@ namespace extension_manifest_errors {
   extern const char* kInvalidToolstrips;
   extern const char* kInvalidTts;
   extern const char* kInvalidTtsVoices;
+  extern const char* kInvalidTtsVoicesEventTypes;
   extern const char* kInvalidTtsVoicesGender;
-  extern const char* kInvalidTtsVoicesLocale;
+  extern const char* kInvalidTtsVoicesLang;
   extern const char* kInvalidTtsVoicesVoiceName;
   extern const char* kInvalidUpdateURL;
   extern const char* kInvalidURLPatternError;
@@ -214,6 +239,7 @@ namespace extension_manifest_errors {
   extern const char* kInvalidWebURL;
   extern const char* kInvalidWebURLs;
   extern const char* kInvalidZipHash;
+  extern const char* kLaunchPathAndExtentAreExclusive;
   extern const char* kLaunchPathAndURLAreExclusive;
   extern const char* kLaunchURLRequired;
   extern const char* kLocalesMessagesFileMissing;
@@ -268,6 +294,9 @@ namespace extension_misc {
 
   // The extension id of the Web Store component application.
   extern const char* kWebStoreAppId;
+
+  // The extension id of the Cloud Print component application.
+  extern const char* kCloudPrintAppId;
 
   // Note: this structure is an ASN.1 which encodes the algorithm used
   // with its parameters. This is defined in PKCS #1 v2.1 (RFC 3447).
@@ -330,7 +359,7 @@ namespace extension_misc {
     // Autolaunched at startup, like for pinned tabs.
     APP_LAUNCH_AUTOLAUNCH,
 
-    // Launched from omnibox app links (not implemented yet).
+    // Launched from omnibox app links.
     APP_LAUNCH_OMNIBOX_APP,
 
     // App URL typed directly into the omnibox (w/ instant turned off).
@@ -367,6 +396,7 @@ namespace extension_misc {
   // The directory path on a ChromeOS device where accessibility extensions are
   // stored.
   extern const char* kAccessExtensionPath;
+  extern const char* kChromeVoxDirectoryName;
 #endif
 
   // What causes an extension to be installed? Used in histograms, so don't

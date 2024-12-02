@@ -6,32 +6,19 @@
 #define REMOTING_PROTOCOL_JINGLE_SESSION_H_
 
 #include "base/memory/ref_counted.h"
+#include "base/task.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/completion_callback.h"
 #include "remoting/protocol/session.h"
 #include "third_party/libjingle/source/talk/base/sigslot.h"
 #include "third_party/libjingle/source/talk/p2p/base/session.h"
 
-namespace jingle_glue {
-class PseudoTcpAdapter;
-class StreamSocketAdapter;
-class TransportChannelSocketAdapter;
-}  // namespace jingle_glue
-
-namespace net {
-class CertVerifier;
-class ClientSocketFactory;
-class Socket;
-class StreamSocket;
-class X509Certificate;
-}  // namespace net
-
 namespace remoting {
 
 namespace protocol {
 
+class JingleChannelConnector;
 class JingleSessionManager;
-class SocketWrapper;
 
 // Implements protocol::Session that work over libjingle session (the
 // cricket::Session object is passed to Init() method). Created
@@ -41,55 +28,62 @@ class JingleSession : public protocol::Session,
  public:
   static const char kChromotingContentName[];
 
+  // Session interface.
+  virtual void SetStateChangeCallback(StateChangeCallback* callback) OVERRIDE;
+  virtual void CreateStreamChannel(
+      const std::string& name,
+      const StreamChannelCallback& callback) OVERRIDE;
+  virtual void CreateDatagramChannel(
+      const std::string& name,
+      const DatagramChannelCallback& callback) OVERRIDE;
+  virtual net::Socket* control_channel() OVERRIDE;
+  virtual net::Socket* event_channel() OVERRIDE;
+  virtual net::Socket* video_channel() OVERRIDE;
+  virtual net::Socket* video_rtp_channel() OVERRIDE;
+  virtual net::Socket* video_rtcp_channel() OVERRIDE;
+  virtual const std::string& jid() OVERRIDE;
+  virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
+  virtual const SessionConfig* config() OVERRIDE;
+  virtual void set_config(const SessionConfig* config) OVERRIDE;
+  virtual const std::string& initiator_token() OVERRIDE;
+  virtual void set_initiator_token(const std::string& initiator_token) OVERRIDE;
+  virtual const std::string& receiver_token() OVERRIDE;
+  virtual void set_receiver_token(const std::string& receiver_token) OVERRIDE;
+  virtual void set_shared_secret(const std::string& secret) OVERRIDE;
+  virtual const std::string& shared_secret() OVERRIDE;
+  virtual void Close() OVERRIDE;
+
+ private:
+  friend class JingleDatagramConnector;
+  friend class JingleSessionManager;
+  friend class JingleStreamConnector;
+
   // Create a JingleSession used in client mode. A server certificate is
   // required.
-  static JingleSession* CreateClientSession(JingleSessionManager* manager);
+  static JingleSession* CreateClientSession(JingleSessionManager* manager,
+                                            const std::string& host_public_key);
 
   // Create a JingleSession used in server mode. A server certificate and
   // private key is provided. |key| is copied in the constructor.
+  //
+  // TODO(sergeyu): Remove |certificate| and |key| when we stop using TLS.
   static JingleSession* CreateServerSession(
       JingleSessionManager* manager,
-      scoped_refptr<net::X509Certificate> certificate,
+      const std::string& certificate,
       crypto::RSAPrivateKey* key);
 
-  // Chromotocol Session interface.
-  virtual void SetStateChangeCallback(StateChangeCallback* callback);
-
-  virtual net::Socket* control_channel();
-  virtual net::Socket* event_channel();
-  virtual net::Socket* video_channel();
-
-  virtual net::Socket* video_rtp_channel();
-  virtual net::Socket* video_rtcp_channel();
-
-  virtual const std::string& jid();
-  virtual MessageLoop* message_loop();
-
-  virtual const SessionConfig* config();
-  virtual void set_config(const SessionConfig* config);
-
-  virtual const std::string& initiator_token();
-  virtual void set_initiator_token(const std::string& initiator_token);
-  virtual const std::string& receiver_token();
-  virtual void set_receiver_token(const std::string& receiver_token);
-
-  // These fields are only set on the receiving side.
-  virtual const CandidateSessionConfig* candidate_config();
-
-  virtual void Close(Task* closed_task);
-
- private:
-  friend class JingleSessionManager;
-
-  JingleSession(JingleSessionManager* client,
-                scoped_refptr<net::X509Certificate> server_cert,
-                crypto::RSAPrivateKey* key);
+  // TODO(sergeyu): Change type of |peer_public_key| to RSAPublicKey.
+  JingleSession(JingleSessionManager* jingle_session_manager,
+                const std::string& local_cert,
+                crypto::RSAPrivateKey* local_private_key,
+                const std::string& peer_public_key);
   virtual ~JingleSession();
 
   // Called by JingleSessionManager.
   void set_candidate_config(const CandidateSessionConfig* candidate_config);
-  scoped_refptr<net::X509Certificate> server_certificate() const;
+  const std::string& local_certificate() const;
   void Init(cricket::Session* cricket_session);
+  std::string GetEncryptedMasterKey() const;
 
   // Close all the channels and terminate the session.
   void CloseInternal(int result, bool failed);
@@ -100,20 +94,7 @@ class JingleSession : public protocol::Session,
   // Initialize the session configuration from a received connection response
   // stanza.
   bool InitializeConfigFromDescription(
-    const cricket::SessionDescription* description);
-
-  // Configures channels and calls InitializeSSL().
-  void InitializeChannels();
-
-  // Initialize PseudoTCP + SSL on each of the video, control and input
-  // channels. The channels must have been created before this is called.
-  bool InitializeSSL();
-
-  // Helper method to create and initialize PseudoTCP + SSL socket on
-  // top of the provided |channel|. The resultant SSL socket is
-  // written to |ssl_socket|. Return true if successful.
-  bool EstablishSSLConnection(net::Socket* channel,
-                              scoped_ptr<SocketWrapper>* ssl_socket);
+      const cricket::SessionDescription* description);
 
   // Used for Session.SignalState sigslot.
   void OnSessionState(cricket::BaseSession* session,
@@ -126,21 +107,57 @@ class JingleSession : public protocol::Session,
   void OnAccept();
   void OnTerminate();
 
-  void OnConnect(int result);
+  // Notifies upper layer about incoming connection and
+  // accepts/rejects connection.
+  void AcceptConnection();
 
-  // Called by SSL socket to notify connect event.
-  void OnSSLConnect(int result);
+  void AddChannelConnector(const std::string& name,
+                           JingleChannelConnector* connector);
+
+  // Called by JingleChannelConnector when it has finished connecting
+  // the channel, to remove itself from the table of pending connectors.  The
+  // connector assumes responsibility for destroying itself after this call.
+  void OnChannelConnectorFinished(const std::string& name,
+                                  JingleChannelConnector* connector);
+
+  // Creates channels after session has been accepted.
+  // TODO(sergeyu): Don't create channels in JingleSession.
+  void CreateChannels();
+
+  // Callbacks for the channels created in JingleSession.
+  // TODO(sergeyu): Remove this method once *_channel() methods are
+  // removed from Session interface.
+  void OnStreamChannelConnected(
+      const std::string& name, net::StreamSocket* socket);
+  void OnChannelConnected(const std::string& name, net::Socket* socket);
+
+  const cricket::ContentInfo* GetContentInfo() const;
 
   void SetState(State new_state);
 
-  // JingleSessionManager that created this session.
-  scoped_refptr<JingleSessionManager> jingle_session_manager_;
+  // JingleSessionManager that created this session. Guaranteed to
+  // exist throughout the lifetime of the session.
+  JingleSessionManager* jingle_session_manager_;
 
-  // Server certificate used in SSL connections.
-  scoped_refptr<net::X509Certificate> server_cert_;
+  // Certificates used for connection. Currently only receiving side
+  // has a certificate.
+  std::string local_cert_;
+  std::string remote_cert_;
 
   // Private key used in SSL server sockets.
-  scoped_ptr<crypto::RSAPrivateKey> key_;
+  scoped_ptr<crypto::RSAPrivateKey> local_private_key_;
+
+  // Public key of the peer.
+  std::string peer_public_key_;
+
+  // Master key used to derive ice keys for each ice
+  // session. Generated on the client and sent to the host in the
+  // session-initiate message (encrypted with the host's key).
+  std::string master_key_;
+
+  // Shared secret to use in channel authentication.  This is currently only
+  // used in IT2Me.
+  std::string shared_secret_;
 
   State state_;
   scoped_ptr<StateChangeCallback> state_change_callback_;
@@ -163,35 +180,14 @@ class JingleSession : public protocol::Session,
   // These data members are only set on the receiving side.
   scoped_ptr<const CandidateSessionConfig> candidate_config_;
 
-  // |control_channel_| holds a channel until SSL socket is
-  // created. After that |control_ssl_socket_| owns the channel. The
-  // same is the case fo |event_channel_| and |video_channel_|.
-  cricket::TransportChannel* raw_control_channel_;
-  scoped_ptr<jingle_glue::TransportChannelSocketAdapter> control_channel_;
-  scoped_ptr<SocketWrapper> control_ssl_socket_;
+  // Channels that are currently being connected.
+  std::map<std::string, JingleChannelConnector*> channel_connectors_;
 
-  cricket::TransportChannel* raw_event_channel_;
-  scoped_ptr<jingle_glue::TransportChannelSocketAdapter> event_channel_;
-  scoped_ptr<SocketWrapper> event_ssl_socket_;
+  scoped_ptr<net::Socket> control_channel_socket_;
+  scoped_ptr<net::Socket> event_channel_socket_;
+  scoped_ptr<net::Socket> video_channel_socket_;
 
-  cricket::TransportChannel* raw_video_channel_;
-  scoped_ptr<jingle_glue::TransportChannelSocketAdapter> video_channel_;
-  scoped_ptr<SocketWrapper> video_ssl_socket_;
-
-  // Count the number of SSL connections esblished.
-  int ssl_connections_;
-
-  // Used to verify the certificate received in SSLClientSocket.
-  scoped_ptr<net::CertVerifier> cert_verifier_;
-
-  cricket::TransportChannel* raw_video_rtp_channel_;
-  scoped_ptr<jingle_glue::TransportChannelSocketAdapter> video_rtp_channel_;
-  cricket::TransportChannel* raw_video_rtcp_channel_;
-  scoped_ptr<jingle_glue::TransportChannelSocketAdapter> video_rtcp_channel_;
-
-  // Callback called by the SSL layer.
-  net::CompletionCallbackImpl<JingleSession> connect_callback_;
-  net::CompletionCallbackImpl<JingleSession> ssl_connect_callback_;
+  ScopedRunnableMethodFactory<JingleSession> task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSession);
 };

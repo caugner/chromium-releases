@@ -34,9 +34,13 @@
 #include "content/common/web_database_observer_impl.h"
 #include "content/plugin/npobject_util.h"
 #include "content/renderer/content_renderer_client.h"
+#include "content/renderer/devtools_agent_filter.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
-#include "content/renderer/gpu/gpu_video_service_host.h"
 #include "content/renderer/indexed_db_dispatcher.h"
+#include "content/renderer/media/audio_input_message_filter.h"
+#include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/video_capture_impl_manager.h"
+#include "content/renderer/media/video_capture_message_filter.h"
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_process_observer.h"
@@ -54,6 +58,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
@@ -81,7 +86,9 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
+using WebKit::WebDocument;
 using WebKit::WebFrame;
+using WebKit::WebNetworkStateNotifier;
 using WebKit::WebRuntimeFeatures;
 using WebKit::WebScriptController;
 using WebKit::WebString;
@@ -104,14 +111,15 @@ class RenderViewZoomer : public RenderViewVisitor {
   }
 
   virtual bool Visit(RenderView* render_view) {
-    WebView* webview = render_view->webview();  // Guaranteed non-NULL.
+    WebView* webview = render_view->webview();
+    WebDocument document = webview->mainFrame()->document();
 
     // Don't set zoom level for full-page plugin since they don't use the same
     // zoom settings.
-    if (webview->mainFrame()->document().isPluginDocument())
+    if (document.isPluginDocument())
       return true;
 
-    if (net::GetHostOrSpecFromURL(GURL(webview->mainFrame()->url())) == host_)
+    if (net::GetHostOrSpecFromURL(GURL(document.url())) == host_)
       webview->setZoomLevel(false, zoom_level_);
     return true;
   }
@@ -167,6 +175,18 @@ void RenderThread::Init() {
   db_message_filter_ = new DBMessageFilter();
   AddFilter(db_message_filter_.get());
 
+  vc_manager_ = new VideoCaptureImplManager();
+  AddFilter(vc_manager_->video_capture_message_filter());
+
+  audio_input_message_filter_ = new AudioInputMessageFilter();
+  AddFilter(audio_input_message_filter_.get());
+
+  audio_message_filter_ = new AudioMessageFilter();
+  AddFilter(audio_message_filter_.get());
+
+  devtools_agent_message_filter_ = new DevToolsAgentFilter();
+  AddFilter(devtools_agent_message_filter_.get());
+
   content::GetContentClient()->renderer()->RenderThreadStarted();
 
   TRACE_EVENT_END_ETW("RenderThread::Init", 0, "");
@@ -181,6 +201,17 @@ RenderThread::~RenderThread() {
     web_database_observer_impl_->WaitForAllDatabasesToClose();
 
   // Shutdown in reverse of the initialization order.
+  RemoveFilter(devtools_agent_message_filter_.get());
+  devtools_agent_message_filter_ = NULL;
+
+  RemoveFilter(audio_input_message_filter_.get());
+  audio_input_message_filter_ = NULL;
+
+  RemoveFilter(audio_message_filter_.get());
+  audio_message_filter_ = NULL;
+
+  RemoveFilter(vc_manager_->video_capture_message_filter());
+
   RemoveFilter(db_message_filter_.get());
   db_message_filter_ = NULL;
 
@@ -388,8 +419,8 @@ bool RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     // is there a new non-windows message I should add here?
     IPC_MESSAGE_HANDLER(ViewMsg_New, OnCreateNewView)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache, OnPurgePluginListCache)
+    IPC_MESSAGE_HANDLER(ViewMsg_NetworkStateChanged, OnNetworkStateChanged)
     IPC_MESSAGE_HANDLER(DOMStorageMsg_Event, OnDOMStorageEvent)
-    IPC_MESSAGE_HANDLER(GpuMsg_GpuChannelEstablished, OnGpuChannelEstablished)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -428,7 +459,6 @@ void RenderThread::OnCreateNewView(const ViewMsg_New_Params& params) {
   RenderView::Create(
       this,
       params.parent_window,
-      params.compositing_surface,
       MSG_ROUTING_NONE,
       params.renderer_preferences,
       params.web_preferences,
@@ -465,14 +495,14 @@ void RenderThread::EnableSpdy(bool enable) {
   Send(new ViewHostMsg_EnableSpdy(enable));
 }
 
-void RenderThread::EstablishGpuChannel(
+GpuChannelHost* RenderThread::EstablishGpuChannelSync(
     content::CauseForGpuLaunch cause_for_gpu_launch) {
   if (gpu_channel_.get()) {
     // Do nothing if we already have a GPU channel or are already
     // establishing one.
     if (gpu_channel_->state() == GpuChannelHost::kUnconnected ||
         gpu_channel_->state() == GpuChannelHost::kConnected)
-      return;
+      return GetGpuChannel();
 
     // Recreate the channel if it has been lost.
     if (gpu_channel_->state() == GpuChannelHost::kLost)
@@ -483,13 +513,26 @@ void RenderThread::EstablishGpuChannel(
     gpu_channel_ = new GpuChannelHost;
 
   // Ask the browser for the channel name.
-  Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch));
-}
+  IPC::ChannelHandle channel_handle;
+  base::ProcessHandle renderer_process_for_gpu;
+  GPUInfo gpu_info;
+  if (!Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch,
+                                               &channel_handle,
+                                               &renderer_process_for_gpu,
+                                               &gpu_info)) ||
+      channel_handle.name.empty() ||
+      renderer_process_for_gpu == base::kNullProcessHandle) {
+    // Otherwise cancel the connection.
+    gpu_channel_ = NULL;
+    return NULL;
+  }
 
-GpuChannelHost* RenderThread::EstablishGpuChannelSync(
-    content::CauseForGpuLaunch cause_for_gpu_launch) {
-  EstablishGpuChannel(cause_for_gpu_launch);
-  Send(new GpuHostMsg_SynchronizeGpu());
+  gpu_channel_->set_gpu_info(gpu_info);
+  content::GetContentClient()->SetGpuInfo(gpu_info);
+
+  // Connect to the GPU process if a channel name was received.
+  gpu_channel_->Connect(channel_handle, renderer_process_for_gpu);
+
   return GetGpuChannel();
 }
 
@@ -547,9 +590,6 @@ void RenderThread::EnsureWebKitInitialized() {
   web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
   WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
 
-  WebRuntimeFeatures::enableMediaPlayer(
-      RenderProcess::current()->HasInitializedMediaLibrary());
-
   WebRuntimeFeatures::enableSockets(
       !command_line.HasSwitch(switches::kDisableWebSockets));
 
@@ -576,8 +616,16 @@ void RenderThread::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
 
+  WebKit::WebRuntimeFeatures::enableMediaStream(
+      command_line.HasSwitch(switches::kEnableMediaStream));
+
+#if defined(OS_CHROMEOS)
+  // TODO(crogers): enable once Web Audio has been tested and optimized.
+  WebRuntimeFeatures::enableWebAudio(false);
+#else
   WebRuntimeFeatures::enableWebAudio(
-      command_line.HasSwitch(switches::kEnableWebAudio));
+      !command_line.HasSwitch(switches::kDisableWebAudio));
+#endif
 
   WebRuntimeFeatures::enablePushState(true);
 
@@ -647,20 +695,9 @@ void RenderThread::OnPurgePluginListCache(bool reload_pages) {
   plugin_refresh_allowed_ = true;
 }
 
-void RenderThread::OnGpuChannelEstablished(
-    const IPC::ChannelHandle& channel_handle,
-    base::ProcessHandle renderer_process_for_gpu,
-    const GPUInfo& gpu_info) {
-  gpu_channel_->set_gpu_info(gpu_info);
-  content::GetContentClient()->SetGpuInfo(gpu_info);
-
-  if (!channel_handle.name.empty() && renderer_process_for_gpu != 0) {
-    // Connect to the GPU process if a channel name was received.
-    gpu_channel_->Connect(channel_handle, renderer_process_for_gpu);
-  } else {
-    // Otherwise cancel the connection.
-    gpu_channel_ = NULL;
-  }
+void RenderThread::OnNetworkStateChanged(bool online) {
+  EnsureWebKitInitialized();
+  WebNetworkStateNotifier::setOnLine(online);
 }
 
 scoped_refptr<base::MessageLoopProxy>

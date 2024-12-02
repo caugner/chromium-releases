@@ -71,16 +71,15 @@ void ShutdownButton::Init() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SetIcon(*rb.GetBitmapNamed(IDR_SHUTDOWN_ICON));
   set_icon_text_spacing(kIconTextPadding);
-  SetFocusable(true);
-  SetID(VIEW_ID_SCREEN_LOCKER_SHUTDOWN);
+  set_focusable(true);
+  set_id(VIEW_ID_SCREEN_LOCKER_SHUTDOWN);
   // Set label colors.
   SetEnabledColor(SK_ColorWHITE);
   SetDisabledColor(SK_ColorWHITE);
   SetHighlightColor(SK_ColorWHITE);
   SetHoverColor(SK_ColorWHITE);
-  // Disable throbbing and make border always visible.
-  SetAnimationDuration(0);
-  SetNormalHasBorder(true);
+  static_cast<views::TextButtonBorder*>(border())->copy_normal_set_to_hot_set();
+  set_animate_on_state_change(false);
   // Setup round shapes.
   set_background(
       new HoverBackground(

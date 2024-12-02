@@ -156,6 +156,7 @@ class BaseTool(object):
 
     add_env = {
       "G_SLICE" : "always-malloc",
+      "NSS_DISABLE_UNLOAD" : "1",
       "NSS_DISABLE_ARENA_FREE_LIST" : "1",
       "GTEST_DEATH_TEST_USE_FORK" : "1",
     }
@@ -601,6 +602,8 @@ class ThreadSanitizerBase(object):
     # This should shorten filepaths for functions intercepted in TSan.
     ret += ["--file-prefix-to-cut=scripts/tsan/tsan/"]
 
+    ret += ["--gen-suppressions=true"]
+
     if self.EvalBoolFlag(self._options.hybrid):
       ret += ["--hybrid=yes"] # "no" is the default value for TSAN
 
@@ -616,9 +619,11 @@ class ThreadSanitizerBase(object):
     # --show-pc flag is needed for parsing the error logs on Darwin.
     if platform_suffix == 'mac':
       ret += ["--show-pc=yes"]
+    ret += ["--show-pid=no"]
 
     # Don't show googletest frames in stacks.
     ret += ["--cut_stack_below=testing*Test*Run*"]
+    ret += ["--cut_stack_below=testing*HandleSehExceptionsInMethodIfSupported"]
 
     return ret
 
@@ -784,12 +789,23 @@ class DrMemory(BaseTool):
     # Un-comment to dump Dr.Memory events on error
     #proc += ["-dr_ops", "-dumpcore_mask 0x8bff"]
 
+    # Un-comment to debug Dr.Memory
+    #proc += ["-dr_ops", "-no_hide -msgbox_mask 15"]
+
     if self._options.use_debug:
       proc += ["-debug"]
 
     proc += ["-logdir", self.log_dir]
     proc += ["-batch", "-quiet"]
+
+    # Increase some Dr. Memory constants
+    proc += ["-redzone_size", "16"]
     proc += ["-callstack_max_frames", "30"]
+
+    # Un-comment to ignore uninitialized accesses
+    #proc += ["-no_check_uninitialized"]
+
+    # Un-comment to ignore leaks
     #proc += ["-no_check_leaks", "-no_count_leaks"]
 
     # Dr.Memory requires -- to separate tool flags from the executable name.

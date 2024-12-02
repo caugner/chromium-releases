@@ -15,6 +15,12 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 
+bool ShellIntegration::CanSetAsDefaultProtocolClient() {
+  // Allowed as long as the browser can become the operating system default
+  // browser.
+  return CanSetAsDefaultBrowser();
+}
+
 ShellIntegration::ShortcutInfo::ShortcutInfo()
     : create_on_desktop(false),
       create_in_applications_menu(false),
@@ -112,6 +118,12 @@ void ShellIntegration::DefaultWebClientWorker::CompleteCheckIsDefault(
     DefaultWebClientState state) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   UpdateUI(state);
+  // The worker has finished everything it needs to do, so free the observer
+  // if we own it.
+  if (observer_ && observer_->IsOwnedByWorker()) {
+    delete observer_;
+    observer_ = NULL;
+  }
 }
 
 void ShellIntegration::DefaultWebClientWorker::ExecuteSetAsDefault() {

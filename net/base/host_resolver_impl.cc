@@ -21,7 +21,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/threading/worker_pool.h"
@@ -43,18 +43,6 @@
 namespace net {
 
 namespace {
-
-// Helper to create an AddressList that has a particular port. It has an
-// optimization to avoid allocating a new address linked list when the
-// port is already what we want.
-AddressList CreateAddressListUsingPort(const AddressList& src, int port) {
-  if (src.GetPort() == port)
-    return src;
-
-  AddressList out = src;
-  out.SetPort(port);
-  return out;
-}
 
 // Helper to mutate the linked list contained by AddressList to the given
 // port. Note that in general this is dangerous since the AddressList's
@@ -82,30 +70,24 @@ const char kOSErrorsForGetAddrinfoHistogramName[] =
     "Net.OSErrorsForGetAddrinfo";
 #endif
 
-HostCache* CreateDefaultCache() {
-  static const size_t kMaxHostCacheEntries = 100;
-
-  HostCache* cache = new HostCache(
-      kMaxHostCacheEntries,
-      base::TimeDelta::FromMinutes(1),
-      base::TimeDelta::FromSeconds(0));  // Disable caching of failed DNS.
-
-  return cache;
-}
-
 // Gets a list of the likely error codes that getaddrinfo() can return
 // (non-exhaustive). These are the error codes that we will track via
 // a histogram.
 std::vector<int> GetAllGetAddrinfoOSErrors() {
   int os_errors[] = {
 #if defined(OS_POSIX)
+#if !defined(OS_FREEBSD)
+#if !defined(OS_ANDROID)
+    // EAI_ADDRFAMILY has been declared obsolete in Android's netdb.h.
     EAI_ADDRFAMILY,
+#endif
+    EAI_NODATA,
+#endif
     EAI_AGAIN,
     EAI_BADFLAGS,
     EAI_FAIL,
     EAI_FAMILY,
     EAI_MEMORY,
-    EAI_NODATA,
     EAI_NONAME,
     EAI_SERVICE,
     EAI_SOCKTYPE,
@@ -152,8 +134,8 @@ HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves,
     max_concurrent_resolves = kDefaultMaxJobs;
 
   HostResolverImpl* resolver =
-      new HostResolverImpl(NULL, CreateDefaultCache(), max_concurrent_resolves,
-                           max_retry_attempts, net_log);
+      new HostResolverImpl(NULL, HostCache::CreateDefaultCache(),
+          max_concurrent_resolves, max_retry_attempts, net_log);
 
   return resolver;
 }
@@ -616,6 +598,12 @@ class HostResolverImpl::Job
     if (was_cancelled())
       return;
 
+    if (was_retry_attempt) {
+      // If retry attempt finishes before 1st attempt, then get stats on how
+      // much time is saved by having spawned an extra attempt.
+      retry_attempt_finished_time_ = base::TimeTicks::Now();
+    }
+
     scoped_refptr<NetLog::EventParameters> params;
     if (error != OK) {
       params = new HostResolveFailedParams(0, error, os_error);
@@ -658,6 +646,20 @@ class HostResolverImpl::Job
         category = RESOLVE_SPECULATIVE_SUCCESS;
         DNS_HISTOGRAM("DNS.ResolveSpeculativeSuccess", duration);
       }
+
+      // Log DNS lookups based on address_family.  This will help us determine
+      // if IPv4 or IPv4/6 lookups are faster or slower.
+      switch(key_.address_family) {
+        case ADDRESS_FAMILY_IPV4:
+          DNS_HISTOGRAM("DNS.ResolveSuccess_FAMILY_IPV4", duration);
+          break;
+        case ADDRESS_FAMILY_IPV6:
+          DNS_HISTOGRAM("DNS.ResolveSuccess_FAMILY_IPV6", duration);
+          break;
+        case ADDRESS_FAMILY_UNSPECIFIED:
+          DNS_HISTOGRAM("DNS.ResolveSuccess_FAMILY_UNSPEC", duration);
+          break;
+      }
     } else {
       if (had_non_speculative_request_) {
         category = RESOLVE_FAIL;
@@ -665,6 +667,19 @@ class HostResolverImpl::Job
       } else {
         category = RESOLVE_SPECULATIVE_FAIL;
         DNS_HISTOGRAM("DNS.ResolveSpeculativeFail", duration);
+      }
+      // Log DNS lookups based on address_family.  This will help us determine
+      // if IPv4 or IPv4/6 lookups are faster or slower.
+      switch(key_.address_family) {
+        case ADDRESS_FAMILY_IPV4:
+          DNS_HISTOGRAM("DNS.ResolveFail_FAMILY_IPV4", duration);
+          break;
+        case ADDRESS_FAMILY_IPV6:
+          DNS_HISTOGRAM("DNS.ResolveFail_FAMILY_IPV6", duration);
+          break;
+        case ADDRESS_FAMILY_UNSPECIFIED:
+          DNS_HISTOGRAM("DNS.ResolveFail_FAMILY_UNSPEC", duration);
+          break;
       }
       UMA_HISTOGRAM_CUSTOM_ENUMERATION(kOSErrorsForGetAddrinfoHistogramName,
                                        std::abs(os_error),
@@ -704,6 +719,7 @@ class HostResolverImpl::Job
                                const int os_error) const {
     bool first_attempt_to_complete =
         completed_attempt_number_ == attempt_number;
+    bool is_first_attempt = (attempt_number == 1);
 
     if (first_attempt_to_complete) {
       // If this was first attempt to complete, then record the resolution
@@ -721,6 +737,13 @@ class HostResolverImpl::Job
       UMA_HISTOGRAM_ENUMERATION("DNS.AttemptSuccess", attempt_number, 100);
     else
       UMA_HISTOGRAM_ENUMERATION("DNS.AttemptFailure", attempt_number, 100);
+
+    // If first attempt didn't finish before retry attempt, then calculate stats
+    // on how much time is saved by having spawned an extra attempt.
+    if (!first_attempt_to_complete && is_first_attempt && !was_cancelled()) {
+      DNS_HISTOGRAM("DNS.AttemptTimeSavedByRetry",
+                    base::TimeTicks::Now() - retry_attempt_finished_time_);
+    }
 
     if (was_cancelled() || !first_attempt_to_complete) {
       // Count those attempts which completed after the job was already canceled
@@ -774,6 +797,9 @@ class HostResolverImpl::Job
 
   // The result (a net error code) from the first attempt to complete.
   int completed_attempt_error_;
+
+  // The time when retry attempt was finished.
+  base::TimeTicks retry_attempt_finished_time_;
 
   // True if a non-speculative request was ever attached to this job
   // (regardless of whether or not it was later cancelled.
@@ -1039,7 +1065,6 @@ HostResolverImpl::HostResolverImpl(
       next_job_id_(0),
       resolver_proc_(resolver_proc),
       default_address_family_(ADDRESS_FAMILY_UNSPECIFIED),
-      shutdown_(false),
       ipv6_probe_monitoring_(false),
       additional_resolver_flags_(0),
       net_log_(net_log) {
@@ -1058,7 +1083,7 @@ HostResolverImpl::HostResolverImpl(
 #if defined(OS_WIN)
   EnsureWinsockInit();
 #endif
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   if (HaveOnlyLoopbackAddresses())
     additional_resolver_flags_ |= HOST_RESOLVER_LOOPBACK_ONLY;
 #endif
@@ -1107,9 +1132,6 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
                               RequestHandle* out_req,
                               const BoundNetLog& source_net_log) {
   DCHECK(CalledOnValidThread());
-
-  if (shutdown_)
-    return ERR_UNEXPECTED;
 
   // Choose a unique ID number for observers to see.
   int request_id = next_request_id_++;
@@ -1235,14 +1257,6 @@ int HostResolverImpl::Resolve(const RequestInfo& info,
 // cancelled requests from Job::requests_.
 void HostResolverImpl::CancelRequest(RequestHandle req_handle) {
   DCHECK(CalledOnValidThread());
-  if (shutdown_) {
-    // TODO(eroman): temp hack for: http://crbug.com/18373
-    // Because we destroy outstanding requests during Shutdown(),
-    // |req_handle| is already cancelled.
-    LOG(ERROR) << "Called HostResolverImpl::CancelRequest() after Shutdown().";
-    base::debug::StackTrace().PrintBacktrace();
-    return;
-  }
   Request* req = reinterpret_cast<Request*>(req_handle);
   DCHECK(req);
 
@@ -1296,16 +1310,6 @@ AddressFamily HostResolverImpl::GetDefaultAddressFamily() const {
 
 HostResolverImpl* HostResolverImpl::GetAsHostResolverImpl() {
   return this;
-}
-
-void HostResolverImpl::Shutdown() {
-  DCHECK(CalledOnValidThread());
-
-  // Cancel the outstanding jobs.
-  CancelAllJobs();
-  DiscardIPv6ProbeJob();
-
-  shutdown_ = true;
 }
 
 void HostResolverImpl::AddOutstandingJob(Job* job) {
@@ -1591,14 +1595,11 @@ void HostResolverImpl::OnIPAddressChanged() {
   if (cache_.get())
     cache_->clear();
   if (ipv6_probe_monitoring_) {
-    DCHECK(!shutdown_);
-    if (shutdown_)
-      return;
     DiscardIPv6ProbeJob();
     ipv6_probe_job_ = new IPv6ProbeJob(this);
     ipv6_probe_job_->Start();
   }
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   if (HaveOnlyLoopbackAddresses()) {
     additional_resolver_flags_ |= HOST_RESOLVER_LOOPBACK_ONLY;
   } else {

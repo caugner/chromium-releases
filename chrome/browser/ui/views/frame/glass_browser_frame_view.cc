@@ -8,27 +8,31 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/profile_menu_button.h"
-#include "chrome/browser/ui/views/profile_tag_view.h"
 #include "chrome/browser/ui/views/tabs/side_tab_strip.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_service.h"
-#include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/icon_util.h"
+#include "ui/gfx/image/image.h"
 #include "views/window/client_view.h"
 #include "views/window/window_resources.h"
 
@@ -46,13 +50,13 @@ const int kNonClientRestoredExtraThickness = 11;
 // In the window corners, the resize areas don't actually expand bigger, but the
 // 16 px at the end of the top and bottom edges triggers diagonal resizing.
 const int kResizeAreaCornerSize = 16;
-// The OTR avatar ends 2 px above the bottom of the tabstrip (which, given the
+// The avatar ends 2 px above the bottom of the tabstrip (which, given the
 // way the tabstrip draws its bottom edge, will appear like a 1 px gap to the
 // user).
-const int kOTRBottomSpacing = 2;
-// There are 2 px on each side of the OTR avatar (between the frame border and
+const int kAvatarBottomSpacing = 2;
+// There are 2 px on each side of the avatar (between the frame border and
 // it on the left, and between it and the tabstrip on the right).
-const int kOTRSideSpacing = 2;
+const int kAvatarSideSpacing = 2;
 // The content left/right images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
 // The top 1 px of the tabstrip is shadow; in maximized mode we push this off
@@ -66,12 +70,6 @@ const int kNewTabCaptionRestoredSpacing = 5;
 // similar vertical coordinates, we need to reserve a larger, 16 px gap to avoid
 // looking too cluttered.
 const int kNewTabCaptionMaximizedSpacing = 16;
-// Y position for profile button inside the frame.
-const int kProfileButtonYPosition = 2;
-// Y position for profile tag inside the frame.
-const int kProfileTagYPosition = 1;
-// Offset y position of profile button and tag by this amount when maximized.
-const int kProfileElementMaximizedYOffset = 6;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -86,18 +84,16 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
       throbber_frame_(0) {
   if (browser_view_->ShouldShowWindowIcon())
     InitThrobberIcons();
-  // If multi-profile is enabled set up profile button and login notifications.
-  const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
-  if (browser_command_line.HasSwitch(switches::kMultiProfiles) &&
-      !browser_view->ShouldShowOffTheRecordAvatar()) {
-    RegisterLoginNotifications();
-    profile_button_.reset(new ProfileMenuButton(std::wstring(),
-        browser_view_->browser()->profile()));
-    profile_button_->SetVisible(false);
-    profile_tag_.reset(new ProfileTagView(frame_, profile_button_.get()));
-    profile_tag_->SetVisible(false);
-    AddChildView(profile_tag_.get());
-    AddChildView(profile_button_.get());
+
+  if (browser_view_->ShouldShowAvatar()) {
+    avatar_button_.reset(new AvatarMenuButton(
+        browser_view_->browser(), !browser_view_->IsOffTheRecord()));
+    AddChildView(avatar_button_.get());
+    UpdateAvatarInfo();
+    if (!browser_view_->IsOffTheRecord()) {
+      registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+                     NotificationService::AllSources());
+    }
   }
 }
 
@@ -117,8 +113,8 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   }
   int minimize_button_offset =
       std::min(frame_->GetMinimizeButtonOffset(), width());
-  int tabstrip_x = browser_view_->ShouldShowOffTheRecordAvatar() ?
-      (otr_avatar_bounds_.right() + kOTRSideSpacing) :
+  int tabstrip_x = browser_view_->ShouldShowAvatar() ?
+      (avatar_bounds_.right() + kAvatarSideSpacing) :
       NonClientBorderThickness();
   // In RTL languages, we have moved an avatar icon left by the size of window
   // controls to prevent it from being rendered over them. So, we use its x
@@ -126,18 +122,13 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   // a tab strip until the left end of this window without considering the size
   // of window controls in RTL languages.
   if (base::i18n::IsRTL()) {
-    if (!browser_view_->ShouldShowOffTheRecordAvatar() && frame_->IsMaximized())
-      tabstrip_x += otr_avatar_bounds_.x();
+    if (!browser_view_->ShouldShowAvatar() && frame_->IsMaximized())
+      tabstrip_x += avatar_bounds_.x();
     minimize_button_offset = width();
   }
-  int maximized_spacing =
-      kNewTabCaptionMaximizedSpacing +
-      (show_profile_button() && profile_button_->IsVisible() ?
-          profile_button_->GetPreferredSize().width() +
-              ProfileMenuButton::kProfileTagHorizontalSpacing : 0);
   int tabstrip_width = minimize_button_offset - tabstrip_x -
       (frame_->IsMaximized() ?
-          maximized_spacing : kNewTabCaptionRestoredSpacing);
+          kNewTabCaptionMaximizedSpacing : kNewTabCaptionRestoredSpacing);
   return gfx::Rect(tabstrip_x, GetHorizontalTabStripVerticalOffset(false),
                    std::max(0, tabstrip_width),
                    tabstrip->GetPreferredSize().height());
@@ -158,6 +149,32 @@ void GlassBrowserFrameView::UpdateThrobber(bool running) {
   } else if (running) {
     StartThrobber();
   }
+}
+
+gfx::Size GlassBrowserFrameView::GetMinimumSize() {
+  gfx::Size min_size(browser_view_->GetMinimumSize());
+
+  // Account for the client area insets.
+  gfx::Insets insets = GetClientAreaInsets();
+  min_size.Enlarge(insets.width(), insets.height());
+  // Client area insets do not include the shadow thickness.
+  min_size.Enlarge(2 * kContentEdgeShadowThickness, 0);
+
+  // Ensure that the minimum width is enough to hold a tab strip with minimum
+  // width at its usual insets.
+  if (browser_view_->IsTabStripVisible()) {
+    AbstractTabStripView* tabstrip = browser_view_->tabstrip();
+    int min_tabstrip_width = tabstrip->GetMinimumSize().width();
+    if (browser_view_->UseVerticalTabs()) {
+      min_size.Enlarge(min_tabstrip_width, 0);
+    } else {
+      int min_tabstrip_area_width =
+          width() - GetBoundsForTabStrip(tabstrip).width() + min_tabstrip_width;
+      min_size.set_width(std::max(min_tabstrip_area_width, min_size.width()));
+    }
+  }
+
+  return min_size;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -181,12 +198,11 @@ gfx::Rect GlassBrowserFrameView::GetWindowBoundsForClientBounds(
     return gfx::Rect(rect);
   }
 
-  int top_height = NonClientTopBorderHeight(false, false);
-  int border_thickness = NonClientBorderThickness();
-  return gfx::Rect(std::max(0, client_bounds.x() - border_thickness),
-                   std::max(0, client_bounds.y() - top_height),
-                   client_bounds.width() + (2 * border_thickness),
-                   client_bounds.height() + top_height + border_thickness);
+  gfx::Insets insets = GetClientAreaInsets();
+  return gfx::Rect(std::max(0, client_bounds.x() - insets.left()),
+                   std::max(0, client_bounds.y() - insets.top()),
+                   client_bounds.width() + insets.width(),
+                   client_bounds.height() + insets.height());
 }
 
 int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
@@ -196,6 +212,11 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   // out.
   if (!browser_view_->IsBrowserTypeNormal() || !bounds().Contains(point))
     return HTNOWHERE;
+
+  // See if the point is within the avatar menu button.
+  if (avatar_button_.get() &&
+      avatar_button_->GetMirroredBounds().Contains(point))
+    return HTCLIENT;
 
   int frame_component = frame_->client_view()->NonClientHitTest(point);
 
@@ -210,16 +231,11 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (frame_component != HTNOWHERE)
     return frame_component;
 
-  // See if the point is within the profile menu button.
-  if (show_profile_button() && profile_button_->IsVisible() &&
-      profile_button_->GetMirroredBounds().Contains(point))
-    return HTCLIENT;
-
   int frame_border_thickness = FrameBorderThickness();
   int window_component = GetHTComponentForFrame(point, frame_border_thickness,
       nonclient_border_thickness, frame_border_thickness,
       kResizeAreaCornerSize - frame_border_thickness,
-      frame_->window_delegate()->CanResize());
+      frame_->widget_delegate()->CanResize());
   // Fall back to the caption if no other component matches.
   return (window_component == HTNOWHERE) ? HTCAPTION : window_component;
 }
@@ -232,24 +248,18 @@ void GlassBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
     return;  // Nothing is visible, so don't bother to paint.
 
   PaintToolbarBackground(canvas);
-  if (browser_view_->ShouldShowOffTheRecordAvatar())
-    PaintOTRAvatar(canvas);
   if (!frame_->IsMaximized())
     PaintRestoredClientEdge(canvas);
 }
 
 void GlassBrowserFrameView::Layout() {
-  LayoutOTRAvatar();
+  LayoutAvatar();
   LayoutClientView();
-  LayoutProfileTag();
 }
 
 bool GlassBrowserFrameView::HitTest(const gfx::Point& l) const {
-  // The ProfileMenuButton intrudes into the client area when the window is
-  // maximized.
-  return (frame_->IsMaximized() && show_profile_button() &&
-          profile_button_->IsVisible() &&
-          profile_button_->GetMirroredBounds().Contains(l)) ||
+  return (avatar_button_.get() &&
+          avatar_button_->GetMirroredBounds().Contains(l)) ||
       !frame_->client_view()->bounds().Contains(l);
 }
 
@@ -319,7 +329,7 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
                           kNonClientBorderThickness, kNonClientBorderThickness,
                           false);
 
-    // Draw center edge. We need to draw a while line above the toolbar for the
+    // Draw center edge. We need to draw a white line above the toolbar for the
     // image to overlay nicely.
     int center_offset =
         -kContentEdgeShadowThickness + kNonClientBorderThickness;
@@ -382,27 +392,6 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
       w - (2 * kClientEdgeThickness), kClientEdgeThickness);
 }
 
-void GlassBrowserFrameView::PaintOTRAvatar(gfx::Canvas* canvas) {
-  // In RTL mode, the avatar icon should be looking the opposite direction.
-  canvas->Save();
-  if (base::i18n::IsRTL()) {
-    canvas->TranslateInt(width(), 0);
-    canvas->ScaleInt(-1, 1);
-  }
-
-  SkBitmap otr_avatar_icon = browser_view_->GetOTRAvatarIcon();
-  int w = otr_avatar_bounds_.width();
-  int h = otr_avatar_bounds_.height();
-  canvas->DrawBitmapInt(otr_avatar_icon, 0,
-      // Bias the rounding to select a region that's lower rather than higher,
-      // as the shadows at the image top mean the apparent center is below the
-      // real center.
-      ((otr_avatar_icon.height() - otr_avatar_bounds_.height()) + 1) / 2, w, h,
-      otr_avatar_bounds_.x(), otr_avatar_bounds_.y(), w, h, false);
-
-  canvas->Restore();
-}
-
 void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   ui::ThemeProvider* tp = GetThemeProvider();
   gfx::Rect client_area_bounds = CalculateClientAreaBounds(width(), height());
@@ -453,91 +442,61 @@ void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
       client_area_bottom + kClientEdgeThickness - client_area_top);
 }
 
-void GlassBrowserFrameView::LayoutOTRAvatar() {
-  int otr_x = NonClientBorderThickness() + kOTRSideSpacing;
+void GlassBrowserFrameView::LayoutAvatar() {
+  // Even though the avatar is used for both incognito and profiles we always
+  // use the incognito icon to layout the avatar button. The profile icon
+  // can be customized so we can't depend on its size to perform layout.
+  SkBitmap incognito_icon = browser_view_->GetOTRAvatarIcon();
+
+  int avatar_x = NonClientBorderThickness() + kAvatarSideSpacing;
   // Move this avatar icon by the size of window controls to prevent it from
   // being rendered over them in RTL languages. This code also needs to adjust
   // the width of a tab strip to avoid decreasing this size twice. (See the
   // comment in GetBoundsForTabStrip().)
   if (base::i18n::IsRTL())
-    otr_x += width() - frame_->GetMinimizeButtonOffset();
+    avatar_x += width() - frame_->GetMinimizeButtonOffset();
 
-  SkBitmap otr_avatar_icon = browser_view_->GetOTRAvatarIcon();
-  int otr_bottom, otr_restored_y;
+  int avatar_bottom, avatar_restored_y;
   if (browser_view_->UseVerticalTabs()) {
-    otr_bottom = NonClientTopBorderHeight(false, false) - kOTRBottomSpacing;
-    otr_restored_y = kFrameShadowThickness;
+    avatar_bottom = NonClientTopBorderHeight(false, false) -
+                    kAvatarBottomSpacing;
+    avatar_restored_y = kFrameShadowThickness;
   } else {
-    otr_bottom = GetHorizontalTabStripVerticalOffset(false) +
-        browser_view_->GetTabStripHeight() - kOTRBottomSpacing;
-    otr_restored_y = otr_bottom - otr_avatar_icon.height();
+    avatar_bottom = GetHorizontalTabStripVerticalOffset(false) +
+        browser_view_->GetTabStripHeight() - kAvatarBottomSpacing;
+    avatar_restored_y = avatar_bottom - incognito_icon.height();
   }
-  int otr_y = frame_->IsMaximized() ?
+  int avatar_y = frame_->IsMaximized() ?
       (NonClientTopBorderHeight(false, true) + kTabstripTopShadowThickness) :
-      otr_restored_y;
-  otr_avatar_bounds_.SetRect(otr_x, otr_y, otr_avatar_icon.width(),
-      browser_view_->ShouldShowOffTheRecordAvatar() ? (otr_bottom - otr_y) : 0);
+      avatar_restored_y;
+  avatar_bounds_.SetRect(avatar_x, avatar_y, incognito_icon.width(),
+      browser_view_->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
+
+  if (avatar_button_.get())
+    avatar_button_->SetBoundsRect(avatar_bounds_);
 }
 
 void GlassBrowserFrameView::LayoutClientView() {
   client_view_bounds_ = CalculateClientAreaBounds(width(), height());
 }
 
-void GlassBrowserFrameView::LayoutProfileTag() {
-  if (!show_profile_button())
-    return;
+gfx::Insets GlassBrowserFrameView::GetClientAreaInsets() const {
+  if (!browser_view_->IsTabStripVisible())
+    return gfx::Insets();
 
-  string16 profile_name = UTF8ToUTF16(browser_view_->browser()->profile()->
-      GetPrefs()->GetString(prefs::kGoogleServicesUsername));
-  if (!profile_name.empty()) {
-    profile_button_->SetText(profile_name);
-    profile_button_->SetTextShadowColors(
-        ProfileMenuButton::kDefaultActiveTextShadow,
-        ProfileMenuButton::kDefaultInactiveTextShadow);
-  } else {
-    profile_button_->SetText(l10n_util::GetStringUTF16(
-        IDS_PROFILES_NOT_SIGNED_IN_MENU));
-    profile_button_->SetTextShadowColors(
-        ProfileMenuButton::kDarkTextShadow,
-        ProfileMenuButton::kDefaultInactiveTextShadow);
-  }
-
-  profile_button_->ClearMaxTextSize();
-  profile_button_->SetVisible(true);
-  int x_tag =
-      // The x position of minimize button in the frame
-      frame_->GetMinimizeButtonOffset() -
-          // - the space between the minimize button and the profile button
-          ProfileMenuButton::kProfileTagHorizontalSpacing -
-          // - the width of the profile button
-          profile_button_->GetPreferredSize().width();
-  int y_maximized_offset = frame_->IsMaximized() ?
-      kProfileElementMaximizedYOffset : 0;
-  profile_button_->SetBounds(
-      x_tag,
-      kProfileButtonYPosition + y_maximized_offset,
-      profile_button_->GetPreferredSize().width(),
-      profile_button_->GetPreferredSize().height());
-
-  profile_tag_->SetVisible(true);
-  profile_tag_->set_is_signed_in(!profile_name.empty());
-  profile_tag_->SetBounds(
-      x_tag,
-      kProfileTagYPosition + y_maximized_offset,
-      profile_button_->GetPreferredSize().width(),
-      ProfileTagView::kProfileTagHeight);
+  const int top_height = NonClientTopBorderHeight(false, false);
+  const int border_thickness = NonClientBorderThickness();
+  return gfx::Insets(top_height,
+                     border_thickness,
+                     border_thickness,
+                     border_thickness);
 }
 
 gfx::Rect GlassBrowserFrameView::CalculateClientAreaBounds(int width,
                                                            int height) const {
-  if (!browser_view_->IsTabStripVisible())
-    return gfx::Rect(0, 0, this->width(), this->height());
-
-  int top_height = NonClientTopBorderHeight(false, false);
-  int border_thickness = NonClientBorderThickness();
-  return gfx::Rect(border_thickness, top_height,
-                   std::max(0, width - (2 * border_thickness)),
-                   std::max(0, height - top_height - border_thickness));
+  gfx::Rect bounds(0, 0, width, height);
+  bounds.Inset(GetClientAreaInsets());
+  return bounds;
 }
 
 void GlassBrowserFrameView::StartThrobber() {
@@ -586,19 +545,18 @@ void GlassBrowserFrameView::DisplayNextThrobberFrame() {
               reinterpret_cast<LPARAM>(throbber_icons_[throbber_frame_]));
 }
 
-void GlassBrowserFrameView::Observe(NotificationType type,
+void GlassBrowserFrameView::Observe(int type,
                                     const NotificationSource& source,
                                     const NotificationDetails& details) {
-  DCHECK_EQ(NotificationType::PREF_CHANGED, type.value);
-  std::string* name = Details<std::string>(details).ptr();
-  if (prefs::kGoogleServicesUsername == *name)
-    LayoutProfileTag();
-}
-
-void GlassBrowserFrameView::RegisterLoginNotifications() {
-  PrefService* pref_service = browser_view_->browser()->profile()->GetPrefs();
-  DCHECK(pref_service);
-  username_pref_.Init(prefs::kGoogleServicesUsername, pref_service, this);
+  switch (type) {
+    case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
+      UpdateAvatarInfo();
+      LayoutAvatar();
+      break;
+    default:
+      NOTREACHED() << "Got a notification we didn't register for!";
+      break;
+  }
 }
 
 // static
@@ -611,5 +569,20 @@ void GlassBrowserFrameView::InitThrobberIcons() {
       DCHECK(throbber_icons_[i]);
     }
     initialized = true;
+  }
+}
+
+void GlassBrowserFrameView::UpdateAvatarInfo() {
+  if (browser_view_->IsOffTheRecord()) {
+    avatar_button_->SetIcon(browser_view_->GetOTRAvatarIcon());
+  } else {
+    ProfileInfoCache& cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    Profile* profile = browser_view_->browser()->profile();
+    size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+    if (index != std::string::npos) {
+      avatar_button_->SetIcon(cache.GetAvatarIconOfProfileAtIndex(index));
+      avatar_button_->SetText(cache.GetNameOfProfileAtIndex(index));
+    }
   }
 }

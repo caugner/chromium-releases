@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
@@ -17,12 +18,14 @@
 
 class AutomationProxy;
 class CommandLine;
-class DictionaryValue;
 class FilePath;
-class GURL;
-class ListValue;
 class ProxyLauncher;
 struct WebKeyEvent;
+
+namespace base {
+class DictionaryValue;
+class ListValue;
+}
 
 namespace gfx {
 class Point;
@@ -42,13 +45,16 @@ class Automation {
   Automation();
   virtual ~Automation();
 
-  // Creates a browser, using the specified |browser_exe|.
+  // Creates a browser, using the specified |browser_exe| and |user_data_dir|.
   void InitWithBrowserPath(const FilePath& browser_exe,
+                           const FilePath& user_data_dir,
                            const CommandLine& options,
                            Error** error);
 
   // Start the system's default Chrome binary.
-  void Init(const CommandLine& options, Error** error);
+  void Init(const CommandLine& options,
+            const FilePath& user_data_dir,
+            Error** error);
 
   // Terminates this session and disconnects its automation proxy. After
   // invoking this method, the Automation can safely be deleted.
@@ -75,6 +81,12 @@ class Automation {
                           int modifiers,
                           Error** error);
 
+  // Drag and drop the file paths to the given location.
+  void DragAndDropFilePaths(int tab_id,
+                            const gfx::Point& location,
+                            const std::vector<FilePath::StringType>& paths,
+                            Error** error);
+
   // Captures a snapshot of the tab to the specified path.  The  PNG will
   // contain the entire page, including what is not in the current view
   // on the  screen.
@@ -85,20 +97,15 @@ class Automation {
   void GoBack(int tab_id, Error** error);
   void Reload(int tab_id, Error** error);
 
-  void GetCookies(const std::string& url, ListValue** cookies, Error** error);
-  void GetCookiesDeprecated(
-      int tab_id, const GURL& gurl, std::string* cookies, bool* success);
+  void GetCookies(const std::string& url,
+                  base::ListValue** cookies,
+                  Error** error);
   void DeleteCookie(const std::string& url,
                     const std::string& cookie_name,
                     Error** error);
-  void DeleteCookieDeprecated(int tab_id,
-                              const GURL& gurl,
-                              const std::string& cookie_name,
-                              bool* success);
-  void SetCookie(
-      const std::string& url, DictionaryValue* cookie_dict, Error** error);
-  void SetCookieDeprecated(
-      int tab_id, const GURL& gurl, const std::string& cookie, bool* success);
+  void SetCookie(const std::string& url,
+                 base::DictionaryValue* cookie_dict,
+                 Error** error);
 
   void MouseMove(int tab_id, const gfx::Point& p, Error** error);
   void MouseClick(int tab_id,
@@ -146,7 +153,6 @@ class Automation {
  private:
   AutomationProxy* automation() const;
   Error* GetIndicesForTab(int tab_id, int* browser_index, int* tab_index);
-  Error* CreateChromeError(const std::string& message);
   Error* CompareVersion(int client_build_no,
                         int client_patch_no,
                         bool* is_newer_or_equal);

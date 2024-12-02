@@ -23,8 +23,8 @@ PlatformContext3DImpl::PlatformContext3DImpl(RendererGLContext* parent_context)
 
 PlatformContext3DImpl::~PlatformContext3DImpl() {
   if (parent_context_.get() && parent_texture_id_ != 0) {
-  // Flush any remaining commands in the parent context to make sure the
-  // texture id accounting stays consistent.
+    // Flush any remaining commands in the parent context to make sure the
+    // texture id accounting stays consistent.
     gpu::gles2::GLES2Implementation* parent_gles2 =
         parent_context_->GetImplementation();
     parent_gles2->helper()->CommandBufferHelper::Finish();
@@ -79,14 +79,16 @@ bool PlatformContext3DImpl::Init() {
   CommandBufferProxy* parent_command_buffer =
       parent_context_->GetCommandBufferProxy();
   command_buffer_ = channel_->CreateOffscreenCommandBuffer(
-      parent_command_buffer,
       gfx::Size(1, 1),
       "*",
       attribs,
-      parent_texture_id_,
       GURL::EmptyGURL());
   if (!command_buffer_)
     return false;
+
+  if (!command_buffer_->SetParent(parent_command_buffer, parent_texture_id_))
+    return false;
+
   command_buffer_->SetChannelErrorCallback(callback_factory_.NewCallback(
       &PlatformContext3DImpl::OnContextLost));
 
@@ -107,8 +109,13 @@ gpu::CommandBuffer* PlatformContext3DImpl::GetCommandBuffer() {
   return command_buffer_;
 }
 
+int PlatformContext3DImpl::GetCommandBufferRouteId() {
+  DCHECK(command_buffer_);
+  return command_buffer_->route_id();
+}
+
 void PlatformContext3DImpl::SetContextLostCallback(Callback0::Type* callback) {
-    context_lost_callback_.reset(callback);
+  context_lost_callback_.reset(callback);
 }
 
 void PlatformContext3DImpl::OnContextLost() {

@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/task.h"
 #include "chrome/browser/browser_process_sub_thread.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/prefs/pref_member.h"
@@ -20,10 +21,14 @@
 class ChromeNetLog;
 class ChromeURLRequestContextGetter;
 class ExtensionEventRouterForwarder;
-class ListValue;
+class MediaInternals;
 class PrefProxyConfigTracker;
 class PrefService;
 class SystemURLRequestContextGetter;
+
+namespace base {
+class ListValue;
+}
 
 namespace chrome_browser_net {
 class ConnectInterceptor;
@@ -52,6 +57,13 @@ class IOThread : public BrowserProcessSubThread {
   struct Globals {
     Globals();
     ~Globals();
+
+    struct MediaGlobals {
+      MediaGlobals();
+      ~MediaGlobals();
+      // MediaInternals singleton used to aggregate media information.
+      scoped_ptr<MediaInternals> media_internals;
+    } media;
 
     // The "system" NetworkDelegate, used for Profile-agnostic network events.
     scoped_ptr<net::NetworkDelegate> system_network_delegate;
@@ -102,7 +114,7 @@ class IOThread : public BrowserProcessSubThread {
                             base::TimeDelta max_dns_queue_delay,
                             size_t max_speculative_parallel_resolves,
                             const chrome_common_net::UrlList& startup_urls,
-                            ListValue* referral_list,
+                            base::ListValue* referral_list,
                             bool preconnect_enabled);
 
   // Registers |url_request_context_getter| into the IO thread.  During
@@ -145,16 +157,18 @@ class IOThread : public BrowserProcessSubThread {
   net::HttpAuthHandlerFactory* CreateDefaultAuthHandlerFactory(
       net::HostResolver* resolver);
 
+  void InitSystemRequestContext();
+
   // Lazy initialization of system request context for
   // SystemURLRequestContextGetter. To be called on IO thread.
-  void InitSystemRequestContext();
+  void InitSystemRequestContextOnIOThread();
 
   void InitNetworkPredictorOnIOThread(
       bool prefetching_enabled,
       base::TimeDelta max_dns_queue_delay,
       size_t max_speculative_parallel_resolves,
       const chrome_common_net::UrlList& startup_urls,
-      ListValue* referral_list,
+      base::ListValue* referral_list,
       bool preconnect_enabled);
 
   void ChangedToOnTheRecordOnIOThread();
@@ -224,6 +238,8 @@ class IOThread : public BrowserProcessSubThread {
   // ChromeURLRequestContexts can be released during
   // IOThread::CleanUp().
   std::list<ChromeURLRequestContextGetter*> url_request_context_getters_;
+
+  ScopedRunnableMethodFactory<IOThread> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(IOThread);
 };

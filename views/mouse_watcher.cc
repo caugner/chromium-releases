@@ -7,9 +7,9 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "views/screen.h"
+#include "ui/gfx/screen.h"
 #include "views/view.h"
-#include "views/window/window.h"
+#include "views/widget/widget.h"
 
 namespace views {
 
@@ -89,19 +89,19 @@ class MouseWatcher::Observer : public MessageLoopForUI::Observer {
                    bounds.width() + mouse_watcher_->hot_zone_insets_.width(),
                    bounds.height() + mouse_watcher_->hot_zone_insets_.height());
 
-    gfx::Point cursor_point = Screen::GetCursorScreenPoint();
+    gfx::Point cursor_point = gfx::Screen::GetCursorScreenPoint();
 
     return bounds.Contains(cursor_point.x(), cursor_point.y());
   }
 
   // Returns true if the mouse is over the view's window.
   bool IsMouseOverWindow() {
-    Window* window = view()->GetWindow();
-    if (!window)
+    Widget* widget = view()->GetWidget();
+    if (!widget)
       return false;
 
-    return Screen::GetWindowAtCursorScreenPoint() ==
-        window->GetNativeWindow();
+    return gfx::Screen::GetWindowAtCursorScreenPoint() ==
+        widget->GetNativeWindow();
   }
 
   // Called from the message loop observer when a mouse movement has occurred.

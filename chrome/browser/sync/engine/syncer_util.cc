@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/tracked.h"
 #include "chrome/browser/sync/engine/conflict_resolver.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
@@ -90,7 +91,7 @@ void SyncerUtil::ChangeEntryIDAndUpdateChildren(
   }
   if (entry->Get(IS_DIR)) {
     // Get all child entries of the old id.
-    trans->directory()->GetChildHandles(trans, old_id, children);
+    trans->directory()->GetChildHandlesById(trans, old_id, children);
     Directory::ChildHandles::iterator i = children->begin();
     while (i != children->end()) {
       MutableEntry child_entry(trans, GET_BY_HANDLE, *i++);
@@ -247,7 +248,6 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
     syncable::MutableEntry* const entry,
     ConflictResolver* resolver,
     Cryptographer* cryptographer) {
-
   CHECK(entry->good());
   if (!entry->Get(IS_UNAPPLIED_UPDATE))
     return SUCCESS;  // No work to do.
@@ -279,7 +279,7 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
     }
   } else if (entry->Get(IS_DIR)) {
     Directory::ChildHandles handles;
-    trans->directory()->GetChildHandles(trans, id, &handles);
+    trans->directory()->GetChildHandlesById(trans, id, &handles);
     if (!handles.empty()) {
       // If we have still-existing children, then we need to deal with
       // them before we can process this change.
@@ -302,7 +302,7 @@ UpdateAttemptResponse SyncerUtil::AttemptToUpdateEntry(
         cryptographer->GetEncryptedTypes();
     if (!VerifyUnsyncedChangesAreEncrypted(trans, encrypted_types) &&
         (!cryptographer->is_ready() ||
-         !syncable::ProcessUnsyncedChangesForEncryption(trans, encrypted_types,
+         !syncable::ProcessUnsyncedChangesForEncryption(trans,
                                                         cryptographer))) {
       // We were unable to encrypt the changes, possibly due to a missing
       // passphrase. We return conflict, even though the conflict is with the
@@ -659,7 +659,7 @@ void SyncerUtil::MarkDeletedChildrenSynced(
     return;
   Directory::UnsyncedMetaHandles handles;
   {
-    ReadTransaction trans(dir, __FILE__, __LINE__);
+    ReadTransaction trans(FROM_HERE, dir);
     dir->GetUnsyncedMetaHandles(&trans, &handles);
   }
   if (handles.empty())
@@ -667,7 +667,7 @@ void SyncerUtil::MarkDeletedChildrenSynced(
   Directory::UnsyncedMetaHandles::iterator it;
   for (it = handles.begin() ; it != handles.end() ; ++it) {
     // Single transaction / entry we deal with.
-    WriteTransaction trans(dir, SYNCER, __FILE__, __LINE__);
+    WriteTransaction trans(FROM_HERE, SYNCER, dir);
     MutableEntry entry(&trans, GET_BY_HANDLE, *it);
     if (!entry.Get(IS_UNSYNCED) || !entry.Get(IS_DEL))
       continue;

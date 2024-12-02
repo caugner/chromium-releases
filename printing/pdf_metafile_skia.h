@@ -30,6 +30,7 @@ class PdfMetafileSkia : public Metafile {
   virtual bool InitFromData(const void* src_buffer, uint32 src_buffer_size);
 
   virtual SkDevice* StartPageForVectorCanvas(
+      int page_number,
       const gfx::Size& page_size,
       const gfx::Rect& content_area,
       const float& scale_factor);
@@ -54,13 +55,30 @@ class PdfMetafileSkia : public Metafile {
   virtual bool Playback(gfx::NativeDrawingContext hdc, const RECT* rect) const;
   virtual bool SafePlayback(gfx::NativeDrawingContext hdc) const;
   virtual HENHMETAFILE emf() const;
-#endif  // if defined(OS_WIN)
+#elif defined(OS_MACOSX)
+  virtual bool RenderPage(unsigned int page_number,
+                          CGContextRef context,
+                          const CGRect rect,
+                          bool shrink_to_fit,
+                          bool stretch_to_fit,
+                          bool center_horizontally,
+                          bool center_vertically) const;
+#endif
 
 #if defined(OS_CHROMEOS)
   virtual bool SaveToFD(const base::FileDescriptor& fd) const;
 #endif  // if defined(OS_CHROMEOS)
+
+  // Return a new metafile containing just the current page in draft mode.
+  PdfMetafileSkia* GetMetafileForCurrentPage();
+
  private:
+  static const int kNoOutstandingPage = -1;
+
   scoped_ptr<PdfMetafileSkiaData> data_;
+
+  // Page number of the outstanding page, or kNoOutstandingPage.
+  int outstanding_page_number_;
 
   DISALLOW_COPY_AND_ASSIGN(PdfMetafileSkia);
 };

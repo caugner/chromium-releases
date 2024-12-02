@@ -14,8 +14,9 @@
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/tab_contents/test_tab_contents.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/form_data.h"
@@ -49,6 +50,10 @@ class MockAutofillMetrics : public AutofillMetrics {
   MOCK_CONST_METHOD1(LogIsAutofillEnabledAtStartup, void(bool enabled));
   MOCK_CONST_METHOD1(LogStoredProfileCount, void(size_t num_profiles));
   MOCK_CONST_METHOD1(LogAddressSuggestionsCount, void(size_t num_suggestions));
+  MOCK_CONST_METHOD1(LogServerExperimentIdForQuery,
+                     void(const std::string& experiment_id));
+  MOCK_CONST_METHOD1(LogServerExperimentIdForUpload,
+                     void(const std::string& experiment_id));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAutofillMetrics);
@@ -115,37 +120,6 @@ class TestPersonalDataManager : public PersonalDataManager {
   DISALLOW_COPY_AND_ASSIGN(TestPersonalDataManager);
 };
 
-class TestAutofillManager : public AutofillManager {
- public:
-  TestAutofillManager(TabContentsWrapper* tab_contents,
-                      TestPersonalDataManager* personal_manager)
-      : AutofillManager(tab_contents, personal_manager),
-        autofill_enabled_(true) {
-    set_metric_logger(new MockAutofillMetrics);
-  }
-  virtual ~TestAutofillManager() {}
-
-  virtual bool IsAutofillEnabled() const { return autofill_enabled_; }
-
-  void set_autofill_enabled(bool autofill_enabled) {
-    autofill_enabled_ = autofill_enabled;
-  }
-
-  const MockAutofillMetrics* metric_logger() const {
-    return static_cast<const MockAutofillMetrics*>(
-        AutofillManager::metric_logger());
-  }
-
-  void AddSeenForm(FormStructure* form) {
-    form_structures()->push_back(form);
-  }
-
- private:
-  bool autofill_enabled_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestAutofillManager);
-};
-
 class TestFormStructure : public FormStructure {
  public:
   explicit TestFormStructure(const FormData& form) : FormStructure(form) {}
@@ -178,6 +152,49 @@ class TestFormStructure : public FormStructure {
   DISALLOW_COPY_AND_ASSIGN(TestFormStructure);
 };
 
+class TestAutofillManager : public AutofillManager {
+ public:
+  TestAutofillManager(TabContentsWrapper* tab_contents,
+                      TestPersonalDataManager* personal_manager)
+      : AutofillManager(tab_contents, personal_manager),
+        autofill_enabled_(true) {
+    set_metric_logger(new MockAutofillMetrics);
+  }
+  virtual ~TestAutofillManager() {}
+
+  virtual bool IsAutofillEnabled() const { return autofill_enabled_; }
+
+  void set_autofill_enabled(bool autofill_enabled) {
+    autofill_enabled_ = autofill_enabled;
+  }
+
+  const MockAutofillMetrics* metric_logger() const {
+    return static_cast<const MockAutofillMetrics*>(
+        AutofillManager::metric_logger());
+  }
+
+  void AddSeenForm(const FormData& form,
+                   const std::vector<AutofillFieldType>& heuristic_types,
+                   const std::vector<AutofillFieldType>& server_types,
+                   const std::string& experiment_id) {
+    FormData empty_form = form;
+    for (size_t i = 0; i < empty_form.fields.size(); ++i) {
+      empty_form.fields[i].value = string16();
+    }
+
+    // |form_structure| will be owned by |form_structures()|.
+    TestFormStructure* form_structure = new TestFormStructure(empty_form);
+    form_structure->SetFieldTypes(heuristic_types, server_types);
+    form_structure->set_server_experiment_id(experiment_id);
+    form_structures()->push_back(form_structure);
+  }
+
+ private:
+  bool autofill_enabled_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestAutofillManager);
+};
+
 }  // namespace
 
 class AutofillMetricsTest : public TabContentsWrapperTestHarness {
@@ -195,10 +212,14 @@ class AutofillMetricsTest : public TabContentsWrapperTestHarness {
   scoped_refptr<TestPersonalDataManager> test_personal_data_;
 
  private:
+  BrowserThread browser_thread_;
+
   DISALLOW_COPY_AND_ASSIGN(AutofillMetricsTest);
 };
 
-AutofillMetricsTest::AutofillMetricsTest() {
+AutofillMetricsTest::AutofillMetricsTest()
+  : TabContentsWrapperTestHarness(),
+    browser_thread_(BrowserThread::UI, &message_loop_) {
 }
 
 AutofillMetricsTest::~AutofillMetricsTest() {
@@ -242,7 +263,7 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
   FormField field;
 
   autofill_test::CreateTestFormField(
-      "Autofilled", "autofilled", "Elvis Presley", "text", &field);
+      "Autofilled", "autofilled", "Elvis Aaron Presley", "text", &field);
   field.is_autofilled = true;
   form.fields.push_back(field);
   heuristic_types.push_back(NAME_FULL);
@@ -280,26 +301,26 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
   server_types.push_back(PHONE_HOME_WHOLE_NUMBER);
 
   // Simulate having seen this form on page load.
-  // |form_structure| will be owned by |autofill_manager_|.
-  TestFormStructure* form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(heuristic_types, server_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types,
+                                 std::string());
 
   // Establish our expectations.
   ::testing::InSequence dummy;
+  EXPECT_CALL(*autofill_manager_->metric_logger(),
+              LogServerExperimentIdForUpload(std::string()));
   // Autofilled field
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
                                std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogHeuristicTypePrediction(AutofillMetrics::TYPE_MATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogServerTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogOverallTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_AUTOFILLED,
                                std::string()));
@@ -458,13 +479,15 @@ TEST_F(AutofillMetricsTest, QualityMetricsForFailure) {
 
   // Simulate having seen this form with the desired heuristic and server types.
   // |form_structure| will be owned by |autofill_manager_|.
-  TestFormStructure* form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(heuristic_types, server_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types,
+                                 std::string());
+
 
   // Establish our expectations.
   ::testing::FLAGS_gmock_verbose = "error";
   ::testing::InSequence dummy;
+  EXPECT_CALL(*autofill_manager_->metric_logger(),
+              LogServerExperimentIdForUpload(std::string()));
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(failure_cases); ++i) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
@@ -499,7 +522,7 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
 
   FormField field;
   autofill_test::CreateTestFormField(
-      "Both match", "match", "Elvis Presley", "text", &field);
+      "Both match", "match", "Elvis Aaron Presley", "text", &field);
   field.is_autofilled = true;
   form.fields.push_back(field);
   heuristic_types.push_back(NAME_FULL);
@@ -522,9 +545,9 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
 
   // Simulate having seen this form with the desired heuristic and server types.
   // |form_structure| will be owned by |autofill_manager_|.
-  TestFormStructure* form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(heuristic_types, server_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types,
+                                 std::string());
+
 
   // Add a field and re-arrange the remaining form fields before submitting.
   std::vector<FormField> cached_fields = form.fields;
@@ -540,6 +563,8 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
   // Establish our expectations.
   ::testing::InSequence dummy;
   // New field
+  EXPECT_CALL(*autofill_manager_->metric_logger(),
+              LogServerExperimentIdForUpload(std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
                                std::string()));
@@ -621,13 +646,13 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
                                std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogHeuristicTypePrediction(AutofillMetrics::TYPE_MATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogServerTypePrediction(AutofillMetrics::TYPE_MATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogOverallTypePrediction(AutofillMetrics::TYPE_MATCH,
-                  UNKNOWN_TYPE, std::string()));
+                  NAME_FULL, std::string()));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_AUTOFILLED,
                                std::string()));
@@ -688,7 +713,7 @@ TEST_F(AutofillMetricsTest, QualityMetricsWithExperimentId) {
   FormField field;
 
   autofill_test::CreateTestFormField(
-      "Autofilled", "autofilled", "Elvis Presley", "text", &field);
+      "Autofilled", "autofilled", "Elvis Aaron Presley", "text", &field);
   field.is_autofilled = true;
   form.fields.push_back(field);
   heuristic_types.push_back(NAME_FULL);
@@ -722,26 +747,26 @@ TEST_F(AutofillMetricsTest, QualityMetricsWithExperimentId) {
 
   // Simulate having seen this form on page load.
   // |form_structure| will be owned by |autofill_manager_|.
-  TestFormStructure* form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(heuristic_types, server_types);
-  form_structure->set_server_experiment_id(experiment_id);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types,
+                                 experiment_id);
 
   // Establish our expectations.
   ::testing::InSequence dummy;
+  EXPECT_CALL(*autofill_manager_->metric_logger(),
+              LogServerExperimentIdForUpload(experiment_id));
   // Autofilled field
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
                                experiment_id));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogHeuristicTypePrediction(AutofillMetrics::TYPE_MATCH,
-                                         UNKNOWN_TYPE, experiment_id));
+                                         NAME_FULL, experiment_id));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogServerTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                                      UNKNOWN_TYPE, experiment_id));
+                                      NAME_FULL, experiment_id));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogOverallTypePrediction(AutofillMetrics::TYPE_MISMATCH,
-                                       UNKNOWN_TYPE, experiment_id));
+                                       NAME_FULL, experiment_id));
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_AUTOFILLED,
                                experiment_id));
@@ -845,9 +870,8 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
 
   // Simulate having seen this form on page load.
   // |form_structure| will be owned by |autofill_manager_|.
-  TestFormStructure* form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(field_types, field_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, field_types, field_types,
+                                 std::string());
 
   // Establish our expectations.
   ::testing::FLAGS_gmock_verbose = "error";
@@ -865,9 +889,8 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
 
   // Reset the autofill manager state.
   autofill_manager_->Reset();
-  form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(field_types, field_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, field_types, field_types,
+                                 std::string());
 
   // Establish our expectations.
   EXPECT_CALL(*autofill_manager_->metric_logger(),
@@ -878,9 +901,8 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
 
   // Reset the autofill manager state again.
   autofill_manager_->Reset();
-  form_structure = new TestFormStructure(form);
-  form_structure->SetFieldTypes(field_types, field_types);
-  autofill_manager_->AddSeenForm(form_structure);
+  autofill_manager_->AddSeenForm(form, field_types, field_types,
+                                 std::string());
 
   // Establish our expectations.
   EXPECT_CALL(*autofill_manager_->metric_logger(),
@@ -958,4 +980,38 @@ TEST_F(AutofillMetricsTest, CreditCardInfoBar) {
     EXPECT_CALL(metric_logger,
         LogCreditCardInfoBarMetric(AutofillMetrics::INFOBAR_IGNORED)).Times(1);
   }
+}
+
+// Test that server query response experiment id metrics are logged correctly.
+TEST_F(AutofillMetricsTest, ServerQueryExperimentIdForQuery) {
+  MockAutofillMetrics metric_logger;
+  ::testing::InSequence dummy;
+
+  // No experiment specified.
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_RECEIVED));
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_PARSED));
+  EXPECT_CALL(metric_logger,
+              LogServerExperimentIdForQuery(std::string()));
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(
+                  AutofillMetrics::QUERY_RESPONSE_MATCHED_LOCAL_HEURISTICS));
+  FormStructure::ParseQueryResponse(
+      "<autofillqueryresponse></autofillqueryresponse>",
+      std::vector<FormStructure*>(), metric_logger);
+
+  // Experiment "ar1" specified.
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_RECEIVED));
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(AutofillMetrics::QUERY_RESPONSE_PARSED));
+  EXPECT_CALL(metric_logger,
+              LogServerExperimentIdForQuery("ar1"));
+  EXPECT_CALL(metric_logger,
+              LogServerQueryMetric(
+                  AutofillMetrics::QUERY_RESPONSE_MATCHED_LOCAL_HEURISTICS));
+  FormStructure::ParseQueryResponse(
+      "<autofillqueryresponse experimentid=\"ar1\"></autofillqueryresponse>",
+      std::vector<FormStructure*>(), metric_logger);
 }

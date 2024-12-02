@@ -15,7 +15,7 @@
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/controls/menu/menu_2.h"
+#include "ui/gfx/render_text.h"
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/textfield/textfield_controller.h"
@@ -27,7 +27,7 @@
 #include "views/test/test_views_delegate.h"
 #include "views/test/views_test_base.h"
 #include "views/views_delegate.h"
-#include "views/widget/native_widget.h"
+#include "views/widget/native_widget_private.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -101,7 +101,7 @@ namespace views {
 
 // TODO(oshima): Move tests that are independent of TextfieldViews to
 // textfield_unittests.cc once we move the test utility functions
-// from chrome/browser/automation/ to app/test/.
+// from chrome/browser/automation/ to ui/base/test/.
 class NativeTextfieldViewsTest : public ViewsTestBase,
                                  public TextfieldController {
  public:
@@ -117,11 +117,11 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
 
   // ::testing::Test:
   virtual void SetUp() {
-    NativeTextfieldViews::SetEnableTextfieldViews(true);
+    Widget::SetPureViews(true);
   }
 
   virtual void TearDown() {
-    NativeTextfieldViews::SetEnableTextfieldViews(false);
+    Widget::SetPureViews(false);
     if (widget_)
       widget_->Close();
     ViewsTestBase::TearDown();
@@ -167,12 +167,13 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
 
     textfield_view_
         = static_cast<NativeTextfieldViews*>(textfield_->native_wrapper());
-    textfield_->SetID(1);
+    textfield_view_->SetBoundsRect(params.bounds);
+    textfield_->set_id(1);
 
     for (int i = 1; i < count; i++) {
       Textfield* textfield = new Textfield(style);
       container->AddChildView(textfield);
-      textfield->SetID(i + 1);
+      textfield->set_id(i + 1);
     }
 
     DCHECK(textfield_view_);
@@ -180,7 +181,7 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     model_->ClearEditHistory();
 
     input_method_ = new MockInputMethod();
-    widget_->native_widget()->ReplaceInputMethod(input_method_);
+    widget_->native_widget_private()->ReplaceInputMethod(input_method_);
 
     // Assumes the Widget is always focused.
     input_method_->OnFocus();
@@ -188,19 +189,19 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
     textfield_->RequestFocus();
   }
 
-  views::Menu2* GetContextMenu() {
-    textfield_view_->InitContextMenuIfRequired();
-    return textfield_view_->context_menu_menu_.get();
+  ui::MenuModel* GetContextMenuModel() {
+    textfield_view_->UpdateContextMenu();
+    return textfield_view_->context_menu_contents_.get();
   }
 
  protected:
   void SendKeyEvent(ui::KeyboardCode key_code,
                     bool shift,
                     bool control,
-                    bool capslock) {
+                    bool caps_lock) {
     int flags = (shift ? ui::EF_SHIFT_DOWN : 0) |
         (control ? ui::EF_CONTROL_DOWN : 0) |
-        (capslock ? ui::EF_CAPS_LOCK_DOWN : 0);
+        (caps_lock ? ui::EF_CAPS_LOCK_DOWN : 0);
     KeyEvent event(ui::ET_KEY_PRESSED, key_code, flags);
     input_method_->DispatchKeyEvent(event);
   }
@@ -218,9 +219,8 @@ class NativeTextfieldViewsTest : public ViewsTestBase,
   }
 
   int GetCursorPositionX(int cursor_pos) {
-    const string16 text = textfield_->text().substr(0, cursor_pos);
-    return textfield_view_->GetInsets().left() + textfield_view_->text_offset_ +
-           textfield_view_->GetFont().GetStringWidth(text);
+    gfx::RenderText* render_text = textfield_view_->GetRenderText();
+    return render_text->GetCursorBounds(cursor_pos, false).x();
   }
 
   // We need widget to populate wrapper class.
@@ -254,12 +254,12 @@ TEST_F(NativeTextfieldViewsTest, ModelChangesTest) {
   last_contents_.clear();
   textfield_->SetText(ASCIIToUTF16("this is"));
 
-  EXPECT_STR_EQ("this is", model_->text());
+  EXPECT_STR_EQ("this is", model_->GetText());
   EXPECT_STR_EQ("this is", textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
 
   textfield_->AppendText(ASCIIToUTF16(" a test"));
-  EXPECT_STR_EQ("this is a test", model_->text());
+  EXPECT_STR_EQ("this is a test", model_->GetText());
   EXPECT_STR_EQ("this is a test", textfield_->text());
   EXPECT_TRUE(last_contents_.empty());
 
@@ -490,35 +490,35 @@ TEST_F(NativeTextfieldViewsTest, FocusTraversalTest) {
   InitTextfields(Textfield::STYLE_DEFAULT, 3);
   textfield_->RequestFocus();
 
-  EXPECT_EQ(1, GetFocusedView()->GetID());
+  EXPECT_EQ(1, GetFocusedView()->id());
   widget_->GetFocusManager()->AdvanceFocus(false);
-  EXPECT_EQ(2, GetFocusedView()->GetID());
+  EXPECT_EQ(2, GetFocusedView()->id());
   widget_->GetFocusManager()->AdvanceFocus(false);
-  EXPECT_EQ(3, GetFocusedView()->GetID());
+  EXPECT_EQ(3, GetFocusedView()->id());
   // Cycle back to the first textfield.
   widget_->GetFocusManager()->AdvanceFocus(false);
-  EXPECT_EQ(1, GetFocusedView()->GetID());
+  EXPECT_EQ(1, GetFocusedView()->id());
 
   widget_->GetFocusManager()->AdvanceFocus(true);
-  EXPECT_EQ(3, GetFocusedView()->GetID());
+  EXPECT_EQ(3, GetFocusedView()->id());
   widget_->GetFocusManager()->AdvanceFocus(true);
-  EXPECT_EQ(2, GetFocusedView()->GetID());
+  EXPECT_EQ(2, GetFocusedView()->id());
   widget_->GetFocusManager()->AdvanceFocus(true);
-  EXPECT_EQ(1, GetFocusedView()->GetID());
+  EXPECT_EQ(1, GetFocusedView()->id());
   // Cycle back to the last textfield.
   widget_->GetFocusManager()->AdvanceFocus(true);
-  EXPECT_EQ(3, GetFocusedView()->GetID());
+  EXPECT_EQ(3, GetFocusedView()->id());
 
   // Request focus should still work.
   textfield_->RequestFocus();
-  EXPECT_EQ(1, GetFocusedView()->GetID());
+  EXPECT_EQ(1, GetFocusedView()->id());
 
   // Test if clicking on textfield view sets the focus to textfield_.
   widget_->GetFocusManager()->AdvanceFocus(true);
-  EXPECT_EQ(3, GetFocusedView()->GetID());
+  EXPECT_EQ(3, GetFocusedView()->id());
   MouseEvent click(ui::ET_MOUSE_PRESSED, 0, 0, ui::EF_LEFT_BUTTON_DOWN);
   textfield_view_->OnMousePressed(click);
-  EXPECT_EQ(1, GetFocusedView()->GetID());
+  EXPECT_EQ(1, GetFocusedView()->id());
 }
 
 void VerifyTextfieldContextMenuContents(bool textfield_has_selection,
@@ -537,11 +537,11 @@ void VerifyTextfieldContextMenuContents(bool textfield_has_selection,
 TEST_F(NativeTextfieldViewsTest, ContextMenuDisplayTest) {
   InitTextfield(Textfield::STYLE_DEFAULT);
   textfield_->SetText(ASCIIToUTF16("hello world"));
-  EXPECT_TRUE(GetContextMenu());
-  VerifyTextfieldContextMenuContents(false, GetContextMenu()->model());
+  EXPECT_TRUE(GetContextMenuModel());
+  VerifyTextfieldContextMenuContents(false, GetContextMenuModel());
 
   textfield_->SelectAll();
-  VerifyTextfieldContextMenuContents(true, GetContextMenu()->model());
+  VerifyTextfieldContextMenuContents(true, GetContextMenuModel());
 }
 
 TEST_F(NativeTextfieldViewsTest, DoubleAndTripleClickTest) {
@@ -1021,11 +1021,13 @@ TEST_F(NativeTextfieldViewsTest, UndoRedoTest) {
   SendKeyEvent(ui::VKEY_Z, false, true);
   EXPECT_STR_EQ("123", textfield_->text());
   SendKeyEvent(ui::VKEY_Z, false, true);
-  EXPECT_STR_EQ("abc", textfield_->text());
-  SendKeyEvent(ui::VKEY_Z, false, true);
+  // the insert edit "c" and set edit "123" are merged to single edit,
+  // so text becomes "ab" after undo.
   EXPECT_STR_EQ("ab", textfield_->text());
+  SendKeyEvent(ui::VKEY_Z, false, true);
+  EXPECT_STR_EQ("a", textfield_->text());
   SendKeyEvent(ui::VKEY_Y, false, true);
-  EXPECT_STR_EQ("abc", textfield_->text());
+  EXPECT_STR_EQ("ab", textfield_->text());
   SendKeyEvent(ui::VKEY_Y, false, true);
   EXPECT_STR_EQ("123", textfield_->text());
   SendKeyEvent(ui::VKEY_Y, false, true);
@@ -1069,6 +1071,7 @@ TEST_F(NativeTextfieldViewsTest, UndoRedoTest) {
 
   // Insert
   textfield_->SetText(ASCIIToUTF16("123"));
+  SendKeyEvent(ui::VKEY_HOME);
   SendKeyEvent(ui::VKEY_INSERT);
   SendKeyEvent(ui::VKEY_A);
   EXPECT_STR_EQ("a23", textfield_->text());

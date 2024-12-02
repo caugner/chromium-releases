@@ -6,7 +6,6 @@
 
 #include "base/message_loop.h"
 #include "content/common/view_messages.h"
-#include "content/renderer/gpu/renderer_gl_context.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/pepper_platform_context_3d_impl.h"
 #include "content/renderer/render_thread.h"
@@ -42,6 +41,8 @@ class PepperWidget : public WebWidget {
         widget_(widget),
         cursor_(WebCursorInfo::TypePointer) {
   }
+
+  virtual ~PepperWidget() {}
 
   // WebWidget API
   virtual void close() {
@@ -286,6 +287,9 @@ void RenderWidgetFullscreenPepper::Close() {
   // normal mode.
   if (plugin_)
     plugin_->SetFullscreen(false, false);
+
+  // Call Close on the base class to destroy the WebWidget instance.
+  RenderWidget::Close();
 }
 
 webkit::ppapi::PluginInstance*
@@ -341,7 +345,6 @@ void RenderWidgetFullscreenPepper::CreateContext() {
   };
   context_ = RendererGLContext::CreateViewContext(
       host,
-      compositing_surface(),
       routing_id(),
       "GL_OES_packed_depth_stencil GL_OES_depth24",
       attribs,
@@ -389,7 +392,7 @@ GLuint CreateShaderFromSource(gpu::gles2::GLES2Implementation* gl,
     GLuint shader = gl->CreateShader(type);
     gl->ShaderSource(shader, 1, &source, NULL);
     gl->CompileShader(shader);
-    int status;
+    int status = GL_FALSE;
     gl->GetShaderiv(shader, GL_COMPILE_STATUS, &status);
     if (!status) {
         int size = 0;
@@ -431,7 +434,7 @@ bool RenderWidgetFullscreenPepper::InitContext() {
 
   gl->BindAttribLocation(program_, 0, "in_tex_coord");
   gl->LinkProgram(program_);
-  int status;
+  int status = GL_FALSE;
   gl->GetProgramiv(program_, GL_LINK_STATUS, &status);
   if (!status) {
     int size = 0;
@@ -470,7 +473,8 @@ void RenderWidgetFullscreenPepper::SwapBuffers() {
   context_->SwapBuffers();
 }
 
-void RenderWidgetFullscreenPepper::OnLostContext() {
+void RenderWidgetFullscreenPepper::OnLostContext(
+    RendererGLContext::ContextLostReason) {
   if (!context_)
     return;
   // Destroy the context later, in case we got called from InitContext for

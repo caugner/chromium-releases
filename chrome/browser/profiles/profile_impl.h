@@ -22,6 +22,7 @@
 class ExtensionPrefs;
 class ExtensionPrefValueMap;
 class PrefService;
+class SpellCheckHostMetrics;
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -44,7 +45,6 @@ class ProfileImpl : public Profile,
 
   // Profile implementation.
   virtual std::string GetProfileName();
-  virtual ProfileId GetRuntimeId();
   virtual FilePath GetPath();
   virtual bool IsOffTheRecord();
   virtual Profile* GetOffTheRecordProfile();
@@ -69,12 +69,12 @@ class ProfileImpl : public Profile,
   virtual HistoryService* GetHistoryService(ServiceAccessType sat);
   virtual HistoryService* GetHistoryServiceWithoutCreating();
   virtual AutocompleteClassifier* GetAutocompleteClassifier();
+  virtual history::ShortcutsBackend* GetShortcutsBackend();
   virtual WebDataService* GetWebDataService(ServiceAccessType sat);
   virtual WebDataService* GetWebDataServiceWithoutCreating();
   virtual PasswordStore* GetPasswordStore(ServiceAccessType sat);
   virtual PrefService* GetPrefs();
   virtual PrefService* GetOffTheRecordPrefs();
-  virtual TemplateURLModel* GetTemplateURLModel();
   virtual TemplateURLFetcher* GetTemplateURLFetcher();
   virtual DownloadManager* GetDownloadManager();
   virtual PersonalDataManager* GetPersonalDataManager();
@@ -113,7 +113,6 @@ class ProfileImpl : public Profile,
   virtual void InitExtensions(bool extensions_enabled);
   virtual void InitPromoResources();
   virtual void InitRegisteredProtocolHandlers();
-  virtual NTPResourceCache* GetNTPResourceCache();
   virtual FilePath last_selected_directory();
   virtual void set_last_selected_directory(const FilePath& path);
   virtual ProfileSyncService* GetProfileSyncService();
@@ -140,7 +139,7 @@ class ProfileImpl : public Profile,
   virtual prerender::PrerenderManager* GetPrerenderManager();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -161,6 +160,10 @@ class ProfileImpl : public Profile,
 
   void CreateWebDataService();
   FilePath GetPrefFilePath();
+
+#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
+  LocalProfileId GetLocalProfileId();
+#endif
 
   void CreatePasswordStore();
 
@@ -210,16 +213,14 @@ class ProfileImpl : public Profile,
   scoped_ptr<prerender::PrerenderManager> prerender_manager_;
   scoped_ptr<NetPrefObserver> net_pref_observer_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
-  scoped_ptr<TemplateURLModel> template_url_model_;
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
   scoped_refptr<PromoResourceService> promo_resource_service_;
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
-  scoped_ptr<NTPResourceCache> ntp_resource_cache_;
 
   scoped_ptr<TokenService> token_service_;
   scoped_ptr<ProfileSyncFactory> profile_sync_factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
-  scoped_refptr<CloudPrintProxyService> cloud_print_proxy_service_;
+  scoped_ptr<CloudPrintProxyService> cloud_print_proxy_service_;
 
   ProfileImplIOData::Handle io_data_;
 
@@ -237,6 +238,7 @@ class ProfileImpl : public Profile,
   scoped_refptr<HistoryService> history_service_;
   scoped_refptr<FaviconService> favicon_service_;
   scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
+  scoped_refptr<history::ShortcutsBackend> shortcuts_backend_;
   scoped_refptr<WebDataService> web_data_service_;
   scoped_refptr<PasswordStore> password_store_;
   scoped_refptr<WebKitContext> webkit_context_;
@@ -261,6 +263,7 @@ class ProfileImpl : public Profile,
   base::Time start_time_;
 
   scoped_refptr<SpellCheckHost> spellcheck_host_;
+  scoped_ptr<SpellCheckHostMetrics> spellcheck_host_metrics_;
 
   // Indicates whether |spellcheck_host_| has told us initialization is
   // finished.

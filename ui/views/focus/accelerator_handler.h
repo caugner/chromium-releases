@@ -24,11 +24,9 @@ namespace ui {
 // and handled, false otherwise.
 bool DispatchXEvent(XEvent* xevent);
 
-#if defined(HAVE_XINPUT2)
 // Keep a list of touch devices so that it is possible to determine if a pointer
 // event is a touch-event or a mouse-event.
 void SetTouchDeviceList(std::vector<unsigned int>& devices);
-#endif  // HAVE_XINPUT2
 #endif  // TOUCH_UI
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -50,11 +48,10 @@ class AcceleratorHandler : public MessageLoopForUI::Dispatcher {
   // focus manager
 #if defined(OS_WIN)
   virtual bool Dispatch(const MSG& msg);
+#elif defined(TOUCH_UI)
+  virtual MesasgePumpDispatcher::DispatchStatus Dispatch(XEvent* xev);
 #else
   virtual bool Dispatch(GdkEvent* event);
-#if defined(TOUCH_UI)
-  virtual MessagePumpGlibXDispatcher::DispatchStatus Dispatch(XEvent* xev);
-#endif
 #endif
 
  private:

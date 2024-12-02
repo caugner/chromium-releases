@@ -111,12 +111,18 @@ TEST_F(ContentSettingBubbleModelTest, MultiplePlugins) {
   HostContentSettingsMap* map = profile_->GetHostContentSettingsMap();
   std::string fooPlugin = "foo";
   std::string barPlugin = "bar";
+
+  // Navigating to some sample url prevents the GetURL method from returning an
+  // invalid empty URL.
+  contents()->NavigateAndCommit(GURL("http://www.example.com"));
   GURL url = contents()->GetURL();
   map->AddExceptionForURL(url,
+                          url,
                           CONTENT_SETTINGS_TYPE_PLUGINS,
                           fooPlugin,
                           CONTENT_SETTING_ALLOW);
   map->AddExceptionForURL(url,
+                          url,
                           CONTENT_SETTINGS_TYPE_PLUGINS,
                           barPlugin,
                           CONTENT_SETTING_ASK);
@@ -141,10 +147,12 @@ TEST_F(ContentSettingBubbleModelTest, MultiplePlugins) {
   // Nothing should have changed.
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             map->GetContentSetting(url,
+                                   url,
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    fooPlugin));
   EXPECT_EQ(CONTENT_SETTING_ASK,
             map->GetContentSetting(url,
+                                   url,
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    barPlugin));
 
@@ -152,10 +160,12 @@ TEST_F(ContentSettingBubbleModelTest, MultiplePlugins) {
   // Both plug-ins should be click-to-play now.
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             map->GetContentSetting(url,
+                                   url,
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    fooPlugin));
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             map->GetContentSetting(url,
+                                   url,
                                    CONTENT_SETTINGS_TYPE_PLUGINS,
                                    barPlugin));
 }
@@ -180,7 +190,8 @@ TEST_F(ContentSettingBubbleModelTest, Geolocation) {
   CheckGeolocationBubble(1, true, false);
 
   // Change the default to allow: no message needed.
-  setting_map->SetDefaultContentSetting(CONTENT_SETTING_ALLOW);
+  profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTING_ALLOW);
   CheckGeolocationBubble(1, false, false);
 
   // Second frame denied, but not stored in the content map: requires reload.
@@ -188,7 +199,8 @@ TEST_F(ContentSettingBubbleModelTest, Geolocation) {
   CheckGeolocationBubble(2, false, true);
 
   // Change the default to block: offer a clear link for the persisted frame 1.
-  setting_map->SetDefaultContentSetting(CONTENT_SETTING_BLOCK);
+  profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION, CONTENT_SETTING_BLOCK);
   CheckGeolocationBubble(2, true, false);
 }
 

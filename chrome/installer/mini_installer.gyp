@@ -25,6 +25,8 @@
         ],
         'sources': [
           'mini_installer/appid.h',
+          'mini_installer/configuration.cc',
+          'mini_installer/configuration.h',
           'mini_installer/decompress.cc',
           'mini_installer/decompress.h',
           'mini_installer/mini_installer.cc',
@@ -169,7 +171,6 @@
         {
           'target_name': 'mini_installer',
           'type': 'executable',
-          'msvs_guid': '24A5AC7C-280B-4899-9153-6BA570A081E7',
           'sources': [
             'mini_installer/chrome.release',
             'mini_installer/chrome_appid.cc',
@@ -231,9 +232,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

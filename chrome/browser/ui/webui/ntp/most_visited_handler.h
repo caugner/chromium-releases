@@ -16,10 +16,13 @@
 #include "content/common/notification_registrar.h"
 
 class GURL;
-class ListValue;
 class PageUsageData;
 class PrefService;
+
+namespace base {
+class ListValue;
 class Value;
+}
 
 // The handler for Javascript messages related to the "most visited" view.
 //
@@ -43,25 +46,25 @@ class MostVisitedHandler : public WebUIMessageHandler,
   virtual void RegisterMessages();
 
   // Callback for the "getMostVisited" message.
-  void HandleGetMostVisited(const ListValue* args);
+  void HandleGetMostVisited(const base::ListValue* args);
 
   // Callback for the "blacklistURLFromMostVisited" message.
-  void HandleBlacklistURL(const ListValue* args);
+  void HandleBlacklistURL(const base::ListValue* args);
 
   // Callback for the "removeURLsFromMostVisitedBlacklist" message.
-  void HandleRemoveURLsFromBlacklist(const ListValue* args);
+  void HandleRemoveURLsFromBlacklist(const base::ListValue* args);
 
   // Callback for the "clearMostVisitedURLsBlacklist" message.
-  void HandleClearBlacklist(const ListValue* args);
+  void HandleClearBlacklist(const base::ListValue* args);
 
   // Callback for the "addPinnedURL" message.
-  void HandleAddPinnedURL(const ListValue* args);
+  void HandleAddPinnedURL(const base::ListValue* args);
 
   // Callback for the "removePinnedURL" message.
-  void HandleRemovePinnedURL(const ListValue* args);
+  void HandleRemovePinnedURL(const base::ListValue* args);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -70,10 +73,6 @@ class MostVisitedHandler : public WebUIMessageHandler,
   }
 
   static void RegisterUserPrefs(PrefService* prefs);
-
-  // Returns a vector containing the urls for the prepopulated pages.
-  // Used only in testing.
-  static std::vector<GURL> GetPrePopulatedUrls();
 
  private:
   struct MostVisitedPage;
@@ -104,11 +103,6 @@ class MostVisitedHandler : public WebUIMessageHandler,
   // Sends pages_value_ to the javascript side to and resets page_value_.
   void SendPagesValue();
 
-  // Returns true if we should treat this as the first run of the new tab page.
-  bool IsFirstRun();
-
-  static const std::vector<MostVisitedPage>& GetPrePopulatedPages();
-
   NotificationRegistrar registrar_;
 
   // Our consumer for the history service.
@@ -125,7 +119,7 @@ class MostVisitedHandler : public WebUIMessageHandler,
   bool got_first_most_visited_request_;
 
   // Keep the results of the db query here.
-  scoped_ptr<ListValue> pages_value_;
+  scoped_ptr<base::ListValue> pages_value_;
 
   DISALLOW_COPY_AND_ASSIGN(MostVisitedHandler);
 };

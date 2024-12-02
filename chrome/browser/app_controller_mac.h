@@ -19,6 +19,7 @@ class CommandUpdater;
 class GURL;
 class HistoryMenuBridge;
 class Profile;
+@class ProfileMenuController;
 
 // The application controller object, created by loading the MainMenu nib.
 // This handles things like responding to menus when there are no windows
@@ -26,12 +27,22 @@ class Profile;
 @interface AppController : NSObject<NSUserInterfaceValidations,
                                     NSApplicationDelegate> {
  @private
+  // Manages the state of the command menu items.
   scoped_ptr<CommandUpdater> menuState_;
+
+  // The profile last used by a Browser. It is this profile that was used to
+  // build the user-data specific main menu items.
+  Profile* lastProfile_;
+
   // Management of the bookmark menu which spans across all windows
   // (and Browser*s).
   scoped_ptr<BookmarkMenuBridge> bookmarkMenuBridge_;
   scoped_ptr<HistoryMenuBridge> historyMenuBridge_;
   AboutWindowController* aboutController_;  // Weak.
+
+  // The profile menu, which appears right before the Help menu. It is only
+  // available when multiple profiles is enabled.
+  scoped_nsobject<ProfileMenuController> profileMenuController_;
 
   // If we're told to open URLs (in particular, via |-application:openFiles:| by
   // Launch Services) before we've launched the browser, we queue them up in
@@ -55,9 +66,9 @@ class Profile;
 }
 
 @property(readonly, nonatomic) BOOL startupComplete;
+@property(readonly, nonatomic) Profile* lastProfile;
 
 - (void)didEndMainMessageLoop;
-- (Profile*)defaultProfile;
 
 // Try to close all browser windows, and if that succeeds then quit.
 - (BOOL)tryToTerminateApplication:(NSApplication*)app;

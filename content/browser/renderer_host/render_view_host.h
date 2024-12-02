@@ -24,9 +24,9 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class ChildProcessSecurityPolicy;
+struct DesktopNotificationHostMsg_Show_Params;
 class FilePath;
 class GURL;
-class ListValue;
 class RenderViewHostDelegate;
 class RenderViewHostObserver;
 class SessionStorageNamespace;
@@ -41,6 +41,10 @@ struct ViewHostMsg_ShowPopup_Params;
 struct ViewMsg_Navigate_Params;
 struct WebDropData;
 struct UserMetricsAction;
+
+namespace base {
+class ListValue;
+}
 
 namespace gfx {
 class Point;
@@ -231,6 +235,14 @@ class RenderViewHost : public RenderWidgetHost {
   void DragTargetDrop(const gfx::Point& client_pt,
                       const gfx::Point& screen_pt);
 
+  // Notifies the renderer about the result of a desktop notification.
+  void DesktopNotificationPermissionRequestDone(int callback_context);
+  void DesktopNotificationPostDisplay(int callback_context);
+  void DesktopNotificationPostError(int notification_id,
+                                    const string16& message);
+  void DesktopNotificationPostClose(int notification_id, bool by_user);
+  void DesktopNotificationPostClick(int notification_id);
+
   // Runs some javascript within the context of a frame in the page.
   void ExecuteJavascriptInWebFrame(const string16& frame_xpath,
                                    const string16& jscript);
@@ -414,8 +426,6 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgOpenURL(const GURL& url, const GURL& referrer,
                     WindowOpenDisposition disposition);
   void OnMsgDidContentsPreferredSizeChange(const gfx::Size& new_size);
-  void OnMsgSetTooltipText(const std::wstring& tooltip_text,
-                           WebKit::WebTextDirection text_direction_hint);
   void OnMsgSelectionChanged(const std::string& text, const ui::Range& range);
   void OnMsgPasteFromSelectionClipboard();
   void OnMsgRunJavaScriptMessage(const string16& message,
@@ -431,6 +441,7 @@ class RenderViewHost : public RenderWidgetHost {
                           const SkBitmap& image,
                           const gfx::Point& image_offset);
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
+  void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
   void OnAddMessageToConsole(int32 level,
                              const std::wstring& message,
@@ -440,11 +451,15 @@ class RenderViewHost : public RenderWidgetHost {
                                 const std::string& value);
   void OnMsgShouldCloseACK(bool proceed);
   void OnMsgClosePageACK();
-
   void OnAccessibilityNotifications(
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params);
-  void OnScriptEvalResponse(int id, const ListValue& result);
+  void OnScriptEvalResponse(int id, const base::ListValue& result);
   void OnDidZoomURL(double zoom_level, bool remember, const GURL& url);
+  void OnRequestDesktopNotificationPermission(const GURL& origin,
+                                              int callback_id);
+  void OnShowDesktopNotification(
+      const DesktopNotificationHostMsg_Show_Params& params);
+  void OnCancelDesktopNotification(int notification_id);
 
 #if defined(OS_MACOSX)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);

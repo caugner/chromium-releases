@@ -4,12 +4,16 @@
 
 #include "chrome/test/automation/automation_json_requests.h"
 
+#include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/values.h"
+#include "base/format_macros.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/stringprintf.h"
 #include "base/test/test_timeouts.h"
+#include "base/time.h"
+#include "base/values.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "content/common/json_value_serializer.h"
@@ -22,23 +26,36 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                std::string* error_msg) {
   std::string request, reply;
   base::JSONWriter::Write(&request_dict, false, &request);
+  std::string command;
+  request_dict.GetString("command", &command);
+  LOG(INFO) << "Sending '" << command << "' command.";
+
+  base::Time before_sending = base::Time::Now();
   bool success = false;
-  if (!SendAutomationJSONRequest(sender, request,
-          TestTimeouts::action_max_timeout_ms(), &reply, &success))
+  if (!SendAutomationJSONRequestWithDefaultTimeout(
+          sender, request, &reply, &success)) {
+    *error_msg = base::StringPrintf(
+        "Chrome did not respond to '%s'. Elapsed time was %" PRId64 " ms. "
+            "Request details: (%s).",
+        command.c_str(),
+        (base::Time::Now() - before_sending).InMilliseconds(),
+        request.c_str());
     return false;
+  }
   scoped_ptr<Value> value(base::JSONReader::Read(reply, true));
   if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY)) {
-    std::string command;
-    request_dict.GetString("command", &command);
     LOG(ERROR) << "JSON request did not return dict: " << command << "\n";
     return false;
   }
   DictionaryValue* dict = static_cast<DictionaryValue*>(value.get());
   if (!success) {
-    std::string command, error;
-    request_dict.GetString("command", &command);
+    std::string error;
     dict->GetString("error", &error);
-    *error_msg = error;
+    *error_msg = base::StringPrintf(
+        "Internal Chrome error during '%s': (%s). Request details: (%s).",
+        command.c_str(),
+        error.c_str(),
+        request.c_str());
     LOG(ERROR) << "JSON request failed: " << command << "\n"
                << "    with error: " << error;
     return false;
@@ -67,6 +84,15 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                bool* success) {
   return sender->Send(new AutomationMsg_SendJSONRequest(
       -1, request, reply, success), timeout_ms);
+}
+
+bool SendAutomationJSONRequestWithDefaultTimeout(
+    AutomationMessageSender* sender,
+    const std::string& request,
+    std::string* reply,
+    bool* success) {
+  return sender->Send(new AutomationMsg_SendJSONRequest(
+      -1, request, reply, success));
 }
 
 bool SendGetIndicesFromTabIdJSONRequest(
@@ -111,7 +137,7 @@ bool SendNavigateToURLJSONRequest(
     AutomationMessageSender* sender,
     int browser_index,
     int tab_index,
-    const GURL& url,
+    const std::string& url,
     int navigation_count,
     AutomationMsg_NavigationResponseValues* nav_response,
     std::string* error_msg) {
@@ -119,7 +145,7 @@ bool SendNavigateToURLJSONRequest(
   dict.SetString("command", "NavigateToURL");
   dict.SetInteger("windex", browser_index);
   dict.SetInteger("tab_index", tab_index);
-  dict.SetString("url", url.possibly_invalid_spec());
+  dict.SetString("url", url);
   dict.SetInteger("navigation_count", navigation_count);
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error_msg))
@@ -277,22 +303,6 @@ bool SendGetCookiesJSONRequest(
   return true;
 }
 
-bool SendGetCookiesJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    std::string* cookies) {
-  DictionaryValue dict;
-  dict.SetString("command", "GetCookies");
-  dict.SetInteger("windex", browser_index);
-  dict.SetString("url", url);
-  DictionaryValue reply_dict;
-  std::string error_msg;
-  if (!SendAutomationJSONRequest(sender, dict, &reply_dict, &error_msg))
-    return false;
-  return reply_dict.GetString("cookies", cookies);
-}
-
 bool SendDeleteCookieJSONRequest(
     AutomationMessageSender* sender,
     const std::string& url,
@@ -306,21 +316,6 @@ bool SendDeleteCookieJSONRequest(
   return SendAutomationJSONRequest(sender, dict, &reply_dict, error_msg);
 }
 
-bool SendDeleteCookieJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    const std::string& cookie_name) {
-  DictionaryValue dict;
-  dict.SetString("command", "DeleteCookie");
-  dict.SetInteger("windex", browser_index);
-  dict.SetString("url", url);
-  dict.SetString("name", cookie_name);
-  DictionaryValue reply_dict;
-  std::string error_msg;
-  return SendAutomationJSONRequest(sender, dict, &reply_dict, &error_msg);
-}
-
 bool SendSetCookieJSONRequest(
     AutomationMessageSender* sender,
     const std::string& url,
@@ -332,21 +327,6 @@ bool SendSetCookieJSONRequest(
   dict.Set("cookie", cookie_dict->DeepCopy());
   DictionaryValue reply_dict;
   return SendAutomationJSONRequest(sender, dict, &reply_dict, error_msg);
-}
-
-bool SendSetCookieJSONRequestDeprecated(
-    AutomationMessageSender* sender,
-    int browser_index,
-    const std::string& url,
-    const std::string& cookie) {
-  DictionaryValue dict;
-  dict.SetString("command", "SetCookie");
-  dict.SetInteger("windex", browser_index);
-  dict.SetString("url", url);
-  dict.SetString("cookie", cookie);
-  DictionaryValue reply_dict;
-  std::string error_msg;
-  return SendAutomationJSONRequest(sender, dict, &reply_dict, &error_msg);
 }
 
 bool SendGetTabIdsJSONRequest(
@@ -545,6 +525,31 @@ bool SendNativeKeyEventJSONRequest(
   dict.SetInteger("tab_index", tab_index);
   dict.SetInteger("keyCode", key_code);
   dict.SetInteger("modifiers", modifiers);
+  DictionaryValue reply_dict;
+  return SendAutomationJSONRequest(sender, dict, &reply_dict, error_msg);
+}
+
+bool SendDragAndDropFilePathsJSONRequest(
+    AutomationMessageSender* sender,
+    int browser_index,
+    int tab_index,
+    int x,
+    int y,
+    const std::vector<FilePath::StringType>& paths,
+    std::string* error_msg) {
+  DictionaryValue dict;
+  dict.SetString("command", "DragAndDropFilePaths");
+  dict.SetInteger("windex", browser_index);
+  dict.SetInteger("tab_index", tab_index);
+  dict.SetInteger("x", x);
+  dict.SetInteger("y", y);
+
+  ListValue* list_value = new ListValue();
+  for (size_t path_index = 0; path_index < paths.size(); ++path_index) {
+    list_value->Append(Value::CreateStringValue(paths[path_index]));
+  }
+  dict.Set("paths", list_value);
+
   DictionaryValue reply_dict;
   return SendAutomationJSONRequest(sender, dict, &reply_dict, error_msg);
 }

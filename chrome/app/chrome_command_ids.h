@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_APP_CHROME_COMMAND_IDS_H_
+#define CHROME_APP_CHROME_COMMAND_IDS_H_
+#pragma once
+
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
 
@@ -55,6 +59,7 @@
 #define IDC_TABPOSE                     34036
 #define IDC_COMPACT_NAVBAR              34037
 #define IDC_DEBUG_FRAME_TOGGLE          34038
+#define IDC_PRESENTATION_MODE           34039
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -166,6 +171,7 @@
 #define IDC_PROFILING_ENABLED           40030
 #define IDC_FILE_MANAGER                40031
 #define IDC_BOOKMARKS_MENU              40032
+#define IDC_SHOW_SYNC_SETUP             40033
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -207,6 +213,7 @@
 #define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
 #define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
+#define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
 
 // Custom context menu entries
@@ -225,6 +232,7 @@
 #define IDC_CONTENT_CONTEXT_SAVELINKAS 50103
 #define IDC_CONTENT_CONTEXT_COPYLINKLOCATION 50104
 #define IDC_CONTENT_CONTEXT_COPYEMAILADDRESS 50105
+#define IDC_CONTENT_CONTEXT_OPENLINKWITH 50106
 // Image items.
 #define IDC_CONTENT_CONTEXT_SAVEIMAGEAS 50110
 #define IDC_CONTENT_CONTEXT_COPYIMAGELOCATION 50111
@@ -253,6 +261,7 @@
 #define IDC_CONTENT_CONTEXT_VIEWPAGEINFO 50152
 #define IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS 50153
 #define IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY 50154
+#define IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS 50155
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
 #define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161
@@ -260,6 +269,7 @@
 // Search items.
 #define IDC_CONTENT_CONTEXT_GOTOURL 50170
 #define IDC_CONTENT_CONTEXT_SEARCHWEBFOR 50171
+#define IDC_CONTENT_CONTEXT_ADDSEARCHENGINE 50172
 
 // Context menu items in the bookmark bar
 #define IDC_BOOKMARK_BAR_OPEN_ALL 51000
@@ -276,3 +286,13 @@
 
 // Context menu items in the status tray
 #define IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND 51100
+
+// Protocol handler menu entries
+#define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000
+#define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_LAST      52199
+#define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS  52200
+
+// NOTE: The last valid command value is 57343 (0xDFFF)
+// See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx
+
+#endif  // CHROME_APP_CHROME_COMMAND_IDS_H_

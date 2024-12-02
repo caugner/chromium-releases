@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -24,7 +25,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
@@ -117,9 +118,8 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
                    G_CALLBACK(OnButtonClickThunk), this);
 
   // Create the "Show all downloads..." link and connect to the click event.
-  std::string link_text =
-      l10n_util::GetStringUTF8(IDS_SHOW_ALL_DOWNLOADS);
-  link_button_ = gtk_chrome_link_button_new(link_text.c_str());
+  link_button_ = theme_service_->BuildChromeLinkButton(
+      l10n_util::GetStringUTF8(IDS_SHOW_ALL_DOWNLOADS));
   g_signal_connect(link_button_, "clicked",
                    G_CALLBACK(OnButtonClickThunk), this);
   gtk_util::SetButtonTriggersNavigation(link_button_);
@@ -143,8 +143,8 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
                                            false, true, this));
 
   theme_service_->InitThemesFor(this);
-  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
+                 Source<ThemeService>(theme_service_));
 
   gtk_widget_show_all(shelf_.get());
 
@@ -221,20 +221,16 @@ void DownloadShelfGtk::Closed() {
   }
 }
 
-void DownloadShelfGtk::Observe(NotificationType type,
+void DownloadShelfGtk::Observe(int type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
-  if (type == NotificationType::BROWSER_THEME_CHANGED) {
+  if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     GdkColor color = theme_service_->GetGdkColor(
         ThemeService::COLOR_TOOLBAR);
     gtk_widget_modify_bg(padding_bg_, GTK_STATE_NORMAL, &color);
 
     color = theme_service_->GetBorderColor();
     gtk_widget_modify_bg(top_border_, GTK_STATE_NORMAL, &color);
-
-    gtk_chrome_link_button_set_use_gtk_theme(
-        GTK_CHROME_LINK_BUTTON(link_button_),
-        theme_service_->UsingNativeTheme());
 
     // When using a non-standard, non-gtk theme, we make the link color match
     // the bookmark text color. Otherwise, standard link blue can look very

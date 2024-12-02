@@ -25,9 +25,9 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #import "content/common/chrome_application_mac.h"
+#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/notification_type.h"
 #include "content/common/view_messages.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
@@ -67,9 +67,9 @@ TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
 }
 
 TabContentsViewMac::TabContentsViewMac(TabContents* tab_contents)
-    : TabContentsView(tab_contents),
+    : tab_contents_(tab_contents),
       preferred_width_(0) {
-  registrar_.Add(this, NotificationType::TAB_CONTENTS_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
                  Source<TabContents>(tab_contents));
 }
 
@@ -128,7 +128,7 @@ gfx::NativeView TabContentsViewMac::GetNativeView() const {
 }
 
 gfx::NativeView TabContentsViewMac::GetContentNativeView() const {
-  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
   if (!rwhv)
     return NULL;
   return rwhv->GetNativeView();
@@ -180,11 +180,10 @@ void TabContentsViewMac::SetPageTitle(const std::wstring& title) {
 void TabContentsViewMac::OnTabCrashed(base::TerminationStatus /* status */,
                                       int /* error_code */) {
   if (!sad_tab_.get()) {
-    TabContents* contents = tab_contents();
-    DCHECK(contents);
-    if (contents) {
+    DCHECK(tab_contents_);
+    if (tab_contents_) {
       SadTabController* sad_tab =
-          [[SadTabController alloc] initWithTabContents:contents
+          [[SadTabController alloc] initWithTabContents:tab_contents_
                                               superview:cocoa_view_];
       sad_tab_.reset(sad_tab);
     }
@@ -205,8 +204,8 @@ void TabContentsViewMac::Focus() {
 }
 
 void TabContentsViewMac::SetInitialFocus() {
-  if (tab_contents()->FocusLocationBarByDefault())
-    tab_contents()->SetFocusToLocationBar(false);
+  if (tab_contents_->FocusLocationBarByDefault())
+    tab_contents_->SetFocusToLocationBar(false);
   else
     [[cocoa_view_.get() window] makeFirstResponder:GetContentNativeView()];
 }
@@ -236,7 +235,13 @@ void TabContentsViewMac::RestoreFocus() {
 
 void TabContentsViewMac::UpdatePreferredSize(const gfx::Size& pref_size) {
   preferred_width_ = pref_size.width();
-  TabContentsView::UpdatePreferredSize(pref_size);
+}
+
+bool TabContentsViewMac::IsDoingDrag() const {
+  return false;
+}
+
+void TabContentsViewMac::CancelDragAndCloseTab() {
 }
 
 void TabContentsViewMac::UpdateDragCursor(WebDragOperation operation) {
@@ -258,11 +263,90 @@ void TabContentsViewMac::TakeFocus(bool reverse) {
   }
 }
 
+void TabContentsViewMac::CreateNewWindow(
+    int route_id,
+    const ViewHostMsg_CreateWindow_Params& params) {
+  delegate_view_helper_.CreateNewWindowFromTabContents(
+      tab_contents_, route_id, params);
+}
+
+void TabContentsViewMac::CreateNewWidget(
+    int route_id, WebKit::WebPopupType popup_type) {
+  RenderWidgetHostView* widget_view = delegate_view_helper_.CreateNewWidget(
+      route_id, popup_type, tab_contents_->render_view_host()->process());
+
+  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
+  // to allow it to survive the trip without being hosted.
+  RenderWidgetHostViewMac* widget_view_mac =
+      static_cast<RenderWidgetHostViewMac*>(widget_view);
+  [widget_view_mac->native_view() retain];
+}
+
+void TabContentsViewMac::CreateNewFullscreenWidget(int route_id) {
+  RenderWidgetHostView* widget_view =
+      delegate_view_helper_.CreateNewFullscreenWidget(
+          route_id, tab_contents_->render_view_host()->process());
+
+  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
+  // to allow it to survive the trip without being hosted.
+  RenderWidgetHostViewMac* widget_view_mac =
+      static_cast<RenderWidgetHostViewMac*>(widget_view);
+  [widget_view_mac->native_view() retain];
+}
+
+void TabContentsViewMac::ShowCreatedWindow(int route_id,
+                                           WindowOpenDisposition disposition,
+                                           const gfx::Rect& initial_pos,
+                                           bool user_gesture) {
+  delegate_view_helper_.ShowCreatedWindow(
+      tab_contents_, route_id, disposition, initial_pos, user_gesture);
+}
+
+void TabContentsViewMac::ShowCreatedWidget(
+    int route_id, const gfx::Rect& initial_pos) {
+  RenderWidgetHostView* widget_host_view = delegate_view_helper_.
+      ShowCreatedWidget(tab_contents_, route_id, initial_pos);
+
+  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
+  // properly embedded (or purposefully ignored) we can release the retain we
+  // took in CreateNewWidgetInternal().
+  RenderWidgetHostViewMac* widget_view_mac =
+      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
+  [widget_view_mac->native_view() release];
+}
+
+void TabContentsViewMac::ShowCreatedFullscreenWidget(int route_id) {
+  RenderWidgetHostView* widget_host_view = delegate_view_helper_.
+      ShowCreatedFullscreenWidget(tab_contents_, route_id);
+
+  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
+  // properly embedded (or purposely ignored) we can release the retain we took
+  // in CreateNewFullscreenWidgetInternal().
+  RenderWidgetHostViewMac* widget_view_mac =
+      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
+  [widget_view_mac->native_view() release];
+}
+
 void TabContentsViewMac::ShowContextMenu(const ContextMenuParams& params) {
-  RenderViewContextMenuMac menu(tab_contents(),
-                                params,
-                                GetContentNativeView());
-  menu.Init();
+  // The renderer may send the "show context menu" message multiple times, one
+  // for each right click mouse event it receives. Normally, this doesn't happen
+  // because mouse events are not forwarded once the context menu is showing.
+  // However, there's a race - the context menu may not yet be showing when
+  // the second mouse event arrives. In this case, |ShowContextMenu()| will
+  // get called multiple times - if so, don't create another context menu.
+  // TODO(asvitkine): Fix the renderer so that it doesn't do this.
+  RenderWidgetHostView* widget_view = tab_contents_->GetRenderWidgetHostView();
+  if (widget_view) {
+    RenderWidgetHostViewMac* widget_view_mac =
+        static_cast<RenderWidgetHostViewMac*>(widget_view);
+    if (widget_view_mac->is_showing_context_menu())
+      return;
+  }
+
+  context_menu_.reset(new RenderViewContextMenuMac(tab_contents(),
+                                                   params,
+                                                   GetContentNativeView()));
+  context_menu_->Init();
 }
 
 // Display a popup menu for WebKit using Cocoa widgets.
@@ -273,61 +357,9 @@ void TabContentsViewMac::ShowPopupMenu(
     int selected_item,
     const std::vector<WebMenuItem>& items,
     bool right_aligned) {
-  PopupMenuHelper popup_menu_helper(tab_contents()->render_view_host());
+  PopupMenuHelper popup_menu_helper(tab_contents_->render_view_host());
   popup_menu_helper.ShowPopupMenu(bounds, item_height, item_font_size,
                                   selected_item, items, right_aligned);
-}
-
-RenderWidgetHostView* TabContentsViewMac::CreateNewWidgetInternal(
-    int route_id,
-    WebKit::WebPopupType popup_type) {
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
-  // to allow it to survive the trip without being hosted.
-  RenderWidgetHostView* widget_view =
-      TabContentsView::CreateNewWidgetInternal(route_id, popup_type);
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_view);
-  [widget_view_mac->native_view() retain];
-
-  return widget_view;
-}
-
-void TabContentsViewMac::ShowCreatedWidgetInternal(
-    RenderWidgetHostView* widget_host_view,
-    const gfx::Rect& initial_pos) {
-  TabContentsView::ShowCreatedWidgetInternal(widget_host_view, initial_pos);
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
-  // properly embedded (or purposefully ignored) we can release the retain we
-  // took in CreateNewWidgetInternal().
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
-  [widget_view_mac->native_view() release];
-}
-
-RenderWidgetHostView* TabContentsViewMac::CreateNewFullscreenWidgetInternal(
-    int route_id) {
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. We'll retain it
-  // to allow it to survive the trip without being hosted.
-  RenderWidgetHostView* widget_view =
-      TabContentsView::CreateNewFullscreenWidgetInternal(route_id);
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_view);
-  [widget_view_mac->native_view() retain];
-
-  return widget_view;
-}
-
-void TabContentsViewMac::ShowCreatedFullscreenWidgetInternal(
-    RenderWidgetHostView* widget_host_view) {
-  TabContentsView::ShowCreatedFullscreenWidgetInternal(widget_host_view);
-
-  // A RenderWidgetHostViewMac has lifetime scoped to the view. Now that it's
-  // properly embedded (or purposely ignored) we can release the retain we took
-  // in CreateNewFullscreenWidgetInternal().
-  RenderWidgetHostViewMac* widget_view_mac =
-      static_cast<RenderWidgetHostViewMac*>(widget_host_view);
-  [widget_view_mac->native_view() release];
 }
 
 bool TabContentsViewMac::IsEventTracking() const {
@@ -355,14 +387,14 @@ void TabContentsViewMac::GetViewBounds(gfx::Rect* out) const {
 }
 
 void TabContentsViewMac::CloseTab() {
-  tab_contents()->Close(tab_contents()->render_view_host());
+  tab_contents_->Close(tab_contents_->render_view_host());
 }
 
-void TabContentsViewMac::Observe(NotificationType type,
+void TabContentsViewMac::Observe(int type,
                                  const NotificationSource& source,
                                  const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::TAB_CONTENTS_CONNECTED: {
+  switch (type) {
+    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED: {
       sad_tab_.reset();
       break;
     }

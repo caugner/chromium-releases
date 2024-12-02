@@ -7,6 +7,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -19,7 +20,7 @@ class PrintPreviewUITest : public UITest {
  public:
   PrintPreviewUITest() {
     dom_automation_enabled_ = true;
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_CHROMEOS)
     launch_arguments_.AppendSwitch(switches::kEnablePrintPreview);
 #endif
   }

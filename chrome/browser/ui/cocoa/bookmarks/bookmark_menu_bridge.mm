@@ -4,7 +4,6 @@
 
 #import <AppKit/AppKit.h>
 
-#include "app/mac/nsimage_cache.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #import "chrome/browser/app_controller_mac.h"
@@ -19,10 +18,11 @@
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/image.h"
+#include "ui/gfx/image/image.h"
+#include "ui/gfx/mac/nsimage_cache.h"
 
 BookmarkMenuBridge::BookmarkMenuBridge(Profile* profile,
-                                       NSMenu* menu)
+                                       NSMenu *menu)
     : menuIsValid_(false),
       profile_(profile),
       controller_([[BookmarkMenuCocoaController alloc] initWithBridge:this
@@ -42,7 +42,7 @@ NSMenu* BookmarkMenuBridge::BookmarkMenu() {
   return [controller_ menu];
 }
 
-void BookmarkMenuBridge::Loaded(BookmarkModel* model) {
+void BookmarkMenuBridge::Loaded(BookmarkModel* model, bool ids_reassigned) {
   InvalidateMenu();
 }
 
@@ -72,21 +72,24 @@ void BookmarkMenuBridge::UpdateMenuInternal(NSMenu* bookmark_menu,
   ClearBookmarkMenu(bookmark_menu);
 
   // Add bookmark bar items, if any.
-  const BookmarkNode* barNode = model->GetBookmarkBarNode();
+  const BookmarkNode* barNode = model->bookmark_bar_node();
   CHECK(barNode);
-  if (barNode->child_count()) {
+  if (!barNode->empty()) {
     [bookmark_menu addItem:[NSMenuItem separatorItem]];
     AddNodeToMenu(barNode, bookmark_menu, !is_submenu);
   }
 
-  // Create a submenu for "other bookmarks", and fill it in.
-  NSString* other_items_title =
-      l10n_util::GetNSString(IDS_BOOMARK_BAR_OTHER_FOLDER_NAME);
-  [bookmark_menu addItem:[NSMenuItem separatorItem]];
-  AddNodeAsSubmenu(bookmark_menu,
-                   model->other_node(),
-                   other_items_title,
-                   !is_submenu);
+  // If the "Other Bookmarks" folder has any content, make a submenu for it and
+  // fill it in.
+  if (!model->other_node()->empty()) {
+    NSString* other_items_title =
+        l10n_util::GetNSString(IDS_BOOMARK_BAR_OTHER_FOLDER_NAME);
+    [bookmark_menu addItem:[NSMenuItem separatorItem]];
+    AddNodeAsSubmenu(bookmark_menu,
+                     model->other_node(),
+                     other_items_title,
+                     !is_submenu);
+  }
 
   menuIsValid_ = true;
 }
@@ -139,12 +142,20 @@ void BookmarkMenuBridge::BookmarkNodeChildrenReordered(
   InvalidateMenu();
 }
 
+void BookmarkMenuBridge::ResetMenu() {
+  ClearBookmarkMenu(BookmarkMenu());
+}
+
+void BookmarkMenuBridge::BuildMenu() {
+  UpdateMenu(BookmarkMenu());
+}
+
 // Watch for changes.
 void BookmarkMenuBridge::ObserveBookmarkModel() {
   BookmarkModel* model = GetBookmarkModel();
   model->AddObserver(this);
   if (model->IsLoaded())
-    Loaded(model);
+    Loaded(model, false);
 }
 
 BookmarkModel* BookmarkMenuBridge::GetBookmarkModel() {
@@ -290,7 +301,7 @@ void BookmarkMenuBridge::ConfigureMenuItem(const BookmarkNode* node,
   // Either we do not have a loaded favicon or the conversion from SkBitmap
   // failed. Use the default site image instead.
   if (!favicon)
-    favicon = app::mac::GetCachedImageWithName(@"nav.pdf");
+    favicon = gfx::GetCachedImageWithName(@"nav.pdf");
   [item setImage:favicon];
 }
 

@@ -37,6 +37,11 @@ PhoneField::Parser PhoneField::phone_field_grammars_[] = {
   { PhoneField::REGEX_AREA, PhoneField::FIELD_AREA_CODE, 0 },
   { PhoneField::REGEX_PHONE, PhoneField::FIELD_PHONE, 0 },
   { PhoneField::REGEX_SEPARATOR, FIELD_NONE, 0 },
+  // \( <ac> \) <phone>:3 <suffix>:4 (Ext: <ext>)?
+  { PhoneField::REGEX_AREA_NOTEXT, PhoneField::FIELD_AREA_CODE, 3 },
+  { PhoneField::REGEX_PREFIX_SEPARATOR, PhoneField::FIELD_PHONE, 3 },
+  { PhoneField::REGEX_PHONE, PhoneField::FIELD_SUFFIX, 4 },
+  { PhoneField::REGEX_SEPARATOR, FIELD_NONE, 0 },
   // Phone: <cc> <ac>:3 - <phone>:3 - <suffix>:4 (Ext: <ext>)?
   { PhoneField::REGEX_PHONE, PhoneField::FIELD_COUNTRY_CODE, 0 },
   { PhoneField::REGEX_PHONE, PhoneField::FIELD_AREA_CODE, 3 },
@@ -92,6 +97,10 @@ PhoneField::Parser PhoneField::phone_field_grammars_[] = {
   // Phone: <ac> - <phone> (Ext: <ext>)?
   { PhoneField::REGEX_AREA, PhoneField::FIELD_AREA_CODE, 0 },
   { PhoneField::REGEX_PHONE, PhoneField::FIELD_PHONE, 0 },
+  { PhoneField::REGEX_SEPARATOR, FIELD_NONE, 0 },
+  // Phone: <cc>:3 - <phone>:10 (Ext: <ext>)?
+  { PhoneField::REGEX_PHONE, PhoneField::FIELD_COUNTRY_CODE, 3 },
+  { PhoneField::REGEX_PHONE, PhoneField::FIELD_PHONE, 10 },
   { PhoneField::REGEX_SEPARATOR, FIELD_NONE, 0 },
   // Phone: <phone> (Ext: <ext>)?
   { PhoneField::REGEX_PHONE, PhoneField::FIELD_PHONE, 0 },
@@ -154,15 +163,21 @@ bool PhoneField::ClassifyField(FieldTypeMap* map) const {
                                    number_->GetCountryCodeType(),
                                    map);
     }
+
+    AutofillFieldType field_number_type = number_->GetNumberType();
     if (parsed_phone_fields_[FIELD_AREA_CODE] != NULL) {
       ok = ok && AddClassification(parsed_phone_fields_[FIELD_AREA_CODE],
                                    number_->GetCityCodeType(),
                                    map);
+    } else if (parsed_phone_fields_[FIELD_COUNTRY_CODE] != NULL) {
+      // Only if we can find country code without city code, it means the phone
+      // number include city code.
+      field_number_type = number_->GetCityAndNumberType();
     }
     // We tag the prefix as PHONE_HOME_NUMBER, then when filling the form
     // we fill only the prefix depending on the size of the input field.
     ok = ok && AddClassification(parsed_phone_fields_[FIELD_PHONE],
-                                 number_->GetNumberType(),
+                                 field_number_type,
                                  map);
     // We tag the suffix as PHONE_HOME_NUMBER, then when filling the form
     // we fill only the suffix depending on the size of the input field.
@@ -263,7 +278,6 @@ bool PhoneField::ParseInternal(PhoneField *phone_field,
 
   for (size_t i = 0; i < arraysize(phone_field_grammars_); ++i) {
     memset(parsed_fields, 0, sizeof(parsed_fields));
-    scanner->Rewind();
     scanner->SaveCursor();
 
     // Attempt to parse according to the next grammar.
@@ -300,6 +314,8 @@ bool PhoneField::ParseInternal(PhoneField *phone_field,
       scanner->Rewind();
       return false;  // Tried through all the possibilities - did not match.
     }
+
+    scanner->Rewind();
   }
 
   if (!parsed_fields[FIELD_PHONE]) {
@@ -332,9 +348,9 @@ void PhoneField::SetPhoneType(PhoneType phone_type) {
   // Field types are different as well, so we create a temporary phone number,
   // to get relevant field types.
   if (phone_type == HOME_PHONE)
-    number_.reset(new PhoneNumber(AutofillType::PHONE_HOME));
+    number_.reset(new PhoneNumber(AutofillType::PHONE_HOME, NULL));
   else
-    number_.reset(new PhoneNumber(AutofillType::PHONE_FAX));
+    number_.reset(new PhoneNumber(AutofillType::PHONE_FAX, NULL));
   phone_type_ = phone_type;
 }
 

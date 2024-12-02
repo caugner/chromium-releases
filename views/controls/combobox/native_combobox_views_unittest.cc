@@ -9,7 +9,7 @@
 #include "views/controls/combobox/native_combobox_views.h"
 #include "views/ime/mock_input_method.h"
 #include "views/test/views_test_base.h"
-#include "views/widget/native_widget.h"
+#include "views/widget/native_widget_private.h"
 #include "views/widget/widget.h"
 
 namespace {
@@ -84,11 +84,11 @@ class NativeComboboxViewsTest : public ViewsTestBase {
   // ::testing::Test:
   virtual void SetUp() {
     ViewsTestBase::SetUp();
-    NativeComboboxViews::SetEnableComboboxViews(true);
+    Widget::SetPureViews(true);
   }
 
   virtual void TearDown() {
-    NativeComboboxViews::SetEnableComboboxViews(false);
+    Widget::SetPureViews(false);
     if (widget_)
       widget_->Close();
     ViewsTestBase::TearDown();
@@ -99,7 +99,7 @@ class NativeComboboxViewsTest : public ViewsTestBase {
 
     ASSERT_FALSE(combobox_);
     combobox_ = new TestCombobox(model_.get());
-    combobox_->SetID(1);
+    combobox_->set_id(1);
 
     widget_ = new Widget;
     Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
@@ -114,7 +114,7 @@ class NativeComboboxViewsTest : public ViewsTestBase {
     ASSERT_TRUE(combobox_view_);
 
     input_method_ = new MockInputMethod();
-    widget_->native_widget()->ReplaceInputMethod(input_method_);
+    widget_->native_widget_private()->ReplaceInputMethod(input_method_);
 
     // Assumes the Widget is always focused.
     input_method_->OnFocus();

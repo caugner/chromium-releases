@@ -7,12 +7,15 @@
 #include <algorithm>
 #include <functional>
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
@@ -33,6 +36,7 @@ static const syncable::ModelType kStartOrder[] = {
   syncable::THEMES,
   syncable::TYPED_URLS,
   syncable::PASSWORDS,
+  syncable::SEARCH_ENGINES,
   syncable::SESSIONS,
 };
 
@@ -66,7 +70,7 @@ DataTypeManagerImpl::DataTypeManagerImpl(SyncBackendHost* backend,
       state_(DataTypeManager::STOPPED),
       needs_reconfigure_(false),
       last_configure_reason_(sync_api::CONFIGURE_REASON_UNKNOWN),
-      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(backend_);
   // Ensure all data type controllers are stopped.
   for (DataTypeController::TypeMap::const_iterator it = controllers_.begin();
@@ -117,6 +121,16 @@ void DataTypeManagerImpl::ConfigureImpl(const TypeSet& desired_types,
   if (state_ == STOPPING) {
     // You can not set a configuration while stopping.
     LOG(ERROR) << "Configuration set while stopping.";
+    return;
+  }
+
+  if (state_ == CONFIGURED &&
+      last_requested_types_ == desired_types &&
+      reason == sync_api::CONFIGURE_REASON_RECONFIGURATION) {
+    // If we're already configured and the types haven't changed, we can exit
+    // out early.
+    NotifyStart();
+    NotifyDone(OK, FROM_HERE);
     return;
   }
 
@@ -198,12 +212,18 @@ void DataTypeManagerImpl::Restart(sync_api::ConfigureReason reason,
       controllers_,
       last_requested_types_,
       reason,
-      method_factory_.NewRunnableMethod(&DataTypeManagerImpl::DownloadReady),
+      base::Bind(&DataTypeManagerImpl::DownloadReady,
+                 weak_ptr_factory_.GetWeakPtr()),
       enable_nigori);
 }
 
-void DataTypeManagerImpl::DownloadReady() {
-  DCHECK(state_ == DOWNLOAD_PENDING);
+void DataTypeManagerImpl::DownloadReady(bool success) {
+  DCHECK_EQ(state_, DOWNLOAD_PENDING);
+
+  if (!success) {
+    NotifyDone(UNRECOVERABLE_ERROR, FROM_HERE);
+    return;
+  }
 
   state_ = CONFIGURING;
   StartNextType();
@@ -235,8 +255,10 @@ void DataTypeManagerImpl::StartNextType() {
     // Unwind the stack before executing configure. The method configure and its
     // callees are not re-entrant.
     MessageLoop::current()->PostTask(FROM_HERE,
-        method_factory_.NewRunnableMethod(&DataTypeManagerImpl::Configure,
-            last_requested_types_, last_configure_reason_));
+        base::Bind(&DataTypeManagerImpl::Configure,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   last_requested_types_,
+                   last_configure_reason_));
 
     needs_reconfigure_ = false;
     last_configure_reason_ = sync_api::CONFIGURE_REASON_UNKNOWN;
@@ -285,7 +307,6 @@ void DataTypeManagerImpl::TypeStartCallback(
   needs_start_.erase(needs_start_.begin());
 
   if (result == DataTypeController::NEEDS_CRYPTO) {
-
   }
   // If the type started normally, continue to the next type.
   // If the type is waiting for the cryptographer, continue to the next type.
@@ -346,7 +367,7 @@ void DataTypeManagerImpl::Stop() {
   if (download_pending) {
     // If Stop() is called while waiting for download, cancel all
     // outstanding tasks.
-    method_factory_.RevokeAll();
+    weak_ptr_factory_.InvalidateWeakPtrs();
     FinishStopAndNotify(ABORTED, FROM_HERE);
     return;
   }
@@ -355,7 +376,8 @@ void DataTypeManagerImpl::Stop() {
 }
 
 void DataTypeManagerImpl::FinishStop() {
-  DCHECK(state_== CONFIGURING || state_ == STOPPING || state_ == BLOCKED);
+  DCHECK(state_== CONFIGURING || state_ == STOPPING || state_ == BLOCKED ||
+         state_ == DOWNLOAD_PENDING);
   // Simply call the Stop() method on all running data types.
   for (DataTypeController::TypeMap::const_iterator it = controllers_.begin();
        it != controllers_.end(); ++it) {
@@ -377,7 +399,7 @@ void DataTypeManagerImpl::FinishStopAndNotify(ConfigureResult result,
 
 void DataTypeManagerImpl::NotifyStart() {
   NotificationService::current()->Notify(
-      NotificationType::SYNC_CONFIGURE_START,
+      chrome::NOTIFICATION_SYNC_CONFIGURE_START,
       Source<DataTypeManager>(this),
       NotificationService::NoDetails());
 }
@@ -415,7 +437,7 @@ void DataTypeManagerImpl::NotifyDone(ConfigureResult result,
       break;
   }
   NotificationService::current()->Notify(
-      NotificationType::SYNC_CONFIGURE_DONE,
+      chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
       Source<DataTypeManager>(this),
       Details<ConfigureResultWithErrorLocation>(&result_with_location));
 }
@@ -434,7 +456,7 @@ void DataTypeManagerImpl::SetBlockedAndNotify() {
   VLOG(1) << "Accumulated spent configuring: "
           << configure_time_delta_.InSecondsF() << "s";
   NotificationService::current()->Notify(
-      NotificationType::SYNC_CONFIGURE_BLOCKED,
+      chrome::NOTIFICATION_SYNC_CONFIGURE_BLOCKED,
       Source<DataTypeManager>(this),
       NotificationService::NoDetails());
 }

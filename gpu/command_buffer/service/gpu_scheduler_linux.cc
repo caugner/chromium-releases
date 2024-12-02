@@ -4,6 +4,7 @@
 
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ui/gfx/gl/gl_context.h"
+#include "ui/gfx/gl/gl_share_group.h"
 #include "ui/gfx/gl/gl_surface.h"
 
 using ::base::SharedMemory;
@@ -13,33 +14,23 @@ namespace gpu {
 bool GpuScheduler::Initialize(
     gfx::PluginWindowHandle window,
     const gfx::Size& size,
+    bool software,
     const gles2::DisallowedExtensions& disallowed_extensions,
     const char* allowed_extensions,
     const std::vector<int32>& attribs,
-    GpuScheduler* parent,
-    uint32 parent_texture_id) {
-  // Get the parent decoder and the GLContext to share IDs with, if any.
-  gles2::GLES2Decoder* parent_decoder = NULL;
-  gfx::GLContext* parent_context = NULL;
-  void* parent_handle = NULL;
-  if (parent) {
-    parent_decoder = parent->decoder_.get();
-    DCHECK(parent_decoder);
-
-    parent_context = parent_decoder->GetGLContext();
-    DCHECK(parent_context);
-  }
+    gfx::GLShareGroup* share_group) {
+#if defined(TOUCH_UI)
+  NOTIMPLEMENTED();
+  return false;
+#endif
 
   // Create either a view or pbuffer based GLSurface.
   scoped_refptr<gfx::GLSurface> surface;
-  if (window) {
-    DCHECK(!parent_handle);
-
-    surface = gfx::GLSurface::CreateViewGLSurface(window);
-  } else {
-    surface = gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size(1, 1));
-  }
-
+  if (window)
+    surface = gfx::GLSurface::CreateViewGLSurface(software, window);
+  else
+    surface = gfx::GLSurface::CreateOffscreenGLSurface(software,
+                                                       gfx::Size(1, 1));
   if (!surface.get()) {
     LOG(ERROR) << "GpuScheduler::Initialize failed.\n";
     Destroy();
@@ -48,7 +39,7 @@ bool GpuScheduler::Initialize(
 
   // Create a GLContext and attach the surface.
   scoped_refptr<gfx::GLContext> context(
-      gfx::GLContext::CreateGLContext(parent_context, surface.get()));
+      gfx::GLContext::CreateGLContext(share_group, surface.get()));
   if (!context.get()) {
     LOG(ERROR) << "CreateGLContext failed.\n";
     Destroy();
@@ -60,9 +51,7 @@ bool GpuScheduler::Initialize(
                           size,
                           disallowed_extensions,
                           allowed_extensions,
-                          attribs,
-                          parent_decoder,
-                          parent_texture_id);
+                          attribs);
 }
 
 void GpuScheduler::Destroy() {

@@ -14,7 +14,6 @@
 #include "content/renderer/render_view_observer.h"
 #include "content/renderer/render_process_observer.h"
 #include "googleurl/src/gurl.h"
-#include "ipc/ipc_platform_file.h"
 
 namespace safe_browsing {
 class ClientPhishingRequest;
@@ -26,11 +25,11 @@ class PhishingClassifierFilter : public RenderProcessObserver {
   static PhishingClassifierFilter* Create();
   virtual ~PhishingClassifierFilter();
 
-  virtual bool OnControlMessageReceived(const IPC::Message& message);
+  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   PhishingClassifierFilter();
-  void OnSetPhishingModel(IPC::PlatformFileForTransit model_file);
+  void OnSetPhishingModel(const std::string& model);
 
   DISALLOW_COPY_AND_ASSIGN(PhishingClassifierFilter);
 };
@@ -62,7 +61,7 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   // cancelled.  However, if the navigation is within the same page, we
   // continue running the current classification.
   virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
-                                        bool is_new_navigation);
+                                        bool is_new_navigation) OVERRIDE;
 
  private:
   friend class PhishingClassifierDelegateTest;
@@ -75,6 +74,7 @@ class PhishingClassifierDelegate : public RenderViewObserver {
     NAVIGATE_WITHIN_PAGE,
     PAGE_RECAPTURED,
     SHUTDOWN,
+    NEW_PHISHING_SCORER,
     CANCEL_CLASSIFICATION_MAX  // Always add new values before this one.
   };
 
@@ -82,7 +82,7 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   void CancelPendingClassification(CancelClassificationReason reason);
 
   // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Called by the RenderView when it receives a StartPhishingDetection IPC
   // from the browser.  This signals that it is ok to begin classification

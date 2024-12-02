@@ -77,6 +77,9 @@ PassiveLogCollector::PassiveLogCollector()
   trackers_[net::NetLog::SOURCE_HTTP_STREAM_JOB] = &http_stream_job_tracker_;
   trackers_[net::NetLog::SOURCE_EXPONENTIAL_BACKOFF_THROTTLING] =
       &exponential_backoff_throttling_tracker_;
+  trackers_[net::NetLog::SOURCE_DNS_TRANSACTION] = &dns_transaction_tracker_;
+  trackers_[net::NetLog::SOURCE_ASYNC_HOST_RESOLVER_REQUEST] =
+      &async_host_resolver_request_tracker_;
   // Make sure our mapping is up-to-date.
   for (size_t i = 0; i < arraysize(trackers_); ++i)
     DCHECK(trackers_[i]) << "Unhandled SourceType: " << i;
@@ -423,7 +426,9 @@ PassiveLogCollector::SocketTracker::DoAddEntry(const ChromeNetLog::Entry& entry,
   //               to summarize transaction read/writes for each SOCKET_IN_USE
   //               section.
   if (entry.type == net::NetLog::TYPE_SOCKET_BYTES_SENT ||
-      entry.type == net::NetLog::TYPE_SOCKET_BYTES_RECEIVED) {
+      entry.type == net::NetLog::TYPE_SOCKET_BYTES_RECEIVED ||
+      entry.type == net::NetLog::TYPE_SSL_SOCKET_BYTES_SENT ||
+      entry.type == net::NetLog::TYPE_SSL_SOCKET_BYTES_RECEIVED) {
     return ACTION_NONE;
   }
 
@@ -455,6 +460,12 @@ PassiveLogCollector::RequestTracker::DoAddEntry(
     const net::NetLog::Source& source_dependency =
         static_cast<net::NetLogSourceParameter*>(entry.params.get())->value();
     AddReferenceToSourceDependency(source_dependency, out_info);
+  }
+
+  // Don't keep read bytes around in the log, to save memory.
+  if (entry.type == net::NetLog::TYPE_URL_REQUEST_JOB_BYTES_READ ||
+      entry.type == net::NetLog::TYPE_URL_REQUEST_JOB_FILTERED_BYTES_READ) {
+    return ACTION_NONE;
   }
 
   AddEntryToSourceInfo(entry, out_info);
@@ -492,9 +503,8 @@ PassiveLogCollector::InitProxyResolverTracker::DoAddEntry(
   if (entry.type == net::NetLog::TYPE_INIT_PROXY_RESOLVER &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
-  } else {
-    return ACTION_NONE;
   }
+  return ACTION_NONE;
 }
 
 //----------------------------------------------------------------------------
@@ -515,9 +525,8 @@ PassiveLogCollector::SpdySessionTracker::DoAddEntry(
   if (entry.type == net::NetLog::TYPE_SPDY_SESSION &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
-  } else {
-    return ACTION_NONE;
   }
+  return ACTION_NONE;
 }
 
 //----------------------------------------------------------------------------
@@ -538,9 +547,8 @@ PassiveLogCollector::DNSRequestTracker::DoAddEntry(
   if (entry.type == net::NetLog::TYPE_HOST_RESOLVER_IMPL_REQUEST &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
-  } else {
-    return ACTION_NONE;
   }
+  return ACTION_NONE;
 }
 
 //----------------------------------------------------------------------------
@@ -561,9 +569,8 @@ PassiveLogCollector::DNSJobTracker::DoAddEntry(const ChromeNetLog::Entry& entry,
   if (entry.type == net::NetLog::TYPE_HOST_RESOLVER_IMPL_JOB &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
-  } else {
-    return ACTION_NONE;
   }
+  return ACTION_NONE;
 }
 
 //----------------------------------------------------------------------------
@@ -587,7 +594,6 @@ PassiveLogCollector::DiskCacheEntryTracker::DoAddEntry(
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }
-
   return ACTION_NONE;
 }
 
@@ -612,7 +618,6 @@ PassiveLogCollector::MemCacheEntryTracker::DoAddEntry(
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }
-
   return ACTION_NONE;
 }
 
@@ -645,7 +650,6 @@ PassiveLogCollector::HttpStreamJobTracker::DoAddEntry(
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }
-
   return ACTION_NONE;
 }
 
@@ -668,5 +672,55 @@ PassiveLogCollector::SourceTracker::Action
 PassiveLogCollector::ExponentialBackoffThrottlingTracker::DoAddEntry(
     const ChromeNetLog::Entry& entry, SourceInfo* out_info) {
   AddEntryToSourceInfo(entry, out_info);
+  return ACTION_NONE;
+}
+
+//----------------------------------------------------------------------------
+// DnsTransactionTracker
+//----------------------------------------------------------------------------
+
+const size_t PassiveLogCollector::DnsTransactionTracker::kMaxNumSources = 100;
+const size_t PassiveLogCollector::DnsTransactionTracker::kMaxGraveyardSize = 15;
+
+PassiveLogCollector::DnsTransactionTracker::DnsTransactionTracker()
+    : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
+}
+
+PassiveLogCollector::SourceTracker::Action
+PassiveLogCollector::DnsTransactionTracker::DoAddEntry(
+    const ChromeNetLog::Entry& entry,
+    SourceInfo* out_info) {
+  AddEntryToSourceInfo(entry, out_info);
+  if (entry.type == net::NetLog::TYPE_DNS_TRANSACTION &&
+      entry.phase == net::NetLog::PHASE_END) {
+    return ACTION_MOVE_TO_GRAVEYARD;
+  }
+  return ACTION_NONE;
+}
+
+//----------------------------------------------------------------------------
+// AsyncHostResolverRequestTracker
+//----------------------------------------------------------------------------
+
+const size_t
+PassiveLogCollector::AsyncHostResolverRequestTracker::kMaxNumSources = 100;
+
+const size_t
+PassiveLogCollector::AsyncHostResolverRequestTracker::kMaxGraveyardSize = 15;
+
+PassiveLogCollector::
+    AsyncHostResolverRequestTracker::AsyncHostResolverRequestTracker()
+        : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
+}
+
+PassiveLogCollector::SourceTracker::Action
+PassiveLogCollector::AsyncHostResolverRequestTracker::DoAddEntry(
+    const ChromeNetLog::Entry& entry,
+    SourceInfo* out_info) {
+  AddEntryToSourceInfo(entry, out_info);
+  if (entry.type == net::NetLog::TYPE_ASYNC_HOST_RESOLVER_REQUEST &&
+      entry.phase == net::NetLog::PHASE_END) {
+    return ACTION_MOVE_TO_GRAVEYARD;
+  }
   return ACTION_NONE;
 }

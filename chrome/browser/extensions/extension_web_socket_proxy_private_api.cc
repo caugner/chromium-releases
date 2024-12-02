@@ -8,6 +8,7 @@
 #include "base/values.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/internal_auth.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/common/notification_service.h"
 
@@ -40,7 +41,7 @@ bool WebSocketProxyPrivateGetPassportForTCPFunction::RunImpl() {
     if (!chromeos::WebSocketProxyController::IsInitiated()) {
       delay_response = true;
       registrar_.Add(
-          this, NotificationType::WEB_SOCKET_PROXY_STARTED,
+          this, chrome::NOTIFICATION_WEB_SOCKET_PROXY_STARTED,
           NotificationService::AllSources());
       chromeos::WebSocketProxyController::Initiate();
     }
@@ -67,10 +68,10 @@ bool WebSocketProxyPrivateGetPassportForTCPFunction::RunImpl() {
 }
 
 void WebSocketProxyPrivateGetPassportForTCPFunction::Observe(
-    NotificationType type, const NotificationSource& source,
+    int type, const NotificationSource& source,
     const NotificationDetails& details) {
 #if defined(OS_CHROMEOS)
-  DCHECK(type.value == NotificationType::WEB_SOCKET_PROXY_STARTED);
+  DCHECK(type == chrome::NOTIFICATION_WEB_SOCKET_PROXY_STARTED);
 #else
   NOTREACHED();
 #endif

@@ -46,6 +46,12 @@ class PseudoTcpAdapter::Core : public cricket::IPseudoTcpNotify,
   // This is triggered by NotifyClock, NotifyPacket, Recv and Send.
   virtual WriteResult TcpWritePacket(cricket::PseudoTcp* tcp,
                                      const char* buffer, size_t len) OVERRIDE;
+
+  void SetAckDelay(int delay_ms);
+  void SetNoDelay(bool no_delay);
+  void SetReceiveBufferSize(int32 size);
+  void SetSendBufferSize(int32 size);
+
  private:
   // These are invoked by the underlying Socket, and may trigger callbacks.
   // They hold a reference to |this| while running, to protect from deletion.
@@ -110,19 +116,10 @@ int PseudoTcpAdapter::Core::Read(net::IOBuffer* buffer, int buffer_size,
   // Reference the Core in case a callback deletes the adapter.
   scoped_refptr<Core> core(this);
 
-  // TODO(wez): This is a hack for remoting.  See JingleSession.
-  PseudoTcp::TcpState state = pseudo_tcp_.State();
-  int result;
-  if (state == PseudoTcp::TCP_SYN_SENT ||
-      state == PseudoTcp::TCP_SYN_RECEIVED) {
-    result = net::ERR_IO_PENDING;
-
-  } else {
-    result = pseudo_tcp_.Recv(buffer->data(), buffer_size);
-    if (result < 0) {
-      result = net::MapSystemError(pseudo_tcp_.GetError());
-      DCHECK(result < 0);
-    }
+  int result = pseudo_tcp_.Recv(buffer->data(), buffer_size);
+  if (result < 0) {
+    result = net::MapSystemError(pseudo_tcp_.GetError());
+    DCHECK(result < 0);
   }
 
   if (result == net::ERR_IO_PENDING) {
@@ -143,19 +140,10 @@ int PseudoTcpAdapter::Core::Write(net::IOBuffer* buffer, int buffer_size,
   // Reference the Core in case a callback deletes the adapter.
   scoped_refptr<Core> core(this);
 
-  // TODO(wez): This is a hack for remoting.  See JingleSession.
-  PseudoTcp::TcpState state = pseudo_tcp_.State();
-  int result;
-  if (state == PseudoTcp::TCP_SYN_SENT ||
-      state == PseudoTcp::TCP_SYN_RECEIVED) {
-    result = net::ERR_IO_PENDING;
-
-  } else {
-    result = pseudo_tcp_.Send(buffer->data(), buffer_size);
-    if (result < 0) {
-      result = net::MapSystemError(pseudo_tcp_.GetError());
-      DCHECK(result < 0);
-    }
+  int result = pseudo_tcp_.Send(buffer->data(), buffer_size);
+  if (result < 0) {
+    result = net::MapSystemError(pseudo_tcp_.GetError());
+    DCHECK(result < 0);
   }
 
   if (result == net::ERR_IO_PENDING) {
@@ -287,18 +275,39 @@ void PseudoTcpAdapter::Core::OnTcpClosed(PseudoTcp* tcp, uint32 error) {
   }
 }
 
+void PseudoTcpAdapter::Core::SetAckDelay(int delay_ms) {
+  pseudo_tcp_.SetOption(cricket::PseudoTcp::OPT_ACKDELAY, delay_ms);
+}
+
+void PseudoTcpAdapter::Core::SetNoDelay(bool no_delay) {
+  pseudo_tcp_.SetOption(cricket::PseudoTcp::OPT_NODELAY, no_delay ? 1 : 0);
+}
+
+void PseudoTcpAdapter::Core::SetReceiveBufferSize(int32 size) {
+  pseudo_tcp_.SetOption(cricket::PseudoTcp::OPT_RCVBUF, size);
+}
+
+void PseudoTcpAdapter::Core::SetSendBufferSize(int32 size) {
+  pseudo_tcp_.SetOption(cricket::PseudoTcp::OPT_SNDBUF, size);
+}
+
 cricket::IPseudoTcpNotify::WriteResult PseudoTcpAdapter::Core::TcpWritePacket(
     PseudoTcp* tcp,
     const char* buffer,
     size_t len) {
   DCHECK_EQ(tcp, &pseudo_tcp_);
 
+  // If we already have a write pending, we behave like a congested network,
+  // returning success for the write, but dropping the packet.  PseudoTcp will
+  // back-off and retransmit, adjusting for the perceived congestion.
   if (socket_write_pending_)
     return IPseudoTcpNotify::WR_SUCCESS;
 
   scoped_refptr<net::IOBuffer> write_buffer = new net::IOBuffer(len);
   memcpy(write_buffer->data(), buffer, len);
 
+  // Our underlying socket is datagram-oriented, which means it should either
+  // send exactly as many bytes as we requested, or fail.
   int result = socket_->Write(write_buffer, len, &socket_write_callback_);
   if (result == net::ERR_IO_PENDING) {
     socket_write_pending_ = true;
@@ -397,15 +406,15 @@ int PseudoTcpAdapter::Write(net::IOBuffer* buffer, int buffer_size,
 
 bool PseudoTcpAdapter::SetReceiveBufferSize(int32 size) {
   DCHECK(CalledOnValidThread());
-  // TODO(sergeyu): Implement support for adjustable buffer size and
-  // used it here.
+
+  core_->SetReceiveBufferSize(size);
   return false;
 }
 
 bool PseudoTcpAdapter::SetSendBufferSize(int32 size) {
   DCHECK(CalledOnValidThread());
-  // TODO(sergeyu): Implement support for adjustable buffer size and
-  // used it here.
+
+  core_->SetSendBufferSize(size);
   return false;
 }
 
@@ -474,6 +483,26 @@ bool PseudoTcpAdapter::WasEverUsed() const {
 bool PseudoTcpAdapter::UsingTCPFastOpen() const {
   DCHECK(CalledOnValidThread());
   return false;
+}
+
+int64 PseudoTcpAdapter::NumBytesRead() const {
+  DCHECK(CalledOnValidThread());
+  return -1;
+}
+
+base::TimeDelta PseudoTcpAdapter::GetConnectTimeMicros() const {
+  DCHECK(CalledOnValidThread());
+  return base::TimeDelta::FromMicroseconds(-1);
+}
+
+void PseudoTcpAdapter::SetAckDelay(int delay_ms) {
+  DCHECK(CalledOnValidThread());
+  core_->SetAckDelay(delay_ms);
+}
+
+void PseudoTcpAdapter::SetNoDelay(bool no_delay) {
+  DCHECK(CalledOnValidThread());
+  core_->SetNoDelay(no_delay);
 }
 
 }  // namespace jingle_glue

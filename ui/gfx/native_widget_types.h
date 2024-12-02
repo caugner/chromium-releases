@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "build/build_config.h"
+#include "ui/ui_api.h"
 
 // This file provides cross platform typedefs for native widget types.
 //   NativeWindow: this is a handle to a native, top-level window
@@ -39,6 +39,7 @@
 #if defined(OS_WIN)
 #include <windows.h>  // NOLINT
 typedef struct HFONT__* HFONT;
+struct IAccessible;
 #elif defined(OS_MACOSX)
 struct CGContext;
 #ifdef __OBJC__
@@ -76,6 +77,7 @@ typedef HDC NativeDrawingContext;
 typedef HCURSOR NativeCursor;
 typedef HMENU NativeMenu;
 typedef HRGN NativeRegion;
+typedef IAccessible* NativeViewAccessible;
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
 typedef NSView* NativeView;
@@ -84,6 +86,7 @@ typedef NSTextField* NativeEditView;
 typedef CGContext* NativeDrawingContext;
 typedef void* NativeCursor;
 typedef void* NativeMenu;
+typedef void* NativeViewAccessible;
 #elif defined(USE_X11)
 typedef PangoFontDescription* NativeFont;
 typedef GtkWidget* NativeView;
@@ -93,6 +96,7 @@ typedef cairo_t* NativeDrawingContext;
 typedef GdkCursor* NativeCursor;
 typedef GtkWidget* NativeMenu;
 typedef GdkRegion* NativeRegion;
+typedef void* NativeViewAccessible;
 #endif
 
 #if defined(OS_MACOSX)
@@ -143,7 +147,7 @@ static inline NativeViewId IdFromNativeView(NativeView view) {
 }
 #elif defined(USE_X11)
 // Not inlined because it involves pulling too many headers.
-NativeViewId IdFromNativeView(NativeView view);
+UI_API NativeViewId IdFromNativeView(NativeView view);
 #endif  // defined(USE_X11)
 
 

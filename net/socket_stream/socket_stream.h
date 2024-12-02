@@ -159,6 +159,8 @@ class NET_API SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   // back.
   virtual void DetachDelegate();
 
+  const ProxyServer& proxy_server() const;
+
   // Sets an alternative HostResolver. For testing purposes only.
   void SetHostResolver(HostResolver* host_resolver);
 
@@ -173,6 +175,9 @@ class NET_API SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   Delegate* delegate_;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SocketStreamTest, IOPending);
+  FRIEND_TEST_ALL_PREFIXES(SocketStreamTest, SwitchAfterPending);
+
   friend class WebSocketThrottleTest;
 
   typedef std::map<const void*, linked_ptr<UserData> > UserDataMap;
@@ -213,6 +218,8 @@ class NET_API SocketStream : public base::RefCountedThreadSafe<SocketStream> {
     STATE_RESOLVE_PROXY_COMPLETE,
     STATE_RESOLVE_HOST,
     STATE_RESOLVE_HOST_COMPLETE,
+    STATE_RESOLVE_PROTOCOL,
+    STATE_RESOLVE_PROTOCOL_COMPLETE,
     STATE_TCP_CONNECT,
     STATE_TCP_CONNECT_COMPLETE,
     STATE_WRITE_TUNNEL_HEADERS,
@@ -262,6 +269,8 @@ class NET_API SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   int DoResolveProxyComplete(int result);
   int DoResolveHost();
   int DoResolveHostComplete(int result);
+  int DoResolveProtocol(int result);
+  int DoResolveProtocolComplete(int result);
   int DoTcpConnect(int result);
   int DoTcpConnectComplete(int result);
   int DoWriteTunnelHeaders();
@@ -295,6 +304,7 @@ class NET_API SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   State next_state_;
   HostResolver* host_resolver_;
   CertVerifier* cert_verifier_;
+  OriginBoundCertService* origin_bound_cert_service_;
   HttpAuthHandlerFactory* http_auth_handler_factory_;
   ClientSocketFactory* factory_;
 

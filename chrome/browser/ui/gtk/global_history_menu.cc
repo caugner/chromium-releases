@@ -6,10 +6,9 @@
 
 #include <gtk/gtk.h>
 
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/owned_widget_gtk.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
@@ -32,10 +32,10 @@
 namespace {
 
 // The maximum number of most visited items to display.
-const unsigned int kMostVisitedCount = 12;
+const unsigned int kMostVisitedCount = 8;
 
 // The number of recently closed items to get.
-const unsigned int kRecentlyClosedCount = 10;
+const unsigned int kRecentlyClosedCount = 8;
 
 // Menus more than this many chars long will get trimmed.
 const int kMaximumMenuWidthInChars = 50;
@@ -57,24 +57,13 @@ struct GlobalHistoryMenu::GetIndexClosure {
 class GlobalHistoryMenu::HistoryItem {
  public:
   HistoryItem()
-      : icon_requested(false),
-        menu_item(NULL),
+      : menu_item(NULL),
         session_id(0) {}
 
   // The title for the menu item.
   string16 title;
   // The URL that will be navigated to if the user selects this item.
   GURL url;
-
-  // If the icon is being requested from the FaviconService, |icon_requested|
-  // will be true and |icon_handle| will be non-NULL. If this is false, then
-  // |icon_handle| will be NULL.
-  bool icon_requested;
-  // The Handle given to us by the FaviconService for the icon fetch request.
-  FaviconService::Handle icon_handle;
-
-  // The icon as a GtkImage for inclusion in a GtkImageMenuItem.
-  OwnedWidgetGtk icon_image;
 
   // A pointer to the menu_item. This is a weak reference in the GTK+ version
   // because the GtkMenu must sink the reference.
@@ -101,7 +90,6 @@ GlobalHistoryMenu::GlobalHistoryMenu(Browser* browser)
     : browser_(browser),
       profile_(browser_->profile()),
       top_sites_(NULL),
-      default_favicon_(NULL),
       tab_restore_service_(NULL) {
 }
 
@@ -124,8 +112,6 @@ void GlobalHistoryMenu::Init(GtkWidget* history_menu,
   g_signal_connect(history_menu_item, "activate",
                    G_CALLBACK(OnMenuActivateThunk), this);
 
-  default_favicon_ = GtkThemeService::GetDefaultFavicon(true);
-
   if (profile_) {
     top_sites_ = profile_->GetTopSites();
     if (top_sites_) {
@@ -133,13 +119,9 @@ void GlobalHistoryMenu::Init(GtkWidget* history_menu,
 
       // Register for notification when TopSites changes so that we can update
       // ourself.
-      registrar_.Add(this, NotificationType::TOP_SITES_CHANGED,
+      registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
                      Source<history::TopSites>(top_sites_));
     }
-
-    registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
-                   Source<ThemeService>(
-                       ThemeServiceFactory::GetForProfile(profile_)));
   }
 }
 
@@ -167,10 +149,6 @@ void GlobalHistoryMenu::OnTopSitesReceived(
     HistoryItem* item = new HistoryItem();
     item->title = visited.title;
     item->url = visited.url;
-
-    // The TopSites system doesn't give us icons; it gives us chrome:// urls
-    // to icons so fetch the icons normally.
-    GetFaviconForHistoryItem(item);
 
     AddHistoryItemToMenu(item,
                          history_menu_.get(),
@@ -210,9 +188,6 @@ GlobalHistoryMenu::HistoryItem* GlobalHistoryMenu::HistoryItemForTab(
   item->url = current_navigation.virtual_url();
   item->session_id = entry.id;
 
-  // Tab navigations don't come with icons, so we always have to request them.
-  GetFaviconForHistoryItem(item);
-
   return item;
 }
 
@@ -227,22 +202,14 @@ GtkWidget* GlobalHistoryMenu::AddHistoryItemToMenu(HistoryItem* item,
     title = UTF8ToUTF16(url_string);
   ui::ElideString(title, kMaximumMenuWidthInChars, &title);
 
-  GtkWidget* menu_item = gtk_image_menu_item_new_with_label(
+  GtkWidget* menu_item = gtk_menu_item_new_with_label(
       UTF16ToUTF8(title).c_str());
-  gtk_util::SetAlwaysShowImage(menu_item);
 
   item->menu_item = menu_item;
   gtk_widget_show(menu_item);
   g_object_set_data(G_OBJECT(menu_item), "type-tag", GINT_TO_POINTER(tag));
   g_signal_connect(menu_item, "activate",
                    G_CALLBACK(OnRecentlyClosedItemActivatedThunk), this);
-  if (item->icon_image.get()) {
-    gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
-                                  item->icon_image.get());
-  } else if (!item->tabs.size()) {
-    gtk_image_menu_item_set_image(GTK_IMAGE_MENU_ITEM(menu_item),
-                                  gtk_image_new_from_pixbuf(default_favicon_));
-  }
 
   std::string tooltip = gtk_util::BuildTooltipTitleFor(item->title, item->url);
   gtk_widget_set_tooltip_markup(menu_item, tooltip.c_str());
@@ -251,57 +218,6 @@ GtkWidget* GlobalHistoryMenu::AddHistoryItemToMenu(HistoryItem* item,
   gtk_menu_shell_insert(GTK_MENU_SHELL(menu), menu_item, index);
 
   return menu_item;
-}
-
-void GlobalHistoryMenu::GetFaviconForHistoryItem(HistoryItem* item) {
-  FaviconService* service =
-      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-  FaviconService::Handle handle = service->GetFaviconForURL(
-      item->url,
-      history::FAVICON,
-      &favicon_consumer_,
-      NewCallback(this, &GlobalHistoryMenu::GotFaviconData));
-  favicon_consumer_.SetClientData(service, handle, item);
-  item->icon_handle = handle;
-  item->icon_requested = true;
-}
-
-void GlobalHistoryMenu::GotFaviconData(FaviconService::Handle handle,
-                                       history::FaviconData favicon) {
-  HistoryItem* item =
-      favicon_consumer_.GetClientData(
-          profile_->GetFaviconService(Profile::EXPLICIT_ACCESS), handle);
-  DCHECK(item);
-  item->icon_requested = false;
-  item->icon_handle = static_cast<CancelableRequestProvider::Handle>(NULL);
-
-  SkBitmap icon;
-  if (favicon.is_valid() &&
-      gfx::PNGCodec::Decode(favicon.image_data->front(),
-                            favicon.image_data->size(), &icon)) {
-    GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
-    if (pixbuf) {
-      item->icon_image.Own(gtk_image_new_from_pixbuf(pixbuf));
-      g_object_unref(pixbuf);
-
-      if (item->menu_item) {
-        gtk_image_menu_item_set_image(
-            GTK_IMAGE_MENU_ITEM(item->menu_item),
-            item->icon_image.get());
-      }
-    }
-  }
-}
-
-void GlobalHistoryMenu::CancelFaviconRequest(HistoryItem* item) {
-  DCHECK(item);
-  if (item->icon_requested) {
-    FaviconService* service =
-        profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
-    service->CancelRequest(item->icon_handle);
-    item->icon_requested = false;
-    item->icon_handle = static_cast<CancelableRequestProvider::Handle>(NULL);
-  }
 }
 
 int GlobalHistoryMenu::GetIndexOfMenuItemWithTag(GtkWidget* menu, int tag_id) {
@@ -351,7 +267,6 @@ void GlobalHistoryMenu::ClearMenuCallback(GtkWidget* menu_item,
     HistoryItem* item = closure->menu_bar->HistoryItemForMenuItem(menu_item);
 
     if (item) {
-      closure->menu_bar->CancelFaviconRequest(item);
       closure->menu_bar->menu_item_history_map_.erase(menu_item);
       delete item;
     }
@@ -364,15 +279,10 @@ void GlobalHistoryMenu::ClearMenuCallback(GtkWidget* menu_item,
   }
 }
 
-void GlobalHistoryMenu::Observe(NotificationType type,
+void GlobalHistoryMenu::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  if (type.value == NotificationType::BROWSER_THEME_CHANGED) {
-    // Keeping track of which menu items have the default icon is going an
-    // error-prone pain, so instead just store the new default favicon and
-    // we'll update on the next menu change event.
-    default_favicon_ = GtkThemeService::GetDefaultFavicon(true);
-  } else if (type.value == NotificationType::TOP_SITES_CHANGED) {
+  if (type == chrome::NOTIFICATION_TOP_SITES_CHANGED) {
     if (Source<history::TopSites>(source).ptr() == top_sites_)
       GetTopSitesData();
   } else {
@@ -469,9 +379,8 @@ void GlobalHistoryMenu::TabRestoreServiceChanged(TabRestoreService* service) {
               base::IntToString16(item->tabs.size()));
 
       // Create the menu item parent. Unlike mac, it's can't be activated.
-      GtkWidget* parent_item = gtk_image_menu_item_new_with_label(
+      GtkWidget* parent_item = gtk_menu_item_new_with_label(
           title.c_str());
-      gtk_util::SetAlwaysShowImage(parent_item);
       gtk_widget_show(parent_item);
       g_object_set_data(G_OBJECT(parent_item), "type-tag",
                         GINT_TO_POINTER(GlobalMenuBar::TAG_RECENTLY_CLOSED));

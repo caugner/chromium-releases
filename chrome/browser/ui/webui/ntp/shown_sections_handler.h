@@ -11,8 +11,11 @@
 #include "content/common/notification_observer.h"
 
 class Extension;
-class Value;
 class PrefService;
+
+namespace base {
+class Value;
+}
 
 // Use for the shown sections bitmask.
 // Currently, only the THUMB and APPS sections can be toggled by the user. Other
@@ -50,15 +53,12 @@ class ShownSectionsHandler : public WebUIMessageHandler,
   virtual void RegisterMessages();
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Callback for "getShownSections" message.
-  void HandleGetShownSections(const ListValue* args);
-
   // Callback for "setShownSections" message.
-  void HandleSetShownSections(const ListValue* args);
+  void HandleSetShownSections(const base::ListValue* args);
 
   static void RegisterUserPrefs(PrefService* pref_service);
 

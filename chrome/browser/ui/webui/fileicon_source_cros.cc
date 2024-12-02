@@ -19,11 +19,12 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
-#include "grit/app_resources.h"
 #include "grit/component_extension_resources.h"
 #include "grit/component_extension_resources_map.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
+#include "net/base/escape.h"
 #include "net/base/mime_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -113,12 +114,24 @@ const IdrBySize kVideoIdrs = {
 // 'video': /\.(mov|mp4|m4v|mpe?g4?|ogm|ogv|ogx|webm)$/i
 
 const ExtensionIconSizeMap::value_type kExtensionIdrBySizeData[] = {
+#if defined(GOOGLE_CHROME_BUILD)
   std::make_pair(".m4a", kAudioIdrs),
   std::make_pair(".mp3", kAudioIdrs),
+  std::make_pair(".pdf", kPdfIdrs),
+  std::make_pair(".3gp", kVideoIdrs),
+  std::make_pair(".avi", kVideoIdrs),
+  std::make_pair(".m4v", kVideoIdrs),
+  std::make_pair(".mov", kVideoIdrs),
+  std::make_pair(".mp4", kVideoIdrs),
+  std::make_pair(".mpeg", kVideoIdrs),
+  std::make_pair(".mpg", kVideoIdrs),
+  std::make_pair(".mpeg4", kVideoIdrs),
+  std::make_pair(".mpg4", kVideoIdrs),
+#endif
+  std::make_pair(".flac", kAudioIdrs),
   std::make_pair(".oga", kAudioIdrs),
   std::make_pair(".ogg", kAudioIdrs),
   std::make_pair(".wav", kAudioIdrs),
-//  std::make_pair(".doc", kIdrDoc),
   std::make_pair(".htm", kHtmlIdrs),
   std::make_pair(".html", kHtmlIdrs),
   std::make_pair(".bmp", kImageIdrs),
@@ -128,18 +141,10 @@ const ExtensionIconSizeMap::value_type kExtensionIdrBySizeData[] = {
   std::make_pair(".jpg", kImageIdrs),
   std::make_pair(".png", kImageIdrs),
   std::make_pair(".webp", kImageIdrs),
-  std::make_pair(".pdf", kPdfIdrs),
   std::make_pair(".log", kTextIdrs),
   std::make_pair(".pod", kTextIdrs),
   std::make_pair(".rst", kTextIdrs),
   std::make_pair(".txt", kTextIdrs),
-  std::make_pair(".m4v", kVideoIdrs),
-  std::make_pair(".mov", kVideoIdrs),
-  std::make_pair(".mp4", kVideoIdrs),
-  std::make_pair(".mpeg", kVideoIdrs),
-  std::make_pair(".mpg", kVideoIdrs),
-  std::make_pair(".mpeg4", kVideoIdrs),
-  std::make_pair(".mpg4", kVideoIdrs),
   std::make_pair(".ogm", kVideoIdrs),
   std::make_pair(".ogv", kVideoIdrs),
   std::make_pair(".ogx", kVideoIdrs),
@@ -162,9 +167,9 @@ void GetExtensionAndQuery(const std::string& url,
                           std::string* extension,
                           std::string* query) {
   // We receive the url with chrome://fileicon/ stripped but GURL expects it.
-  const GURL gurl("chrome://fileicon/" + url);
+  const GURL gurl("chrome://fileicon/" + EscapePath(url));
   const std::string path = gurl.path();
-  *extension = StringToLowerASCII(FilePath().AppendASCII(path).Extension());
+  *extension = StringToLowerASCII(FilePath(path).Extension());
   *query = gurl.query();
 }
 
@@ -204,7 +209,6 @@ int UrlToIDR(const std::string& url) {
       idr = idrbysize.idr_large_;
     }
   }
-  DCHECK_NE(-1, idr) << " Missing fileicon for: " << url;
   if (idr == -1) {
     if (size == IconLoader::SMALL) {
       idr = kGenericIdrs.idr_small_;

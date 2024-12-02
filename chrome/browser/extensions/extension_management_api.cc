@@ -19,13 +19,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 
 using base::IntToString;
 namespace events = extension_event_names;
@@ -91,7 +91,8 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
     info->Set("icons", icon_list);
   }
 
-  const std::set<std::string> perms = extension.api_permissions();
+  const std::set<std::string> perms =
+      extension.permission_set()->GetAPIsAsStrings();
   ListValue* permission_list = new ListValue();
   if (!perms.empty()) {
     std::set<std::string>::const_iterator perms_iter;
@@ -105,9 +106,10 @@ static DictionaryValue* CreateExtensionInfo(const Extension& extension,
   ListValue* host_permission_list = new ListValue();
   if (!extension.is_hosted_app()) {
     // Skip host permissions for hosted apps.
-    const URLPatternList host_perms = extension.host_permissions();
-    if (!host_perms.empty()) {
-      URLPatternList::const_iterator host_perms_iter;
+    const URLPatternSet host_perms =
+        extension.permission_set()->explicit_hosts();
+    if (!host_perms.is_empty()) {
+      URLPatternSet::const_iterator host_perms_iter;
       for (host_perms_iter = host_perms.begin();
            host_perms_iter != host_perms.end();
            ++host_perms_iter) {
@@ -154,9 +156,7 @@ bool GetExtensionByIdFunction::RunImpl() {
                                                      extension_id);
     return false;
   }
-  bool enabled = service()->extension_prefs()->
-      GetExtensionState(extension_id) == Extension::ENABLED;
-
+  bool enabled = service()->IsExtensionEnabled(extension_id);
   DictionaryValue* result = CreateExtensionInfo(*extension, enabled);
   result_.reset(result);
 
@@ -248,58 +248,55 @@ bool UninstallFunction::RunImpl() {
   return true;
 }
 
-// static
-ExtensionManagementEventRouter* ExtensionManagementEventRouter::GetInstance() {
-  return Singleton<ExtensionManagementEventRouter>::get();
-}
-
-ExtensionManagementEventRouter::ExtensionManagementEventRouter() {}
+ExtensionManagementEventRouter::ExtensionManagementEventRouter(Profile* profile)
+    : profile_(profile) {}
 
 ExtensionManagementEventRouter::~ExtensionManagementEventRouter() {}
 
 void ExtensionManagementEventRouter::Init() {
-  NotificationType::Type types[] = {
-    NotificationType::EXTENSION_INSTALLED,
-    NotificationType::EXTENSION_UNINSTALLED,
-    NotificationType::EXTENSION_LOADED,
-    NotificationType::EXTENSION_UNLOADED
+  int types[] = {
+    chrome::NOTIFICATION_EXTENSION_INSTALLED,
+    chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
+    chrome::NOTIFICATION_EXTENSION_LOADED,
+    chrome::NOTIFICATION_EXTENSION_UNLOADED
   };
 
-  // Don't re-init (eg in the case of multiple profiles).
-  if (registrar_.IsEmpty()) {
-    for (size_t i = 0; i < arraysize(types); i++) {
-      registrar_.Add(this,
-                     types[i],
-                     NotificationService::AllSources());
-    }
+  CHECK(registrar_.IsEmpty());
+  for (size_t i = 0; i < arraysize(types); i++) {
+    registrar_.Add(this,
+                   types[i],
+                   NotificationService::AllSources());
   }
 }
 
 void ExtensionManagementEventRouter::Observe(
-    NotificationType type,
+    int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
   const char* event_name = NULL;
-  switch (type.value) {
-    case NotificationType::EXTENSION_INSTALLED:
+  Profile* profile = Source<Profile>(source).ptr();
+  CHECK(profile);
+  if (!profile_->IsSameProfile(profile)) {
+    return;
+  }
+
+  switch (type) {
+    case chrome::NOTIFICATION_EXTENSION_INSTALLED:
       event_name = events::kOnExtensionInstalled;
       break;
-    case NotificationType::EXTENSION_UNINSTALLED:
+    case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
       event_name = events::kOnExtensionUninstalled;
       break;
-    case NotificationType::EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED:
       event_name = events::kOnExtensionEnabled;
       break;
-    case NotificationType::EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
       event_name = events::kOnExtensionDisabled;
       break;
     default:
       NOTREACHED();
       return;
   }
-
-  Profile* profile = Source<Profile>(source).ptr();
-  CHECK(profile);
 
   ListValue args;
   if (event_name == events::kOnExtensionUninstalled) {

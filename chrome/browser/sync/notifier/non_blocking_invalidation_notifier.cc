@@ -29,6 +29,7 @@ class NonBlockingInvalidationNotifier::Core
   void Initialize(const notifier::NotifierOptions& notifier_options,
                   const std::string& client_info);
   void Teardown();
+  void SetUniqueId(const std::string& unique_id);
   void SetState(const std::string& state);
   void UpdateCredentials(const std::string& email, const std::string& token);
   void UpdateEnabledTypes(const syncable::ModelTypeSet& types);
@@ -91,6 +92,12 @@ void NonBlockingInvalidationNotifier::Core::RemoveObserver(
   observers_->RemoveObserver(observer);
 }
 
+void NonBlockingInvalidationNotifier::Core::SetUniqueId(
+    const std::string& unique_id) {
+  DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
+  invalidation_notifier_->SetUniqueId(unique_id);
+}
+
 void NonBlockingInvalidationNotifier::Core::SetState(
     const std::string& state) {
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
@@ -133,7 +140,7 @@ NonBlockingInvalidationNotifier::NonBlockingInvalidationNotifier(
     const notifier::NotifierOptions& notifier_options,
     const std::string& client_info)
         : core_(new Core),
-          construction_message_loop_proxy_(
+          parent_message_loop_proxy_(
               base::MessageLoopProxy::CreateForCurrentThread()),
           io_message_loop_proxy_(notifier_options.request_context_getter->
               GetIOMessageLoopProxy()) {
@@ -142,80 +149,89 @@ NonBlockingInvalidationNotifier::NonBlockingInvalidationNotifier(
           NewRunnableMethod(
               core_.get(),
               &NonBlockingInvalidationNotifier::Core::Initialize,
-              notifier_options, client_info)))
+              notifier_options, client_info))) {
     NOTREACHED();
+  }
 }
 
 NonBlockingInvalidationNotifier::~NonBlockingInvalidationNotifier() {
-  DCHECK(construction_message_loop_proxy_->BelongsToCurrentThread());
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   if (!io_message_loop_proxy_->PostTask(
           FROM_HERE,
           NewRunnableMethod(
               core_.get(),
-              &NonBlockingInvalidationNotifier::Core::Teardown)))
+              &NonBlockingInvalidationNotifier::Core::Teardown))) {
     NOTREACHED();
+  }
 }
 
 void NonBlockingInvalidationNotifier::AddObserver(
     SyncNotifierObserver* observer) {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   core_->AddObserver(observer);
 }
 
 void NonBlockingInvalidationNotifier::RemoveObserver(
     SyncNotifierObserver* observer) {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   core_->RemoveObserver(observer);
 }
 
+void NonBlockingInvalidationNotifier::SetUniqueId(
+    const std::string& unique_id) {
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
+  if (!io_message_loop_proxy_->PostTask(
+          FROM_HERE,
+          NewRunnableMethod(
+              core_.get(),
+              &NonBlockingInvalidationNotifier::Core::SetUniqueId,
+              unique_id))) {
+    NOTREACHED();
+  }
+}
+
 void NonBlockingInvalidationNotifier::SetState(const std::string& state) {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   if (!io_message_loop_proxy_->PostTask(
           FROM_HERE,
           NewRunnableMethod(
               core_.get(),
               &NonBlockingInvalidationNotifier::Core::SetState,
-              state)))
+              state))) {
     NOTREACHED();
+  }
 }
 
 void NonBlockingInvalidationNotifier::UpdateCredentials(
     const std::string& email, const std::string& token) {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   if (!io_message_loop_proxy_->PostTask(
           FROM_HERE,
           NewRunnableMethod(
               core_.get(),
               &NonBlockingInvalidationNotifier::Core::UpdateCredentials,
-              email, token)))
+              email, token))) {
     NOTREACHED();
+  }
 }
 
 void NonBlockingInvalidationNotifier::UpdateEnabledTypes(
     const syncable::ModelTypeSet& types) {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   if (!io_message_loop_proxy_->PostTask(
           FROM_HERE,
           NewRunnableMethod(
               core_.get(),
               &NonBlockingInvalidationNotifier::Core::UpdateEnabledTypes,
-              types)))
+              types))) {
     NOTREACHED();
+  }
 }
 
 void NonBlockingInvalidationNotifier::SendNotification() {
-  CheckOrSetValidThread();
+  DCHECK(parent_message_loop_proxy_->BelongsToCurrentThread());
   // InvalidationClient doesn't implement SendNotification(), so no
   // need to forward on the call.
-}
-
-void NonBlockingInvalidationNotifier::CheckOrSetValidThread() {
-  if (method_message_loop_proxy_) {
-    DCHECK(method_message_loop_proxy_->BelongsToCurrentThread());
-  } else {
-    method_message_loop_proxy_ =
-        base::MessageLoopProxy::CreateForCurrentThread();
-  }
 }
 
 }  // namespace sync_notifier

@@ -11,7 +11,6 @@
 #include <richedit.h>
 #include <textserv.h>
 
-#include "app/win/iat_patch_function.h"
 #include "base/auto_reset.h"
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
@@ -19,6 +18,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/iat_patch_function.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -28,9 +28,8 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
@@ -348,8 +347,8 @@ class PaintPatcher {
 
  private:
   size_t refcount_;
-  app::win::IATPatchFunction begin_paint_;
-  app::win::IATPatchFunction end_paint_;
+  base::win::IATPatchFunction begin_paint_;
+  base::win::IATPatchFunction end_paint_;
 
   DISALLOW_COPY_AND_ASSIGN(PaintPatcher);
 };
@@ -484,9 +483,9 @@ OmniboxViewWin::OmniboxViewWin(const gfx::Font& font,
 }
 
 OmniboxViewWin::~OmniboxViewWin() {
-  NotificationService::current()->Notify(NotificationType::OMNIBOX_DESTROYED,
-                                         Source<OmniboxViewWin>(this),
-                                         NotificationService::NoDetails());
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_OMNIBOX_DESTROYED, Source<OmniboxViewWin>(this),
+      NotificationService::NoDetails());
 
   // Explicitly release the text object model now that we're done with it, and
   // before we free the library. If the library gets unloaded before this
@@ -1448,6 +1447,13 @@ void OmniboxViewWin::OnKillFocus(HWND focus_wnd) {
   // URL.  We have to do this after calling DefWindowProc() because otherwise
   // an in-progress IME composition will be completed at the new caret position,
   // resulting in the string jumping unexpectedly to the front of the edit.
+  //
+  // Crazy hack: If we just do PlaceCaretAt(0), and the beginning of the text is
+  // currently scrolled out of view, we can wind up with a blinking cursor in
+  // the toolbar at the current X coordinate of the beginning of the text.  By
+  // first doing a reverse-select-all to scroll the beginning of the text into
+  // view, we work around this CRichEditCtrl bug.
+  SelectAll(true);
   PlaceCaretAt(0);
 }
 

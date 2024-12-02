@@ -9,6 +9,7 @@
 
 #include "base/memory/singleton.h"
 #include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -28,14 +29,8 @@ TextfieldsUIHTMLSource::TextfieldsUIHTMLSource()
 void TextfieldsUIHTMLSource::StartDataRequest(const std::string& path,
                                               bool is_incognito,
                                               int request_id) {
-  const std::string full_html = ResourceBundle::GetSharedInstance()
-      .GetRawDataResource(IDR_TEXTFIELDS_HTML).as_string();
-
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id, html_bytes);
+  SendResponse(request_id, ResourceBundle::GetSharedInstance()
+                           .LoadDataResourceBytes(IDR_TEXTFIELDS_HTML));
 }
 
 std::string TextfieldsUIHTMLSource::GetMimeType(
@@ -63,7 +58,7 @@ void TextfieldsDOMHandler::HandleTextfieldValue(const ListValue* args) {
 /**
  * TextfieldsUI implementation.
  */
-TextfieldsUI::TextfieldsUI(TabContents* contents) : WebUI(contents) {
+TextfieldsUI::TextfieldsUI(TabContents* contents) : ChromeWebUI(contents) {
   TextfieldsDOMHandler* handler = new TextfieldsDOMHandler();
   AddMessageHandler(handler);
   handler->Attach(this);

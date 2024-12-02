@@ -22,6 +22,7 @@
 #include "base/time.h"
 #include "base/tuple.h"
 #include "chrome/browser/extensions/apps_promo.h"
+#include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -39,14 +40,20 @@
 #include "content/common/property_bag.h"
 
 class CrxInstaller;
+class ExtensionBookmarkEventRouter;
 class ExtensionBrowserEventRouter;
 class ExtensionContentSettingsStore;
+class ExtensionCookiesEventRouter;
+class ExtensionFileBrowserEventRouter;
+class ExtensionHistoryEventRouter;
 class ExtensionInstallUI;
+class ExtensionManagementEventRouter;
 class ExtensionPreferenceEventRouter;
 class ExtensionServiceBackend;
 struct ExtensionSyncData;
 class ExtensionToolbarModel;
 class ExtensionUpdater;
+class ExtensionWebNavigationEventRouter;
 class GURL;
 class PendingExtensionManager;
 class Profile;
@@ -134,6 +141,8 @@ class ExtensionService
           root_directory(root_directory) {
     }
 
+    bool Equals(const ComponentExtensionInfo& other) const;
+
     // The extension's manifest. This is required for component extensions so
     // that ExtensionService doesn't need to go to disk to load them.
     std::string manifest;
@@ -203,6 +212,9 @@ class ExtensionService
   void register_component_extension(const ComponentExtensionInfo& info) {
     component_extension_manifests_.push_back(info);
   }
+
+  // Unregisters a component extension from the list of extensions to be loaded
+  void UnregisterComponentExtension(const ComponentExtensionInfo& info);
 
   const FilePath& install_directory() const { return install_directory_; }
 
@@ -311,11 +323,17 @@ class ExtensionService
   // Loads the extension from the directory |extension_path|.
   void LoadExtension(const FilePath& extension_path);
 
+  // Same as above, but for use with command line switch --load-extension=path.
+  void LoadExtensionFromCommandLine(const FilePath& extension_path);
+
   // Loads any component extensions.
   void LoadComponentExtensions();
 
   // Loads particular component extension.
   const Extension* LoadComponentExtension(const ComponentExtensionInfo& info);
+
+  // Unloads particular component extension.
+  void UnloadComponentExtension(const ComponentExtensionInfo& info);
 
   // Loads all known extensions (used by startup and testing code).
   void LoadAllExtensions();
@@ -380,10 +398,12 @@ class ExtensionService
   void AddExtension(const Extension* extension);
 
   // Called by the backend when an unpacked extension has been loaded.
-  void OnLoadSingleExtension(const Extension* extension);
+  void OnLoadSingleExtension(const Extension* extension,
+                             bool prompt_for_plugins);
 
   // Called by the backend when an extension has been installed.
-  void OnExtensionInstalled(const Extension* extension);
+  void OnExtensionInstalled(
+      const Extension* extension, bool from_webstore);
 
   // Checks if the privileges requested by |extension| have increased, and if
   // so, disables the extension and prompts the user to approve the change.
@@ -392,7 +412,7 @@ class ExtensionService
   // Go through each extensions in pref, unload blacklisted extensions
   // and update the blacklist state in pref.
   virtual void UpdateExtensionBlacklist(
-    const std::vector<std::string>& blacklist) OVERRIDE;
+      const std::vector<std::string>& blacklist) OVERRIDE;
 
   // Go through each extension and unload those that the network admin has
   // put on the blacklist (not to be confused with the Google managed blacklist
@@ -444,15 +464,25 @@ class ExtensionService
 
   ExtensionMenuManager* menu_manager() { return &menu_manager_; }
 
+  AppNotificationManager* app_notification_manager() {
+    return &app_notification_manager_;
+  }
+
   ExtensionBrowserEventRouter* browser_event_router() {
     return browser_event_router_.get();
   }
+
+#if defined(OS_CHROMEOS)
+  ExtensionFileBrowserEventRouter* file_browser_event_router() {
+    return file_browser_event_router_.get();
+  }
+#endif
 
   // Notify the frontend that there was an error loading an extension.
   // This method is public because ExtensionServiceBackend can post to here.
   void ReportExtensionLoadError(const FilePath& extension_path,
                                 const std::string& error,
-                                NotificationType type,
+                                int type,
                                 bool be_noisy);
 
   // ExtensionHost of background page calls this method right after its render
@@ -483,7 +513,7 @@ class ExtensionService
   virtual void OnExternalProviderReady();
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -642,7 +672,7 @@ class ExtensionService
   // Used by dispatchers to limit API quota for individual extensions.
   ExtensionsQuotaService quota_service_;
 
-  // Record that Init() has been called, and NotificationType::EXTENSIONS_READY
+  // Record that Init() has been called, and chrome::EXTENSIONS_READY
   // has fired.
   bool ready_;
 
@@ -675,6 +705,9 @@ class ExtensionService
   // Keeps track of menu items added by extensions.
   ExtensionMenuManager menu_manager_;
 
+  // Keeps track of app notifications.
+  AppNotificationManager app_notification_manager_;
+
   // Keeps track of favicon-sized omnibox icons for extensions.
   ExtensionIconManager omnibox_icon_manager_;
   ExtensionIconManager omnibox_popup_icon_manager_;
@@ -689,9 +722,23 @@ class ExtensionService
   // Flag to make sure event routers are only initialized once.
   bool event_routers_initialized_;
 
+  scoped_ptr<ExtensionHistoryEventRouter> history_event_router_;
+
   scoped_ptr<ExtensionBrowserEventRouter> browser_event_router_;
 
   scoped_ptr<ExtensionPreferenceEventRouter> preference_event_router_;
+
+  scoped_ptr<ExtensionBookmarkEventRouter> bookmark_event_router_;
+
+  scoped_ptr<ExtensionCookiesEventRouter> cookies_event_router_;
+
+  scoped_ptr<ExtensionManagementEventRouter> management_event_router_;
+
+  scoped_ptr<ExtensionWebNavigationEventRouter> web_navigation_event_router_;
+
+#if defined(OS_CHROMEOS)
+  scoped_ptr<ExtensionFileBrowserEventRouter> file_browser_event_router_;
+#endif
 
   // A collection of external extension providers.  Each provider reads
   // a source of external extension information.  Examples include the

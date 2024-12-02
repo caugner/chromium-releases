@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/value_conversions.h"
@@ -23,7 +23,7 @@
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/default_pref_store.h"
-#include "chrome/browser/prefs/overlay_persistent_pref_store.h"
+#include "chrome/browser/prefs/incognito_user_pref_store.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/pref_notifier_impl.h"
 #include "chrome/browser/prefs/pref_value_store.h"
@@ -112,7 +112,6 @@ class ReadErrorHandler : public PersistentPrefStore::ReadErrorDelegate {
 // static
 PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
                                             PrefStore* extension_prefs,
-                                            Profile* profile,
                                             bool async) {
   using policy::ConfigurationPolicyPrefStore;
 
@@ -129,20 +128,27 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
   }
 #endif
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
   ConfigurationPolicyPrefStore* managed_platform =
       ConfigurationPolicyPrefStore::CreateManagedPlatformPolicyPrefStore();
   ConfigurationPolicyPrefStore* managed_cloud =
-      ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore(profile);
+      ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore();
+  ConfigurationPolicyPrefStore* recommended_platform =
+      ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore();
+  ConfigurationPolicyPrefStore* recommended_cloud =
+      ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore();
+#else
+  ConfigurationPolicyPrefStore* managed_platform = NULL;
+  ConfigurationPolicyPrefStore* managed_cloud = NULL;
+  ConfigurationPolicyPrefStore* recommended_platform = NULL;
+  ConfigurationPolicyPrefStore* recommended_cloud = NULL;
+#endif  // ENABLE_CONFIGURATION_POLICY
+
   CommandLinePrefStore* command_line =
       new CommandLinePrefStore(CommandLine::ForCurrentProcess());
   JsonPrefStore* user = new JsonPrefStore(
       pref_filename,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
-  ConfigurationPolicyPrefStore* recommended_platform =
-      ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* recommended_cloud =
-      ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore(
-          profile);
   DefaultPrefStore* default_pref_store = new DefaultPrefStore();
 
   return new PrefService(
@@ -186,7 +192,7 @@ PrefService::PrefService(PrefStore* managed_platform_prefs,
 PrefService::PrefService(const PrefService& original,
                          PrefStore* incognito_extension_prefs)
       : user_pref_store_(
-            new OverlayPersistentPrefStore(original.user_pref_store_.get())),
+            new IncognitoUserPrefStore(original.user_pref_store_.get())),
         default_store_(original.default_store_.get()) {
   // Incognito mode doesn't sync, so no need to create PrefModelAssociator.
   pref_notifier_.reset(new PrefNotifierImpl(this));
@@ -776,8 +782,6 @@ Value* PrefService::GetMutableUserPref(const char* path,
                                        Value::ValueType type) {
   CHECK(type == Value::TYPE_DICTIONARY || type == Value::TYPE_LIST);
   DCHECK(CalledOnValidThread());
-  DLOG_IF(WARNING, IsManagedPreference(path)) <<
-      "Attempt to change managed preference " << path;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {
@@ -814,8 +818,6 @@ void PrefService::ReportUserPrefChanged(const std::string& key) {
 void PrefService::SetUserPrefValue(const char* path, Value* new_value) {
   scoped_ptr<Value> owned_value(new_value);
   DCHECK(CalledOnValidThread());
-  DLOG_IF(WARNING, IsManagedPreference(path)) <<
-      "Attempt to change managed preference " << path;
 
   const Preference* pref = FindPreference(path);
   if (!pref) {

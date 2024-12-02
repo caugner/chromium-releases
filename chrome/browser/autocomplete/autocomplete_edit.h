@@ -117,6 +117,8 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   // making this accessor unnecessary.
   AutocompletePopupModel* popup_model() const { return popup_; }
 
+  AutocompleteEditController* controller() const { return controller_; }
+
   // Invoked when the profile has changed.
   void SetProfile(Profile* profile);
 
@@ -529,11 +531,10 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
 
   Profile* profile_;
 
-  // Should instant be updated? This is needed as prior to accepting the current
-  // text the model is reverted, which triggers resetting instant. We don't want
-  // to update instant in this case, so we use the flag to determine if this is
-  // happening.
-  bool update_instant_;
+  // This is needed as prior to accepting the current text the model is
+  // reverted, which triggers resetting instant. We don't want to update instant
+  // in this case, so we use the flag to determine if this is happening.
+  bool in_revert_;
 
   // Indicates if the upcoming autocomplete search is allowed to be treated as
   // an exact keyword match. If it's true then keyword mode will be triggered

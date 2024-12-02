@@ -6,9 +6,10 @@
 #include <string>
 
 #include "base/json/json_reader.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/string_piece.h"
 #include "base/task.h"
+#include "base/tracked.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
@@ -124,7 +125,7 @@ class ProfileSyncServicePreferenceTest
 
   // Caller gets ownership of the returned value.
   const Value* GetSyncedValue(const std::string& name) {
-    sync_api::ReadTransaction trans(service_->GetUserShare());
+    sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode node(&trans);
 
     if (!node.InitByClientTagLookup(syncable::PREFERENCES, name))
@@ -151,7 +152,7 @@ class ProfileSyncServicePreferenceTest
   }
 
   int64 SetSyncedValue(const std::string& name, const Value& value) {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode root(&trans);
     if (!root.InitByTagLookup(
         syncable::ModelTypeToRootTag(syncable::PREFERENCES))) {
@@ -385,7 +386,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeActionUpdate) {
   scoped_ptr<SyncManager::ChangeRecord> record(MakeChangeRecord(
       node_id, SyncManager::ChangeRecord::ACTION_UPDATE));
   {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   change_processor_->CommitChangesFromSyncModel();
@@ -405,7 +406,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeActionAdd) {
   scoped_ptr<SyncManager::ChangeRecord> record(MakeChangeRecord(
       node_id, SyncManager::ChangeRecord::ACTION_ADD));
   {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   change_processor_->CommitChangesFromSyncModel();
@@ -413,7 +414,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeActionAdd) {
   const Value& actual = GetPreferenceValue(prefs::kHomePage);
   EXPECT_TRUE(expected->Equals(&actual));
   EXPECT_EQ(1U,
-            pref_sync_service_->synced_preferences().count(prefs::kHomePage));
+      pref_sync_service_->registered_preferences().count(prefs::kHomePage));
 }
 
 TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeUnknownPreference) {
@@ -427,7 +428,7 @@ TEST_F(ProfileSyncServicePreferenceTest, UpdatedSyncNodeUnknownPreference) {
   scoped_ptr<SyncManager::ChangeRecord> record(MakeChangeRecord(
       node_id, SyncManager::ChangeRecord::ACTION_UPDATE));
   {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   change_processor_->CommitChangesFromSyncModel();
@@ -452,7 +453,8 @@ TEST_F(ProfileSyncServicePreferenceTest, ManagedPreferences) {
   prefs_->SetUserPref(prefs::kHomePage, user_value->DeepCopy());
   EXPECT_EQ(NULL, GetSyncedValue(prefs::kHomePage));
 
-  // An incoming sync transaction shouldn't change the user value.
+  // An incoming sync transaction should change the user value, not the managed
+  // value.
   scoped_ptr<Value> sync_value(
       Value::CreateStringValue("http://crbug.com"));
   int64 node_id = SetSyncedValue(prefs::kHomePage, *sync_value);
@@ -460,15 +462,13 @@ TEST_F(ProfileSyncServicePreferenceTest, ManagedPreferences) {
   scoped_ptr<SyncManager::ChangeRecord> record(MakeChangeRecord(
       node_id, SyncManager::ChangeRecord::ACTION_UPDATE));
   {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   change_processor_->CommitChangesFromSyncModel();
 
-  EXPECT_TRUE(managed_value->Equals(
-      prefs_->GetManagedPref(prefs::kHomePage)));
-  EXPECT_TRUE(user_value->Equals(
-      prefs_->GetUserPref(prefs::kHomePage)));
+  EXPECT_TRUE(managed_value->Equals(prefs_->GetManagedPref(prefs::kHomePage)));
+  EXPECT_TRUE(sync_value->Equals(prefs_->GetUserPref(prefs::kHomePage)));
 }
 
 TEST_F(ProfileSyncServicePreferenceTest, DynamicManagedPreferences) {
@@ -488,9 +488,33 @@ TEST_F(ProfileSyncServicePreferenceTest, DynamicManagedPreferences) {
   profile_->GetTestingPrefService()->SetManagedPref(
       prefs::kHomePage, managed_value->DeepCopy());
 
-  // Sync node should be gone.
-  EXPECT_EQ(0U,
-            pref_sync_service_->synced_preferences().count(prefs::kHomePage));
+  // The pref value should be the one dictated by policy.
+  EXPECT_TRUE(managed_value->Equals(&GetPreferenceValue(prefs::kHomePage)));
+
+  // Switch kHomePage back to unmanaged.
+  profile_->GetTestingPrefService()->RemoveManagedPref(prefs::kHomePage);
+
+  // The original value should be picked up.
+  EXPECT_TRUE(initial_value->Equals(&GetPreferenceValue(prefs::kHomePage)));
+}
+
+TEST_F(ProfileSyncServicePreferenceTest,
+       DynamicManagedPreferencesWithSyncChange) {
+  CreateRootTask task(this, syncable::PREFERENCES);
+  ASSERT_TRUE(StartSyncService(&task, false));
+  ASSERT_TRUE(task.success());
+
+  scoped_ptr<Value> initial_value(
+      Value::CreateStringValue("http://example.com/initial"));
+  profile_->GetPrefs()->Set(prefs::kHomePage, *initial_value);
+  scoped_ptr<const Value> actual(GetSyncedValue(prefs::kHomePage));
+  EXPECT_TRUE(initial_value->Equals(actual.get()));
+
+  // Switch kHomePage to managed and set a different value.
+  scoped_ptr<Value> managed_value(
+      Value::CreateStringValue("http://example.com/managed"));
+  profile_->GetTestingPrefService()->SetManagedPref(
+      prefs::kHomePage, managed_value->DeepCopy());
 
   // Change the sync value.
   scoped_ptr<Value> sync_value(
@@ -500,7 +524,7 @@ TEST_F(ProfileSyncServicePreferenceTest, DynamicManagedPreferences) {
   scoped_ptr<SyncManager::ChangeRecord> record(MakeChangeRecord(
       node_id, SyncManager::ChangeRecord::ACTION_ADD));
   {
-    sync_api::WriteTransaction trans(service_->GetUserShare());
+    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(&trans, record.get(), 1);
   }
   change_processor_->CommitChangesFromSyncModel();

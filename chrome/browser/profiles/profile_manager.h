@@ -25,16 +25,32 @@
 
 class FilePath;
 class NewProfileLauncher;
+class ProfileInfoCache;
 
 class ProfileManagerObserver {
  public:
-  // This method is called when profile is ready. If profile creation has
-  // failed, method is called with |profile| equal to NULL.
-  virtual void OnProfileCreated(Profile* profile) = 0;
+  enum Status {
+    // So epic.
+    STATUS_FAIL,
+    // Profile created but before initializing extensions and promo resources.
+    STATUS_CREATED,
+    // Profile is created, extensions and promo resources are initialized.
+    STATUS_INITIALIZED
+  };
 
-  // If true, delete the observer after the profile has been created. Default
-  // is false.
-  virtual bool DeleteAfterCreation();
+  // This method is called when profile is ready. If profile already exists,
+  // method is called with pointer to that profile and STATUS_INITIALIZED.
+  // If profile creation has failed, method is called with |profile| equal to
+  // NULL and |status| equal to STATUS_FAIL. If profile has been created
+  // successfully, method is called twice: first with STATUS_CREATED status
+  // (before extensions are initialized) and eventually with STATUS_INITIALIZED.
+  virtual void OnProfileCreated(Profile* profile, Status status) = 0;
+
+  // If true, delete the observer after no more OnProfileCreated calls are
+  // expected. Default is false.
+  virtual bool DeleteAfter();
+
+  virtual ~ProfileManagerObserver() {}
 };
 
 class ProfileManager : public base::NonThreadSafe,
@@ -62,6 +78,12 @@ class ProfileManager : public base::NonThreadSafe,
   // otherwise it will create and manage it.
   Profile* GetProfile(const FilePath& profile_dir);
 
+  // Multi-profile support.
+  size_t GetNumberOfProfiles();
+  string16 GetNameOfProfileAtIndex(size_t index);
+  FilePath GetFilePathOfProfileAtIndex(size_t index,
+                                       const FilePath& user_data_dir);
+
   // Explicit asynchronous creation of the profile. |observer| is called
   // when profile is created. If profile has already been created, observer
   // is called immediately. Should be called on the UI thread.
@@ -71,10 +93,6 @@ class ProfileManager : public base::NonThreadSafe,
   // Initiates default profile creation. If default profile has already been
   // created, observer is called immediately. Should be called on the UI thread.
   static void CreateDefaultProfileAsync(ProfileManagerObserver* observer);
-
-  // Returns the profile with the given |profile_id| or NULL if no such profile
-  // exists.
-  Profile* GetProfileWithId(ProfileId profile_id);
 
   // Returns true if the profile pointer is known to point to an existing
   // profile.
@@ -88,6 +106,9 @@ class ProfileManager : public base::NonThreadSafe,
   // been stored in Local State, hand back the Default profile.
   Profile* GetLastUsedProfile(const FilePath& user_data_dir);
 
+  // Same as instance method but provides the default user_data_dir as well.
+  static Profile* GetLastUsedProfile();
+
   // Register the mapping of a directory to a profile name in Local State.
   void RegisterProfileName(Profile* profile);
 
@@ -96,7 +117,7 @@ class ProfileManager : public base::NonThreadSafe,
   std::vector<Profile*> GetLoadedProfiles() const;
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
@@ -136,9 +157,19 @@ class ProfileManager : public base::NonThreadSafe,
   // Register multi-profile related preferences in Local State.
   static void RegisterPrefs(PrefService* prefs);
 
+  // Returns a ProfileInfoCache object which can be used to get information
+  // about profiles without having to load them from disk.
+  ProfileInfoCache& GetProfileInfoCache();
+
+  // Schedules the profile at the given path to be deleted on shutdown.
+  void ScheduleProfileForDeletion(const FilePath& profile_dir);
+
+  // Checks if multiple profiles is enabled.
+  static bool IsMultipleProfilesEnabled();
+
  protected:
   // Does final initial actions.
-  virtual void DoFinalInit(Profile* profile);
+  virtual void DoFinalInit(Profile* profile, bool go_off_the_record);
 
  private:
   friend class ExtensionEventRouterForwarderTest;
@@ -173,6 +204,20 @@ class ProfileManager : public base::NonThreadSafe,
   // entry.
   ProfileInfo* RegisterProfile(Profile* profile, bool created);
 
+  typedef std::pair<FilePath, string16> ProfilePathAndName;
+  typedef std::vector<ProfilePathAndName> ProfilePathAndNames;
+  ProfilePathAndNames GetSortedProfilesFromDirectoryMap();
+
+  static bool CompareProfilePathAndName(
+      const ProfileManager::ProfilePathAndName& pair1,
+      const ProfileManager::ProfilePathAndName& pair2);
+
+  // Adds |profile| to the profile info cache if it's not already there.
+  void AddProfileToCache(Profile* profile);
+
+  // For ChromeOS, determines if profile should be otr.
+  bool ShouldGoOffTheRecord();
+
   NotificationRegistrar registrar_;
 
   // Indicates that a user has logged in and that the profile specified
@@ -185,6 +230,12 @@ class ProfileManager : public base::NonThreadSafe,
   typedef std::map<FilePath, linked_ptr<ProfileInfo> > ProfilesInfoMap;
   ProfilesInfoMap profiles_info_;
 
+  // Object to cache various information about profiles.
+  scoped_ptr<ProfileInfoCache> profile_info_cache_;
+
+  // Profiles that should be deleted on shutdown.
+  std::vector<FilePath> profiles_to_delete_;
+
   DISALLOW_COPY_AND_ASSIGN(ProfileManager);
 };
 
@@ -192,7 +243,7 @@ class ProfileManager : public base::NonThreadSafe,
 // profile. This one is useful in unittests.
 class ProfileManagerWithoutInit : public ProfileManager {
  protected:
-  virtual void DoFinalInit(Profile*) {}
+  virtual void DoFinalInit(Profile*, bool) {}
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_MANAGER_H_

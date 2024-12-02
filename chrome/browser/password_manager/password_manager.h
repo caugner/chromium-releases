@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/login/login_model.h"
@@ -42,7 +42,7 @@ class PasswordManager : public LoginModel,
                 bool wait_for_username) const;
 
   // LoginModel implementation.
-  virtual void SetObserver(LoginModelObserver* observer);
+  virtual void SetObserver(LoginModelObserver* observer) OVERRIDE;
 
   // When a form is submitted, we prepare to save the password but wait
   // until we decide the user has successfully logged in. This is step 1
@@ -50,11 +50,11 @@ class PasswordManager : public LoginModel,
   void ProvisionallySavePassword(webkit_glue::PasswordForm form);
 
   // TabContentsObserver overrides.
-  virtual void DidStopLoading();
+  virtual void DidStopLoading() OVERRIDE;
   virtual void DidNavigateAnyFramePostCommit(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params);
-  virtual bool OnMessageReceived(const IPC::Message& message);
+      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnPasswordFormsFound(
       const std::vector<webkit_glue::PasswordForm>& forms);

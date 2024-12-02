@@ -13,8 +13,9 @@
 #include "base/perftimer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "content/browser/javascript_dialogs.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -42,7 +43,7 @@ class ExtensionHost : public RenderViewHostDelegate,
                       public RenderViewHostDelegate::View,
                       public ExtensionFunctionDispatcher::Delegate,
                       public NotificationObserver,
-                      public JavaScriptAppModalDialogDelegate {
+                      public content::JavaScriptDialogDelegate {
  public:
   class ProcessCreationQueue;
 
@@ -110,34 +111,42 @@ class ExtensionHost : public RenderViewHostDelegate,
   void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
 
   // RenderViewHostDelegate implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual const GURL& GetURL() const;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host);
-  virtual ViewType::Type GetRenderViewType() const;
-  virtual int GetBrowserWindowID() const;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual const GURL& GetURL() const OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual ViewType::Type GetRenderViewType() const OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* render_view_host,
                               base::TerminationStatus status,
-                              int error_code);
-  virtual void DidNavigate(RenderViewHost* render_view_host,
-                           const ViewHostMsg_FrameNavigate_Params& params);
-  virtual void DidStopLoading();
-  virtual void DocumentAvailableInMainFrame(RenderViewHost* render_view_host);
+                              int error_code) OVERRIDE;
+  virtual void DidNavigate(
+      RenderViewHost* render_view_host,
+      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+  virtual void DidStopLoading() OVERRIDE;
+  virtual void DocumentAvailableInMainFrame(
+      RenderViewHost* render_view_host) OVERRIDE;
   virtual void DocumentOnLoadCompletedInMainFrame(
       RenderViewHost* render_view_host,
-      int32 page_id);
-
-  // RenderViewHostDelegate implementation.
-  virtual RenderViewHostDelegate::View* GetViewDelegate();
-  virtual WebPreferences GetWebkitPrefs();
+      int32 page_id) OVERRIDE;
+  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
                                     const string16& message,
                                     const string16& default_prompt,
                                     const GURL& frame_url,
                                     const int flags,
                                     IPC::Message* reply_msg,
-                                    bool* did_suppress_message);
-  virtual void Close(RenderViewHost* render_view_host);
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
+                                    bool* did_suppress_message) OVERRIDE;
+  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
+  virtual RendererPreferences GetRendererPrefs(Profile* profile) const OVERRIDE;
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event)
+      OVERRIDE;
+  virtual void HandleMouseMove() OVERRIDE;
+  virtual void HandleMouseDown() OVERRIDE;
+  virtual void HandleMouseLeave() OVERRIDE;
+  virtual void HandleMouseUp() OVERRIDE;
+  virtual void HandleMouseActivate() OVERRIDE;
 
   // RenderViewHostDelegate::View
   virtual void CreateNewWindow(
@@ -166,35 +175,18 @@ class ExtensionHost : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual void LostCapture();
-  virtual void Activate();
-  virtual void Deactivate();
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void HandleMouseMove();
-  virtual void HandleMouseDown();
-  virtual void HandleMouseLeave();
-  virtual void HandleMouseUp();
-  virtual void HandleMouseActivate();
   virtual void UpdatePreferredSize(const gfx::Size& new_size);
-  virtual void UpdateInspectorSetting(const std::string& key,
-                                      const std::string& value);
-  virtual void ClearInspectorSettings();
 
   // NotificationObserver
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // Overridden from JavaScriptAppModalDialogDelegate:
-  virtual void OnMessageBoxClosed(IPC::Message* reply_msg,
-                                  bool success,
-                                  const std::wstring& user_input);
-  virtual void SetSuppressMessageBoxes(bool suppress_message_boxes);
-  virtual gfx::NativeWindow GetMessageBoxRootWindow();
-  virtual TabContents* AsTabContents();
-  virtual ExtensionHost* AsExtensionHost();
+  // Overridden from content::JavaScriptDialogDelegate:
+  virtual void OnDialogClosed(IPC::Message* reply_msg,
+                              bool success,
+                              const string16& user_input) OVERRIDE;
+  virtual gfx::NativeWindow GetDialogRootWindow() OVERRIDE;
 
  protected:
   // Internal functions used to support the CreateNewWidget() method. If a
@@ -290,12 +282,6 @@ class ExtensionHost : public RenderViewHostDelegate,
 
   // FileSelectHelper, lazily created.
   scoped_ptr<FileSelectHelper> file_select_helper_;
-
-  // The time that the last javascript message was dismissed.
-  base::TimeTicks last_javascript_message_dismissal_;
-
-  // Whether to suppress all javascript messages.
-  bool suppress_javascript_messages_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

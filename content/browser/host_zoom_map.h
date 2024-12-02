@@ -39,7 +39,7 @@ class HostZoomMap :
   // negative (to zoom out).
   //
   // This may be called on any thread.
-  double GetZoomLevel(std::string host) const;
+  double GetZoomLevel(const std::string& host) const;
 
   // Sets the zoom level for the host or spec for a given url to |level|.  If
   // the level matches the current default zoom level, the host is erased
@@ -65,7 +65,7 @@ class HostZoomMap :
                              double level);
 
   // NotificationObserver implementation.
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 

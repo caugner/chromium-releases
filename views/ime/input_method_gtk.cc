@@ -55,8 +55,6 @@ InputMethodGtk::~InputMethodGtk() {
 }
 
 void InputMethodGtk::Init(Widget* widget) {
-  InputMethodBase::Init(widget);
-
   DCHECK(GTK_IS_WIDGET(widget->GetNativeView()));
 
   widget_realize_id_ =
@@ -94,6 +92,8 @@ void InputMethodGtk::Init(Widget* widget) {
 
   // Set client window if the widget is already realized.
   OnWidgetRealize(widget->GetNativeView());
+
+  InputMethodBase::Init(widget);
 }
 
 void InputMethodGtk::OnFocus() {
@@ -161,6 +161,7 @@ void InputMethodGtk::OnTextInputTypeChanged(View* view) {
     DCHECK(!composing_text_);
     UpdateContextFocusState();
   }
+  InputMethodBase::OnTextInputTypeChanged(view);
 }
 
 void InputMethodGtk::OnCaretBoundsChanged(View* view) {

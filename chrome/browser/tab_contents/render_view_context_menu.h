@@ -10,8 +10,10 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
 #include "content/common/page_transition_types.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -43,12 +45,15 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate {
   // Initializes the context menu.
   void Init();
 
+  // Provide access to the menu model for ExternalTabContainer.
+  const ui::MenuModel& menu_model() const { return menu_model_; }
+
   // SimpleMenuModel::Delegate implementation.
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
-  virtual void MenuWillShow() OVERRIDE;
-  virtual void MenuClosed() OVERRIDE;
+  virtual void MenuWillShow(ui::SimpleMenuModel* source) OVERRIDE;
+  virtual void MenuClosed(ui::SimpleMenuModel* source) OVERRIDE;
 
  protected:
   void InitMenu();
@@ -108,6 +113,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate {
   void AppendSpellcheckOptionsSubMenu();
   // Add writing direction sub menu (only used on Mac).
   void AppendBidiSubMenu();
+  void AppendProtocolHandlerSubMenu();
 
   // This is a helper function to append items for one particular extension.
   // The |index| parameter is used for assigning id's, and is incremented for
@@ -123,9 +129,10 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate {
   // This will set the icon on the most recently-added item in the menu_model_.
   void SetExtensionIcon(const std::string& extension_id);
 
-  // Opens the specified URL string in a new tab.  If |in_current_window| is
-  // false, a new window is created to hold the new tab.
-  void OpenURL(const GURL& url, const GURL& referrer,
+  // Opens the specified URL string in a new tab.  The |frame_id| specifies the
+  // frame in which the context menu was displayed, or 0 if the menu action is
+  // independent of that frame (e.g. protocol handler settings).
+  void OpenURL(const GURL& url, const GURL& referrer, int64 frame_id,
                WindowOpenDisposition disposition,
                PageTransition::Type transition);
 
@@ -143,6 +150,10 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate {
 
   bool IsDevCommandEnabled(int id) const;
 
+  // Returns a list of registered ProtocolHandlers that can handle the clicked
+  // on URL.
+  ProtocolHandlerRegistry::ProtocolHandlerList GetHandlersForLinkUrl();
+
   // Returns a (possibly truncated) version of the current selection text
   // suitable or putting in the title of a menu item.
   string16 PrintableSelectionText();
@@ -153,7 +164,9 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate {
 
   ui::SimpleMenuModel spellcheck_submenu_model_;
   ui::SimpleMenuModel bidi_submenu_model_;
+  ui::SimpleMenuModel protocol_handler_submenu_model_;
   ScopedVector<ui::SimpleMenuModel> extension_menu_models_;
+  scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenu);
 };

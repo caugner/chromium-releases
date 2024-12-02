@@ -15,7 +15,7 @@ class SkBitmap;
 
 namespace views {
 class Label;
-class NativeButton;
+class NativeTextButton;
 }  // namespace views
 
 namespace chromeos {
@@ -69,7 +69,7 @@ class UserImageView : public views::View,
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize();
-  bool AcceleratorPressed(const views::Accelerator& accel);
+  virtual bool AcceleratorPressed(const views::Accelerator& accel);
 
   // Overridden from views::ButtonListener.
   virtual void ButtonPressed(views::Button* sender, const views::Event& event);
@@ -94,7 +94,7 @@ class UserImageView : public views::View,
   DefaultImagesView* default_images_view_;
   TakePhotoView* take_photo_view_;
   views::View* splitter_;
-  views::NativeButton* ok_button_;
+  views::NativeTextButton* ok_button_;
 
   views::Accelerator accel_ok_;
   views::Accelerator accel_up_;

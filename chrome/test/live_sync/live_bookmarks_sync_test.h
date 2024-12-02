@@ -42,6 +42,12 @@ class LiveBookmarksSyncTest : public LiveSyncTest {
   // be reflected in the verifier model.
   void DisableVerifier();
 
+  // Encrypt Bookmarks datatype.
+  bool EnableEncryption(int index);
+
+  // Check if Bookmarks are encrypted.
+  bool IsEncrypted(int index);
+
   // Adds a URL with address |url| and title |title| to the bookmark bar of
   // profile |profile|. Returns a pointer to the node that was added.
   const BookmarkNode* AddURL(int profile,
@@ -161,6 +167,21 @@ class LiveBookmarksSyncTest : public LiveSyncTest {
 
   // Creates a unique favicon using |seed|.
   static std::vector<unsigned char> CreateFavicon(int seed);
+
+  // Returns a URL identifiable by |i|.
+  static std::string IndexedURL(int i);
+
+  // Returns a URL title identifiable by |i|.
+  static std::wstring IndexedURLTitle(int i);
+
+  // Returns a folder name identifiable by |i|.
+  static std::wstring IndexedFolderName(int i);
+
+  // Returns a subfolder name identifiable by |i|.
+  static std::wstring IndexedSubfolderName(int i);
+
+  // Returns a subsubfolder name identifiable by |i|.
+  static std::wstring IndexedSubsubfolderName(int i);
 
  private:
   // Helper object that has the functionality to verify changes made to the

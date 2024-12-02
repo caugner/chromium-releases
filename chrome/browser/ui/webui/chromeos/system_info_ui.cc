@@ -15,7 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/syslogs_library.h"
+#include "chrome/browser/chromeos/system/syslogs_provider.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
@@ -48,7 +48,7 @@ class SystemInfoUIHTMLSource : public ChromeURLDataManager::DataSource {
  private:
   ~SystemInfoUIHTMLSource() {}
 
-  void SyslogsComplete(chromeos::LogDictionaryType* sys_info,
+  void SyslogsComplete(chromeos::system::LogDictionaryType* sys_info,
                        std::string* ignored_content);
 
   CancelableRequestConsumer consumer_;
@@ -92,19 +92,19 @@ void SystemInfoUIHTMLSource::StartDataRequest(const std::string& path,
   path_ = path;
   request_id_ = request_id;
 
-  chromeos::SyslogsLibrary* syslogs_lib =
-      chromeos::CrosLibrary::Get()->GetSyslogsLibrary();
-  if (syslogs_lib) {
-    syslogs_lib->RequestSyslogs(
+  chromeos::system::SyslogsProvider* provider =
+      chromeos::system::SyslogsProvider::GetInstance();
+  if (provider) {
+    provider->RequestSyslogs(
         false,  // don't compress.
-        chromeos::SyslogsLibrary::SYSLOGS_SYSINFO,
+        chromeos::system::SyslogsProvider::SYSLOGS_SYSINFO,
         &consumer_,
         NewCallback(this, &SystemInfoUIHTMLSource::SyslogsComplete));
   }
 }
 
 void SystemInfoUIHTMLSource::SyslogsComplete(
-    chromeos::LogDictionaryType* sys_info,
+    chromeos::system::LogDictionaryType* sys_info,
     std::string* ignored_content) {
   DCHECK(!ignored_content);
 
@@ -127,7 +127,7 @@ void SystemInfoUIHTMLSource::SyslogsComplete(
   if (sys_info) {
      ListValue* details = new ListValue();
      strings.Set("details", details);
-     chromeos::LogDictionaryType::iterator it;
+     chromeos::system::LogDictionaryType::iterator it;
      for (it = sys_info->begin(); it != sys_info->end(); ++it) {
        DictionaryValue* val = new DictionaryValue;
        val->SetString("stat_name", it->first);
@@ -140,14 +140,10 @@ void SystemInfoUIHTMLSource::SyslogsComplete(
   static const base::StringPiece systeminfo_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_SYS_HTML));
-  const std::string full_html = jstemplate_builder::GetTemplatesHtml(
+  std::string full_html = jstemplate_builder::GetTemplatesHtml(
       systeminfo_html, &strings, "t" /* template root node id */);
 
-  scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
-  html_bytes->data.resize(full_html.size());
-  std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
-
-  SendResponse(request_id_, html_bytes);
+  SendResponse(request_id_, base::RefCountedString::TakeString(&full_html));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -176,7 +172,7 @@ void SystemInfoHandler::RegisterMessages() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-SystemInfoUI::SystemInfoUI(TabContents* contents) : WebUI(contents) {
+SystemInfoUI::SystemInfoUI(TabContents* contents) : ChromeWebUI(contents) {
   SystemInfoHandler* handler = new SystemInfoHandler();
   AddMessageHandler((handler)->Attach(this));
   SystemInfoUIHTMLSource* html_source = new SystemInfoUIHTMLSource();

@@ -27,6 +27,8 @@
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/worker_thread_ticker.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -37,7 +39,6 @@
 #include "chrome/installer/util/util_constants.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
-#include "content/common/result_codes.h"
 #include "google_update_idl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -59,18 +60,18 @@ class FirstRunDelayedTasks : public NotificationObserver {
 
   explicit FirstRunDelayedTasks(Tasks task) {
     if (task == INSTALL_EXTENSIONS) {
-      registrar_.Add(this, NotificationType::EXTENSIONS_READY,
+      registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
                      NotificationService::AllSources());
     }
-    registrar_.Add(this, NotificationType::BROWSER_CLOSED,
+    registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
                    NotificationService::AllSources());
   }
 
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
     // After processing the notification we always delete ourselves.
-    if (type.value == NotificationType::EXTENSIONS_READY)
+    if (type == chrome::NOTIFICATION_EXTENSIONS_READY)
       DoExtensionWork(Source<Profile>(source).ptr()->GetExtensionService());
     delete this;
     return;
@@ -144,7 +145,8 @@ bool FirstRun::LaunchSetupWithParam(const std::string& param,
     cl.AppendSwitch(switches::kChromeFrame);
   }
 
-  if (!base::LaunchApp(cl, false, false, &ph))
+  // TODO(evan): should this use options.wait = true?
+  if (!base::LaunchProcess(cl, base::LaunchOptions(), &ph))
     return false;
   DWORD wr = ::WaitForSingleObject(ph, INFINITE);
   if (wr != WAIT_OBJECT_0)
@@ -182,7 +184,7 @@ class ImportProcessRunner : public base::win::ObjectWatcher::Delegate {
   // the import_process handle.
   explicit ImportProcessRunner(base::ProcessHandle import_process)
       : import_process_(import_process),
-        exit_code_(ResultCodes::NORMAL_EXIT) {
+        exit_code_(content::RESULT_CODE_NORMAL_EXIT) {
     watcher_.StartWatching(import_process, this);
     MessageLoop::current()->Run();
   }
@@ -244,7 +246,7 @@ class HungImporterMonitor : public WorkerThreadTicker::Callback {
     // while the other process still not pumping messages.
     HWND active_window = ::GetLastActivePopup(owner_window_);
     if (::IsHungAppWindow(active_window) || ::IsHungAppWindow(owner_window_)) {
-      ::TerminateProcess(import_process_, ResultCodes::IMPORTER_HUNG);
+      ::TerminateProcess(import_process_, chrome::RESULT_CODE_IMPORTER_HUNG);
       import_process_ = NULL;
     }
   }
@@ -341,7 +343,7 @@ bool FirstRun::ImportSettings(Profile* profile,
 
   // Time to launch the process that is going to do the import.
   base::ProcessHandle import_process;
-  if (!base::LaunchApp(import_cmd, false, false, &import_process))
+  if (!base::LaunchProcess(import_cmd, base::LaunchOptions(), &import_process))
     return false;
 
   // We block inside the import_runner ctor, pumping messages until the
@@ -354,7 +356,7 @@ bool FirstRun::ImportSettings(Profile* profile,
   if (profile)
     profile->GetPrefs()->ReloadPersistentPrefs();
 
-  return (import_runner.exit_code() == ResultCodes::NORMAL_EXIT);
+  return (import_runner.exit_code() == content::RESULT_CODE_NORMAL_EXIT);
 }
 
 // static

@@ -14,54 +14,11 @@
 namespace webkit {
 namespace ppapi {
 
-// If you inherit from resource, make sure you add the class name here.
-#define FOR_ALL_RESOURCES(F) \
-  F(MockResource) \
-  F(PPB_AudioConfig_Impl) \
-  F(PPB_Audio_Impl) \
-  F(PPB_Broker_Impl) \
-  F(PPB_Buffer_Impl) \
-  F(PPB_Context3D_Impl) \
-  F(PPB_DirectoryReader_Impl) \
-  F(PPB_FileChooser_Impl) \
-  F(PPB_FileIO_Impl) \
-  F(PPB_FileRef_Impl) \
-  F(PPB_FileSystem_Impl) \
-  F(PPB_Flash_Menu_Impl) \
-  F(PPB_Flash_NetConnector_Impl) \
-  F(PPB_Font_Impl) \
-  F(PPB_Graphics2D_Impl) \
-  F(PPB_Graphics3D_Impl) \
-  F(PPB_ImageData_Impl) \
-  F(PPB_LayerCompositor_Impl) \
-  F(PPB_Scrollbar_Impl) \
-  F(PPB_Surface3D_Impl) \
-  F(PPB_Transport_Impl) \
-  F(PPB_URLLoader_Impl) \
-  F(PPB_URLRequestInfo_Impl) \
-  F(PPB_URLResponseInfo_Impl) \
-  F(PPB_VideoDecoder_Impl) \
-  F(PPB_VideoLayer_Impl) \
-  F(PPB_Widget_Impl) \
-  F(PrivateFontFile)
-
-// Forward declaration of Resource classes.
-#define DECLARE_RESOURCE_CLASS(RESOURCE) class RESOURCE;
-FOR_ALL_RESOURCES(DECLARE_RESOURCE_CLASS)
-#undef DECLARE_RESOURCE_CLASS
-
 class Resource : public base::RefCountedThreadSafe<Resource>,
                  public ::ppapi::ResourceObjectBase {
  public:
   explicit Resource(PluginInstance* instance);
   virtual ~Resource();
-
-  // Returns NULL if the resource is invalid or is a different type.
-  template<typename T>
-  static scoped_refptr<T> GetAs(PP_Resource res) {
-    scoped_refptr<Resource> resource = ResourceTracker::Get()->GetResource(res);
-    return resource ? resource->Cast<T>() : NULL;
-  }
 
   // Returns the instance owning this resource. This is generally to be
   // non-NULL except if the instance is destroyed and some code internal to the
@@ -72,12 +29,7 @@ class Resource : public base::RefCountedThreadSafe<Resource>,
   // destroyed.
   //
   // If you override this, be sure to call the base class' implementation.
-  virtual void ClearInstance() { instance_ = NULL; }
-
-  // Cast the resource into a specified type. This will return NULL if the
-  // resource does not match the specified type. Specializations of this
-  // template call into As* functions.
-  template <typename T> T* Cast() { return NULL; }
+  virtual void ClearInstance();
 
   // Returns an resource id of this object. If the object doesn't have a
   // resource id, new one is created with plugin refcount of 1. If it does,
@@ -121,14 +73,6 @@ class Resource : public base::RefCountedThreadSafe<Resource>,
   virtual void LastPluginRefWasDeleted();
 
  private:
-  // Type-specific getters for individual resource types. These will return
-  // NULL if the resource does not match the specified type. Used by the Cast()
-  // function.
-  #define DEFINE_TYPE_GETTER(RESOURCE)  \
-      virtual RESOURCE* As##RESOURCE();
-  FOR_ALL_RESOURCES(DEFINE_TYPE_GETTER)
-  #undef DEFINE_TYPE_GETTER
-
   // If referenced by a plugin, holds the id of this resource object. Do not
   // access this member directly, because it is possible that the plugin holds
   // no references to the object, and therefore the resource_id_ is zero. Use
@@ -142,15 +86,6 @@ class Resource : public base::RefCountedThreadSafe<Resource>,
 
   DISALLOW_COPY_AND_ASSIGN(Resource);
 };
-
-// Cast() specializations.
-#define DEFINE_RESOURCE_CAST(Type)                   \
-  template <> inline Type* Resource::Cast<Type>() {  \
-    return As##Type();                               \
-  }
-
-FOR_ALL_RESOURCES(DEFINE_RESOURCE_CAST)
-#undef DEFINE_RESOURCE_CAST
 
 }  // namespace ppapi
 }  // namespace webkit

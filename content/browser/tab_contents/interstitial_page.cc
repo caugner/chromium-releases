@@ -11,8 +11,8 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
@@ -45,7 +45,8 @@ class ResourceRequestTask : public Task {
         process_id_(process_id),
         render_view_host_id_(render_view_host_id),
         resource_dispatcher_host_(
-            g_browser_process->resource_dispatcher_host()) {
+            content::GetContentClient()->browser()->
+                GetResourceDispatcherHost()) {
   }
 
   virtual void Run() {
@@ -111,17 +112,6 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
   virtual void UpdateDragCursor(WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual void LostCapture();
-  virtual void Activate();
-  virtual void Deactivate();
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void HandleMouseMove();
-  virtual void HandleMouseDown();
-  virtual void HandleMouseLeave();
-  virtual void HandleMouseUp();
-  virtual void HandleMouseActivate();
   virtual void OnFindReply(int request_id,
                            int number_of_matches,
                            const gfx::Rect& selection_rect,
@@ -203,7 +193,7 @@ void InterstitialPage::Show() {
   // NOTIFY_TAB_CONTENTS_DESTROYED as at that point the RenderViewHost has
   // already been destroyed.
   notification_registrar_.Add(
-      this, NotificationType::RENDER_WIDGET_HOST_DESTROYED,
+      this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
       Source<RenderWidgetHost>(tab_->render_view_host()));
 
   // Update the tab_to_interstitial_page_ map.
@@ -231,11 +221,12 @@ void InterstitialPage::Show() {
                          EscapePath(GetHTMLContents());
   render_view_host_->NavigateToURL(GURL(data_url));
 
-  notification_registrar_.Add(this, NotificationType::TAB_CONTENTS_DESTROYED,
+  notification_registrar_.Add(this,
+                              content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                               Source<TabContents>(tab_));
-  notification_registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
+  notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       Source<NavigationController>(&tab_->controller()));
-  notification_registrar_.Add(this, NotificationType::NAV_ENTRY_PENDING,
+  notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
       Source<NavigationController>(&tab_->controller()));
 }
 
@@ -270,11 +261,11 @@ void InterstitialPage::Hide() {
   delete this;
 }
 
-void InterstitialPage::Observe(NotificationType type,
+void InterstitialPage::Observe(int type,
                                const NotificationSource& source,
                                const NotificationDetails& details) {
-  switch (type.value) {
-    case NotificationType::NAV_ENTRY_PENDING:
+  switch (type) {
+    case content::NOTIFICATION_NAV_ENTRY_PENDING:
       // We are navigating away from the interstitial (the user has typed a URL
       // in the location bar or clicked a bookmark).  Make sure clicking on the
       // interstitial will have no effect.  Also cancel any blocked requests
@@ -287,7 +278,7 @@ void InterstitialPage::Observe(NotificationType type,
       Disable();
       TakeActionOnResourceDispatcher(CANCEL);
       break;
-    case NotificationType::RENDER_WIDGET_HOST_DESTROYED:
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED:
       if (action_taken_ == NO_ACTION) {
         // The RenderViewHost is being destroyed (as part of the tab being
         // closed), make sure we clear the blocked requests.
@@ -297,8 +288,8 @@ void InterstitialPage::Observe(NotificationType type,
         TakeActionOnResourceDispatcher(CANCEL);
       }
       break;
-    case NotificationType::TAB_CONTENTS_DESTROYED:
-    case NotificationType::NAV_ENTRY_COMMITTED:
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+    case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
       if (action_taken_ == NO_ACTION) {
         // We are navigating away from the interstitial or closing a tab with an
         // interstitial.  Default to DontProceed(). We don't just call Hide as
@@ -352,13 +343,12 @@ void InterstitialPage::DidNavigate(
   render_view_host_->view()->Show();
   tab_->set_interstitial_page(this);
 
-  // Hide the bookmark bar. Note that this has to happen after the interstitial
-  // page was registered with |tab_|, since there will be a callback to |tab_|
-  // testing if an interstitial page is showing before hiding the bookmark bar.
-  tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_BOOKMARK_BAR);
-
+  // This notification hides the bookmark bar. Note that this has to happen
+  // after the interstitial page was registered with |tab_|, since there will be
+  // a callback to |tab_| testing if an interstitial page is showing before
+  // hiding the bookmark bar.
   NotificationService::current()->Notify(
-      NotificationType::INTERSTITIAL_ATTACHED,
+      content::NOTIFICATION_INTERSTITIAL_ATTACHED,
       Source<TabContents>(tab_),
       NotificationService::NoDetails());
 
@@ -379,7 +369,7 @@ void InterstitialPage::DidNavigate(
   // by the UI tests) expects to consider a navigation as complete. Without
   // this, navigating in a UI test to a URL that triggers an interstitial would
   // hang.
-  tab_was_loading_ = tab_->is_loading();
+  tab_was_loading_ = tab_->IsLoading();
   tab_->SetIsLoading(false, NULL);
 }
 
@@ -426,7 +416,7 @@ TabContentsView* InterstitialPage::CreateTabContentsView() {
   TabContentsView* tab_contents_view = tab()->view();
   RenderWidgetHostView* view =
       tab_contents_view->CreateViewForWidget(render_view_host_);
-  render_view_host_->set_view(view);
+  render_view_host_->SetView(view);
   render_view_host_->AllowBindings(BindingsPolicy::DOM_AUTOMATION);
 
   render_view_host_->CreateRenderView(string16());
@@ -561,8 +551,10 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   // we don't have one.
   RenderViewHost* rvh = RenderViewHost::FromID(original_child_id_,
                                                original_rvh_id_);
-  if (!rvh || !g_browser_process->resource_dispatcher_host())
+  if (!rvh ||
+      !content::GetContentClient()->browser()->GetResourceDispatcherHost()) {
     return;
+  }
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -667,69 +659,7 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
 }
 
-void InterstitialPage::InterstitialPageRVHViewDelegate::LostCapture() {
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::Activate() {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->Activate();
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::Deactivate() {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->Deactivate();
-}
-
-bool InterstitialPage::InterstitialPageRVHViewDelegate::PreHandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    return interstitial_page_->tab()->GetViewDelegate()->PreHandleKeyboardEvent(
-        event, is_keyboard_shortcut);
-  return false;
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event) {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->HandleKeyboardEvent(event);
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseMove() {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->HandleMouseMove();
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseDown() {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->HandleMouseDown();
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseLeave() {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->HandleMouseLeave();
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseUp() {
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::HandleMouseActivate() {
-}
-
 void InterstitialPage::InterstitialPageRVHViewDelegate::OnFindReply(
     int request_id, int number_of_matches, const gfx::Rect& selection_rect,
     int active_match_ordinal, bool final_update) {
-}
-
-int InterstitialPage::GetBrowserWindowID() const {
-  return tab_->GetBrowserWindowID();
-}
-
-void InterstitialPage::UpdateInspectorSetting(const std::string& key,
-                                              const std::string& value) {
-  RenderViewHostDelegateHelper::UpdateInspectorSetting(
-      tab_->profile(), key, value);
-}
-
-void InterstitialPage::ClearInspectorSettings() {
-  RenderViewHostDelegateHelper::ClearInspectorSettings(tab_->profile());
 }

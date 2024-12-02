@@ -31,7 +31,6 @@ class AutofillManager;
 class AutomationTabHelper;
 class BlockedContentTabHelper;
 class BookmarkTabHelper;
-class DownloadTabHelper;
 class Extension;
 class ExtensionTabHelper;
 class ExtensionWebNavigationTabObserver;
@@ -39,6 +38,7 @@ class ExternalProtocolObserver;
 class FaviconTabHelper;
 class FileSelectObserver;
 class FindTabHelper;
+class FirewallTraversalTabHelper;
 class InfoBarDelegate;
 class HistoryTabHelper;
 class NavigationController;
@@ -46,6 +46,7 @@ class OmniboxSearchHint;
 class PasswordManager;
 class PasswordManagerDelegate;
 class PluginObserver;
+class RestoreTabHelper;
 class SearchEngineTabHelper;
 class TabContentsSSLHelper;
 class TabContentsWrapperDelegate;
@@ -98,6 +99,8 @@ class TabContentsWrapper : public TabContentsObserver,
   // chrome/ code instead of TabContents.
   static TabContentsWrapper* GetCurrentWrapperForContents(
       TabContents* contents);
+  static const TabContentsWrapper* GetCurrentWrapperForContents(
+      const TabContents* contents);
 
   TabContentsWrapperDelegate* delegate() const { return delegate_; }
   void set_delegate(TabContentsWrapperDelegate* d) { delegate_ = d; }
@@ -133,11 +136,11 @@ class TabContentsWrapper : public TabContentsObserver,
     return bookmark_tab_helper_.get();
   }
 
-  DownloadTabHelper* download_tab_helper() {
-    return download_tab_helper_.get();
+  ExtensionTabHelper* extension_tab_helper() {
+    return extension_tab_helper_.get();
   }
 
-  ExtensionTabHelper* extension_tab_helper() {
+  const ExtensionTabHelper* extension_tab_helper() const {
     return extension_tab_helper_.get();
   }
 
@@ -173,6 +176,14 @@ class TabContentsWrapper : public TabContentsObserver,
     return prerender_observer_.get();
   }
 
+  RestoreTabHelper* restore_tab_helper() {
+    return restore_tab_helper_.get();
+  }
+
+  const RestoreTabHelper* restore_tab_helper() const {
+    return restore_tab_helper_.get();
+  }
+
   // Overrides -----------------------------------------------------------------
 
   // TabContentsObserver overrides:
@@ -180,31 +191,43 @@ class TabContentsWrapper : public TabContentsObserver,
   virtual void RenderViewGone() OVERRIDE;
   virtual void DidBecomeSelected() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
 
   // NotificationObserver overrides:
-  virtual void Observe(NotificationType type,
+  virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
 
   // Infobars ------------------------------------------------------------------
 
   // Adds an InfoBar for the specified |delegate|.
+  //
+  // If infobars are disabled for this tab or the tab already has a delegate
+  // which returns true for InfoBarDelegate::EqualsDelegate(delegate),
+  // |delegate| is closed immediately without being added.
   void AddInfoBar(InfoBarDelegate* delegate);
 
   // Removes the InfoBar for the specified |delegate|.
+  //
+  // If infobars are disabled for this tab, this will do nothing, on the
+  // assumption that the matching AddInfoBar() call will have already closed the
+  // delegate (see above).
   void RemoveInfoBar(InfoBarDelegate* delegate);
 
   // Replaces one infobar with another, without any animation in between.
+  //
+  // If infobars are disabled for this tab, |new_delegate| is closed immediately
+  // without being added, and nothing else happens.
+  //
+  // NOTE: This does not perform any EqualsDelegate() checks like AddInfoBar().
   void ReplaceInfoBar(InfoBarDelegate* old_delegate,
                       InfoBarDelegate* new_delegate);
 
   // Enumeration and access functions.
-  size_t infobar_count() const { return infobar_delegates_.size(); }
-  void set_infobars_enabled(bool value) { infobars_enabled_ = value; }
+  size_t infobar_count() const { return infobars_.size(); }
   // WARNING: This does not sanity-check |index|!
-  InfoBarDelegate* GetInfoBarDelegateAt(size_t index) {
-    return infobar_delegates_[index];
-  }
+  InfoBarDelegate* GetInfoBarDelegateAt(size_t index);
+  void set_infobars_enabled(bool value) { infobars_enabled_ = value; }
 
  private:
   // Internal helpers ----------------------------------------------------------
@@ -216,6 +239,8 @@ class TabContentsWrapper : public TabContentsObserver,
                                  const string16& title);
   void OnSnapshot(const SkBitmap& bitmap);
   void OnPDFHasUnsupportedFeature();
+  void OnDidBlockDisplayingInsecureContent();
+  void OnDidBlockRunningInsecureContent();
 
   // Returns the server that can provide alternate error pages.  If the returned
   // URL is empty, the default error page built into WebKit will be used.
@@ -230,13 +255,20 @@ class TabContentsWrapper : public TabContentsObserver,
   // Update the TabContents's RendererPreferences.
   void UpdateRendererPreferences();
 
+  // Create or destroy SafebrowsingDetectionHost as needed if the user's
+  // safe browsing preference has changed.
+  void UpdateSafebrowsingDetectionHost();
+
+  void RemoveInfoBarInternal(InfoBarDelegate* delegate, bool animate);
+  void RemoveAllInfoBars(bool animate);
+
   // Data for core operation ---------------------------------------------------
 
   // Delegate for notifying our owner about stuff. Not owned by us.
   TabContentsWrapperDelegate* delegate_;
 
   // Delegates for InfoBars associated with this TabContentsWrapper.
-  std::vector<InfoBarDelegate*> infobar_delegates_;
+  std::vector<InfoBarDelegate*> infobars_;
   bool infobars_enabled_;
 
   NotificationRegistrar registrar_;
@@ -257,11 +289,12 @@ class TabContentsWrapper : public TabContentsObserver,
   scoped_ptr<AutomationTabHelper> automation_tab_helper_;
   scoped_ptr<BlockedContentTabHelper> blocked_content_tab_helper_;
   scoped_ptr<BookmarkTabHelper> bookmark_tab_helper_;
-  scoped_ptr<DownloadTabHelper> download_tab_helper_;
   scoped_ptr<ExtensionTabHelper> extension_tab_helper_;
   scoped_ptr<FaviconTabHelper> favicon_tab_helper_;
   scoped_ptr<FindTabHelper> find_tab_helper_;
+  scoped_ptr<FirewallTraversalTabHelper> firewall_traversal_tab_helper_;
   scoped_ptr<HistoryTabHelper> history_tab_helper_;
+  scoped_ptr<RestoreTabHelper> restore_tab_helper_;
 
   // PasswordManager and its delegate. The delegate must outlive the manager,
   // per documentation in password_manager.h.
@@ -297,6 +330,9 @@ class TabContentsWrapper : public TabContentsObserver,
   scoped_ptr<ThumbnailGenerator> thumbnail_generation_observer_;
 
   // TabContents (MUST BE LAST) ------------------------------------------------
+
+  // If true, we're running the destructor.
+  bool in_destructor_;
 
   // The supporting objects need to outlive the TabContents dtor (as they may
   // be called upon during its execution). As a result, this must come last

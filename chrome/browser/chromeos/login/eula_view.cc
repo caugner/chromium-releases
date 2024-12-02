@@ -38,7 +38,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/checkbox.h"
-#include "views/controls/button/native_button_gtk.h"
+#include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
 #include "views/controls/throbber.h"
@@ -47,7 +47,8 @@
 #include "views/layout/layout_constants.h"
 #include "views/layout/layout_manager.h"
 #include "views/window/dialog_delegate.h"
-#include "views/window/window.h"
+
+namespace chromeos {
 
 namespace {
 
@@ -56,7 +57,8 @@ const int kCheckboxWidth = 26;
 const int kLastButtonHorizontalMargin = 10;
 const int kMargin = 20;
 const int kTextMargin = 10;
-const int kTpmCheckIntervalMs = 500;
+
+const char kGoogleEulaUrl[] = "about:terms";
 
 enum kLayoutColumnsets {
   SINGLE_CONTROL_ROW,
@@ -65,62 +67,33 @@ enum kLayoutColumnsets {
   LAST_ROW
 };
 
-// Helper class that disables using native label for subclassed GTK control.
-class EULANativeCheckboxGtk : public views::NativeCheckboxGtk {
- public:
-  explicit EULANativeCheckboxGtk(views::Checkbox* checkbox)
-      : views::NativeCheckboxGtk(checkbox) {
-    set_fast_resize(true);
-  }
-  virtual ~EULANativeCheckboxGtk() { }
-  virtual bool UsesNativeLabel() const { return false; }
-  virtual void UpdateLabel() { }
-};
-
-// views::Checkbox specialization that uses its internal views::Label
-// instead of native one. We need this because native label does not
-// support multiline property and we need it for certain languages.
-class EULACheckbox : public views::Checkbox {
- public:
-  EULACheckbox() { }
-  virtual ~EULACheckbox() { }
-
- protected:
-  virtual views::NativeButtonWrapper* CreateWrapper() {
-    views::NativeButtonWrapper* native_wrapper =
-        new EULANativeCheckboxGtk(this);
-    native_wrapper->UpdateChecked();
-    return native_wrapper;
-  }
-};
-
 // A simple LayoutManager that causes the associated view's one child to be
 // sized to match the bounds of its parent except the bounds, if set.
 struct FillLayoutWithBorder : public views::LayoutManager {
   // Overridden from LayoutManager:
   virtual void Layout(views::View* host) {
     DCHECK(host->has_children());
-    host->GetChildViewAt(0)->SetBoundsRect(host->GetContentsBounds());
+    host->child_at(0)->SetBoundsRect(host->GetContentsBounds());
   }
   virtual gfx::Size GetPreferredSize(views::View* host) {
     return gfx::Size(host->width(), host->height());
   }
 };
 
+}  // namespace
+
 // System security setting dialog.
-class TpmInfoView : public views::View,
-                    public views::DialogDelegate {
+class TpmInfoView : public views::DialogDelegateView {
  public:
-  explicit TpmInfoView(std::string* password)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(runnable_method_factory_(this)),
-        password_(password) {
-    DCHECK(password_);
-  }
+  explicit TpmInfoView(EulaView* eula_view);
+  virtual ~TpmInfoView();
 
   void Init();
 
+  void ShowTpmPassword(const std::string& tpm_password);
+
  protected:
-  // views::DialogDelegate overrides:
+  // views::DialogDelegateView overrides:
   virtual bool Accept() { return true; }
   virtual bool IsModal() const { return true; }
   virtual views::View* GetContentsView() { return this; }
@@ -135,18 +108,13 @@ class TpmInfoView : public views::View,
   }
 
   gfx::Size GetPreferredSize() {
-    return gfx::Size(views::Window::GetLocalizedContentsSize(
+    return gfx::Size(views::Widget::GetLocalizedContentsSize(
         IDS_TPM_INFO_DIALOG_WIDTH_CHARS,
         IDS_TPM_INFO_DIALOG_HEIGHT_LINES));
   }
 
  private:
-  void PullPassword();
-
-  ScopedRunnableMethodFactory<TpmInfoView> runnable_method_factory_;
-
-  // Holds pointer to the password storage.
-  std::string* password_;
+  chromeos::EulaView* eula_view_;
 
   views::Label* busy_label_;
   views::Label* password_label_;
@@ -154,6 +122,15 @@ class TpmInfoView : public views::View,
 
   DISALLOW_COPY_AND_ASSIGN(TpmInfoView);
 };
+
+TpmInfoView::TpmInfoView(EulaView* eula_view)
+    : eula_view_(eula_view) {
+  DCHECK(eula_view_);
+}
+
+TpmInfoView::~TpmInfoView() {
+  eula_view_->OnTpmInfoViewClosed(this);
+}
 
 void TpmInfoView::Init() {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
@@ -212,48 +189,15 @@ void TpmInfoView::Init() {
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_TPM_BUSY)));
   layout->AddView(busy_label_);
   layout->AddPaddingRow(0, views::kRelatedControlHorizontalSpacing);
-
-  // TODO(avayvod): Refactor this to be usable for WebUI.
-  PullPassword();
 }
 
-void TpmInfoView::PullPassword() {
-  // Since this method is also called directly.
-  runnable_method_factory_.RevokeAll();
-
-  chromeos::CryptohomeLibrary* cryptohome =
-      chromeos::CrosLibrary::Get()->GetCryptohomeLibrary();
-
-  bool password_acquired = false;
-  if (password_->empty() && cryptohome->TpmIsReady()) {
-    password_acquired = cryptohome->TpmGetPassword(password_);
-    if (!password_acquired) {
-      password_->clear();
-    } else if (password_->empty()) {
-      // For a fresh OOBE flow TPM is uninitialized,
-      // ownership process is started at the EULA screen,
-      // password is cleared after EULA is accepted.
-      LOG(ERROR) << "TPM returned an empty password.";
-    }
-  }
-  if (password_->empty() && !password_acquired) {
-    // Password hasn't been acquired, reschedule pulling.
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        runnable_method_factory_.NewRunnableMethod(&TpmInfoView::PullPassword),
-        kTpmCheckIntervalMs);
-  } else {
-    password_label_->SetText(ASCIIToWide(*password_));
-    password_label_->SetVisible(true);
-    busy_label_->SetVisible(false);
-    throbber_->Stop();
-    throbber_->SetVisible(false);
-  }
+void TpmInfoView::ShowTpmPassword(const std::string& tpm_password) {
+  password_label_->SetText(ASCIIToWide(tpm_password));
+  password_label_->SetVisible(true);
+  busy_label_->SetVisible(false);
+  throbber_->Stop();
+  throbber_->SetVisible(false);
 }
-
-}  // namespace
-
-namespace chromeos {
 
 ////////////////////////////////////////////////////////////////////////////////
 // EULATabContentsDelegate, public:
@@ -286,6 +230,7 @@ EulaView::EulaView(ViewsEulaScreenActor* actor)
       system_security_settings_link_(NULL),
       back_button_(NULL),
       continue_button_(NULL),
+      tpm_info_view_(NULL),
       actor_(actor),
       bubble_(NULL) {
 }
@@ -363,7 +308,7 @@ void EulaView::Init() {
 
   layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
   layout->StartRow(0, SINGLE_CONTROL_WITH_SHIFT_ROW);
-  usage_statistics_checkbox_ = new EULACheckbox();
+  usage_statistics_checkbox_ = new views::Checkbox(L"");
   usage_statistics_checkbox_->SetMultiLine(true);
   usage_statistics_checkbox_->SetChecked(
       actor_->screen()->IsUsageStatsEnabled());
@@ -418,7 +363,7 @@ void EulaView::UpdateLocalizedStrings() {
   // Load Google EULA and its title.
   LoadEulaView(google_eula_view_,
                google_eula_label_,
-               actor_->screen()->GetGoogleEulaUrl());
+               GURL(kGoogleEulaUrl));
 
   // Load OEM EULA and its title.
   if (!oem_eula_page_.is_empty())
@@ -453,6 +398,16 @@ bool EulaView::IsUsageStatsChecked() const {
   return usage_statistics_checkbox_ && usage_statistics_checkbox_->checked();
 }
 
+void EulaView::ShowTpmPassword(const std::string& tpm_password) {
+  if (tpm_info_view_)
+    tpm_info_view_->ShowTpmPassword(tpm_password);
+}
+
+void EulaView::OnTpmInfoViewClosed(TpmInfoView* tpm_info_view) {
+  if (tpm_info_view == tpm_info_view_)
+    tpm_info_view_ = NULL;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // EulaView, protected, views::View implementation:
 
@@ -466,9 +421,9 @@ void EulaView::OnLocaleChanged() {
 
 void EulaView::ButtonPressed(views::Button* sender, const views::Event& event) {
   if (sender == continue_button_) {
-    actor_->screen()->OnExit(true);
+    actor_->screen()->OnExit(true, IsUsageStatsChecked());
   } else if (sender == back_button_) {
-    actor_->screen()->OnExit(false);
+    actor_->screen()->OnExit(false, IsUsageStatsChecked());
   }
 }
 
@@ -483,14 +438,14 @@ void EulaView::LinkClicked(views::Link* source, int event_flags) {
       help_app_ = new HelpAppLauncher(parent_window);
     help_app_->ShowHelpTopic(HelpAppLauncher::HELP_STATS_USAGE);
   } else if (source == system_security_settings_link_) {
-    TpmInfoView* view =
-        new TpmInfoView(actor_->screen()->GetTpmPasswordStorage());
-    view->Init();
-    views::Window* window = browser::CreateViewsWindow(parent_window,
+    tpm_info_view_ = new TpmInfoView(this);
+    tpm_info_view_->Init();
+    views::Widget* window = browser::CreateViewsWindow(parent_window,
                                                        gfx::Rect(),
-                                                       view);
+                                                       tpm_info_view_);
     window->SetAlwaysOnTop(true);
     window->Show();
+    actor_->screen()->InitiatePasswordFetch();
   }
 }
 

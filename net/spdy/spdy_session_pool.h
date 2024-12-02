@@ -99,7 +99,7 @@ class NET_API SpdySessionPool
 
   // Creates a Value summary of the state of the spdy session pool. The caller
   // responsible for deleting the returned value.
-  Value* SpdySessionPoolInfoToValue() const;
+  base::Value* SpdySessionPoolInfoToValue() const;
 
   SpdySettingsStorage* mutable_spdy_settings() { return &spdy_settings_; }
   const SpdySettingsStorage& spdy_settings() const { return spdy_settings_; }
@@ -163,8 +163,8 @@ class NET_API SpdySessionPool
   bool LookupAddresses(const HostPortProxyPair& pair,
                        AddressList* addresses) const;
 
-  // Add a set of |addresses| as IP-equivalent addresses for |pair|.
-  void AddAliases(const AddressList& addresses, const HostPortProxyPair& pair);
+  // Add |endpoint| as an IP-equivalent address for |pair|.
+  void AddAlias(const addrinfo* address, const HostPortProxyPair& pair);
 
   // Remove all aliases for |pair| from the aliases table.
   void RemoveAliases(const HostPortProxyPair& pair);
@@ -181,7 +181,10 @@ class NET_API SpdySessionPool
   static bool g_enable_ip_pooling;
 
   const scoped_refptr<SSLConfigService> ssl_config_service_;
-  HostResolver* resolver_;
+  HostResolver* const resolver_;
+
+  // Defaults to true. May be controlled via SpdySessionPoolPeer for tests.
+  bool verify_domain_authentication_;
 
   DISALLOW_COPY_AND_ASSIGN(SpdySessionPool);
 };

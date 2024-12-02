@@ -12,7 +12,7 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stl_util-inl.h"
+#include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/task.h"
 #include "base/threading/thread_restrictions.h"
@@ -26,12 +26,12 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_service.h"
-#include "content/common/notification_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -283,12 +283,13 @@ bool CrxInstaller::AllowInstall(const Extension* extension,
       // host (or a subdomain of the host) the download happened from.  There's
       // no way for us to verify that the app controls any other hosts.
       URLPattern pattern(UserScript::kValidUserScriptSchemes);
-      pattern.set_host(original_url_.host());
-      pattern.set_match_subdomains(true);
+      pattern.SetHost(original_url_.host());
+      pattern.SetMatchSubdomains(true);
 
-      URLPatternList patterns = extension_->web_extent().patterns();
-      for (size_t i = 0; i < patterns.size(); ++i) {
-        if (!pattern.MatchesHost(patterns[i].host())) {
+      URLPatternSet patterns = extension_->web_extent();
+      for (URLPatternSet::const_iterator i = patterns.begin();
+           i != patterns.end(); ++i) {
+        if (!pattern.MatchesHost(i->host())) {
           *error = base::StringPrintf(
               "Apps must be served from the host that they affect.");
           return false;
@@ -429,15 +430,16 @@ void CrxInstaller::InstallUIProceed() {
   Release();  // balanced in ConfirmInstall().
 }
 
-void CrxInstaller::InstallUIAbort() {
-  // Technically, this can be called for other reasons than the user hitting
-  // cancel, but they're rare.
+void CrxInstaller::InstallUIAbort(bool user_initiated) {
+  std::string histogram_name = user_initiated ?
+      "Extensions.Permissions_InstallCancel" :
+      "Extensions.Permissions_InstallAbort";
   ExtensionService::RecordPermissionMessagesHistogram(
-      extension_, "Extensions.Permissions_InstallCancel");
+      extension_, histogram_name.c_str());
 
   // Kill the theme loading bubble.
   NotificationService* service = NotificationService::current();
-  service->Notify(NotificationType::NO_THEME_DETECTED,
+  service->Notify(chrome::NOTIFICATION_NO_THEME_DETECTED,
                   Source<CrxInstaller>(this),
                   NotificationService::NoDetails());
   Release();  // balanced in ConfirmInstall().
@@ -486,10 +488,13 @@ void CrxInstaller::CompleteInstall() {
   // TODO(aa): All paths to resources inside extensions should be created
   // lazily and based on the Extension's root path at that moment.
   std::string error;
+  int flags = extension_->creation_flags() | Extension::REQUIRE_KEY;
+  if (is_gallery_install())
+    flags |= Extension::FROM_WEBSTORE;
   extension_ = extension_file_util::LoadExtension(
       version_dir,
       install_source_,
-      Extension::REQUIRE_KEY,
+      flags,
       &error);
   CHECK(error.empty()) << error;
 
@@ -510,7 +515,7 @@ void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   NotificationService* service = NotificationService::current();
-  service->Notify(NotificationType::EXTENSION_INSTALL_ERROR,
+  service->Notify(chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
                   Source<CrxInstaller>(this),
                   Details<const std::string>(&error));
 
@@ -546,9 +551,16 @@ void CrxInstaller::ReportSuccessFromUIThread() {
   if (client_)
     client_->OnInstallSuccess(extension_.get(), install_icon_.get());
 
+  // We update the extension's granted permissions if the user already approved
+  // the install (client_ is non NULL), or we are allowed to install this
+  // silently. We only track granted permissions for INTERNAL extensions.
+  if ((client_ || allow_silent_install_) &&
+      extension_->location() == Extension::INTERNAL)
+    frontend_weak_->GrantPermissions(extension_);
+
   // Tell the frontend about the installation and hand off ownership of
   // extension_ to it.
-  frontend_weak_->OnExtensionInstalled(extension_);
+  frontend_weak_->OnExtensionInstalled(extension_, is_gallery_install());
   extension_ = NULL;
 
   NotifyCrxInstallComplete();
@@ -564,7 +576,7 @@ void CrxInstaller::NotifyCrxInstallComplete() {
   // extension before it is unpacked, so they can not filter based
   // on the extension.
   NotificationService::current()->Notify(
-      NotificationType::CRX_INSTALLER_DONE,
+      chrome::NOTIFICATION_CRX_INSTALLER_DONE,
       Source<CrxInstaller>(this),
       NotificationService::NoDetails());
 }
