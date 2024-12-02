@@ -8,12 +8,21 @@
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string16.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_function_registry.h"
 #include "ui/events/event.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
+#include "chrome/browser/chromeos/login/users/user_manager.h"
+#endif  // OS_CHROMEOS
 
 #if defined(USE_ASH)
 #include "ash/root_window_controller.h"
@@ -152,7 +161,32 @@ bool VirtualKeyboardPrivateGetKeyboardConfigFunction::RunSync() {
   base::DictionaryValue* results = new base::DictionaryValue();
   results->SetString("layout", keyboard::GetKeyboardLayout());
   results->SetBoolean("a11ymode", keyboard::GetAccessibilityKeyboardEnabled());
+  results->SetBoolean("experimental",
+      keyboard::IsExperimentalInputViewEnabled());
   SetResult(results);
+  return true;
+#else
+  error_ = kNotYetImplementedError;
+  return false;
+#endif
+}
+
+bool VirtualKeyboardPrivateOpenSettingsFunction::RunSync() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
+  // Do not try to open language options page if user is not logged in or
+  // locked.
+  if (!chromeos::UserManager::Get()->IsUserLoggedIn() ||
+      chromeos::UserAddingScreen::Get()->IsRunning() ||
+      (chromeos::ScreenLocker::default_screen_locker() &&
+          chromeos::ScreenLocker::default_screen_locker()->locked()))
+    return true;
+#endif  // OS_CHROMEOS
+
+  content::RecordAction(base::UserMetricsAction("OpenLanguageOptionsDialog"));
+  chrome::ShowSettingsSubPageForProfile(
+      ProfileManager::GetActiveUserProfile(), chrome::kLanguageOptionsSubPage);
   return true;
 #else
   error_ = kNotYetImplementedError;

@@ -135,6 +135,9 @@ bool TestExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
   return false;
 }
 
+void TestExtensionsBrowserClient::PermitExternalProtocolHandler() {
+}
+
 scoped_ptr<AppSorting> TestExtensionsBrowserClient::CreateAppSorting() {
   return scoped_ptr<AppSorting>();
 }
@@ -160,6 +163,11 @@ scoped_ptr<RuntimeAPIDelegate>
 TestExtensionsBrowserClient::CreateRuntimeAPIDelegate(
     content::BrowserContext* context) const {
   return scoped_ptr<RuntimeAPIDelegate>(new TestRuntimeAPIDelegate());
+}
+
+ComponentExtensionResourceManager*
+TestExtensionsBrowserClient::GetComponentExtensionResourceManager() {
+  return NULL;
 }
 
 }  // namespace extensions

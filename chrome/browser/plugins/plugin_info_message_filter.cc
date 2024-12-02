@@ -59,6 +59,29 @@ bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
   return false;
 }
 
+#if defined(ENABLE_PEPPER_CDMS)
+
+enum PluginAvailabilityStatusForUMA {
+  PLUGIN_NOT_REGISTERED,
+  PLUGIN_AVAILABLE,
+  PLUGIN_DISABLED,
+  PLUGIN_AVAILABILITY_STATUS_MAX
+};
+
+static void SendPluginAvailabilityUMA(const std::string& mime_type,
+                                      PluginAvailabilityStatusForUMA status) {
+#if defined(WIDEVINE_CDM_AVAILABLE)
+  // Only report results for Widevine CDM.
+  if (mime_type != kWidevineCdmPluginMimeType)
+    return;
+
+  UMA_HISTOGRAM_ENUMERATION("Plugin.AvailabilityStatus.WidevineCdm",
+                            status, PLUGIN_AVAILABILITY_STATUS_MAX);
+#endif  // defined(WIDEVINE_CDM_AVAILABLE)
+}
+
+#endif  // defined(ENABLE_PEPPER_CDMS)
+
 }  // namespace
 
 PluginInfoMessageFilter::Context::Context(int render_process_id,
@@ -79,12 +102,6 @@ PluginInfoMessageFilter::Context::Context(int render_process_id,
           content::BrowserThread::IO));
 }
 
-PluginInfoMessageFilter::Context::Context()
-    : render_process_id_(0),
-      resource_context_(NULL),
-      host_content_settings_map_(NULL) {
-}
-
 PluginInfoMessageFilter::Context::~Context() {
 }
 
@@ -96,14 +113,15 @@ PluginInfoMessageFilter::PluginInfoMessageFilter(
       weak_ptr_factory_(this) {
 }
 
-bool PluginInfoMessageFilter::OnMessageReceived(const IPC::Message& message,
-                                                bool* message_was_ok) {
-  IPC_BEGIN_MESSAGE_MAP_EX(PluginInfoMessageFilter, message, *message_was_ok)
+bool PluginInfoMessageFilter::OnMessageReceived(const IPC::Message& message) {
+  IPC_BEGIN_MESSAGE_MAP(PluginInfoMessageFilter, message)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_GetPluginInfo,
                                     OnGetPluginInfo)
+#if defined(ENABLE_PEPPER_CDMS)
     IPC_MESSAGE_HANDLER(
-        ChromeViewHostMsg_IsInternalPluginRegisteredForMimeType,
-        OnIsInternalPluginRegisteredForMimeType)
+        ChromeViewHostMsg_IsInternalPluginAvailableForMimeType,
+        OnIsInternalPluginAvailableForMimeType)
+#endif
     IPC_MESSAGE_UNHANDLED(return false)
   IPC_END_MESSAGE_MAP()
   return true;
@@ -171,28 +189,42 @@ void PluginInfoMessageFilter::PluginsLoaded(
   Send(reply_msg);
 }
 
-void PluginInfoMessageFilter::OnIsInternalPluginRegisteredForMimeType(
+#if defined(ENABLE_PEPPER_CDMS)
+void PluginInfoMessageFilter::OnIsInternalPluginAvailableForMimeType(
     const std::string& mime_type,
-    bool* is_registered,
+    bool* is_available,
     std::vector<base::string16>* additional_param_names,
     std::vector<base::string16>* additional_param_values) {
   std::vector<WebPluginInfo> plugins;
   PluginService::GetInstance()->GetInternalPlugins(&plugins);
+
+  bool is_plugin_disabled = false;
   for (size_t i = 0; i < plugins.size(); ++i) {
+    const WebPluginInfo& plugin = plugins[i];
     const std::vector<content::WebPluginMimeType>& mime_types =
-        plugins[i].mime_types;
+        plugin.mime_types;
     for (size_t j = 0; j < mime_types.size(); ++j) {
       if (mime_types[j].mime_type == mime_type) {
-        *is_registered = true;
+        if (!context_.IsPluginEnabled(plugin)) {
+          is_plugin_disabled = true;
+          break;
+        }
+
+        *is_available = true;
         *additional_param_names = mime_types[j].additional_param_names;
         *additional_param_values = mime_types[j].additional_param_values;
+        SendPluginAvailabilityUMA(mime_type, PLUGIN_AVAILABLE);
         return;
       }
     }
   }
 
-  *is_registered = false;
+  *is_available = false;
+  SendPluginAvailabilityUMA(
+      mime_type, is_plugin_disabled ? PLUGIN_DISABLED : PLUGIN_NOT_REGISTERED);
 }
+
+#endif // defined(ENABLE_PEPPER_CDMS)
 
 void PluginInfoMessageFilter::Context::DecidePluginStatus(
     const GetPluginInfo_Params& params,
@@ -360,16 +392,27 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
             policy_url, policy_url, CONTENT_SETTINGS_TYPE_JAVASCRIPT,
             std::string(), &info));
   } else {
-    value.reset(
+    content_settings::SettingInfo specific_info;
+    scoped_ptr<base::Value> specific_setting(
         host_content_settings_map_->GetWebsiteSetting(
             policy_url, plugin_url, CONTENT_SETTINGS_TYPE_PLUGINS, resource,
-            &info));
-    if (value.get()) {
-      uses_plugin_specific_setting = true;
+            &specific_info));
+    content_settings::SettingInfo general_info;
+    scoped_ptr<base::Value> general_setting(
+        host_content_settings_map_->GetWebsiteSetting(
+            policy_url, plugin_url, CONTENT_SETTINGS_TYPE_PLUGINS,
+            std::string(), &general_info));
+
+    // If there is a plugin-specific setting, we use it, unless the general
+    // setting was set by policy, in which case it takes precedence.
+    uses_plugin_specific_setting = specific_setting &&
+        (general_info.source != content_settings::SETTING_SOURCE_POLICY);
+    if (uses_plugin_specific_setting) {
+      value = specific_setting.Pass();
+      info = specific_info;
     } else {
-      value.reset(host_content_settings_map_->GetWebsiteSetting(
-          policy_url, plugin_url, CONTENT_SETTINGS_TYPE_PLUGINS, std::string(),
-          &info));
+      value = general_setting.Pass();
+      info = general_info;
     }
   }
   *setting = content_settings::ValueToContentSetting(value.get());
@@ -390,3 +433,7 @@ void PluginInfoMessageFilter::Context::MaybeGrantAccess(
   }
 }
 
+bool PluginInfoMessageFilter::Context::IsPluginEnabled(
+    const content::WebPluginInfo& plugin) const {
+  return plugin_prefs_->IsPluginEnabled(plugin);
+}

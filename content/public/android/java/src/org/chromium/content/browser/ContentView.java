@@ -9,6 +9,10 @@ import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -19,40 +23,34 @@ import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
 import org.chromium.base.TraceEvent;
-import org.chromium.ui.base.WindowAndroid;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
  * exposes the various {@link View} functionality to it.
- *
- * TODO(joth): Remove any methods overrides from this class that were added for WebView
- *             compatibility.
  */
 public class ContentView extends FrameLayout
-        implements ContentViewCore.InternalAccessDelegate {
+        implements ContentViewCore.InternalAccessDelegate, SmartClipProvider {
 
-    private final ContentViewCore mContentViewCore;
+    private static final String TAG = "ContentView";
 
-    private final int[] mLocationInWindow = new int[2];
+    protected final ContentViewCore mContentViewCore;
 
     /**
      * Creates an instance of a ContentView.
      * @param context The Context the view is running in, through which it can
      *                access the current theme, resources, etc.
-     * @param nativeWebContents A pointer to the native web contents.
-     * @param windowAndroid An instance of the WindowAndroid.
+     * @param cvc A pointer to the content view core managing this content view.
      * @return A ContentView instance.
      */
-    public static ContentView newInstance(
-            Context context, long nativeWebContents, WindowAndroid windowAndroid) {
+    public static ContentView newInstance(Context context, ContentViewCore cvc) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-            return new ContentView(context, nativeWebContents, windowAndroid);
+            return new ContentView(context, cvc);
         } else {
-            return new JellyBeanContentView(context, nativeWebContents, windowAndroid);
+            return new JellyBeanContentView(context, cvc);
         }
     }
 
-    protected ContentView(Context context, long nativeWebContents, WindowAndroid windowAndroid) {
+    protected ContentView(Context context, ContentViewCore cvc) {
         super(context, null, android.R.attr.webViewStyle);
 
         if (getScrollBarStyle() == View.SCROLLBARS_INSIDE_OVERLAY) {
@@ -63,19 +61,8 @@ public class ContentView extends FrameLayout
         setFocusable(true);
         setFocusableInTouchMode(true);
 
-        mContentViewCore = new ContentViewCore(context);
-        mContentViewCore.initialize(this, this, nativeWebContents, windowAndroid);
+        mContentViewCore = cvc;
     }
-
-    /**
-     * @return The core component of the ContentView that handles JNI communication.  Should only be
-     *         used for passing to native.
-     */
-    public ContentViewCore getContentViewCore() {
-        return mContentViewCore;
-    }
-
-    // FrameLayout overrides.
 
     // Needed by ContentViewCore.InternalAccessDelegate
     @Override
@@ -95,15 +82,6 @@ public class ContentView extends FrameLayout
         super.onSizeChanged(w, h, ow, oh);
         mContentViewCore.onSizeChanged(w, h, ow, oh);
         TraceEvent.end();
-    }
-
-    @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
-        if (changed) {
-            getLocationInWindow(mLocationInWindow);
-            mContentViewCore.onLocationInWindowChanged(mLocationInWindow[0], mLocationInWindow[1]);
-        }
     }
 
     @Override
@@ -275,22 +253,36 @@ public class ContentView extends FrameLayout
         mContentViewCore.onVisibilityChanged(changedView, visibility);
     }
 
-    /**
-     * Return content scroll y.
-     *
-     * @return The vertical scroll position in pixels.
-     */
-    public int getContentScrollY() {
-        return mContentViewCore.computeVerticalScrollOffset();
+    // Implements SmartClipProvider
+    @Override
+    public void extractSmartClipData(int x, int y, int width, int height) {
+        mContentViewCore.extractSmartClipData(x, y, width, height);
     }
 
-    /**
-     * Return content height.
-     *
-     * @return The height of the content in pixels.
-     */
-    public int getContentHeight() {
-        return mContentViewCore.computeVerticalScrollRange();
+    // Implements SmartClipProvider
+    @Override
+    public void setSmartClipResultHandler(final Handler resultHandler) {
+        if (resultHandler == null) {
+            mContentViewCore.setSmartClipDataListener(null);
+            return;
+        }
+        mContentViewCore.setSmartClipDataListener(new ContentViewCore.SmartClipDataListener() {
+            public void onSmartClipDataExtracted(String text, String html, Rect clipRect) {
+                Bundle bundle = new Bundle();
+                bundle.putString("url", mContentViewCore.getWebContents().getVisibleUrl());
+                bundle.putString("title", mContentViewCore.getWebContents().getTitle());
+                bundle.putParcelable("rect", clipRect);
+                bundle.putString("text", text);
+                bundle.putString("html", html);
+                try {
+                    Message msg = Message.obtain(resultHandler, 0);
+                    msg.setData(bundle);
+                    msg.sendToTarget();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error calling handler for smart clip data: ", e);
+                }
+            }
+        });
     }
 
     ///////////////////////////////////////////////////////////////////////////////////////////////

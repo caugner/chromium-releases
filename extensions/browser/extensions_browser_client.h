@@ -34,6 +34,7 @@ namespace extensions {
 
 class ApiActivityMonitor;
 class AppSorting;
+class ComponentExtensionResourceManager;
 class Extension;
 class ExtensionHostDelegate;
 class ExtensionPrefsObserver;
@@ -148,6 +149,10 @@ class ExtensionsBrowserClient {
   // version for later comparison.
   virtual bool DidVersionUpdate(content::BrowserContext* context) = 0;
 
+  // Permits an external protocol handler to be launched. See
+  // ExternalProtocolHandler::PermitLaunchUrl() in Chrome.
+  virtual void PermitExternalProtocolHandler() = 0;
+
   // Creates a new AppSorting instance.
   virtual scoped_ptr<AppSorting> CreateAppSorting() = 0;
 
@@ -172,6 +177,11 @@ class ExtensionsBrowserClient {
   // core runtime API implementation.
   virtual scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const = 0;
+
+  // Returns the manager of resource bundles used in extensions. Returns NULL if
+  // the manager doesn't exist.
+  virtual ComponentExtensionResourceManager*
+  GetComponentExtensionResourceManager() = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

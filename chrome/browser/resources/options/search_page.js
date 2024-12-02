@@ -269,11 +269,12 @@ cr.define('options', function() {
       // Cleanup the search query string.
       text = SearchPage.canonicalizeQuery(text);
 
-      // Set the hash on the current page, and the enclosing uber page
+      // Set the hash on the current page, and the enclosing uber page. Only do
+      // this if the page is not current. See https://crbug.com/401004.
       var hash = text ? '#' + encodeURIComponent(text) : '';
       var path = text ? this.name : '';
-      window.location.hash = hash;
-      uber.invokeMethodOnParent('setPath', {path: path + hash});
+      if (location.hash != hash || location.pathname != '/' + path)
+        uber.pushState({}, path + hash);
 
       // Toggle the search page if necessary.
       if (text) {

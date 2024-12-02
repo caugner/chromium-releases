@@ -4,11 +4,6 @@
 
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
 
-#define XK_MISCELLANY
-#include <X11/keysymdef.h>
-#include <X11/X.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
 #undef FocusIn
 #undef FocusOut
 #undef RootWindow
@@ -35,7 +30,6 @@
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
-#include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 
@@ -70,6 +64,92 @@ size_t GetUtf8StringLength(const char* s) {
   return ret;
 }
 
+std::string GetKeyFromEvent(const ui::KeyEvent& event) {
+  const std::string& code = event.code();
+  if (StartsWithASCII(code, "Control", true))
+    return "Ctrl";
+  if (StartsWithASCII(code, "Shift", true))
+    return "Shift";
+  if (StartsWithASCII(code, "Alt", true))
+    return "Alt";
+  if (StartsWithASCII(code, "Arrow", true))
+    return code.substr(5);
+  if (code == "Escape")
+    return "Esc";
+  if (code == "Backspace" || code == "Tab" ||
+      code == "Enter" || code == "CapsLock" ||
+      code == "Power")
+    return code;
+  // Cases for media keys.
+  switch (event.key_code()) {
+    case ui::VKEY_BROWSER_BACK:
+    case ui::VKEY_F1:
+      return "HistoryBack";
+    case ui::VKEY_BROWSER_FORWARD:
+    case ui::VKEY_F2:
+      return "HistoryForward";
+    case ui::VKEY_BROWSER_REFRESH:
+    case ui::VKEY_F3:
+      return "BrowserRefresh";
+    case ui::VKEY_MEDIA_LAUNCH_APP2:
+    case ui::VKEY_F4:
+      return "ChromeOSFullscreen";
+    case ui::VKEY_MEDIA_LAUNCH_APP1:
+    case ui::VKEY_F5:
+      return "ChromeOSSwitchWindow";
+    case ui::VKEY_BRIGHTNESS_DOWN:
+    case ui::VKEY_F6:
+      return "BrightnessDown";
+    case ui::VKEY_BRIGHTNESS_UP:
+    case ui::VKEY_F7:
+      return "BrightnessUp";
+    case ui::VKEY_VOLUME_MUTE:
+    case ui::VKEY_F8:
+      return "AudioVolumeMute";
+    case ui::VKEY_VOLUME_DOWN:
+    case ui::VKEY_F9:
+      return "AudioVolumeDown";
+    case ui::VKEY_VOLUME_UP:
+    case ui::VKEY_F10:
+      return "AudioVolumeUp";
+    default:
+      break;
+  }
+  uint16 ch = 0;
+  // Ctrl+? cases, gets key value for Ctrl is not down.
+  if (event.flags() & ui::EF_CONTROL_DOWN) {
+    ui::KeyEvent event_no_ctrl(event.type(),
+                               event.key_code(),
+                               event.flags() ^ ui::EF_CONTROL_DOWN,
+                               false);
+    ch = event_no_ctrl.GetCharacter();
+  } else {
+    ch = event.GetCharacter();
+  }
+  return base::UTF16ToUTF8(base::string16(1, ch));
+}
+
+void GetExtensionKeyboardEventFromKeyEvent(
+    const ui::KeyEvent& event,
+    InputMethodEngine::KeyboardEvent* ext_event) {
+  DCHECK(event.type() == ui::ET_KEY_RELEASED ||
+         event.type() == ui::ET_KEY_PRESSED);
+  DCHECK(ext_event);
+  ext_event->type = (event.type() == ui::ET_KEY_RELEASED) ? "keyup" : "keydown";
+
+  std::string dom_code = event.code();
+  if (dom_code ==
+      ui::KeycodeConverter::GetInstance()->InvalidKeyboardEventCode())
+    dom_code = ui::KeyboardCodeToDomKeycode(event.key_code());
+  ext_event->code = dom_code;
+  ext_event->key_code = static_cast<int>(event.key_code());
+  ext_event->alt_key = event.IsAltDown();
+  ext_event->ctrl_key = event.IsControlDown();
+  ext_event->shift_key = event.IsShiftDown();
+  ext_event->caps_lock = event.IsCapsLockDown();
+  ext_event->key = GetKeyFromEvent(event);
+}
+
 }  // namespace
 
 InputMethodEngine::InputMethodEngine()
@@ -81,15 +161,19 @@ InputMethodEngine::InputMethodEngine()
       composition_cursor_(0),
       candidate_window_(new ui::CandidateWindow()),
       window_visible_(false),
-      sent_key_event_(NULL) {}
+      sent_key_event_(NULL),
+      profile_(NULL) {
+}
 
 InputMethodEngine::~InputMethodEngine() {
   if (start_time_.ToInternalValue())
     RecordHistogram("WorkingTime", (end_time_ - start_time_).InSeconds());
-  input_method::InputMethodManager::Get()->RemoveInputMethodExtension(imm_id_);
+  input_method::InputMethodManager::Get()->RemoveInputMethodExtension(profile_,
+                                                                      imm_id_);
 }
 
 void InputMethodEngine::Initialize(
+    Profile* profile,
     scoped_ptr<InputMethodEngineInterface::Observer> observer,
     const char* engine_name,
     const char* extension_id,
@@ -99,6 +183,8 @@ void InputMethodEngine::Initialize(
     const GURL& options_page,
     const GURL& input_view) {
   DCHECK(observer) << "Observer must not be null.";
+
+  profile_ = profile;
 
   // TODO(komatsu): It is probably better to set observer out of Initialize.
   observer_ = observer.Pass();
@@ -131,7 +217,7 @@ void InputMethodEngine::Initialize(
 
   // TODO(komatsu): It is probably better to call AddInputMethodExtension
   // out of Initialize.
-  manager->AddInputMethodExtension(imm_id_, this);
+  manager->AddInputMethodExtension(profile, imm_id_, this);
 }
 
 const input_method::InputMethodDescriptor& InputMethodEngine::GetDescriptor()
@@ -265,25 +351,28 @@ bool InputMethodEngine::SendKeyEvents(
     const KeyboardEvent& event = events[i];
     const ui::EventType type =
         (event.type == "keyup") ? ui::ET_KEY_RELEASED : ui::ET_KEY_PRESSED;
+    ui::KeyboardCode key_code = static_cast<ui::KeyboardCode>(event.key_code);
+    if (key_code == ui::VKEY_UNKNOWN)
+      key_code = ui::DomKeycodeToKeyboardCode(event.code);
 
-    // KeyboardCodeFromXKyeSym assumes US keyboard layout.
-    ui::KeycodeConverter* conv = ui::KeycodeConverter::GetInstance();
-    DCHECK(conv);
-
-     // DOM code (KeyA) -> XKB -> XKeySym (XK_A) -> KeyboardCode (VKEY_A)
-    const uint16 native_keycode =
-        conv->CodeToNativeKeycode(event.code.c_str());
-    const uint xkeysym = ui::DefaultXKeysymFromHardwareKeycode(native_keycode);
-    const ui::KeyboardCode key_code = ui::KeyboardCodeFromXKeysym(xkeysym);
-
-    const std::string code = event.code;
     int flags = ui::EF_NONE;
     flags |= event.alt_key   ? ui::EF_ALT_DOWN       : ui::EF_NONE;
     flags |= event.ctrl_key  ? ui::EF_CONTROL_DOWN   : ui::EF_NONE;
     flags |= event.shift_key ? ui::EF_SHIFT_DOWN     : ui::EF_NONE;
     flags |= event.caps_lock ? ui::EF_CAPS_LOCK_DOWN : ui::EF_NONE;
 
-    ui::KeyEvent ui_event(type, key_code, code, flags, false /* is_char */);
+    ui::KeyEvent ui_event(type,
+                          key_code,
+                          event.code,
+                          flags,
+                          false /* is_char */);
+    // 4-bytes UTF-8 string is at least 2-characters UTF-16 string.
+    // And Key char can only be single UTF-16 character.
+    if (!event.key.empty() && event.key.size() < 4) {
+      base::string16 key_char = base::UTF8ToUTF16(event.key);
+      if (key_char.size() == 1)
+        ui_event.set_character(key_char[0]);
+    }
     base::AutoReset<const ui::KeyEvent*> reset_sent_key(&sent_key_event_,
                                                         &ui_event);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&ui_event);
@@ -433,14 +522,6 @@ bool InputMethodEngine::IsActive() const {
   return active_;
 }
 
-void InputMethodEngine::KeyEventDone(input_method::KeyEventHandle* key_data,
-                                     bool handled) {
-  KeyEventDoneCallback* callback =
-      reinterpret_cast<KeyEventDoneCallback*>(key_data);
-  callback->Run(handled);
-  delete callback;
-}
-
 bool InputMethodEngine::DeleteSurroundingText(int context_id,
                                               int offset,
                                               size_t number_of_chars,
@@ -492,16 +573,6 @@ void InputMethodEngine::FocusIn(
   if (!active_ || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
 
-  // Prevent sending events on password field to 3rd-party IME extensions.
-  // And also make sure the VK fallback to system VK.
-  // TODO(shuchen): for password field, forcibly switch/lock the IME to the XKB
-  // keyboard related to the current IME.
-  if (current_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD &&
-      !extension_ime_util::IsComponentExtensionIME(GetDescriptor().id())) {
-    EnableInputView(false);
-    return;
-  }
-
   context_id_ = next_context_id_;
   ++next_context_id_;
 
@@ -538,16 +609,7 @@ void InputMethodEngine::FocusOut() {
   if (!active_ || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
 
-  ui::TextInputType previous_input_type = current_input_type_;
   current_input_type_ = ui::TEXT_INPUT_TYPE_NONE;
-
-  // Prevent sending events on password field to 3rd-party IME extensions.
-  // And also make sure the VK restore to IME input view.
-  if (previous_input_type == ui::TEXT_INPUT_TYPE_PASSWORD &&
-      !extension_ime_util::IsComponentExtensionIME(GetDescriptor().id())) {
-    EnableInputView(true);
-    return;
-  }
 
   int context_id = context_id_;
   context_id_ = -1;
@@ -582,44 +644,6 @@ void InputMethodEngine::PropertyActivate(const std::string& property_name) {
 void InputMethodEngine::Reset() {
   observer_->OnReset(engine_id_);
 }
-
-namespace {
-void GetExtensionKeyboardEventFromKeyEvent(
-    const ui::KeyEvent& event,
-    InputMethodEngine::KeyboardEvent* ext_event) {
-  DCHECK(event.type() == ui::ET_KEY_RELEASED ||
-         event.type() == ui::ET_KEY_PRESSED);
-  DCHECK(ext_event);
-  ext_event->type = (event.type() == ui::ET_KEY_RELEASED) ? "keyup" : "keydown";
-
-  ext_event->code = event.code();
-  ext_event->alt_key = event.IsAltDown();
-  ext_event->ctrl_key = event.IsControlDown();
-  ext_event->shift_key = event.IsShiftDown();
-  ext_event->caps_lock = event.IsCapsLockDown();
-
-  uint32 x11_keysym = 0;
-  if (event.HasNativeEvent()) {
-    const base::NativeEvent& native_event = event.native_event();
-    DCHECK(native_event);
-
-    XKeyEvent* x_key = &(static_cast<XEvent*>(native_event)->xkey);
-    KeySym keysym = NoSymbol;
-    ::XLookupString(x_key, NULL, 0, &keysym, NULL);
-    x11_keysym = keysym;
-  } else {
-    // Convert ui::KeyEvent.key_code to DOM UIEvent key.
-    // XKeysymForWindowsKeyCode converts key_code to XKeySym, but it
-    // assumes US layout and does not care about CapLock state.
-    //
-    // TODO(komatsu): Support CapsLock states.
-    // TODO(komatsu): Support non-us keyboard layouts.
-    x11_keysym = ui::XKeysymForWindowsKeyCode(event.key_code(),
-                                              event.IsShiftDown());
-  }
-  ext_event->key = ui::FromXKeycodeToKeyValue(x11_keysym);
-}
-}  // namespace
 
 void InputMethodEngine::ProcessKeyEvent(
     const ui::KeyEvent& key_event,
