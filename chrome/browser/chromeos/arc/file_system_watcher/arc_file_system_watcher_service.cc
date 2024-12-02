@@ -69,6 +69,12 @@ constexpr base::FilePath::CharType kAndroidMyFilesDownloadsDir[] =
 const base::TimeDelta kBuildTimestampMapDelay =
     base::TimeDelta::FromMilliseconds(1000);
 
+// Providing the similar guarantee as
+// /proc/sys/fs/inotify/max_queued_events
+// It probably does not make sense to store more than the max queued limit in
+// inotify, since the inotify system degrades when that happens anyway.
+const size_t kMaxTimestampMapSize = 16384;
+
 // Compares two TimestampMaps and returns the list of file paths added/removed
 // or whose timestamp have changed.
 std::vector<base::FilePath> CollectChangedPaths(
@@ -118,6 +124,10 @@ TimestampMap BuildTimestampMap(base::FilePath cros_dir,
                                   base::FileEnumerator::FILES);
   for (base::FilePath cros_path = enumerator.Next(); !cros_path.empty();
        cros_path = enumerator.Next()) {
+    if (timestamp_map.size() >= kMaxTimestampMapSize) {
+      LOG(WARNING) << "The timestamp map size exceeds max limit";
+      break;
+    }
     // Skip non-media files for efficiency.
     if (!HasAndroidSupportedMediaExtension(cros_path))
       continue;
@@ -174,7 +184,8 @@ class ArcFileSystemWatcherServiceFactory
 // directory.
 class ArcFileSystemWatcherService::FileSystemWatcher {
  public:
-  using Callback = base::Callback<void(const std::vector<std::string>& paths)>;
+  using Callback =
+      base::RepeatingCallback<void(const std::vector<std::string>& paths)>;
 
   FileSystemWatcher(const Callback& callback,
                     const base::FilePath& cros_dir,
@@ -247,8 +258,8 @@ void ArcFileSystemWatcherService::FileSystemWatcher::Start() {
   watcher_ = std::make_unique<base::FilePathWatcher>();
   // On Linux, base::FilePathWatcher::Watch() always returns true.
   watcher_->Watch(cros_dir_, true,
-                  base::Bind(&FileSystemWatcher::OnFilePathChanged,
-                             weak_ptr_factory_.GetWeakPtr()));
+                  base::BindRepeating(&FileSystemWatcher::OnFilePathChanged,
+                                      weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ArcFileSystemWatcherService::FileSystemWatcher::OnFilePathChanged(
@@ -436,6 +447,14 @@ void ArcFileSystemWatcherService::StartWatchingRemovableMedia(
     const std::string& mount_path,
     base::OnceClosure callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  // Make sure that there is no removable media entry. Otherwise, the
+  // map assignment will remove the entry after a new entry is
+  // created, possibly causing crash if there is 2 mount events without
+  // unmounting events in between.
+  if (removable_media_watchers_.count(fs_uuid)) {
+    return;
+  }
 
   // Make sure the callback is triggered after the file system is attached in
   // file_task_runner.

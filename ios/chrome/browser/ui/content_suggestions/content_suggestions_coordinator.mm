@@ -69,6 +69,7 @@
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
 #import "ios/chrome/browser/ui/sharing/sharing_coordinator.h"
 #import "ios/chrome/browser/ui/util/multi_window_support.h"
+#import "ios/chrome/browser/ui/util/named_guide.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/url_loading/url_loading_browser_agent.h"
 #import "ios/chrome/browser/url_loading/url_loading_params.h"
@@ -109,6 +110,7 @@
     DiscoverFeedMetricsRecorder* discoverFeedMetricsRecorder;
 @property(nonatomic, strong) NTPHomeMediator* NTPMediator;
 @property(nonatomic, strong) UIViewController* discoverFeedViewController;
+@property(nonatomic, strong) UIView* discoverFeedHeaderMenuButton;
 @property(nonatomic, strong) URLDragDropHandler* dragDropHandler;
 @property(nonatomic, strong) ActionSheetCoordinator* alertCoordinator;
 // Redefined as readwrite.
@@ -122,6 +124,11 @@
 @property(nonatomic, assign) AuthenticationService* authService;
 // Coordinator in charge of handling sharing use cases.
 @property(nonatomic, strong) SharingCoordinator* sharingCoordinator;
+// YES if the feedShown method has already been called.
+// TODO(crbug.com/1126940): The coordinator shouldn't be keeping track of this
+// for its |self.discoverFeedViewController| remove once we have an appropriate
+// callback.
+@property(nonatomic, assign) BOOL feedShownWasCalled;
 
 @end
 
@@ -135,6 +142,10 @@
   }
 
   _visible = YES;
+
+  self.authService = AuthenticationServiceFactory::GetForBrowserState(
+      self.browser->GetBrowserState());
+  self.authService->WaitUntilCacheIsPopulated();
 
   ntp_snippets::ContentSuggestionsService* contentSuggestionsService =
       IOSChromeContentSuggestionsServiceFactory::GetForBrowserState(
@@ -162,9 +173,6 @@
   } else {
     ntp_home::RecordNTPImpression(ntp_home::LOCAL_SUGGESTIONS);
   }
-
-  self.authService = AuthenticationServiceFactory::GetForBrowserState(
-      self.browser->GetBrowserState());
 
   TemplateURLService* templateURLService =
       ios::TemplateURLServiceFactory::GetForBrowserState(
@@ -265,8 +273,8 @@
   self.suggestionsViewController.overscrollDelegate = self;
   self.suggestionsViewController.themeChangeDelegate = self;
   self.suggestionsViewController.metricsRecorder = self.metricsRecorder;
-  id<SnackbarCommands> dispatcher = HandlerForProtocol(
-      self.browser->GetCommandDispatcher(), SnackbarCommands);
+  id<SnackbarCommands> dispatcher =
+      static_cast<id<SnackbarCommands>>(self.browser->GetCommandDispatcher());
   self.suggestionsViewController.dispatcher = dispatcher;
   self.suggestionsViewController.discoverFeedMenuHandler = self;
   self.suggestionsViewController.discoverFeedMetricsRecorder =
@@ -330,11 +338,24 @@
   [self.sharingCoordinator stop];
   self.sharingCoordinator = nil;
   self.headerController = nil;
+  if (IsDiscoverFeedEnabled()) {
+    ios::GetChromeBrowserProvider()
+        ->GetDiscoverFeedProvider()
+        ->RemoveFeedViewController(self.discoverFeedViewController);
+  }
   _visible = NO;
 }
 
 - (UIViewController*)viewController {
   return self.suggestionsViewController;
+}
+
+- (void)constrainDiscoverHeaderMenuButtonNamedGuide {
+  NamedGuide* menuButtonGuide =
+      [NamedGuide guideWithName:kDiscoverFeedHeaderMenuGuide
+                           view:self.discoverFeedHeaderMenuButton];
+
+  menuButtonGuide.constrainedView = self.discoverFeedHeaderMenuButton;
 }
 
 #pragma mark - ContentSuggestionsViewControllerAudience
@@ -344,6 +365,17 @@
       [self.contentSuggestionsMediator notificationPromo];
   notificationPromo->HandleViewed();
   [self.headerController setPromoCanShow:notificationPromo->CanShow()];
+}
+
+- (void)discoverHeaderMenuButtonShown:(UIView*)menuButton {
+  _discoverFeedHeaderMenuButton = menuButton;
+}
+
+- (void)discoverFeedShown {
+  if (IsDiscoverFeedEnabled() && !self.feedShownWasCalled) {
+    ios::GetChromeBrowserProvider()->GetDiscoverFeedProvider()->FeedWasShown();
+    self.feedShownWasCalled = YES;
+  }
 }
 
 #pragma mark - OverscrollActionsControllerDelegate
@@ -428,7 +460,7 @@
 
 #pragma mark - DiscoverFeedMenuCommands
 
-- (void)openDiscoverFeedMenu:(UIView*)menuButton {
+- (void)openDiscoverFeedMenu {
   [self.alertCoordinator stop];
   self.alertCoordinator = nil;
 
@@ -437,8 +469,8 @@
                          browser:self.browser
                            title:nil
                          message:nil
-                            rect:menuButton.frame
-                            view:menuButton.superview];
+                            rect:self.discoverFeedHeaderMenuButton.frame
+                            view:self.discoverFeedHeaderMenuButton.superview];
   __weak ContentSuggestionsCoordinator* weakSelf = self;
 
   if ([self.contentSuggestionsVisible value]) {

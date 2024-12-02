@@ -38,7 +38,7 @@
 #include "media/base/logging_override_if_enabled.h"
 #include "media/base/media_switches.h"
 #include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
-#include "third_party/blink/public/common/privacy_budget/identifiability_study_participation.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/common/widget/screen_info.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream.h"
@@ -51,7 +51,6 @@
 #include "third_party/blink/public/platform/web_media_player.h"
 #include "third_party/blink/public/platform/web_media_player_source.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
@@ -400,10 +399,9 @@ std::ostream& operator<<(std::ostream& stream,
 constexpr double HTMLMediaElement::kMinPlaybackRate;
 constexpr double HTMLMediaElement::kMaxPlaybackRate;
 
+// static
 MIMETypeRegistry::SupportsType HTMLMediaElement::GetSupportsType(
     const ContentType& content_type) {
-  DEFINE_STATIC_LOCAL(const String, codecs, ("codecs"));
-
   // TODO(https://crbug.com/809912): Finding source of mime parsing crash.
   static base::debug::CrashKeyString* content_type_crash_key =
       base::debug::AllocateCrashKeyString("media_content_type",
@@ -414,7 +412,7 @@ MIMETypeRegistry::SupportsType HTMLMediaElement::GetSupportsType(
   String type = content_type.GetType().DeprecatedLower();
   // The codecs string is not lower-cased because MP4 values are case sensitive
   // per http://tools.ietf.org/html/rfc4281#page-7.
-  String type_codecs = content_type.Parameter(codecs);
+  String type_codecs = content_type.Parameter("codecs");
 
   if (type.IsEmpty())
     return MIMETypeRegistry::kIsNotSupported;
@@ -820,7 +818,8 @@ String HTMLMediaElement::canPlayType(ExecutionContext* context,
   MIMETypeRegistry::SupportsType support =
       GetSupportsType(ContentType(mime_type));
 
-  if (IsUserInIdentifiabilityStudy()) {
+  if (IdentifiabilityStudySettings::Get()->ShouldSample(
+          blink::IdentifiableSurface::Type::kHTMLMediaElement_CanPlayType)) {
     blink::IdentifiabilityMetricBuilder(context->UkmSourceID())
         .Set(
             blink::IdentifiableSurface::FromTypeAndToken(
@@ -4318,9 +4317,8 @@ bool HTMLMediaElement::IsAudioElement() {
   return IsHTMLAudioElement();
 }
 
-WebMediaPlayer::DisplayType HTMLMediaElement::DisplayType() const {
-  return IsFullscreen() ? WebMediaPlayer::DisplayType::kFullscreen
-                        : WebMediaPlayer::DisplayType::kInline;
+DisplayType HTMLMediaElement::GetDisplayType() const {
+  return IsFullscreen() ? DisplayType::kFullscreen : DisplayType::kInline;
 }
 
 gfx::ColorSpace HTMLMediaElement::TargetColorSpace() {

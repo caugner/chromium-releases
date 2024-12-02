@@ -32,6 +32,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/test/button_test_api.h"
 #include "ui/views/test/widget_test.h"
 
 namespace ash {
@@ -201,48 +202,40 @@ TEST_F(SearchBoxViewTest, CloseButtonVisibleAfterTyping) {
   EXPECT_TRUE(view()->close_button()->GetVisible());
 }
 
-// Tests that the close button is still invisible after the search box is
-// activated.
-TEST_F(SearchBoxViewTest, CloseButtonInvisibleAfterSearchBoxActived) {
+// Tests that the close button is still visible after the search box is
+// activated (in zero state).
+TEST_F(SearchBoxViewTest, CloseButtonIVisibleInZeroStateSearchBox) {
   SetSearchBoxActive(true, ui::ET_MOUSE_PRESSED);
-
-  // UI behavior is different with Zero State enabled.
-  if (app_list_features::IsZeroStateSuggestionsEnabled())
-    EXPECT_TRUE(view()->close_button()->GetVisible());
-  else
-    EXPECT_FALSE(view()->close_button()->GetVisible());
+  EXPECT_TRUE(view()->close_button()->GetVisible());
 }
 
 // Tests that the close button becomes invisible after close button is clicked.
 TEST_F(SearchBoxViewTest, CloseButtonInvisibleAfterCloseButtonClicked) {
   KeyPress(ui::VKEY_A);
-  view()->ButtonPressed(
-      view()->close_button(),
-      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-                     base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON,
-                     ui::EF_LEFT_MOUSE_BUTTON));
+  views::test::ButtonTestApi(view()->close_button())
+      .NotifyClick(ui::MouseEvent(
+          ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(), base::TimeTicks(),
+          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   EXPECT_FALSE(view()->close_button()->GetVisible());
 }
 
 // Tests that the search box becomes empty after close button is clicked.
 TEST_F(SearchBoxViewTest, SearchBoxEmptyAfterCloseButtonClicked) {
   KeyPress(ui::VKEY_A);
-  view()->ButtonPressed(
-      view()->close_button(),
-      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-                     base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON,
-                     ui::EF_LEFT_MOUSE_BUTTON));
+  views::test::ButtonTestApi(view()->close_button())
+      .NotifyClick(ui::MouseEvent(
+          ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(), base::TimeTicks(),
+          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   EXPECT_TRUE(view()->search_box()->GetText().empty());
 }
 
 // Tests that the search box is no longer active after close button is clicked.
 TEST_F(SearchBoxViewTest, SearchBoxActiveAfterCloseButtonClicked) {
   KeyPress(ui::VKEY_A);
-  view()->ButtonPressed(
-      view()->close_button(),
-      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-                     base::TimeTicks(), ui::EF_LEFT_MOUSE_BUTTON,
-                     ui::EF_LEFT_MOUSE_BUTTON));
+  views::test::ButtonTestApi(view()->close_button())
+      .NotifyClick(ui::MouseEvent(
+          ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(), base::TimeTicks(),
+          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
   EXPECT_FALSE(view()->is_search_box_active());
 }
 
@@ -667,30 +660,7 @@ TEST_F(SearchBoxViewTest, NavigatePrivacyNotice) {
   EXPECT_TRUE(selection->is_default_result());
   EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
 
-  // The privacy view should have two additional non-default actions.
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
-
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
-
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  ASSERT_TRUE(selection->result());
-  EXPECT_EQ(selection->result()->title(), base::ASCIIToUTF16("test"));
-
-  // Move focus forward to the close button and then the privacy view again.
-  // The privacy view should now have only two actions.
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  EXPECT_FALSE(selection);
-
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
-
+  // The privacy view should have one additional action.
   KeyPress(ui::VKEY_TAB);
   selection = selection_controller->selected_result();
   EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
@@ -700,7 +670,7 @@ TEST_F(SearchBoxViewTest, NavigatePrivacyNotice) {
   ASSERT_TRUE(selection->result());
   EXPECT_EQ(selection->result()->title(), base::ASCIIToUTF16("test"));
 
-  // When navigating backwards, the privacy notice should have two actions.
+  // The privacy notice should also have two actions when navigating backwards.
   KeyPress(ui::VKEY_TAB, /*is_shift_down=*/true);
   selection = selection_controller->selected_result();
   EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
@@ -740,7 +710,6 @@ TEST_F(SearchBoxViewTest, KeyboardEventClosesPrivacyNotice) {
   // Navigate to the close button and press enter. The privacy info should no
   // longer be shown.
   KeyPress(ui::VKEY_TAB);
-  KeyPress(ui::VKEY_TAB);
   KeyPress(ui::VKEY_RETURN);
   EXPECT_FALSE(view_delegate()->ShouldShowAssistantPrivacyInfo());
 }
@@ -769,21 +738,17 @@ TEST_F(SearchBoxViewTest, PrivacyViewActionNotOverriddenByNewResults) {
       selection_controller->selected_result();
   EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
 
-  // The privacy view should have two additional actions. Tab to the next
-  // privacy view action.
+  // The privacy view should have one additional action. Tab to the next privacy
+  // view action.
   KeyPress(ui::VKEY_TAB);
   selection = selection_controller->selected_result();
   EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
 
-  // Create a new search result. The privacy view should only have one action
+  // Create a new search result. The privacy view should have no actions
   // remaining.
   CreateSearchResult(ash::SearchResultDisplayType::kList, 0.5,
                      base::ASCIIToUTF16("testing"), base::string16());
   base::RunLoop().RunUntilIdle();
-
-  KeyPress(ui::VKEY_TAB);
-  selection = selection_controller->selected_result();
-  EXPECT_EQ(selection, privacy_container_view->GetResultViewAt(0));
 
   KeyPress(ui::VKEY_TAB);
   selection = selection_controller->selected_result();
@@ -851,17 +816,6 @@ TEST_F(SearchBoxViewAssistantButtonTest, AssistantButtonVisibleByDefault) {
   EXPECT_TRUE(view()->assistant_button()->GetVisible());
 }
 
-// Tests that the assistant button is visible after the search box is activated.
-TEST_F(SearchBoxViewAssistantButtonTest,
-       AssistantButtonVisibleAfterSearchBoxActived) {
-  // Assistant button is not showing up under zero state for now.
-  // TODO(jennyz): Make assistant button show up under zero state.
-  if (!app_list_features::IsZeroStateSuggestionsEnabled()) {
-    SetSearchBoxActive(true, ui::ET_MOUSE_PRESSED);
-    EXPECT_TRUE(view()->assistant_button()->GetVisible());
-  }
-}
-
 // Tests that the assistant button is invisible after typing in the search box,
 // and comes back when search box is empty.
 TEST_F(SearchBoxViewAssistantButtonTest,
@@ -869,12 +823,9 @@ TEST_F(SearchBoxViewAssistantButtonTest,
   KeyPress(ui::VKEY_A);
   EXPECT_FALSE(view()->assistant_button()->GetVisible());
 
-  // Assistant button is not showing up under zero state for now.
-  // TODO(crbug.com/925455): Make assistant button show up under zero state.
-  if (!app_list_features::IsZeroStateSuggestionsEnabled()) {
-    KeyPress(ui::VKEY_BACK);
-    EXPECT_TRUE(view()->assistant_button()->GetVisible());
-  }
+  // Assistant button is not showing up under zero state.
+  KeyPress(ui::VKEY_BACK);
+  EXPECT_FALSE(view()->assistant_button()->GetVisible());
 }
 
 class SearchBoxViewAutocompleteTest

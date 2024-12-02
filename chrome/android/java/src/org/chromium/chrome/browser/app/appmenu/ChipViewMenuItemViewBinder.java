@@ -11,12 +11,14 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.content.res.AppCompatResources;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.appmenu.AppMenuPropertiesDelegateImpl.ThreeButtonActionBarType;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuClickHandler;
 import org.chromium.chrome.browser.ui.appmenu.CustomViewBinder;
+import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.text.TextViewWithCompoundDrawables;
 import org.chromium.ui.widget.ChipView;
 
@@ -45,8 +47,9 @@ class ChipViewMenuItemViewBinder implements CustomViewBinder {
     }
 
     @Override
-    public View getView(MenuItem item, View convertView, ViewGroup parent, LayoutInflater inflater,
-            AppMenuClickHandler appMenuClickHandler) {
+    public View getView(MenuItem item, @Nullable View convertView, ViewGroup parent,
+            LayoutInflater inflater, AppMenuClickHandler appMenuClickHandler,
+            @Nullable Integer highlightedItemId) {
         assert item.getItemId() == R.id.downloads_row_menu_id
                 || item.getItemId() == R.id.all_bookmarks_row_menu_id;
 
@@ -94,11 +97,22 @@ class ChipViewMenuItemViewBinder implements CustomViewBinder {
             holder.chipView.setVisibility(View.VISIBLE);
             holder.chipView.getPrimaryTextView().setText(chipViewMenuItem.getTitle());
             holder.chipView.setEnabled(chipViewMenuItem.isEnabled());
-            // Use selected chip color.
-            holder.chipView.setSelected(true);
             final MenuItem finalChipViewMenuItem = chipViewMenuItem;
             holder.chipView.setOnClickListener(
                     v -> appMenuClickHandler.onItemClick(finalChipViewMenuItem));
+
+            if (highlightedItemId != null && chipViewMenuItem.getItemId() == highlightedItemId) {
+                ViewHighlighter.turnOnRectangularHighlight(
+                        holder.chipView, holder.chipView.getCornerRadius());
+            } else {
+                ViewHighlighter.turnOffHighlight(holder.chipView);
+            }
+        }
+
+        if (highlightedItemId != null && mainMenuItem.getItemId() == highlightedItemId) {
+            ViewHighlighter.turnOnRectangularHighlight(holder.title);
+        } else {
+            ViewHighlighter.turnOffHighlight(holder.title);
         }
 
         convertView.setEnabled(false);

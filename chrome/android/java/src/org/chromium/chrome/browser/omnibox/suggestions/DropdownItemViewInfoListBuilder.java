@@ -27,14 +27,15 @@ import org.chromium.chrome.browser.omnibox.suggestions.clipboard.ClipboardSugges
 import org.chromium.chrome.browser.omnibox.suggestions.editurl.EditUrlSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.entity.EntitySuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderProcessor;
+import org.chromium.chrome.browser.omnibox.suggestions.mostvisited.MostVisitedTilesProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tail.TailSuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.tiles.TileSuggestionProcessor;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.ui.favicon.LargeIconBridge;
 import org.chromium.components.browser_ui.util.ConversionUtils;
 import org.chromium.components.browser_ui.util.GlobalDiscardableReferencePool;
+import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.components.query_tiles.QueryTile;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -51,6 +52,7 @@ class DropdownItemViewInfoListBuilder {
     private static final int DEFAULT_SIZE_OF_VISIBLE_GROUP = 5;
 
     private final List<SuggestionProcessor> mPriorityOrderedSuggestionProcessors;
+    private @NonNull AutocompleteController mAutocompleteController;
 
     private HeaderProcessor mHeaderProcessor;
     private ActivityTabProvider mActivityTabProvider;
@@ -62,9 +64,10 @@ class DropdownItemViewInfoListBuilder {
     private boolean mEnableAdaptiveSuggestionsCount;
     private boolean mBuiltListHasFullyConcealedElements;
 
-    DropdownItemViewInfoListBuilder() {
+    DropdownItemViewInfoListBuilder(AutocompleteController controller) {
         mPriorityOrderedSuggestionProcessors = new ArrayList<>();
         mDropdownHeight = DROPDOWN_HEIGHT_UNKNOWN;
+        mAutocompleteController = controller;
     }
 
     /**
@@ -100,6 +103,8 @@ class DropdownItemViewInfoListBuilder {
         registerSuggestionProcessor(new TailSuggestionProcessor(context, host));
         registerSuggestionProcessor(
                 new TileSuggestionProcessor(context, queryTileSuggestionCallback));
+        registerSuggestionProcessor(
+                new MostVisitedTilesProcessor(context, host, iconBridgeSupplier));
         registerSuggestionProcessor(
                 new BasicSuggestionProcessor(context, host, textProvider, iconBridgeSupplier));
     }
@@ -381,6 +386,8 @@ class DropdownItemViewInfoListBuilder {
             Collections.sort(suggestionsPairedWithProcessors.subList(
                                      firstIndexForGrouping, firstIndexInConcealedGroup),
                     comparator);
+            mAutocompleteController.groupSuggestionsBySearchVsURL(
+                    firstIndexForGrouping, firstIndexInConcealedGroup);
         }
 
         // Sort the concealed part of suggestions list.
@@ -388,6 +395,8 @@ class DropdownItemViewInfoListBuilder {
             Collections.sort(suggestionsPairedWithProcessors.subList(
                                      firstIndexInConcealedGroup, firstIndexWithHeader),
                     comparator);
+            mAutocompleteController.groupSuggestionsBySearchVsURL(
+                    firstIndexInConcealedGroup, firstIndexWithHeader);
         }
     }
 
@@ -449,5 +458,14 @@ class DropdownItemViewInfoListBuilder {
         }
         assert false : "No default handler for suggestions";
         return null;
+    }
+
+    /**
+     * Change the AutocompleteController instance that will be used by this class.
+     *
+     * @param controller New AutocompleteController to use.
+     */
+    void setAutocompleteControllerForTest(@NonNull AutocompleteController controller) {
+        mAutocompleteController = controller;
     }
 }

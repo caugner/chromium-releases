@@ -79,11 +79,11 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
                             const base::Optional<gpu::GpuFeatureInfo>&
                                 gpu_feature_info_for_hardware_gpu);
-  void UpdateGpuExtraInfo(const gpu::GpuExtraInfo& process_info);
+  void UpdateGpuExtraInfo(const gfx::GpuExtraInfo& process_info);
 
   gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
   gpu::GpuFeatureInfo GetGpuFeatureInfoForHardwareGpu() const;
-  gpu::GpuExtraInfo GetGpuExtraInfo() const;
+  gfx::GpuExtraInfo GetGpuExtraInfo() const;
 
   bool IsGpuCompositingDisabled() const;
 
@@ -121,12 +121,16 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   gpu::GpuMode GetGpuMode() const;
   void FallBackToNextGpuMode();
 
+  bool CanFallback() const { return !fallback_modes_.empty(); }
+
   bool IsGpuProcessUsingHardwareGpu() const;
 
   void SetApplicationVisible(bool is_visible);
 
   void OnDisplayAdded(const display::Display& new_display);
   void OnDisplayRemoved(const display::Display& old_display);
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t changed_metrics);
 
  private:
   friend class GpuDataManagerImplPrivateTest;
@@ -221,7 +225,7 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   gpu::GpuFeatureInfo gpu_feature_info_for_hardware_gpu_;
   gpu::GPUInfo gpu_info_for_hardware_gpu_;
 
-  gpu::GpuExtraInfo gpu_extra_info_;
+  gfx::GpuExtraInfo gpu_extra_info_;
 
   const scoped_refptr<GpuDataManagerObserverList> observer_list_;
 

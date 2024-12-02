@@ -64,7 +64,9 @@ BaseSafeBrowsingErrorUI::SBErrorDisplayOptions GetDefaultDisplayOptions(
       /*is_enhanced_protection_enabled=*/false,
       prefs->GetBoolean(prefs::kSafeBrowsingProceedAnywayDisabled),
       /*should_open_links_in_new_tab=*/false,
-      /*always_show_back_to_safety=*/true, "cpn_safe_browsing");
+      /*always_show_back_to_safety=*/true,
+      /*is_enhanced_protection_message_enabled=*/false,
+      /*is_safe_browsing_managed=*/false, "cpn_safe_browsing");
 }
 }  // namespace
 
@@ -156,7 +158,6 @@ bool SafeBrowsingBlockingPage::ShouldCreateNewNavigation() const {
 
 void SafeBrowsingBlockingPage::PopulateInterstitialStrings(
     base::DictionaryValue* load_time_data) const {
-  load_time_data->SetBoolean("committed_interstitials_enabled", true);
   load_time_data->SetString("url_to_reload", request_url().spec());
   error_ui_->PopulateStringsForHtml(load_time_data);
 }
@@ -171,7 +172,7 @@ SafeBrowsingBlockingPage::SafeBrowsingControllerClient::
           resource.web_state_getter.Run(),
           CreateMetricsHelper(resource),
           GetApplicationContext()->GetApplicationLocale()),
-      url_(resource.url),
+      url_(SafeBrowsingUrlAllowList::GetDecisionUrl(resource)),
       threat_type_(resource.threat_type) {}
 
 SafeBrowsingBlockingPage::SafeBrowsingControllerClient::

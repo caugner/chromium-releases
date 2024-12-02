@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "base/containers/stack.h"
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
@@ -23,6 +24,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
@@ -32,6 +34,7 @@
 #include "components/omnibox/browser/in_memory_url_index.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/tailored_word_break_iterator.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/url_formatter/url_formatter.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
@@ -76,6 +79,12 @@ typedef in_memory_url_index::
 bool LengthGreater(const base::string16& string_a,
                    const base::string16& string_b) {
   return string_a.length() > string_b.length();
+}
+
+bool HasApi2Qualifier(ui::PageTransition transition) {
+  return (ui::PageTransitionGetQualifier(transition) &
+          ui::PAGE_TRANSITION_FROM_API_2) ==
+         ui::PageTransitionGetQualifier(ui::PAGE_TRANSITION_FROM_API_2);
 }
 
 }  // namespace
@@ -278,12 +287,9 @@ bool URLIndexPrivateData::UpdateURL(
     // This new row should be indexed if it qualifies.
     history::URLRow new_row(row);
     new_row.set_id(row_id);
-    row_was_updated = RowQualifiesAsSignificant(new_row, base::Time()) &&
-                      IndexRow(nullptr,
-                               history_service,
-                               new_row,
-                               scheme_whitelist,
-                               tracker);
+    row_was_updated =
+        RowQualifiesAsSignificant(new_row, base::Time()) &&
+        IndexRow(nullptr, history_service, new_row, scheme_whitelist, tracker);
   } else if (RowQualifiesAsSignificant(row, base::Time())) {
     // This indexed row still qualifies and will be re-indexed.
     // The url won't have changed but the title, visit count, etc.
@@ -383,6 +389,7 @@ bool URLIndexPrivateData::DeleteURL(const GURL& url) {
 // static
 scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RestoreFromFile(
     const base::FilePath& file_path) {
+  base::TimeTicks beginning_time = base::TimeTicks::Now();
   if (!base::PathExists(file_path))
     return nullptr;
   std::string data;
@@ -409,6 +416,8 @@ scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RestoreFromFile(
   if (!restored_data->RestorePrivateData(index_cache))
     return nullptr;
 
+  UMA_HISTOGRAM_TIMES("History.InMemoryURLIndexRestoreCacheTime",
+                      base::TimeTicks::Now() - beginning_time);
   UMA_HISTOGRAM_COUNTS_1M("History.InMemoryURLHistoryItems",
                           restored_data->history_id_word_map_.size());
   if (restored_data->Empty())
@@ -436,17 +445,19 @@ scoped_refptr<URLIndexPrivateData> URLIndexPrivateData::RebuildFromHistory(
   // Limiting the number of URLs indexed degrades the quality of suggestions to
   // save memory. This limit is only applied for urls indexed at startup and
   // more urls can be indexed during the browsing session. The primary use case
-  // is for Android devices where the session is typically short.
+  // is for Android devices where the session is typically short, and low-memory
+  // machines in general (Desktop or Mobile).
   const int max_urls_indexed =
       OmniboxFieldTrial::MaxNumHQPUrlsIndexedAtStartup();
   int num_urls_indexed = 0;
   for (history::URLRow row; history_enum.GetNextURL(&row);) {
     DCHECK(RowQualifiesAsSignificant(row, base::Time()));
     // Do not use >= to account for case of -1 for unlimited urls.
-    if (num_urls_indexed++ == max_urls_indexed)
+    if (rebuilt_data->IndexRow(history_db, nullptr, row, scheme_whitelist,
+                               nullptr) &&
+        num_urls_indexed++ == max_urls_indexed) {
       break;
-    rebuilt_data->IndexRow(
-        history_db, nullptr, row, scheme_whitelist, nullptr);
+    }
   }
 
   UMA_HISTOGRAM_TIMES("History.InMemoryURLIndexingTime",
@@ -511,6 +522,103 @@ size_t URLIndexPrivateData::EstimateMemoryUsage() const {
   res += base::trace_event::EstimateMemoryUsage(word_starts_map_);
 
   return res;
+}
+
+// TODO(https://crbug.com/1068883): Remove this code when the bug is fixed.
+// This code should be deprecated and removed before M90. This method is not
+// merged with EstimateMemoryUsage(...) since it is intended to be removed.
+void URLIndexPrivateData::OnMemoryAllocatorDump(
+    base::trace_event::MemoryAllocatorDump* dump) const {
+  dump->AddScalar("search_term_cache",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  search_term_cache_.size());
+  dump->AddScalar("search_term_cache",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(search_term_cache_));
+
+  dump->AddScalar("word_list",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  word_list_.size());
+  dump->AddScalar("word_list",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(word_list_));
+
+  dump->AddScalar("available_words",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  available_words_.size());
+  dump->AddScalar("available_words",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(available_words_));
+
+  dump->AddScalar("word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  word_map_.size());
+  dump->AddScalar("word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(word_map_));
+
+  dump->AddScalar("char_word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  char_word_map_.size());
+  dump->AddScalar("char_word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(char_word_map_));
+
+  dump->AddScalar("word_id_history_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  word_id_history_map_.size());
+  dump->AddScalar("word_id_history_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(word_id_history_map_));
+
+  dump->AddScalar("history_id_word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  history_id_word_map_.size());
+  dump->AddScalar("history_id_word_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(history_id_word_map_));
+
+  dump->AddScalar("history_info_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  history_info_map_.size());
+  dump->AddScalar("history_info_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(history_info_map_));
+
+  dump->AddScalar("word_starts_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                  word_starts_map_.size());
+  dump->AddScalar("word_starts_map",
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  base::trace_event::EstimateMemoryUsage(word_starts_map_));
+}
+
+bool URLIndexPrivateData::IsUrlRowIndexed(const history::URLRow& row) const {
+  return history_info_map_.count(row.id()) > 0;
+}
+
+// static
+bool URLIndexPrivateData::ShouldExcludeBecauseOfCctTransition(
+    ui::PageTransition transition) {
+  // Cct visits are tagged with PAGE_TRANSITION_FROM_API_2.
+  return HasApi2Qualifier(transition) &&
+         base::FeatureList::IsEnabled(omnibox::kHideVisitsFromCct);
+}
+
+// static
+bool URLIndexPrivateData::ShouldExcludeBecauseOfCctVisits(
+    const history::VisitVector& visits) {
+  if (visits.empty() ||
+      !base::FeatureList::IsEnabled(omnibox::kHideVisitsFromCct)) {
+    return false;
+  }
+
+  // Cct visits are tagged with PAGE_TRANSITION_FROM_API_2.
+  for (const auto& visit : visits) {
+    if (!HasApi2Qualifier(visit.transition))
+      return false;
+  }
+  return true;
 }
 
 // Note that when running Chrome normally this destructor isn't called during
@@ -792,7 +900,17 @@ bool URLIndexPrivateData::IndexRow(
   if (!URLSchemeIsWhitelisted(gurl, scheme_whitelist))
     return false;
 
-  history::URLID row_id = row.id();
+  const history::URLID row_id = row.id();
+  history::VisitVector recent_visits;
+  // We'd like to check that we're on the history DB thread.
+  // However, unittest code actually calls this on the UI thread.
+  // So we don't do any thread checks.
+  const bool got_visits =
+      history_db && history_db->GetMostRecentVisitsForURL(
+                        row_id, kMaxVisitsToStoreInCache, &recent_visits);
+  if (got_visits && ShouldExcludeBecauseOfCctVisits(recent_visits))
+    return false;
+
   // Strip out username and password before saving and indexing.
   base::string16 url(url_formatter::FormatUrl(
       gurl, url_formatter::kFormatUrlOmitUsernamePassword,
@@ -817,18 +935,10 @@ bool URLIndexPrivateData::IndexRow(
 
   // Update the recent visits information or schedule the update
   // as appropriate.
-  if (history_db) {
-    // We'd like to check that we're on the history DB thread.
-    // However, unittest code actually calls this on the UI thread.
-    // So we don't do any thread checks.
-    history::VisitVector recent_visits;
-    if (history_db->GetMostRecentVisitsForURL(row_id,
-                                              kMaxVisitsToStoreInCache,
-                                              &recent_visits))
-      UpdateRecentVisits(row_id, recent_visits);
-  } else {
+  if (got_visits) {
+    UpdateRecentVisits(row_id, recent_visits);
+  } else if (history_service) {
     DCHECK(tracker);
-    DCHECK(history_service);
     ScheduleUpdateRecentVisits(history_service, row_id, tracker);
   }
 
@@ -933,6 +1043,7 @@ void URLIndexPrivateData::ResetSearchTermCache() {
 }
 
 bool URLIndexPrivateData::SaveToFile(const base::FilePath& file_path) {
+  base::TimeTicks beginning_time = base::TimeTicks::Now();
   InMemoryURLIndexCacheItem index_cache;
   SavePrivateData(&index_cache);
   std::string data;
@@ -946,6 +1057,8 @@ bool URLIndexPrivateData::SaveToFile(const base::FilePath& file_path) {
     LOG(WARNING) << "Failed to write " << file_path.value();
     return false;
   }
+  UMA_HISTOGRAM_TIMES("History.InMemoryURLIndexSaveCacheTime",
+                      base::TimeTicks::Now() - beginning_time);
   return true;
 }
 

@@ -206,6 +206,11 @@ public class ProfileSyncService {
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
+    public boolean isAuthenticatedAccountPrimary() {
+        return ProfileSyncServiceJni.get().isAuthenticatedAccountPrimary(
+                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
+    }
+
     /**
      * Gets the set of data types that are "preferred" in sync. Those are the
      * chosen ones (see getChosenDataTypes), plus any that are implied by them.
@@ -498,16 +503,6 @@ public class ProfileSyncService {
                 mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
     }
 
-    /**
-     * Turns on encryption of all data types. This only takes effect after sync configuration is
-     * completed and setChosenDataTypes() is invoked.
-     */
-    public void enableEncryptEverything() {
-        assert isEngineInitialized();
-        ProfileSyncServiceJni.get().enableEncryptEverything(
-                mNativeProfileSyncServiceAndroid, ProfileSyncService.this);
-    }
-
     public void setEncryptionPassphrase(String passphrase) {
         assert isEngineInitialized();
         ProfileSyncServiceJni.get().setEncryptionPassphrase(
@@ -667,6 +662,8 @@ public class ProfileSyncService {
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean getDecoupledFromAndroidMasterSync(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
+        boolean isAuthenticatedAccountPrimary(
+                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isEngineInitialized(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isEncryptEverythingAllowed(
@@ -674,8 +671,6 @@ public class ProfileSyncService {
         boolean isEncryptEverythingEnabled(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isTransportStateActive(
-                long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
-        void enableEncryptEverything(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);
         boolean isPassphraseRequiredForPreferredDataTypes(
                 long nativeProfileSyncServiceAndroid, ProfileSyncService caller);

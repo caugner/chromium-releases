@@ -18,6 +18,7 @@
 #include "ash/app_list/views/apps_container_view.h"
 #include "ash/app_list/views/apps_grid_view.h"
 #include "ash/app_list/views/contents_view.h"
+#include "ash/app_list/views/privacy_container_view.h"
 #include "ash/app_list/views/search_result_container_view.h"
 #include "ash/app_list/views/search_result_page_view.h"
 #include "ash/app_list/views/search_result_tile_item_view.h"
@@ -137,15 +138,20 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
     }
     GetAppListTestHelper()->WaitUntilIdle();
 
+    // Mark the privacy notices as dismissed so that the tile items will be the
+    // first search container.
+    ContentsView* contents_view = Shell::Get()
+                                      ->app_list_controller()
+                                      ->presenter()
+                                      ->GetView()
+                                      ->app_list_main_view()
+                                      ->contents_view();
+    Shell::Get()->app_list_controller()->MarkAssistantPrivacyInfoDismissed();
+    Shell::Get()->app_list_controller()->MarkSuggestedContentInfoDismissed();
+    contents_view->privacy_container_view()->Update();
+
     SearchResultContainerView* search_result_container_view =
-        Shell::Get()
-            ->app_list_controller()
-            ->presenter()
-            ->GetView()
-            ->app_list_main_view()
-            ->contents_view()
-            ->search_results_page_view()
-            ->result_container_views()[0];
+        contents_view->search_results_page_view()->result_container_views()[0];
 
     // Request focus on the first tile item view.
     search_result_container_view->GetFirstResultView()->RequestFocus();
@@ -158,7 +164,7 @@ class AppListAppLaunchedMetricTest : public AshTestBase {
     // Populate 4 suggestion chips.
     for (size_t i = 0; i < 4; i++) {
       auto search_result_chip = std::make_unique<SearchResult>();
-      search_result_chip->set_display_type(SearchResultDisplayType::kTile);
+      search_result_chip->set_display_type(SearchResultDisplayType::kChip);
       search_result_chip->set_is_recommendation(true);
       search_model_->results()->Add(std::move(search_result_chip));
     }

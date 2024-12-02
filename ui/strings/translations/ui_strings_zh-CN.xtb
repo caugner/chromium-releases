@@ -23,6 +23,7 @@
 <translation id="1450753235335490080">无法分享<ph name="CONTENT_TYPE" /></translation>
 <translation id="1487931858675166540">“<ph name="FIRST_ITEM_TITLE" />”与“<ph name="SECOND_ITEM_TITLE" />”交换了位置</translation>
 <translation id="1498028757988366001">您以前搜索过此内容。如果您将“<ph name="QUERY" />”从历史记录中删除，该条目将会从登录您帐号的所有设备上永久移除。</translation>
+<translation id="1510238584712386396">启动器</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 分钟 }other{# 分钟 }}</translation>
 <translation id="1643823602425662293">通知</translation>
 <translation id="169515659049020177">Shift</translation>
@@ -99,6 +100,7 @@
 <translation id="3600969208114796418"><ph name="SAVEAS_EXTENSION_TYPE" /> 文件</translation>
 <translation id="3608915363409716668"><ph name="MAXIMUM_VALUE" />+</translation>
 <translation id="3618849550573277856">查询“<ph name="LOOKUP_STRING" />”</translation>
+<translation id="3622035490309591977">剪贴板历史记录</translation>
 <translation id="364720409959344976">选择要上传的文件夹</translation>
 <translation id="3660179305079774227">向上箭头</translation>
 <translation id="3670030362669914947">卡号</translation>
@@ -134,6 +136,7 @@
 <translation id="520299402983819650"><ph name="QUANTITY" /> PB</translation>
 <translation id="5266161281976477809">开合三角标记</translation>
 <translation id="5278860589123563674">发送失败</translation>
+<translation id="5283099933536931082"><ph name="APP_ITEM_TITLE" />中有需要您关注的新动态。</translation>
 <translation id="528468243742722775">结束</translation>
 <translation id="5329858601952122676">删除(&amp;D)</translation>
 <translation id="5395308026110844773">“<ph name="DRAGGED_APP_NAME" />”已拖至“<ph name="IN_PLACE_APP" />”上，松开即可创建文件夹。</translation>
@@ -144,11 +147,13 @@
 <translation id="5574202486608032840"><ph name="IDS_SHORT_PRODUCT_OS_NAME" /> 系统</translation>
 <translation id="5583640892426849032">退格</translation>
 <translation id="5613020302032141669">向左箭头</translation>
+<translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" />中有需要您关注的新动态。</translation>
 <translation id="5675363643668471212">任务栏中的项目</translation>
 <translation id="5754277640426581776">{MINUTES,plural, =1{1 分钟}other{# 分钟}}</translation>
 <translation id="5763338081255973061">{DAYS,plural, =0{今天曾有活动}=1{1 天前曾有活动}other{# 天前曾有活动}}</translation>
 <translation id="5768079895599174203">{DAYS,plural, =1{1 天 }other{# 天 }}</translation>
 <translation id="5789643057113097023">.</translation>
+<translation id="5843690142429128814">图片。</translation>
 <translation id="5866104238061687188">{YEARS,plural, =1{1 年后}other{# 年后}}</translation>
 <translation id="588258955323874662">全屏</translation>
 <translation id="5906667377645263094">{SECONDS,plural, =1{还剩 1 秒}other{还剩 # 秒}}</translation>
@@ -189,6 +194,7 @@
 <translation id="6845533974506654842">按</translation>
 <translation id="6863590663815976734">{HOURS,plural, =1{还剩 1 小时}other{还剩 # 小时}}</translation>
 <translation id="688711909580084195">无标题网页</translation>
+<translation id="6902419395050653510">HTML 内容。</translation>
 <translation id="6907759265145635167"><ph name="QUANTITY" /> PB/s</translation>
 <translation id="6917971086528278418">{YEARS,plural, =1{还有 1 年的时间}other{还有 # 年的时间}}</translation>
 <translation id="6945221475159498467">选择</translation>

@@ -33,7 +33,7 @@
 #include <gtk/gtk.h>
 
 #include "base/linux_util.h"
-#include "ui/gfx/x/x11.h"
+#include "ui/events/platform/x11/x11_event_source.h"
 #endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 #if defined(OS_APPLE)
@@ -113,8 +113,10 @@ int It2MeNativeMessagingHostMain(int argc, char** argv) {
   remoting::LoadResources("");
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
-  // Required in order for us to run multiple X11 threads.
-  XInitThreads();
+  // Create an X11EventSource so the global X11 connection
+  // (x11::Connection::Get()) can dispatch X events.
+  auto event_source =
+      std::make_unique<ui::X11EventSource>(x11::Connection::Get());
 
   // Required for any calls into GTK functions, such as the Disconnect and
   // Continue windows. Calling with nullptr arguments because we don't have

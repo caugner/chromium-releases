@@ -193,10 +193,19 @@ class PLATFORM_EXPORT FontMatchingMetrics {
                                       IdentifiableTokenKeyHashTraits>;
 
   // Adds a digest of the |font_data|'s typeface to |hash_map| using the key
-  // |input_key|, unless that key is already present.
+  // |input_key|, unless that key is already present. If |font_data| is not
+  // nullptr, then the typeface digest will also be saved with its PostScript
+  // name in |font_load_postscript_name_|.
   void InsertFontHashIntoMap(IdentifiableTokenKey input_key,
                              SimpleFontData* font_data,
-                             TokenToTokenHashMap hash_map);
+                             TokenToTokenHashMap& hash_map);
+
+  // Reports a local font's existence was looked up by a name, but its actual
+  // font data may or may not have been loaded. This only includes lookups where
+  // the name is allowed to match PostScript names and full font names, but not
+  // family names.
+  void ReportLocalFontExistenceByUniqueNameOnly(const AtomicString& font_name,
+                                                bool font_exists);
 
   // Constructs a builder with a hash of the FontSelectionRequest already added.
   IdentifiableTokenBuilder GetTokenBuilderWithFontSelectionRequest(
@@ -207,6 +216,11 @@ class PLATFORM_EXPORT FontMatchingMetrics {
   int64_t GetHashForFontData(SimpleFontData* font_data);
 
   void Initialize();
+
+  // Get a token that uniquely represents the typeface's PostScript name. May
+  // represent the empty string if no PostScript name was found.
+  IdentifiableToken GetPostScriptNameTokenForFontData(
+      SimpleFontData* font_data);
 
   // Font family names successfully matched.
   HashSet<AtomicString> successful_font_families_;
@@ -235,13 +249,13 @@ class PLATFORM_EXPORT FontMatchingMetrics {
   TokenToTokenHashMap font_lookups_by_fallback_character_;
   TokenToTokenHashMap font_lookups_as_last_resort_;
   TokenToTokenHashMap generic_font_lookups_;
+  TokenToTokenHashMap font_load_postscript_name_;
+  TokenToTokenHashMap local_font_existence_by_unique_name_only_;
 
   ukm::UkmRecorder* const ukm_recorder_;
   const ukm::SourceId source_id_;
 
   TaskRunnerTimer<FontMatchingMetrics> identifiability_metrics_timer_;
-
-  const bool identifiability_study_enabled_;
 };
 
 }  // namespace blink

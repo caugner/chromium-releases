@@ -9,9 +9,11 @@
 
 #include "base/macros.h"
 #include "base/time/time.h"
+#include "base/version.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_result.h"
 #include "components/permissions/permission_util.h"
+#include "components/permissions/prediction_service/prediction_service_messages.pb.h"
 
 namespace content {
 class BrowserContext;
@@ -50,6 +52,9 @@ enum class PermissionSourceUI {
   // through the notification UI.
   INLINE_SETTINGS = 5,
 
+  // Permission settings changes as part of the abusive origins revocation.
+  AUTO_REVOCATION = 6,
+
   // Always keep this at the end.
   NUM,
 };
@@ -69,7 +74,7 @@ enum class PermissionEmbargoStatus {
 // Enum used in UKMs and UMAs, do not re-order or change values. Deprecated
 // items should only be commented out. New items should be added at the end,
 // and the "PermissionPromptDisposition" histogram suffix needs to be updated to
-// match (tools/metrics/histograms/histograms.xml).
+// match (tools/metrics/histograms/histograms_xml/histogram_suffixes_list.xml).
 enum class PermissionPromptDisposition {
   // Not all permission actions will have an associated permission prompt (e.g.
   // changing permission via the settings page).
@@ -92,6 +97,36 @@ enum class PermissionPromptDisposition {
   // Only used on Android, an initially-collapsed infobar at the bottom of the
   // page.
   MINI_INFOBAR = 5,
+
+  // Only used on desktop, a chip on the left-hand side of the location bar that
+  // shows a bubble when clicked.
+  LOCATION_BAR_LEFT_CHIP = 6,
+
+  // There was no UI being shown. This is usually because the user closed an
+  // inactive tab that had a pending permission request.
+  NONE_VISIBLE = 7,
+
+  // Other custom modal dialogs.
+  CUSTOM_MODAL_DIALOG = 8,
+};
+
+// The reason why the permission prompt disposition was used. Enum used in UKMs,
+// do not re-order or change values. Deprecated items should only be commented
+// out.
+enum class PermissionPromptDispositionReason {
+  // Disposition was selected in prefs.
+  USER_PREFERENCE_IN_SETTINGS = 0,
+
+  // Disposition was chosen because Safe Browsing classifies the origin
+  // as being spammy or abusive with permission requests.
+  SAFE_BROWSING_VERDICT = 1,
+
+  // Disposition was chosen based on grant likelihood predicted by the
+  // Web Permission Prediction Service.
+  PREDICTION_SERVICE = 2,
+
+  // Disposition was used as a fallback, if no selector made a decision.
+  DEFAULT_FALLBACK = 3,
 };
 
 enum class AdaptiveTriggers {
@@ -103,15 +138,29 @@ enum class AdaptiveTriggers {
   THREE_CONSECUTIVE_DENIES = 0x01,
 };
 
+enum class PermissionAutoRevocationHistory {
+  // Permission has not been automatically revoked.
+  NONE = 0,
+
+  // Permission has been automatically revoked.
+  PREVIOUSLY_AUTO_REVOKED = 0x01,
+};
+
 // Provides a convenient way of logging UMA for permission related operations.
 class PermissionUmaUtil {
  public:
+  using PredictionGrantLikelihood =
+      PermissionSuggestion_Likelihood_DiscretizedLikelihood;
+
   static const char kPermissionsPromptShown[];
   static const char kPermissionsPromptShownGesture[];
   static const char kPermissionsPromptShownNoGesture[];
   static const char kPermissionsPromptAccepted[];
   static const char kPermissionsPromptAcceptedGesture[];
   static const char kPermissionsPromptAcceptedNoGesture[];
+  static const char kPermissionsPromptAcceptedOnce[];
+  static const char kPermissionsPromptAcceptedOnceGesture[];
+  static const char kPermissionsPromptAcceptedOnceNoGesture[];
   static const char kPermissionsPromptDenied[];
   static const char kPermissionsPromptDeniedGesture[];
   static const char kPermissionsPromptDeniedNoGesture[];
@@ -147,11 +196,18 @@ class PermissionUmaUtil {
       const std::vector<PermissionRequest*>& requests,
       content::WebContents* web_contents,
       PermissionAction permission_action,
-      PermissionPromptDisposition ui_disposition);
+      PermissionPromptDisposition ui_disposition,
+      base::Optional<PermissionPromptDispositionReason> ui_reason,
+      base::Optional<PredictionGrantLikelihood> predicted_grant_likelihood);
 
   static void RecordWithBatteryBucket(const std::string& histogram);
 
   static void RecordInfobarDetailsExpanded(bool expanded);
+
+  static void RecordCrowdDenyIsLoadedAtAbuseCheckTime(bool loaded);
+
+  static void RecordCrowdDenyVersionAtAbuseCheckTime(
+      const base::Optional<base::Version>& version);
 
   // Record UMAs related to the Android "Missing permissions" infobar.
   static void RecordMissingPermissionInfobarShouldShow(
@@ -200,14 +256,17 @@ class PermissionUmaUtil {
   friend class PermissionUmaUtilTest;
 
   // web_contents may be null when for recording non-prompt actions.
-  static void RecordPermissionAction(ContentSettingsType permission,
-                                     PermissionAction action,
-                                     PermissionSourceUI source_ui,
-                                     PermissionRequestGestureType gesture_type,
-                                     PermissionPromptDisposition ui_disposition,
-                                     const GURL& requesting_origin,
-                                     const content::WebContents* web_contents,
-                                     content::BrowserContext* browser_context);
+  static void RecordPermissionAction(
+      ContentSettingsType permission,
+      PermissionAction action,
+      PermissionSourceUI source_ui,
+      PermissionRequestGestureType gesture_type,
+      PermissionPromptDisposition ui_disposition,
+      base::Optional<PermissionPromptDispositionReason> ui_reason,
+      const GURL& requesting_origin,
+      const content::WebContents* web_contents,
+      content::BrowserContext* browser_context,
+      base::Optional<PredictionGrantLikelihood> predicted_grant_likelihood);
 
   // Records |count| total prior actions for a prompt of type |permission|
   // for a single origin using |prefix| for the metric.
@@ -217,7 +276,8 @@ class PermissionUmaUtil {
 
   static void RecordPromptDecided(
       const std::vector<PermissionRequest*>& requests,
-      bool accepted);
+      bool accepted,
+      bool is_one_time);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(PermissionUmaUtil);
 };

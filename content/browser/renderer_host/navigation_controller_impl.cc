@@ -64,7 +64,6 @@
 #include "content/common/content_constants_internal.h"
 #include "content/common/frame_messages.h"
 #include "content/common/trace_utils.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/invalidate_type.h"
@@ -320,7 +319,7 @@ mojom::NavigationType GetNavigationType(const GURL& old_url,
       break;  // Fall through to rest of function.
   }
 
-  if (entry->restore_type() == RestoreType::LAST_SESSION_EXITED_CLEANLY) {
+  if (entry->restore_type() != RestoreType::NONE) {
     return entry->GetHasPostData() ? mojom::NavigationType::RESTORE_WITH_POST
                                    : mojom::NavigationType::RESTORE;
   }
@@ -357,17 +356,11 @@ void RewriteUrlForNavigation(const GURL& original_url,
                              GURL* url_to_load,
                              GURL* virtual_url,
                              bool* reverse_on_redirect) {
-  // Fix up the given URL before letting it be rewritten, so that any minor
-  // cleanup (e.g., removing leading dots) will not lead to a virtual URL.
-  *virtual_url = original_url;
-  BrowserURLHandlerImpl::GetInstance()->FixupURLBeforeRewrite(virtual_url,
-                                                              browser_context);
-
   // Allow the browser URL handler to rewrite the URL. This will, for example,
   // remove "view-source:" from the beginning of the URL to get the URL that
   // will actually be loaded. This real URL won't be shown to the user, just
   // used internally.
-  *url_to_load = *virtual_url;
+  *url_to_load = *virtual_url = original_url;
   BrowserURLHandlerImpl::GetInstance()->RewriteURLIfNecessary(
       url_to_load, browser_context, reverse_on_redirect);
 }
@@ -480,7 +473,7 @@ std::unique_ptr<NavigationEntry> NavigationController::CreateNavigationEntry(
       url, referrer, std::move(initiator_origin),
       nullptr /* source_site_instance */, transition, is_renderer_initiated,
       extra_headers, browser_context, std::move(blob_url_loader_factory),
-      false /* should_replace_entry */);
+      false /* should_replace_entry */, nullptr /* web_contents */);
 }
 
 // static
@@ -495,7 +488,8 @@ NavigationControllerImpl::CreateNavigationEntry(
     const std::string& extra_headers,
     BrowserContext* browser_context,
     scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
-    bool should_replace_entry) {
+    bool should_replace_entry,
+    WebContents* web_contents) {
   GURL url_to_load;
   GURL virtual_url;
   bool reverse_on_redirect = false;
@@ -505,8 +499,8 @@ NavigationControllerImpl::CreateNavigationEntry(
   // Let the NTP override the navigation params and pretend that this is a
   // browser-initiated, bookmark-like navigation.
   GetContentClient()->browser()->OverrideNavigationParams(
-      source_site_instance, &transition, &is_renderer_initiated, &referrer,
-      &initiator_origin);
+      web_contents, source_site_instance, &transition, &is_renderer_initiated,
+      &referrer, &initiator_origin);
 
   auto entry = std::make_unique<NavigationEntryImpl>(
       nullptr,  // The site instance for tabs is sent on navigation
@@ -2329,20 +2323,26 @@ void NavigationControllerImpl::NavigateFromFrameProxy(
           GURL(url::kAboutBlankURL), referrer, initiator_origin,
           source_site_instance, page_transition, is_renderer_initiated,
           extra_headers, browser_context_,
-          nullptr /* blob_url_loader_factory */, should_replace_current_entry));
+          nullptr /* blob_url_loader_factory */, should_replace_current_entry,
+          GetWebContents()));
+      // CreateNavigationEntry() may have changed the transition type.
+      page_transition = entry->GetTransitionType();
     }
     entry->AddOrUpdateFrameEntry(
         node, -1, -1, nullptr,
         static_cast<SiteInstanceImpl*>(source_site_instance), url,
         base::nullopt /* commit_origin */, referrer, initiator_origin,
-        std::vector<GURL>(), PageState(), method, -1, blob_url_loader_factory,
-        nullptr /* web_bundle_navigation_info */);
+        std::vector<GURL>(), blink::PageState(), method, -1,
+        blob_url_loader_factory, nullptr /* web_bundle_navigation_info */);
   } else {
     // Main frame case.
     entry = NavigationEntryImpl::FromNavigationEntry(CreateNavigationEntry(
         url, referrer, initiator_origin, source_site_instance, page_transition,
         is_renderer_initiated, extra_headers, browser_context_,
-        blob_url_loader_factory, should_replace_current_entry));
+        blob_url_loader_factory, should_replace_current_entry,
+        GetWebContents()));
+    // CreateNavigationEntry() may have changed the transition type.
+    page_transition = entry->GetTransitionType();
     entry->root_node()->frame_entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(source_site_instance));
     entry->root_node()->frame_entry->set_method(method);
@@ -2367,7 +2367,7 @@ void NavigationControllerImpl::NavigateFromFrameProxy(
         node->unique_name(), -1, -1, nullptr,
         static_cast<SiteInstanceImpl*>(source_site_instance), url,
         nullptr /* origin */, referrer, initiator_origin, std::vector<GURL>(),
-        PageState(), method, -1, blob_url_loader_factory,
+        blink::PageState(), method, -1, blob_url_loader_factory,
         nullptr /* web_bundle_navigation_info */);
   }
 
@@ -2404,7 +2404,7 @@ void NavigationControllerImpl::NavigateFromFrameProxy(
       CreateNavigationRequestFromLoadParams(
           node, params, override_user_agent, should_replace_current_entry,
           false /* has_user_gesture */, download_policy, ReloadType::NONE,
-          entry.get(), frame_entry.get());
+          entry.get(), frame_entry.get(), params.transition_type);
 
   if (!request)
     return;
@@ -2987,25 +2987,17 @@ void NavigationControllerImpl::NavigateWithoutEntry(
   bool should_replace_current_entry =
       params.should_replace_current_entry && entries_.size();
 
-  // Always propagate `has_user_gesture` on Android but only when the request
-  // was originated by the renderer on other platforms. This is merely for
-  // backward compatibility as browser process user gestures create confusion in
-  // many tests.
-  bool has_user_gesture = false;
-#if defined(OS_ANDROID)
-  has_user_gesture = params.has_user_gesture;
-#else
-  if (params.is_renderer_initiated)
-    has_user_gesture = params.has_user_gesture;
-#endif
+  ui::PageTransition transition_type = params.transition_type;
 
   // Javascript URLs should not create NavigationEntries. All other navigations
   // do, including navigations to chrome renderer debug URLs.
-  std::unique_ptr<NavigationEntryImpl> entry;
   if (!params.url.SchemeIs(url::kJavaScriptScheme)) {
-    entry = CreateNavigationEntryFromLoadParams(
-        node, params, override_user_agent, should_replace_current_entry,
-        has_user_gesture);
+    std::unique_ptr<NavigationEntryImpl> entry =
+        CreateNavigationEntryFromLoadParams(node, params, override_user_agent,
+                                            should_replace_current_entry,
+                                            params.has_user_gesture);
+    // CreateNavigationEntryFromLoadParams() may modify the transition type.
+    transition_type = entry->GetTransitionType();
     DiscardPendingEntry(false);
     SetPendingEntry(std::move(entry));
   }
@@ -3056,8 +3048,8 @@ void NavigationControllerImpl::NavigateWithoutEntry(
   std::unique_ptr<NavigationRequest> request =
       CreateNavigationRequestFromLoadParams(
           node, params, override_user_agent, should_replace_current_entry,
-          has_user_gesture, NavigationDownloadPolicy(), reload_type,
-          pending_entry_, pending_entry_->GetFrameEntry(node));
+          params.has_user_gesture, NavigationDownloadPolicy(), reload_type,
+          pending_entry_, pending_entry_->GetFrameEntry(node), transition_type);
 
   // If the navigation couldn't start, return immediately and discard the
   // pending NavigationEntry.
@@ -3145,22 +3137,24 @@ NavigationControllerImpl::CreateNavigationEntryFromLoadParams(
           GURL(url::kAboutBlankURL), params.referrer, params.initiator_origin,
           params.source_site_instance.get(), params.transition_type,
           params.is_renderer_initiated, extra_headers_crlf, browser_context_,
-          blob_url_loader_factory, should_replace_current_entry));
+          blob_url_loader_factory, should_replace_current_entry,
+          GetWebContents()));
     }
 
     entry->AddOrUpdateFrameEntry(
         node, -1, -1, nullptr,
         static_cast<SiteInstanceImpl*>(params.source_site_instance.get()),
         params.url, base::nullopt, params.referrer, params.initiator_origin,
-        params.redirect_chain, PageState(), "GET", -1, blob_url_loader_factory,
-        nullptr /* web_bundle_navigation_info */);
+        params.redirect_chain, blink::PageState(), "GET", -1,
+        blob_url_loader_factory, nullptr /* web_bundle_navigation_info */);
   } else {
     // Otherwise, create a pending entry for the main frame.
     entry = NavigationEntryImpl::FromNavigationEntry(CreateNavigationEntry(
         params.url, params.referrer, params.initiator_origin,
         params.source_site_instance.get(), params.transition_type,
         params.is_renderer_initiated, extra_headers_crlf, browser_context_,
-        blob_url_loader_factory, should_replace_current_entry));
+        blob_url_loader_factory, should_replace_current_entry,
+        GetWebContents()));
     entry->set_source_site_instance(
         static_cast<SiteInstanceImpl*>(params.source_site_instance.get()));
     entry->SetRedirectChain(params.redirect_chain);
@@ -3209,7 +3203,8 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
     NavigationDownloadPolicy download_policy,
     ReloadType reload_type,
     NavigationEntryImpl* entry,
-    FrameNavigationEntry* frame_entry) {
+    FrameNavigationEntry* frame_entry,
+    ui::PageTransition transition_type) {
   DCHECK_EQ(-1, GetIndexOfEntry(entry));
   DCHECK(frame_entry);
   // All renderer-initiated navigations must have an initiator_origin.
@@ -3308,12 +3303,14 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
 
   const GURL& history_url_for_data_url =
       params.base_url_for_data_url.is_empty() ? GURL() : virtual_url;
+  // Don't use |params.transition_type| as calling code may supply a different
+  // value.
   mojom::CommonNavigationParamsPtr common_params =
       mojom::CommonNavigationParams::New(
           url_to_load, params.initiator_origin,
           blink::mojom::Referrer::New(params.referrer.url,
                                       params.referrer.policy),
-          params.transition_type, navigation_type, download_policy,
+          transition_type, navigation_type, download_policy,
           should_replace_current_entry, params.base_url_for_data_url,
           history_url_for_data_url, previews_state, navigation_start,
           params.load_type == LOAD_TYPE_HTTP_POST ? "POST" : "GET",
@@ -3358,7 +3355,7 @@ NavigationControllerImpl::CreateNavigationRequestFromLoadParams(
               network::mojom::WebClientHintsType>() /* enabled_client_hints */,
           false /* is_cross_browsing_instance */,
           std::vector<std::string>() /* forced_content_security_policies */,
-          nullptr /* old_page_info */);
+          nullptr /* old_page_info */, -1 /* http_response_code */);
 #if defined(OS_ANDROID)
   if (ValidateDataURLAsString(params.data_url_as_string)) {
     commit_params->data_url_as_string = params.data_url_as_string->data();

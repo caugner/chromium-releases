@@ -441,6 +441,14 @@ int AXPosition::MaxTextOffset() const {
   if (!is_atomic_inline_level && !layout_object->IsText())
     return container_object_->ComputedName().length();
 
+  // TODO(crbug.com/1149171): NGInlineOffsetMappingBuilder does not properly
+  // compute offset mappings for empty LayoutText objects. Other text objects
+  // (such as some list markers) are not affected.
+  if (const LayoutText* layout_text = DynamicTo<LayoutText>(layout_object)) {
+    if (layout_text->GetText().IsEmpty())
+      return container_object_->ComputedName().length();
+  }
+
   LayoutBlockFlow* formatting_context =
       NGOffsetMapping::GetInlineFormattingContextOf(*layout_object);
   const NGOffsetMapping* container_offset_mapping =
@@ -763,15 +771,15 @@ const AXPosition AXPosition::AsValidDOMPosition(
       (child &&
        (!child->GetNode() || child->GetNode()->IsMarkerPseudoElement() ||
         child->IsMockObject() || child->IsVirtualObject()))) {
-    switch (adjustment_behavior) {
-      case AXPositionAdjustmentBehavior::kMoveRight:
-        return CreateNextPosition().AsValidDOMPosition(adjustment_behavior);
-      case AXPositionAdjustmentBehavior::kMoveLeft:
-        const AXPosition result = CreatePreviousPosition();
-        if (result && result != *this)
-          return result.AsValidDOMPosition(adjustment_behavior);
-        return {};
-    }
+    AXPosition result;
+    if (adjustment_behavior == AXPositionAdjustmentBehavior::kMoveRight)
+      result = CreateNextPosition();
+    else
+      result = CreatePreviousPosition();
+
+    if (result && result != *this)
+      return result.AsValidDOMPosition(adjustment_behavior);
+    return {};
   }
 
   // At this point, if a DOM node is associated with our container, then the

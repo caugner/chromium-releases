@@ -55,11 +55,6 @@ LabelButton::LabelButton(PressedCallback callback,
   SetTextInternal(text);
 }
 
-LabelButton::LabelButton(ButtonListener* listener,
-                         const base::string16& text,
-                         int button_context)
-    : LabelButton(PressedCallback(listener, this), text, button_context) {}
-
 LabelButton::~LabelButton() = default;
 
 gfx::ImageSkia LabelButton::GetImage(ButtonState for_state) const {
@@ -377,11 +372,6 @@ void LabelButton::Layout() {
   Button::Layout();
 }
 
-void LabelButton::EnableCanvasFlippingForRTLUI(bool flip) {
-  Button::EnableCanvasFlippingForRTLUI(flip);
-  image_->EnableCanvasFlippingForRTLUI(flip);
-}
-
 void LabelButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   if (GetIsDefault())
     node_data->AddState(ax::mojom::State::kDefault);
@@ -563,9 +553,16 @@ gfx::Size LabelButton::GetUnclampedSizeWithoutLabel() const {
 
 Button::ButtonState LabelButton::GetVisualState() const {
   const auto* widget = GetWidget();
-  if (PlatformStyle::kInactiveWidgetControlsAppearDisabled && widget &&
-      widget->CanActivate() && !widget->ShouldPaintAsActive())
+  if (!widget || !widget->CanActivate() ||
+      !PlatformStyle::kInactiveWidgetControlsAppearDisabled)
+    return GetState();
+
+  // Paint as inactive if neither this widget nor its parent should paint as
+  // active.
+  if (!widget->ShouldPaintAsActive() &&
+      !(widget->parent() && widget->parent()->ShouldPaintAsActive()))
     return STATE_DISABLED;
+
   return GetState();
 }
 
@@ -606,6 +603,10 @@ Button::ButtonState LabelButton::ImageStateForState(
     ButtonState for_state) const {
   return button_state_image_models_[for_state].IsEmpty() ? STATE_NORMAL
                                                          : for_state;
+}
+
+void LabelButton::FlipCanvasOnPaintForRTLUIChanged() {
+  image_->SetFlipCanvasOnPaintForRTLUI(GetFlipCanvasOnPaintForRTLUI());
 }
 
 BEGIN_METADATA(LabelButton, Button)

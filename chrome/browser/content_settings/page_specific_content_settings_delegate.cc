@@ -15,7 +15,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_configuration.mojom.h"
 #include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/permissions/permission_decision_auto_blocker.h"
@@ -52,7 +51,18 @@ namespace chrome {
 
 PageSpecificContentSettingsDelegate::PageSpecificContentSettingsDelegate(
     content::WebContents* web_contents)
-    : WebContentsObserver(web_contents) {}
+    : WebContentsObserver(web_contents) {
+#if !defined(OS_ANDROID)
+  auto* access_context_audit_service =
+      AccessContextAuditServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+  if (access_context_audit_service) {
+    cookie_access_helper_ =
+        std::make_unique<AccessContextAuditService::CookieAccessHelper>(
+            access_context_audit_service);
+  }
+#endif  // !defined(OS_ANDROID)
+}
 
 PageSpecificContentSettingsDelegate::~PageSpecificContentSettingsDelegate() =
     default;
@@ -170,7 +180,7 @@ void PageSpecificContentSettingsDelegate::OnContentAllowed(
   content_settings::SettingInfo setting_info;
   GetSettingsMap()->GetWebsiteSetting(web_contents()->GetLastCommittedURL(),
                                       web_contents()->GetLastCommittedURL(),
-                                      type, std::string(), &setting_info);
+                                      type, &setting_info);
   const base::Time grant_time = GetSettingsMap()->GetSettingLastModifiedDate(
       setting_info.primary_pattern, setting_info.secondary_pattern, type);
   if (grant_time.is_null())
@@ -202,13 +212,11 @@ void PageSpecificContentSettingsDelegate::OnCacheStorageAccessAllowed(
 void PageSpecificContentSettingsDelegate::OnCookieAccessAllowed(
     const net::CookieList& accessed_cookies) {
 #if !defined(OS_ANDROID)
-  auto* access_context_audit_service =
-      AccessContextAuditServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
-  if (access_context_audit_service)
-    access_context_audit_service->RecordCookieAccess(
+  if (cookie_access_helper_) {
+    cookie_access_helper_->RecordCookieAccess(
         accessed_cookies,
         url::Origin::Create(web_contents()->GetLastCommittedURL()));
+  }
 #endif  // !defined(OS_ANDROID)
 }
 

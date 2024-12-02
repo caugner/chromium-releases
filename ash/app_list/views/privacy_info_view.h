@@ -35,13 +35,10 @@ class PrivacyInfoView : public SearchResultBaseView {
   void OnGestureEvent(ui::GestureEvent* event) override;
   void OnKeyEvent(ui::KeyEvent* event) override;
 
-  // views::ButtonListener:
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
-
   // SearchResultBaseView:
   void SelectInitialResultAction(bool reverse_tab_order) override;
   bool SelectNextResultAction(bool reverse_tab_order) override;
-  void NotifyA11yResultSelected() override;
+  views::View* GetSelectedView() override;
 
   virtual void LinkClicked() = 0;
   virtual void CloseButtonPressed() = 0;
@@ -50,7 +47,10 @@ class PrivacyInfoView : public SearchResultBaseView {
   PrivacyInfoView(int info_string_id, int link_string_id);
 
  private:
-  enum class Action { kNone, kDefault, kTextLink, kCloseButton };
+  enum class Action { kNone, kTextLink, kCloseButton };
+
+  // Button pressed callback.
+  void OnButtonPressed();
 
   void InitLayout();
   void InitInfoIcon();
@@ -69,7 +69,7 @@ class PrivacyInfoView : public SearchResultBaseView {
 
   // Indicates which of the privacy notice's actions is selected for keyboard
   // navigation.
-  Action selected_action_;
+  Action selected_action_ = Action::kNone;
 
   DISALLOW_COPY_AND_ASSIGN(PrivacyInfoView);
 };

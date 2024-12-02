@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
 #include "content/browser/renderer_host/input/synthetic_gesture.h"
@@ -205,8 +204,7 @@ class ScrollBehaviorBrowserTest : public ContentBrowserTest,
     // When the first smooth scroll starts and scroll to 5 pixels, we will
     // send the second scroll to interrupt the current smooth scroll.
     constexpr int kExpectedScrollTop = 5;
-    MainThreadFrameObserver frame_observer(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
+    MainThreadFrameObserver frame_observer(GetWidgetHost());
     while (ExecuteScriptAndExtractDouble(script) < kExpectedScrollTop)
       frame_observer.Wait();
   }
@@ -215,8 +213,7 @@ class ScrollBehaviorBrowserTest : public ContentBrowserTest,
                          double starting_scroll_top) {
     // For the scroll interruption, we want to make sure that the first smooth
     // scroll animation stops right away, and the second scroll starts.
-    MainThreadFrameObserver frame_observer(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
+    MainThreadFrameObserver frame_observer(GetWidgetHost());
     double current = ExecuteScriptAndExtractDouble(script);
 
     // If the animation doesn't reverse within this number of pixels we fail the
@@ -232,20 +229,13 @@ class ScrollBehaviorBrowserTest : public ContentBrowserTest,
   void ValueHoldsAt(const std::string& scroll_top_script, double scroll_top) {
     // This function checks that the scroll top value holds at the given value
     // for 10 frames.
-    MainThreadFrameObserver frame_observer(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
-    int frame_count = 10;
+    MainThreadFrameObserver frame_observer(GetWidgetHost());
+    int frame_count = 5;
     while (frame_count > 0) {
       ASSERT_EQ(ExecuteScriptAndExtractDouble(scroll_top_script), scroll_top);
       frame_observer.Wait();
       frame_count--;
     }
-  }
-
-  RenderViewHost* GetRenderViewHost() const {
-    RenderViewHost* const rvh = shell()->web_contents()->GetRenderViewHost();
-    CHECK(rvh);
-    return rvh;
   }
 
   std::unique_ptr<base::RunLoop> run_loop_;
@@ -263,10 +253,8 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
   // TODO(crbug.com/1133492): the last animation is committed after we set the
   // scrollTop even when we cancel the animation, so the final scrollTop value
   // is not 0, we need to fix it.
-#if defined(OS_CHROMEOS)
   if (!disable_threaded_scrolling_)
     return;
-#endif
 
   LoadURL(kOverflowScrollDataURL);
 
@@ -372,7 +360,7 @@ IN_PROC_BROWSER_TEST_P(ScrollBehaviorBrowserTest,
 
   // Smooth scrolling is disabled for wheel scroll on Mac.
   // https://crbug.com/574283.
-#if defined(OS_MAC)
+#if defined(OS_MAC) || defined(OS_ANDROID)
   ValueHoldsAt(scroll_top_script, 0);
 #else
   WaitUntilLessThan(scroll_top_script, scroll_top);

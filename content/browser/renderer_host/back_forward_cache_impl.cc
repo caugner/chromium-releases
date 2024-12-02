@@ -17,7 +17,6 @@
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/content_navigation_policy.h"
-#include "content/common/page_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/visibility.h"
 #include "net/http/http_request_headers.h"
@@ -38,8 +37,8 @@ using blink::scheduler::WebSchedulerTrackedFeature;
 const base::Feature kBackForwardCacheNoTimeEviction{
     "BackForwardCacheNoTimeEviction", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// The number of entries the BackForwardCache can hold per tab.
-static constexpr size_t kBackForwardCacheLimit = 1;
+// The default number of entries the BackForwardCache can hold per tab.
+static constexpr size_t kDefaultBackForwardCacheSize = 1;
 
 // The default time to live in seconds for documents in BackForwardCache.
 static constexpr int kDefaultTimeToLiveInBackForwardCacheInSeconds = 15;
@@ -89,6 +88,14 @@ bool IsGeolocationSupported() {
   return geolocation_supported.Get();
 }
 
+bool IsFileSystemSupported() {
+  if (!DeviceHasEnoughMemoryForBackForwardCache())
+    return false;
+  static constexpr base::FeatureParam<bool> file_system_api_supported(
+      &features::kBackForwardCache, "file_system_api_supported", false);
+  return file_system_api_supported.Get();
+}
+
 bool IgnoresOutstandingNetworkRequestForTesting() {
   if (!DeviceHasEnoughMemoryForBackForwardCache())
     return false;
@@ -110,7 +117,10 @@ bool ShouldIgnoreBlocklists() {
   return should_ignore_blocklists.Get();
 }
 
-uint64_t GetDisallowedFeatures(RenderFrameHostImpl* rfh) {
+enum RequestedFeatures { kAll, kOnlySticky };
+
+uint64_t GetDisallowedFeatures(RenderFrameHostImpl* rfh,
+                               RequestedFeatures requested_features) {
   // TODO(https://crbug.com/1015784): Finalize disallowed feature list, and test
   // for each disallowed feature.
   constexpr uint64_t kAlwaysDisallowedFeatures =
@@ -139,13 +149,11 @@ uint64_t GetDisallowedFeatures(RenderFrameHostImpl* rfh) {
       FeatureToBit(
           WebSchedulerTrackedFeature::kRequestedVideoCapturePermission) |
       FeatureToBit(WebSchedulerTrackedFeature::kSharedWorker) |
-      FeatureToBit(WebSchedulerTrackedFeature::kSmsService) |
+      FeatureToBit(WebSchedulerTrackedFeature::kWebOTPService) |
       FeatureToBit(WebSchedulerTrackedFeature::kSpeechRecognizer) |
       FeatureToBit(WebSchedulerTrackedFeature::kSpeechSynthesis) |
       FeatureToBit(WebSchedulerTrackedFeature::kWakeLock) |
       FeatureToBit(WebSchedulerTrackedFeature::kWebDatabase) |
-      FeatureToBit(WebSchedulerTrackedFeature::kWebFileSystem) |
-      FeatureToBit(WebSchedulerTrackedFeature::kWebGL) |
       FeatureToBit(WebSchedulerTrackedFeature::kWebHID) |
       FeatureToBit(WebSchedulerTrackedFeature::kWebLocks) |
       FeatureToBit(WebSchedulerTrackedFeature::kWebRTC) |
@@ -168,6 +176,15 @@ uint64_t GetDisallowedFeatures(RenderFrameHostImpl* rfh) {
         FeatureToBit(
             WebSchedulerTrackedFeature::kOutstandingNetworkRequestFetch) |
         FeatureToBit(WebSchedulerTrackedFeature::kOutstandingNetworkRequestXHR);
+  }
+
+  if (!IsFileSystemSupported()) {
+    result |= FeatureToBit(WebSchedulerTrackedFeature::kWebFileSystem);
+  }
+
+  if (requested_features == RequestedFeatures::kOnlySticky) {
+    // Remove all non-sticky features from |result|.
+    result &= blink::scheduler::StickyFeaturesBitmask();
   }
 
   return result;
@@ -310,6 +327,11 @@ base::TimeDelta BackForwardCacheImpl::GetTimeToLiveInBackForwardCache() {
       kDefaultTimeToLiveInBackForwardCacheInSeconds));
 }
 
+size_t BackForwardCacheImpl::GetCacheSize() {
+  return base::GetFieldTrialParamByFeatureAsInt(
+      features::kBackForwardCache, "cache_size", kDefaultBackForwardCacheSize);
+}
+
 BackForwardCacheCanStoreDocumentResult BackForwardCacheImpl::CanStorePageNow(
     RenderFrameHostImpl* rfh) {
   BackForwardCacheCanStoreDocumentResult result =
@@ -435,6 +457,18 @@ void BackForwardCacheImpl::CanStoreRenderFrameHostLater(
   if (rfh->IsOuterDelegateFrame())
     result->No(BackForwardCacheMetrics::NotRestoredReason::kHaveInnerContents);
 
+  // When it's not the final decision for putting a page in the back-forward
+  // cache, we should only consider "sticky" features here - features that
+  // will always result in a page becoming ineligible for back-forward cache
+  // since the first time it's used.
+  if (uint64_t banned_features =
+          GetDisallowedFeatures(rfh, RequestedFeatures::kOnlySticky) &
+          rfh->scheduler_tracked_features()) {
+    if (!ShouldIgnoreBlocklists()) {
+      result->NoDueToFeatures(banned_features);
+    }
+  }
+
   for (size_t i = 0; i < rfh->child_count(); i++)
     CanStoreRenderFrameHostLater(result,
                                  rfh->child_at(i)->current_frame_host());
@@ -448,11 +482,14 @@ void BackForwardCacheImpl::CheckDynamicStatesOnSubtree(
   if (!rfh->IsDOMContentLoaded())
     result->No(BackForwardCacheMetrics::NotRestoredReason::kLoading);
 
-  // TODO(altimin): At the moment only the first detected failure is reported.
-  // For reporting purposes it's a good idea to also collect this information
-  // from children.
+  // Check for banned features currently being used. Note that unlike the check
+  // in CanStoreRenderFrameHostLater, we are checking all banned features here
+  // (not only the "sticky" features), because this time we're making a final
+  // decision on whether we should store a page in the back-forward cache or
+  // not.
   if (uint64_t banned_features =
-          GetDisallowedFeatures(rfh) & rfh->scheduler_tracked_features()) {
+          GetDisallowedFeatures(rfh, RequestedFeatures::kAll) &
+          rfh->scheduler_tracked_features()) {
     if (!ShouldIgnoreBlocklists()) {
       result->NoDueToFeatures(banned_features);
     }
@@ -493,9 +530,7 @@ void BackForwardCacheImpl::StoreEntry(
   entry->render_frame_host->DidEnterBackForwardCache();
   entries_.push_front(std::move(entry));
 
-  size_t size_limit = cache_size_limit_for_testing_
-                          ? cache_size_limit_for_testing_
-                          : kBackForwardCacheLimit;
+  size_t size_limit = GetCacheSize();
   // Evict the least recently used documents if the BackForwardCache list is
   // full.
   size_t available_count = 0;

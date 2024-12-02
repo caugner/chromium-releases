@@ -4,12 +4,15 @@
 
 #include "third_party/blink/renderer/platform/mojo/drag_mojom_traits.h"
 
+#include "base/check.h"
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
-#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "mojo/public/cpp/base/big_buffer.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "third_party/blink/public/mojom/file_system_access/native_file_system_drag_drop_token.mojom-blink.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
@@ -112,10 +115,17 @@ bool StructTraits<
 }
 
 // static
-blink::WebVector<uint8_t> StructTraits<
+mojo_base::BigBuffer StructTraits<
     blink::mojom::DragItemBinaryDataView,
     blink::WebDragData::Item>::data(const blink::WebDragData::Item& item) {
-  return item.binary_data.Copy();
+  mojo_base::BigBuffer buffer(item.binary_data.size());
+  item.binary_data.ForEachSegment([&buffer](const char* segment,
+                                            size_t segment_size,
+                                            size_t segment_offset) {
+    std::copy(segment, segment + segment_size, buffer.data() + segment_offset);
+    return true;
+  });
+  return buffer;
 }
 
 // static
@@ -167,6 +177,7 @@ int64_t StructTraits<
 WTF::String StructTraits<blink::mojom::DragItemFileSystemFileDataView,
                          blink::WebDragData::Item>::
     file_system_id(const blink::WebDragData::Item& item) {
+  DCHECK(item.file_system_id.IsNull());
   return item.file_system_id;
 }
 
@@ -176,7 +187,7 @@ StructTraits<blink::mojom::DragItemFileDataView, blink::WebDragData::Item>::
     native_file_system_token(const blink::WebDragData::Item& item) {
   // Should never have to send a transfer token information from the renderer
   // to the browser.
-  NOTREACHED();
+  DCHECK(!item.native_file_system_entry);
   return mojo::NullRemote();
 }
 

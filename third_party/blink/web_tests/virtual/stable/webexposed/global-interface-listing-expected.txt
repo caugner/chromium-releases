@@ -275,11 +275,6 @@ interface BarProp
     attribute @@toStringTag
     getter visible
     method constructor
-interface BarcodeDetector
-    static method getSupportedFormats
-    attribute @@toStringTag
-    method constructor
-    method detect
 interface BaseAudioContext : EventTarget
     attribute @@toStringTag
     getter audioWorklet
@@ -376,42 +371,6 @@ interface ByteLengthQueuingStrategy
     getter size
     method constructor
 interface CDATASection : Text
-    attribute @@toStringTag
-    method constructor
-interface CSS
-    static getter paintWorklet
-    static method Hz
-    static method Q
-    static method ch
-    static method cm
-    static method deg
-    static method dpcm
-    static method dpi
-    static method dppx
-    static method em
-    static method escape
-    static method ex
-    static method fr
-    static method grad
-    static method in
-    static method kHz
-    static method mm
-    static method ms
-    static method number
-    static method pc
-    static method percent
-    static method pt
-    static method px
-    static method rad
-    static method registerProperty
-    static method rem
-    static method s
-    static method supports
-    static method turn
-    static method vh
-    static method vmax
-    static method vmin
-    static method vw
     attribute @@toStringTag
     method constructor
 interface CSSAnimation : Animation
@@ -1897,6 +1856,7 @@ interface ElementInternals
     getter ariaValueText
     getter form
     getter labels
+    getter shadowRoot
     getter validationMessage
     getter validity
     getter willValidate
@@ -2916,7 +2876,6 @@ interface HTMLIFrameElement : HTMLElement
     getter contentDocument
     getter contentWindow
     getter csp
-    getter disallowDocumentAccess
     getter featurePolicy
     getter frameBorder
     getter height
@@ -2938,7 +2897,6 @@ interface HTMLIFrameElement : HTMLElement
     setter allowFullscreen
     setter allowPaymentRequest
     setter csp
-    setter disallowDocumentAccess
     setter frameBorder
     setter height
     setter loading
@@ -4615,6 +4573,7 @@ interface Navigator
     getter presentation
     getter product
     getter productSub
+    getter scheduling
     getter serviceWorker
     getter storage
     getter usb
@@ -5582,6 +5541,7 @@ interface RTCRtpTransceiver
     getter stopped
     method constructor
     method setCodecPreferences
+    method stop
     setter direction
 interface RTCSctpTransport : EventTarget
     attribute @@toStringTag
@@ -6891,6 +6851,10 @@ interface SVGViewElement : SVGElement
     getter zoomAndPan
     method constructor
     setter zoomAndPan
+interface Scheduling
+    attribute @@toStringTag
+    method constructor
+    method isInputPending
 interface Screen
     attribute @@toStringTag
     getter availHeight
@@ -9552,6 +9516,42 @@ interface webkitURL
     setter protocol
     setter search
     setter username
+[NAMESPACES]
+namespace CSS
+    attribute @@toStringTag
+    getter paintWorklet
+    method Hz
+    method Q
+    method ch
+    method cm
+    method deg
+    method dpcm
+    method dpi
+    method dppx
+    method em
+    method escape
+    method ex
+    method fr
+    method grad
+    method in
+    method kHz
+    method mm
+    method ms
+    method number
+    method pc
+    method percent
+    method pt
+    method px
+    method rad
+    method registerProperty
+    method rem
+    method s
+    method supports
+    method turn
+    method vh
+    method vmax
+    method vmin
+    method vw
 [GLOBAL OBJECT]
     attribute GCController
     attribute accessibilityController

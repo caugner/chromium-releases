@@ -29,7 +29,11 @@ const char kTranslateUnsupportedLanguageAtInitiation[] =
 const char kTranslateSourceLanguage[] = "Translate.SourceLanguage";
 const char kTranslateTargetLanguage[] = "Translate.TargetLanguage";
 const char kTranslateHrefHintStatus[] = "Translate.HrefHint.Status";
+const char kTranslateHrefHintPrefsFilterStatus[] =
+    "Translate.HrefHint.PrefsFilterStatus";
 const char kTranslateTargetLanguageOrigin[] = "Translate.TargetLanguage.Origin";
+const char kTranslateMenuTranslationUnavailableReasons[] =
+    "Translate.MenuTranslation.UnavailableReasons";
 
 }  // namespace
 
@@ -42,6 +46,12 @@ void ReportInitiationStatus(InitiationStatusType type) {
 
 void ReportLanguageDetectionError() {
   UMA_HISTOGRAM_BOOLEAN(kTranslateReportLanguageDetectionError, true);
+}
+
+void ReportMenuTranslationUnavailableReason(
+    MenuTranslationUnavailableReason reason) {
+  UMA_HISTOGRAM_ENUMERATION(kTranslateMenuTranslationUnavailableReasons,
+                            reason);
 }
 
 void ReportLanguageDetectionContentLength(size_t length) {
@@ -80,6 +90,11 @@ void ReportTranslateTargetLanguage(base::StringPiece language) {
 
 void ReportTranslateHrefHintStatus(HrefTranslateStatus status) {
   base::UmaHistogramEnumeration(kTranslateHrefHintStatus, status);
+}
+
+void ReportTranslateHrefHintPrefsFilterStatus(
+    HrefTranslatePrefsFilterStatus status) {
+  base::UmaHistogramEnumeration(kTranslateHrefHintPrefsFilterStatus, status);
 }
 
 void ReportTranslateTargetLanguageOrigin(TargetLanguageOrigin origin) {

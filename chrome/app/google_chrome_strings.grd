@@ -347,7 +347,7 @@ chromium_strings.grd. -->
         Make Google Chrome the default browser
       </message>
       <if expr="chromeos">
-        <message name="IDS_EXTERNAL_PROTOCOL_TITLE" desc="External Protocol Dialog Title">
+        <message name="IDS_EXTERNAL_PROTOCOL_NO_HANDLER_TITLE" desc="External Protocol Dialog Title">
           Google Chrome OS can't open this page.
         </message>
       </if>
@@ -1192,10 +1192,25 @@ Google Chrome is unable to recover your settings.
           Set up your new Chrome profile
         </message>
         <message name="IDS_PROFILE_PICKER_ASK_ON_STARTUP" desc="Text for the checkbox on the profile picker main view">
-          Ask when I open Chrome
+          Ask when Chrome opens
         </message>
       </if>
 
+      <!-- Rosetta installation for protected media -->
+      <if expr="is_macosx">
+        <message name="IDS_ROSETTA_INSTALL_TITLE"
+                   desc="Title of the 'do you want to install Rosetta' dialog. Used when there is a page title.">
+          To enable Chrome to play protected media, you need to install Rosetta. Do you want to install it now?
+        </message>
+        <message name="IDS_ROSETTA_INSTALL_BODY"
+                   desc="Body text of the 'do you want to install Rosetta' dialog.">
+          Rosetta enables Chrome to play the protected media on this page.
+        </message>
+        <message name="IDS_ROSETTA_INSTALL_RESTART_DIALOG"
+                   desc="Title text of the dialog once Rosetta is installed.">
+          To use Rosetta to play protected media, you must restart Chrome.
+        </message>
+      </if>
     </messages>
   </release>
 </grit>

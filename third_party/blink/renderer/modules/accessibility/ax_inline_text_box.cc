@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_position.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_range.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -237,8 +238,22 @@ AXObject* AXInlineTextBox::PreviousOnLine() const {
 void AXInlineTextBox::GetDocumentMarkers(
     Vector<DocumentMarker::MarkerType>* marker_types,
     Vector<AXRange>* marker_ranges) const {
+  if (!RuntimeEnabledFeatures::
+          AccessibilityUseAXPositionForDocumentMarkersEnabled())
+    return;
+
   if (IsDetached())
     return;
+  if (!GetDocument() ||
+      GetDocument()->IsSlotAssignmentOrLegacyDistributionDirty()) {
+    // In order to retrieve the document markers we need access to the flat
+    // tree. If the slot assignments in a shadow DOM subtree are dirty,
+    // accessing the flat tree will cause them to be updated, which could in
+    // turn cause an update to the accessibility tree, potentially causing this
+    // method to be called repeatedly.
+    return;  // Wait until distribution for flat tree traversal has been
+             // updated.
+  }
 
   int text_length = TextLength();
   if (!text_length)

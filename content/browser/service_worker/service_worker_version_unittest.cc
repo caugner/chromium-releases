@@ -10,11 +10,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -35,6 +36,8 @@
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_service.mojom.h"
 #include "content/public/test/test_utils.h"
+#include "net/base/test_completion_callback.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_event_status.mojom.h"
@@ -156,7 +159,7 @@ class ServiceWorkerVersionTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
 
     // And finish request, as if a response to the event was received.
-    EXPECT_TRUE(version_->FinishRequest(request_id, true /* was_handled */));
+    EXPECT_TRUE(version_->FinishRequest(request_id, /*was_handled=*/true));
   }
 
   void SetTickClockForTesting(base::SimpleTestTickClock* tick_clock) {
@@ -752,7 +755,7 @@ TEST_F(ServiceWorkerVersionTest, RequestTimeout) {
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorTimeout,
             error_status.value());
   // Calling FinishRequest should be no-op, since the request timed out.
-  EXPECT_FALSE(version_->FinishRequest(request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(request_id, /*was_handled=*/true));
 
   // Simulate the renderer aborting the inflight event.
   // This should not crash: https://crbug.com/676984.
@@ -784,7 +787,7 @@ TEST_F(ServiceWorkerVersionTest, RequestNowTimeout) {
   run_loop.Run();
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorTimeout, status.value());
 
-  EXPECT_FALSE(version_->FinishRequest(request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(request_id, /*was_handled=*/true));
 
   // CONTINUE_ON_TIMEOUT timeouts don't stop the service worker.
   EXPECT_EQ(EmbeddedWorkerStatus::RUNNING, version_->running_status());
@@ -809,7 +812,7 @@ TEST_F(ServiceWorkerVersionTest, RequestNowTimeoutKill) {
   run_loop.Run();
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorTimeout, status.value());
 
-  EXPECT_FALSE(version_->FinishRequest(request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(request_id, /*was_handled=*/true));
 
   // KILL_ON_TIMEOUT timeouts should stop the service worker.
   base::RunLoop().RunUntilIdle();
@@ -871,11 +874,10 @@ TEST_F(ServiceWorkerVersionTest, RequestCustomizedTimeout) {
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kErrorTimeout,
             second_status.value());
 
-  EXPECT_FALSE(
-      version_->FinishRequest(first_request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(first_request_id, /*was_handled=*/true));
 
   EXPECT_FALSE(
-      version_->FinishRequest(second_request_id, true /* was_handled */));
+      version_->FinishRequest(second_request_id, /*was_handled=*/true));
   base::RunLoop().RunUntilIdle();
 
   // KILL_ON_TIMEOUT timeouts should stop the service worker.
@@ -915,8 +917,7 @@ TEST_F(ServiceWorkerVersionTest, MixedRequestTimeouts) {
   EXPECT_EQ(EmbeddedWorkerStatus::RUNNING, version_->running_status());
 
   // Gracefully handle the sync event finishing after the timeout.
-  EXPECT_FALSE(
-      version_->FinishRequest(sync_request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(sync_request_id, /*was_handled=*/true));
 
   // Verify that the fetch times out later.
   version_->SetAllRequestExpirations(base::TimeTicks::Now());
@@ -926,8 +927,7 @@ TEST_F(ServiceWorkerVersionTest, MixedRequestTimeouts) {
             fetch_status.value());
 
   // Fetch request should no longer exist.
-  EXPECT_FALSE(
-      version_->FinishRequest(fetch_request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(fetch_request_id, /*was_handled=*/true));
   base::RunLoop().RunUntilIdle();
 
   // Other timeouts do stop the service worker.
@@ -1090,7 +1090,7 @@ TEST_F(ServiceWorkerVersionTest, RendererCrashDuringEvent) {
   EXPECT_EQ(EmbeddedWorkerStatus::STOPPED, version_->running_status());
 
   // Request already failed, calling finish should return false.
-  EXPECT_FALSE(version_->FinishRequest(request_id, true /* was_handled */));
+  EXPECT_FALSE(version_->FinishRequest(request_id, /*was_handled=*/true));
 }
 
 TEST_F(ServiceWorkerVersionTest, PingController) {
@@ -1225,7 +1225,7 @@ TEST_F(ServiceWorkerVersionTest,
   container_host->OnBeginNavigationCommit(
       version_->embedded_worker()->process_id(),
       /* render_frame_id = */ 1, network::CrossOriginEmbedderPolicy(),
-      std::move(reporter));
+      std::move(reporter), ukm::UkmRecorder::GetNewSourceID());
 
   // RenderProcessHost should be notified of foreground worker.
   base::RunLoop().RunUntilIdle();
@@ -1441,6 +1441,36 @@ TEST_F(ServiceWorkerVersionTest, AddMessageToConsole) {
   loop.Run();
   ASSERT_EQ(1UL, service_worker->console_messages().size());
   EXPECT_EQ(test_message, service_worker->console_messages()[0]);
+}
+
+// Test that writing metadata aborts gracefully when a remote connection to
+// the Storage Service is disconnected.
+TEST_F(ServiceWorkerVersionTest, WriteMetadata_RemoteStorageDisconnection) {
+  const std::string kMetadata("Test metadata");
+
+  net::TestCompletionCallback completion;
+  version_->script_cache_map()->WriteMetadata(
+      version_->script_url(), base::as_bytes(base::make_span(kMetadata)),
+      completion.callback());
+
+  helper_->context()->registry()->SimulateStorageRestartForTesting();
+
+  ASSERT_EQ(completion.WaitForResult(), net::ERR_FAILED);
+}
+
+// Test that writing metadata aborts gracefully when the storage is disabled.
+TEST_F(ServiceWorkerVersionTest, WriteMetadata_StorageDisabled) {
+  const std::string kMetadata("Test metadata");
+
+  helper_->context()->registry()->GetRemoteStorageControl()->Disable();
+  helper_->context()->registry()->GetRemoteStorageControl().FlushForTesting();
+
+  net::TestCompletionCallback completion;
+  version_->script_cache_map()->WriteMetadata(
+      version_->script_url(), base::as_bytes(base::make_span(kMetadata)),
+      completion.callback());
+
+  ASSERT_EQ(completion.WaitForResult(), net::ERR_FAILED);
 }
 
 class ServiceWorkerVersionTerminationOnNoControlleeTest

@@ -32,6 +32,7 @@
 #include "components/autofill/core/browser/form_types.h"
 #include "components/autofill/core/browser/metrics/address_form_event_logger.h"
 #include "components/autofill/core/browser/metrics/credit_card_form_event_logger.h"
+#include "components/autofill/core/browser/payments/autofill_offer_manager.h"
 #include "components/autofill/core/browser/payments/card_unmask_delegate.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/payments/full_card_request.h"
@@ -216,7 +217,7 @@ class AutofillManager : public AutofillHandler,
   void DidSuppressPopup(const FormData& form, const FormFieldData& field);
 
   // AutofillHandler:
-  void OnFocusNoLongerOnForm() override;
+  void OnFocusNoLongerOnForm(bool had_interacted_form) override;
   void OnFocusOnFormFieldImpl(const FormData& form,
                               const FormFieldData& field,
                               const gfx::RectF& bounding_box) override;
@@ -387,6 +388,9 @@ class AutofillManager : public AutofillHandler,
   // Exposed for testing.
   bool is_rich_query_enabled() const { return is_rich_query_enabled_; }
 
+  // Exposed for testing.
+  FormData* pending_form_data() { return pending_form_data_.get(); }
+
  private:
   // Keeps track of the filling context for a form, used to make refill attemps.
   struct FillingContext {
@@ -405,8 +409,12 @@ class AutofillManager : public AutofillHandler,
     // empty.
     const base::Optional<AutofillProfile> profile;
     const base::Optional<std::pair<CreditCard, base::string16>> credit_card;
-    // The name of the field that was initially filled.
-    const base::string16 filled_field_name;
+    // Possible identifiers of the field that was focused when the form was
+    // initially filled. A refill shall be triggered from the same field.
+    // TODO(crbug/896689): Remove |filled_field_unique_name|.
+    const FieldRendererId filled_field_renderer_id;
+    const FieldSignature filled_field_signature;
+    const base::string16 filled_field_unique_name;
     // The time at which the initial fill occurred.
     const base::TimeTicks original_fill_time;
     // The timer used to trigger a refill.
@@ -581,7 +589,14 @@ class AutofillManager : public AutofillHandler,
                           uint32_t profile_form_bitmask,
                           std::string* failure_to_fill);
 
-  // Whether there should be an attemps to refill the form. Returns true if all
+  // TODO(crbug/896689): Remove code duplication once experiment is finished.
+  void SetFillingContext(const FormStructure& form,
+                         std::unique_ptr<FillingContext> context);
+
+  // TODO(crbug/896689): Remove code duplication once experiment is finished.
+  FillingContext* GetFillingContext(const FormStructure& form);
+
+  // Whether there should be an attempts to refill the form. Returns true if all
   // the following are satisfied:
   //  There have been no refill on that page yet.
   //  A non empty form name was recorded in a previous fill
@@ -617,6 +632,7 @@ class AutofillManager : public AutofillHandler,
 
   void SetDataList(const std::vector<base::string16>& values,
                    const std::vector<base::string16>& labels);
+
   AutofillClient* const client_;
 
   LogManager* log_manager_;
@@ -681,6 +697,10 @@ class AutofillManager : public AutofillHandler,
   // The credit card access manager, used to access local and server cards.
   std::unique_ptr<CreditCardAccessManager> credit_card_access_manager_;
 
+  // The autofill offer manager, used to to retrieve offers for card
+  // suggestions.
+  AutofillOfferManager* offer_manager_;
+
   // Collected information about the autofill form where a credit card will be
   // filled.
   AutofillDriver::RendererFormDataAction credit_card_action_;
@@ -709,8 +729,11 @@ class AutofillManager : public AutofillHandler,
 
   // A map of form names to FillingContext instances used to make refill
   // attempts for dynamic forms.
+  // TODO(crbug/896689): Remove code duplication once experiment is finished.
+  std::map<FormRendererId, std::unique_ptr<FillingContext>>
+      filling_context_by_renderer_id_;
   std::map<base::string16, std::unique_ptr<FillingContext>>
-      filling_contexts_map_;
+      filling_context_by_unique_name_;
 
   // Tracks whether or not rich query encoding is enabled for this client.
   const bool is_rich_query_enabled_ = false;

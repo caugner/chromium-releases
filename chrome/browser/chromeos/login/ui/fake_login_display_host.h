@@ -9,7 +9,9 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "components/user_manager/user_type.h"
 
 namespace session_manager {
 class SessionManager;
@@ -50,7 +52,9 @@ class FakeLoginDisplayHost : public LoginDisplayHost {
                               const std::string& given_name) override;
   void LoadWallpaper(const AccountId& account_id) override;
   void LoadSigninWallpaper() override;
-  bool IsUserAllowlisted(const AccountId& account_id) override;
+  bool IsUserAllowlisted(
+      const AccountId& account_id,
+      const base::Optional<user_manager::UserType>& user_type) override;
   void ShowGaiaDialog(const AccountId& prefilled_account) override;
   void HideOobeDialog() override;
   void UpdateOobeDialogState(ash::OobeDialogState state) override;
@@ -61,6 +65,9 @@ class FakeLoginDisplayHost : public LoginDisplayHost {
   void HandleDisplayCaptivePortal() override;
   void UpdateAddUserButtonStatus() override;
   void RequestSystemInfoUpdate() override;
+  bool HasUserPods() override;
+  void AddObserver(LoginDisplayHost::Observer* observer) override;
+  void RemoveObserver(LoginDisplayHost::Observer* observer) override;
 
  private:
   class FakeBaseScreen;

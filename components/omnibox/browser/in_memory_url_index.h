@@ -151,6 +151,7 @@ class InMemoryURLIndex : public KeyedService,
   friend class history::HQPPerfTestOnePopularURL;
   friend class InMemoryURLIndexTest;
   friend class InMemoryURLIndexCacheTest;
+  friend class RepeatableQueriesServiceTest;
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, ExpireRow);
   FRIEND_TEST_ALL_PREFIXES(LimitedInMemoryURLIndexTest, Initialization);
 
@@ -244,7 +245,8 @@ class InMemoryURLIndex : public KeyedService,
                     const history::RedirectList& redirects,
                     base::Time visit_time) override;
   void OnURLsModified(history::HistoryService* history_service,
-                      const history::URLRows& changed_urls) override;
+                      const history::URLRows& changed_urls,
+                      history::UrlsModifiedReason reason) override;
   void OnURLsDeleted(history::HistoryService* history_service,
                      const history::DeletionInfo& deletion_info) override;
   void OnHistoryServiceLoaded(

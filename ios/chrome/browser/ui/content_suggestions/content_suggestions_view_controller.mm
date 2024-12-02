@@ -53,7 +53,7 @@ const CGFloat kMostVisitedBottomMargin = 13;
 const CGFloat kCardBorderRadius = 11;
 const CGFloat kDiscoverFeedContentWith = 430;
 // Value representing offset from bottom of the page to trigger pagination.
-const CGFloat kPaginationOffset = 400;
+const CGFloat kPaginationOffset = 800;
 // Height for the Discover Feed section header.
 const CGFloat kDiscoverFeedFeaderHeight = 30;
 // Minimum height of the Discover feed content to indicate that the articles
@@ -125,10 +125,7 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
 }
 
 - (void)dealloc {
-  if (self.observingDiscoverFeedHeight) {
-    [self.feedView removeObserver:self forKeyPath:@"contentSize"];
-    self.observingDiscoverFeedHeight = NO;
-  }
+  [self removeContentSizeKVO];
   if (self.discoverFeedVC.parentViewController) {
     [self.discoverFeedVC willMoveToParentViewController:nil];
     [self.discoverFeedVC.view removeFromSuperview];
@@ -439,11 +436,9 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
     UIViewController* newFeedViewController = discoverFeedItem.discoverFeed;
 
     if (newFeedViewController != self.discoverFeedVC) {
-      // If previous VC is not nil, remove it from the view hierarchy and stop
-      // osberving its feedView.
+      // If previous VC is not nil, remove it from the view hierarchy.
       if (self.discoverFeedVC) {
-        [self.feedView removeObserver:self forKeyPath:@"contentSize"];
-        self.observingDiscoverFeedHeight = NO;
+        self.feedView = nil;
         [self.discoverFeedVC willMoveToParentViewController:nil];
         [self.discoverFeedVC.view removeFromSuperview];
         [self.discoverFeedVC removeFromParentViewController];
@@ -462,11 +457,6 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
             self.feedView = static_cast<UICollectionView*>(view);
           }
         }
-        [self.feedView addObserver:self
-                        forKeyPath:@"contentSize"
-                           options:0
-                           context:nil];
-        self.observingDiscoverFeedHeight = YES;
         self.discoverFeedVC = newFeedViewController;
         return cell;
       }
@@ -543,8 +533,9 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
     ContentSuggestionsDiscoverHeaderCell* discoverFeedHeader =
         base::mac::ObjCCastStrict<ContentSuggestionsDiscoverHeaderCell>(cell);
     [discoverFeedHeader.menuButton addTarget:self
-                                      action:@selector(openDiscoverFeedMenu:)
+                                      action:@selector(openDiscoverFeedMenu)
                             forControlEvents:UIControlEventTouchUpInside];
+    [self.audience discoverHeaderMenuButtonShown:discoverFeedHeader.menuButton];
   }
   return cell;
 }
@@ -754,8 +745,14 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
   [super scrollViewDidEndDragging:scrollView willDecelerate:decelerate];
   [self.overscrollActionsController scrollViewDidEndDragging:scrollView
                                               willDecelerate:decelerate];
-  [self.discoverFeedMetricsRecorder
-      recordFeedScrolled:scrollView.contentOffset.y - self.scrollStartPosition];
+  if (IsDiscoverFeedEnabled()) {
+    [self.discoverFeedMetricsRecorder
+        recordFeedScrolled:scrollView.contentOffset.y -
+                           self.scrollStartPosition];
+  } else {
+    [self.metricsRecorder recordFeedScrolled:scrollView.contentOffset.y -
+                                             self.scrollStartPosition];
+  }
 }
 
 - (void)scrollViewWillEndDragging:(UIScrollView*)scrollView
@@ -835,11 +832,40 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
     // more reliably.
     if (self.feedView.contentSize.height > kDiscoverFeedLoadedHeight) {
       [self.discoverFeedMenuHandler notifyFeedLoadedForHeaderMenu];
+      [self.audience discoverFeedShown];
     }
   }
 }
 
 #pragma mark - Private
+
+// |self.feedView| setter.
+- (void)setFeedView:(UICollectionView*)feedView {
+  if (feedView != _feedView) {
+    [self removeContentSizeKVO];
+    _feedView = feedView;
+    [self addContentSizeKVO];
+  }
+}
+
+// Adds KVO observing for the feedView contentSize if there is not one already.
+- (void)addContentSizeKVO {
+  if (!self.observingDiscoverFeedHeight) {
+    [self.feedView addObserver:self
+                    forKeyPath:@"contentSize"
+                       options:0
+                       context:nil];
+    self.observingDiscoverFeedHeight = YES;
+  }
+}
+
+// Removes KVO observing for the feedView contentSize if one exists.
+- (void)removeContentSizeKVO {
+  if (self.observingDiscoverFeedHeight) {
+    [self.feedView removeObserver:self forKeyPath:@"contentSize"];
+    self.observingDiscoverFeedHeight = NO;
+  }
+}
 
 - (void)handleLongPress:(UILongPressGestureRecognizer*)gestureRecognizer {
   if (self.editor.editing ||
@@ -918,17 +944,17 @@ NSString* const kContentSuggestionsMostVisitedAccessibilityIdentifierPrefix =
                        self.traitCollection.preferredContentSizeCategory) +
                    collection.contentInset.bottom));
     if (collection.contentOffset.y != offset) {
-      collection.contentOffset = CGPointMake(0, offset);
-      // Update the constraints in case the omnibox needs to be moved.
-      [self updateConstraints];
+        collection.contentOffset = CGPointMake(0, offset);
+        // Update the constraints in case the omnibox needs to be moved.
+        [self updateConstraints];
     }
   }
   _initialContentOffset = NAN;
 }
 
 // Opens top-level feed menu when pressing |menuButton|.
-- (void)openDiscoverFeedMenu:(id)menuButton {
-  [self.discoverFeedMenuHandler openDiscoverFeedMenu:menuButton];
+- (void)openDiscoverFeedMenu {
+  [self.discoverFeedMenuHandler openDiscoverFeedMenu];
 }
 
 // Evaluates whether or not another set of Discover feed articles should be

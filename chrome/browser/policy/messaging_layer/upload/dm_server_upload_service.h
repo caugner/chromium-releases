@@ -21,6 +21,10 @@
 #include "components/policy/proto/record_constants.pb.h"
 #include "net/base/backoff_entry.h"
 
+#ifdef OS_CHROMEOS
+#include "chrome/browser/profiles/profile.h"
+#endif  // OS_CHROMEOS
+
 namespace reporting {
 
 // DmServerUploadService uploads events to the DMServer. It does not manage
@@ -48,7 +52,7 @@ class DmServerUploadService {
   class RecordHandler {
    public:
     explicit RecordHandler(policy::CloudPolicyClient* client);
-    virtual ~RecordHandler();
+    virtual ~RecordHandler() = default;
 
     virtual Status HandleRecord(Record record) = 0;
 
@@ -87,8 +91,8 @@ class DmServerUploadService {
     void IsHandlerVectorEmptyCheck(bool handler_is_empty);
 
     // ProcessRecords verifies that the records provided are parseable and sets
-    // the |Record|s up for handling by the |RecordHandler|s. On completion,
-    // ProcessRecords |Schedule|s |HandleRecords|.
+    // the |Record|s up for handling by the |RecordHandlers|s. On
+    // completion, ProcessRecords |Schedule|s |HandleRecords|.
     void ProcessRecords();
 
     // HandleRecords sends the records to the |record_handlers_|, allowing them
@@ -112,14 +116,16 @@ class DmServerUploadService {
     // Helper function for tracking the highest sequencing information per
     // generation id. Schedules ProcessSuccessfulUploadAddition.
     void AddSuccessfulUpload(
+        base::RepeatingClosure done_cb,
         const SequencingInformation& sequencing_information);
 
     // Processes successful uploads on sequence.
     void ProcessSuccessfulUploadAddition(
+        base::RepeatingClosure done_cb,
         SequencingInformation sequencing_information);
 
     std::unique_ptr<std::vector<EncryptedRecord>> encrypted_records_;
-    const scoped_refptr<SharedVector<std::unique_ptr<RecordHandler>>> handlers_;
+    scoped_refptr<SharedVector<std::unique_ptr<RecordHandler>>> handlers_;
 
     // generation_id_ will be set to the generation of the first record in
     // encrypted_records_.
@@ -131,18 +137,20 @@ class DmServerUploadService {
     SEQUENCE_CHECKER(sequence_checker_);
   };
 
-  // Will create a DMServerUploadService with handlers.
-  // On successful completion returns a DMServerUploadService.
-  // If |client| is null, will return error::INVALID_ARGUMENT.
+  // Will asynchronously create a DMServerUploadService with handlers.
+  // On successful completion will call |created_cb| with DMServerUploadService.
+  // If |client| is null, will call |created_cb| with error::INVALID_ARGUMENT.
   // If any handlers fail to create, or the policy::CloudPolicyClient is null,
-  // will return error::UNAVAILABLE.
+  // will call |created_cb| with error::UNAVAILABLE.
   //
   // |client| must not be null.
-  // |completion_cb| should report back to the holder of the created object
-  // whenever a record set is successfully uploaded.
-  static StatusOr<std::unique_ptr<DmServerUploadService>> Create(
+  // |report_upload_success_cb| should report back to the holder of the created
+  // object whenever a record set is successfully uploaded.
+  static void Create(
       std::unique_ptr<policy::CloudPolicyClient> client,
-      ReportSuccessfulUploadCallback completion_cb);
+      ReportSuccessfulUploadCallback report_upload_success_cb,
+      base::OnceCallback<void(StatusOr<std::unique_ptr<DmServerUploadService>>)>
+          created_cb);
   ~DmServerUploadService();
 
   Status EnqueueUpload(std::unique_ptr<std::vector<EncryptedRecord>> record);
@@ -151,7 +159,13 @@ class DmServerUploadService {
   DmServerUploadService(std::unique_ptr<policy::CloudPolicyClient> client,
                         ReportSuccessfulUploadCallback completion_cb);
 
-  Status InitRecordHandlers();
+  static void InitRecordHandlers(
+      std::unique_ptr<DmServerUploadService> uploader,
+#ifdef OS_CHROMEOS
+      Profile* primary_profile,
+#endif  // OS_CHROMEOS
+      base::OnceCallback<void(StatusOr<std::unique_ptr<DmServerUploadService>>)>
+          created_cb);
 
   void UploadCompletion(StatusOr<SequencingInformation>) const;
 
@@ -159,9 +173,9 @@ class DmServerUploadService {
 
   std::unique_ptr<policy::CloudPolicyClient> client_;
   ReportSuccessfulUploadCallback upload_cb_;
-  scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner_;
-
   scoped_refptr<SharedVector<std::unique_ptr<RecordHandler>>> record_handlers_;
+
+  scoped_refptr<base::SequencedTaskRunner> sequenced_task_runner_;
 };
 
 }  // namespace reporting

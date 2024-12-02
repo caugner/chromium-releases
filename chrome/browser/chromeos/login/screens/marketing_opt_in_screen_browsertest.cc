@@ -20,7 +20,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/marketing_backend_connector.h"
-#include "chrome/browser/chromeos/login/screen_manager.h"
 #include "chrome/browser/chromeos/login/test/fake_gaia_mixin.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 #include "chrome/browser/chromeos/login/test/local_policy_test_server_mixin.h"
@@ -192,8 +191,8 @@ void MarketingOptInScreenTest::SetUpOnMainThread() {
 }
 
 MarketingOptInScreen* MarketingOptInScreenTest::GetScreen() {
-  return MarketingOptInScreen::Get(
-      WizardController::default_controller()->screen_manager());
+  return WizardController::default_controller()
+      ->GetScreen<MarketingOptInScreen>();
 }
 
 void MarketingOptInScreenTest::ShowMarketingOptInScreen() {
@@ -408,12 +407,16 @@ IN_PROC_BROWSER_TEST_P(MarketingTestCountryCodes, CountryCodes) {
   TapOnGetStartedAndWaitForScreenExit();
   WaitForBackendRequest();
   EXPECT_EQ(GetRequestedCountryCode(), param.country_code);
-  histogram_tester_.ExpectUniqueSample(
-      "OOBE.MarketingOptInScreen.Event." + std::string(param.country_code),
+  const auto event =
       (param.is_default_opt_in)
           ? MarketingOptInScreen::Event::kUserOptedInWhenDefaultIsOptIn
-          : MarketingOptInScreen::Event::kUserOptedInWhenDefaultIsOptOut,
-      1);
+          : MarketingOptInScreen::Event::kUserOptedInWhenDefaultIsOptOut;
+  histogram_tester_.ExpectUniqueSample(
+      "OOBE.MarketingOptInScreen.Event." + std::string(param.country_code),
+      event, 1);
+  // Expect a generic event in addition to the country specific one.
+  histogram_tester_.ExpectUniqueSample("OOBE.MarketingOptInScreen.Event", event,
+                                       1);
 
   // Expect successful geolocation resolve.
   ExpectGeolocationMetric(true, std::string(param.country_code).size());

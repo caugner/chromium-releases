@@ -27,8 +27,8 @@ android_library("java") {
     "java/src/org/chromium/chrome/browser/safe_browsing/settings/EnhancedProtectionSettingsFragment.java",
     "java/src/org/chromium/chrome/browser/safe_browsing/settings/NoProtectionConfirmationDialog.java",
     "java/src/org/chromium/chrome/browser/safe_browsing/settings/RadioButtonGroupSafeBrowsingPreference.java",
+    "java/src/org/chromium/chrome/browser/safe_browsing/settings/SafeBrowsingSettingsFragment.java",
     "java/src/org/chromium/chrome/browser/safe_browsing/settings/SafeBrowsingSettingsFragmentBase.java",
-    "java/src/org/chromium/chrome/browser/safe_browsing/settings/SecuritySettingsFragment.java",
     "java/src/org/chromium/chrome/browser/safe_browsing/settings/StandardProtectionSettingsFragment.java",
   ]
   deps = [
@@ -46,10 +46,12 @@ android_library("java") {
     "//components/prefs/android:java",
     "//components/user_prefs/android:java",
     "//third_party/android_deps:androidx_annotation_annotation_java",
+    "//third_party/android_deps:androidx_core_core_java",
     "//third_party/android_deps:androidx_fragment_fragment_java",
     "//third_party/android_deps:androidx_preference_preference_java",
     "//third_party/android_deps:androidx_vectordrawable_vectordrawable_java",
     "//ui/android:ui_full_java",
+    "//ui/android:ui_no_recycler_view_java",
   ]
   annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
   srcjar_deps = [ ":safe_browsing_enums" ]
@@ -59,7 +61,7 @@ android_library("java") {
 android_library("javatests") {
   testonly = true
   sources = [
-    "javatests/src/org/chromium/chrome/browser/safe_browsing/settings/SecuritySettingsFragmentTest.java",
+    "javatests/src/org/chromium/chrome/browser/safe_browsing/settings/SafeBrowsingSettingsFragmentTest.java",
     "javatests/src/org/chromium/chrome/browser/safe_browsing/settings/StandardProtectionSettingsFragmentTest.java",
   ]
   deps = [
@@ -91,7 +93,7 @@ android_resources("java_resources") {
   sources = [
     "java/res/layout/radio_button_group_safe_browsing_preference.xml",
     "java/res/xml/enhanced_protection_preferences.xml",
-    "java/res/xml/security_preferences.xml",
+    "java/res/xml/safe_browsing_preferences.xml",
     "java/res/xml/standard_protection_preferences.xml",
   ]
   deps = [

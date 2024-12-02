@@ -32,8 +32,6 @@
 #include "content/common/inter_process_time_ticks_converter.h"
 #include "content/common/navigation_params.h"
 #include "content/common/navigation_params_utils.h"
-#include "content/common/page_messages.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/global_request_id.h"
@@ -137,13 +135,9 @@ bool Navigator::CheckWebUIRendererDoesNotDisplayNormalURL(
   // Embedders might disable locking for WebUI URLs, which is bad idea, however
   // this method should take this into account.
   SiteInstanceImpl* site_instance = render_frame_host->GetSiteInstance();
-  SiteInfo site_info = SiteInstanceImpl::ComputeSiteInfo(
-      site_instance->GetIsolationContext(), url_info,
-      site_instance->IsCoopCoepCrossOriginIsolated(),
-      site_instance->CoopCoepCrossOriginIsolatedOrigin());
+  SiteInfo site_info = site_instance->DeriveSiteInfo(url_info);
   bool should_lock_process =
-      SiteInstanceImpl::ShouldLockProcess(site_instance->GetIsolationContext(),
-                                          site_info, site_instance->IsGuest());
+      site_info.ShouldLockProcessToSite(site_instance->GetIsolationContext());
 
   // If the |render_frame_host| has any WebUI bindings, disallow URLs that are
   // not allowed in a WebUI renderer process.
@@ -237,14 +231,15 @@ void Navigator::DidNavigate(
   DCHECK(navigation_request);
   FrameTreeNode* frame_tree_node = render_frame_host->frame_tree_node();
   FrameTree* frame_tree = frame_tree_node->frame_tree();
-  RenderFrameHostImpl* old_frame_host =
-      frame_tree_node->render_manager()->current_frame_host();
+  base::WeakPtr<RenderFrameHostImpl> old_frame_host =
+      frame_tree_node->render_manager()->current_frame_host()->GetWeakPtr();
 
   bool is_same_document_navigation = controller_->IsURLSameDocumentNavigation(
       params.url, params.origin, was_within_same_document, render_frame_host);
   // If a frame claims the navigation was same-document, it must be the current
   // frame, not a pending one.
-  if (is_same_document_navigation && render_frame_host != old_frame_host) {
+  if (is_same_document_navigation &&
+      render_frame_host != old_frame_host.get()) {
     bad_message::ReceivedBadMessage(render_frame_host->GetProcess(),
                                     bad_message::NI_IN_PAGE_NAVIGATION);
     is_same_document_navigation = false;
@@ -255,10 +250,9 @@ void Navigator::DidNavigate(
   bool is_cross_document_same_site_navigation =
       !is_same_document_navigation &&
       old_frame_host->IsNavigationSameSite(
-          url_info,
-          render_frame_host->GetSiteInstance()->IsCoopCoepCrossOriginIsolated(),
-          render_frame_host->GetSiteInstance()
-              ->CoopCoepCrossOriginIsolatedOrigin());
+          url_info, render_frame_host->GetSiteInstance()
+                        ->GetCoopCoepCrossOriginIsolatedInfo());
+
   if (is_cross_document_same_site_navigation) {
     UMA_HISTOGRAM_BOOLEAN(
         "BackForwardCache.ProactiveSameSiteBISwap.SameSiteNavigationDidSwap",
@@ -272,13 +266,15 @@ void Navigator::DidNavigate(
     // cache), because on normal same-site navigations the unloading of the old
     // RenderFrameHost happens before commit. We're measuring how often this
     // case happens to determine the risk of this change.
-    DCHECK_NE(old_frame_host, render_frame_host);
+    DCHECK(old_frame_host.get());
+    DCHECK_NE(old_frame_host.get(), render_frame_host);
     DCHECK(frame_tree_node->IsMainFrame());
     DCHECK(!old_frame_host->GetSiteInstance()->IsRelatedSiteInstance(
         render_frame_host->GetSiteInstance()));
     DCHECK(is_cross_document_same_site_navigation);
     bool can_store_in_back_forward_cache =
-        controller_->GetBackForwardCache().CanStorePageNow(old_frame_host);
+        controller_->GetBackForwardCache().CanStorePageNow(
+            old_frame_host.get());
     UMA_HISTOGRAM_BOOLEAN(
         "BackForwardCache.ProactiveSameSiteBISwap.EligibilityDuringCommit",
         can_store_in_back_forward_cache);
@@ -306,12 +302,6 @@ void Navigator::DidNavigate(
     }
   }
 
-  // For browser initiated navigation and same document navigation, frame policy
-  // in commit_params is nullopt and should use fallback value instead.
-  const blink::FramePolicy pending_frame_policy =
-      navigation_request->commit_params().frame_policy.value_or(
-          frame_tree_node->pending_frame_policy());
-
   // DidNavigateFrame() must be called before replicating the new origin and
   // other properties to proxies.  This is because it destroys the subframes of
   // the frame we're navigating from, which might trigger those subframes to
@@ -322,7 +312,7 @@ void Navigator::DidNavigate(
       is_same_document_navigation,
       navigation_request->coop_status()
           .require_browsing_instance_swap() /* clear_proxies_on_commit */,
-      pending_frame_policy);
+      navigation_request->commit_params().frame_policy);
 
   // Save the new page's origin and other properties, and replicate them to
   // proxies, including the proxy created in DidNavigateFrame() to replace the
@@ -340,8 +330,24 @@ void Navigator::DidNavigate(
   if (!is_same_document_navigation) {
     // Navigating to a new location means a new, fresh set of http headers
     // and/or <meta> elements - we need to reset CSP and Feature Policy.
-    render_frame_host->ResetContentSecurityPolicies();
-    frame_tree_node->ResetForNavigation();
+    // However, if the navigation is restoring the given |render_frame_host|
+    // from back-forward cache, it does not change the document in the given
+    // RenderFrameHost and the existing Content Security Policy should be kept.
+    if (!navigation_request->IsServedFromBackForwardCache())
+      render_frame_host->ResetContentSecurityPolicies();
+
+    auto reset_result = frame_tree_node->ResetForNavigation(
+        navigation_request->IsServedFromBackForwardCache());
+
+    // |old_frame_host| might get immediately deleted after the DidNavigateFrame
+    // call above, so use weak pointer here.
+    if (old_frame_host && old_frame_host->IsInBackForwardCache()) {
+      if (reset_result.changed_frame_policy) {
+        old_frame_host->EvictFromBackForwardCacheWithReason(
+            BackForwardCacheMetrics::NotRestoredReason::
+                kFrameTreeNodeStateReset);
+      }
+    }
   }
 
   // Update the site of the SiteInstance if it doesn't have one yet, unless
@@ -382,9 +388,14 @@ void Navigator::DidNavigate(
   if (old_entry_count != controller_->GetEntryCount() ||
       details.previous_entry_index !=
           controller_->GetLastCommittedEntryIndex()) {
-    frame_tree->root()->render_manager()->SendPageMessage(
-        new PageMsg_SetHistoryOffsetAndLength(
-            MSG_ROUTING_NONE, controller_->GetLastCommittedEntryIndex(),
+    frame_tree->root()->render_manager()->ExecutePageBroadcastMethod(
+        base::BindRepeating(
+            [](int history_offset, int history_count, RenderViewHostImpl* rvh) {
+              if (auto& broadcast = rvh->GetAssociatedPageBroadcast())
+                broadcast->SetHistoryOffsetAndLength(history_offset,
+                                                     history_count);
+            },
+            controller_->GetLastCommittedEntryIndex(),
             controller_->GetEntryCount()),
         site_instance);
   }
@@ -540,7 +551,7 @@ void Navigator::RequestOpenURL(
   // redirects.  http://crbug.com/311721.
   std::vector<GURL> redirect_chain;
 
-  int frame_tree_node_id = -1;
+  int frame_tree_node_id = FrameTreeNode::kFrameTreeNodeInvalidId;
 
   // Send the navigation to the current FrameTreeNode if it's destined for a
   // subframe in the current tab.  We'll assume it's for the main frame
@@ -1043,7 +1054,8 @@ Navigator::GetNavigationEntryForRendererInitiatedNavigation(
               std::string() /* extra_headers */,
               controller_->GetBrowserContext(),
               nullptr /* blob_url_loader_factory */,
-              common_params.should_replace_current_entry));
+              common_params.should_replace_current_entry,
+              controller_->GetWebContents()));
   entry->set_reload_type(NavigationRequest::NavigationTypeToReloadType(
       common_params.navigation_type));
 

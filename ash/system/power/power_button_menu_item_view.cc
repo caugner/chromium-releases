@@ -5,6 +5,7 @@
 #include "ash/system/power/power_button_menu_item_view.h"
 
 #include "ash/style/ash_color_provider.h"
+#include "ash/style/scoped_light_mode_as_default.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
@@ -37,30 +38,21 @@ constexpr int kLineHeight = 20;
 }  // namespace
 
 PowerButtonMenuItemView::PowerButtonMenuItemView(
-    views::ButtonListener* listener,
+    PressedCallback callback,
     const gfx::VectorIcon& icon,
     const base::string16& title_text)
-    : views::ImageButton(listener),
-      icon_view_(new views::ImageView),
-      title_(new views::Label) {
+    : views::ImageButton(std::move(callback)), icon_(icon) {
   SetFocusBehavior(FocusBehavior::ALWAYS);
   SetFocusPainter(nullptr);
 
-  const AshColorProvider* color_provider = AshColorProvider::Get();
-  icon_view_->SetImage(gfx::CreateVectorIcon(
-      icon, color_provider->GetContentLayerColor(
-                AshColorProvider::ContentLayerType::kIconColorPrimary)));
-  AddChildView(icon_view_);
-
+  icon_view_ = AddChildView(std::make_unique<views::ImageView>());
+  title_ = AddChildView(std::make_unique<views::Label>());
   title_->SetBackgroundColor(SK_ColorTRANSPARENT);
-  title_->SetEnabledColor(color_provider->GetContentLayerColor(
-      AshColorProvider::ContentLayerType::kTextColorPrimary));
   title_->SetText(title_text);
   title_->SetVerticalAlignment(gfx::ALIGN_TOP);
   title_->SetLineHeight(kLineHeight);
   title_->SetMultiLine(true);
   title_->SetMaxLines(2);
-  AddChildView(title_);
   GetViewAccessibility().OverrideRole(ax::mojom::Role::kMenuItem);
   GetViewAccessibility().OverrideName(title_->GetText());
 
@@ -104,6 +96,17 @@ void PowerButtonMenuItemView::OnBlur() {
   SchedulePaint();
 }
 
+void PowerButtonMenuItemView::OnThemeChanged() {
+  views::ImageButton::OnThemeChanged();
+  ScopedLightModeAsDefault scoped_light_mode_as_default;
+  const auto* color_provider = AshColorProvider::Get();
+  icon_view_->SetImage(gfx::CreateVectorIcon(
+      icon_, color_provider->GetContentLayerColor(
+                 AshColorProvider::ContentLayerType::kIconColorPrimary)));
+  title_->SetEnabledColor(color_provider->GetContentLayerColor(
+      AshColorProvider::ContentLayerType::kTextColorPrimary));
+}
+
 void PowerButtonMenuItemView::PaintButtonContents(gfx::Canvas* canvas) {
   cc::PaintFlags flags;
   flags.setAntiAlias(true);
@@ -120,6 +123,7 @@ void PowerButtonMenuItemView::PaintButtonContents(gfx::Canvas* canvas) {
   gfx::Rect bounds = GetLocalBounds();
   bounds.Inset(gfx::Insets(kItemBorderThickness));
   // Stroke.
+  ScopedLightModeAsDefault scoped_light_mode_as_default;
   flags.setColor(AshColorProvider::Get()->GetControlsLayerColor(
       AshColorProvider::ControlsLayerType::kFocusRingColor));
   flags.setStrokeWidth(kItemBorderThickness);

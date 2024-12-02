@@ -21,6 +21,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/password_manager/core/browser/bulk_leak_check_service.h"
 #include "components/password_manager/core/browser/ui/export_progress_status.h"
+#include "components/password_manager/core/browser/ui/insecure_credentials_manager.h"
 #include "extensions/browser/extension_function.h"
 
 namespace content {
@@ -89,13 +90,13 @@ class PasswordsPrivateDelegate : public KeyedService {
       PlaintextPasswordCallback callback,
       content::WebContents* web_contents) = 0;
 
-  // Moves a password currently stored on the device to being stored in the
-  // signed-in, non-syncing Google Account. The result is a no-op if any of
-  // these is true: |id| is invalid; |id| corresponds to a password already
-  // stored in the account; or the user is not using the account-scoped password
-  // storage.
-  virtual void MovePasswordToAccount(int id,
-                                     content::WebContents* web_contents) = 0;
+  // Moves a list of passwords currently stored on the device to being stored in
+  // the signed-in, non-syncing Google Account. The result of any password is a
+  // no-op if any of these is true: |id| is invalid; |id| corresponds to a
+  // password already stored in the account; or the user is not using the
+  // account-scoped password storage.
+  virtual void MovePasswordsToAccount(const std::vector<int>& ids,
+                                      content::WebContents* web_contents) = 0;
 
   // Trigger the password import procedure, allowing the user to select a file
   // containing passwords to import.
@@ -165,6 +166,12 @@ class PasswordsPrivateDelegate : public KeyedService {
   // Returns the current status of the password check.
   virtual api::passwords_private::PasswordCheckStatus
   GetPasswordCheckStatus() = 0;
+
+  // Returns a pointer to the current instance of InsecureCredentialsManager.
+  // Needed to get notified when compromised credentials are written out to
+  // disk, since BulkLeakCheckService does not know about that step.
+  virtual password_manager::InsecureCredentialsManager*
+  GetInsecureCredentialsManager() = 0;
 };
 
 }  // namespace extensions

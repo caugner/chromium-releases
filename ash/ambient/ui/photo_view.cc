@@ -12,12 +12,11 @@
 #include "ash/ambient/model/ambient_backend_model.h"
 #include "ash/ambient/ui/ambient_background_image_view.h"
 #include "ash/ambient/ui/ambient_view_delegate.h"
-#include "ash/assistant/ui/assistant_view_ids.h"
+#include "ash/ambient/ui/ambient_view_ids.h"
 #include "ash/public/cpp/metrics_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/window.h"
-#include "ui/compositor/animation_metrics_reporter.h"
 #include "ui/compositor/animation_throughput_reporter.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -32,16 +31,16 @@ constexpr char kPhotoTransitionSmoothness[] =
     "Ash.AmbientMode.AnimationSmoothness.PhotoTransition";
 
 void ReportSmoothness(int value) {
-  base::UmaHistogramPercentage(kPhotoTransitionSmoothness, value);
+  base::UmaHistogramPercentageObsoleteDoNotUse(kPhotoTransitionSmoothness,
+                                               value);
 }
-
 
 }  // namespace
 
 // PhotoView ------------------------------------------------------------------
 PhotoView::PhotoView(AmbientViewDelegate* delegate) : delegate_(delegate) {
   DCHECK(delegate_);
-  SetID(AssistantViewID::kAmbientPhotoView);
+  SetID(AmbientViewID::kAmbientPhotoView);
   Init();
 }
 
@@ -62,7 +61,7 @@ void PhotoView::OnImagesChanged() {
     return;
   }
 
-  UpdateImages();
+  UpdateImage(delegate_->GetAmbientBackendModel()->GetNextImage());
 }
 
 void PhotoView::Init() {
@@ -82,12 +81,13 @@ void PhotoView::Init() {
   // Hides one image view initially for fade in animation.
   image_views_[1]->layer()->SetOpacity(0.0f);
 
-  delegate_->GetAmbientBackendModel()->AddObserver(this);
+  auto* model = delegate_->GetAmbientBackendModel();
+  model->AddObserver(this);
+
+  UpdateImage(model->GetCurrentImage());
 }
 
-void PhotoView::UpdateImages() {
-  auto* model = delegate_->GetAmbientBackendModel();
-  auto& next_image = model->GetNextImage();
+void PhotoView::UpdateImage(const PhotoWithDetails& next_image) {
   if (next_image.photo.isNull())
     return;
 
@@ -135,7 +135,7 @@ void PhotoView::StartTransitionAnimation() {
 }
 
 void PhotoView::OnImplicitAnimationsCompleted() {
-  UpdateImages();
+  UpdateImage(delegate_->GetAmbientBackendModel()->GetNextImage());
   delegate_->OnPhotoTransitionAnimationCompleted();
 }
 

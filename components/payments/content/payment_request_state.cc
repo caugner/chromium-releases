@@ -34,6 +34,7 @@
 #include "components/payments/core/payment_request_data_util.h"
 #include "components/payments/core/payments_experimental_features.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_features.h"
 
 namespace payments {
@@ -56,7 +57,6 @@ void PostStatusCallback(PaymentRequestState::StatusCallback callback,
 }  // namespace
 
 PaymentRequestState::PaymentRequestState(
-    content::WebContents* web_contents,
     content::RenderFrameHost* initiator_render_frame_host,
     const GURL& top_level_origin,
     const GURL& frame_origin,
@@ -67,8 +67,9 @@ PaymentRequestState::PaymentRequestState(
     autofill::PersonalDataManager* personal_data_manager,
     ContentPaymentRequestDelegate* payment_request_delegate,
     JourneyLogger* journey_logger)
-    : web_contents_(web_contents),
-      initiator_render_frame_host_(initiator_render_frame_host),
+    : frame_routing_id_(content::GlobalFrameRoutingId(
+          initiator_render_frame_host->GetProcess()->GetID(),
+          initiator_render_frame_host->GetRoutingID())),
       top_origin_(top_level_origin),
       frame_origin_(frame_origin),
       frame_security_origin_(frame_security_origin),
@@ -83,9 +84,8 @@ PaymentRequestState::PaymentRequestState(
       profile_comparator_(app_locale, *spec) {
   PopulateProfileCache();
 
-  // |web_contents_| is null in unit tests.
   PaymentAppService* service = PaymentAppServiceFactory::GetForContext(
-      web_contents_ ? web_contents_->GetBrowserContext() : nullptr);
+      initiator_render_frame_host->GetBrowserContext());
   number_of_payment_app_factories_ = service->GetNumberOfFactories();
   service->Create(weak_ptr_factory_.GetWeakPtr());
 
@@ -95,7 +95,10 @@ PaymentRequestState::PaymentRequestState(
 PaymentRequestState::~PaymentRequestState() {}
 
 content::WebContents* PaymentRequestState::GetWebContents() {
-  return web_contents_;
+  auto* rfh = content::RenderFrameHost::FromID(frame_routing_id_);
+  return rfh && rfh->IsCurrent()
+             ? content::WebContents::FromRenderFrameHost(rfh)
+             : nullptr;
 }
 
 ContentPaymentRequestDelegate* PaymentRequestState::GetPaymentRequestDelegate()
@@ -129,7 +132,7 @@ const url::Origin& PaymentRequestState::GetFrameSecurityOrigin() {
 
 content::RenderFrameHost* PaymentRequestState::GetInitiatorRenderFrameHost()
     const {
-  return initiator_render_frame_host_;
+  return content::RenderFrameHost::FromID(frame_routing_id_);
 }
 
 const std::vector<mojom::PaymentMethodDataPtr>&
@@ -393,7 +396,8 @@ void PaymentRequestState::GeneratePaymentResponse() {
 }
 
 void PaymentRequestState::OnPaymentAppWindowClosed() {
-  DCHECK(selected_app_);
+  if (!selected_app_)
+    return;
   response_helper_.reset();
   selected_app_->OnPaymentAppWindowClosed();
 }
@@ -415,14 +419,17 @@ void PaymentRequestState::RecordUseStats() {
     }
   }
 
-  selected_app_->RecordUse();
+  if (selected_app_)
+    selected_app_->RecordUse();
 }
 
 void PaymentRequestState::SetAvailablePaymentAppForRetry() {
-  DCHECK(selected_app_);
+  if (!selected_app_)
+    return;
+
   base::EraseIf(available_apps_, [this](const auto& payment_app) {
     // Remove the app if it is not selected.
-    return payment_app.get() != selected_app_;
+    return payment_app.get() != selected_app_.get();
   });
   is_retry_called_ = true;
 }
@@ -441,7 +448,7 @@ void PaymentRequestState::AddAutofillPaymentApp(
       JourneyLogger::EVENT_AVAILABLE_METHOD_BASIC_CARD);
 
   if (selected) {
-    SetSelectedApp(available_apps_.back().get());
+    SetSelectedApp(available_apps_.back()->AsWeakPtr());
   }
 }
 
@@ -527,7 +534,7 @@ void PaymentRequestState::SetSelectedContactProfile(
   }
 }
 
-void PaymentRequestState::SetSelectedApp(PaymentApp* app) {
+void PaymentRequestState::SetSelectedApp(base::WeakPtr<PaymentApp> app) {
   selected_app_ = app;
   UpdateIsReadyToPayAndNotifyObservers();
 }
@@ -665,7 +672,7 @@ void PaymentRequestState::SetDefaultProfileSelections() {
 
   selected_app_ = nullptr;
   if (!available_apps_.empty() && available_apps_[0]->CanPreselect()) {
-    selected_app_ = available_apps_[0].get();
+    selected_app_ = available_apps_[0]->AsWeakPtr();
     UpdateIsReadyToPayAndNotifyObservers();
   }
 
@@ -690,7 +697,7 @@ void PaymentRequestState::SetDefaultProfileSelections() {
 
   journey_logger_->SetNumberOfSuggestionsShown(
       JourneyLogger::Section::SECTION_PAYMENT_METHOD, available_apps().size(),
-      selected_app_);
+      selected_app_.get());
 }
 
 void PaymentRequestState::UpdateIsReadyToPayAndNotifyObservers() {
@@ -712,7 +719,7 @@ void PaymentRequestState::NotifyOnSelectedInformationChanged() {
 bool PaymentRequestState::ArePaymentDetailsSatisfied() {
   // There is no need to check for supported networks, because only supported
   // apps are listed/created in the flow.
-  return selected_app_ != nullptr && selected_app_->IsCompleteForPayment();
+  return selected_app_ && selected_app_->IsCompleteForPayment();
 }
 
 bool PaymentRequestState::ArePaymentOptionsSatisfied() {

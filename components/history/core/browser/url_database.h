@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "components/history/core/browser/url_row.h"
 #include "components/query_parser/query_parser.h"
@@ -238,12 +239,12 @@ class URLDatabase {
   // Deletes any search corresponding to |url_id|.
   bool DeleteKeywordSearchTermForURL(URLID url_id);
 
-  // Migration -----------------------------------------------------------------
-
-  // Do to a bug we were setting the favicon of about:blank. This forces
-  // about:blank to have no icon or title. Returns true on success, false if
-  // the favicon couldn't be updated.
-  bool MigrateFromVersion11ToVersion12();
+  // This is a cover for VisitDatabase::GetVisitsForURL(). It's here to avoid
+  // changing a ton of callback code that currently takes a UrlDatabase.
+  //
+  // TODO(https://crbug.com/1141501): this is for an experiment, and will be
+  // removed once data is collected from experiment.
+  virtual bool GetVisitsForUrl2(URLID url_id, VisitVector* visits);
 
  protected:
   friend class VisitDatabase;

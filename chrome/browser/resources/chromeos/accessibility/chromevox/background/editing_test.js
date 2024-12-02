@@ -21,6 +21,13 @@ ChromeVoxEditingTest = class extends ChromeVoxNextE2ETest {
       EventGenerator.sendKeyPress(keyCode, modifiers);
     };
   }
+
+  waitForEditableEvent() {
+    return new Promise(resolve => {
+      DesktopAutomationHandler.instance.textEditHandler_.onEvent = (e) =>
+          resolve(e);
+    });
+  }
 };
 
 
@@ -96,7 +103,7 @@ TEST_F('ChromeVoxEditingTest', 'TextButNoSelectionChange', function() {
           if (input.selectionStart == 0) {
             return;
           }
-          console.log('TIM' + 'ER');
+
           input.value = 'text2';
           window.clearInterval(timer);
         }
@@ -1353,7 +1360,7 @@ TEST_F('ChromeVoxEditingTest', 'TextAreaBrailleEmptyLine', function() {
   this.runWithLoadedTree('<textarea></textarea>', function(root) {
     const textarea = root.find({role: RoleType.TEXT_FIELD});
     this.listenOnce(textarea, 'focus', function() {
-      this.listenOnce(textarea, 'valueChanged', function() {
+      this.listenOnce(textarea, 'valueInTextFieldChanged', function() {
         mockFeedback.call(this.press(KeyCode.UP)).expectBraille('\n');
         mockFeedback.call(this.press(KeyCode.UP)).expectBraille('two\n');
         mockFeedback.call(this.press(KeyCode.UP)).expectBraille('one\n');
@@ -1469,4 +1476,150 @@ TEST_F('ChromeVoxEditingTest', 'NonBreakingSpaceNewLine', function() {
         });
         input.focus();
       });
+});
+
+TEST_F('ChromeVoxEditingTest', 'InputEvents', function() {
+  const site = `<input type="text"></input>`;
+  this.runWithLoadedTree(site, async function(root) {
+    const input = root.find({role: RoleType.TEXT_FIELD});
+    input.focus();
+    await new Promise(resolve => {
+      this.listenOnce(input, 'focus', resolve);
+    });
+
+    // EventType.TEXT_SELECTION_CHANGED fires on focus as well.
+    //
+    // TODO(nektar): Deprecate and remove TEXT_SELECTION_CHANGED.
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.TEXT_SELECTION_CHANGED, event.type);
+    assertEquals(input, event.target);
+    assertEquals('', input.value);
+
+    this.press(KeyCode.A)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.VALUE_IN_TEXT_FIELD_CHANGED, event.type);
+    assertEquals(input, event.target);
+    assertEquals('a', input.value);
+
+    // We deliberately used EventType.TEXT_SELECTION_CHANGED instead of
+    // EventType.DOCUMENT_SELECTION_CHANGED for text fields.
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.TEXT_SELECTION_CHANGED, event.type);
+    assertEquals(input, event.target);
+    assertEquals('a', input.value);
+
+    this.press(KeyCode.B)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.VALUE_IN_TEXT_FIELD_CHANGED, event.type);
+    assertEquals(input, event.target);
+    assertEquals('ab', input.value);
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.TEXT_SELECTION_CHANGED, event.type);
+    assertEquals(input, event.target);
+    assertEquals('ab', input.value);
+  });
+});
+
+TEST_F('ChromeVoxEditingTest', 'TextAreaEvents', function() {
+  const site = `<textarea></textarea>`;
+  this.runWithLoadedTree(site, async function(root) {
+    const textArea = root.find({role: RoleType.TEXT_FIELD});
+    textArea.focus();
+    await new Promise(resolve => {
+      this.listenOnce(textArea, 'focus', resolve);
+    });
+
+    let event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(textArea, event.target);
+    assertEquals('', textArea.value);
+
+    this.press(KeyCode.A)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(textArea, event.target);
+    assertEquals('a', textArea.value);
+
+    this.press(KeyCode.B)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(textArea, event.target);
+    assertEquals('ab', textArea.value);
+  });
+});
+
+TEST_F('ChromeVoxEditingTest', 'ContentEditableEvents', function() {
+  const site = `<div role="textbox" contenteditable></div>`;
+  this.runWithLoadedTree(site, async function(root) {
+    const contentEditable = root.find({role: RoleType.TEXT_FIELD});
+    contentEditable.focus();
+    await new Promise(resolve => {
+      this.listenOnce(contentEditable, 'focus', resolve);
+    });
+
+    let event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(contentEditable, event.target);
+    assertEquals('', contentEditable.value);
+
+    this.press(KeyCode.A)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(contentEditable, event.target);
+    assertEquals('a', contentEditable.value);
+
+    this.press(KeyCode.B)();
+
+    event = await this.waitForEditableEvent();
+    assertEquals(EventType.DOCUMENT_SELECTION_CHANGED, event.type);
+    assertEquals(contentEditable, event.target);
+    assertEquals('ab', contentEditable.value);
+  });
+});
+
+TEST_F('ChromeVoxEditingTest', 'MarkedContent', function() {
+  const mockFeedback = this.createMockFeedback();
+  const site = `
+    <div contenteditable role="textbox">
+      <p>Start</p>
+      <span>This is </span><span role="mark">my</span><span> text.</span>
+      <br>
+      <span>This is </span><span role="mark"
+          aria-roledescription="Comment">your</span><span> text.</span>
+      <br>
+      <span>This is </span><span role="suggestion"><span
+          role="insertion">their</span></span><span> text.</span>
+      <br>
+      <span>This is </span><span role="suggestion"><span
+          role="deletion">everyone's</span></span><span> text.</span>
+    </div>
+  `;
+  this.runWithLoadedTree(site, function(root) {
+    const input = root.find({role: RoleType.TEXT_FIELD});
+    this.listenOnce(input, 'focus', function() {
+      mockFeedback.call(this.press(KeyCode.DOWN))
+          .expectSpeech(
+              'This is ', 'my', 'Marked content', ' text.',
+              'Exited Marked content.')
+          .call(this.press(KeyCode.DOWN))
+          .expectSpeech(
+              'This is ', 'your', 'Comment', ' text.', 'Exited Comment.')
+          .call(this.press(KeyCode.DOWN))
+          .expectSpeech(
+              'This is ', 'their', 'Insertion', 'Suggestion', ' text.',
+              'Exited Suggestion.', 'Exited Insertion.')
+          .call(this.press(KeyCode.DOWN))
+          .expectSpeech(
+              'This is ', `everyone's`, 'Deletion', 'Suggestion', ' text.',
+              'Exited Suggestion.', 'Exited Deletion.')
+          .replay();
+    });
+    input.focus();
+  });
 });

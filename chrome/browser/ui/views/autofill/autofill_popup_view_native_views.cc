@@ -41,6 +41,7 @@
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/color_tracking_icon_view.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_config.h"
@@ -69,6 +70,9 @@ constexpr int kAutofillPopupPasswordMaxWidth = 108;
 
 // The additional height of the row in case it has two lines of text.
 constexpr int kAutofillPopupAdditionalDoubleRowHeight = 22;
+
+// The additional padding of the row in case it has three lines of text.
+constexpr int kAutofillPopupAdditionalPadding = 16;
 
 // Vertical spacing between labels in one row.
 constexpr int kAdjacentLabelsVerticalSpacing = 2;
@@ -108,23 +112,6 @@ void BuildColumnSet(views::GridLayout* layout) {
                         views::GridLayout::ColumnSize::kUsePreferred, 0, 0);
 }
 
-// An image view that shows a vector icon and tracks changes in the theme.
-class VectorIconView : public views::ImageView {
- public:
-  explicit VectorIconView(const gfx::VectorIcon& icon) : icon_(icon) {}
-
-  // views::ImageView
-  void OnThemeChanged() override {
-    ImageView::OnThemeChanged();
-    const SkColor color = GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_DefaultIconColor);
-    SetImage(gfx::CreateVectorIcon(icon_, gfx::kFaviconSize, color));
-  }
-
- private:
-  const gfx::VectorIcon& icon_;
-};
-
 std::unique_ptr<views::ImageView> ImageViewFromImageSkia(
     const gfx::ImageSkia& image_skia) {
   if (image_skia.isNull())
@@ -136,7 +123,8 @@ std::unique_ptr<views::ImageView> ImageViewFromImageSkia(
 
 std::unique_ptr<views::ImageView> ImageViewFromVectorIcon(
     const gfx::VectorIcon& vector_icon) {
-  return std::make_unique<VectorIconView>(vector_icon);
+  return std::make_unique<views::ColorTrackingIconView>(vector_icon,
+                                                        gfx::kFaviconSize);
 }
 
 std::unique_ptr<views::ImageView> GetIconImageViewByName(
@@ -199,6 +187,17 @@ std::unique_ptr<views::ImageView> GetIconImageView(
 std::unique_ptr<views::ImageView> GetStoreIndicatorIconImageView(
     const autofill::Suggestion& suggestion) {
   return GetIconImageViewByName(suggestion.store_indicator_icon);
+}
+
+// Creates a label with a specific context and style.
+std::unique_ptr<views::Label> CreateLabelWithStyleAndContext(
+    const base::string16& text,
+    int text_context,
+    int text_style) {
+  auto label = std::make_unique<views::Label>(text, text_context, text_style);
+  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  return label;
 }
 
 }  // namespace
@@ -273,19 +272,8 @@ class AutofillPopupItemView : public AutofillPopupRowView {
   // Returns a value view. The label part is optional but allow caller to keep
   // track of all the labels for background color update.
   virtual ViewWithLabel CreateValueLabel();
-  // Creates an optional label below the value.
-  virtual ViewWithLabel CreateSubtextLabel();
   // The description view can be nullptr.
   virtual ViewWithLabel CreateDescriptionLabel();
-
-  // Creates a label matching the style of the description label.
-  std::unique_ptr<views::Label> CreateSecondaryLabel(
-      const base::string16& text) const;
-  // Creates a label with a specific context and style.
-  std::unique_ptr<views::Label> CreateLabelWithStyleAndContext(
-      const base::string16& text,
-      int text_context,
-      int text_style) const;
 
   // Returns the font weight to be applied to primary info.
   virtual gfx::Font::Weight GetPrimaryTextWeight() const = 0;
@@ -300,6 +288,13 @@ class AutofillPopupItemView : public AutofillPopupRowView {
   }
 
  private:
+  // Returns a vector of optional labels to be displayed beneath value.
+  virtual std::vector<ViewWithLabel> CreateSubtextLabels();
+
+  // Returns the minimum cross axis size depending on the length of
+  // GetSubtexts();
+  void UpdateLayoutSize(views::BoxLayout* layout_manager, int64_t num_subtexts);
+
   const int frontend_id_;
 
   // All the labels inside this view.
@@ -321,7 +316,7 @@ class AutofillPopupSuggestionView : public AutofillPopupItemView {
   // AutofillPopupItemView:
   int GetPrimaryTextStyle() override;
   gfx::Font::Weight GetPrimaryTextWeight() const override;
-  ViewWithLabel CreateSubtextLabel() override;
+  std::vector<ViewWithLabel> CreateSubtextLabels() override;
   AutofillPopupSuggestionView(AutofillPopupViewNativeViews* popup_view,
                               int line_number,
                               int frontend_id);
@@ -342,7 +337,7 @@ class PasswordPopupSuggestionView : public AutofillPopupSuggestionView {
  protected:
   // AutofillPopupItemView:
   ViewWithLabel CreateValueLabel() override;
-  ViewWithLabel CreateSubtextLabel() override;
+  std::vector<ViewWithLabel> CreateSubtextLabels() override;
   ViewWithLabel CreateDescriptionLabel() override;
   gfx::Font::Weight GetPrimaryTextWeight() const override;
 
@@ -451,6 +446,11 @@ void AutofillPopupItemView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
     text.push_back(suggestion.label);
   }
 
+  if (!suggestion.offer_label.empty()) {
+    // |offer_label| is only populated for credit card suggestions.
+    text.push_back(suggestion.offer_label);
+  }
+
   if (!suggestion.additional_label.empty()) {
     // |additional_label| is only populated in a passwords context.
     text.push_back(suggestion.additional_label);
@@ -542,8 +542,8 @@ void AutofillPopupItemView::CreateContent() {
                       /*resize=*/false, layout_manager);
   }
 
-  ViewWithLabel lower_value_label = CreateSubtextLabel();
   ViewWithLabel value_label = CreateValueLabel();
+  std::vector<ViewWithLabel> subtext_labels = CreateSubtextLabels();
   ViewWithLabel description_label = CreateDescriptionLabel();
 
   std::unique_ptr<views::View> all_labels = std::make_unique<views::View>();
@@ -560,17 +560,12 @@ void AutofillPopupItemView::CreateContent() {
     grid_layout->SkipColumns(1);
   }
 
-  const int kStandardRowHeight =
-      views::MenuConfig::instance().touchable_menu_height;
-  if (lower_value_label.first) {
-    layout_manager->set_minimum_cross_axis_size(
-        kStandardRowHeight + kAutofillPopupAdditionalDoubleRowHeight);
+  UpdateLayoutSize(layout_manager, subtext_labels.size());
+  for (ViewWithLabel& subtext_label : subtext_labels) {
     grid_layout->StartRowWithPadding(0, 0, 0, kAdjacentLabelsVerticalSpacing);
-    grid_layout->AddView(std::move(lower_value_label.first));
-    KeepLabel(lower_value_label.second);
+    grid_layout->AddView(std::move(subtext_label.first));
+    KeepLabel(subtext_label.second);
     grid_layout->SkipColumns(1);
-  } else {
-    layout_manager->set_minimum_cross_axis_size(kStandardRowHeight);
   }
 
   AddChildView(std::move(all_labels));
@@ -618,7 +613,9 @@ AutofillPopupItemView::ViewWithLabel AutofillPopupItemView::CreateValueLabel() {
           ->controller()
           ->GetSuggestionAt(line_number())
           .is_value_secondary) {
-    std::unique_ptr<views::Label> label = CreateSecondaryLabel(text);
+    std::unique_ptr<views::Label> label = CreateLabelWithStyleAndContext(
+        text, views::style::CONTEXT_DIALOG_BODY_TEXT,
+        views::style::STYLE_SECONDARY);
     view_and_label.second = label.get();
     view_and_label.first = std::move(label);
     return view_and_label;
@@ -640,31 +637,33 @@ AutofillPopupItemView::ViewWithLabel AutofillPopupItemView::CreateValueLabel() {
 }
 
 AutofillPopupItemView::ViewWithLabel
-AutofillPopupItemView::CreateSubtextLabel() {
-  return ViewWithLabel();
-}
-
-AutofillPopupItemView::ViewWithLabel
 AutofillPopupItemView::CreateDescriptionLabel() {
   return ViewWithLabel();
 }
 
-std::unique_ptr<views::Label> AutofillPopupItemView::CreateSecondaryLabel(
-    const base::string16& text) const {
-  return CreateLabelWithStyleAndContext(text,
-                                        views::style::CONTEXT_DIALOG_BODY_TEXT,
-                                        views::style::STYLE_SECONDARY);
+std::vector<AutofillPopupItemView::ViewWithLabel>
+AutofillPopupItemView::CreateSubtextLabels() {
+  return {};
 }
 
-std::unique_ptr<views::Label>
-AutofillPopupItemView::CreateLabelWithStyleAndContext(
-    const base::string16& text,
-    int text_context,
-    int text_style) const {
-  auto label = std::make_unique<views::Label>(text, text_context, text_style);
-  label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+void AutofillPopupItemView::UpdateLayoutSize(views::BoxLayout* layout_manager,
+                                             int64_t num_subtexts) {
+  const int kStandardRowHeight =
+      views::MenuConfig::instance().touchable_menu_height;
+  if (num_subtexts == 0) {
+    layout_manager->set_minimum_cross_axis_size(kStandardRowHeight);
+  } else {
+    layout_manager->set_minimum_cross_axis_size(
+        kStandardRowHeight + kAutofillPopupAdditionalDoubleRowHeight);
+  }
 
-  return label;
+  // In the case that there are three rows in total, adding extra padding to
+  // avoid cramming.
+  if (num_subtexts == 2) {
+    layout_manager->set_inside_border_insets(
+        gfx::Insets(kAutofillPopupAdditionalPadding, GetHorizontalMargin(),
+                    kAutofillPopupAdditionalPadding, GetHorizontalMargin()));
+  }
 }
 
 void AutofillPopupItemView::AddSpacerWithSize(int spacer_width,
@@ -706,20 +705,29 @@ AutofillPopupSuggestionView::AutofillPopupSuggestionView(
   SetFocusBehavior(FocusBehavior::ALWAYS);
 }
 
-AutofillPopupItemView::ViewWithLabel
-AutofillPopupSuggestionView::CreateSubtextLabel() {
-  base::string16 label_text =
+std::vector<AutofillPopupItemView::ViewWithLabel>
+AutofillPopupSuggestionView::CreateSubtextLabels() {
+  const base::string16& second_row_label =
       popup_view()->controller()->GetSuggestionAt(line_number()).label;
-  if (label_text.empty())
-    return ViewWithLabel();
+  const base::string16& third_row_label =
+      popup_view()->controller()->GetSuggestionAt(line_number()).offer_label;
 
-  auto label = CreateLabelWithStyleAndContext(
-      label_text, ChromeTextContext::CONTEXT_DIALOG_BODY_TEXT_SMALL,
-      views::style::STYLE_SECONDARY);
-  ViewWithLabel result;
-  result.second = label.get();
-  result.first = std::move(label);
-  return result;
+  std::vector<AutofillPopupItemView::ViewWithLabel> labels;
+  for (const base::string16& text : {second_row_label, third_row_label}) {
+    // If a row is missing, do not include any further rows.
+    if (text.empty())
+      return labels;
+
+    auto label = CreateLabelWithStyleAndContext(
+        text, ChromeTextContext::CONTEXT_DIALOG_BODY_TEXT_SMALL,
+        views::style::STYLE_SECONDARY);
+    ViewWithLabel result;
+    result.second = label.get();
+    result.first = std::move(label);
+    labels.emplace_back(std::move(result));
+  }
+
+  return labels;
 }
 
 /************** PasswordPopupSuggestionView **************/
@@ -742,15 +750,19 @@ PasswordPopupSuggestionView::CreateValueLabel() {
   return label;
 }
 
-AutofillPopupItemView::ViewWithLabel
-PasswordPopupSuggestionView::CreateSubtextLabel() {
-  auto label = CreateSecondaryLabel(masked_password_);
+std::vector<AutofillPopupItemView::ViewWithLabel>
+PasswordPopupSuggestionView::CreateSubtextLabels() {
+  auto label = CreateLabelWithStyleAndContext(
+      masked_password_, views::style::CONTEXT_DIALOG_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   label->SetElideBehavior(gfx::TRUNCATE);
   ViewWithLabel result;
   result.second = label.get();
   result.first = std::make_unique<ConstrainedWidthView>(
       std::move(label), kAutofillPopupPasswordMaxWidth);
-  return result;
+  std::vector<AutofillPopupItemView::ViewWithLabel> labels;
+  labels.emplace_back(std::move(result));
+  return labels;
 }
 
 AutofillPopupItemView::ViewWithLabel
@@ -758,7 +770,9 @@ PasswordPopupSuggestionView::CreateDescriptionLabel() {
   if (origin_.empty())
     return ViewWithLabel();
 
-  auto label = CreateSecondaryLabel(origin_);
+  auto label = CreateLabelWithStyleAndContext(
+      origin_, views::style::CONTEXT_DIALOG_BODY_TEXT,
+      views::style::STYLE_SECONDARY);
   label->SetElideBehavior(gfx::ELIDE_HEAD);
   ViewWithLabel result;
   result.second = label.get();
@@ -1163,7 +1177,8 @@ void AutofillPopupViewNativeViews::CreateChildViews() {
     }
 
     scroll_view_ = new views::ScrollView();
-    scroll_view_->SetHideHorizontalScrollBar(true);
+    scroll_view_->SetHorizontalScrollBarMode(
+        views::ScrollView::ScrollBarMode::kDisabled);
     body_container_ = scroll_view_->SetContents(std::move(body_container));
     scroll_view_->SetDrawOverflowIndicator(false);
     scroll_view_->ClipHeightTo(0, body_container_->GetPreferredSize().height());

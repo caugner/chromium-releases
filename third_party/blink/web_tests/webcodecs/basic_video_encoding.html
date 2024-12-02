@@ -45,8 +45,8 @@
     };
 
     async function encode_decode_test(codec, acc) {
-      const w = 120;
-      const h = 60;
+      const w = 640;
+      const h = 360;
       let next_ts = 0
       let frames_to_encode = 16;
       let frames_encoded = 0;
@@ -88,7 +88,6 @@
         width: w,
         height: h,
         bitrate: 5000000,
-        framerate: 30,
       };
 
       let encoder = new VideoEncoder(encoder_init);
@@ -110,8 +109,8 @@
     }
 
     async function encode_test(codec, acc) {
-      let w = 120;
-      let h = 60;
+      let w = 640;
+      let h = 360;
       let next_ts = 0
       let frames_to_encode = 16;
       let frames_processed = 0;
@@ -135,7 +134,7 @@
       const init = {
         output: process_video_chunk,
         error: (e) => {
-          error++;
+          errors++;
           console.log(e.message);
         },
       };
@@ -180,11 +179,11 @@
       "encoding and decoding avc1.42001E");
 
     /* Uncomment this for manual testing, before we have GPU tests for that */
-    // promise_test(encode_test.bind(null, "avc1.42001E", "require"),
+    //promise_test(encode_test.bind(null, "avc1.42001E", "require"),
     //  "encoding avc1.42001E");
 
-    // promise_test(encode_decode_test.bind(null, "avc1.42001E", "require"),
-    //  "encoding and decoding avc1.42001E");
+    //promise_test(encode_decode_test.bind(null, "avc1.42001E", "require"),
+    //  "encoding and decoding avc1.42001E req");
 
 
   </script>

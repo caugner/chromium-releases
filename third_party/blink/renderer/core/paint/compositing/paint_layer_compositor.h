@@ -42,7 +42,6 @@ class LayoutEmbeddedContent;
 class LayoutView;
 class Page;
 class Scrollbar;
-class ScrollingCoordinator;
 
 enum CompositingStateTransitionType {
   kNoCompositingStateChange,
@@ -108,8 +107,6 @@ class CORE_EXPORT PaintLayerCompositor {
   // starts or stops being composited.
   static void PaintInvalidationOnCompositingChange(PaintLayer*);
 
-  void FullyInvalidatePaint();
-
   PaintLayer* RootLayer() const;
 
   // The LayoutView's main GraphicsLayer.
@@ -132,7 +129,6 @@ class CORE_EXPORT PaintLayerCompositor {
   // Whether the layer could ever be composited.
   bool CanBeComposited(const PaintLayer*) const;
 
-  bool RootLayerAttachmentDirty() const { return root_layer_attachment_dirty_; }
   void ClearRootLayerAttachmentDirty() { root_layer_attachment_dirty_ = false; }
 
   // FIXME: Move allocateOrClearCompositedLayerMapping to
@@ -169,8 +165,6 @@ class CORE_EXPORT PaintLayerCompositor {
   void SetOwnerNeedsCompositingInputsUpdate();
 
   Page* GetPage() const;
-
-  ScrollingCoordinator* GetScrollingCoordinator() const;
 
   // Checks the given graphics layer against the compositor's horizontal and
   // vertical scrollbar graphics layers, returning the associated Scrollbar

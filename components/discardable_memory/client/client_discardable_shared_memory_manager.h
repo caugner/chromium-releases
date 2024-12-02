@@ -12,7 +12,7 @@
 
 #include "base/feature_list.h"
 #include "base/memory/discardable_memory_allocator.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/synchronization/lock.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -34,14 +34,15 @@ DISCARDABLE_MEMORY_EXPORT extern const base::Feature kSchedulePeriodicPurge;
 // discardable memory segments through the browser process.
 class DISCARDABLE_MEMORY_EXPORT ClientDiscardableSharedMemoryManager
     : public base::DiscardableMemoryAllocator,
-      public base::trace_event::MemoryDumpProvider {
+      public base::trace_event::MemoryDumpProvider,
+      public base::RefCountedDeleteOnSequence<
+          ClientDiscardableSharedMemoryManager> {
  public:
   ClientDiscardableSharedMemoryManager(
       mojo::PendingRemote<mojom::DiscardableSharedMemoryManager> manager,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> periodic_purge_task_runner =
           nullptr);
-  ~ClientDiscardableSharedMemoryManager() override;
 
   // Overridden from base::DiscardableMemoryAllocator:
   std::unique_ptr<base::DiscardableMemory> AllocateLockedDiscardableMemory(
@@ -76,8 +77,8 @@ class DISCARDABLE_MEMORY_EXPORT ClientDiscardableSharedMemoryManager
       const char* name,
       base::trace_event::ProcessMemoryDump* pmd) const;
 
-  void StartScheduledPurging(
-      scoped_refptr<base::SequencedTaskRunner> task_runner);
+  void StartScheduledPurging();
+  void StopScheduledPurging();
 
   struct Statistics {
     size_t total_size;
@@ -96,12 +97,17 @@ class DISCARDABLE_MEMORY_EXPORT ClientDiscardableSharedMemoryManager
   // These fields are only protected for testing, they would otherwise be
   // private. Everything else should be either public or private.
  protected:
+  friend class base::RefCountedDeleteOnSequence<
+      ClientDiscardableSharedMemoryManager>;
+  friend class base::DeleteHelper<ClientDiscardableSharedMemoryManager>;
+
+  ~ClientDiscardableSharedMemoryManager() override;
   ClientDiscardableSharedMemoryManager(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> periodic_purge_task_runner);
   std::unique_ptr<DiscardableSharedMemoryHeap> heap_ GUARDED_BY(lock_);
   mutable base::Lock lock_;
-  std::unique_ptr<base::RepeatingTimer> timer_;
+  std::unique_ptr<base::RepeatingTimer> timer_ GUARDED_BY(lock_);
   scoped_refptr<base::SingleThreadTaskRunner> periodic_purge_task_runner_;
 
  private:
@@ -134,7 +140,9 @@ class DISCARDABLE_MEMORY_EXPORT ClientDiscardableSharedMemoryManager
     bool is_locked() const EXCLUSIVE_LOCKS_REQUIRED(manager_->GetLock());
 
     friend class ClientDiscardableSharedMemoryManager;
-    ClientDiscardableSharedMemoryManager* const manager_;
+    // We need to ensure that |manager_| outlives |this|, to avoid a
+    // use-after-free.
+    scoped_refptr<ClientDiscardableSharedMemoryManager> const manager_;
     std::unique_ptr<DiscardableSharedMemoryHeap::Span> span_;
     // Set to an invalid base::TimeTicks when |this| is Lock()-ed, and to
     // |TimeTicks::Now()| each time |this| is Unlock()-ed.
@@ -186,6 +194,9 @@ class DISCARDABLE_MEMORY_EXPORT ClientDiscardableSharedMemoryManager
   // we're in the foreground. This is parallel to what we do in
   // RenderThreadImpl.
   bool foregrounded_ = false;
+
+  base::WeakPtrFactory<ClientDiscardableSharedMemoryManager> weak_factory_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ClientDiscardableSharedMemoryManager);
 };

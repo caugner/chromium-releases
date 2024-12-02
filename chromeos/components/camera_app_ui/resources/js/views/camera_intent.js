@@ -56,7 +56,7 @@ export class CameraIntent extends Camera {
           const ratio = Math.sqrt(
               DOWNSCALE_INTENT_MAX_PIXEL_NUM / (image.width * image.height));
           blob = await util.scalePicture(
-              image.src, false, Math.floor(image.width * ratio),
+              blob, false, Math.floor(image.width * ratio),
               Math.floor(image.height * ratio));
         }
         const buf = await blob.arrayBuffer();
@@ -144,6 +144,10 @@ export class CameraIntent extends Camera {
     }
     return (async () => {
       await take;
+      if (this.photoResult_ === null && this.videoResultFile_ === null) {
+        // In case of take early finish without any result e.g. Timer canceled.
+        return;
+      }
 
       state.set(state.State.SUSPEND, true);
       await this.start();
@@ -153,7 +157,7 @@ export class CameraIntent extends Camera {
         } else if (this.videoResultFile_ !== null) {
           return this.reviewResult_.openVideo(this.videoResultFile_);
         } else {
-          assertNotReached('End take without intent result.');
+          assertNotReached('None of intent result.');
         }
       })();
       const result = this.photoResult_ || this.videoResult_;
@@ -167,7 +171,15 @@ export class CameraIntent extends Camera {
       });
       if (confirmed) {
         await this.intent_.finish();
-        window.close();
+
+        const appWindow = window['appWindow'];
+        if (appWindow === null) {
+          window.close();
+        } else {
+          // For test session, we notify tests and let test close the window for
+          // us.
+          await appWindow.notifyClosingItself();
+        }
         return;
       }
       this.focus();  // Refocus the visible shutter button for ChromeVox.

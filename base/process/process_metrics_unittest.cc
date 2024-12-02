@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/writable_shared_memory_region.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -475,8 +476,6 @@ TEST(SystemMetrics2Test, GetSystemMemoryInfo) {
   // Chrome OS exposes shmem.
   EXPECT_GT(info.shmem, 0);
   EXPECT_LT(info.shmem, info.total);
-  // Chrome unit tests are not run on actual Chrome OS hardware, so gem_objects
-  // and gem_size cannot be tested here.
 #endif
 }
 #endif  // defined(OS_WIN) || defined(OS_APPLE) || defined(OS_LINUX) ||
@@ -789,13 +788,13 @@ TEST(ProcessMetricsTestLinux, GetCumulativeCPUUsagePerThread) {
 
   // Should have at least the test runner thread and the thread spawned above.
   EXPECT_GE(prev_thread_times.size(), 2u);
-  EXPECT_TRUE(std::any_of(
-      prev_thread_times.begin(), prev_thread_times.end(),
+  EXPECT_TRUE(ranges::any_of(
+      prev_thread_times,
       [&thread1](const std::pair<PlatformThreadId, base::TimeDelta>& entry) {
         return entry.first == thread1.GetThreadId();
       }));
-  EXPECT_TRUE(std::any_of(
-      prev_thread_times.begin(), prev_thread_times.end(),
+  EXPECT_TRUE(ranges::any_of(
+      prev_thread_times,
       [](const std::pair<PlatformThreadId, base::TimeDelta>& entry) {
         return entry.first == base::PlatformThread::CurrentId();
       }));
@@ -811,16 +810,16 @@ TEST(ProcessMetricsTestLinux, GetCumulativeCPUUsagePerThread) {
 
   // The stopped thread may still be reported until the kernel cleans it up.
   EXPECT_GE(prev_thread_times.size(), 1u);
-  EXPECT_TRUE(std::any_of(
-      current_thread_times.begin(), current_thread_times.end(),
+  EXPECT_TRUE(ranges::any_of(
+      current_thread_times,
       [](const std::pair<PlatformThreadId, base::TimeDelta>& entry) {
         return entry.first == base::PlatformThread::CurrentId();
       }));
 
   // Reported times should not decrease.
   for (const auto& entry : current_thread_times) {
-    auto prev_it = std::find_if(
-        prev_thread_times.begin(), prev_thread_times.end(),
+    auto prev_it = ranges::find_if(
+        prev_thread_times,
         [&entry](
             const std::pair<PlatformThreadId, base::TimeDelta>& prev_entry) {
           return entry.first == prev_entry.first;
@@ -870,8 +869,8 @@ TEST(ProcessMetricsTestLinux, GetPerThreadCumulativeCPUTimeInState) {
 
   // Reported times should not decrease.
   for (const auto& entry : current_thread_times) {
-    auto prev_it = std::find_if(
-        prev_thread_times.begin(), prev_thread_times.end(),
+    auto prev_it = ranges::find_if(
+        prev_thread_times,
         [&entry](const ProcessMetrics::ThreadTimeInState& prev_entry) {
           return entry.thread_id == prev_entry.thread_id &&
                  entry.core_type == prev_entry.core_type &&

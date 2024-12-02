@@ -5,12 +5,13 @@
 #include "chrome/browser/apps/platform_apps/shortcut_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/one_shot_event.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/system/sys_info.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -36,13 +37,23 @@ using extensions::Extension;
 
 namespace {
 
+#if defined(OS_MAC)
 // This version number is stored in local prefs to check whether app shortcuts
 // need to be recreated. This might happen when we change various aspects of app
 // shortcuts like command-line flags or associated icons, binaries, etc.
-#if defined(OS_MAC)
 const int kCurrentAppShortcutsVersion = APP_SHIM_VERSION_NUMBER;
+
+// The architecture that was last used to create app shortcuts for this user
+// directory.
+std::string CurrentAppShortcutsArch() {
+  return base::SysInfo::OperatingSystemArchitecture();
+}
 #else
+// Non-mac platforms do not update shortcuts.
 const int kCurrentAppShortcutsVersion = 0;
+std::string CurrentAppShortcutsArch() {
+  return "";
+}
 #endif
 
 // Delay in seconds before running UpdateShortcutsForAllApps.
@@ -75,10 +86,10 @@ void AppShortcutManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   // Indicates whether app shortcuts have been created.
   registry->RegisterIntegerPref(prefs::kAppShortcutsVersion, 0);
+  registry->RegisterStringPref(prefs::kAppShortcutsArch, "");
 }
 
-AppShortcutManager::AppShortcutManager(Profile* profile)
-    : profile_(profile), is_profile_attributes_storage_observer_(false) {
+AppShortcutManager::AppShortcutManager(Profile* profile) : profile_(profile) {
   // Use of g_browser_process requires that we are either on the UI thread, or
   // there are no threads initialized (such as in unit tests).
   DCHECK(!content::BrowserThread::IsThreadInitialized(
@@ -97,19 +108,12 @@ AppShortcutManager::AppShortcutManager(Profile* profile)
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   // profile_manager might be NULL in testing environments.
   if (profile_manager) {
-    profile_manager->GetProfileAttributesStorage().AddObserver(this);
-    is_profile_attributes_storage_observer_ = true;
+    profile_storage_observer_.Add(
+        &profile_manager->GetProfileAttributesStorage());
   }
 }
 
-AppShortcutManager::~AppShortcutManager() {
-  if (g_browser_process && is_profile_attributes_storage_observer_) {
-    ProfileManager* profile_manager = g_browser_process->profile_manager();
-    // profile_manager might be NULL in testing environments or during shutdown.
-    if (profile_manager)
-      profile_manager->GetProfileAttributesStorage().RemoveObserver(this);
-  }
-}
+AppShortcutManager::~AppShortcutManager() = default;
 
 void AppShortcutManager::OnExtensionWillBeInstalled(
     content::BrowserContext* browser_context,
@@ -169,6 +173,8 @@ void AppShortcutManager::UpdateShortcutsForAllAppsNow() {
 void AppShortcutManager::SetCurrentAppShortcutsVersion() {
   profile_->GetPrefs()->SetInteger(prefs::kAppShortcutsVersion,
                                    kCurrentAppShortcutsVersion);
+  profile_->GetPrefs()->SetString(prefs::kAppShortcutsArch,
+                                  CurrentAppShortcutsArch());
 }
 
 void AppShortcutManager::UpdateShortcutsForAllAppsIfNeeded() {
@@ -179,8 +185,13 @@ void AppShortcutManager::UpdateShortcutsForAllAppsIfNeeded() {
 
   int last_version =
       profile_->GetPrefs()->GetInteger(prefs::kAppShortcutsVersion);
-  if (last_version >= kCurrentAppShortcutsVersion)
+  std::string last_arch =
+      profile_->GetPrefs()->GetString(prefs::kAppShortcutsArch);
+
+  if (last_version == kCurrentAppShortcutsVersion &&
+      last_arch == CurrentAppShortcutsArch()) {
     return;
+  }
 
   content::GetUIThreadTaskRunner({})->PostDelayedTask(
       FROM_HERE,

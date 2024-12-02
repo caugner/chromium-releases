@@ -18,13 +18,13 @@
 #import "ios/web/js_messaging/web_frames_manager_impl.h"
 #import "ios/web/navigation/crw_navigation_item_holder.h"
 #import "ios/web/navigation/crw_pending_navigation_info.h"
+#import "ios/web/navigation/crw_text_fragments_handler.h"
 #import "ios/web/navigation/crw_wk_navigation_states.h"
 #import "ios/web/navigation/error_page_helper.h"
 #include "ios/web/navigation/error_retry_state_machine.h"
 #import "ios/web/navigation/navigation_context_impl.h"
 #import "ios/web/navigation/navigation_manager_impl.h"
 #include "ios/web/navigation/navigation_manager_util.h"
-#import "ios/web/navigation/text_fragment_utils.h"
 #import "ios/web/navigation/web_kit_constants.h"
 #import "ios/web/navigation/wk_back_forward_list_item_holder.h"
 #import "ios/web/navigation/wk_navigation_action_policy_util.h"
@@ -82,12 +82,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 }  // namespace
 
 @interface CRWWKNavigationHandler () {
-  // Used to poll for a SafeBrowsing warning being displayed. This is created in
-  // |decidePolicyForNavigationAction| and destroyed once any of the following
-  // happens: 1) a SafeBrowsing warning is detected; 2) any WKNavigationDelegate
-  // method is called; 3) |stopLoading| is called.
-  base::RepeatingTimer _safeBrowsingWarningDetectionTimer;
-
   // Referrer for the current page; does not include the fragment.
   NSString* _currentReferrerString;
 
@@ -116,6 +110,8 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 @property(nonatomic, readonly, assign) GURL documentURL;
 // Returns the js injector from self.delegate.
 @property(nonatomic, readonly, weak) CRWJSInjector* JSInjector;
+// Will handle highlighting text fragments on the page when necessary.
+@property(nonatomic, strong) CRWTextFragmentsHandler* textFragmentsHandler;
 
 @end
 
@@ -133,6 +129,9 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
             kMaxCertErrorsCount);
 
     _delegate = delegate;
+
+    _textFragmentsHandler =
+        [[CRWTextFragmentsHandler alloc] initWithDelegate:_delegate];
   }
   return self;
 }
@@ -333,8 +332,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
         (!context->IsRendererInitiated() ||
          (context->GetPageTransition() & ui::PAGE_TRANSITION_FORWARD_BACK))) {
       transition = context->GetPageTransition();
-      if (!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
-          context->IsLoadingErrorPage()) {
+      if (context->IsLoadingErrorPage()) {
         // loadHTMLString: navigation which loads error page into WKWebView.
         decisionHandler(WKNavigationActionPolicyAllow);
         return;
@@ -486,48 +484,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     }
   }
 
-  // Only try to detect a SafeBrowsing warning if one isn't already displayed,
-  // since the detection logic won't be able to distinguish between the current
-  // warning and a warning for the page that's about to be loaded. Also, since
-  // the purpose of running this logic is to ensure that the right URL is
-  // displayed in the omnibox, don't try to detect a SafeBrowsing warning for
-  // iframe navigations, because the omnibox already shows the correct main
-  // frame URL in that case.
-  if (policyDecision.ShouldAllowNavigation() && isMainFrameNavigationAction &&
-      !web::IsSafeBrowsingWarningDisplayedInWebView(webView)) {
-    __weak CRWWKNavigationHandler* weakSelf = self;
-    __weak WKWebView* weakWebView = webView;
-    const base::TimeDelta kDelayUntilSafeBrowsingWarningCheck =
-        base::TimeDelta::FromMilliseconds(20);
-    _safeBrowsingWarningDetectionTimer.Start(
-        FROM_HERE, kDelayUntilSafeBrowsingWarningCheck, base::BindRepeating(^{
-          __strong __typeof(weakSelf) strongSelf = weakSelf;
-          __strong __typeof(weakWebView) strongWebView = weakWebView;
-          if (web::IsSafeBrowsingWarningDisplayedInWebView(strongWebView)) {
-            // Extract state from an existing navigation context if one exists.
-            // Create a new context rather than just re-using the existing one,
-            // since the existing context will continue to be used if the user
-            // decides to proceed to the unsafe page. In that case, WebKit
-            // continues the navigation with the same WKNavigation* that's
-            // associated with the existing context.
-            web::NavigationContextImpl* existingContext = [strongSelf
-                contextForPendingMainFrameNavigationWithURL:requestURL];
-            bool hasUserGesture =
-                existingContext ? existingContext->HasUserGesture() : false;
-            bool isRendererInitiated =
-                existingContext ? existingContext->IsRendererInitiated() : true;
-            std::unique_ptr<web::NavigationContextImpl> context =
-                web::NavigationContextImpl::CreateNavigationContext(
-                    strongSelf.webStateImpl, requestURL, hasUserGesture,
-                    transition, isRendererInitiated);
-            [strongSelf navigationManagerImpl] -> AddTransientItem(requestURL);
-            strongSelf.webStateImpl->OnNavigationStarted(context.get());
-            strongSelf.webStateImpl->OnNavigationFinished(context.get());
-            strongSelf->_safeBrowsingWarningDetectionTimer.Stop();
-          }
-        }));
-  }
-
   if (policyDecision.ShouldCancelNavigation()) {
     decisionHandler(WKNavigationActionPolicyCancel);
     return;
@@ -620,18 +576,19 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   if (context) {
     // This is already seen and registered navigation.
 
-    if ((!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
-         context->IsLoadingErrorPage()) ||
-        (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
-         [ErrorPageHelper isErrorPageFileURL:context->GetUrl()])) {
+    if (context->IsLoadingErrorPage()) {
       // This is loadHTMLString: navigation to display error page in web view.
       self.navigationState = web::WKNavigationState::REQUESTED;
       return;
     }
 
-    if ((base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) ||
-         !context->IsPlaceholderNavigation()) &&
-        !IsWKInternalUrl(webViewURL)) {
+    BOOL isErrorPageNavigation =
+        (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+         [ErrorPageHelper isErrorPageFileURL:webViewURL]) ||
+        (!base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+         context->IsPlaceholderNavigation());
+
+    if (!isErrorPageNavigation && !IsWKInternalUrl(webViewURL)) {
       web::NavigationItem* item =
           web::GetItemWithUniqueID(self.navigationManagerImpl, context);
       if (item) {
@@ -685,11 +642,13 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   // should be registered.
 
   // When using WKBasedNavigationManager, renderer-initiated app-specific loads
-  // should be allowed in two specific cases:
+  // should only be allowed in these specific cases:
   // 1) if |backForwardList.currentItem| is a placeholder URL for the
   //    provisional load URL (i.e. webView.URL), then this is an in-progress
   //    app-specific load and should not be restarted.
   // 2) back/forward navigation to an app-specific URL should be allowed.
+  // 3) navigation to an app-specific URL should be allowed from other
+  //    app-specific URLs
   bool exemptedAppSpecificLoad = false;
   bool currentItemIsPlaceholder =
       !base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
@@ -698,8 +657,8 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   bool isBackForward =
       self.pendingNavigationInfo.navigationType == WKNavigationTypeBackForward;
   bool isRestoringSession = IsRestoreSessionUrl(self.documentURL);
-  exemptedAppSpecificLoad =
-      currentItemIsPlaceholder || isBackForward || isRestoringSession;
+  exemptedAppSpecificLoad = currentItemIsPlaceholder || isBackForward ||
+                            isRestoringSession || self.webStateImpl->HasWebUI();
 
   if (!web::GetWebClient()->IsAppSpecificURL(webViewURL) ||
       !exemptedAppSpecificLoad) {
@@ -789,19 +748,10 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     DCHECK(web::GetWebClient()->IsAppSpecificURL(
         net::GURLWithNSURL(error.userInfo[NSURLErrorFailingURLErrorKey])));
   } else {
-    // Skip this check when committed interstitials enabled and let the cert
-    // error go through handleLoadError: instead. In this case, a generic
-    // net error page gets shown for cert errors.
-    if (web::IsWKWebViewSSLCertError(error) &&
-        !base::FeatureList::IsEnabled(
-            web::features::kSSLCommittedInterstitials)) {
-      [self handleSSLCertError:error forNavigation:navigation webView:webView];
-    } else {
-      [self handleLoadError:error
-              forNavigation:navigation
-                    webView:webView
-            provisionalLoad:YES];
-    }
+    [self handleLoadError:error
+            forNavigation:navigation
+                  webView:webView
+          provisionalLoad:YES];
   }
 
   self.webStateImpl->GetWebFramesManagerImpl().RemoveAllWebFrames();
@@ -821,8 +771,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   if (web::WKNavigationState::NONE !=
           [self.navigationStates stateForNavigation:navigation] &&
       !(context && web::IsWKWebViewSSLCertError(context->GetError()) &&
-        base::FeatureList::IsEnabled(
-            web::features::kSSLCommittedInterstitials) &&
         !base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage))) {
     [self.navigationStates removeNavigation:navigation];
   }
@@ -986,19 +934,42 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     }
   }
 
+  // The WebView URL can't always be trusted when multiple pending navigations
+  // are occuring, as a navigation could commit after a new navigation has
+  // started (and thus the WebView URL will be the URL of the new navigation).
+  // See crbug.com/1127025.
+  BOOL hasMultiplePendingNavigations =
+      [self.navigationStates pendingNavigations].count > 1;
+
+  // When loading an error page, the context has the correct URL whereas the
+  // webView has the file URL.
+  BOOL isErrorPage =
+      base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+      [ErrorPageHelper isErrorPageFileURL:webViewURL];
+
+  // When loading an error page that is a placeholder (legacy), the webViewURL
+  // should be used as it is the actual URL we want to load.
+  BOOL isLegacyErrorPage =
+      !base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) &&
+      context && !context->IsPlaceholderNavigation();
+
+  BOOL shouldUseContextURL =
+      context
+          ? isErrorPage || (!isLegacyErrorPage && hasMultiplePendingNavigations)
+          : NO;
+  GURL documentURL = shouldUseContextURL ? context->GetUrl() : webViewURL;
+
+  // This is the point where the document's URL has actually changed.
+  [self.delegate navigationHandler:self
+                    setDocumentURL:documentURL
+                           context:context];
+
   // No further code relies an existance of pending item, so this navigation can
   // be marked as "committed".
   [self.navigationStates setState:web::WKNavigationState::COMMITTED
                     forNavigation:navigation];
 
-  // This is the point where the document's URL has actually changed.
-  [self.delegate navigationHandler:self
-                    setDocumentURL:webViewURL
-                           context:context];
-
-  if (!committedNavigation && context &&
-      (base::FeatureList::IsEnabled(web::features::kUseJSForErrorPage) ||
-       !context->IsLoadingErrorPage())) {
+  if (!committedNavigation && context && !context->IsLoadingErrorPage()) {
     self.webStateImpl->OnNavigationFinished(context);
   }
 
@@ -1023,14 +994,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 - (void)webView:(WKWebView*)webView
     didFinishNavigation:(WKNavigation*)navigation {
   [self didReceiveWKNavigationDelegateCallback];
-
-  NSUInteger forwardItemCount = webView.backForwardList.forwardList.count;
-  base::UmaHistogramBoolean("Session.WebStates.HasForwardItemsAfterNavigation",
-                            forwardItemCount > 0);
-  if (forwardItemCount > 0) {
-    base::UmaHistogramCounts100(
-        "Session.WebStates.ForwardItemsCountAfterNavigation", forwardItemCount);
-  }
 
   // Sometimes |webView:didFinishNavigation| arrives before
   // |webView:didCommitNavigation|. Explicitly trigger post-commit processing.
@@ -1149,9 +1112,9 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     }
   }
 
-  if (context && web::AreTextFragmentsAllowed(context)) {
-    web::HandleTextFragments(self.webStateImpl);
-  }
+  [self.textFragmentsHandler
+      processTextFragmentsWithContext:context
+                             referrer:self.currentReferrer];
 
   [self.navigationStates setState:web::WKNavigationState::FINISHED
                     forNavigation:navigation];
@@ -1238,9 +1201,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 
   // If the legacy TLS interstitial is not enabled, don't cause errors. The
   // interstitial is also dependent on committed interstitials being enabled.
-  if (!base::FeatureList::IsEnabled(
-          web::features::kSSLCommittedInterstitials) ||
-      !base::FeatureList::IsEnabled(web::features::kIOSLegacyTLSInterstitial)) {
+  if (!base::FeatureList::IsEnabled(web::features::kIOSLegacyTLSInterstitial)) {
     decisionHandler(YES);
     return;
   }
@@ -1353,13 +1314,9 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
              : nullptr;
 }
 
-// This method should be called on receiving WKNavigationDelegate callbacks. It
-// stops the SafeBrowsing warning detection timer, since after this point it's
-// too late for a SafeBrowsing warning to be displayed for the navigation for
-// which the timer was started.
+// This method should be called on receiving WKNavigationDelegate callbacks.
 - (void)didReceiveWKNavigationDelegateCallback {
   DCHECK(!self.beingDestroyed);
-  _safeBrowsingWarningDetectionTimer.Stop();
 }
 
 // Extracts navigation info from WKNavigationAction and sets it as a pending.
@@ -1455,6 +1412,11 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 
   // If the session is being restored, allow the navigation.
   if (IsRestoreSessionUrl(self.documentURL)) {
+    return YES;
+  }
+
+  // Allow navigation to WebUI pages from error pages.
+  if ([ErrorPageHelper isErrorPageFileURL:self.documentURL]) {
     return YES;
   }
 
@@ -1945,6 +1907,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 
       std::unique_ptr<web::NavigationContextImpl> originalContext =
           [self.navigationStates removeNavigation:navigation];
+      originalContext->SetLoadingErrorPage(true);
       [self.navigationStates setContext:std::move(originalContext)
                           forNavigation:errorNavigation];
       // Return as the context was moved.
@@ -2017,6 +1980,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   context->SetNavigationItemUniqueID(item->GetUniqueID());
   context->SetItem(std::move(item));
   context->SetError(error);
+  context->SetLoadingErrorPage(true);
 
   self.webStateImpl->OnNavigationStarted(context.get());
 
@@ -2035,23 +1999,29 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 
   ErrorPageHelper* errorPage = [[ErrorPageHelper alloc] initWithError:error];
   WKBackForwardListItem* backForwardItem = webView.backForwardList.currentItem;
-  // There are 3 possible scenarios here:
+  // There are 4 possible scenarios here:
   //   1. Current nav item is an error page for failed URL;
   //   2. Current nav item has a failed URL. This may happen when
   //      back/forward/refresh on a loaded page;
   //   3. Current nav item is an irrelevant page.
-  // For 1&2, load an empty string to remove existing JS code.
+  //   4. Current nav item is a session restoration.
+  // For 1, 2 and 4, load an empty string to remove existing JS code. The URL is
+  // also updated to the URL of the page that failed to allow back/forward
+  // navigations even on navigations originating from pushstate. See
+  // crbug.com/1153261.
   // For 3, load error page file to create a new nav item.
   // The actual error HTML will be loaded in didFinishNavigation callback.
   WKNavigation* errorNavigation = nil;
   if (provisionalLoad &&
       ![errorPage
           isErrorPageFileURLForFailedNavigationURL:backForwardItem.URL] &&
-      ![backForwardItem.URL isEqual:errorPage.failedNavigationURL]) {
+      ![backForwardItem.URL isEqual:errorPage.failedNavigationURL] &&
+      !web::wk_navigation_util::IsRestoreSessionUrl(backForwardItem.URL)) {
     errorNavigation = [webView loadFileURL:errorPage.errorPageFileURL
                    allowingReadAccessToURL:errorPage.errorPageFileURL];
   } else {
-    errorNavigation = [webView loadHTMLString:@"" baseURL:backForwardItem.URL];
+    errorNavigation = [webView loadHTMLString:@""
+                                      baseURL:errorPage.failedNavigationURL];
   }
   [self.navigationStates setState:web::WKNavigationState::REQUESTED
                     forNavigation:errorNavigation];
@@ -2068,8 +2038,10 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     std::unique_ptr<web::NavigationContextImpl> navigationContext =
         [self.navigationStates removeNavigation:navigation];
     [self loadCancelled];
-    web::NavigationItemImpl* item = web::GetItemWithUniqueID(
-        self.navigationManagerImpl, navigationContext.get());
+    web::NavigationItemImpl* item =
+        navigationContext ? web::GetItemWithUniqueID(self.navigationManagerImpl,
+                                                     navigationContext.get())
+                          : nullptr;
     if (self.navigationManagerImpl->GetPendingItem() == item) {
       self.navigationManagerImpl->DiscardNonCommittedItems();
     }
@@ -2093,7 +2065,9 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
     web::NavigationContextImpl* navigationContext =
         [self.navigationStates contextForNavigation:navigation];
     web::NavigationItemImpl* item =
-        web::GetItemWithUniqueID(self.navigationManagerImpl, navigationContext);
+        navigationContext ? web::GetItemWithUniqueID(self.navigationManagerImpl,
+                                                     navigationContext)
+                          : nullptr;
     if (item) {
       // Since the navigation has already been committed, it will retain its
       // back / forward item even though the load has been cancelled. Update the
@@ -2203,8 +2177,7 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
   net::SSLInfo info;
   base::Optional<net::SSLInfo> ssl_info = base::nullopt;
 
-  if (web::IsWKWebViewSSLCertError(error) &&
-      base::FeatureList::IsEnabled(web::features::kSSLCommittedInterstitials)) {
+  if (web::IsWKWebViewSSLCertError(error)) {
     web::GetSSLInfoFromWKWebViewSSLCertError(error, &info);
     if (info.cert) {
       // Retrieve verification results from _certVerificationErrors cache to
@@ -2235,16 +2208,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
       }
     }
     ssl_info = base::make_optional<net::SSLInfo>(info);
-  } else if (web::IsWKWebViewSSLCertError(error) &&
-             !base::FeatureList::IsEnabled(
-                 web::features::kSSLCommittedInterstitials)) {
-    // This could happen only if certificate is absent or could not be parsed.
-    error = web::NetErrorFromError(error, net::ERR_SSL_SERVER_CERT_BAD_FORMAT);
-#if defined(DEBUG)
-    net::SSLInfo info;
-    web::GetSSLInfoFromWKWebViewSSLCertError(error, &info);
-    CHECK(!error.cert);
-#endif
   }
   NSString* failingURLString =
       error.userInfo[NSURLErrorFailingURLStringErrorKey];
@@ -2380,7 +2343,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
 
 - (void)stopLoading {
   self.pendingNavigationInfo.cancelled = YES;
-  _safeBrowsingWarningDetectionTimer.Stop();
   [self loadCancelled];
   _certVerificationErrors->Clear();
 }
@@ -2629,12 +2591,6 @@ void ReportOutOfSyncURLInDidStartProvisionalNavigation(
       self.navigationManagerImpl->GetLastCommittedItem()->SetURL(
           context->GetUrl());
     }
-    // If a SafeBrowsing warning is currently displayed, the user has tapped
-    // the button on the warning page to proceed to the site, the site has
-    // started loading, and the warning is about to be removed. In this case,
-    // the transient item for the warning needs to be removed too.
-    if (web::IsSafeBrowsingWarningDisplayedInWebView(webView))
-      self.navigationManagerImpl->DiscardNonCommittedItems();
   }
 }
 

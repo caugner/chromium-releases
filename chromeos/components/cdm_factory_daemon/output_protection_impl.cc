@@ -8,7 +8,7 @@
 
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -200,12 +200,17 @@ void OutputProtectionImpl::EnableProtection(ProtectionType desired_protection,
     return;
   }
 
-  // We never lower the HDCP level with a new request.
-  if (desired_protection == ProtectionType::HDCP_TYPE_0) {
-    if (!desired_protection_mask_)
+  // We just pass through what the client requests.
+  switch (desired_protection) {
+    case ProtectionType::HDCP_TYPE_0:
       desired_protection_mask_ = display::CONTENT_PROTECTION_METHOD_HDCP_TYPE_0;
-  } else if (desired_protection == ProtectionType::HDCP_TYPE_1) {
-    desired_protection_mask_ = display::CONTENT_PROTECTION_METHOD_HDCP_TYPE_1;
+      break;
+    case ProtectionType::HDCP_TYPE_1:
+      desired_protection_mask_ = display::CONTENT_PROTECTION_METHOD_HDCP_TYPE_1;
+      break;
+    case ProtectionType::NONE:
+      desired_protection_mask_ = display::CONTENT_PROTECTION_METHOD_NONE;
+      break;
   }
 
   // We want to copy this since we will manipulate it.
@@ -286,9 +291,7 @@ void OutputProtectionImpl::QueryStatusCallbackAggregator(
                           ConvertProtection(aggregate_protection_mask));
 }
 
-void OutputProtectionImpl::OnDisplayMetricsChanged(
-    const display::Display& display,
-    uint32_t changed_metrics) {
+void OutputProtectionImpl::HandleDisplayChange() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   display_id_list_ = GetDisplayIdsFromSnapshots(delegate_->cached_displays());
   if (desired_protection_mask_) {
@@ -297,6 +300,20 @@ void OutputProtectionImpl::OnDisplayMetricsChanged(
     EnableProtection(ConvertProtection(desired_protection_mask_),
                      base::DoNothing());
   }
+}
+
+void OutputProtectionImpl::OnDisplayAdded(const display::Display& display) {
+  HandleDisplayChange();
+}
+
+void OutputProtectionImpl::OnDisplayMetricsChanged(
+    const display::Display& display,
+    uint32_t changed_metrics) {
+  HandleDisplayChange();
+}
+
+void OutputProtectionImpl::OnDisplayRemoved(const display::Display& display) {
+  HandleDisplayChange();
 }
 
 }  // namespace chromeos

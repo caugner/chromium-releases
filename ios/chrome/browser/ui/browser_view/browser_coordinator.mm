@@ -38,10 +38,10 @@
 #import "ios/chrome/browser/ui/commands/page_info_commands.h"
 #import "ios/chrome/browser/ui/commands/password_breach_commands.h"
 #import "ios/chrome/browser/ui/commands/qr_generation_commands.h"
+#import "ios/chrome/browser/ui/commands/share_highlight_command.h"
 #import "ios/chrome/browser/ui/commands/text_zoom_commands.h"
 #import "ios/chrome/browser/ui/commands/whats_new_commands.h"
 #import "ios/chrome/browser/ui/download/ar_quick_look_coordinator.h"
-#import "ios/chrome/browser/ui/download/features.h"
 #import "ios/chrome/browser/ui/download/pass_kit_coordinator.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_controller_ios.h"
 #import "ios/chrome/browser/ui/find_bar/find_bar_coordinator.h"
@@ -208,25 +208,25 @@
     return;
 
   DCHECK(!self.viewController);
+
+  // Add commands protocols handled by this class in this array to let the
+  // dispatcher know where to dispatch such commands. This must be done before
+  // starting any child coordinator, otherwise they won't be able to resolve
+  // handlers.
+  NSArray<Protocol*>* protocols = @[
+    @protocol(ActivityServiceCommands), @protocol(BrowserCoordinatorCommands),
+    @protocol(FindInPageCommands), @protocol(PageInfoCommands),
+    @protocol(PasswordBreachCommands), @protocol(TextZoomCommands),
+    @protocol(WhatsNewCommands)
+  ];
+
+  for (Protocol* protocol in protocols) {
+    [self.dispatcher startDispatchingToTarget:self forProtocol:protocol];
+  }
+
   [self startBrowserContainer];
-  [self.dispatcher startDispatchingToTarget:self
-                                forProtocol:@protocol(TextZoomCommands)];
-  [self.browser->GetCommandDispatcher()
-      startDispatchingToTarget:self
-                   forProtocol:@protocol(WhatsNewCommands)];
-  [self.dispatcher startDispatchingToTarget:self
-                                forProtocol:@protocol(FindInPageCommands)];
   [self createViewController];
   [self startChildCoordinators];
-  [self.dispatcher startDispatchingToTarget:self
-                                forProtocol:@protocol(ActivityServiceCommands)];
-  [self.dispatcher
-      startDispatchingToTarget:self
-                   forProtocol:@protocol(BrowserCoordinatorCommands)];
-  [self.dispatcher startDispatchingToTarget:self
-                                forProtocol:@protocol(PageInfoCommands)];
-  [self.dispatcher startDispatchingToTarget:self
-                                forProtocol:@protocol(PasswordBreachCommands)];
   [self installDelegatesForAllWebStates];
   [self installDelegatesForBrowser];
   [self addWebStateListObserver];
@@ -241,6 +241,7 @@
   [self removeWebStateListObserver];
   [self uninstallDelegatesForBrowser];
   [self uninstallDelegatesForAllWebStates];
+  self.viewController.commandDispatcher = nil;
   [self.dispatcher stopDispatchingToTarget:self];
   [self stopChildCoordinators];
   [self destroyViewController];
@@ -304,7 +305,8 @@
                      initWithBrowser:self.browser
                    dependencyFactory:factory
       browserContainerViewController:self.browserContainerCoordinator
-                                         .viewController];
+                                         .viewController
+                          dispatcher:self.dispatcher];
 }
 
 // Shuts down the BrowserViewController.
@@ -470,17 +472,33 @@
 #pragma mark - ActivityServiceCommands
 
 - (void)sharePage {
-  UIView* shareButton =
-      [self.viewController.activityServicePositioner shareButtonView];
-
   ActivityParams* params = [[ActivityParams alloc]
       initWithScenario:ActivityScenario::TabShareButton];
 
-  self.sharingCoordinator =
-      [[SharingCoordinator alloc] initWithBaseViewController:self.viewController
-                                                     browser:self.browser
-                                                      params:params
-                                                  originView:shareButton];
+  self.sharingCoordinator = [[SharingCoordinator alloc]
+      initWithBaseViewController:self.viewController
+                         browser:self.browser
+                          params:params
+                      originView:self.viewController.activityServicePositioner
+                                     .sourceView
+                      originRect:self.viewController.activityServicePositioner
+                                     .sourceRect];
+  [self.sharingCoordinator start];
+}
+
+- (void)shareHighlight:(ShareHighlightCommand*)command {
+  ActivityParams* params =
+      [[ActivityParams alloc] initWithURL:command.URL
+                                    title:command.title
+                           additionalText:command.selectedText
+                                 scenario:ActivityScenario::SharedHighlight];
+
+  self.sharingCoordinator = [[SharingCoordinator alloc]
+      initWithBaseViewController:self.viewController
+                         browser:self.browser
+                          params:params
+                      originView:command.sourceView
+                      originRect:command.sourceRect];
   [self.sharingCoordinator start];
 }
 
@@ -501,30 +519,13 @@
 }
 
 - (void)showDownloadsFolder {
-  if (base::FeatureList::IsEnabled(kOpenDownloadsInFilesApp)) {
-    NSURL* URL = GetFilesAppUrl();
-    if (!URL)
-      return;
-
-    [[UIApplication sharedApplication] openURL:URL
-                                       options:@{}
-                             completionHandler:nil];
+  NSURL* URL = GetFilesAppUrl();
+  if (!URL)
     return;
-  }
 
-  base::FilePath download_dir;
-  if (!GetTempDownloadsDirectory(&download_dir)) {
-    return;
-  }
-
-  UIDocumentPickerViewController* documentPicker =
-      [[UIDocumentPickerViewController alloc]
-          initWithDocumentTypes:@[ @"public.data" ]
-                         inMode:UIDocumentPickerModeImport];
-  documentPicker.modalPresentationStyle = UIModalPresentationFormSheet;
-  [self.viewController presentViewController:documentPicker
-                                    animated:YES
-                                  completion:nil];
+  [[UIApplication sharedApplication] openURL:URL
+                                     options:@{}
+                           completionHandler:nil];
 }
 
 - (void)showRecentTabs {

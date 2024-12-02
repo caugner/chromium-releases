@@ -11,7 +11,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_registrar.h"
 #include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
-#include "chrome/common/chrome_features.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -43,7 +42,8 @@ const Extension* BookmarkAppRegistryController::GetExtension(
 
 void BookmarkAppRegistryController::SetAppUserDisplayMode(
     const web_app::AppId& app_id,
-    DisplayMode display_mode) {
+    DisplayMode display_mode,
+    bool is_user_action) {
   const Extension* extension = GetExtension(app_id);
   if (!extension)
     return;
@@ -60,6 +60,7 @@ void BookmarkAppRegistryController::SetAppUserDisplayMode(
     case DisplayMode::kUndefined:
     case DisplayMode::kMinimalUi:
     case DisplayMode::kFullscreen:
+    case DisplayMode::kWindowControlsOverlay:
       NOTREACHED();
       return;
   }

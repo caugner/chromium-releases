@@ -3,6 +3,7 @@
 <translationbundle lang="or">
 <translation id="1276998909102132017">ଗ୍ୟାଲେରୀ ଛବିଗୁଡ଼ିକ</translation>
 <translation id="1430915738399379752">ପ୍ରିଣ୍ଟ କରନ୍ତୁ</translation>
+<translation id="1473110567575736769">3 ସେକେଣ୍ଡର ଟାଇମର୍</translation>
 <translation id="1620510694547887537">କ୍ୟାମେରା</translation>
 <translation id="1627744224761163218">4 x 4</translation>
 <translation id="1664224225747386870">କିଛି ରେକର୍ଡ କରାଯାଇ ନାହିଁ</translation>
@@ -29,7 +30,9 @@
 <translation id="3259149966178251584">କ୍ୟାମେରା ରିଜୋଲ୍ୟୁଶନ୍</translation>
 <translation id="3517926952904427380">ପୋଟ୍ରେଟ୍ ଫଟୋ ଉଠାଇବା ପାଇଁ ଅକ୍ଷମ</translation>
 <translation id="3569311554794739032">ଆପଣ କ'ଣ ପ୍ରକୃତରେ <ph name="FILE" />କୁ କାଢ଼ି ଦେବାକୁ ଚାହୁଁଛନ୍ତି?</translation>
+<translation id="3750315947605636967">ଆପଣଙ୍କ କ୍ୟାମେରା ଅନ୍ୟ ଏକ ଆପ୍ ଦ୍ୱାରା ବ୍ୟବହୃତ ହେଉଛି</translation>
 <translation id="3810838688059735925">ଭିଡିଓ</translation>
+<translation id="4000398125663085899">ନୂଆ ଫଟୋ ଏବଂ ଭିଡିଓଗୁଡ଼ିକ ବର୍ତ୍ତମାନ Files ଆପରେ ଏକ ଫୋଲ୍ଡରରେ ସେଭ୍ କରାଯିବ: ମୋ ଫାଇଲ୍ &gt; କ୍ୟାମେରା</translation>
 <translation id="4118525110028899586">ରେକର୍ଡିଂ ବିରତ କରନ୍ତୁ</translation>
 <translation id="4279490309300973883">ପ୍ରତିଫଳନ</translation>
 <translation id="4329152592498422850">ବର୍ଗାକାର ଫଟୋ ଉଠାଇବା ପାଇଁ ସ୍ୱିଚ୍ କରନ୍ତୁ</translation>
@@ -58,11 +61,11 @@
 ଯଦି ଆପଣଙ୍କ ମତାମତ ଛବି କିମ୍ବା ଭିଡିଓର ଗୁଣବତ୍ତା ବିଷୟରେ ହୋଇଥାଏ, ତେବେ ଦୟାକରି ଏକ ନମୁନା ଫଟୋ କିମ୍ବା ଭିଡିଓ ଆଟାଚ୍ କରନ୍ତୁ ଏବଂ କଣ ସମସ୍ୟା ହୋଇଛି ତାହା ବର୍ଣ୍ଣନା କରନ୍ତୁ। (ଉଦାହରଣ ସ୍ୱରୂପ, ଫଟୋଟି ଅତ୍ୟଧିକ ଗାଢ଼ା ଅଛି କିମ୍ବା ଫଟୋ ନିଆଯାଉଥିବା ବସ୍ତୁଟି ଉପରେ ଫୋକସ୍ କରାଯାଇ ନାହିଁ।)</translation>
 <translation id="6420689864531458495">(<ph name="ASPECT_RATIO_WIDTH" />:<ph name="ASPECT_RATIO_HEIGHT" /> - <ph name="WIDTH" />x<ph name="HEIGHT" />) <ph name="MEGAPIXEL" /> ମେଗା ପିକ୍ସେଲ୍</translation>
 <translation id="6681668084120808868">ଫଟୋ ଉଠାନ୍ତୁ</translation>
-<translation id="6739700533200816396">ଫଟୋ ଏବଂ ଭିଡିଓଗୁଡ଼ିକ ବର୍ତ୍ତମାନ Files ଆପରେ ଏକ ନୂଆ ଫୋଲ୍ଡରରେ ସେଭ୍ କରାଯିବ: ମୋ ଫାଇଲ୍ &gt; କ୍ୟାମେରା। ପୂର୍ବବର୍ତ୍ତୀ ଫଟୋ ଏବଂ ଭିଡିଓଗୁଡ଼ିକ ନୂଆ ଫୋଲ୍ଡରକୁ ମୁଭ୍ କରାଯିବ ନାହିଁ।</translation>
 <translation id="6778482348691154169">ଫଟୋ ଉଠାଇବାରେ ଅକ୍ଷମ</translation>
 <translation id="6965382102122355670">ଓକେ ବଟନ୍</translation>
 <translation id="698156982839284926">3 ସେକେଣ୍ଡ</translation>
 <translation id="712848772518857951">ଆପଣ କ'ଣ ପ୍ରକୃତରେ <ph name="COUNT" />ଟି ଆଇଟମ୍ କାଢ଼ି ଦେବାକୁ ଚାହୁଁଛନ୍ତି?</translation>
+<translation id="7134221860976209830">10 ସେକେଣ୍ଡର ଟାଇମର୍</translation>
 <translation id="7243947652761655814">ଭିଡିଓ ରିଜୋଲ୍ୟୁସନ୍</translation>
 <translation id="7337660886763914220">ଫାଇଲ୍ ସିଷ୍ଟମ୍‌ର ତ୍ରୁଟିଗୁଡ଼ିକ।</translation>
 <translation id="7557677699350329807">ପରବର୍ତ୍ତୀ କ୍ୟାମେରାକୁ ସ୍ୱିଚ୍ କରନ୍ତୁ</translation>
@@ -70,7 +73,6 @@
 <translation id="7649070708921625228">ସହାୟତା</translation>
 <translation id="7658239707568436148">ବାତିଲ୍</translation>
 <translation id="7670511624014457267">60 FPS</translation>
-<translation id="8049189770492311300">ଟାଇମର୍</translation>
 <translation id="8067883171444229417">ଭିଡିଓ ଚଲାନ୍ତୁ</translation>
 <translation id="8131740175452115882">ନିଶ୍ଚିତ କରନ୍ତୁ</translation>
 <translation id="8145038249676204903">ଫଟୋ ଉଠାଇବା ପାଇଁ ସ୍ୱିଚ୍ କରନ୍ତୁ</translation>

@@ -7,9 +7,10 @@
 #include <memory>
 
 #include "ash/ambient/ambient_constants.h"
+#include "ash/ambient/ui/ambient_view_ids.h"
 #include "ash/ambient/ui/glanceable_info_view.h"
+#include "ash/ambient/ui/media_string_view.h"
 #include "ash/ambient/util/ambient_util.h"
-#include "ash/assistant/ui/assistant_view_ids.h"
 #include "base/rand_util.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
@@ -30,6 +31,7 @@ namespace {
 // Appearance.
 constexpr int kMarginDip = 16;
 constexpr int kSpacingDip = 8;
+constexpr int kMediaStringMarginDip = 32;
 
 // Typography.
 constexpr SkColor kTextColor = SK_ColorWHITE;
@@ -77,25 +79,11 @@ AmbientBackgroundImageView::AmbientBackgroundImageView(
     AmbientViewDelegate* delegate)
     : delegate_(delegate) {
   DCHECK(delegate_);
-  SetID(AssistantViewID::kAmbientBackgroundImageView);
+  SetID(AmbientViewID::kAmbientBackgroundImageView);
   InitLayout();
 }
 
 AmbientBackgroundImageView::~AmbientBackgroundImageView() = default;
-
-// views::View:
-bool AmbientBackgroundImageView::OnMousePressed(const ui::MouseEvent& event) {
-  delegate_->OnBackgroundPhotoEvents();
-  return true;
-}
-
-// views::View:
-void AmbientBackgroundImageView::OnGestureEvent(ui::GestureEvent* event) {
-  if (event->type() == ui::ET_GESTURE_TAP) {
-    delegate_->OnBackgroundPhotoEvents();
-    event->SetHandled();
-  }
-}
 
 void AmbientBackgroundImageView::OnBoundsChanged(
     const gfx::Rect& previous_bounds) {
@@ -228,6 +216,25 @@ void AmbientBackgroundImageView::InitLayout() {
   details_label_->SetShadows(ambient::util::GetTextShadowValues());
   details_label_->SetPaintToLayer();
   details_label_->layer()->SetFillsBoundsOpaquely(false);
+
+  // Inits the media string view. The media string view is positioned on the
+  // right-top corner of the container.
+  views::View* media_string_view_container_ =
+      AddChildView(std::make_unique<views::View>());
+  views::BoxLayout* media_string_layout =
+      media_string_view_container_->SetLayoutManager(
+          std::make_unique<views::BoxLayout>(
+              views::BoxLayout::Orientation::kVertical));
+  media_string_layout->set_main_axis_alignment(
+      views::BoxLayout::MainAxisAlignment::kStart);
+  media_string_layout->set_cross_axis_alignment(
+      views::BoxLayout::CrossAxisAlignment::kEnd);
+  media_string_layout->set_inside_border_insets(
+      gfx::Insets(kMediaStringMarginDip + shadow_insets.top(), 0, 0,
+                  kMediaStringMarginDip + shadow_insets.right()));
+  media_string_view_ = media_string_view_container_->AddChildView(
+      std::make_unique<MediaStringView>());
+  media_string_view_->SetVisible(false);
 }
 
 void AmbientBackgroundImageView::UpdateGlanceableInfoPosition() {
@@ -262,11 +269,18 @@ void AmbientBackgroundImageView::UpdateGlanceableInfoPosition() {
   transform.Translate(current_x_translation, current_y_translation);
   glanceable_info_view_->layer()->SetTransform(transform);
   details_label_->layer()->SetTransform(transform);
+
+  if (media_string_view_->GetVisible()) {
+    gfx::Transform media_string_transform;
+    media_string_transform.Translate(-current_x_translation,
+                                     -current_y_translation);
+    media_string_view_->layer()->SetTransform(media_string_transform);
+  }
 }
 
 bool AmbientBackgroundImageView::UpdateRelatedImageViewVisibility() {
   const bool did_show_pair = related_image_view_->GetVisible();
-  const bool show_pair = IsLandscapeOrientation() && HasPairedPortraitImages();
+  const bool show_pair = IsLandscapeOrientation() && HasPairedImages();
   related_image_view_->SetVisible(show_pair);
   return did_show_pair != show_pair;
 }
@@ -293,10 +307,8 @@ bool AmbientBackgroundImageView::IsLandscapeOrientation() const {
   return width() > height();
 }
 
-bool AmbientBackgroundImageView::HasPairedPortraitImages() const {
-  const auto& primary_image = image_unscaled_;
-  return !primary_image.isNull() && !related_image_unscaled_.isNull() &&
-         primary_image.height() > primary_image.width();
+bool AmbientBackgroundImageView::HasPairedImages() const {
+  return !image_unscaled_.isNull() && !related_image_unscaled_.isNull();
 }
 
 BEGIN_METADATA(AmbientBackgroundImageView, views::View)

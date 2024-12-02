@@ -127,6 +127,10 @@ class CrosNetworkConfig : public mojom::CrosNetworkConfig,
       int callback_id,
       const std::string& error_name,
       std::unique_ptr<base::DictionaryValue> error_data);
+  void UpdateCustomAPNList(const NetworkState* network,
+                           const mojom::ConfigProperties* properties);
+  std::vector<mojom::ApnPropertiesPtr> GetCustomAPNList(
+      const std::string& guid);
 
   void StartConnectSuccess(int callback_id);
   void StartConnectFailure(int callback_id,
@@ -146,6 +150,8 @@ class CrosNetworkConfig : public mojom::CrosNetworkConfig,
   void NetworkPropertiesUpdated(const NetworkState* network) override;
   void DevicePropertiesUpdated(const DeviceState* device) override;
   void OnShuttingDown() override;
+  void ScanStarted(const DeviceState* device) override;
+  void ScanCompleted(const DeviceState* device) override;
 
   // NetworkCertificateHandler::Observer
   void OnCertificatesChanged() override;

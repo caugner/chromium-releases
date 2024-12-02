@@ -10,6 +10,7 @@
 #include <set>
 #include <utility>
 
+#include "base/containers/flat_set.h"
 #include "base/logging.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -152,6 +153,19 @@ void HardwareDisplayPlaneManager::ResetCurrentPlaneList(
   plane_list->atomic_property_set.reset(drmModeAtomicAlloc());
 }
 
+void HardwareDisplayPlaneManager::RestoreCurrentPlaneList(
+    HardwareDisplayPlaneList* plane_list) const {
+  for (auto* plane : plane_list->plane_list) {
+    plane->set_in_use(false);
+  }
+  for (auto* plane : plane_list->old_plane_list) {
+    plane->set_in_use(true);
+  }
+  plane_list->plane_list.clear();
+  plane_list->legacy_page_flips.clear();
+  plane_list->atomic_property_set.reset(drmModeAtomicAlloc());
+}
+
 void HardwareDisplayPlaneManager::BeginFrame(
     HardwareDisplayPlaneList* plane_list) {
   for (auto* plane : plane_list->old_plane_list) {
@@ -174,8 +188,7 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
     HardwareDisplayPlane* hw_plane =
         FindNextUnusedPlane(&plane_idx, crtc_index, plane);
     if (!hw_plane) {
-      LOG(ERROR) << "Failed to find a free plane for crtc " << crtc_id;
-      ResetCurrentPlaneList(plane_list);
+      RestoreCurrentPlaneList(plane_list);
       return false;
     }
 
@@ -191,7 +204,7 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
                   crop_rect.width() << 16, crop_rect.height() << 16);
 
     if (!SetPlaneData(plane_list, hw_plane, plane, crtc_id, fixed_point_rect)) {
-      ResetCurrentPlaneList(plane_list);
+      RestoreCurrentPlaneList(plane_list);
       return false;
     }
 
@@ -415,6 +428,64 @@ void HardwareDisplayPlaneManager::DisableConnectedConnectorsToCrtcs(
         drm_->DisableCrtc(encoder->crtc_id);
     }
   }
+}
+
+const HardwareDisplayPlaneManager::CrtcState&
+HardwareDisplayPlaneManager::GetCrtcStateForCrtcId(uint32_t crtc_id) {
+  return CrtcStateForCrtcId(crtc_id);
+}
+
+HardwareDisplayPlaneManager::CrtcState&
+HardwareDisplayPlaneManager::CrtcStateForCrtcId(uint32_t crtc_id) {
+  int crtc_index = LookupCrtcIndex(crtc_id);
+  DCHECK_GE(crtc_index, 0);
+  return crtc_state_[crtc_index];
+}
+
+void HardwareDisplayPlaneManager::UpdateCrtcAndPlaneStatesAfterModeset(
+    const CommitRequest& commit_request) {
+  base::flat_set<HardwareDisplayPlaneList*> disable_planes_lists;
+
+  for (const auto& crtc_request : commit_request) {
+    bool is_enabled = crtc_request.should_enable();
+
+    int connector_index = LookupConnectorIndex(crtc_request.connector_id());
+    DCHECK_GE(connector_index, 0);
+    ConnectorProperties& connector_props = connectors_props_[connector_index];
+    connector_props.crtc_id.value = is_enabled ? crtc_request.crtc_id() : 0;
+
+    CrtcState& crtc_state = CrtcStateForCrtcId(crtc_request.crtc_id());
+    crtc_state.properties.active.value = static_cast<uint64_t>(is_enabled);
+
+    if (is_enabled) {
+      crtc_state.mode = crtc_request.mode();
+      crtc_state.modeset_framebuffer =
+          DrmOverlayPlane::GetPrimaryPlane(crtc_request.overlays())->buffer;
+    } else {
+      if (crtc_request.plane_list())
+        disable_planes_lists.insert(crtc_request.plane_list());
+
+      // TODO(crbug/1135291): Use atomic APIs to reset cursor plane.
+      if (!drm_->SetCursor(crtc_request.crtc_id(), 0, gfx::Size())) {
+        PLOG(ERROR) << "Failed to drmModeSetCursor: device:"
+                    << drm_->device_path().value()
+                    << " crtc:" << crtc_request.crtc_id();
+      }
+    }
+  }
+
+  // TODO(markyacoub): DisableOverlayPlanes should be part of the commit
+  // request.
+  for (HardwareDisplayPlaneList* list : disable_planes_lists) {
+    bool status = DisableOverlayPlanes(list);
+    LOG_IF(ERROR, !status) << "Can't disable overlays when disabling HDC.";
+    list->plane_list.clear();
+  }
+}
+
+void HardwareDisplayPlaneManager::ResetModesetBufferOfCrtc(uint32_t crtc_id) {
+  CrtcState& crtc_state = CrtcStateForCrtcId(crtc_id);
+  crtc_state.modeset_framebuffer = nullptr;
 }
 
 }  // namespace ui

@@ -23,7 +23,7 @@
 #include "chrome/credential_provider/gaiacp/gcp_utils.h"
 #include "chrome/credential_provider/gaiacp/gcpw_strings.h"
 #include "chrome/credential_provider/gaiacp/logging.h"
-#include "chrome/credential_provider/gaiacp/mdm_utils.h"
+#include "chrome/credential_provider/gaiacp/os_user_manager.h"
 #include "chrome/credential_provider/gaiacp/reg_utils.h"
 #include "chrome/credential_provider/gaiacp/win_http_url_fetcher.h"
 
@@ -212,8 +212,10 @@ extension::TaskCreator UserPoliciesManager::GetFetchPoliciesTaskCreator() {
 }
 
 UserPoliciesManager::UserPoliciesManager() : fetch_status_(S_OK) {
-  g_cloud_policies_enabled =
-      GetGlobalFlagOrDefault(kCloudPoliciesEnabledRegKey, 0) == 1;
+  std::string dm_token;
+  bool has_dm_token = SUCCEEDED(GetDmToken(&dm_token)) && !dm_token.empty();
+  g_cloud_policies_enabled = GetGlobalFlagOrDefault(kCloudPoliciesEnabledRegKey,
+                                                    has_dm_token ? 1 : 0) == 1;
 }
 
 UserPoliciesManager::~UserPoliciesManager() = default;
@@ -343,7 +345,7 @@ base::TimeDelta UserPoliciesManager::GetTimeDeltaSinceLastPolicyFetch(
 }
 
 bool UserPoliciesManager::GetUserPolicies(const base::string16& sid,
-                                          UserPolicies* user_policies) {
+                                          UserPolicies* user_policies) const {
   DCHECK(user_policies);
 
   uint32_t open_flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
@@ -378,12 +380,37 @@ bool UserPoliciesManager::GetUserPolicies(const base::string16& sid,
   return true;
 }
 
+bool UserPoliciesManager::IsUserPolicyStaleOrMissing(
+    const base::string16& sid) const {
+  UserPolicies user_policies;
+  if (!GetUserPolicies(sid, &user_policies)) {
+    return true;
+  }
+
+  if (GetTimeDeltaSinceLastPolicyFetch(sid) >
+      kMaxTimeDeltaSinceLastUserPolicyRefresh) {
+    return true;
+  }
+
+  return false;
+}
+
 void UserPoliciesManager::SetCloudPoliciesEnabledForTesting(bool value) {
   g_cloud_policies_enabled = value;
 }
 
 HRESULT UserPoliciesManager::GetLastFetchStatusForTesting() const {
   return fetch_status_;
+}
+
+void UserPoliciesManager::SetFakesForTesting(FakesForTesting* fakes) {
+  DCHECK(fakes);
+
+  WinHttpUrlFetcher::SetCreatorForTesting(
+      fakes->fake_win_http_url_fetcher_creator);
+  if (fakes->os_user_manager_for_testing) {
+    OSUserManager::SetInstanceForTesting(fakes->os_user_manager_for_testing);
+  }
 }
 
 }  // namespace credential_provider

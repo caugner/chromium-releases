@@ -92,6 +92,10 @@ bool ExtensionMayAttachToURL(const Extension& extension,
                              const GURL& url,
                              Profile* profile,
                              std::string* error) {
+  // Allow the extension to attach to about:blank and empty URLs.
+  if (url.is_empty() || url == "about:")
+    return true;
+
   if (url == content::kUnreachableWebDataURL)
     return true;
 
@@ -270,6 +274,7 @@ bool ExtensionDevToolsClientHost::Attach() {
 }
 
 ExtensionDevToolsClientHost::~ExtensionDevToolsClientHost() {
+  ExtensionDevToolsInfoBarDelegate::NotifyExtensionDetached(extension_id());
   g_attached_client_hosts.Get().erase(this);
 }
 
@@ -400,11 +405,16 @@ bool ExtensionDevToolsClientHost::MayAttachToURL(const GURL& url,
                                                  bool is_webui) {
   if (is_webui)
     return false;
-  // Allow the extension to attach to about:blank.
-  if (url.is_empty() || url == "about:")
-    return true;
   std::string error;
-  return ExtensionMayAttachToURL(*extension_, url, profile_, &error);
+  if (!ExtensionMayAttachToURL(*extension_, url, profile_, &error))
+    return false;
+  // For nested URLs, make sure ExtensionMayAttachToURL() allows both
+  // the outer and the inner URLs.
+  if (url.inner_url() && !ExtensionMayAttachToURL(*extension_, *url.inner_url(),
+                                                  profile_, &error)) {
+    return false;
+  }
+  return true;
 }
 
 bool ExtensionDevToolsClientHost::MayAttachToBrowser() {
@@ -707,7 +717,8 @@ ExtensionFunction::ResponseAction DebuggerGetTargetsFunction::Run() {
   for (size_t i = 0; i < list.size(); ++i)
     result->Append(SerializeTarget(list[i]));
 
-  return RespondNow(OneArgument(std::move(result)));
+  return RespondNow(
+      OneArgument(base::Value::FromUniquePtrValue(std::move(result))));
 }
 
 }  // namespace extensions

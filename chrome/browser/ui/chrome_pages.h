@@ -67,6 +67,7 @@ enum FeedbackSource {
   kFeedbackSourceNetworkHealthPage,
   kFeedbackSourceTabSearch,
   kFeedbackSourceCameraApp,
+  kFeedbackSourceCaptureMode,
 
   // Must be last.
   kFeedbackSourceCount,
@@ -134,6 +135,7 @@ void ShowSettingsSubPageInTabbedBrowser(Browser* browser,
 void ShowClearBrowsingDataDialog(Browser* browser);
 void ShowPasswordManager(Browser* browser);
 void ShowPasswordCheck(Browser* browser);
+void ShowSafeBrowsingEnhancedProtection(Browser* browser);
 void ShowImportDialog(Browser* browser);
 void ShowAboutChrome(Browser* browser);
 void ShowSearchEngineSettings(Browser* browser);
@@ -151,6 +153,8 @@ void ShowAppManagementPage(Profile* profile,
 
 void ShowPrintManagementApp(Profile* profile,
                             PrintManagementAppEntryPoint entry_point);
+
+void ShowConnectivityDiagnosticsApp(Profile* profile);
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)

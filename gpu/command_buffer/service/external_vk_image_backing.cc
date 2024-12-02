@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/service/external_vk_image_gl_representation.h"
+#include "gpu/command_buffer/service/external_vk_image_overlay_representation.h"
 #include "gpu/command_buffer/service/external_vk_image_skia_representation.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/ipc/common/vulkan_ycbcr_info.h"
@@ -127,8 +128,9 @@ bool UseSeparateGLTexture(SharedContextState* context_state,
   if (format != viz::ResourceFormat::BGRA_8888)
     return false;
 
-  const auto* version_info = context_state->real_context()->GetVersionInfo();
-  const auto& ext = gl::g_current_gl_driver->ext;
+  auto* gl_context = context_state->real_context();
+  const auto* version_info = gl_context->GetVersionInfo();
+  const auto& ext = gl_context->GetCurrentGL()->Driver->ext;
   if (!ext.b_GL_EXT_texture_format_BGRA8888)
     return true;
 
@@ -152,6 +154,7 @@ bool UseMinimalUsageFlags(SharedContextState* context_state) {
 
 void WaitSemaphoresOnGrContext(GrDirectContext* gr_context,
                                std::vector<ExternalSemaphore>* semaphores) {
+  DCHECK(!gr_context->abandoned());
   std::vector<GrBackendSemaphore> backend_senampres;
   backend_senampres.reserve(semaphores->size());
   for (auto& semaphore : *semaphores) {
@@ -216,6 +219,21 @@ std::unique_ptr<ExternalVkImageBacking> ExternalVkImageBacking::Create(
     } else {
       vk_usage |= image_usage_cache->optimal_tiling_usage[format];
     }
+  }
+
+  if (is_external && (usage & SHARED_IMAGE_USAGE_WEBGPU)) {
+    // The following additional usage flags are provided for Dawn:
+    //
+    // - TRANSFER_SRC: Used for copies from this image.
+    // - TRANSFER_DST: Used for copies to this image or clears.
+    vk_usage |=
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  }
+
+  if (usage & SHARED_IMAGE_USAGE_DISPLAY) {
+    // Skia currently requires all VkImages it uses to support transfers
+    vk_usage |=
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   }
 
   auto* vulkan_implementation =
@@ -361,8 +379,10 @@ ExternalVkImageBacking::~ExternalVkImageBacking() {
   if (write_semaphore_)
     semaphores.emplace_back(std::move(write_semaphore_));
 
-  WaitSemaphoresOnGrContext(context_state()->gr_context(), &semaphores);
-  ReturnPendingSemaphoresWithFenceHelper(std::move(semaphores));
+  if (!semaphores.empty() && !context_state()->gr_context()->abandoned()) {
+    WaitSemaphoresOnGrContext(context_state()->gr_context(), &semaphores);
+    ReturnPendingSemaphoresWithFenceHelper(std::move(semaphores));
+  }
 
   fence_helper()->EnqueueVulkanObjectCleanupForSubmittedWork(std::move(image_));
   backend_texture_ = GrBackendTexture();
@@ -569,6 +589,10 @@ void ExternalVkImageBacking::AddSemaphoresToPendingListOrRelease(
   }
 }
 
+scoped_refptr<gfx::NativePixmap> ExternalVkImageBacking::GetNativePixmap() {
+  return image_->native_pixmap();
+}
+
 void ExternalVkImageBacking::ReturnPendingSemaphoresWithFenceHelper(
     std::vector<ExternalSemaphore> semaphores) {
   std::move(semaphores.begin(), semaphores.end(),
@@ -753,6 +777,13 @@ ExternalVkImageBacking::ProduceSkia(
   DCHECK(context_state->GrContextIsVulkan());
   return std::make_unique<ExternalVkImageSkiaRepresentation>(manager, this,
                                                              tracker);
+}
+
+std::unique_ptr<SharedImageRepresentationOverlay>
+ExternalVkImageBacking::ProduceOverlay(SharedImageManager* manager,
+                                       MemoryTypeTracker* tracker) {
+  return std::make_unique<ExternalVkImageOverlayRepresentation>(manager, this,
+                                                                tracker);
 }
 
 void ExternalVkImageBacking::InstallSharedMemory(

@@ -24,6 +24,7 @@ import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.components.strictmode.ThreadStrictModeInterceptor;
 import org.chromium.weblayer.Browser;
 import org.chromium.weblayer.FullscreenCallback;
 import org.chromium.weblayer.NewTabCallback;
@@ -42,21 +43,37 @@ import java.util.List;
 /**
  * Activity for running instrumentation tests.
  */
+// This isn't part of Chrome, so using explicit colors/sizes is ok.
+@SuppressWarnings("checkstyle:SetTextColorAndSetTextSizeCheck")
 public class InstrumentationActivity extends FragmentActivity {
     private static final String TAG = "WLInstrumentation";
     private static final String KEY_MAIN_VIEW_ID = "mainViewId";
 
     public static final String EXTRA_PERSISTENCE_ID = "EXTRA_PERSISTENCE_ID";
     public static final String EXTRA_PROFILE_NAME = "EXTRA_PROFILE_NAME";
+    public static final String EXTRA_IS_INCOGNITO = "EXTRA_IS_INCOGNITO";
     private static final float DEFAULT_TEXT_SIZE = 15.0F;
 
     // Used in tests to specify whether WebLayer should be created automatically on launch.
     // True by default. If set to false, the test should call loadWebLayerSync.
     public static final String EXTRA_CREATE_WEBLAYER = "EXTRA_CREATE_WEBLAYER";
 
+    public static final String EXTRA_TOP_VIEW_MIN_HEIGHT = "EXTRA_TOP_VIEW_MIN_HEIGHT";
+    public static final String EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP =
+            "EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP";
+
     // Used in tests to specify whether WebLayer URL bar should set default click listeners
     // that show Page Info UI on its TextView.
     public static final String EXTRA_URLBAR_TEXT_CLICKABLE = "EXTRA_URLBAR_TEXT_CLICKABLE";
+
+    // Used in tests to specify whether WebLayer URL bar should show publisher url.
+    public static final String EXTRA_URLBAR_SHOW_PUBLISHER_URL = "EXTRA_URLBAR_SHOW_PUBLISHER_URL";
+
+    private static OnCreatedCallback sOnCreatedCallback;
+
+    // If true, multiple fragments may be created. Only the first is attached. This is useful for
+    // tests that need to create multiple BrowserFragments.
+    public static boolean sAllowMultipleFragments;
 
     private Profile mProfile;
     private Fragment mFragment;
@@ -83,6 +100,25 @@ public class InstrumentationActivity extends FragmentActivity {
         } catch (LinkageError | ClassNotFoundException e) {
         }
         return false;
+    }
+
+    /**
+     * Use this callback for tests that need to be notified synchronously when the Browser has been
+     * created.
+     */
+    public static interface OnCreatedCallback {
+        // Notification that a Browser was created.
+        // This is called on the UI thread.
+        public void onCreated(Browser browser);
+    }
+
+    // Registers a callback that is notified on the UI thread when a Browser is created.
+    public static void registerOnCreatedCallback(OnCreatedCallback callback) {
+        sOnCreatedCallback = callback;
+        // Ideally |callback| would be registered in the Intent, but that isn't possible as to do so
+        // |callback| would have to be a Parceable (which doesn't make sense). As at this time each
+        // test runs in its own process a static is used, if multiple tests were to run in the same
+        // binary, then some state would need to be put in the intent.
     }
 
     public Tab getTab() {
@@ -157,8 +193,8 @@ public class InstrumentationActivity extends FragmentActivity {
     protected void onCreate(final Bundle savedInstanceState) {
         // JaCoCo injects code that does file access, which doesn't work well with strict mode.
         if (!isJaCoCoEnabled()) {
-            StrictMode.setThreadPolicy(
-                    new ThreadPolicy.Builder().detectAll().penaltyLog().penaltyDeath().build());
+            ThreadStrictModeInterceptor.buildWithDeathPenaltyAndKnownViolationExemptions().install(
+                    new ThreadPolicy.Builder().detectAll().build());
             // This doesn't use detectAll() as the untagged sockets policy is encountered in tests
             // using TestServer.
             StrictMode.setVmPolicy(new VmPolicy.Builder()
@@ -244,7 +280,18 @@ public class InstrumentationActivity extends FragmentActivity {
         mBrowser = Browser.fromFragment(mFragment);
         mProfile = mBrowser.getProfile();
 
-        mBrowser.setTopView(mTopContentsContainer);
+        final boolean onlyExpandControlsAtTop =
+                getIntent().getBooleanExtra(EXTRA_ONLY_EXPAND_CONTROLS_AT_TOP, false);
+        final int minTopViewHeight = getIntent().getIntExtra(EXTRA_TOP_VIEW_MIN_HEIGHT, -1);
+
+        if (onlyExpandControlsAtTop || minTopViewHeight != -1) {
+            // This was added in 86.
+            mBrowser.setTopView(mTopContentsContainer, Math.max(0, minTopViewHeight),
+                    onlyExpandControlsAtTop,
+                    /* animate */ false);
+        } else {
+            mBrowser.setTopView(mTopContentsContainer);
+        }
 
         mRendererCrashListener = new TabCallback() {
             @Override
@@ -291,6 +338,12 @@ public class InstrumentationActivity extends FragmentActivity {
         } else {
             setTabCallbacks(mBrowser.getActiveTab());
             setTab(mBrowser.getActiveTab());
+        }
+
+        if (sOnCreatedCallback != null) {
+            sOnCreatedCallback.onCreated(mBrowser);
+            // Don't reset |sOnCreatedCallback| as it's needed for tests that exercise activity
+            // recreation.
         }
     }
 
@@ -343,6 +396,9 @@ public class InstrumentationActivity extends FragmentActivity {
         if (getIntent().getBooleanExtra(EXTRA_URLBAR_TEXT_CLICKABLE, true)) {
             optionsBuilder = optionsBuilder.showPageInfoWhenTextIsClicked();
         }
+        if (getIntent().getBooleanExtra(EXTRA_URLBAR_SHOW_PUBLISHER_URL, false)) {
+            optionsBuilder = optionsBuilder.showPublisherUrl();
+        }
 
         mUrlBarView = mBrowser.getUrlBarController().createUrlBarView(optionsBuilder.build());
 
@@ -387,9 +443,18 @@ public class InstrumentationActivity extends FragmentActivity {
             // FragmentManager could have re-created the fragment.
             List<Fragment> fragments = fragmentManager.getFragments();
             if (fragments.size() > 1) {
-                throw new IllegalStateException("More than one fragment added, shouldn't happen");
+                if (!sAllowMultipleFragments) {
+                    throw new IllegalStateException(
+                            "More than one fragment added, shouldn't happen");
+                }
+                if (sOnCreatedCallback != null) {
+                    for (int i = 1; i < fragments.size(); ++i) {
+                        sOnCreatedCallback.onCreated(Browser.fromFragment(fragments.get(i)));
+                    }
+                }
+                return fragments.get(0);
             }
-            if (fragments.size() == 1) {
+            if (fragments.size() > 0) {
                 return fragments.get(0);
             }
         }
@@ -397,14 +462,23 @@ public class InstrumentationActivity extends FragmentActivity {
     }
 
     public Fragment createBrowserFragment(int viewId) {
+        return createBrowserFragment(viewId, getIntent());
+    }
+
+    public Fragment createBrowserFragment(int viewId, Intent intent) {
         FragmentManager fragmentManager = getSupportFragmentManager();
-        String profileName = getIntent().hasExtra(EXTRA_PROFILE_NAME)
-                ? getIntent().getStringExtra(EXTRA_PROFILE_NAME)
+        String profileName = intent.hasExtra(EXTRA_PROFILE_NAME)
+                ? intent.getStringExtra(EXTRA_PROFILE_NAME)
                 : "DefaultProfile";
-        String persistenceId = getIntent().hasExtra(EXTRA_PERSISTENCE_ID)
-                ? getIntent().getStringExtra(EXTRA_PERSISTENCE_ID)
+        String persistenceId = intent.hasExtra(EXTRA_PERSISTENCE_ID)
+                ? intent.getStringExtra(EXTRA_PERSISTENCE_ID)
                 : null;
-        Fragment fragment = WebLayer.createBrowserFragment(profileName, persistenceId);
+        boolean incognito = intent.hasExtra(EXTRA_IS_INCOGNITO)
+                ? intent.getBooleanExtra(EXTRA_IS_INCOGNITO, false)
+                : (profileName == null);
+        Fragment fragment = incognito
+                ? WebLayer.createBrowserFragmentWithIncognitoProfile(profileName, persistenceId)
+                : WebLayer.createBrowserFragment(profileName, persistenceId);
         FragmentTransaction transaction = fragmentManager.beginTransaction();
         transaction.add(viewId, fragment);
 
@@ -412,6 +486,11 @@ public class InstrumentationActivity extends FragmentActivity {
         // activity synchronously, so we can use all the functionality immediately. Otherwise we'd
         // have to wait until the commit is executed.
         transaction.commitNow();
+
+        if (viewId != mMainViewId && sOnCreatedCallback != null) {
+            sOnCreatedCallback.onCreated(Browser.fromFragment(fragment));
+        }
+
         return fragment;
     }
 

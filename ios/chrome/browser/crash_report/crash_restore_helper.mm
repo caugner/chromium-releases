@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
@@ -21,7 +22,6 @@
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/crash_report/breakpad_helper.h"
-#include "ios/chrome/browser/infobars/confirm_infobar_controller.h"
 #include "ios/chrome/browser/infobars/confirm_infobar_metrics_recorder.h"
 #include "ios/chrome/browser/infobars/infobar_ios.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
@@ -34,9 +34,9 @@
 #import "ios/chrome/browser/sessions/session_restoration_browser_agent.h"
 #import "ios/chrome/browser/sessions/session_service_ios.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
-#import "ios/chrome/browser/ui/infobars/infobar_feature.h"
 #import "ios/chrome/browser/ui/main/scene_state.h"
 #import "ios/chrome/browser/ui/main/scene_state_browser_agent.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/util/multi_window_support.h"
 #include "ios/chrome/browser/web_state_list/web_state_list.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -143,6 +143,7 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
   void InfoBarDismissed() override;
+  bool ShouldExpire(const NavigationDetails& details) const override;
   int GetIconId() const override;
 
   // TimeInterval when the delegate was created.
@@ -170,14 +171,8 @@ bool SessionCrashedInfoBarDelegate::Create(
   std::unique_ptr<ConfirmInfoBarDelegate> delegate(
       new SessionCrashedInfoBarDelegate(crash_restore_helper));
 
-  std::unique_ptr<infobars::InfoBar> infobar;
-  if (IsCrashRestoreInfobarMessagesUIEnabled()) {
-    infobar = ::CreateHighPriorityConfirmInfoBar(std::move(delegate));
-  } else {
-    ConfirmInfoBarController* controller = [[ConfirmInfoBarController alloc]
-        initWithInfoBarDelegate:delegate.get()];
-    infobar = std::make_unique<InfoBarIOS>(controller, std::move(delegate));
-  }
+  std::unique_ptr<infobars::InfoBar> infobar =
+      ::CreateHighPriorityConfirmInfoBar(std::move(delegate));
   return !!infobar_manager->AddInfoBar(std::move(infobar));
 }
 
@@ -223,6 +218,15 @@ void SessionCrashedInfoBarDelegate::InfoBarDismissed() {
           forInfobarConfirmType:InfobarConfirmType::kInfobarConfirmTypeRestore];
 }
 
+bool SessionCrashedInfoBarDelegate::ShouldExpire(
+    const NavigationDetails& details) const {
+  if (base::FeatureList::IsEnabled(kIOSPersistCrashRestore)) {
+    return false;
+  } else {
+    return InfoBarDelegate::ShouldExpire(details);
+  }
+}
+
 int SessionCrashedInfoBarDelegate::GetIconId() const {
   return IDR_IOS_INFOBAR_RESTORE_SESSION;
 }
@@ -232,11 +236,11 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
 @implementation CrashRestoreHelper {
   Browser* _browser;
   std::unique_ptr<InfoBarManagerObserverBridge> _infoBarBridge;
-
-  // Indicate that the session has been restored to tabs or to recently closed
-  // and should not be rerestored.
-  BOOL _sessionRestored;
 }
+
+// Indicate that the session has been restored to tabs or to recently closed
+// and should not be rerestored.
+static BOOL _sessionRestored = NO;
 
 - (instancetype)initWithBrowser:(Browser*)browser {
   if (self = [super init]) {
@@ -408,6 +412,10 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
                           error:nil];
 }
 
++ (BOOL)isBackedUpSessionID:(NSString*)sessionID {
+  return [[[self class] backedupSessionIDs] containsObject:sessionID];
+}
+
 + (BOOL)moveAsideSessionInformationForBrowserState:
     (ChromeBrowserState*)browserState {
   DCHECK(!IsMultiwindowSupported());
@@ -488,10 +496,15 @@ int SessionCrashedInfoBarDelegate::GetIconId() const {
     NSString* originalSessionPath =
         [SessionServiceIOS sessionPathForSessionID:sessionID
                                          directory:stashPath];
-    [fileManager
-        moveItemAtPath:[[strongSelf class] backupPathForSessionID:sessionID]
-                toPath:originalSessionPath
-                 error:&error];
+    NSString* backupPath =
+        [[strongSelf class] backupPathForSessionID:sessionID];
+    [fileManager moveItemAtPath:backupPath
+                         toPath:originalSessionPath
+                          error:&error];
+    // Remove Parent directory for the backup path, so it doesn't show restore
+    // prompt again.
+    [fileManager removeItemAtPath:[backupPath stringByDeletingLastPathComponent]
+                            error:&error];
   }
 
   return success;

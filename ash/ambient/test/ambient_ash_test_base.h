@@ -10,12 +10,9 @@
 
 #include "ash/ambient/ambient_access_token_controller.h"
 #include "ash/ambient/ambient_controller.h"
+#include "ash/ambient/test/test_ambient_client.h"
 #include "ash/ambient/ui/ambient_background_image_view.h"
-#include "ash/public/cpp/test/test_ambient_client.h"
-#include "ash/public/cpp/test/test_image_downloader.h"
 #include "ash/test/ash_test_base.h"
-#include "base/test/scoped_feature_list.h"
-#include "services/device/public/cpp/test/test_wake_lock_provider.h"
 #include "services/media_session/public/mojom/media_session.mojom.h"
 #include "ui/views/widget/widget.h"
 
@@ -41,7 +38,7 @@ class AmbientAshTestBase : public AshTestBase {
   void SetUp() override;
   void TearDown() override;
 
-  // Enables/disables ambient mode.
+  // Enables/disables ambient mode for the currently active user session.
   void SetAmbientModeEnabled(bool enabled);
 
   // Creates ambient screen in its own widget.
@@ -90,14 +87,27 @@ class AmbientAshTestBase : public AshTestBase {
   // Set the size of the next image that will be loaded.
   void SetPhotoViewImageSize(int width, int height);
 
-  // Advance the task environment timer to expire the inactivity monitor.
-  void FastForwardToInactivity();
+  // Advance the task environment timer to expire the lock screen inactivity
+  // timer.
+  void FastForwardToLockScreenTimeout();
 
   // Advance the task environment timer to load the next photo.
   void FastForwardToNextImage();
 
+  // Advance the task environment timer a tiny amount. This is intended to
+  // trigger any pending async operations.
+  void FastForwardTiny();
+
   // Advance the task environment timer to load the weather info.
   void FastForwardToRefreshWeather();
+
+  // Advance the task environment timer to ambient mode lock screen delay.
+  void FastForwardToLockScreen();
+  void FastForwardHalfLockScreenDelay();
+
+  void SetPowerStateCharging();
+  void SetPowerStateDischarging();
+  void SetPowerStateFull();
 
   // Returns the number of active wake locks of type |type|.
   int GetNumOfActiveWakeLocks(device::mojom::WakeLockType type);
@@ -106,7 +116,7 @@ class AmbientAshTestBase : public AshTestBase {
   // If |with_error| is true, will return an empty access token.
   void IssueAccessToken(const std::string& access_token, bool with_error);
 
-  bool IsAccessTokenRequestPending() const;
+  bool IsAccessTokenRequestPending();
 
   base::TimeDelta GetRefreshTokenDelay();
 
@@ -130,16 +140,13 @@ class AmbientAshTestBase : public AshTestBase {
 
   void FetchImage();
 
+  void FetchBackupImages();
+
   void SetUrlLoaderData(std::unique_ptr<std::string> data);
 
-  void SeteImageDecoderImage(const gfx::ImageSkia& image);
+  void SetImageDecoderImage(const gfx::ImageSkia& image);
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-  std::unique_ptr<TestImageDownloader> image_downloader_;
-
-  device::TestWakeLockProvider wake_lock_provider_;
-  std::unique_ptr<TestAmbientClient> ambient_client_;
   std::unique_ptr<views::Widget> widget_;
 };
 

@@ -54,8 +54,6 @@ const double kLoadingProgressDone = 1.0;
 
 }  // namespace
 
-const int FrameTreeNode::kFrameTreeNodeInvalidId = -1;
-
 // This observer watches the opener of its owner FrameTreeNode and clears the
 // owner's opener if the opener is destroyed.
 class FrameTreeNode::OpenerDestroyedObserver : public FrameTreeNode::Observer {
@@ -86,6 +84,12 @@ class FrameTreeNode::OpenerDestroyedObserver : public FrameTreeNode::Observer {
 
   DISALLOW_COPY_AND_ASSIGN(OpenerDestroyedObserver);
 };
+
+const int FrameTreeNode::kFrameTreeNodeInvalidId = -1;
+
+static_assert(FrameTreeNode::kFrameTreeNodeInvalidId ==
+                  RenderFrameHost::kNoFrameTreeNodeId,
+              "Have consistent sentinel values for an invalid FTN id.");
 
 int FrameTreeNode::next_frame_tree_node_id_ = 1;
 
@@ -231,21 +235,42 @@ bool FrameTreeNode::IsMainFrame() const {
   return frame_tree_->root() == this;
 }
 
-void FrameTreeNode::ResetForNavigation() {
-  // Discard any CSP headers from the previous document.
+FrameTreeNode::ResetForNavigationResult FrameTreeNode::ResetForNavigation(
+    bool was_served_from_back_forward_cache) {
+  // TODO(altimin,carlscab): Remove this logic after the relevant states are
+  // moved to RenderFrameHost or BrowsingInstanceFrameState.
+  ResetForNavigationResult result;
+
   replication_state_.accumulated_csp_headers.clear();
-  render_manager_.OnDidResetContentSecurityPolicy();
+  if (!was_served_from_back_forward_cache) {
+    render_manager_.OnDidResetContentSecurityPolicy();
+  } else {
+    for (auto& policy : current_frame_host()->ContentSecurityPolicies()) {
+      replication_state_.accumulated_csp_headers.push_back(*policy->header);
+    }
+    // Note: there is no need to call OnDidResetContentSecurityPolicy or any
+    // other update as the proxies are being restored from bfcache as well and
+    // they already have the correct value.
+  }
 
   // Clear any CSP-set sandbox flags, and the declared feature policy for the
   // frame.
-  UpdateFramePolicyHeaders(network::mojom::WebSandboxFlags::kNone, {});
+  // TODO(https://crbug.com/1145886): Remove this.
+  result.changed_frame_policy =
+      UpdateFramePolicyHeaders(network::mojom::WebSandboxFlags::kNone, {});
 
   // This frame has had its user activation bits cleared in the renderer
   // before arriving here. We just need to clear them here and in the other
   // renderer processes that may have a reference to this frame.
+  //
+  // We do not take user activation into account when calculating
+  // |ResetForNavigationResult|, as we are using it to determine bfcache
+  // eligibility and the page can get another user gesture after restore.
   UpdateUserActivationState(
       blink::mojom::UserActivationUpdateType::kClearActivation,
       blink::mojom::UserActivationNotificationType::kNone);
+
+  return result;
 }
 
 size_t FrameTreeNode::GetFrameTreeSize() const {
@@ -418,6 +443,23 @@ bool FrameTreeNode::IsLoading() const {
   if (speculative_frame_host && speculative_frame_host->is_loading())
     return true;
   return current_frame_host->is_loading();
+}
+
+bool FrameTreeNode::HasPendingCrossDocumentNavigation() const {
+  // Having a |navigation_request_| on FrameTreeNode implies that there's an
+  // ongoing navigation that hasn't reached the ReadyToCommit state.  If the
+  // navigation is between ReadyToCommit and DidCommitNavigation, the
+  // NavigationRequest will be held by RenderFrameHost, which is checked below.
+  if (navigation_request_ && !navigation_request_->IsSameDocument())
+    return true;
+
+  // Having a speculative RenderFrameHost should imply a cross-document
+  // navigation.
+  if (render_manager_.speculative_frame_host())
+    return true;
+
+  return render_manager_.current_frame_host()
+      ->HasPendingCommitForCrossDocumentNavigation();
 }
 
 bool FrameTreeNode::CommitFramePolicy(
@@ -711,7 +753,7 @@ FrameTreeNode* FrameTreeNode::GetSibling(int relative_offset) const {
   return nullptr;
 }
 
-void FrameTreeNode::UpdateFramePolicyHeaders(
+bool FrameTreeNode::UpdateFramePolicyHeaders(
     network::mojom::WebSandboxFlags sandbox_flags,
     const blink::ParsedFeaturePolicy& parsed_header) {
   bool changed = false;
@@ -730,6 +772,7 @@ void FrameTreeNode::UpdateFramePolicyHeaders(
   // Notify any proxies if the policies have been changed.
   if (changed)
     render_manager()->OnDidSetFramePolicyHeaders();
+  return changed;
 }
 
 void FrameTreeNode::PruneChildFrameNavigationEntries(

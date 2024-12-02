@@ -103,6 +103,9 @@ export class TabElement extends CustomElement {
     this.tabEl_.addEventListener('contextmenu', e => this.onContextMenu_(e));
     this.tabEl_.addEventListener(
         'keydown', e => this.onKeyDown_(/** @type {!KeyboardEvent} */ (e)));
+    this.tabEl_.addEventListener(
+        'pointerup', e => this.onPointerUp_(/** @type {!PointerEvent} */ (e)));
+
     this.closeButtonEl_.addEventListener('click', e => this.onClose_(e));
     this.addEventListener('swipe', () => this.onSwipe_());
 
@@ -262,6 +265,17 @@ export class TabElement extends CustomElement {
     }
   }
 
+  /**
+   * @param {!PointerEvent} event
+   * @private
+   */
+  onPointerUp_(event) {
+    if (event.pointerType !== 'touch' && event.button === 2) {
+      this.embedderApi_.showTabContextMenu(
+          this.tab.id, event.clientX, event.clientY);
+    }
+  }
+
   resetSwipe() {
     this.tabSwiper_.reset();
   }
@@ -276,6 +290,11 @@ export class TabElement extends CustomElement {
   /** @param {boolean} isDraggedOut */
   setDraggedOut(isDraggedOut) {
     this.toggleAttribute('dragged-out_', isDraggedOut);
+  }
+
+  /** @return {boolean} */
+  isDraggedOut() {
+    return this.hasAttribute('dragged-out_');
   }
 
   /**
