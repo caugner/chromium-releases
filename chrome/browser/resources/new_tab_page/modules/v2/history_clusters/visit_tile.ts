@@ -48,9 +48,8 @@ export class VisitTileModuleElement extends I18nMixin
         computed: `computeLabel_(visit.urlForDisplay)`,
       },
 
-      imagesEnabled_: {
+      imagesEnabled: {
         type: Boolean,
-        value: () => loadTimeData.getBoolean('historyClustersImagesEnabled'),
         reflectToAttribute: true,
       },
 
@@ -63,16 +62,35 @@ export class VisitTileModuleElement extends I18nMixin
 
       format: {
         type: String,
-        value: 'narrow',
         reflectToAttribute: true,
+      },
+
+      // The texts for the discount chip.
+      discount: {
+        type: String,
+      },
+
+      hasDiscount: {
+        type: Boolean,
+        computed: `computeHasDiscount_(discount)`,
+        reflectToAttribute: true,
+      },
+
+      /* The label of the tile in a11y mode. */
+      tileLabel_: {
+        type: String,
+        computed: `computeTileLabel_(discount, label_)`,
       },
     };
   }
 
   format: string;
+  imagesEnabled: boolean;
   visit: URLVisit;
-  private imagesEnabled_: boolean;
+  discount: string;
+  hasDiscount: boolean;
   private imageUrl_: Url|null;
+  private label_: string;
 
   hasImageUrl(): boolean {
     return !!this.imageUrl_;
@@ -89,6 +107,10 @@ export class VisitTileModuleElement extends I18nMixin
     let domain = (new URL(this.visit.normalizedUrl.url)).hostname;
     domain = domain.replace('www.', '');
     return domain;
+  }
+
+  private computeHasDiscount_(): boolean {
+    return !!this.discount && this.discount.length !== 0;
   }
 
   // Set imageUrl when visit is set/updated.
@@ -109,6 +131,15 @@ export class VisitTileModuleElement extends I18nMixin
       }
     }
     this.imageUrl_ = null;
+  }
+
+  private computeTileLabel_(): string {
+    const labelTexts =
+        [this.visit.pageTitle, this.label_, this.visit.relativeDate];
+    if (!!this.discount && this.discount.length !== 0) {
+      labelTexts.push(this.discount);
+    }
+    return labelTexts.join(', ');
   }
 }
 

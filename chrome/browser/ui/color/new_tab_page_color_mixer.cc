@@ -147,11 +147,19 @@ void AddGeneratedThemeComprehensiveColors(ui::ColorMixer& mixer) {
   mixer[kColorNewTabPageLogo] = element_background_color;
   mixer[kColorNewTabPageLink] = themed_foreground_color;
   mixer[kColorNewTabPageFirstRunBackground] = {kColorNewTabPageBackground};
-  mixer[kColorNewTabPageModuleBackground] = element_background_color;
+
   mixer[kColorNewTabPageChipBackground] =
       select_topmost_element_background_color;
   mixer[kColorNewTabPageChipForeground] =
       select_topmost_element_foreground_color;
+
+  if (base::FeatureList::IsEnabled(ntp_features::kNtpModulesRedesigned)) {
+    mixer[kColorNewTabPageModuleBackground] = SelectBasedOnWhiteInput(
+        {kColorNewTabPageBackground}, gfx::kGoogleGrey100,
+        element_background_color);
+  } else {
+    mixer[kColorNewTabPageModuleBackground] = element_background_color;
+  }
   mixer[kColorNewTabPageModuleItemBackground] = {kColorNewTabPageBackground};
 
   mixer[kColorNewTabPageHistoryClustersModuleItemBackground] =
@@ -431,8 +439,22 @@ void AddWebThemeNewTabPageColors(ui::ColorMixer& mixer, bool dark_mode) {
                                                      : gfx::kGoogleGrey300};
   mixer[kColorNewTabPageMicIconColor] = {dark_mode ? gfx::kGoogleGrey100
                                                    : gfx::kGoogleGrey700};
-  mixer[kColorNewTabPageModuleBackground] = {
-      kColorNewTabPageBackgroundOverride};
+
+  if (base::FeatureList::IsEnabled(ntp_features::kNtpModulesRedesigned)) {
+    if (dark_mode) {
+      mixer[kColorNewTabPageModuleBackground] = {gfx::kGoogleGrey800};
+    } else {
+      mixer[kColorNewTabPageModuleBackground] = {gfx::kGoogleGrey100};
+    }
+    mixer[kColorNewTabPageModuleItemBackgroundHovered] = {
+        kColorNewTabPageControlBackgroundHovered};
+  } else {
+    mixer[kColorNewTabPageModuleBackground] = {
+        kColorNewTabPageBackgroundOverride};
+  }
+
+  mixer[kColorNewTabPageModuleContextMenuDivider] = {
+      {dark_mode ? SK_ColorWHITE : gfx::kGoogleGrey600}};
   mixer[kColorNewTabPageModuleItemBackground] = {
       kColorNewTabPageBackgroundOverride};
   if (dark_mode) {
