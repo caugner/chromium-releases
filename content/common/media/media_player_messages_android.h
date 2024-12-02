@@ -193,6 +193,10 @@ IPC_MESSAGE_ROUTED1(MediaPlayerMsg_ConnectedToRemoteDevice,
 IPC_MESSAGE_ROUTED1(MediaPlayerMsg_DisconnectedFromRemoteDevice,
                     int /* player_id */)
 
+// Instructs the video element to enter fullscreen.
+IPC_MESSAGE_ROUTED1(MediaPlayerMsg_RequestFullscreen,
+                    int /*player_id */)
+
 // Messages for controlling the media playback in browser process ----------
 
 // Destroy the media player object.
@@ -266,14 +270,13 @@ IPC_MESSAGE_CONTROL2(MediaPlayerHostMsg_DurationChanged,
                      int /* demuxer_client_id */,
                      base::TimeDelta /* duration */)
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
 // Notify the player about the external surface, requesting it if necessary.
 IPC_MESSAGE_ROUTED3(MediaPlayerHostMsg_NotifyExternalSurface,
                     int /* player_id */,
                     bool /* is_request */,
                     gfx::RectF /* rect */)
-
-#endif
+#endif  // defined(VIDEO_HOLE)
 
 // Messages for encrypted media extensions API ------------------------------
 // TODO(xhwang): Move the following messages to a separate file.
@@ -283,33 +286,44 @@ IPC_MESSAGE_ROUTED3(MediaKeysHostMsg_InitializeCDM,
                     std::vector<uint8> /* uuid */,
                     GURL /* frame url */)
 
-IPC_MESSAGE_ROUTED3(MediaKeysHostMsg_GenerateKeyRequest,
+IPC_MESSAGE_ROUTED4(MediaKeysHostMsg_CreateSession,
                     int /* media_keys_id */,
+                    uint32_t /* session_id */,
                     std::string /* type */,
                     std::vector<uint8> /* init_data */)
+// TODO(jrummell): Use enum for type (http://crbug.com/327449)
 
-IPC_MESSAGE_ROUTED4(MediaKeysHostMsg_AddKey,
+IPC_MESSAGE_ROUTED3(MediaKeysHostMsg_UpdateSession,
                     int /* media_keys_id */,
-                    std::vector<uint8> /* key */,
-                    std::vector<uint8> /* init_data */,
-                    std::string /* session_id */)
+                    uint32_t /* session_id */,
+                    std::vector<uint8> /* response */)
 
-IPC_MESSAGE_ROUTED2(MediaKeysHostMsg_CancelKeyRequest,
+IPC_MESSAGE_ROUTED2(MediaKeysHostMsg_ReleaseSession,
                     int /* media_keys_id */,
-                    std::string /* session_id */)
+                    uint32_t /* session_id */)
 
-IPC_MESSAGE_ROUTED2(MediaKeysMsg_KeyAdded,
+IPC_MESSAGE_ROUTED3(MediaKeysMsg_SessionCreated,
                     int /* media_keys_id */,
-                    std::string /* session_id */)
+                    uint32_t /* session_id */,
+                    std::string /* web_session_id */)
 
-IPC_MESSAGE_ROUTED4(MediaKeysMsg_KeyError,
+IPC_MESSAGE_ROUTED4(MediaKeysMsg_SessionMessage,
                     int /* media_keys_id */,
-                    std::string /* session_id */,
-                    media::MediaKeys::KeyError /* error_code */,
-                    int /* system_code */)
-
-IPC_MESSAGE_ROUTED4(MediaKeysMsg_KeyMessage,
-                    int /* media_keys_id */,
-                    std::string /* session_id */,
+                    uint32_t /* session_id */,
                     std::vector<uint8> /* message */,
                     std::string /* destination_url */)
+// TODO(jrummell): Use GURL for destination_url (http://crbug.com/326663)
+
+IPC_MESSAGE_ROUTED2(MediaKeysMsg_SessionReady,
+                    int /* media_keys_id */,
+                    uint32_t /* session_id */)
+
+IPC_MESSAGE_ROUTED2(MediaKeysMsg_SessionClosed,
+                    int /* media_keys_id */,
+                    uint32_t /* session_id */)
+
+IPC_MESSAGE_ROUTED4(MediaKeysMsg_SessionError,
+                    int /* media_keys_id */,
+                    uint32_t /* session_id */,
+                    media::MediaKeys::KeyError /* error_code */,
+                    int /* system_code */)

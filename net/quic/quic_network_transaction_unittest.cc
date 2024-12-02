@@ -64,6 +64,7 @@ class QuicNetworkTransactionTest : public PlatformTest {
         compressor_(new QuicSpdyCompressor()),
         auth_handler_factory_(
             HttpAuthHandlerFactory::CreateDefault(&host_resolver_)),
+        random_generator_(0),
         hanging_data_(NULL, 0, NULL, 0) {
     request_.method = "GET";
     request_.url = GURL("http://www.google.com/");
@@ -90,7 +91,7 @@ class QuicNetworkTransactionTest : public PlatformTest {
       QuicPacketSequenceNumber num,
       QuicStreamId stream_id) {
     QuicPacketHeader header;
-    header.public_header.guid = 0xDEADBEEF;
+    header.public_header.guid = random_generator_.RandUint64();
     header.public_header.reset_flag = false;
     header.public_header.version_flag = false;
     header.public_header.sequence_number_length = PACKET_1BYTE_SEQUENCE_NUMBER;
@@ -107,7 +108,7 @@ class QuicNetworkTransactionTest : public PlatformTest {
   scoped_ptr<QuicEncryptedPacket> ConstructConnectionClosePacket(
       QuicPacketSequenceNumber num) {
     QuicPacketHeader header;
-    header.public_header.guid = 0xDEADBEEF;
+    header.public_header.guid = random_generator_.RandUint64();
     header.public_header.reset_flag = false;
     header.public_header.version_flag = false;
     header.public_header.sequence_number_length = PACKET_1BYTE_SEQUENCE_NUMBER;
@@ -116,11 +117,9 @@ class QuicNetworkTransactionTest : public PlatformTest {
     header.fec_flag = false;
     header.fec_group = 0;
 
-    QuicAckFrame ack_frame(0, QuicTime::Zero(), 0);
     QuicConnectionCloseFrame close;
     close.error_code = QUIC_CRYPTO_VERSION_NOT_SUPPORTED;
     close.error_details = "Time to panic!";
-    close.ack_frame = ack_frame;
     return scoped_ptr<QuicEncryptedPacket>(
         ConstructPacket(header, QuicFrame(&close)));
   }
@@ -129,7 +128,7 @@ class QuicNetworkTransactionTest : public PlatformTest {
       QuicPacketSequenceNumber largest_received,
       QuicPacketSequenceNumber least_unacked) {
     QuicPacketHeader header;
-    header.public_header.guid = 0xDEADBEEF;
+    header.public_header.guid = random_generator_.RandUint64();
     header.public_header.reset_flag = false;
     header.public_header.version_flag = false;
     header.public_header.sequence_number_length = PACKET_1BYTE_SEQUENCE_NUMBER;
@@ -191,7 +190,7 @@ class QuicNetworkTransactionTest : public PlatformTest {
       QuicStreamOffset offset,
       base::StringPiece data) {
     InitializeHeader(sequence_number, should_include_version);
-    QuicStreamFrame frame(stream_id, fin, offset, data);
+    QuicStreamFrame frame(stream_id, fin, offset, MakeIOVector(data));
     return ConstructPacket(header_, QuicFrame(&frame)).release();
   }
 

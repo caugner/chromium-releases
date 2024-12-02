@@ -19,12 +19,12 @@
 #include "base/values.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "content/public/child/image_decoder_utils.h"
 #include "content/public/common/common_param_traits.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/generated_resources.h"
@@ -170,7 +170,7 @@ bool Unpacker::Run() {
   temp_install_dir_ =
       extension_path_.DirName().AppendASCII(kTempExtensionName);
 
-  if (!file_util::CreateDirectory(temp_install_dir_)) {
+  if (!base::CreateDirectory(temp_install_dir_)) {
     SetUTF16Error(
         l10n_util::GetStringFUTF16(
             IDS_EXTENSION_PACKAGE_DIRECTORY_ERROR,

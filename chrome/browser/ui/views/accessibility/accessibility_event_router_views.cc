@@ -18,6 +18,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/controls/tree/tree_view.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -79,8 +80,8 @@ void AccessibilityEventRouterViews::HandleAccessibilityEvent(
 }
 
 void AccessibilityEventRouterViews::HandleMenuItemFocused(
-    const string16& menu_name,
-    const string16& menu_item_name,
+    const base::string16& menu_name,
+    const base::string16& menu_item_name,
     int item_index,
     int item_count,
     bool has_submenu) {
@@ -165,8 +166,16 @@ void AccessibilityEventRouterViews::DispatchAccessibilityEvent(
   ui::AccessibleViewState state;
   view->GetAccessibleState(&state);
 
+  if (type == ui::AccessibilityTypes::EVENT_ALERT &&
+      !(state.role == ui::AccessibilityTypes::ROLE_ALERT ||
+        state.role == ui::AccessibilityTypes::ROLE_WINDOW)) {
+    SendAlertControlNotification(view, type, profile);
+    return;
+  }
+
   switch (state.role) {
   case ui::AccessibilityTypes::ROLE_ALERT:
+  case ui::AccessibilityTypes::ROLE_DIALOG:
   case ui::AccessibilityTypes::ROLE_WINDOW:
     SendWindowNotification(view, type, profile);
     break;
@@ -199,6 +208,12 @@ void AccessibilityEventRouterViews::DispatchAccessibilityEvent(
     // Not used anymore?
   case ui::AccessibilityTypes::ROLE_SLIDER:
     SendSliderNotification(view, type, profile);
+    break;
+  case ui::AccessibilityTypes::ROLE_OUTLINE:
+    SendTreeNotification(view, type, profile);
+    break;
+  case ui::AccessibilityTypes::ROLE_OUTLINEITEM:
+    SendTreeItemNotification(view, type, profile);
     break;
   default:
     // If this is encountered, please file a bug with the role that wasn't
@@ -262,6 +277,60 @@ void AccessibilityEventRouterViews::SendMenuItemNotification(
 
   AccessibilityMenuItemInfo info(
       profile, name, context, has_submenu, index, count);
+  SendControlAccessibilityNotification(event, &info);
+}
+
+// static
+void AccessibilityEventRouterViews::SendTreeNotification(
+    views::View* view,
+    ui::AccessibilityTypes::Event event,
+    Profile* profile) {
+  AccessibilityTreeInfo info(profile, GetViewName(view));
+  SendControlAccessibilityNotification(event, &info);
+}
+
+// static
+void AccessibilityEventRouterViews::SendTreeItemNotification(
+    views::View* view,
+    ui::AccessibilityTypes::Event event,
+    Profile* profile) {
+  std::string name = GetViewName(view);
+  std::string context = GetViewContext(view);
+
+  if (strcmp(view->GetClassName(), views::TreeView::kViewClassName) != 0) {
+    NOTREACHED();
+    return;
+  }
+
+  views::TreeView* tree = static_cast<views::TreeView*>(view);
+  ui::TreeModelNode* selected_node = tree->GetSelectedNode();
+  ui::TreeModel* model = tree->model();
+
+  int siblings_count = model->GetChildCount(model->GetRoot());
+  int children_count = -1;
+  int index = -1;
+  int depth = -1;
+  bool is_expanded = false;
+
+  if (selected_node) {
+    children_count = model->GetChildCount(selected_node);
+    is_expanded = tree->IsExpanded(selected_node);
+    ui::TreeModelNode* parent_node = model->GetParent(selected_node);
+    if (parent_node) {
+      index = model->GetIndexOf(parent_node, selected_node);
+      siblings_count = model->GetChildCount(parent_node);
+    }
+    // Get node depth.
+    depth = 0;
+    while (parent_node) {
+      depth++;
+      parent_node = model->GetParent(parent_node);
+    }
+  }
+
+  AccessibilityTreeItemInfo info(
+      profile, name, context, depth, index, siblings_count, children_count,
+      is_expanded);
   SendControlAccessibilityNotification(event, &info);
 }
 
@@ -356,6 +425,21 @@ void AccessibilityEventRouterViews::SendSliderNotification(
 }
 
 // static
+void AccessibilityEventRouterViews::SendAlertControlNotification(
+    views::View* view,
+    ui::AccessibilityTypes::Event event,
+    Profile* profile) {
+  ui::AccessibleViewState state;
+  view->GetAccessibleState(&state);
+
+  std::string name = UTF16ToUTF8(state.name);
+  AccessibilityAlertInfo info(
+      profile,
+      name);
+  SendControlAccessibilityNotification(event, &info);
+}
+
+// static
 std::string AccessibilityEventRouterViews::GetViewName(views::View* view) {
   ui::AccessibleViewState state;
   view->GetAccessibleState(&state);
@@ -373,9 +457,11 @@ std::string AccessibilityEventRouterViews::GetViewContext(views::View* view) {
     // Two cases are handled right now. More could be added in the future
     // depending on how the UI evolves.
 
-    // A control in a toolbar should use the toolbar's accessible name
-    // as the context.
-    if (state.role == ui::AccessibilityTypes::ROLE_TOOLBAR &&
+    // A control inside of alert, toolbar or dialog should use that container's
+    // accessible name.
+    if ((state.role == ui::AccessibilityTypes::ROLE_ALERT ||
+         state.role == ui::AccessibilityTypes::ROLE_DIALOG ||
+         state.role == ui::AccessibilityTypes::ROLE_TOOLBAR) &&
         !state.name.empty()) {
       return UTF16ToUTF8(state.name);
     }
@@ -426,6 +512,9 @@ void AccessibilityEventRouterViews::RecursiveGetMenuItemIndexAndCount(
     int* count) {
   for (int i = 0; i < menu->child_count(); ++i) {
     views::View* child = menu->child_at(i);
+    if (!child->visible())
+      continue;
+
     int previous_count = *count;
     RecursiveGetMenuItemIndexAndCount(child, item, index, count);
     ui::AccessibleViewState state;

@@ -7,10 +7,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/feature_switch.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
@@ -30,7 +30,7 @@ const std::vector<std::string> ScriptBadgeHandler::PrerequisiteKeys() const {
   return SingleKey(keys::kIcons);
 }
 
-bool ScriptBadgeHandler::Parse(Extension* extension, string16* error) {
+bool ScriptBadgeHandler::Parse(Extension* extension, base::string16* error) {
   scoped_ptr<ActionInfo> action_info(new ActionInfo);
 
   // Provide a default script badge if one isn't declared in the manifest.

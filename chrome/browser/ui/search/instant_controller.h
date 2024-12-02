@@ -59,13 +59,10 @@ class InstantController : public InstantPage::Delegate {
   // Sends the current SearchProvider suggestion to the Instant page if any.
   void SetSuggestionToPrefetch(const InstantSuggestion& suggestion);
 
-  // Notifies |instant_Tab_| to toggle voice search.
-  void ToggleVoiceSearch();
-
   // Called if the browser is navigating to a search URL for |search_terms| with
   // search-term-replacement enabled. If |instant_tab_| can be used to process
   // the search, this does so and returns true. Else, returns false.
-  bool SubmitQuery(const string16& search_terms);
+  bool SubmitQuery(const base::string16& search_terms);
 
   // Called to indicate that the omnibox focus state changed with the given
   // |reason|. If |focus_state| is FOCUS_NONE, |view_gaining_focus| is set to

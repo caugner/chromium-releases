@@ -11,6 +11,8 @@ from telemetry.page import page_measurement
 from telemetry.core.timeline.model import MarkerMismatchError
 from telemetry.core.timeline.model import MarkerOverlapError
 
+TIMELINE_MARKER = 'RasterizeAndRecord'
+
 
 class RasterizeAndRecord(page_measurement.PageMeasurement):
   def __init__(self):
@@ -29,7 +31,7 @@ class RasterizeAndRecord(page_measurement.PageMeasurement):
                       help='Wait time before the benchmark is started ' +
                       '(must be long enought to load all content)')
     parser.add_option('--stop-wait-time', dest='stop_wait_time',
-                      default=10,
+                      default=15,
                       help='Wait time before measurement is taken ' +
                       '(must be long enough to render one frame)')
 
@@ -63,15 +65,6 @@ class RasterizeAndRecord(page_measurement.PageMeasurement):
                       'forced and threaded. Skipping measurement.')
       sys.exit(0)
 
-    # TODO(ernstm): Remove this temporary workaround when reference build has
-    # been updated to branch 1671 or later.
-    backend = tab.browser._browser_backend # pylint: disable=W0212
-    if (not hasattr(backend, 'chrome_branch_number') or
-        (sys.platform != 'android' and backend.chrome_branch_number < 1671)):
-      print ('Warning: rasterize_and_record requires Chrome branch 1671 or '
-             'later. Skipping measurement.')
-      sys.exit(0)
-
     # Rasterize only what's visible.
     tab.ExecuteJavaScript(
         'chrome.gpuBenchmarking.setRasterizeOnlyVisibleContent();')
@@ -97,7 +90,7 @@ class RasterizeAndRecord(page_measurement.PageMeasurement):
         'window.__rafFired = false;'
         'window.webkitRequestAnimationFrame(function() {'
           'chrome.gpuBenchmarking.setNeedsDisplayOnAllLayers();'
-          'console.time("' + rendering_stats.RENDER_PROCESS_MARKER + '");'
+          'console.time("' + TIMELINE_MARKER + '");'
           'window.__rafFired  = true;'
         '});')
     # Wait until the frame was drawn.
@@ -106,15 +99,15 @@ class RasterizeAndRecord(page_measurement.PageMeasurement):
     # TODO(ernstm): replace by call-back.
     time.sleep(float(self.options.stop_wait_time))
     tab.ExecuteJavaScript(
-        'console.timeEnd("' + rendering_stats.RENDER_PROCESS_MARKER + '")')
+        'console.timeEnd("' + TIMELINE_MARKER + '")')
 
     timeline = tab.browser.StopTracing().AsTimelineModel()
     try:
-      timeline_markers = timeline.FindTimelineMarkers(
-          rendering_stats.RENDER_PROCESS_MARKER)
+      timeline_markers = timeline.FindTimelineMarkers(TIMELINE_MARKER)
     except (MarkerMismatchError, MarkerOverlapError) as e:
       raise page_measurement.MeasurementFailure(str(e))
-    stats = rendering_stats.RenderingStats(timeline_markers, timeline_markers)
+    renderer_process = timeline.GetRendererProcessFromTab(tab)
+    stats = rendering_stats.RenderingStats(renderer_process, timeline_markers)
 
     results.Add('rasterize_time', 'ms',
                 max(stats.rasterize_time))

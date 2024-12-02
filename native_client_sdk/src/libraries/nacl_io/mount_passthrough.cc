@@ -111,10 +111,8 @@ class MountNodePassthrough : public MountNode {
 
 MountPassthrough::MountPassthrough() {}
 
-Error MountPassthrough::Init(int dev,
-                             StringMap_t& args,
-                             PepperInterface* ppapi) {
-  return Mount::Init(dev, args, ppapi);
+Error MountPassthrough::Init(const MountInitArgs& args) {
+  return Mount::Init(args);
 }
 
 void MountPassthrough::Destroy() {}
@@ -163,6 +161,11 @@ Error MountPassthrough::Rmdir(const Path& path) {
 }
 
 Error MountPassthrough::Remove(const Path& path) {
+  // Not implemented by NaCl.
+  return ENOSYS;
+}
+
+Error MountPassthrough::Rename(const Path& path, const Path& newpath) {
   // Not implemented by NaCl.
   return ENOSYS;
 }

@@ -63,8 +63,6 @@ using base::StringValue;
 using base::Time;
 using base::TimeDelta;
 using base::Value;
-using chrome::VersionInfo;
-using extensions::Feature;
 using helpers::CalculateOnAuthRequiredDelta;
 using helpers::CalculateOnBeforeRequestDelta;
 using helpers::CalculateOnBeforeSendHeadersDelta;
@@ -209,7 +207,7 @@ class ExtensionWebRequestTest : public testing::Test {
   BooleanPrefMember enable_referrers_;
   TestIPCSender ipc_sender_;
   scoped_refptr<EventRouterForwarder> event_router_;
-  scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  scoped_refptr<InfoMap> extension_info_map_;
   scoped_ptr<ChromeNetworkDelegate> network_delegate_;
   scoped_ptr<net::TestURLRequestContext> context_;
 };
@@ -803,7 +801,7 @@ class ExtensionWebRequestHeaderModificationTest
   BooleanPrefMember enable_referrers_;
   TestIPCSender ipc_sender_;
   scoped_refptr<EventRouterForwarder> event_router_;
-  scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  scoped_refptr<InfoMap> extension_info_map_;
   scoped_ptr<ChromeNetworkDelegate> network_delegate_;
   scoped_ptr<net::MockHostResolver> host_resolver_;
   scoped_ptr<net::TestURLRequestContext> context_;
@@ -1297,8 +1295,8 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnHeadersReceivedDelta) {
 TEST(ExtensionWebRequestHelpersTest, TestCalculateOnAuthRequiredDelta) {
   const bool cancel = true;
 
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
+  base::string16 username = ASCIIToUTF16("foo");
+  base::string16 password = ASCIIToUTF16("bar");
   scoped_ptr<net::AuthCredentials> credentials(
       new net::AuthCredentials(username, password));
 
@@ -2070,9 +2068,9 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnAuthRequiredResponses) {
   net::BoundNetLog net_log = capturing_net_log.bound();
   ExtensionWarningSet warning_set;
   EventResponseDeltas deltas;
-  string16 username = ASCIIToUTF16("foo");
-  string16 password = ASCIIToUTF16("bar");
-  string16 password2 = ASCIIToUTF16("baz");
+  base::string16 username = ASCIIToUTF16("foo");
+  base::string16 password = ASCIIToUTF16("bar");
+  base::string16 password2 = ASCIIToUTF16("baz");
 
   // Check that we can handle if not returning credentials.
   linked_ptr<EventResponseDelta> d0(

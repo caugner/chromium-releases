@@ -12,7 +12,7 @@
 
 class ConfirmInfoBar : public InfoBarAndroid {
  public:
-  ConfirmInfoBar(InfoBarService* owner, InfoBarDelegate* delegate);
+  explicit ConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate> delegate);
   virtual ~ConfirmInfoBar();
 
  private:
@@ -23,9 +23,9 @@ class ConfirmInfoBar : public InfoBarAndroid {
   virtual void ProcessButton(int action,
                              const std::string& action_value) OVERRIDE;
 
-  string16 GetTextFor(ConfirmInfoBarDelegate::InfoBarButton button);
+  ConfirmInfoBarDelegate* GetDelegate();
+  base::string16 GetTextFor(ConfirmInfoBarDelegate::InfoBarButton button);
 
-  ConfirmInfoBarDelegate* delegate_;
   base::android::ScopedJavaGlobalRef<jobject> java_confirm_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ConfirmInfoBar);

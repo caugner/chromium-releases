@@ -15,13 +15,13 @@
 #include "base/values.h"
 #include "chrome/common/cloud_print/cloud_print_constants.h"
 #include "chrome/common/cloud_print/cloud_print_helpers.h"
-#include "chrome/service/cloud_print/cloud_print_helpers.h"
+#include "chrome/service/cloud_print/cloud_print_service_helpers.h"
 #include "chrome/service/cloud_print/job_status_updater.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
-#include "printing/backend/print_backend.h"
+#include "printing/printing_utils.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -245,6 +245,8 @@ void PrinterJobHandler::OnJobChanged() {
 
 void PrinterJobHandler::OnJobSpoolSucceeded(const PlatformJobId& job_id) {
   DCHECK(base::MessageLoop::current() == print_thread_.message_loop());
+  job_spooler_->AddRef();
+  print_thread_.message_loop()->ReleaseSoon(FROM_HERE, job_spooler_.get());
   job_spooler_ = NULL;
   job_handler_message_loop_proxy_->PostTask(
       FROM_HERE, base::Bind(&PrinterJobHandler::JobSpooled, this, job_id));
@@ -252,6 +254,8 @@ void PrinterJobHandler::OnJobSpoolSucceeded(const PlatformJobId& job_id) {
 
 void PrinterJobHandler::OnJobSpoolFailed() {
   DCHECK(base::MessageLoop::current() == print_thread_.message_loop());
+  job_spooler_->AddRef();
+  print_thread_.message_loop()->ReleaseSoon(FROM_HERE, job_spooler_.get());
   job_spooler_ = NULL;
   VLOG(1) << "CP_CONNECTOR: Job failed (spool failed)";
   job_handler_message_loop_proxy_->PostTask(
@@ -367,7 +371,7 @@ PrinterJobHandler::HandlePrintDataResponse(const net::URLFetcher* source,
                                            const std::string& data) {
   VLOG(1) << "CP_CONNECTOR: Handling print data response"
           << ", printer id: " << printer_info_cloud_.printer_id;
-  if (file_util::CreateTemporaryFile(&job_details_.print_data_file_path_)) {
+  if (base::CreateTemporaryFile(&job_details_.print_data_file_path_)) {
     UMA_HISTOGRAM_ENUMERATION("CloudPrint.JobHandlerEvent", JOB_HANDLER_DATA,
                               JOB_HANDLER_MAX);
     int ret = file_util::WriteFile(job_details_.print_data_file_path_,
@@ -496,6 +500,9 @@ void PrinterJobHandler::StartPrinting() {
   // We are done with the request object for now.
   request_ = NULL;
   if (!shutting_down_) {
+#if defined(OS_WIN)
+    print_thread_.init_com_with_mta(true);
+#endif
     if (!print_thread_.Start()) {
       VLOG(1) << "CP_CONNECTOR: Failed to start print thread"
               << ", printer id: " << printer_info_cloud_.printer_id;
@@ -767,10 +774,9 @@ void PrinterJobHandler::DoPrint(const JobDetails& job_details,
   if (!job_spooler_.get())
     return;
   string16 document_name =
-      printing::PrintBackend::SimplifyDocumentTitle(
-          UTF8ToUTF16(job_details.job_title_));
+      printing::SimplifyDocumentTitle(UTF8ToUTF16(job_details.job_title_));
   if (document_name.empty()) {
-    document_name = printing::PrintBackend::SimplifyDocumentTitle(
+    document_name = printing::SimplifyDocumentTitle(
         l10n_util::GetStringUTF16(IDS_DEFAULT_PRINT_DOCUMENT_TITLE));
   }
   UMA_HISTOGRAM_ENUMERATION("CloudPrint.JobHandlerEvent",

@@ -24,7 +24,8 @@ class CHROMEOS_EXPORT InputMethodDescriptor {
                         const std::vector<std::string>& keyboard_layouts,
                         const std::vector<std::string>& language_codes,
                         bool is_login_keyboard,
-                        const GURL& options_page_url);
+                        const GURL& options_page_url,
+                        const GURL& input_view_url);
   ~InputMethodDescriptor();
 
   // Accessors
@@ -34,6 +35,7 @@ class CHROMEOS_EXPORT InputMethodDescriptor {
     return language_codes_;
   }
   const GURL& options_page_url() const { return options_page_url_; }
+  const GURL& input_view_url() const { return input_view_url_; }
   const std::vector<std::string>& keyboard_layouts() const {
     return keyboard_layouts_;
   }
@@ -64,9 +66,13 @@ class CHROMEOS_EXPORT InputMethodDescriptor {
 
   // Options page URL e.g.
   // "chrome-extension://ceaajjmckiakobniehbjpdcidfpohlin/options.html".
-  // We can't use GURL here due to dependency policy. This field is valid only
-  // for input method extension.
+  // This field is valid only for input method extension.
   GURL options_page_url_;
+
+  // Input View URL e.g.
+  // "chrome-extension://ceaajjmckiakobniehbjpdcidfpohlin/my_input_view.html".
+  // This field is valid only for input method extension.
+  GURL input_view_url_;
 };
 
 typedef std::vector<InputMethodDescriptor> InputMethodDescriptors;

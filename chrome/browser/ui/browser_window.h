@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/browser/ui/translate/translate_bubble_model.h"
 #include "chrome/common/content_settings_types.h"
+#include "chrome/common/translate/translate_errors.h"
 #include "ui/base/base_window.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/native_widget_types.h"
@@ -111,6 +112,9 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Sets the starred state for the current tab.
   virtual void SetStarredState(bool is_starred) = 0;
+
+  // Sets whether the translate icon is lit for the current tab.
+  virtual void SetTranslateIconToggled(bool is_lit) = 0;
 
   // Called when the active tab changes.  Subclasses which implement
   // TabStripModelObserver should implement this instead of ActiveTabChanged();
@@ -223,7 +227,8 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows the translate bubble.
   virtual void ShowTranslateBubble(
       content::WebContents* contents,
-      TranslateBubbleModel::ViewState view_state) = 0;
+      TranslateBubbleModel::ViewState view_state,
+      TranslateErrors::Type error_type) = 0;
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   enum OneClickSigninBubbleType {
@@ -242,8 +247,8 @@ class BrowserWindow : public ui::BaseWindow {
   // of the account that has signed in.
   virtual void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
-      const string16& email,
-      const string16& error_message,
+      const base::string16& email,
+      const base::string16& error_message,
       const StartSyncCallback& start_sync_callback) = 0;
 #endif
 
@@ -347,6 +352,12 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
+
+  // Returns a HostDesktopType that is compatible with the current Chrome window
+  // configuration. On Windows with Ash, this is always HOST_DESKTOP_TYPE_ASH
+  // while Chrome is running in Metro mode. Otherwise returns |desktop_type|.
+  static chrome::HostDesktopType AdjustHostDesktopType(
+      chrome::HostDesktopType desktop_type);
 
   // Shows the avatar bubble inside |web_contents|. The bubble is positioned
   // relative to |rect|. |rect| should be in the |web_contents| coordinate

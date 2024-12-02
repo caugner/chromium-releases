@@ -80,7 +80,7 @@ using content::WebContents;
 namespace {
 // Conditionally return the update app menu item title based on upgrade detector
 // state.
-string16 GetUpgradeDialogMenuItemName() {
+base::string16 GetUpgradeDialogMenuItemName() {
   if (UpgradeDetector::GetInstance()->is_outdated_install()) {
     return l10n_util::GetStringFUTF16(
         IDS_UPGRADE_BUBBLE_MENU_ITEM,
@@ -115,7 +115,7 @@ void EncodingMenuModel::Build() {
       encoding_menu_items.begin();
   for (; it != encoding_menu_items.end(); ++it) {
     int id = it->first;
-    string16& label = it->second;
+    base::string16& label = it->second;
     if (id == 0) {
       AddSeparator(ui::NORMAL_SEPARATOR);
     } else {
@@ -198,7 +198,12 @@ void ToolsMenuModel::Build(Browser* browser) {
   if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
     show_create_shortcuts = false;
 #endif
-  if (show_create_shortcuts) {
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableStreamlinedHostedApps)) {
+    AddItemWithStringId(IDC_CREATE_HOSTED_APP, IDS_CREATE_HOSTED_APP);
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  } else if (show_create_shortcuts) {
     AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
     AddSeparator(ui::NORMAL_SEPARATOR);
   }
@@ -278,7 +283,7 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
          command_id == IDC_SHOW_SIGNIN;
 }
 
-string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
+base::string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
   switch (command_id) {
     case IDC_ZOOM_PERCENT_DISPLAY:
       return zoom_label_;
@@ -310,7 +315,7 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
           browser_->profile()->GetOriginalProfile());
     default:
       NOTREACHED();
-      return string16();
+      return base::string16();
   }
 }
 
@@ -606,7 +611,7 @@ void WrenchMenuModel::Build(bool is_new_menu) {
   SigninManager* signin = SigninManagerFactory::GetForProfile(
       browser_->profile()->GetOriginalProfile());
   if (signin && signin->IsSigninAllowed()) {
-    const string16 short_product_name =
+    const base::string16 short_product_name =
         l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
     AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
         IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));

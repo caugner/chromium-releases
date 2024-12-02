@@ -121,6 +121,70 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_TRANSLATE_NEVER_TRANSLATE_LANGUAGE" meaning="Android" desc="Text to display on the never translate language button. [CHAR-LIMIT=64]">
         Never translate <ph name="LANGUAGE">%1$s<ex>French</ex></ph>
       </message>
+      <message name="IDS_MENU_PRINT" desc="Menu item for printing the current page. [CHAR-LIMIT=27]">
+        Print…
+      </message>
+      <message name="IDS_ERROR_PRINTING_FAILED" desc="Generic error message shown when Chrome fails to print the current page for some reason.">
+        There was a problem printing the page. Please try again.
+      </message>
+      <message name="IDS_ACCESSIBILITY_MENU_BOOKMARK" desc="Content description for the bookmark button when the page is not currently bookmarked.">
+        Bookmark page
+      </message>
+      <message name="IDS_ACCESSIBILITY_MENU_EDIT_BOOKMARK" desc="Content description for the bookmark button when the page is currently bookmarked.">
+        Edit bookmark page
+      </message>
+      <message name="IDS_ACCESSIBILITY_MENU_FORWARD" desc="Content description for the forward navigation button.">
+        Go forward
+      </message>
+      <message name="IDS_ACCESSIBILITY_MENU_BACK" desc="Content description for the backard navigation button.">
+        Go back
+      </message>
+      <!-- ContextMenu -->
+      <message name="IDS_CONTEXTMENU_OPEN_IN_NEW_TAB" desc="Context sensitive menu item to open the selected link in a new tab. [CHAR-LIMIT=30]">
+        Open in new tab
+      </message>
+      <message name="IDS_CONTEXTMENU_OPEN_IN_INCOGNITO_TAB" desc="Context sensitive menu item to open the selected link in a new incognito tab. [CHAR-LIMIT=30]">
+        Open in incognito tab
+      </message>
+      <message name="IDS_CONTEXTMENU_COPY_LINK_ADDRESS" desc="Context sensitive menu item for copying the selected link URL / address. [CHAR-LIMIT=30]">
+        Copy link address
+      </message>
+      <message name="IDS_CONTEXTMENU_COPY_LINK_TEXT" desc="Context sensitive menu item for copying the selected link's text. [CHAR-LIMIT=30]">
+        Copy link text
+      </message>
+      <message name="IDS_CONTEXTMENU_SAVE_LINK" desc="Context sensitive menu item for saving the target of a link [CHAR-LIMIT=30]">
+        Save link
+      </message>
+      <message name="IDS_CONTEXTMENU_SAVE_IMAGE" desc="Context sensitive menu item for saving the selected image. [CHAR-LIMIT=30]">
+        Save image
+      </message>
+      <message name="IDS_CONTEXTMENU_OPEN_IMAGE" desc="Context sensitive menu item for opening/viewing the selected image. [CHAR-LIMIT=30]">
+        Open image
+      </message>
+      <message name="IDS_CONTEXTMENU_OPEN_IMAGE_IN_NEW_TAB" desc="Context sensitive menu item for opening/viewing the selected image in a new tab. [CHAR-LIMIT=30]">
+        Open image in new tab
+      </message>
+      <message name="IDS_CONTEXTMENU_OPEN_ORIGINAL_IMAGE_IN_NEW_TAB" desc="Context sensitive menu item for opening/viewing the original version of the selected image in a new tab. [CHAR-LIMIT=30]">
+        Open original image in new tab
+      </message>
+      <message name="IDS_CONTEXTMENU_SEARCH_WEB_FOR_IMAGE" desc="Context sensitive menu item for search-for-Image command in a new tab. [CHAR-LIMIT=30]">
+        Search <ph name="SEARCH_ENGINE">%1$s<ex>Google</ex></ph> for this image
+      </message>
+      <message name="IDS_CONTEXTMENU_COPY_IMAGE" desc="Context sensitive menu item for copying an image to the clipboard. [CHAR-LIMIT=30]">
+        Copy image
+      </message>
+      <message name="IDS_CONTEXTMENU_SAVE_VIDEO" desc="Context sensitive menu item for saving the selected video. [CHAR-LIMIT=30]">
+        Save video
+     </message>
+
+      <!-- Smartcard certificate support -->
+      <message name="IDS_SMARTCARD_DIALOG_TITLE" desc="Title of a dialog asking whether to use Android default keystore or a smartcard for certificate authentication.">
+        Choose certificate for authentication
+      </message>
+      <message name="IDS_SMARTCARD_CERTIFICATE_OPTION" desc="An option to use Smart Card when a dialog asking whether to use Android default keystore or a Smart Card for certificate authentication.">
+        Smart card
+      </message>
+
     </messages>
   </release>
   <translations>

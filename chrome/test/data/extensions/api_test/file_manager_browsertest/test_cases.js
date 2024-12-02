@@ -1173,6 +1173,78 @@ testcase.shareDirectory = function() {
   testcase.intermediate.share('photos');
 };
 
+testcase.executeDefaultTaskOnDrive = function(root) {
+  testcase.intermediate.executeDefaultTask(true);
+};
+
+testcase.executeDefaultTaskOnDownloads = function(root) {
+  testcase.intermediate.executeDefaultTask(false);
+};
+
+/**
+ * Tests executing the default task when there is only one task.
+ */
+testcase.intermediate.executeDefaultTask = function(drive) {
+  var root = drive ? '/drive/root' : '/Downloads';
+  var taskId = drive ? 'dummytaskid|drive|open-with' : 'dummytaskid|open-with'
+  var appId;
+  StepsRunner.run([
+    // Set up File Manager.
+    function() {
+      var appState = {
+        defaultPath: root
+      };
+      setupAndWaitUntilReady(appState, this.next);
+    },
+    // Override tasks list with a dummy task.
+    function(inAppId, inFileListBefore) {
+      appId = inAppId;
+
+      callRemoteTestUtil(
+          'overrideTasks',
+          appId,
+          [[
+            {
+              driveApp: false,
+              iconUrl: 'chrome://theme/IDR_DEFAULT_FAVICON',  // Dummy icon
+              isDefault: true,
+              taskId: taskId,
+              title: 'The dummy task for test'
+            }
+          ]],
+          this.next);
+    },
+    // Select file.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'selectFile', appId, ['hello.txt'], this.next);
+    },
+    // Double-click the file.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil(
+          'fakeMouseDoubleClick',
+          appId,
+          ['#file-list li.table-row[selected] .filename-label span'],
+          this.next);
+    },
+    // Wait until the task is executed.
+    function(result) {
+      chrome.test.assertTrue(!!result);
+      callRemoteTestUtil(
+          'waitUntilTaskExecutes',
+          appId,
+          [taskId],
+          this.next);
+    },
+    // Check the error.
+    function() {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
 /**
  * Tests sharing a file on Drive
  */
@@ -1231,6 +1303,35 @@ testcase.suggestAppDialog = function() {
           ['#suggest-app-dialog:not(.show-spinner)'],
           this.next);
     },
+    // Override task APIs for test.
+    function(result) {
+      chrome.test.assertTrue(!!result);
+      callRemoteTestUtil(
+          'overrideTasks',
+          appId,
+          [[
+            {
+              driveApp: false,
+              iconUrl: 'chrome://theme/IDR_DEFAULT_FAVICON',  // Dummy icon
+              isDefault: true,
+              taskId: 'dummytaskid|drive|open-with',
+              title: 'The dummy task for test'
+            }
+          ]],
+          this.next);
+    },
+    // Override installWebstoreItem API for test.
+    function(result) {
+      chrome.test.assertTrue(!!result);
+      callRemoteTestUtil(
+          'overrideInstallWebstoreItemApi',
+          appId,
+          [
+            'DUMMY_ITEM_ID_FOR_TEST',  // Same ID in cws_container_mock/main.js.
+            null  // Success
+          ],
+          this.next);
+    },
     // Initiate an installation from the widget.
     function(result) {
       chrome.test.assertTrue(!!result);
@@ -1251,9 +1352,17 @@ testcase.suggestAppDialog = function() {
                           true],  // inverse
                          this.next);
     },
-    // Check the styles
+    // Wait until the task is executed.
     function(result) {
       chrome.test.assertTrue(!!result);
+      callRemoteTestUtil(
+          'waitUntilTaskExecutes',
+          appId,
+          ['dummytaskid|drive|open-with'],
+          this.next);
+    },
+    // Check error
+    function() {
       checkIfNoErrorsOccured(this.next);
     }
   ]);
@@ -1391,6 +1500,13 @@ testcase.restoreCurrentView = function() {
       callRemoteTestUtil('waitForElement',
                          appId,
                          ['.thumbnail-grid[hidden]'],
+                         this.next);
+    },
+    // Opens the gear menu.
+    function() {
+      callRemoteTestUtil('fakeMouseClick',
+                         appId,
+                         ['#gear-button'],
                          this.next);
     },
     // Change the current view.
@@ -1645,6 +1761,42 @@ testcase.searchBoxFocus = function() {
     },
     // Check for errors.
     function(element) {
+      checkIfNoErrorsOccured(this.next);
+    }
+  ]);
+};
+
+/**
+ * Tests if a thumbnail for the selected item shows up in the preview panel.
+ * This thumbnail is fetched via the image loader.
+ */
+testcase.thumbnailsDownloads = function() {
+  var appId;
+  StepsRunner.run([
+    function() {
+      var appState = {defaultPath: '/Downloads'};
+      setupAndWaitUntilReady(appState, this.next);
+    },
+    // Select the image.
+    function(inAppId) {
+      appId = inAppId;
+      callRemoteTestUtil('selectFile',
+                         appId,
+                         ['My Desktop Background.png'],
+                         this.next);
+    },
+    // Wait until the thumbnail shows up.
+    function(result) {
+      chrome.test.assertTrue(result);
+      callRemoteTestUtil('waitForElement',
+                         appId,
+                         ['.preview-thumbnails .img-container img'],
+                         this.next);
+    },
+    // Verify the thumbnail.
+    function(element) {
+      chrome.test.assertTrue(element.attributes.src.indexOf(
+          'data:image/jpeg') === 0);
       checkIfNoErrorsOccured(this.next);
     }
   ]);

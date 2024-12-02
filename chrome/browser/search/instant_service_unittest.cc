@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/search/instant_search_prerenderer.h"
 #include "chrome/common/render_messages.h"
 #include "components/variations/entropy_provider.h"
 #include "content/public/browser/notification_service.h"
@@ -52,9 +53,7 @@ class MockWebContentsObserver : public content::WebContentsObserver {
 class InstantServiceTest : public InstantUnitTestBase {
  protected:
   virtual void SetUp() OVERRIDE {
-    InstantUnitTestBase::SetUp();
-    field_trial_list_.reset(new base::FieldTrialList(
-        new metrics::SHA1EntropyProvider("42")));
+    InstantUnitTestBase::SetUpWithoutCacheableNTP();
 
     instant_service_observer_.reset(new MockInstantServiceObserver());
     instant_service_->AddObserver(instant_service_observer_.get());
@@ -70,9 +69,12 @@ class InstantServiceTest : public InstantUnitTestBase {
     InstantUnitTestBase::TearDown();
   }
 
+  InstantSearchPrerenderer* GetInstantSearchPrerenderer() {
+    return instant_service_->instant_search_prerenderer();
+  }
+
   scoped_ptr<MockInstantServiceObserver> instant_service_observer_;
   scoped_ptr<MockWebContentsObserver> instant_ntp_contents_observer_;
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
 };
 
 TEST_F(InstantServiceTest, DispatchDefaultSearchProviderChanged) {
@@ -105,7 +107,7 @@ TEST_F(InstantServiceTest, DispatchGoogleURLUpdated) {
 }
 
 TEST_F(InstantServiceTest, SendsSearchURLsToRenderer) {
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("InstantExtended",
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("EmbeddedSearch",
       "Group1 use_cacheable_ntp:1"));
   scoped_ptr<content::MockRenderProcessHost> rph(
       new content::MockRenderProcessHost(profile()));
@@ -124,4 +126,52 @@ TEST_F(InstantServiceTest, SendsSearchURLsToRenderer) {
   EXPECT_EQ("https://www.google.com/alt#quux=", search_urls[0].spec());
   EXPECT_EQ("https://www.google.com/url?bar=", search_urls[1].spec());
   EXPECT_EQ("https://www.google.com/newtab", new_tab_page_url.spec());
+}
+
+TEST_F(InstantServiceTest, InstantSearchDisabled) {
+  // 'prefetch_results' flag is not enabled in field trials. Make sure
+  // InstantSearchPrerenderer is not initialized.
+  EXPECT_EQ(static_cast<InstantSearchPrerenderer*>(NULL),
+            GetInstantSearchPrerenderer());
+}
+
+TEST_F(InstantServiceTest,
+       ResetInstantSearchPrerenderer_DefaultProviderChanged) {
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "EmbeddedSearch", "Group1 use_cacheable_ntp:1 prefetch_results:1"));
+  EXPECT_CALL(*instant_service_observer_.get(), DefaultSearchProviderChanged())
+      .Times(2);
+
+  // Set a default search provider that doesn't support Instant.
+  TemplateURLData data;
+  data.SetURL("https://foobar.com/url?bar={searchTerms}");
+  TemplateURL* template_url = new TemplateURL(profile(), data);
+  // Takes ownership of |template_url|.
+  template_url_service_->Add(template_url);
+  template_url_service_->SetDefaultSearchProvider(template_url);
+
+  EXPECT_EQ(static_cast<InstantSearchPrerenderer*>(NULL),
+            GetInstantSearchPrerenderer());
+
+  // Set a default search provider that supports Instant and make sure
+  // InstantSearchPrerenderer is valid.
+  SetDefaultSearchProvider("https://google.com/");
+  EXPECT_NE(static_cast<InstantSearchPrerenderer*>(NULL),
+            GetInstantSearchPrerenderer());
+}
+
+TEST_F(InstantServiceTest, ResetInstantSearchPrerenderer_GoogleBaseURLUpdated) {
+  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
+      "EmbeddedSearch", "Group1 use_cacheable_ntp:1 prefetch_results:1"));
+  EXPECT_CALL(*instant_service_observer_.get(), DefaultSearchProviderChanged())
+      .Times(1);
+  EXPECT_CALL(*instant_service_observer_.get(), GoogleURLUpdated()).Times(1);
+
+  SetDefaultSearchProvider("https://google.com/");
+  InstantSearchPrerenderer* old_prerenderer = GetInstantSearchPrerenderer();
+  EXPECT_NE(static_cast<InstantSearchPrerenderer*>(NULL), old_prerenderer);
+
+  const std::string& new_base_url = "https://www.google.es/";
+  NotifyGoogleBaseURLUpdate(new_base_url);
+  EXPECT_NE(old_prerenderer, GetInstantSearchPrerenderer());
 }

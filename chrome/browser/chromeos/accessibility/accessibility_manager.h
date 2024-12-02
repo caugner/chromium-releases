@@ -5,13 +5,19 @@
 #ifndef CHROME_BROWSER_CHROMEOS_ACCESSIBILITY_ACCESSIBILITY_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_ACCESSIBILITY_ACCESSIBILITY_MANAGER_H_
 
+#include <set>
+
 #include "ash/accessibility_delegate.h"
+#include "ash/session_state_observer.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "base/time/time.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/extensions/api/braille_display_private/braille_controller.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/event_router.h"
 
 class Profile;
 
@@ -36,7 +42,9 @@ struct AccessibilityStatusEventDetails {
 // watching profile notifications and pref-changes.
 // TODO(yoshiki): merge MagnificationManager with AccessibilityManager.
 class AccessibilityManager : public content::NotificationObserver,
-    extensions::api::braille_display_private::BrailleObserver {
+    public extensions::EventRouter::Observer,
+    extensions::api::braille_display_private::BrailleObserver,
+    public ash::SessionStateObserver {
  public:
   // Creates an instance of AccessibilityManager, this should be called once,
   // because only one instance should exist at the same time.
@@ -63,6 +71,9 @@ class AccessibilityManager : public content::NotificationObserver,
     const char* pref_path_;
   };
 
+  // Returns true when the accessibility menu should be shown.
+  bool ShouldShowAccessibilityMenu();
+
   // Enables or disables the large cursor.
   void EnableLargeCursor(bool enabled);
   // Returns true if the large cursor is enabled, or false if not.
@@ -88,12 +99,6 @@ class AccessibilityManager : public content::NotificationObserver,
   // Toggles whether Chrome OS spoken feedback is on or off.
   void ToggleSpokenFeedback(ash::AccessibilityNotificationVisibility notify);
 
-  // Speaks the specified string.
-  void Speak(const std::string& text);
-
-  // Speaks the given text if the accessibility pref is already set.
-  void MaybeSpeak(const std::string& text);
-
   // Enables or disables the high contrast mode for Chrome.
   void EnableHighContrast(bool enabled);
 
@@ -112,10 +117,19 @@ class AccessibilityManager : public content::NotificationObserver,
   // Returns the autoclick delay in milliseconds.
   int GetAutoclickDelay() const;
 
+  // SessionStateObserver overrides:
+  virtual void ActiveUserChanged(const std::string& user_id) OVERRIDE;
+
   void SetProfileForTest(Profile* profile);
 
   static void SetBrailleControllerForTest(
       extensions::api::braille_display_private::BrailleController* controller);
+
+  // Enables/disables system sounds.
+  void EnableSystemSounds(bool system_sounds_enabled);
+
+  // Initiates play of shutdown sound and returns it's duration.
+  base::TimeDelta PlayShutdownSound();
 
  protected:
   AccessibilityManager();
@@ -127,6 +141,8 @@ class AccessibilityManager : public content::NotificationObserver,
   void LoadChromeVoxToLockScreen();
   void UnloadChromeVox();
   void UnloadChromeVoxFromLockScreen();
+  void SetUpPreLoadChromeVox(Profile* profile);
+  void TearDownPostUnloadChromeVox(Profile* profile);
 
   void UpdateLargeCursorFromPref();
   void UpdateStickyKeysFromPref();
@@ -156,6 +172,17 @@ class AccessibilityManager : public content::NotificationObserver,
       const extensions::api::braille_display_private::DisplayState&
           display_state) OVERRIDE;
 
+  // EventRouter::Observer implementation.
+  virtual void OnListenerAdded(
+      const extensions::EventListenerInfo& details) OVERRIDE;
+  virtual void OnListenerRemoved(
+      const extensions::EventListenerInfo& details) OVERRIDE;
+
+  // Plays sound identified by |sound_key|.  |sound_key| must be an ID for sound
+  // registered by AccessibilityManager.  If there is no such sound, sound isn't
+  // played.
+  void PlaySound(int sound_key) const;
+
   // Profile which has the current a11y context.
   Profile* profile_;
 
@@ -164,9 +191,13 @@ class AccessibilityManager : public content::NotificationObserver,
   bool chrome_vox_loaded_on_lock_screen_;
   bool chrome_vox_loaded_on_user_screen_;
 
+  // Set of profiles ChromeVox is loaded to.
+  std::set<Profile*> chromevox_profiles_;
+
   content::NotificationRegistrar notification_registrar_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
   scoped_ptr<PrefChangeRegistrar> local_state_pref_change_registrar_;
+  scoped_ptr<ash::ScopedSessionStateObserver> session_state_observer_;
 
   PrefHandler large_cursor_pref_handler_;
   PrefHandler spoken_feedback_pref_handler_;
@@ -184,6 +215,10 @@ class AccessibilityManager : public content::NotificationObserver,
   ash::AccessibilityNotificationVisibility spoken_feedback_notification_;
 
   base::WeakPtrFactory<AccessibilityManager> weak_ptr_factory_;
+
+  bool should_speak_chrome_vox_announcements_on_user_screen_;
+
+  bool system_sounds_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(AccessibilityManager);
 };

@@ -102,7 +102,6 @@ const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
   {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, "ppapi-broker"},
   {CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, "multiple-automatic-downloads"},
   {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, "midi-sysex"},
-  {CONTENT_SETTINGS_TYPE_SAVE_PASSWORD, "save-password"},
 #if defined(OS_CHROMEOS)
   {CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER, "protectedContent"},
 #endif
@@ -481,6 +480,11 @@ void ContentSettingsHandler::InitializeHandler() {
       prefs::kVideoCaptureAllowed,
       base::Bind(&ContentSettingsHandler::UpdateMediaSettingsView,
                  base::Unretained(this)));
+  pref_change_registrar_.Add(
+      prefs::kEnableDRM,
+      base::Bind(
+          &ContentSettingsHandler::UpdateProtectedContentExceptionsButton,
+          base::Unretained(this)));
 
   flash_settings_manager_.reset(new PepperFlashSettingsManager(this, profile));
 }
@@ -491,6 +495,7 @@ void ContentSettingsHandler::InitializePage() {
 
   UpdateHandlersEnabledRadios();
   UpdateAllExceptionsViewsFromModel();
+  UpdateProtectedContentExceptionsButton();
 }
 
 void ContentSettingsHandler::Observe(
@@ -710,9 +715,6 @@ void ContentSettingsHandler::UpdateExceptionsViewFromModel(
       break;
     case CONTENT_SETTINGS_TYPE_PROTOCOL_HANDLERS:
       // The RPH settings are retrieved separately.
-      break;
-    case CONTENT_SETTINGS_TYPE_SAVE_PASSWORD:
-      // There is no user facing UI for this content type and we skip it here.
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       UpdateMIDISysExExceptionsView();
@@ -1265,8 +1267,8 @@ void ContentSettingsHandler::SetContentFilter(const ListValue* args) {
           UserMetricsAction("Options_DefaultMediaStreamMicSettingChanged"));
       break;
     case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
-      content::RecordAction(UserMetricsAction(
-          "Options_DefaultMultipleAutomaticDownloadsSettingChanged"));
+      content::RecordAction(
+          UserMetricsAction("Options_DefaultMultipleAutomaticDLSettingChange"));
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       content::RecordAction(
@@ -1457,6 +1459,15 @@ void ContentSettingsHandler::UpdateFlashMediaLinksVisibility() {
       ShowFlashMediaLink(EXCEPTIONS, true);
     }
   }
+}
+
+void ContentSettingsHandler::UpdateProtectedContentExceptionsButton() {
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  // Exceptions apply only when the feature is enabled.
+  bool enable_exceptions = prefs->GetBoolean(prefs::kEnableDRM);
+  web_ui()->CallJavascriptFunction(
+      "ContentSettings.enableProtectedContentExceptions",
+      base::FundamentalValue(enable_exceptions));
 }
 
 }  // namespace options

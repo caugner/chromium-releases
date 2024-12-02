@@ -8,10 +8,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/manifest_tests/extension_manifest_test.h"
-#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/extensions/permissions/settings_override_permission.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permission_set.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -48,7 +48,8 @@ class SettingsOverridePermissionTest : public ExtensionManifestTest {
       search_provider->SetString("keyword", "lock");
       search_provider->SetString("encoding", "UTF-8");
       search_provider->SetBoolean("is_default", true);
-      search_provider->SetString("favicon_url", "wikipedia.org/wiki/Favicon");
+      search_provider->SetString("favicon_url",
+                                 "http://wikipedia.org/wiki/Favicon");
       settings_override->Set("search_provider", search_provider.release());
     }
     ext_manifest.Set(
@@ -65,7 +66,7 @@ TEST_F(SettingsOverridePermissionTest, HomePage) {
       extension->GetActivePermissions());
 
   EXPECT_TRUE(permission_set->HasAPIPermission(APIPermission::kHomepage));
-  std::vector<string16> warnings =
+  std::vector<base::string16> warnings =
       PermissionsData::GetPermissionMessageStrings(extension.get());
   ASSERT_EQ(1u, warnings.size());
   EXPECT_EQ("Change your home page to: google.com/",
@@ -82,7 +83,7 @@ TEST_F(SettingsOverridePermissionTest, SartupPages) {
       extension->GetActivePermissions());
 
   EXPECT_TRUE(permission_set->HasAPIPermission(APIPermission::kStartupPages));
-  std::vector<string16> warnings =
+  std::vector<base::string16> warnings =
       PermissionsData::GetPermissionMessageStrings(extension.get());
   ASSERT_EQ(1u, warnings.size());
   EXPECT_EQ("Change your start page to: startup.com/startup.html",
@@ -99,7 +100,7 @@ TEST_F(SettingsOverridePermissionTest, SearchSettings) {
       extension->GetActivePermissions());
 
   EXPECT_TRUE(permission_set->HasAPIPermission(APIPermission::kSearchProvider));
-  std::vector<string16> warnings =
+  std::vector<base::string16> warnings =
       PermissionsData::GetPermissionMessageStrings(extension.get());
   ASSERT_EQ(1u, warnings.size());
   EXPECT_EQ("Change your search settings to: google.com",

@@ -31,7 +31,7 @@ class ChromeLauncherController;
 // instance per app, per launcher id.
 // For apps with multiple windows, each item controller keeps track of all
 // windows associated with the app and their activation order.
-// Instances are owned by ash::LauncherItemDelegateManager.
+// Instances are owned by ash::ShelfItemDelegateManager.
 //
 // Tests are in chrome_launcher_controller_browsertest.cc
 
@@ -55,20 +55,17 @@ class ShellWindowLauncherItemController : public LauncherItemController,
   const std::string& app_launcher_id() const { return app_launcher_id_; }
 
   // LauncherItemController overrides:
-  virtual bool IsCurrentlyShownInWindow(aura::Window* window) const OVERRIDE;
   virtual bool IsOpen() const OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Launch(ash::LaunchSource source, int event_flags) OVERRIDE;
-  virtual void Activate(ash::LaunchSource source) OVERRIDE;
+  virtual bool Activate(ash::LaunchSource source) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual ChromeLauncherAppMenuItems GetApplicationList(
       int event_flags) OVERRIDE;
-  virtual void ItemSelected(const ui::Event& eent) OVERRIDE;
+  virtual bool ItemSelected(const ui::Event& eent) OVERRIDE;
   virtual base::string16 GetTitle() OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenu(
-      aura::Window* root_window) OVERRIDE;
-  virtual ash::LauncherMenuModel* CreateApplicationMenu(
-      int event_flags) OVERRIDE;
+  virtual ui::MenuModel* CreateContextMenu(aura::Window* root_window) OVERRIDE;
+  virtual ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) OVERRIDE;
   virtual bool IsDraggable() OVERRIDE;
   virtual bool ShouldShowTooltip() OVERRIDE;
 

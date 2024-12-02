@@ -21,15 +21,16 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
+#include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
 
 
@@ -174,7 +175,8 @@ class ConfigParserTest : public testing::Test {
       const GURL& url,
       net::URLFetcherDelegate* fetcher_delegate,
       const std::string& response_data,
-      net::HttpStatusCode response_code);
+      net::HttpStatusCode response_code,
+      net::URLRequestStatus::Status status);
 
   MOCK_METHOD0(Callback, void(void));
 
@@ -214,13 +216,12 @@ scoped_ptr<net::FakeURLFetcher> ConfigParserTest::CreateFakeURLFetcher(
     const GURL& url,
     net::URLFetcherDelegate* fetcher_delegate,
     const std::string& response_data,
-    net::HttpStatusCode response_code) {
+    net::HttpStatusCode response_code,
+    net::URLRequestStatus::Status status) {
   request_listener_.real_delegate = fetcher_delegate;
   scoped_ptr<net::FakeURLFetcher> fetcher(
-      new net::FakeURLFetcher(url,
-                              &request_listener_,
-                              response_data,
-                              response_code));
+      new net::FakeURLFetcher(
+          url, &request_listener_, response_data, response_code, status));
   scoped_refptr<net::HttpResponseHeaders> download_headers =
       new net::HttpResponseHeaders("");
   download_headers->AddHeader("Content-Type: text/xml");
@@ -231,7 +232,7 @@ scoped_ptr<net::FakeURLFetcher> ConfigParserTest::CreateFakeURLFetcher(
 
 // helper functions -----------------------------------------------------------
 
-scoped_refptr<Extension> CreateExtension(const string16& name,
+scoped_refptr<Extension> CreateExtension(const base::string16& name,
                                          const base::FilePath& path,
                                          Manifest::Location location,
                                          extensions::Manifest::Type type,
@@ -653,7 +654,8 @@ TEST_F(ProfileResetterTest, ResetFewFlags) {
 // Tries to load unavailable config file.
 TEST_F(ConfigParserTest, NoConnectivity) {
   const GURL url("http://test");
-  factory().SetFakeResponse(url, "", net::HTTP_INTERNAL_SERVER_ERROR);
+  factory().SetFakeResponse(url, "", net::HTTP_INTERNAL_SERVER_ERROR,
+                            net::URLRequestStatus::FAILED);
 
   scoped_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
   EXPECT_FALSE(fetcher->GetSettings());
@@ -667,7 +669,8 @@ TEST_F(ConfigParserTest, ParseConfig) {
   ReplaceString(&xml_config,
                 "placeholder_for_id",
                 "abbaabbaabbaabbaabbaabbaabbaabba");
-  factory().SetFakeResponse(url, xml_config, net::HTTP_OK);
+  factory().SetFakeResponse(url, xml_config, net::HTTP_OK,
+                            net::URLRequestStatus::SUCCESS);
 
   scoped_ptr<BrandcodeConfigFetcher> fetcher = WaitForRequest(GURL(url));
   scoped_ptr<BrandcodedDefaultSettings> settings = fetcher->GetSettings();
@@ -842,7 +845,7 @@ TEST_F(ProfileResetterTest, GetReadableFeedback) {
     std::string value;
     ASSERT_TRUE(dict->GetString("key", &value));
     if (value == "Extensions") {
-      string16 extensions;
+      base::string16 extensions;
       EXPECT_TRUE(dict->GetString("value", &extensions));
       EXPECT_EQ(WideToUTF16(L"Tiësto"), extensions);
     }

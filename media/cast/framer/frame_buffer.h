@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "media/cast/cast_config.h"
-#include "media/cast/rtp_common/rtp_defines.h"
+#include "media/cast/rtp_receiver/rtp_receiver_defines.h"
 
 namespace media {
 namespace cast {
@@ -32,16 +32,16 @@ class FrameBuffer {
                             uint32* rtp_timestamp) const;
 
   bool is_key_frame() const { return is_key_frame_; }
-  uint8 frame_id() const { return frame_id_; }
-  uint8 last_referenced_frame_id() const { return last_referenced_frame_id_; }
+
+  uint32 last_referenced_frame_id() const { return last_referenced_frame_id_; }
 
  private:
-  uint8 frame_id_;
+  uint32 frame_id_;
   uint16 max_packet_id_;
   uint16 num_packets_received_;
   bool is_key_frame_;
   size_t total_data_size_;
-  uint8 last_referenced_frame_id_;
+  uint32 last_referenced_frame_id_;
   uint32 rtp_timestamp_;
   PacketMap packets_;
 

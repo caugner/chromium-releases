@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/taskbar_decorator.h"
 #include "chrome/browser/ui/views/new_avatar_button.h"
-#include "chrome/browser/ui/views/profile_chooser_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -88,7 +87,7 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::Image avatar;
   gfx::Image taskbar_badge_avatar;
-  string16 text;
+  base::string16 text;
   bool is_rectangle = false;
   if (browser_view_->IsGuestSession()) {
     avatar = rb.GetImageNamed(browser_view_->GetGuestIconResourceID());
@@ -149,7 +148,7 @@ void BrowserNonClientFrameView::UpdateNewStyleAvatarInfo(
 
   if (browser_view_->ShouldShowAvatar()) {
     if (!new_avatar_button_) {
-      string16 profile_name =
+      base::string16 profile_name =
           profiles::GetActiveProfileDisplayName(browser_view_->browser());
       new_avatar_button_ = new NewAvatarButton(
           listener, profile_name, style, browser_view_->browser());
@@ -162,15 +161,4 @@ void BrowserNonClientFrameView::UpdateNewStyleAvatarInfo(
     new_avatar_button_ = NULL;
     frame_->GetRootView()->Layout();
   }
-}
-
-void BrowserNonClientFrameView::ShowProfileChooserViewBubble() {
-  gfx::Point origin;
-  views::View::ConvertPointToScreen(new_avatar_button(), &origin);
-  gfx::Rect bounds(origin, size());
-
-  ProfileChooserView::ShowBubble(
-      new_avatar_button(), views::BubbleBorder::TOP_RIGHT,
-      views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE, bounds,
-      browser_view_->browser());
 }

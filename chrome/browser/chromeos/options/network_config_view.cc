@@ -41,12 +41,12 @@ using views::Widget;
 
 namespace {
 
-gfx::NativeWindow GetDialogParent() {
+gfx::NativeWindow GetParentForUnhostedDialog() {
   if (chromeos::LoginDisplayHostImpl::default_host()) {
     return chromeos::LoginDisplayHostImpl::default_host()->GetNativeWindow();
   } else {
     Browser* browser = chrome::FindTabbedBrowser(
-        ProfileManager::GetDefaultProfileOrOffTheRecord(),
+        ProfileManager::GetPrimaryUserProfileOrOffTheRecord(),
         true,
         chrome::HOST_DESKTOP_TYPE_ASH);
     if (browser)
@@ -156,7 +156,7 @@ gfx::NativeWindow NetworkConfigView::GetNativeWindow() const {
   return GetWidget()->GetNativeWindow();
 }
 
-string16 NetworkConfigView::GetDialogButtonLabel(
+base::string16 NetworkConfigView::GetDialogButtonLabel(
     ui::DialogButton button) const {
   if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT);
@@ -195,7 +195,7 @@ views::View* NetworkConfigView::GetInitiallyFocusedView() {
   return child_config_view_->GetInitiallyFocusedView();
 }
 
-string16 NetworkConfigView::GetWindowTitle() const {
+base::string16 NetworkConfigView::GetWindowTitle() const {
   DCHECK(!child_config_view_->GetTitle().empty());
   return child_config_view_->GetTitle();
 }
@@ -268,7 +268,7 @@ void NetworkConfigView::ViewHierarchyChanged(
 
 void NetworkConfigView::ShowDialog(gfx::NativeWindow parent) {
   if (parent == NULL)
-    parent = GetDialogParent();
+    parent = GetParentForUnhostedDialog();
   // Failed connections may result in a pop-up with no natural parent window,
   // so provide a fallback context on the primary display. This is necessary
   // becase one of parent or context must be non NULL.
@@ -327,25 +327,13 @@ void ControlledSettingIndicatorView::Layout() {
   image_view_->SetBounds(0, 0, width(), height());
 }
 
-void ControlledSettingIndicatorView::OnMouseEntered(
-    const ui::MouseEvent& event) {
-  image_view_->SetImage(color_image_);
-}
-
-void ControlledSettingIndicatorView::OnMouseExited(
-    const ui::MouseEvent& event) {
-  image_view_->SetImage(gray_image_);
-}
-
 void ControlledSettingIndicatorView::Init() {
-  color_image_ = ResourceBundle::GetSharedInstance().GetImageNamed(
+  image_ = ResourceBundle::GetSharedInstance().GetImageNamed(
       IDR_CONTROLLED_SETTING_MANDATORY).ToImageSkia();
-  gray_image_ = ResourceBundle::GetSharedInstance().GetImageNamed(
-      IDR_CONTROLLED_SETTING_MANDATORY_GRAY).ToImageSkia();
   image_view_ = new views::ImageView();
   // Disable |image_view_| so mouse events propagate to the parent.
   image_view_->SetEnabled(false);
-  image_view_->SetImage(gray_image_);
+  image_view_->SetImage(image_);
   image_view_->SetTooltipText(
       l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
   AddChildView(image_view_);

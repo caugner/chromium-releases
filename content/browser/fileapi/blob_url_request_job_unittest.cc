@@ -13,6 +13,7 @@
 #include "content/public/test/test_file_system_context.h"
 #include "net/base/io_buffer.h"
 #include "net/base/request_priority.h"
+#include "net/http/http_byte_range.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
@@ -145,7 +146,7 @@ class BlobURLRequestJobTest : public testing::Test {
               file_util::WriteFile(temp_file1_, kTestFileData1,
                                    arraysize(kTestFileData1) - 1));
     base::PlatformFileInfo file_info1;
-    file_util::GetFileInfo(temp_file1_, &file_info1);
+    base::GetFileInfo(temp_file1_, &file_info1);
     temp_file_modification_time1_ = file_info1.last_modified;
 
     temp_file2_ = temp_dir_.path().AppendASCII("BlobFile2.dat");
@@ -153,7 +154,7 @@ class BlobURLRequestJobTest : public testing::Test {
               file_util::WriteFile(temp_file2_, kTestFileData2,
                                    arraysize(kTestFileData2) - 1));
     base::PlatformFileInfo file_info2;
-    file_util::GetFileInfo(temp_file2_, &file_info2);
+    base::GetFileInfo(temp_file2_, &file_info2);
     temp_file_modification_time2_ = file_info2.last_modified;
 
     url_request_job_factory_.SetProtocolHandler("blob",
@@ -397,7 +398,8 @@ TEST_F(BlobURLRequestJobTest, TestGetRangeRequest1) {
   std::string result;
   BuildComplicatedData(&result);
   net::HttpRequestHeaders extra_headers;
-  extra_headers.SetHeader(net::HttpRequestHeaders::kRange, "bytes=5-10");
+  extra_headers.SetHeader(net::HttpRequestHeaders::kRange,
+                          net::HttpByteRange::Bounded(5, 10).GetHeaderValue());
   expected_status_code_ = 206;
   expected_response_ = result.substr(5, 10 - 5 + 1);
   TestRequest("GET", extra_headers);
@@ -408,7 +410,8 @@ TEST_F(BlobURLRequestJobTest, TestGetRangeRequest2) {
   std::string result;
   BuildComplicatedData(&result);
   net::HttpRequestHeaders extra_headers;
-  extra_headers.SetHeader(net::HttpRequestHeaders::kRange, "bytes=-10");
+  extra_headers.SetHeader(net::HttpRequestHeaders::kRange,
+                          net::HttpByteRange::Suffix(10).GetHeaderValue());
   expected_status_code_ = 206;
   expected_response_ = result.substr(result.length() - 10);
   TestRequest("GET", extra_headers);

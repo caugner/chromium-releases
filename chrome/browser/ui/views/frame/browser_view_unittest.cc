@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/url_constants.h"
 #include "grit/theme_resources.h"
 #include "ui/views/controls/single_split_view.h"
@@ -120,7 +120,7 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
   // Bookmark bar is reparented to BrowserView on NTP.
   NavigateAndCommitActiveTabWithTitle(browser,
                                       GURL(chrome::kChromeUINewTabURL),
-                                      string16());
+                                      base::string16());
   EXPECT_TRUE(bookmark_bar->visible());
   EXPECT_TRUE(bookmark_bar->IsDetached());
   EXPECT_EQ(browser_view(), bookmark_bar->parent());
@@ -148,7 +148,7 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
   // Bookmark bar is parented back to top container on normal page.
   NavigateAndCommitActiveTabWithTitle(browser,
                                       GURL("about:blank"),
-                                      string16());
+                                      base::string16());
   EXPECT_FALSE(bookmark_bar->visible());
   EXPECT_FALSE(bookmark_bar->IsDetached());
   EXPECT_EQ(top_container, bookmark_bar->parent());

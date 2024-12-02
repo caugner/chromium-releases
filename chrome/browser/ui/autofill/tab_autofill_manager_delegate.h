@@ -34,16 +34,17 @@ class TabAutofillManagerDelegate
   virtual ~TabAutofillManagerDelegate();
 
   // Called when the tab corresponding to |this| instance is activated.
-  void TabActivated(int reason);
+  void TabActivated();
 
   // AutofillManagerDelegate implementation.
   virtual PersonalDataManager* GetPersonalDataManager() OVERRIDE;
+  virtual scoped_refptr<AutofillWebDataService>
+      GetDatabase() OVERRIDE;
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual void HideRequestAutocompleteDialog() OVERRIDE;
   virtual void ShowAutofillSettings() OVERRIDE;
   virtual void ConfirmSaveCreditCard(
       const AutofillMetrics& metric_logger,
-      const CreditCard& credit_card,
       const base::Closure& save_card_callback) OVERRIDE;
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
@@ -52,9 +53,9 @@ class TabAutofillManagerDelegate
   virtual void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
-      const std::vector<string16>& values,
-      const std::vector<string16>& labels,
-      const std::vector<string16>& icons,
+      const std::vector<base::string16>& values,
+      const std::vector<base::string16>& labels,
+      const std::vector<base::string16>& icons,
       const std::vector<int>& identifiers,
       base::WeakPtr<AutofillPopupDelegate> delegate) OVERRIDE;
   virtual void UpdateAutofillPopupDataListValues(
@@ -77,6 +78,10 @@ class TabAutofillManagerDelegate
   // Exposed for testing.
   AutofillDialogController* GetDialogControllerForTesting() {
     return dialog_controller_.get();
+  }
+  void SetDialogControllerForTesting(
+      const base::WeakPtr<AutofillDialogController>& dialog_controller) {
+    dialog_controller_ = dialog_controller;
   }
 
  private:

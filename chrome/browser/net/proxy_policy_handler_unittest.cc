@@ -7,11 +7,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/net/proxy_policy_handler.h"
-#include "chrome/browser/policy/configuration_policy_pref_store.h"
-#include "chrome/browser/policy/configuration_policy_pref_store_unittest.h"
+#include "chrome/browser/policy/configuration_policy_pref_store_test.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "components/policy/core/browser/configuration_policy_pref_store.h"
+#include "components/policy/core/common/policy_service_impl.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -22,8 +23,16 @@ class ProxyPolicyHandlerTest
     : public ConfigurationPolicyPrefStoreTest {
  public:
   virtual void SetUp() OVERRIDE {
+    ConfigurationPolicyPrefStoreTest::SetUp();
     handler_list_.AddHandler(
         make_scoped_ptr<ConfigurationPolicyHandler>(new ProxyPolicyHandler));
+    // Reset the PolicyServiceImpl to one that has the policy fixup
+    // preprocessor. The previous store must be nulled out first so that it
+    // removes itself from the service's observer list.
+    store_ = NULL;
+    policy_service_.reset(new PolicyServiceImpl(providers_));
+    store_ = new ConfigurationPolicyPrefStore(
+        policy_service_.get(), &handler_list_, POLICY_LEVEL_MANDATORY);
   }
 
  protected:

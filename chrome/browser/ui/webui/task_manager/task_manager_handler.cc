@@ -110,10 +110,10 @@ void TaskManagerHandler::RegisterMessages() {
 
 static int parseIndex(const Value* value) {
   int index = -1;
-  string16 string16_index;
+  base::string16 base::string16_index;
   double double_index;
   if (value->GetAsString(&string16_index)) {
-    bool converted = base::StringToInt(string16_index, &index);
+    bool converted = base::StringToInt(base::string16_index, &index);
     DCHECK(converted);
   } else if (value->GetAsDouble(&double_index)) {
     index = static_cast<int>(double_index);
@@ -349,7 +349,7 @@ base::Value* TaskManagerHandler::CreateColumnValue(
         model_->GetResourceWebCoreImageCacheSize(i));
   }
   if (column_name == "webCoreImageCacheSizeValue") {
-    WebKit::WebCache::ResourceTypeStats resource_stats;
+    blink::WebCache::ResourceTypeStats resource_stats;
     model_->GetWebCoreCacheStats(i, &resource_stats);
     return Value::CreateDoubleValue(resource_stats.images.size);
   }
@@ -358,14 +358,14 @@ base::Value* TaskManagerHandler::CreateColumnValue(
         model_->GetResourceWebCoreScriptsCacheSize(i));
   }
   if (column_name == "webCoreScriptsCacheSizeValue") {
-    WebKit::WebCache::ResourceTypeStats resource_stats;
+    blink::WebCache::ResourceTypeStats resource_stats;
     model_->GetWebCoreCacheStats(i, &resource_stats);
     return Value::CreateDoubleValue(resource_stats.scripts.size);
   }
   if (column_name == "webCoreCSSCacheSize")
     return Value::CreateStringValue(model_->GetResourceWebCoreCSSCacheSize(i));
   if (column_name == "webCoreCSSCacheSizeValue") {
-    WebKit::WebCache::ResourceTypeStats resource_stats;
+    blink::WebCache::ResourceTypeStats resource_stats;
     model_->GetWebCoreCacheStats(i, &resource_stats);
     return Value::CreateDoubleValue(resource_stats.cssStyleSheets.size);
   }

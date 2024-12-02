@@ -14,9 +14,9 @@
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/validation.h"
-#include "components/autofill/core/common/autofill_messages.h"
 #include "components/autofill/core/common/password_form.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -42,8 +42,7 @@ PasswordFormManager::PasswordFormManager(Profile* profile,
       web_contents_(web_contents),
       manager_action_(kManagerActionNone),
       user_action_(kUserActionNone),
-      submit_result_(kSubmitResultNotSubmitted),
-      password_action_(DO_NOTHING) {
+      submit_result_(kSubmitResultNotSubmitted) {
   DCHECK(profile_);
   if (observed_form_.origin.is_valid())
     base::SplitString(observed_form_.origin.path(), '/', &form_path_tokens_);
@@ -54,9 +53,6 @@ PasswordFormManager::~PasswordFormManager() {
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.ActionsTakenWithPsl",
                             GetActionsTaken(),
                             kMaxNumActionsTaken);
-  // In case the tab is closed before the next navigation occurs this will
-  // apply outstanding changes.
-  ApplyChange();
 }
 
 int PasswordFormManager::GetActionsTaken() {
@@ -111,14 +107,6 @@ bool PasswordFormManager::DoesManage(const PasswordForm& form,
     return false;
   }
   return true;
-}
-
-void PasswordFormManager::ApplyChange() {
-  if (password_action_ == SAVE)
-    Save();
-  else if (password_action_ == BLACKLIST)
-    PermanentlyBlacklist();
-  password_action_ = DO_NOTHING;
 }
 
 bool PasswordFormManager::IsBlacklisted() {
@@ -266,7 +254,8 @@ void PasswordFormManager::Save() {
     UpdateLogin();
 }
 
-void PasswordFormManager::FetchMatchingLoginsFromPasswordStore() {
+void PasswordFormManager::FetchMatchingLoginsFromPasswordStore(
+    PasswordStore::AuthorizationPromptPolicy prompt_policy) {
   DCHECK_EQ(state_, PRE_MATCHING_PHASE);
   state_ = MATCHING_PHASE;
   PasswordStore* password_store = PasswordStoreFactory::GetForProfile(
@@ -275,7 +264,7 @@ void PasswordFormManager::FetchMatchingLoginsFromPasswordStore() {
     NOTREACHED();
     return;
   }
-  password_store->GetLogins(observed_form_, this);
+  password_store->GetLogins(observed_form_, prompt_policy, this);
 }
 
 bool PasswordFormManager::HasCompletedMatching() {
@@ -464,15 +453,15 @@ void PasswordFormManager::SanitizePossibleUsernames(PasswordForm* form) {
   // Remove any possible usernames that could be credit cards or SSN for privacy
   // reasons. Also remove duplicates, both in other_possible_usernames and
   // between other_possible_usernames and username_value.
-  std::set<string16> set;
-  for (std::vector<string16>::iterator it =
+  std::set<base::string16> set;
+  for (std::vector<base::string16>::iterator it =
            form->other_possible_usernames.begin();
        it != form->other_possible_usernames.end(); ++it) {
     if (!autofill::IsValidCreditCardNumber(*it) && !autofill::IsSSN(*it))
       set.insert(*it);
   }
   set.erase(form->username_value);
-  std::vector<string16> temp(set.begin(), set.end());
+  std::vector<base::string16> temp(set.begin(), set.end());
   form->other_possible_usernames.swap(temp);
 }
 
@@ -559,7 +548,7 @@ void PasswordFormManager::UpdateLogin() {
 }
 
 bool PasswordFormManager::UpdatePendingCredentialsIfOtherPossibleUsername(
-    const string16& username) {
+    const base::string16& username) {
   for (PasswordFormMap::const_iterator it = best_matches_.begin();
        it != best_matches_.end(); ++it) {
     for (size_t i = 0; i < it->second->other_possible_usernames.size(); ++i) {

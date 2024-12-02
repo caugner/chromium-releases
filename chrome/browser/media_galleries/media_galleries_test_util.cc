@@ -19,7 +19,7 @@
 #include "chrome/browser/media_galleries/fileapi/picasa_finder.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -27,7 +27,7 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/media_galleries/fileapi/iapps_finder_impl.h"
-#include "chrome/browser/policy/preferences_mock_mac.h"
+#include "components/policy/core/common/preferences_mock_mac.h"
 #endif  // OS_MACOSX
 
 #if defined(OS_WIN)
@@ -74,7 +74,7 @@ scoped_refptr<extensions::Extension> AddMediaGalleriesApp(
   extension_prefs->OnExtensionInstalled(
       extension.get(),
       extensions::Extension::ENABLED,
-      extensions::Blacklist::NOT_BLACKLISTED,
+      false,
       syncer::StringOrdinal::CreateInitialOrdinal());
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();

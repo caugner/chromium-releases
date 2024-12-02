@@ -5,6 +5,7 @@ import logging
 
 from telemetry.page import test_expectations
 from telemetry.page.actions import all_page_actions
+from telemetry.page.actions import interact
 from telemetry.page.actions import navigate
 from telemetry.page.actions import page_action
 
@@ -20,7 +21,10 @@ def _GetActionFromData(action_data):
   return action(action_data)
 
 
-def GetCompoundActionFromPage(page, action_name):
+def GetCompoundActionFromPage(page, action_name, interactive=False):
+  if interactive:
+    return [interact.InteractAction()]
+
   if not action_name:
     return []
 
@@ -32,7 +36,7 @@ def GetCompoundActionFromPage(page, action_name):
   for subaction_data in action_data_list:
     subaction_name = subaction_data['action']
     if hasattr(page, subaction_name):
-      subaction = GetCompoundActionFromPage(page, subaction_name)
+      subaction = GetCompoundActionFromPage(page, subaction_name, interactive)
     else:
       subaction = [_GetActionFromData(subaction_data)]
     action_list += subaction * subaction_data.get('repeat', 1)
@@ -123,7 +127,9 @@ class PageTest(object):
     """Add options specific to the test and the given page."""
     if not self.CanRunForPage(page):
       return
-    for action in GetCompoundActionFromPage(page, self._action_name_to_run):
+    interactive = options and options.interactive
+    for action in GetCompoundActionFromPage(
+        page, self._action_name_to_run, interactive):
       action.CustomizeBrowserOptions(options)
 
   def WillStartBrowser(self, browser):
@@ -174,6 +180,14 @@ class PageTest(object):
     all waiting for completion has occurred."""
     pass
 
+  def WillRunActions(self, page, tab):
+    """Override to do operations before running the actions on the page."""
+    pass
+
+  def DidRunActions(self, page, tab):
+    """Override to do operations after running the actions on the page."""
+    pass
+
   def WillRunAction(self, page, tab, action):
     """Override to do operations before running the action on the page."""
     pass
@@ -204,8 +218,12 @@ class PageTest(object):
 
   def Run(self, options, page, tab, results):
     self.options = options
-    compound_action = GetCompoundActionFromPage(page, self._action_name_to_run)
+    interactive = options and options.interactive
+    compound_action = GetCompoundActionFromPage(
+        page, self._action_name_to_run, interactive)
+    self.WillRunActions(page, tab)
     self._RunCompoundAction(page, tab, compound_action)
+    self.DidRunActions(page, tab)
     try:
       self._test_method(page, tab, results)
     finally:

@@ -35,7 +35,7 @@
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/service/service_process_control.h"
+#include "chrome/browser/service_process/service_process_control.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
@@ -232,8 +232,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   virtual void OnProfileAdded(const base::FilePath& profile_path) OVERRIDE {
   }
 
-  virtual void OnProfileWasRemoved(const base::FilePath& profile_path,
-                                   const string16& profile_name) OVERRIDE {
+  virtual void OnProfileWasRemoved(
+      const base::FilePath& profile_path,
+      const base::string16& profile_name) OVERRIDE {
     // When a profile is deleted we need to notify the AppController,
     // so it can correctly update its pointer to the last used profile.
     [app_controller_ profileWasRemoved:profile_path];
@@ -243,8 +244,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       const base::FilePath& profile_path) OVERRIDE {
   }
 
-  virtual void OnProfileNameChanged(const base::FilePath& profile_path,
-                                    const string16& old_profile_name) OVERRIDE {
+  virtual void OnProfileNameChanged(
+      const base::FilePath& profile_path,
+      const base::string16& old_profile_name) OVERRIDE {
   }
 
   virtual void OnProfileAvatarChanged(
@@ -1316,11 +1318,11 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
     NSString* printTitle = [[paramList descriptorAtIndex:3] stringValue];
     NSString* printTicket = [[paramList descriptorAtIndex:4] stringValue];
     // Convert the title to UTF 16 as required.
-    string16 title16 = base::SysNSStringToUTF16(printTitle);
-    string16 printTicket16 = base::SysNSStringToUTF16(printTicket);
+    base::string16 title16 = base::SysNSStringToUTF16(printTitle);
+    base::string16 printTicket16 = base::SysNSStringToUTF16(printTicket);
     print_dialog_cloud::CreatePrintDialogForFile(
-        ProfileManager::GetDefaultProfile(), NULL,
-        base::FilePath([inputPath UTF8String]), title16,
+        ProfileManager::GetActiveUserProfile(), NULL,
+        base::FilePath([inputPath fileSystemRepresentation]), title16,
         printTicket16, [mime UTF8String], /*delete_on_close=*/false);
   }
 }
@@ -1330,7 +1332,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   std::vector<GURL> gurlVector;
   for (NSString* file in filenames) {
     GURL gurl =
-        net::FilePathToFileURL(base::FilePath(base::SysNSStringToUTF8(file)));
+        net::FilePathToFileURL(base::FilePath([file fileSystemRepresentation]));
     gurlVector.push_back(gurl);
   }
   if (!gurlVector.empty())

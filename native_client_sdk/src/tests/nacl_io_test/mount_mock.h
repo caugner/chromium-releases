@@ -12,6 +12,7 @@
 class MountMock : public nacl_io::Mount {
  public:
   typedef nacl_io::Error Error;
+  typedef nacl_io::MountInitArgs MountInitArgs;
   typedef nacl_io::Path Path;
   typedef nacl_io::PepperInterface PepperInterface;
   typedef nacl_io::ScopedMountNode ScopedMountNode;
@@ -20,7 +21,7 @@ class MountMock : public nacl_io::Mount {
   MountMock();
   virtual ~MountMock();
 
-  MOCK_METHOD3(Init, Error(int, StringMap_t&, PepperInterface*));
+  MOCK_METHOD1(Init, Error(const MountInitArgs&));
   MOCK_METHOD0(Destroy, void());
   MOCK_METHOD2(Access, Error(const Path&, int));
   MOCK_METHOD3(Open, Error(const Path&, int, ScopedMountNode*));
@@ -29,6 +30,7 @@ class MountMock : public nacl_io::Mount {
   MOCK_METHOD2(Mkdir, Error(const Path&, int));
   MOCK_METHOD1(Rmdir, Error(const Path&));
   MOCK_METHOD1(Remove, Error(const Path&));
+  MOCK_METHOD2(Rename, Error(const Path&, const Path&));
 };
 
 #endif  // LIBRARIES_NACL_IO_TEST_MOUNT_MOCK_H_

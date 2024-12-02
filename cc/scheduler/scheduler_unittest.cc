@@ -61,7 +61,7 @@ class FakeSchedulerClient : public SchedulerClient {
   }
 
   Scheduler* CreateScheduler(const SchedulerSettings& settings) {
-    scheduler_ = Scheduler::Create(this, settings);
+    scheduler_ = Scheduler::Create(this, settings, 0);
     return scheduler_.get();
   }
 
@@ -1093,6 +1093,142 @@ TEST(SchedulerTest, ManageTiles) {
   EXPECT_TRUE(client.HasAction("ScheduledActionManageTiles"));
 }
 
+// Test that ManageTiles only happens once per frame.  If an external caller
+// initiates it, then the state machine should not on that frame.
+TEST(SchedulerTest, ManageTilesOncePerFrame) {
+  FakeSchedulerClient client;
+  SchedulerSettings default_scheduler_settings;
+  Scheduler* scheduler = client.CreateScheduler(default_scheduler_settings);
+  scheduler->SetCanStart();
+  scheduler->SetVisible(true);
+  scheduler->SetCanDraw(true);
+  InitializeOutputSurfaceAndFirstCommit(scheduler);
+
+  // If DidManageTiles during a frame, then ManageTiles should not occur again.
+  scheduler->SetNeedsManageTiles();
+  scheduler->SetNeedsRedraw();
+  client.Reset();
+  scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
+  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+
+  EXPECT_TRUE(scheduler->ManageTilesPending());
+  scheduler->DidManageTiles();
+  EXPECT_FALSE(scheduler->ManageTilesPending());
+
+  client.Reset();
+  scheduler->OnBeginImplFrameDeadline();
+  EXPECT_EQ(1, client.num_draws());
+  EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndSwapIfPossible"));
+  EXPECT_FALSE(client.HasAction("ScheduledActionManageTiles"));
+  EXPECT_FALSE(scheduler->RedrawPending());
+  EXPECT_FALSE(scheduler->ManageTilesPending());
+
+  // Next frame without DidManageTiles should ManageTiles with draw.
+  scheduler->SetNeedsManageTiles();
+  scheduler->SetNeedsRedraw();
+  client.Reset();
+  scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
+  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+
+  client.Reset();
+  scheduler->OnBeginImplFrameDeadline();
+  EXPECT_EQ(1, client.num_draws());
+  EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndSwapIfPossible"));
+  EXPECT_TRUE(client.HasAction("ScheduledActionManageTiles"));
+  EXPECT_LT(client.ActionIndex("ScheduledActionDrawAndSwapIfPossible"),
+            client.ActionIndex("ScheduledActionManageTiles"));
+  EXPECT_FALSE(scheduler->RedrawPending());
+  EXPECT_FALSE(scheduler->ManageTilesPending());
+}
+
+class SchedulerClientWithFixedEstimates : public FakeSchedulerClient {
+ public:
+  SchedulerClientWithFixedEstimates(
+      base::TimeDelta draw_duration,
+      base::TimeDelta begin_main_frame_to_commit_duration,
+      base::TimeDelta commit_to_activate_duration)
+      : draw_duration_(draw_duration),
+        begin_main_frame_to_commit_duration_(
+            begin_main_frame_to_commit_duration),
+        commit_to_activate_duration_(commit_to_activate_duration) {}
+
+  virtual base::TimeDelta DrawDurationEstimate() OVERRIDE {
+    return draw_duration_;
+  }
+  virtual base::TimeDelta BeginMainFrameToCommitDurationEstimate() OVERRIDE {
+    return begin_main_frame_to_commit_duration_;
+  }
+  virtual base::TimeDelta CommitToActivateDurationEstimate() OVERRIDE {
+    return commit_to_activate_duration_;
+  }
+
+ private:
+    base::TimeDelta draw_duration_;
+    base::TimeDelta begin_main_frame_to_commit_duration_;
+    base::TimeDelta commit_to_activate_duration_;
+};
+
+void MainFrameInHighLatencyMode(int64 begin_main_frame_to_commit_estimate_in_ms,
+                                int64 commit_to_activate_estimate_in_ms,
+                                bool should_send_begin_main_frame) {
+  // Set up client with specified estimates (draw duration is set to 1).
+  SchedulerClientWithFixedEstimates client(
+      base::TimeDelta::FromMilliseconds(1),
+      base::TimeDelta::FromMilliseconds(
+          begin_main_frame_to_commit_estimate_in_ms),
+      base::TimeDelta::FromMilliseconds(commit_to_activate_estimate_in_ms));
+  SchedulerSettings scheduler_settings;
+  scheduler_settings.deadline_scheduling_enabled = true;
+  scheduler_settings.switch_to_low_latency_if_possible = true;
+  Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
+  scheduler->SetCanStart();
+  scheduler->SetVisible(true);
+  scheduler->SetCanDraw(true);
+  InitializeOutputSurfaceAndFirstCommit(scheduler);
+
+  // Impl thread hits deadline before commit finishes.
+  client.Reset();
+  scheduler->SetNeedsCommit();
+  EXPECT_FALSE(scheduler->MainThreadIsInHighLatencyMode());
+  scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
+  EXPECT_FALSE(scheduler->MainThreadIsInHighLatencyMode());
+  scheduler->OnBeginImplFrameDeadline();
+  EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
+  scheduler->FinishCommit();
+  EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
+  EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
+
+  client.Reset();
+  scheduler->SetNeedsCommit();
+  EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
+  scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
+  EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
+  scheduler->OnBeginImplFrameDeadline();
+  EXPECT_EQ(scheduler->MainThreadIsInHighLatencyMode(),
+            should_send_begin_main_frame);
+  EXPECT_EQ(client.HasAction("ScheduledActionSendBeginMainFrame"),
+            should_send_begin_main_frame);
+}
+
+TEST(SchedulerTest,
+    SkipMainFrameIfHighLatencyAndCanCommitAndActivateBeforeDeadline) {
+  // Set up client so that estimates indicate that we can commit and activate
+  // before the deadline (~8ms by default).
+  MainFrameInHighLatencyMode(1, 1, false);
+}
+
+TEST(SchedulerTest, NotSkipMainFrameIfHighLatencyAndCanCommitTooLong) {
+  // Set up client so that estimates indicate that the commit cannot finish
+  // before the deadline (~8ms by default).
+  MainFrameInHighLatencyMode(10, 1, true);
+}
+
+TEST(SchedulerTest, NotSkipMainFrameIfHighLatencyAndCanActivateTooLong) {
+  // Set up client so that estimates indicate that the activate cannot finish
+  // before the deadline (~8ms by default).
+  MainFrameInHighLatencyMode(1, 10, true);
+}
+
 void SpinForMillis(int millis) {
   base::RunLoop run_loop;
   base::MessageLoop::current()->PostDelayedTask(
@@ -1137,7 +1273,7 @@ TEST(SchedulerTest, PollForCommitCompletion) {
   // Does three iterations to make sure that the timer is properly repeating.
   for (int i = 0; i < 3; ++i) {
     // Wait for 2x the frame interval to match
-    // cc::Scheduler::advance_commit_state_timer_'s rate.
+    // Scheduler::advance_commit_state_timer_'s rate.
     SpinForMillis(interval * 2);
     EXPECT_GT(client.num_actions_(), actions_so_far);
     EXPECT_STREQ(client.Action(client.num_actions_() - 1),

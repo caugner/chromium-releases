@@ -5,17 +5,18 @@
 #include "ash/wm/panels/panel_window_resizer.h"
 
 #include "ash/launcher/launcher.h"
-#include "ash/launcher/launcher_model.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_model.h"
 #include "ash/shelf/shelf_types.h"
+#include "ash/shelf/shelf_util.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
 #include "ash/test/shell_test_api.h"
-#include "ash/test/test_launcher_delegate.h"
+#include "ash/test/test_shelf_delegate.h"
 #include "ash/wm/drag_window_resizer.h"
 #include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
@@ -39,8 +40,8 @@ class PanelWindowResizerTest : public test::AshTestBase {
     AshTestBase::SetUp();
     UpdateDisplay("600x400");
     test::ShellTestApi test_api(Shell::GetInstance());
-    model_ = test_api.launcher_model();
-    launcher_delegate_ = test::TestLauncherDelegate::instance();
+    model_ = test_api.shelf_model();
+    shelf_delegate_ = test::TestShelfDelegate::instance();
   }
 
   virtual void TearDown() OVERRIDE {
@@ -64,7 +65,7 @@ class PanelWindowResizerTest : public test::AshTestBase {
         aura::client::WINDOW_TYPE_PANEL,
         0,
         bounds);
-    launcher_delegate_->AddLauncherItem(window);
+    shelf_delegate_->AddLauncherItem(window);
     PanelLayoutManager* manager =
         static_cast<PanelLayoutManager*>(
             Shell::GetContainer(window->GetRootWindow(),
@@ -145,7 +146,7 @@ class PanelWindowResizerTest : public test::AshTestBase {
     for (std::vector<aura::Window*>::const_iterator iter =
          window_order.begin(); iter != window_order.end();
          ++iter, ++panel_index) {
-      LauncherID id = launcher_delegate_->GetIDByWindow(*iter);
+      LauncherID id = GetLauncherIDForWindow(*iter);
       EXPECT_EQ(id, model_->items()[panel_index].id);
     }
   }
@@ -186,8 +187,8 @@ class PanelWindowResizerTest : public test::AshTestBase {
  private:
   scoped_ptr<WindowResizer> resizer_;
   internal::PanelLayoutManager* panel_layout_manager_;
-  LauncherModel* model_;
-  test::TestLauncherDelegate* launcher_delegate_;
+  ShelfModel* model_;
+  test::TestShelfDelegate* shelf_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelWindowResizerTest);
 };
@@ -286,7 +287,7 @@ TEST_F(PanelWindowResizerTest, PanelDetachReattachMultipleDisplays) {
     return;
 
   UpdateDisplay("600x400,600x400");
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   scoped_ptr<aura::Window> window(
       CreatePanelWindow(gfx::Point(600, 0)));
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
@@ -298,7 +299,7 @@ TEST_F(PanelWindowResizerTest, DetachThenDragAcrossDisplays) {
     return;
 
   UpdateDisplay("600x400,600x400");
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   scoped_ptr<aura::Window> window(
       CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
@@ -327,7 +328,7 @@ TEST_F(PanelWindowResizerTest, DetachAcrossDisplays) {
     return;
 
   UpdateDisplay("600x400,600x400");
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   scoped_ptr<aura::Window> window(
       CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
@@ -347,7 +348,7 @@ TEST_F(PanelWindowResizerTest, DetachThenAttachToSecondDisplay) {
     return;
 
   UpdateDisplay("600x400,600x600");
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   scoped_ptr<aura::Window> window(
       CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();
@@ -380,7 +381,7 @@ TEST_F(PanelWindowResizerTest, AttachToSecondDisplay) {
     return;
 
   UpdateDisplay("600x400,600x600");
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
   scoped_ptr<aura::Window> window(
       CreatePanelWindow(gfx::Point(0, 0)));
   gfx::Rect initial_bounds = window->GetBoundsInScreen();

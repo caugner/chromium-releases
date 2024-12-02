@@ -16,10 +16,10 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/id_util.h"
 #include "extensions/common/manifest.h"
 #include "sync/api/string_ordinal.h"
@@ -283,7 +283,7 @@ void UnpackedInstaller::ReportExtensionLoadError(const std::string &error) {
 
 void UnpackedInstaller::ConfirmInstall() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  string16 error = installer_.CheckManagementPolicy();
+  base::string16 error = installer_.CheckManagementPolicy();
   if (!error.empty()) {
     ReportExtensionLoadError(UTF16ToUTF8(error));
     return;

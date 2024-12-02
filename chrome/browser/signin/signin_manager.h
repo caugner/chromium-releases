@@ -44,6 +44,7 @@ class CookieSettings;
 class GaiaAuthFetcher;
 class ProfileIOData;
 class PrefService;
+class SigninAccountIdHelper;
 class SigninGlobalError;
 class SigninManagerDelegate;
 
@@ -150,22 +151,14 @@ class SigninManager : public SigninManagerBase,
   virtual void OnClientOAuthSuccess(const ClientOAuthResult& result) OVERRIDE;
   virtual void OnClientOAuthFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnOAuth2RevokeTokenCompleted() OVERRIDE;
   virtual void OnGetUserInfoSuccess(const UserInfoMap& data) OVERRIDE;
   virtual void OnGetUserInfoFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnUberAuthTokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUberAuthTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnMergeSessionSuccess(const std::string& data) OVERRIDE;
-  virtual void OnMergeSessionFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
-
 
   // Tells the SigninManager whether to prohibit signout for this profile.
   // If |prohibit_signout| is true, then signout will be prohibited.
@@ -191,9 +184,6 @@ class SigninManager : public SigninManagerBase,
   bool HasSigninProcess() const;
 
  protected:
-  // If user was signed in, load tokens from DB if available.
-  virtual void InitTokenService() OVERRIDE;
-
   // Flag saying whether signing out is allowed.
   bool prohibit_signout_;
 
@@ -209,6 +199,9 @@ class SigninManager : public SigninManagerBase,
   FRIEND_TEST_ALL_PREFIXES(SigninManagerTest, ClearTransientSigninData);
   FRIEND_TEST_ALL_PREFIXES(SigninManagerTest, ProvideSecondFactorSuccess);
   FRIEND_TEST_ALL_PREFIXES(SigninManagerTest, ProvideSecondFactorFailure);
+
+  // If user was signed in, load tokens from DB if available.
+  void InitTokenService();
 
   // Called to setup the transient signin data during one of the
   // StartSigninXXX methods.  |type| indicates which of the methods is being
@@ -243,10 +236,6 @@ class SigninManager : public SigninManagerBase,
   void HandleAuthError(const GoogleServiceAuthError& error,
                        bool clear_transient_data);
 
-  // Called to tell GAIA that we will no longer be using the current refresh
-  // token.
-  void RevokeOAuthLoginToken();
-
   void OnSigninAllowedPrefChanged();
   void OnGoogleServicesUsernamePatternChanged();
 
@@ -267,6 +256,9 @@ class SigninManager : public SigninManagerBase,
 
   // OAuth revocation fetcher for sign outs.
   scoped_ptr<GaiaAuthFetcher> revoke_token_fetcher_;
+
+  // Fetcher for the obfuscated user id.
+  scoped_ptr<SigninAccountIdHelper> account_id_helper_;
 
   // The type of sign being performed.  This value is valid only between a call
   // to one of the StartSigninXXX methods and when the sign in is either

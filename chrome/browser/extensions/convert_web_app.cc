@@ -21,11 +21,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/web_application_info.h"
 #include "crypto/sha2.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -153,7 +153,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
 
   // Write the icon files.
   base::FilePath icons_dir = temp_dir.path().AppendASCII(kIconsDirName);
-  if (!file_util::CreateDirectory(icons_dir)) {
+  if (!base::CreateDirectory(icons_dir)) {
     LOG(ERROR) << "Could not create icons directory.";
     return NULL;
   }

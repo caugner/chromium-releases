@@ -31,15 +31,11 @@ GURL GetFileManagerMainPageUrl();
 // in the query string section. |file_types| is optional.
 GURL GetFileManagerMainPageUrlWithParams(
     ui::SelectFileDialog::Type type,
-    const string16& title,
+    const base::string16& title,
     const base::FilePath& default_virtual_path,
     const ui::SelectFileDialog::FileTypeInfo* file_types,
     int file_type_index,
     const base::FilePath::StringType& default_extension);
-
-// Returns the file manager's action choice URL.
-GURL GetActionChoiceUrl(const base::FilePath& virtual_path,
-                        bool advanced_mode);
 
 }  // namespace util
 }  // namespace file_manager

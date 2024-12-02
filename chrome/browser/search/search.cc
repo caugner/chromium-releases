@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,6 +22,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/search/instant_search_prerenderer.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/search_urls.h"
@@ -53,7 +53,6 @@ namespace {
 // The first token is always GroupN for some integer N, followed by a
 // space-delimited list of key:value pairs which correspond to these flags:
 const char kEmbeddedPageVersionFlagName[] = "espv";
-const uint64 kEmbeddedPageVersionDisabled = 0;
 #if defined(OS_IOS) || defined(OS_ANDROID)
 const uint64 kEmbeddedPageVersionDefault = 1;
 #else
@@ -65,12 +64,15 @@ const char kStalePageTimeoutFlagName[] = "stale";
 const int kStalePageTimeoutDefault = 3 * 3600;  // 3 hours.
 
 const char kHideVerbatimFlagName[] = "hide_verbatim";
-const char kUseRemoteNTPOnStartupFlagName[] = "use_remote_ntp_on_startup";
 const char kShowNtpFlagName[] = "show_ntp";
-const char kRecentTabsOnNTPFlagName[] = "show_recent_tabs";
 const char kUseCacheableNTP[] = "use_cacheable_ntp";
+const char kPrefetchSearchResultsFlagName[] = "prefetch_results";
 const char kPrefetchSearchResultsOnSRP[] = "prefetch_results_srp";
-const char kSuppressInstantExtendedOnSRPFlagName[] = "suppress_on_srp";
+const char kDisplaySearchButtonFlagName[] = "display_search_button";
+const char kEnableOriginChipFlagName[] = "origin_chip";
+#if !defined(OS_IOS) && !defined(OS_ANDROID)
+const char kEnableQueryExtractionFlagName[] = "query_extraction";
+#endif
 
 // Constants for the field trial name and group prefix.
 // Note in M30 and below this field trial was named "InstantExtended" and in
@@ -81,14 +83,10 @@ const char kSuppressInstantExtendedOnSRPFlagName[] = "suppress_on_srp";
 // channel.
 const char kInstantExtendedFieldTrialName[] = "InstantExtended";
 const char kEmbeddedSearchFieldTrialName[] = "EmbeddedSearch";
-const char kGroupNumberPrefix[] = "Group";
 
 // If the field trial's group name ends with this string its configuration will
 // be ignored and Instant Extended will not be enabled by default.
 const char kDisablingSuffix[] = "DISABLED";
-
-// Remember if we reported metrics about opt-in/out state.
-bool instant_extended_opt_in_state_gate = false;
 
 // Used to set the Instant support state of the Navigation entry.
 const char kInstantSupportStateKey[] = "instant_support_state";
@@ -97,7 +95,7 @@ const char kInstantSupportEnabled[] = "Instant support enabled";
 const char kInstantSupportDisabled[] = "Instant support disabled";
 const char kInstantSupportUnknown[] = "Instant support unknown";
 
-InstantSupportState StringToInstantSupportState(const string16& value) {
+InstantSupportState StringToInstantSupportState(const base::string16& value) {
   if (value == ASCIIToUTF16(kInstantSupportEnabled))
     return INSTANT_SUPPORT_YES;
   else if (value == ASCIIToUTF16(kInstantSupportDisabled))
@@ -106,7 +104,7 @@ InstantSupportState StringToInstantSupportState(const string16& value) {
     return INSTANT_SUPPORT_UNKNOWN;
 }
 
-string16 InstantSupportStateToString(InstantSupportState state) {
+base::string16 InstantSupportStateToString(InstantSupportState state) {
   switch (state) {
     case INSTANT_SUPPORT_NO:
       return ASCIIToUTF16(kInstantSupportDisabled);
@@ -131,7 +129,7 @@ GURL TemplateURLRefToGURL(const TemplateURLRef& ref,
                           bool append_extra_query_params,
                           bool force_instant_results) {
   TemplateURLRef::SearchTermsArgs search_terms_args =
-      TemplateURLRef::SearchTermsArgs(string16());
+      TemplateURLRef::SearchTermsArgs(base::string16());
   search_terms_args.omnibox_start_margin = start_margin;
   search_terms_args.append_extra_query_params = append_extra_query_params;
   search_terms_args.force_instant_results = force_instant_results;
@@ -156,22 +154,6 @@ bool MatchesAnySearchURL(const GURL& url, TemplateURL* template_url) {
   }
 
   return false;
-}
-
-void RecordInstantExtendedOptInState() {
-  if (instant_extended_opt_in_state_gate)
-    return;
-
-  instant_extended_opt_in_state_gate = true;
-  OptInState state = INSTANT_EXTENDED_NOT_SET;
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableInstantExtendedAPI))
-    state = INSTANT_EXTENDED_OPT_OUT;
-  else if (command_line->HasSwitch(switches::kEnableInstantExtendedAPI))
-    state = INSTANT_EXTENDED_OPT_IN;
-
-  UMA_HISTOGRAM_ENUMERATION("InstantExtended.NewOptInState", state,
-                            INSTANT_EXTENDED_OPT_IN_STATE_ENUM_COUNT);
 }
 
 // Returns true if |contents| is rendered inside the Instant process for
@@ -233,14 +215,13 @@ bool IsInstantURL(const GURL& url, Profile* profile) {
   if (search::MatchesOriginAndPath(url, instant_url))
     return true;
 
-  return !ShouldSuppressInstantExtendedOnSRP() &&
-      MatchesAnySearchURL(url, template_url);
+  return IsQueryExtractionEnabled() && MatchesAnySearchURL(url, template_url);
 }
 
-string16 GetSearchTermsImpl(const content::WebContents* contents,
-                            const content::NavigationEntry* entry) {
+base::string16 GetSearchTermsImpl(const content::WebContents* contents,
+                                  const content::NavigationEntry* entry) {
   if (!contents || !IsQueryExtractionEnabled())
-    return string16();
+    return base::string16();
 
   // For security reasons, don't extract search terms if the page is not being
   // rendered in the privileged Instant renderer process. This is to protect
@@ -255,10 +236,10 @@ string16 GetSearchTermsImpl(const content::WebContents* contents,
   if (!IsRenderedInInstantProcess(contents, profile) &&
       ((entry == contents->GetController().GetLastCommittedEntry()) ||
        !ShouldAssignURLToInstantRenderer(entry->GetURL(), profile)))
-    return string16();
+    return base::string16();
 #endif  // !defined(OS_IOS) && !defined(OS_ANDROID)
   // Check to see if search terms have already been extracted.
-  string16 search_terms = GetSearchTermsFromNavigationEntry(entry);
+  base::string16 search_terms = GetSearchTermsFromNavigationEntry(entry);
   if (!search_terms.empty())
     return search_terms;
 
@@ -289,75 +270,79 @@ bool IsInstantExtendedAPIEnabled() {
 #if defined(OS_IOS) || defined(OS_ANDROID)
   return false;
 #else
-  RecordInstantExtendedOptInState();
-  return EmbeddedSearchPageVersion() != kEmbeddedPageVersionDisabled;
+  return true;
 #endif  // defined(OS_IOS) || defined(OS_ANDROID)
 }
 
 // Determine what embedded search page version to request from the user's
 // default search provider. If 0, the embedded search UI should not be enabled.
 uint64 EmbeddedSearchPageVersion() {
-  RecordInstantExtendedOptInState();
-
-  // Check the command-line/about:flags setting first, which should have
-  // precedence and allows the trial to not be reported (if it's never queried).
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableInstantExtendedAPI))
-    return kEmbeddedPageVersionDisabled;
-  if (command_line->HasSwitch(switches::kEnableInstantExtendedAPI)) {
-    // The user has set the about:flags switch to Enabled - give the default
-    // UI version.
-    return kEmbeddedPageVersionDefault;
-  }
-
   FieldTrialFlags flags;
-  uint64 group_num = 0;
-  if (GetFieldTrialInfo(&flags, &group_num)) {
-    if (group_num == 0)
-      return kEmbeddedPageVersionDisabled;
+  if (GetFieldTrialInfo(&flags)) {
     return GetUInt64ValueForFlagWithDefault(kEmbeddedPageVersionFlagName,
                                             kEmbeddedPageVersionDefault,
                                             flags);
   }
-  return kEmbeddedPageVersionDisabled;
+  return kEmbeddedPageVersionDefault;
 }
 
 bool IsQueryExtractionEnabled() {
-  return EmbeddedSearchPageVersion() != kEmbeddedPageVersionDisabled &&
-      !ShouldSuppressInstantExtendedOnSRP();
+#if defined(OS_IOS) || defined(OS_ANDROID)
+  return true;
+#else
+  if (!IsInstantExtendedAPIEnabled())
+    return false;
+
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableQueryExtraction))
+    return true;
+
+  FieldTrialFlags flags;
+  return GetFieldTrialInfo(&flags) && GetBoolValueForFlagWithDefault(
+      kEnableQueryExtractionFlagName, false, flags);
+#endif  // defined(OS_IOS) || defined(OS_ANDROID)
 }
 
-string16 GetSearchTermsFromURL(Profile* profile, const GURL& url) {
-  string16 search_terms;
+base::string16 GetSearchTermsFromURL(Profile* profile, const GURL& url) {
+  if (url.is_valid() && url == GetSearchResultPrefetchBaseURL(profile)) {
+    // InstantSearchPrerenderer has the search query for the Instant search base
+    // page.
+    InstantSearchPrerenderer* prerenderer =
+        InstantSearchPrerenderer::GetForProfile(profile);
+    DCHECK(prerenderer);
+    return prerenderer->get_last_query();
+  }
+
+  base::string16 search_terms;
   TemplateURL* template_url = GetDefaultSearchProviderTemplateURL(profile);
   if (template_url && IsSuitableURLForInstant(url, template_url))
     template_url->ExtractSearchTermsFromURL(url, &search_terms);
   return search_terms;
 }
 
-string16 GetSearchTermsFromNavigationEntry(
+base::string16 GetSearchTermsFromNavigationEntry(
     const content::NavigationEntry* entry) {
-  string16 search_terms;
+  base::string16 search_terms;
   if (entry)
     entry->GetExtraData(sessions::kSearchTermsKey, &search_terms);
   return search_terms;
 }
 
-string16 GetSearchTerms(const content::WebContents* contents) {
+base::string16 GetSearchTerms(const content::WebContents* contents) {
   if (!contents)
-    return string16();
+    return base::string16();
 
   const content::NavigationEntry* entry =
       contents->GetController().GetVisibleEntry();
   if (!entry)
-    return string16();
+    return base::string16();
 
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
   // iOS and Android doesn't use the Instant framework, disable this check for
   // the two platforms.
   InstantSupportState state = GetInstantSupportStateFromNavigationEntry(*entry);
   if (state == INSTANT_SUPPORT_NO)
-    return string16();
+    return base::string16();
 #endif  // !defined(OS_IOS) && !defined(OS_ANDROID)
 
   return GetSearchTermsImpl(contents, entry);
@@ -407,7 +392,7 @@ bool NavEntryIsInstantNTP(const content::WebContents* contents,
   if (!IsRenderedInInstantProcess(contents, profile))
     return false;
 
-  if (entry->GetVirtualURL() == GetLocalInstantURL(profile))
+  if (entry->GetURL() == GetLocalInstantURL(profile))
     return true;
 
   if (ShouldUseCacheableNTP()) {
@@ -497,47 +482,34 @@ GURL GetNewTabPageURL(Profile* profile) {
   return url;
 }
 
+GURL GetSearchResultPrefetchBaseURL(Profile* profile) {
+  return ShouldPrefetchSearchResults() ?
+      GetInstantURL(profile, kDisableStartMargin, true) : GURL();
+}
+
+bool ShouldPrefetchSearchResults() {
+  if (!ShouldUseCacheableNTP())
+    return false;
+
+  FieldTrialFlags flags;
+  return GetFieldTrialInfo(&flags) && GetBoolValueForFlagWithDefault(
+      kPrefetchSearchResultsFlagName, false, flags);
+}
+
 GURL GetLocalInstantURL(Profile* profile) {
   return GURL(chrome::kChromeSearchLocalNtpUrl);
 }
 
-bool ShouldPreferRemoteNTPOnStartup() {
-  // Check the command-line/about:flags setting first, which should have
-  // precedence and allows the trial to not be reported (if it's never queried).
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableInstantExtendedAPI) ||
-      command_line->HasSwitch(switches::kEnableLocalFirstLoadNTP)) {
-    return false;
-  }
-  if (command_line->HasSwitch(switches::kDisableLocalFirstLoadNTP))
-    return true;
-
-  FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(kUseRemoteNTPOnStartupFlagName, true,
-                                          flags);
-  }
-  return false;
-}
-
 bool ShouldHideTopVerbatimMatch() {
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(kHideVerbatimFlagName, false, flags);
-  }
-  return false;
+  return GetFieldTrialInfo(&flags) && GetBoolValueForFlagWithDefault(
+      kHideVerbatimFlagName, false, flags);
 }
 
 bool ShouldUseCacheableNTP() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kUseCacheableNewTabPage))
-    return true;
-
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(kUseCacheableNTP, false, flags);
-  }
-  return false;
+  return !GetFieldTrialInfo(&flags) || GetBoolValueForFlagWithDefault(
+      kUseCacheableNTP, true, flags);
 }
 
 bool ShouldShowInstantNTP() {
@@ -547,30 +519,43 @@ bool ShouldShowInstantNTP() {
     return false;
 
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(kShowNtpFlagName, true, flags);
-  }
-  return true;
+  return !GetFieldTrialInfo(&flags) ||
+      GetBoolValueForFlagWithDefault(kShowNtpFlagName, true, flags);
 }
 
-bool ShouldShowRecentTabsOnNTP() {
-  FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(
-        kRecentTabsOnNTPFlagName, false, flags);
+DisplaySearchButtonConditions GetDisplaySearchButtonConditions() {
+  const CommandLine* cl = CommandLine::ForCurrentProcess();
+  if (cl->HasSwitch(switches::kDisableSearchButtonInOmnibox)) {
+    return DISPLAY_SEARCH_BUTTON_NEVER;
+  } else if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStr)) {
+    return DISPLAY_SEARCH_BUTTON_FOR_STR;
+  } else if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxForStrOrIip)) {
+    return DISPLAY_SEARCH_BUTTON_FOR_STR_OR_IIP;
+  } else if (cl->HasSwitch(switches::kEnableSearchButtonInOmniboxAlways)) {
+    return DISPLAY_SEARCH_BUTTON_ALWAYS;
   }
 
-  return false;
+  FieldTrialFlags flags;
+  if (!GetFieldTrialInfo(&flags))
+    return DISPLAY_SEARCH_BUTTON_NEVER;
+  uint64 value =
+      GetUInt64ValueForFlagWithDefault(kDisplaySearchButtonFlagName, 0, flags);
+  return (value < DISPLAY_SEARCH_BUTTON_NUM_VALUES) ?
+      static_cast<DisplaySearchButtonConditions>(value) :
+      DISPLAY_SEARCH_BUTTON_NEVER;
 }
 
-bool ShouldSuppressInstantExtendedOnSRP() {
-  FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(
-        kSuppressInstantExtendedOnSRPFlagName, false, flags);
+bool ShouldDisplayOriginChip() {
+  const CommandLine* cl = CommandLine::ForCurrentProcess();
+  if (cl->HasSwitch(switches::kDisableOriginChip)) {
+    return false;
+  } else if (cl->HasSwitch(switches::kEnableOriginChip)) {
+    return true;
   }
 
-  return false;
+  FieldTrialFlags flags;
+  return GetFieldTrialInfo(&flags) && GetBoolValueForFlagWithDefault(
+      kEnableOriginChipFlagName, false, flags);
 }
 
 GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
@@ -609,7 +594,7 @@ GURL GetEffectiveURLForInstant(const GURL& url, Profile* profile) {
 int GetInstantLoaderStalenessTimeoutSec() {
   int timeout_sec = kStalePageTimeoutDefault;
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
+  if (GetFieldTrialInfo(&flags)) {
     timeout_sec = GetUInt64ValueForFlagWithDefault(kStalePageTimeoutFlagName,
                                                    kStalePageTimeoutDefault,
                                                    flags);
@@ -687,7 +672,7 @@ void SetInstantSupportStateInNavigationEntry(InstantSupportState state,
 
 InstantSupportState GetInstantSupportStateFromNavigationEntry(
     const content::NavigationEntry& entry) {
-  string16 value;
+  base::string16 value;
   if (!entry.GetExtraData(kInstantSupportStateKey, &value))
     return INSTANT_SUPPORT_UNKNOWN;
 
@@ -695,34 +680,17 @@ InstantSupportState GetInstantSupportStateFromNavigationEntry(
 }
 
 bool ShouldPrefetchSearchResultsOnSRP() {
-  // Check the command-line/about:flags setting first, which should have
-  // precedence and allows the trial to not be reported (if it's never queried).
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisableInstantExtendedAPI) ||
-      command_line->HasSwitch(switches::kEnableInstantExtendedAPI)) {
-    return false;
-  }
-
   FieldTrialFlags flags;
-  if (GetFieldTrialInfo(&flags, NULL)) {
-    return GetBoolValueForFlagWithDefault(kPrefetchSearchResultsOnSRP, false,
-                                          flags);
-  }
-  return false;
+  return GetFieldTrialInfo(&flags) && GetBoolValueForFlagWithDefault(
+      kPrefetchSearchResultsOnSRP, false, flags);
 }
 
-void EnableInstantExtendedAPIForTesting() {
+void EnableQueryExtractionForTesting() {
   CommandLine* cl = CommandLine::ForCurrentProcess();
-  cl->AppendSwitch(switches::kEnableInstantExtendedAPI);
+  cl->AppendSwitch(switches::kEnableQueryExtraction);
 }
 
-void DisableInstantExtendedAPIForTesting() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  cl->AppendSwitch(switches::kDisableInstantExtendedAPI);
-}
-
-bool GetFieldTrialInfo(FieldTrialFlags* flags,
-                       uint64* group_number) {
+bool GetFieldTrialInfo(FieldTrialFlags* flags) {
   // Get the group name.  If the EmbeddedSearch trial doesn't exist, look for
   // the older InstantExtended name.
   std::string group_name = base::FieldTrialList::FindFullName(
@@ -735,10 +703,8 @@ bool GetFieldTrialInfo(FieldTrialFlags* flags,
   if (EndsWith(group_name, kDisablingSuffix, true))
     return false;
 
-  // We have a valid trial that isn't disabled.
-  // First extract the flags.
+  // We have a valid trial that isn't disabled. Extract the flags.
   std::string group_prefix(group_name);
-
   size_t first_space = group_name.find(" ");
   if (first_space != std::string::npos) {
     // There is a flags section of the group name. Split that out and parse it.
@@ -750,21 +716,6 @@ bool GetFieldTrialInfo(FieldTrialFlags* flags,
       return false;
     }
   }
-
-  // Now extract the group number, making sure we get a non-zero value.
-  uint64 temp_group_number = 0;
-  if (StartsWithASCII(group_name, kGroupNumberPrefix, true)) {
-    std::string group_suffix = group_prefix.substr(strlen(kGroupNumberPrefix));
-    if (!base::StringToUint64(group_suffix, &temp_group_number))
-      return false;
-    if (group_number)
-      *group_number = temp_group_number;
-  } else {
-    // Instant Extended is not enabled.
-    if (group_number)
-      *group_number = 0;
-  }
-
   return true;
 }
 
@@ -800,10 +751,6 @@ bool GetBoolValueForFlagWithDefault(const std::string& flag,
                                     bool default_value,
                                     const FieldTrialFlags& flags) {
   return !!GetUInt64ValueForFlagWithDefault(flag, default_value ? 1 : 0, flags);
-}
-
-void ResetInstantExtendedOptInStateGateForTest() {
-  instant_extended_opt_in_state_gate = false;
 }
 
 }  // namespace chrome

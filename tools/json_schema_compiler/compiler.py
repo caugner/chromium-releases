@@ -26,11 +26,12 @@ from cpp_type_generator import CppTypeGenerator
 from dart_generator import DartGenerator
 import json_schema
 from model import Model
+from ppapi_generator import PpapiGenerator
 from schema_loader import SchemaLoader
 
 # Names of supported code generators, as specified on the command-line.
 # First is default.
-GENERATORS = ['cpp', 'cpp-bundle', 'dart']
+GENERATORS = ['cpp', 'cpp-bundle', 'dart', 'ppapi']
 
 def GenerateSchema(generator,
                    filenames,
@@ -87,7 +88,8 @@ def GenerateSchema(generator,
                                               api_model,
                                               api_defs,
                                               type_generator,
-                                              root_namespace)
+                                              root_namespace,
+                                              namespace.source_file_dir)
     generators = [
       ('generated_api.cc', cpp_bundle_generator.api_cc_generator),
       ('generated_api.h', cpp_bundle_generator.api_h_generator),
@@ -104,6 +106,12 @@ def GenerateSchema(generator,
     generators = [
       ('%s.dart' % namespace.unix_name, DartGenerator(
           dart_overrides_dir))
+    ]
+  elif generator == 'ppapi':
+    generator = PpapiGenerator()
+    generators = [
+      (os.path.join('api', 'ppb_%s.idl' % namespace.unix_name),
+       generator.idl_generator),
     ]
   else:
     raise Exception('Unrecognised generator %s' % generator)

@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/stacked_panel_collection.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -37,6 +36,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/extension.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
@@ -121,7 +121,7 @@ base::DictionaryValue* PanelExtensionWindowController::CreateTabValue(
   tab_value->SetString(
       extensions::tabs_constants::kUrlKey, web_contents->GetURL().spec());
   tab_value->SetString(extensions::tabs_constants::kStatusKey,
-                       ExtensionTabUtil::GetTabStatusText(
+                       extensions::ExtensionTabUtil::GetTabStatusText(
                            web_contents->IsLoading()));
   tab_value->SetBoolean(
       extensions::tabs_constants::kActiveKey, panel_->IsActive());
@@ -748,9 +748,9 @@ bool Panel::ExecuteCommandIfEnabled(int id) {
   return false;
 }
 
-string16 Panel::GetWindowTitle() const {
+base::string16 Panel::GetWindowTitle() const {
   content::WebContents* contents = GetWebContents();
-  string16 title;
+  base::string16 title;
 
   // |contents| can be NULL during the window's creation.
   if (contents) {
@@ -888,11 +888,12 @@ void Panel::UpdateAppIcon() {
 }
 
 // static
-void Panel::FormatTitleForDisplay(string16* title) {
+void Panel::FormatTitleForDisplay(base::string16* title) {
   size_t current_index = 0;
   size_t match_index;
-  while ((match_index = title->find(L'\n', current_index)) != string16::npos) {
-    title->replace(match_index, 1, string16());
+  while ((match_index = title->find(L'\n', current_index)) !=
+         base::string16::npos) {
+    title->replace(match_index, 1, base::string16());
     current_index = match_index;
   }
 }

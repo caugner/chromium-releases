@@ -19,11 +19,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/plugin_service.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/id_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/browser_resources.h"
@@ -316,6 +317,11 @@ void ComponentLoader::AddBookmarksExtensions() {
 #endif
 }
 
+void ComponentLoader::AddNetworkSpeechSynthesisExtension() {
+  Add(IDR_NETWORK_SPEECH_SYNTHESIS_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("network_speech_synthesis")));
+}
+
 void ComponentLoader::AddWithName(int manifest_resource_id,
                                   const base::FilePath& root_directory,
                                   const std::string& name) {
@@ -369,15 +375,6 @@ void ComponentLoader::AddDefaultComponentExtensions(
       base::FilePath(FILE_PATH_LITERAL("/usr/share/chromeos-assets/mobile")));
 
 #if defined(GOOGLE_CHROME_BUILD)
-  {
-    const CommandLine* command_line = CommandLine::ForCurrentProcess();
-    if (!command_line->HasSwitch(chromeos::switches::kDisableGeniusApp)) {
-      AddWithName(IDR_GENIUS_APP_MANIFEST,
-                  base::FilePath(FILE_PATH_LITERAL(
-                      "/usr/share/chromeos-assets/genius_app")),
-                  l10n_util::GetStringUTF8(IDS_GENIUS_APP_NAME));
-    }
-  }
   if (browser_defaults::enable_help_app) {
     Add(IDR_HELP_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
                                "/usr/share/chromeos-assets/helpapp")));
@@ -411,6 +408,16 @@ void ComponentLoader::AddDefaultComponentExtensions(
   AddDefaultComponentExtensionsWithBackgroundPages(skip_session_components);
 }
 
+void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
+    bool skip_session_components) {
+  // No component extension for kiosk app launch splash screen.
+  if (skip_session_components)
+    return;
+
+  // Component extensions needed for kiosk apps.
+  AddFileManagerExtension();
+}
+
 void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     bool skip_session_components) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -423,6 +430,16 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
               switches::kDisableComponentExtensionsWithBackgroundPages))) {
     return;
   }
+
+#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
+  // Since this is a v2 app it has a background page.
+  if (!command_line->HasSwitch(chromeos::switches::kDisableGeniusApp)) {
+    AddWithName(IDR_GENIUS_APP_MANIFEST,
+                base::FilePath(FILE_PATH_LITERAL(
+                    "/usr/share/chromeos-assets/genius_app")),
+                l10n_util::GetStringUTF8(IDS_GENIUS_APP_NAME));
+  }
+#endif
 
   if (!skip_session_components) {
     // Apps Debugger
@@ -491,6 +508,11 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
           base::FilePath(FILE_PATH_LITERAL("chromeos/wallpaper_manager")));
     }
 
+    if (!command_line->HasSwitch(chromeos::switches::kDisableFirstRunUI)) {
+      Add(IDR_FIRST_RUN_DIALOG_MANIFEST,
+          base::FilePath(FILE_PATH_LITERAL("chromeos/first_run/app")));
+    }
+
     Add(IDR_NETWORK_CONFIGURATION_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/network_configuration")));
 
@@ -538,9 +560,26 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableGoogleNowIntegration);
 
-  if (enabled && !disabled_via_flag) {
+  if (!skip_session_components && enabled && !disabled_via_flag) {
     Add(IDR_GOOGLE_NOW_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("google_now")));
+  }
+#endif
+
+#if defined(GOOGLE_CHROME_BUILD)
+#if !defined(OS_CHROMEOS)  // http://crbug.com/314799
+  AddNetworkSpeechSynthesisExtension();
+#endif
+#endif  // defined(GOOGLE_CHROME_BUILD)
+
+#if defined(ENABLE_PLUGINS)
+  base::FilePath pdf_path;
+  content::PluginService* plugin_service =
+      content::PluginService::GetInstance();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kOutOfProcessPdf) &&
+      PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path) &&
+      plugin_service->GetRegisteredPpapiPluginInfo(pdf_path)) {
+    Add(IDR_PDF_MANIFEST, base::FilePath(FILE_PATH_LITERAL("pdf")));
   }
 #endif
 }

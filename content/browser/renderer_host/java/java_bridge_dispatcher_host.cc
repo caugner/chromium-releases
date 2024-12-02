@@ -59,7 +59,7 @@ JavaBridgeDispatcherHost::~JavaBridgeDispatcherHost() {
       base::Bind(&CleanUpStubs, stubs_));
 }
 
-void JavaBridgeDispatcherHost::AddNamedObject(const string16& name,
+void JavaBridgeDispatcherHost::AddNamedObject(const base::string16& name,
                                               NPObject* object) {
   NPVariant_Param variant_param;
   CreateNPVariantParam(object, &variant_param);
@@ -68,7 +68,7 @@ void JavaBridgeDispatcherHost::AddNamedObject(const string16& name,
       render_view_host_->GetRoutingID(), name, variant_param));
 }
 
-void JavaBridgeDispatcherHost::RemoveNamedObject(const string16& name) {
+void JavaBridgeDispatcherHost::RemoveNamedObject(const base::string16& name) {
   // On receipt of this message, the JavaBridgeDispatcher will drop its
   // reference to the corresponding proxy object. When the last reference is
   // removed, the proxy object will delete its NPObjectProxy, which will cause
@@ -128,7 +128,7 @@ void JavaBridgeDispatcherHost::CreateNPVariantParam(NPObject* object,
   int route_id = JavaBridgeChannelHost::ThreadsafeGenerateRouteID();
   param->npobject_routing_id = route_id;
 
-  WebKit::WebBindings::retainObject(object);
+  blink::WebBindings::retainObject(object);
   g_background_thread.Get().message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&JavaBridgeDispatcherHost::CreateObjectStub, this, object,
@@ -161,7 +161,7 @@ void JavaBridgeDispatcherHost::CreateObjectStub(NPObject* object,
 
   // The NPObjectStub takes a reference to the NPObject. Release the ref added
   // in CreateNPVariantParam().
-  WebKit::WebBindings::releaseObject(object);
+  blink::WebBindings::releaseObject(object);
 }
 
 }  // namespace content

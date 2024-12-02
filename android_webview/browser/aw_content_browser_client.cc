@@ -13,10 +13,13 @@
 #include "android_webview/browser/jni_dependency_factory.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
+#include "android_webview/common/render_view_messages.h"
 #include "android_webview/common/url_constants.h"
 #include "base/base_paths_android.h"
 #include "base/path_service.h"
 #include "content/public/browser/access_token_store.h"
+#include "content/public/browser/browser_message_filter.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -30,8 +33,78 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/common/webpreferences.h"
 
+using content::BrowserThread;
+
 namespace android_webview {
 namespace {
+
+// TODO(sgurun) move this to its own file.
+// This class filters out incoming aw_contents related IPC messages for the
+// renderer process on the IPC thread.
+class AwContentsMessageFilter : public content::BrowserMessageFilter {
+public:
+  explicit AwContentsMessageFilter(int process_id);
+
+  // BrowserMessageFilter methods.
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      BrowserThread::ID* thread) OVERRIDE;
+  virtual bool OnMessageReceived(
+      const IPC::Message& message,
+      bool* message_was_ok) OVERRIDE;
+
+  void OnShouldOverrideUrlLoading(int routing_id,
+                                  const base::string16& url,
+                                  bool* ignore_navigation);
+
+private:
+  virtual ~AwContentsMessageFilter();
+
+  int process_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(AwContentsMessageFilter);
+};
+
+AwContentsMessageFilter::AwContentsMessageFilter(int process_id)
+    : process_id_(process_id) {
+}
+
+AwContentsMessageFilter::~AwContentsMessageFilter() {
+}
+
+void AwContentsMessageFilter::OverrideThreadForMessage(
+    const IPC::Message& message, BrowserThread::ID* thread) {
+  if (message.type() == AwViewHostMsg_ShouldOverrideUrlLoading::ID) {
+    *thread = BrowserThread::UI;
+  }
+}
+
+bool AwContentsMessageFilter::OnMessageReceived(const IPC::Message& message,
+                                                bool* message_was_ok) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP_EX(AwContentsMessageFilter, message, *message_was_ok)
+      IPC_MESSAGE_HANDLER(AwViewHostMsg_ShouldOverrideUrlLoading,
+                          OnShouldOverrideUrlLoading)
+      IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void AwContentsMessageFilter::OnShouldOverrideUrlLoading(
+    int routing_id,
+    const base::string16& url,
+    bool* ignore_navigation) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  *ignore_navigation = false;
+  AwContentsClientBridgeBase* client =
+      AwContentsClientBridgeBase::FromID(process_id_, routing_id);
+  if (client) {
+    *ignore_navigation = client->ShouldOverrideUrlLoading(url);
+  } else {
+    LOG(WARNING) << "Failed to find the associated render view host for url: "
+                 << url;
+  }
+}
 
 class AwAccessTokenStore : public content::AccessTokenStore {
  public:
@@ -122,6 +195,8 @@ void AwContentBrowserClient::RenderProcessHostCreated(
       host->GetID(), android_webview::kContentScheme);
   content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
       host->GetID(), chrome::kFileScheme);
+
+  host->AddFilter(new AwContentsMessageFilter(host->GetID()));
 }
 
 net::URLRequestContextGetter*
@@ -272,19 +347,19 @@ void AwContentBrowserClient::SelectClientCertificate(
       const net::HttpNetworkSession* network_session,
       net::SSLCertRequestInfo* cert_request_info,
       const base::Callback<void(net::X509Certificate*)>& callback) {
-  LOG(INFO) << "Client certificate request from "
+  LOG(WARNING) << "Client certificate request from "
         << cert_request_info->host_and_port
         << " rejected. (Client certificates not supported in WebView)";
   callback.Run(NULL);
 }
 
-WebKit::WebNotificationPresenter::Permission
+blink::WebNotificationPresenter::Permission
     AwContentBrowserClient::CheckDesktopNotificationPermission(
         const GURL& source_url,
         content::ResourceContext* context,
         int render_process_id) {
   // Android WebView does not support notifications, so return Denied here.
-  return WebKit::WebNotificationPresenter::PermissionDenied;
+  return blink::WebNotificationPresenter::PermissionDenied;
 }
 
 void AwContentBrowserClient::ShowDesktopNotification(
@@ -310,7 +385,7 @@ bool AwContentBrowserClient::CanCreateWindow(
     const GURL& target_url,
     const content::Referrer& referrer,
     WindowOpenDisposition disposition,
-    const WebKit::WebWindowFeatures& features,
+    const blink::WebWindowFeatures& features,
     bool user_gesture,
     bool opener_suppressed,
     content::ResourceContext* context,

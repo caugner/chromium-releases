@@ -14,11 +14,13 @@
 #import "chrome/browser/ui/cocoa/autofill/autofill_layout.h"
 
 namespace autofill {
-  class AutofillDialogViewDelegate;
+class AutofillDialogViewDelegate;
 }
 
 @class AutofillSectionView;
 @class AutofillSuggestionContainer;
+@class AutofillTextField;
+@class AutofillTooltipController;
 @class LayoutView;
 @class MenuButton;
 @class MenuController;
@@ -28,6 +30,9 @@ namespace autofill {
 
 // Updates the validation message for a given field.
 - (void)updateMessageForField:(NSControl<AutofillInputField>*)field;
+
+// Hides the validation error bubble.
+- (void)hideErrorBubble;
 
 @end
 
@@ -45,6 +50,14 @@ namespace autofill {
 
   // The view for the container.
   base::scoped_nsobject<AutofillSectionView> view_;
+
+  // Some sections need to show an icon with an associated tooltip. This is the
+  // controller for such an icon. There is at most one such icon per section.
+  base::scoped_nsobject<AutofillTooltipController> tooltipController_;
+
+  // The logical superview for the tooltip icon. Weak pointer, owned by
+  // |inputs_|.
+  AutofillTextField* tooltipField_;
 
   // List of weak pointers, which constitute unique field IDs.
   std::vector<const autofill::DetailInput*> detailInputs_;
@@ -70,7 +83,7 @@ namespace autofill {
             forSection:(autofill::DialogSection)section;
 
 // Populates |output| with mappings from field identification to input value.
-- (void)getInputs:(autofill::DetailOutputMap*)output;
+- (void)getInputs:(autofill::FieldValueMap*)output;
 
 // Called when the delegate-maintained suggestions model has changed.
 - (void)modelChanged;
@@ -88,6 +101,9 @@ namespace autofill {
 // Returns the value of the |suggestContainer_|'s input field, or nil if no
 // suggestion is currently showing.
 - (NSString*)suggestionText;
+
+// Collects all input fields (direct & suggestions) into the given |array|.
+- (void)addInputsToArray:(NSMutableArray*)array;
 
 @end
 

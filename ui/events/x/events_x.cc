@@ -4,6 +4,7 @@
 
 #include "ui/events/event_constants.h"
 
+#include <cmath>
 #include <string.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
@@ -204,7 +205,10 @@ ui::EventType GetTouchEventType(const base::NativeEvent& native_event) {
     case XI_ButtonRelease:
       return ui::ET_TOUCH_RELEASED;
     case XI_Motion:
-      if (GetButtonMaskForX2Event(event))
+      // Should not convert any emulated Motion event from touch device to
+      // touch event.
+      if (!(event->flags & XIPointerEmulated) &&
+          GetButtonMaskForX2Event(event))
         return ui::ET_TOUCH_MOVED;
       return ui::ET_UNKNOWN;
     default:
@@ -468,6 +472,10 @@ int EventButtonFromNative(const base::NativeEvent& native_event) {
 
 KeyboardCode KeyboardCodeFromNative(const base::NativeEvent& native_event) {
   return KeyboardCodeFromXKeyEvent(native_event);
+}
+
+const char* CodeFromNative(const base::NativeEvent& native_event) {
+  return CodeFromXEvent(native_event);
 }
 
 bool IsMouseEvent(const base::NativeEvent& native_event) {

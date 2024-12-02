@@ -321,6 +321,15 @@ class AppCacheStorageImplTest : public testing::Test {
     virtual void RegisterClient(quota::QuotaClient* client) OVERRIDE {}
     virtual void NotifyOriginInUse(const GURL& origin) OVERRIDE {}
     virtual void NotifyOriginNoLongerInUse(const GURL& origin) OVERRIDE {}
+    virtual void SetUsageCacheEnabled(quota::QuotaClient::ID client_id,
+                                      const GURL& origin,
+                                      quota::StorageType type,
+                                      bool enabled) OVERRIDE {}
+    virtual void GetUsageAndQuota(
+        base::SequencedTaskRunner* original_task_runner,
+        const GURL& origin,
+        quota::StorageType type,
+        const GetUsageAndQuotaCallback& callback) OVERRIDE {}
 
     int notify_storage_accessed_count_;
     int notify_storage_modified_count_;
@@ -1625,7 +1634,7 @@ class AppCacheStorageImplTest : public testing::Test {
     const std::string kCorruptData("deadbeef");
     base::FilePath disk_cache_directory =
         temp_directory_.path().AppendASCII("Cache");
-    ASSERT_TRUE(file_util::CreateDirectory(disk_cache_directory));
+    ASSERT_TRUE(base::CreateDirectory(disk_cache_directory));
     base::FilePath index_file = disk_cache_directory.AppendASCII("index");
     EXPECT_EQ(static_cast<int>(kCorruptData.length()),
               file_util::WriteFile(

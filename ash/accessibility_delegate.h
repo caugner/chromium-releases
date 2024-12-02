@@ -7,12 +7,18 @@
 
 #include "ash/ash_export.h"
 #include "ash/magnifier/magnifier_constants.h"
+#include "base/time/time.h"
 
 namespace ash {
 
 enum AccessibilityNotificationVisibility {
   A11Y_NOTIFICATION_NONE,
   A11Y_NOTIFICATION_SHOW,
+};
+
+enum AccessibilityAlert {
+  A11Y_ALERT_NONE,
+  A11Y_ALERT_WINDOW_NEEDED
 };
 
 // A deletate class to control accessibility features.
@@ -57,9 +63,8 @@ class ASH_EXPORT AccessibilityDelegate {
   // Returns if autoclick is enabled or not.
   virtual bool IsAutoclickEnabled() const = 0;
 
-  // Returns true if the user wants to show accesibility menu even when all the
-  // accessibility features are disabled.
-  virtual bool ShouldAlwaysShowAccessibilityMenu() const = 0;
+  // Returns true when the accessibility menu should be shown.
+  virtual bool ShouldShowAccessibilityMenu() const = 0;
 
   // Cancel all current and queued speech immediately.
   virtual void SilenceSpokenFeedback() const = 0;
@@ -70,6 +75,15 @@ class ASH_EXPORT AccessibilityDelegate {
   // Gets a saved value of the zoom scale of full screen magnifier. If a value
   // is not saved, return a negative value.
   virtual double GetSavedScreenMagnifierScale() = 0;
+
+  // Triggers an accessibility alert to give the user feedback.
+  virtual void TriggerAccessibilityAlert(AccessibilityAlert alert) = 0;
+
+  // Gets the last accessibility alert that was triggered.
+  virtual AccessibilityAlert GetLastAccessibilityAlert() = 0;
+
+  // Initiates play of shutdown sound and returns it's duration.
+  virtual base::TimeDelta PlayShutdownSound() const = 0;
 };
 
 }  // namespace ash

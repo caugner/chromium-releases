@@ -13,6 +13,7 @@
 
 class AdViewGuest;
 class WebViewGuest;
+struct RendererContentSettingRules;
 
 // A GuestView is the base class browser-side API implementation for a <*view>
 // tag. GuestView maintains an association between a guest WebContents and an
@@ -28,15 +29,15 @@ class GuestView : public content::BrowserPluginGuestDelegate {
 
   class Event {
    public:
-     Event(const std::string& event_name, scoped_ptr<DictionaryValue> args);
+     Event(const std::string& name, scoped_ptr<DictionaryValue> args);
      ~Event();
 
-    const std::string& event_name() const { return event_name_; }
+    const std::string& name() const { return name_; }
 
     scoped_ptr<DictionaryValue> GetArguments();
 
    private:
-    const std::string event_name_;
+    const std::string name_;
     scoped_ptr<DictionaryValue> args_;
   };
 
@@ -49,6 +50,22 @@ class GuestView : public content::BrowserPluginGuestDelegate {
   static GuestView* FromWebContents(content::WebContents* web_contents);
 
   static GuestView* From(int embedder_process_id, int instance_id);
+
+  // For GuestViews, we create special guest processes, which host the
+  // tag content separately from the main application that embeds the tag.
+  // A GuestView can specify both the partition name and whether the storage
+  // for that partition should be persisted. Each tag gets a SiteInstance with
+  // a specially formatted URL, based on the application it is hosted by and
+  // the partition requested by it. The format for that URL is:
+  // chrome-guest://partition_domain/persist?partition_name
+  static bool GetGuestPartitionConfigForSite(const GURL& site,
+                                             std::string* partition_domain,
+                                             std::string* partition_name,
+                                             bool* in_memory);
+
+  // By default, JavaScript and images are enabled in guest content.
+  static void GetDefaultContentSettingRules(
+      RendererContentSettingRules* rules, bool incognito);
 
   virtual void Attach(content::WebContents* embedder_web_contents,
                       const base::DictionaryValue& args);
@@ -99,11 +116,11 @@ class GuestView : public content::BrowserPluginGuestDelegate {
  private:
   void SendQueuedEvents();
 
-  content::WebContents* guest_web_contents_;
+  content::WebContents* const guest_web_contents_;
   content::WebContents* embedder_web_contents_;
   const std::string extension_id_;
   int embedder_render_process_id_;
-  content::BrowserContext* browser_context_;
+  content::BrowserContext* const browser_context_;
   // |guest_instance_id_| is a profile-wide unique identifier for a guest
   // WebContents.
   const int guest_instance_id_;

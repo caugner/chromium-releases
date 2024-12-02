@@ -22,12 +22,13 @@ class AwSettings : public content::WebContentsObserver {
  public:
   static AwSettings* FromWebContents(content::WebContents* web_contents);
 
-  AwSettings(JNIEnv* env, jobject obj, jint web_contents);
+  AwSettings(JNIEnv* env, jobject obj, jlong web_contents);
   virtual ~AwSettings();
 
   // Called from Java. Methods with "Locked" suffix require that the settings
   // access lock is held during their execution.
   void Destroy(JNIEnv* env, jobject obj);
+  void PopulateWebPreferencesLocked(JNIEnv* env, jobject obj, jlong web_prefs);
   void ResetScrollAndScaleState(JNIEnv* env, jobject obj);
   void UpdateEverythingLocked(JNIEnv* env, jobject obj);
   void UpdateInitialPageScaleLocked(JNIEnv* env, jobject obj);

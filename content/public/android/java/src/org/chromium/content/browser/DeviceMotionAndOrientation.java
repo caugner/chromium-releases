@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,16 +41,13 @@ class DeviceMotionAndOrientation implements SensorEventListener {
 
     // Non-zero if and only if we're listening for events.
     // To avoid race conditions on the C++ side, access must be synchronized.
-    private int mNativePtr;
+    private long mNativePtr;
 
     // The lock to access the mNativePtr.
     private final Object mNativePtrLock = new Object();
 
-    // The acceleration vector including gravity expressed in the body frame.
-    private float[] mAccelerationIncludingGravityVector;
-
-    // The geomagnetic vector expressed in the body frame.
-    private float[] mMagneticFieldVector;
+    // Holds a shortened version of the rotation vector for compatibility purposes.
+    private float[] mTruncatedRotationVector;
 
     // Lazily initialized when registering for notifications.
     private SensorManagerProxy mSensorManagerProxy;
@@ -67,8 +64,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
     static final int DEVICE_MOTION = 1;
 
     static final Set<Integer> DEVICE_ORIENTATION_SENSORS = CollectionUtil.newHashSet(
-            Sensor.TYPE_ACCELEROMETER,
-            Sensor.TYPE_MAGNETIC_FIELD);
+            Sensor.TYPE_ROTATION_VECTOR);
 
     static final Set<Integer> DEVICE_MOTION_SENSORS = CollectionUtil.newHashSet(
             Sensor.TYPE_ACCELEROMETER,
@@ -95,7 +91,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
      * @return True on success.
      */
     @CalledByNative
-    public boolean start(int nativePtr, int eventType, int rateInMilliseconds) {
+    public boolean start(long nativePtr, int eventType, int rateInMilliseconds) {
         boolean success = false;
         synchronized (mNativePtrLock) {
             switch (eventType) {
@@ -177,22 +173,10 @@ class DeviceMotionAndOrientation implements SensorEventListener {
 
     @VisibleForTesting
     void sensorChanged(int type, float[] values) {
-
         switch (type) {
             case Sensor.TYPE_ACCELEROMETER:
-                if (mAccelerationIncludingGravityVector == null) {
-                    mAccelerationIncludingGravityVector = new float[3];
-                }
-                System.arraycopy(values, 0, mAccelerationIncludingGravityVector,
-                        0, mAccelerationIncludingGravityVector.length);
                 if (mDeviceMotionIsActive) {
-                    gotAccelerationIncludingGravity(
-                            mAccelerationIncludingGravityVector[0],
-                            mAccelerationIncludingGravityVector[1],
-                            mAccelerationIncludingGravityVector[2]);
-                }
-                if (mDeviceOrientationIsActive) {
-                    getOrientationUsingGetRotationMatrix();
+                    gotAccelerationIncludingGravity(values[0], values[1], values[2]);
                 }
                 break;
             case Sensor.TYPE_LINEAR_ACCELERATION:
@@ -205,13 +189,21 @@ class DeviceMotionAndOrientation implements SensorEventListener {
                     gotRotationRate(values[0], values[1], values[2]);
                 }
                 break;
-            case Sensor.TYPE_MAGNETIC_FIELD:
-                if (mMagneticFieldVector == null) {
-                    mMagneticFieldVector = new float[3];
-                }
-                System.arraycopy(values, 0, mMagneticFieldVector, 0, mMagneticFieldVector.length);
+            case Sensor.TYPE_ROTATION_VECTOR:
                 if (mDeviceOrientationIsActive) {
-                    getOrientationUsingGetRotationMatrix();
+                    if (values.length > 4) {
+                        // On some Samsung devices SensorManager.getRotationMatrixFromVector
+                        // appears to throw an exception if rotation vector has length > 4.
+                        // For the purposes of this class the first 4 values of the
+                        // rotation vector are sufficient (see crbug.com/335298 for details).
+                        if (mTruncatedRotationVector == null) {
+                            mTruncatedRotationVector = new float[4];
+                        }
+                        System.arraycopy(values, 0, mTruncatedRotationVector, 0, 4);
+                        getOrientationFromRotationVector(mTruncatedRotationVector);
+                    } else {
+                        getOrientationFromRotationVector(values);
+                    }
                 }
                 break;
             default:
@@ -303,16 +295,9 @@ class DeviceMotionAndOrientation implements SensorEventListener {
         return values;
     }
 
-    private void getOrientationUsingGetRotationMatrix() {
-        if (mAccelerationIncludingGravityVector == null || mMagneticFieldVector == null) {
-            return;
-        }
-
+    private void getOrientationFromRotationVector(float[] rotationVector) {
         float[] deviceRotationMatrix = new float[9];
-        if (!SensorManager.getRotationMatrix(deviceRotationMatrix, null,
-                mAccelerationIncludingGravityVector, mMagneticFieldVector)) {
-            return;
-        }
+        SensorManager.getRotationMatrixFromVector(deviceRotationMatrix, rotationVector);
 
         double[] rotationAngles = new double[3];
         computeDeviceOrientationFromRotationMatrix(deviceRotationMatrix, rotationAngles);
@@ -326,7 +311,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
         if (mSensorManagerProxy != null) {
             return mSensorManagerProxy;
         }
-        SensorManager sensorManager = (SensorManager)WeakContext.getSystemService(
+        SensorManager sensorManager = (SensorManager) WeakContext.getSystemService(
                 Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             mSensorManagerProxy = new SensorManagerProxyImpl(sensorManager);
@@ -399,7 +384,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
     protected void gotOrientation(double alpha, double beta, double gamma) {
         synchronized (mNativePtrLock) {
             if (mNativePtr != 0) {
-              nativeGotOrientation(mNativePtr, alpha, beta, gamma);
+                nativeGotOrientation(mNativePtr, alpha, beta, gamma);
             }
         }
     }
@@ -407,7 +392,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
     protected void gotAcceleration(double x, double y, double z) {
         synchronized (mNativePtrLock) {
             if (mNativePtr != 0) {
-              nativeGotAcceleration(mNativePtr, x, y, z);
+                nativeGotAcceleration(mNativePtr, x, y, z);
             }
         }
     }
@@ -415,7 +400,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
     protected void gotAccelerationIncludingGravity(double x, double y, double z) {
         synchronized (mNativePtrLock) {
             if (mNativePtr != 0) {
-              nativeGotAccelerationIncludingGravity(mNativePtr, x, y, z);
+                nativeGotAccelerationIncludingGravity(mNativePtr, x, y, z);
             }
         }
     }
@@ -423,7 +408,7 @@ class DeviceMotionAndOrientation implements SensorEventListener {
     protected void gotRotationRate(double alpha, double beta, double gamma) {
         synchronized (mNativePtrLock) {
             if (mNativePtr != 0) {
-              nativeGotRotationRate(mNativePtr, alpha, beta, gamma);
+                nativeGotRotationRate(mNativePtr, alpha, beta, gamma);
             }
         }
     }
@@ -461,28 +446,28 @@ class DeviceMotionAndOrientation implements SensorEventListener {
      * Orientation of the device with respect to its reference frame.
      */
     private native void nativeGotOrientation(
-            int nativeDataFetcherImplAndroid,
+            long nativeDataFetcherImplAndroid,
             double alpha, double beta, double gamma);
 
     /**
      * Linear acceleration without gravity of the device with respect to its body frame.
      */
     private native void nativeGotAcceleration(
-            int nativeDataFetcherImplAndroid,
+            long nativeDataFetcherImplAndroid,
             double x, double y, double z);
 
     /**
      * Acceleration including gravity of the device with respect to its body frame.
      */
     private native void nativeGotAccelerationIncludingGravity(
-            int nativeDataFetcherImplAndroid,
+            long nativeDataFetcherImplAndroid,
             double x, double y, double z);
 
     /**
      * Rotation rate of the device with respect to its body frame.
      */
     private native void nativeGotRotationRate(
-            int nativeDataFetcherImplAndroid,
+            long nativeDataFetcherImplAndroid,
             double alpha, double beta, double gamma);
 
     /**

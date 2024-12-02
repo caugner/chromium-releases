@@ -76,6 +76,11 @@ class NetworkingPrivateGetStateFunction : public ChromeAsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
+  void Success(const std::string& service_path,
+               const base::DictionaryValue& result);
+  void Failure(const std::string& error_name,
+               scoped_ptr<base::DictionaryValue> error_data);
+
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetStateFunction);
 };
 
@@ -123,7 +128,7 @@ class NetworkingPrivateCreateNetworkFunction
 
 // Implements the chrome.networkingPrivate.getVisibleNetworks method.
 class NetworkingPrivateGetVisibleNetworksFunction
-    : public ChromeSyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   NetworkingPrivateGetVisibleNetworksFunction() {}
   DECLARE_EXTENSION_FUNCTION("networkingPrivate.getVisibleNetworks",
@@ -132,10 +137,12 @@ class NetworkingPrivateGetVisibleNetworksFunction
  protected:
   virtual ~NetworkingPrivateGetVisibleNetworksFunction();
 
-  // SyncExtensionFunction overrides.
+  // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
  private:
+  void ResultCallback(const base::ListValue& network_list);
+
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateGetVisibleNetworksFunction);
 };
 

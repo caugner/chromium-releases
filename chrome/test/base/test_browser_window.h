@@ -49,6 +49,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void UpdateDevTools() OVERRIDE {}
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE {}
   virtual void SetStarredState(bool is_starred) OVERRIDE {}
+  virtual void SetTranslateIconToggled(bool is_lit) OVERRIDE {}
   virtual void OnActiveTabChanged(content::WebContents* old_contents,
                                   content::WebContents* new_contents,
                                   int index,
@@ -103,7 +104,8 @@ class TestBrowserWindow : public BrowserWindow {
                                   bool already_bookmarked) OVERRIDE {}
   virtual void ShowTranslateBubble(
       content::WebContents* contents,
-      TranslateBubbleModel::ViewState view_state) OVERRIDE {}
+      TranslateBubbleModel::ViewState view_state,
+      TranslateErrors::Type error_type) OVERRIDE {}
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
@@ -167,14 +169,15 @@ class TestBrowserWindow : public BrowserWindow {
     virtual void FocusLocation(bool select_all) OVERRIDE {}
     virtual void FocusSearch() OVERRIDE {}
     virtual void UpdateContentSettingsIcons() OVERRIDE {}
+    virtual void UpdateManagePasswordsIconAndBubble() OVERRIDE {}
     virtual void UpdatePageActions() OVERRIDE {}
     virtual void InvalidatePageActions() OVERRIDE {}
     virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE {}
     virtual void UpdateGeneratedCreditCardView() OVERRIDE {}
     virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE {}
     virtual void Revert() OVERRIDE {}
-    virtual const OmniboxView* GetLocationEntry() const OVERRIDE;
-    virtual OmniboxView* GetLocationEntry() OVERRIDE;
+    virtual const OmniboxView* GetOmniboxView() const OVERRIDE;
+    virtual OmniboxView* GetOmniboxView() OVERRIDE;
     virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
 
    private:

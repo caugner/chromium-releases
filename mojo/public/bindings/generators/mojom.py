@@ -1,4 +1,4 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,19 +17,20 @@ class Kind(object):
 
 
 # Initialize the set of primitive types. These can be accessed by clients.
-BOOL   = Kind('b')
-INT8   = Kind('i8')
-INT16  = Kind('i16')
-INT32  = Kind('i32')
-INT64  = Kind('i64')
-UINT8  = Kind('u8')
-UINT16 = Kind('u16')
-UINT32 = Kind('u32')
-UINT64 = Kind('u64')
-FLOAT  = Kind('f')
-DOUBLE = Kind('d')
-STRING = Kind('s')
-HANDLE = Kind('h')
+BOOL    = Kind('b')
+INT8    = Kind('i8')
+INT16   = Kind('i16')
+INT32   = Kind('i32')
+INT64   = Kind('i64')
+UINT8   = Kind('u8')
+UINT16  = Kind('u16')
+UINT32  = Kind('u32')
+UINT64  = Kind('u64')
+FLOAT   = Kind('f')
+DOUBLE  = Kind('d')
+STRING  = Kind('s')
+HANDLE  = Kind('h')
+MSGPIPE = Kind('h:m')
 
 
 # Collection of all Primitive types
@@ -46,7 +47,8 @@ PRIMITIVES = (
   FLOAT,
   DOUBLE,
   STRING,
-  HANDLE
+  HANDLE,
+  MSGPIPE
 )
 
 
@@ -104,14 +106,27 @@ class Method(object):
 
 
 class Interface(object):
-  def __init__(self, name = None):
+  def __init__(self, name = None, peer = None):
     self.name = name
+    self.peer = peer
     self.methods = []
 
   def AddMethod(self, name, ordinal = None):
     method = Method(name, ordinal)
     self.methods.append(method)
     return method;
+
+
+class EnumField(object):
+  def __init__(self, name = None, value = None):
+    self.name = name
+    self.value = value
+
+
+class Enum(object):
+  def __init__(self, name = None):
+    self.name = name
+    self.fields = []
 
 
 class Module(object):

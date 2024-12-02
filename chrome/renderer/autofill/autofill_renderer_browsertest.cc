@@ -4,8 +4,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/base/chrome_render_view_test.h"
+#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
-#include "components/autofill/core/common/autofill_messages.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -13,10 +13,10 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 
-using WebKit::WebDocument;
-using WebKit::WebFrame;
-using WebKit::WebInputElement;
-using WebKit::WebString;
+using blink::WebDocument;
+using blink::WebFrame;
+using blink::WebInputElement;
+using blink::WebString;
 
 namespace autofill {
 
@@ -57,19 +57,19 @@ TEST_F(ChromeRenderViewTest, SendForms) {
   FormFieldData expected;
 
   expected.name = ASCIIToUTF16("firstname");
-  expected.value = string16();
+  expected.value = base::string16();
   expected.form_control_type = "text";
   expected.max_length = WebInputElement::defaultMaxLength();
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, forms[0].fields[0]);
 
   expected.name = ASCIIToUTF16("middlename");
-  expected.value = string16();
+  expected.value = base::string16();
   expected.form_control_type = "text";
   expected.max_length = WebInputElement::defaultMaxLength();
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, forms[0].fields[1]);
 
   expected.name = ASCIIToUTF16("lastname");
-  expected.value = string16();
+  expected.value = base::string16();
   expected.form_control_type = "text";
   expected.autocomplete_attribute = "off";
   expected.max_length = WebInputElement::defaultMaxLength();
@@ -91,7 +91,7 @@ TEST_F(ChromeRenderViewTest, SendForms) {
 
   // Make sure to query for Autofill suggestions before selecting one.
   autofill_agent_->element_ = firstname;
-  autofill_agent_->QueryAutofillSuggestions(firstname, false);
+  autofill_agent_->QueryAutofillSuggestions(firstname, false, false);
 
   // Fill the form with a suggestion that contained a label.  Labeled items
   // indicate Autofill as opposed to Autocomplete.  We're testing this
@@ -113,13 +113,13 @@ TEST_F(ChromeRenderViewTest, SendForms) {
   ASSERT_EQ(3UL, form2.fields.size());
 
   expected.name = ASCIIToUTF16("firstname");
-  expected.value = string16();
+  expected.value = base::string16();
   expected.form_control_type = "text";
   expected.max_length = WebInputElement::defaultMaxLength();
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, form2.fields[0]);
 
   expected.name = ASCIIToUTF16("middlename");
-  expected.value = string16();
+  expected.value = base::string16();
   expected.form_control_type = "text";
   expected.max_length = WebInputElement::defaultMaxLength();
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, form2.fields[1]);

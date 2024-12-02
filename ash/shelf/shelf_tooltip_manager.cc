@@ -29,7 +29,7 @@ namespace internal {
 namespace {
 const int kTooltipTopBottomMargin = 3;
 const int kTooltipLeftRightMargin = 10;
-const int kTooltipAppearanceDelay = 200;  // msec
+const int kTooltipAppearanceDelay = 1000;  // msec
 const int kTooltipMinHeight = 29 - 2 * kTooltipTopBottomMargin;
 const SkColor kTooltipTextColor = SkColorSetRGB(0x22, 0x22, 0x22);
 
@@ -80,7 +80,7 @@ ShelfTooltipManager::ShelfTooltipBubble::ShelfTooltipBubble(
                                    kArrowOffsetLeftRight,
                                    kArrowOffsetTopBottom,
                                    kArrowOffsetLeftRight);
-  // Launcher items can have an asymmetrical border for spacing reasons.
+  // Shelf items can have an asymmetrical border for spacing reasons.
   // Adjust anchor location for this.
   if (anchor->border())
     insets += anchor->border()->GetInsets();

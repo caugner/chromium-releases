@@ -1260,8 +1260,8 @@ _FUNCTION_INFO = {
     # TODO(gman): remove this once client side caching works.
     'client_test': False,
   },
-  'BlitFramebufferEXT': {
-    'decoder_func': 'DoBlitFramebufferEXT',
+  'BlitFramebufferCHROMIUM': {
+    'decoder_func': 'DoBlitFramebufferCHROMIUM',
     'unit_test': False,
     'extension': True,
     'pepper_interface': 'FramebufferBlit',
@@ -1901,13 +1901,24 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glRenderbufferStorageEXT',
     'expectation': False,
   },
-  'RenderbufferStorageMultisampleEXT': {
-    'decoder_func': 'DoRenderbufferStorageMultisample',
-    'gl_test_func': 'glRenderbufferStorageMultisampleEXT',
+  'RenderbufferStorageMultisampleCHROMIUM': {
+    'cmd_comment':
+        '// GL_CHROMIUM_framebuffer_multisample\n',
+    'decoder_func': 'DoRenderbufferStorageMultisampleCHROMIUM',
+    'gl_test_func': 'glRenderbufferStorageMultisampleCHROMIUM',
     'expectation': False,
     'unit_test': False,
     'extension': True,
     'pepper_interface': 'FramebufferMultisample',
+  },
+  'RenderbufferStorageMultisampleEXT': {
+    'cmd_comment':
+        '// GL_EXT_multisampled_render_to_texture\n',
+    'decoder_func': 'DoRenderbufferStorageMultisampleEXT',
+    'gl_test_func': 'glRenderbufferStorageMultisampleEXT',
+    'expectation': False,
+    'unit_test': False,
+    'extension': True,
   },
   'ReadPixels': {
     'cmd_comment':
@@ -2470,6 +2481,12 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
   },
+  'DiscardBackbufferCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': True,
+    'extension': True,
+    'chromium': True,
+  },
 }
 
 
@@ -2859,17 +2876,18 @@ COMPILE_ASSERT(offsetof(%(cmd_name)s::Result, %(field_name)s) == %(offset)d,
 
   def WriteHandlerDeferReadWrite(self, func, file):
     """Writes the code to handle deferring reads or writes."""
-    defer_reads = func.GetInfo('defer_reads')
     defer_draws = func.GetInfo('defer_draws')
-    conditions = []
+    defer_reads = func.GetInfo('defer_reads')
+    if defer_draws or defer_reads:
+      file.Write("  error::Error error;\n")
     if defer_draws:
-      conditions.append('ShouldDeferDraws()');
+      file.Write("  error = WillAccessBoundFramebufferForDraw();\n")
+      file.Write("  if (error != error::kNoError)\n")
+      file.Write("    return error;\n")
     if defer_reads:
-      conditions.append('ShouldDeferReads()');
-    if not conditions:
-      return
-    file.Write("  if (%s)\n" % ' || '.join(conditions))
-    file.Write("    return error::kDeferCommandUntilLater;\n")
+      file.Write("  error = WillAccessBoundFramebufferForRead();\n")
+      file.Write("  if (error != error::kNoError)\n")
+      file.Write("    return error;\n")
 
   def WriteValidUnitTest(self, func, file, test, extra = {}):
     """Writes a valid unit test."""
@@ -4351,7 +4369,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
 """ % func.GetOriginalArgs()[1].name)
       file.Write("""  GPU_CLIENT_DCHECK_CODE_BLOCK({
     for (GLsizei i = 0; i < n; ++i) {
-      GPU_DCHECK(%s[i] != 0);
+      DCHECK(%s[i] != 0);
     }
   });
 """ % func.GetOriginalArgs()[1].name)
@@ -7164,7 +7182,7 @@ void ContextState::InitState() const {
       file.Write("    case GL_%s:\n" % capability['name'].upper())
       file.Write("      return enable_flags.%s;\n" % capability['name'])
     file.Write("""    default:
-      GPU_NOTREACHED();
+      NOTREACHED();
       return false;
   }
 }

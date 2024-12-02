@@ -251,6 +251,18 @@ bool CopyIdentifyingProperties(const base::DictionaryValue& service_properties,
   return success;
 }
 
+bool DoIdentifyingPropertiesMatch(const base::DictionaryValue& properties_a,
+                                  const base::DictionaryValue& properties_b) {
+  base::DictionaryValue identifying_a;
+  if (!CopyIdentifyingProperties(properties_a, &identifying_a))
+    return false;
+  base::DictionaryValue identifying_b;
+  if (!CopyIdentifyingProperties(properties_b, &identifying_b))
+    return false;
+
+  return identifying_a.Equals(&identifying_b);
+}
+
 }  // namespace shill_property_util
 
 namespace {
@@ -268,7 +280,8 @@ enum NetworkTypeBitFlag {
   kNetworkTypeWimax = 1 << 2,
   kNetworkTypeCellular = 1 << 3,
   kNetworkTypeVPN = 1 << 4,
-  kNetworkTypeEthernetEap = 1 << 5
+  kNetworkTypeEthernetEap = 1 << 5,
+  kNetworkTypeBluetooth = 1 << 6
 };
 
 struct ShillToBitFlagEntry {
@@ -280,7 +293,8 @@ struct ShillToBitFlagEntry {
   { shill::kTypeWifi, kNetworkTypeWifi },
   { shill::kTypeWimax, kNetworkTypeWimax },
   { shill::kTypeCellular, kNetworkTypeCellular },
-  { shill::kTypeVPN, kNetworkTypeVPN }
+  { shill::kTypeVPN, kNetworkTypeVPN },
+  { shill::kTypeBluetooth, kNetworkTypeBluetooth }
 };
 
 NetworkTypeBitFlag ShillNetworkTypeToFlag(const std::string& shill_type) {

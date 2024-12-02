@@ -193,9 +193,9 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
 
 // Returns a localized version of |visit_time| including a relative
 // indicator (e.g. today, yesterday).
-string16 getRelativeDateLocalized(const base::Time& visit_time) {
+base::string16 getRelativeDateLocalized(const base::Time& visit_time) {
   base::Time midnight = base::Time::Now().LocalMidnight();
-  string16 date_str = ui::TimeFormat::RelativeDate(visit_time, &midnight);
+  base::string16 date_str = ui::TimeFormat::RelativeDate(visit_time, &midnight);
   if (date_str.empty()) {
     date_str = base::TimeFormatFriendlyDate(visit_time);
   } else {
@@ -215,20 +215,6 @@ void normalizeMonths(base::Time::Exploded* exploded) {
     exploded->month += 12;
     exploded->year--;
   }
-}
-
-// Returns the URL of a query result value.
-bool GetResultTimeAndUrl(Value* result, base::Time* time, string16* url) {
-  DictionaryValue* result_dict;
-  double timestamp;
-
-  if (result->GetAsDictionary(&result_dict) &&
-      result_dict->GetDouble("time", &timestamp) &&
-      result_dict->GetString("url", url)) {
-    *time = base::Time::FromJsTime(timestamp);
-    return true;
-  }
-  return false;
 }
 
 // Returns true if |entry| represents a local visit that had no corresponding
@@ -277,9 +263,9 @@ void GetDeviceNameAndType(const ProfileSyncService* sync_service,
 
 BrowsingHistoryHandler::HistoryEntry::HistoryEntry(
     BrowsingHistoryHandler::HistoryEntry::EntryType entry_type,
-    const GURL& url, const string16& title, base::Time time,
+    const GURL& url, const base::string16& title, base::Time time,
     const std::string& client_id, bool is_search_result,
-    const string16& snippet, bool blocked_visit,
+    const base::string16& snippet, bool blocked_visit,
     const std::string& accept_languages) {
   this->entry_type = entry_type;
   this->url = url;
@@ -305,7 +291,7 @@ void BrowsingHistoryHandler::HistoryEntry::SetUrlAndTitle(
   result->SetString("url", url.spec());
 
   bool using_url_as_the_title = false;
-  string16 title_to_set(title);
+  base::string16 title_to_set(title);
   if (title.empty()) {
     using_url_as_the_title = true;
     title_to_set = UTF8ToUTF16(url.spec());
@@ -330,8 +316,14 @@ scoped_ptr<DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
     const ProfileSyncService* sync_service) const {
   scoped_ptr<DictionaryValue> result(new DictionaryValue());
   SetUrlAndTitle(result.get());
-  result->SetString("domain",
-                    net::IDNToUnicode(url.host(), accept_languages));
+
+  string16 domain = net::IDNToUnicode(url.host(), accept_languages);
+  // When the domain is empty, use the scheme instead. This allows for a
+  // sensible treatment of e.g. file: URLs when group by domain is on.
+  if (domain.empty())
+    domain = UTF8ToUTF16(url.scheme() + ":");
+
+  result->SetString("domain", domain);
   result->SetDouble("time", time.ToJsTime());
 
   // Pass the timestamps in a list.
@@ -352,7 +344,7 @@ scoped_ptr<DictionaryValue> BrowsingHistoryHandler::HistoryEntry::ToValue(
     result->SetString("snippet", snippet);
   } else {
     base::Time midnight = base::Time::Now().LocalMidnight();
-    string16 date_str = ui::TimeFormat::RelativeDate(time, &midnight);
+    base::string16 date_str = ui::TimeFormat::RelativeDate(time, &midnight);
     if (date_str.empty()) {
       date_str = base::TimeFormatFriendlyDate(time);
     } else {
@@ -448,7 +440,7 @@ void BrowsingHistoryHandler::WebHistoryTimeout() {
 }
 
 void BrowsingHistoryHandler::QueryHistory(
-    string16 search_text, const history::QueryOptions& options) {
+    base::string16 search_text, const history::QueryOptions& options) {
   Profile* profile = Profile::FromWebUI(web_ui());
 
   // Anything in-flight is invalid.
@@ -500,7 +492,7 @@ void BrowsingHistoryHandler::HandleQueryHistory(const ListValue* args) {
   //   returned.
   // - the maximum number of results to return (may be 0, meaning that there
   //   is no maximum).
-  string16 search_text = ExtractStringValue(args);
+  base::string16 search_text = ExtractStringValue(args);
   int offset;
   if (!args->GetInteger(1, &offset)) {
     NOTREACHED() << "Failed to convert argument 1. ";
@@ -554,7 +546,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const ListValue* args) {
   DCHECK(urls_to_be_deleted_.empty());
   for (ListValue::const_iterator it = args->begin(); it != args->end(); ++it) {
     DictionaryValue* deletion = NULL;
-    string16 url;
+    base::string16 url;
     ListValue* timestamps = NULL;
 
     // Each argument is a dictionary with properties "url" and "timestamps".
@@ -655,7 +647,7 @@ void BrowsingHistoryHandler::HandleClearBrowsingData(const ListValue* args) {
 }
 
 void BrowsingHistoryHandler::HandleRemoveBookmark(const ListValue* args) {
-  string16 url = ExtractStringValue(args);
+  base::string16 url = ExtractStringValue(args);
   Profile* profile = Profile::FromWebUI(web_ui());
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
   bookmark_utils::RemoveAllBookmarks(model, GURL(url));
@@ -755,7 +747,7 @@ void BrowsingHistoryHandler::ReturnResultsToFrontEnd() {
 }
 
 void BrowsingHistoryHandler::QueryComplete(
-    const string16& search_text,
+    const base::string16& search_text,
     const history::QueryOptions& options,
     HistoryService::Handle request_handle,
     history::QueryResults* results) {
@@ -799,7 +791,7 @@ void BrowsingHistoryHandler::QueryComplete(
 }
 
 void BrowsingHistoryHandler::WebHistoryQueryComplete(
-    const string16& search_text,
+    const base::string16& search_text,
     const history::QueryOptions& options,
     base::TimeTicks start_time,
     history::WebHistoryService::Request* request,
@@ -828,8 +820,8 @@ void BrowsingHistoryHandler::WebHistoryQueryComplete(
       const DictionaryValue* result = NULL;
       const ListValue* results = NULL;
       const ListValue* ids = NULL;
-      string16 url;
-      string16 title;
+      base::string16 url;
+      base::string16 title;
       base::Time visit_time;
 
       if (!(events->GetDictionary(i, &event) &&
@@ -873,7 +865,7 @@ void BrowsingHistoryHandler::WebHistoryQueryComplete(
                 time,
                 client_id,
                 !search_text.empty(),
-                string16(),
+                base::string16(),
                 /* blocked_visit */ false,
                 accept_languages));
       }
@@ -1007,7 +999,7 @@ HistoryUI::HistoryUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 }
 
 // static
-const GURL HistoryUI::GetHistoryURLWithSearchText(const string16& text) {
+const GURL HistoryUI::GetHistoryURLWithSearchText(const base::string16& text) {
   return GURL(std::string(chrome::kChromeUIHistoryURL) + "#q=" +
               net::EscapeQueryParamValue(UTF16ToUTF8(text), true));
 }

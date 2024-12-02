@@ -9,7 +9,6 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/google/google_url_tracker.h"
-#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -29,6 +28,7 @@ using content::WebContents;
 
 namespace {
 
+#if !defined(OS_ANDROID)
 bool FetchUsernameThroughSigninManager(Profile* profile, std::string* output) {
   // In an incognito window these services are not available.
   SigninManagerBase* signin_manager =
@@ -46,6 +46,7 @@ bool FetchUsernameThroughSigninManager(Profile* profile, std::string* output) {
   *output = signin_manager->GetAuthenticatedUsername();
   return true;
 }
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace
 
@@ -136,14 +137,6 @@ void AutoLoginPrompter::WebContentsDestroyed(WebContents* web_contents) {
 }
 
 void AutoLoginPrompter::AddInfoBarToWebContents() {
-  if (infobar_shown_)
-    return;
-
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents());
-  // |infobar_service| is NULL for WebContents hosted in WebDialog.
-  if (infobar_service) {
-    AutoLoginInfoBarDelegate::Create(infobar_service, params_);
-    infobar_shown_ = true;
-  }
+  if (!infobar_shown_)
+    infobar_shown_ = AutoLoginInfoBarDelegate::Create(web_contents(), params_);
 }

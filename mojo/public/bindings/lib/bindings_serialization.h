@@ -39,7 +39,7 @@ bool ValidatePointer(const void* ptr, const Message& message);
 // Handles are encoded as indices into a vector of handles. These functions
 // manipulate the value of |handle|, mapping it to and from an index.
 void EncodeHandle(Handle* handle, std::vector<Handle>* handles);
-bool DecodeHandle(Handle* handle, const std::vector<Handle>& handles);
+bool DecodeHandle(Handle* handle, std::vector<Handle>* handles);
 
 // All objects (structs and arrays) support the following operations:
 //  - computing size
@@ -61,13 +61,19 @@ inline T* Clone(const T* obj, Buffer* buf) {
 }
 
 template <typename T>
+inline void CloseHandles(T* obj) {
+  if (obj)
+    ObjectTraits<T>::CloseHandles(obj);
+}
+
+template <typename T>
 inline void EncodePointersAndHandles(T* obj,
                                      std::vector<Handle>* handles) {
   ObjectTraits<T>::EncodePointersAndHandles(obj, handles);
 }
 
 template <typename T>
-inline bool DecodePointersAndHandles(T* obj, const Message& message) {
+inline bool DecodePointersAndHandles(T* obj, Message* message) {
   return ObjectTraits<T>::DecodePointersAndHandles(obj, message);
 }
 
@@ -82,10 +88,10 @@ inline void Encode(T* obj, std::vector<Handle>* handles) {
 }
 
 template <typename T>
-inline bool Decode(T* obj, const Message& message) {
+inline bool Decode(T* obj, Message* message) {
   DecodePointer(&obj->offset, &obj->ptr);
   if (obj->ptr) {
-    if (!ValidatePointer(obj->ptr, message))
+    if (!ValidatePointer(obj->ptr, *message))
       return false;
     if (!DecodePointersAndHandles(obj->ptr, message))
       return false;
@@ -94,9 +100,9 @@ inline bool Decode(T* obj, const Message& message) {
 }
 
 // What follows is code to support the ObjectTraits<> specialization of
-// Array<T>. There are two interesting cases: arrays of primitives and arrays
-// of objects. Arrays of objects are represented as arrays of pointers to
-// objects.
+// Array_Data<T>. There are two interesting cases: arrays of primitives and
+// arrays of objects. Arrays of objects are represented as arrays of pointers
+// to objects.
 
 template <typename T>
 struct ArrayHelper {
@@ -118,7 +124,7 @@ struct ArrayHelper {
   }
   static bool DecodePointersAndHandles(const ArrayHeader* header,
                                        ElementType* elements,
-                                       const Message& message) {
+                                       Message* message) {
     return true;
   }
 };
@@ -142,7 +148,7 @@ struct ArrayHelper<Handle> {
                                        std::vector<Handle>* handles);
   static bool DecodePointersAndHandles(const ArrayHeader* header,
                                        ElementType* elements,
-                                       const Message& message);
+                                       Message* message);
 };
 
 template <typename P>
@@ -172,7 +178,7 @@ struct ArrayHelper<P*> {
   }
   static bool DecodePointersAndHandles(const ArrayHeader* header,
                                        ElementType* elements,
-                                       const Message& message) {
+                                       Message* message) {
     for (uint32_t i = 0; i < header->num_elements; ++i) {
       if (!Decode(&elements[i], message))
         return false;
@@ -182,32 +188,36 @@ struct ArrayHelper<P*> {
 };
 
 template <typename T>
-class ObjectTraits<Array<T> > {
+class ObjectTraits<Array_Data<T> > {
  public:
-  static size_t ComputeSizeOf(const Array<T>* array) {
+  static size_t ComputeSizeOf(const Array_Data<T>* array) {
     return Align(array->header_.num_bytes) +
         ArrayHelper<T>::ComputeSizeOfElements(&array->header_,
                                               array->storage());
   }
 
-  static Array<T>* Clone(const Array<T>* array, Buffer* buf) {
-    Array<T>* clone = Array<T>::New(buf, array->header_.num_elements);
+  static Array_Data<T>* Clone(const Array_Data<T>* array, Buffer* buf) {
+    Array_Data<T>* clone = Array_Data<T>::New(array->header_.num_elements, buf);
     memcpy(clone->storage(),
            array->storage(),
-           array->header_.num_bytes - sizeof(Array<T>));
+           array->header_.num_bytes - sizeof(Array_Data<T>));
 
     ArrayHelper<T>::CloneElements(&clone->header_, clone->storage(), buf);
     return clone;
   }
 
-  static void EncodePointersAndHandles(Array<T>* array,
+  static void CloseHandles(Array_Data<T>* array) {
+    // TODO(darin): Implement!
+  }
+
+  static void EncodePointersAndHandles(Array_Data<T>* array,
                                        std::vector<Handle>* handles) {
     ArrayHelper<T>::EncodePointersAndHandles(&array->header_, array->storage(),
                                              handles);
   }
 
-  static bool DecodePointersAndHandles(Array<T>* array,
-                                       const Message& message) {
+  static bool DecodePointersAndHandles(Array_Data<T>* array,
+                                       Message* message) {
     return ArrayHelper<T>::DecodePointersAndHandles(&array->header_,
                                                     array->storage(),
                                                     message);

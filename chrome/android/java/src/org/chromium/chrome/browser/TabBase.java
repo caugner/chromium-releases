@@ -1,18 +1,24 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chrome.browser;
 
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.view.ContextMenu;
 import android.view.View;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ObserverList;
-import org.chromium.chrome.browser.RepostFormWarningDialog;
+import org.chromium.chrome.browser.contextmenu.ChromeContextMenuItemDelegate;
+import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
+import org.chromium.chrome.browser.contextmenu.ContextMenuParams;
+import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
+import org.chromium.chrome.browser.contextmenu.ContextMenuPopulatorWrapper;
+import org.chromium.chrome.browser.contextmenu.EmptyChromeContextMenuItemDelegate;
 import org.chromium.chrome.browser.infobar.AutoLoginProcessor;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -24,9 +30,9 @@ import org.chromium.content.browser.NavigationClient;
 import org.chromium.content.browser.NavigationHistory;
 import org.chromium.content.browser.PageInfo;
 import org.chromium.content.browser.WebContentsObserverAndroid;
-import org.chromium.ui.WindowAndroid;
+import org.chromium.ui.base.Clipboard;
+import org.chromium.ui.base.WindowAndroid;
 
-import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -46,7 +52,7 @@ public abstract class TabBase implements NavigationClient {
     /** Used for automatically generating tab ids. */
     private static final AtomicInteger sIdCounter = new AtomicInteger();
 
-    private int mNativeTabAndroid;
+    private long mNativeTabAndroid;
 
     /** Unique id of this tab (within its container). */
     private final int mId;
@@ -96,6 +102,37 @@ public abstract class TabBase implements NavigationClient {
     private TabBaseChromeWebContentsDelegateAndroid mWebContentsDelegate;
 
     /**
+     * A default {@link ChromeContextMenuItemDelegate} that supports some of the context menu
+     * functionality.
+     */
+    protected class TabBaseChromeContextMenuItemDelegate
+            extends EmptyChromeContextMenuItemDelegate {
+        private final Clipboard mClipboard;
+
+        /**
+         * Builds a {@link TabBaseChromeContextMenuItemDelegate} instance.
+         */
+        public TabBaseChromeContextMenuItemDelegate() {
+            mClipboard = new Clipboard(getApplicationContext());
+        }
+
+        @Override
+        public boolean isIncognito() {
+            return mIncognito;
+        }
+
+        @Override
+        public void onSaveToClipboard(String text, boolean isUrl) {
+            mClipboard.setText(text, text);
+        }
+
+        @Override
+        public void onSaveImageToClipboard(String url) {
+            mClipboard.setHTMLText("<img src=\"" + url + "\">", url, url);
+        }
+    }
+
+    /**
      * A basic {@link ChromeWebContentsDelegateAndroid} that forwards some calls to the registered
      * {@link TabObserver}s.  Meant to be overridden by subclasses.
      */
@@ -127,15 +164,27 @@ public abstract class TabBase implements NavigationClient {
                             contentViewCore.continuePendingReload();
                         }
                     });
-            Activity activity = (Activity)mContext;
+            Activity activity = (Activity) mContext;
             warningDialog.show(activity.getFragmentManager(), null);
         }
 
         @Override
         public void toggleFullscreenModeForTab(boolean enableFullscreen) {
-            for (TabObserver observer: mObservers) {
+            for (TabObserver observer : mObservers) {
                 observer.onToggleFullscreenMode(TabBase.this, enableFullscreen);
             }
+        }
+    }
+
+    private class TabBaseContextMenuPopulator extends ContextMenuPopulatorWrapper {
+        public TabBaseContextMenuPopulator(ContextMenuPopulator populator) {
+            super(populator);
+        }
+
+        @Override
+        public void buildContextMenu(ContextMenu menu, Context context, ContextMenuParams params) {
+            super.buildContextMenu(menu, context, params);
+            for (TabObserver observer : mObservers) observer.onContextMenuShown(TabBase.this, menu);
         }
     }
 
@@ -312,7 +361,6 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
-     *
      * @return The infobar container.
      */
     public final InfoBarContainer getInfoBarContainer() {
@@ -326,11 +374,29 @@ public abstract class TabBase implements NavigationClient {
     protected abstract AutoLoginProcessor createAutoLoginProcessor();
 
     /**
+     * Prints the current page.
+     *
+     * @return Whether the printing process is started successfully.
+     **/
+    public boolean print() {
+        assert mNativeTabAndroid != 0;
+        return nativePrint(mNativeTabAndroid);
+    }
+
+    /**
      * Reloads the current page content if it is a {@link ContentView}.
      */
     public void reload() {
         // TODO(dtrainor): Should we try to rebuild the ContentView if it's frozen?
-        if (mContentViewCore != null) mContentViewCore.reload();
+        if (mContentViewCore != null) mContentViewCore.reload(true);
+    }
+
+    /**
+     * Reloads the current page content if it is a {@link ContentView}.
+     * This version ignores the cache and reloads from the network.
+     */
+    public void reloadIgnoringCache() {
+        if (mContentViewCore != null) mContentViewCore.reloadIgnoringCache(true);
     }
 
     /** Stop the current navigation. */
@@ -456,7 +522,8 @@ public abstract class TabBase implements NavigationClient {
     /**
      * @return An {@link ObserverList.RewindableIterator} instance that points to all of
      *         the current {@link TabObserver}s on this class.  Note that calling
-     *         {@link Iterator#remove()} will throw an {@link UnsupportedOperationException}.
+     *         {@link java.util.Iterator#remove()} will throw an
+     *         {@link UnsupportedOperationException}.
      */
     protected ObserverList.RewindableIterator<TabObserver> getTabObservers() {
         return mObservers.rewindableIterator();
@@ -497,10 +564,11 @@ public abstract class TabBase implements NavigationClient {
      */
     protected void showNativePage(NativePage nativePage) {
         if (mNativePage == nativePage) return;
-        destroyNativePageInternal();
+        NativePage previousNativePage = mNativePage;
         mNativePage = nativePage;
         pushNativePageStateToNavigationEntry();
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
+        destroyNativePageInternal(previousNativePage);
     }
 
     /**
@@ -508,8 +576,10 @@ public abstract class TabBase implements NavigationClient {
      */
     protected void showRenderedPage() {
         if (mNativePage == null) return;
-        destroyNativePageInternal();
+        NativePage previousNativePage = mNativePage;
+        mNativePage = null;
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
+        destroyNativePageInternal(previousNativePage);
     }
 
     /**
@@ -534,8 +604,10 @@ public abstract class TabBase implements NavigationClient {
      *
      * @param nativeWebContents The native web contents pointer.
      */
-    protected void initContentView(int nativeWebContents) {
-        destroyNativePageInternal();
+    protected void initContentView(long nativeWebContents) {
+        NativePage previousNativePage = mNativePage;
+        mNativePage = null;
+        destroyNativePageInternal(previousNativePage);
 
         mContentView = ContentView.newInstance(mContext, nativeWebContents, getWindowAndroid());
 
@@ -547,7 +619,8 @@ public abstract class TabBase implements NavigationClient {
 
         assert mNativeTabAndroid != 0;
         nativeInitWebContents(
-                mNativeTabAndroid, mIncognito, mContentViewCore, mWebContentsDelegate);
+                mNativeTabAndroid, mIncognito, mContentViewCore, mWebContentsDelegate,
+                new TabBaseContextMenuPopulator(createContextMenuPopulator()));
 
         // In the case where restoring a Tab or showing a prerendered one we already have a
         // valid infobar container, no need to recreate one.
@@ -570,7 +643,9 @@ public abstract class TabBase implements NavigationClient {
     public void destroy() {
         for (TabObserver observer : mObservers) observer.onDestroyed(this);
 
-        destroyNativePageInternal();
+        NativePage currentNativePage = mNativePage;
+        mNativePage = null;
+        destroyNativePageInternal(currentNativePage);
         destroyContentView(true);
         if (mInfoBarContainer != null) {
             mInfoBarContainer.destroy();
@@ -602,6 +677,15 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
+     * @return The bitmap of the favicon scaled to 16x16dp. null if no favicon
+     *         is specified or it requires the default favicon.
+     *         TODO(bauerb): Upstream implementation.
+     */
+    public Bitmap getFavicon() {
+        return null;
+    }
+
+    /**
      * Restores the tab if it is frozen or crashed.
      * @return true iff tab restore was triggered.
      */
@@ -610,11 +694,11 @@ public abstract class TabBase implements NavigationClient {
         return false;
     }
 
-    private void destroyNativePageInternal() {
-        if (mNativePage == null) return;
+    private void destroyNativePageInternal(NativePage nativePage) {
+        if (nativePage == null) return;
+        assert getPageInfo() != nativePage : "Attempting to destroy active page.";
 
-        mNativePage.destroy();
-        mNativePage = null;
+        nativePage.destroy();
     }
 
     /**
@@ -658,6 +742,14 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
+     * A helper method to allow subclasses to build their own menu populator.
+     * @return An instance of a {@link ContextMenuPopulator}.
+     */
+    protected ContextMenuPopulator createContextMenuPopulator() {
+        return new ChromeContextMenuPopulator(new TabBaseChromeContextMenuItemDelegate());
+    }
+
+    /**
      * @return The {@link WindowAndroid} associated with this {@link TabBase}.
      */
     protected WindowAndroid getWindowAndroid() {
@@ -672,22 +764,6 @@ public abstract class TabBase implements NavigationClient {
     }
 
     /**
-     * Launches all currently blocked popups that were spawned by the content of this tab.
-     */
-    protected void launchBlockedPopups() {
-        assert mContentViewCore != null;
-
-        nativeLaunchBlockedPopups(mNativeTabAndroid);
-    }
-
-    /**
-     * Called when the number of blocked popups has changed.
-     * @param numPopups The current number of blocked popups.
-     */
-    @CalledByNative
-    protected void onBlockedPopupsStateChanged(int numPopups) { }
-
-    /**
      * Called when the favicon of the content this tab represents changes.
      */
     @CalledByNative
@@ -699,19 +775,23 @@ public abstract class TabBase implements NavigationClient {
      * @return The native pointer representing the native side of this {@link TabBase} object.
      */
     @CalledByNative
-    protected int getNativePtr() {
+    protected long getNativePtr() {
         return mNativeTabAndroid;
     }
 
     /** This is currently called when committing a pre-rendered page. */
     @CalledByNative
-    private void swapWebContents(final int newWebContents) {
+    private void swapWebContents(final long newWebContents) {
         if (mContentViewCore != null) mContentViewCore.onHide();
         destroyContentView(false);
+        NativePage previousNativePage = mNativePage;
+        mNativePage = null;
         initContentView(newWebContents);
         mContentViewCore.onShow();
         mContentViewCore.attachImeAdapter();
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
+        destroyNativePageInternal(previousNativePage);
+        for (TabObserver observer : mObservers) observer.onWebContentsSwapped(this);
     }
 
     @CalledByNative
@@ -721,13 +801,13 @@ public abstract class TabBase implements NavigationClient {
     }
 
     @CalledByNative
-    private void setNativePtr(int nativePtr) {
+    private void setNativePtr(long nativePtr) {
         assert mNativeTabAndroid == 0;
         mNativeTabAndroid = nativePtr;
     }
 
     @CalledByNative
-    private int getNativeInfoBarContainer() {
+    private long getNativeInfoBarContainer() {
         return getInfoBarContainer().getNative();
     }
 
@@ -773,12 +853,13 @@ public abstract class TabBase implements NavigationClient {
         sIdCounter.addAndGet(diff);
     }
 
-    private native void nativeInitWebContents(int nativeTabAndroid, boolean incognito,
-            ContentViewCore contentViewCore, ChromeWebContentsDelegateAndroid delegate);
-    private native void nativeDestroyWebContents(int nativeTabAndroid, boolean deleteNative);
-    private native Profile nativeGetProfileAndroid(int nativeTabAndroid);
-    private native void nativeLaunchBlockedPopups(int nativeTabAndroid);
-    private native int nativeGetSecurityLevel(int nativeTabAndroid);
-    private native void nativeSetActiveNavigationEntryTitleForUrl(int nativeTabAndroid, String url,
+    private native void nativeInitWebContents(long nativeTabAndroid, boolean incognito,
+            ContentViewCore contentViewCore, ChromeWebContentsDelegateAndroid delegate,
+            ContextMenuPopulator contextMenuPopulator);
+    private native void nativeDestroyWebContents(long nativeTabAndroid, boolean deleteNative);
+    private native Profile nativeGetProfileAndroid(long nativeTabAndroid);
+    private native int nativeGetSecurityLevel(long nativeTabAndroid);
+    private native void nativeSetActiveNavigationEntryTitleForUrl(long nativeTabAndroid, String url,
             String title);
+    private native boolean nativePrint(long nativeTabAndroid);
 }

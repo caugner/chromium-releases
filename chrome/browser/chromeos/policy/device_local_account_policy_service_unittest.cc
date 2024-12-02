@@ -20,20 +20,23 @@
 #include "base/test/test_simple_task_runner.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_provider.h"
+#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
-#include "chrome/browser/policy/cloud/cloud_policy_client.h"
-#include "chrome/browser/policy/cloud/cloud_policy_constants.h"
-#include "chrome/browser/policy/cloud/cloud_policy_service.h"
-#include "chrome/browser/policy/cloud/mock_device_management_service.h"
-#include "chrome/browser/policy/cloud/policy_builder.h"
-#include "chrome/browser/policy/external_data_fetcher.h"
-#include "chrome/browser/policy/mock_configuration_policy_provider.h"
-#include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
 #include "chrome/common/chrome_paths.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/dbus/power_policy_controller.h"
+#include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/cloud_policy_service.h"
+#include "components/policy/core/common/cloud/mock_device_management_service.h"
+#include "components/policy/core/common/cloud/policy_builder.h"
+#include "components/policy/core/common/external_data_fetcher.h"
+#include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/policy/core/common/schema_registry.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "net/url_request/url_request_test_util.h"
 #include "policy/policy_constants.h"
 #include "policy/proto/cloud_policy.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -168,6 +171,7 @@ void DeviceLocalAccountPolicyServiceTestBase::SetUp() {
 }
 
 void DeviceLocalAccountPolicyServiceTestBase::TearDown() {
+  service_->Shutdown();
   service_.reset();
   extension_cache_task_runner_->RunUntilIdle();
   chromeos::DeviceSettingsTestBase::TearDown();
@@ -179,7 +183,11 @@ void DeviceLocalAccountPolicyServiceTestBase::CreatePolicyService() {
       &device_settings_service_,
       &cros_settings_,
       loop_.message_loop_proxy(),
-      extension_cache_task_runner_));
+      extension_cache_task_runner_,
+      loop_.message_loop_proxy(),
+      loop_.message_loop_proxy(),
+      new net::TestURLRequestContextGetter(
+          base::MessageLoop::current()->message_loop_proxy())));
 }
 
 void DeviceLocalAccountPolicyServiceTestBase::
@@ -411,7 +419,7 @@ TEST_F(DeviceLocalAccountPolicyServiceTest, FetchPolicy) {
   response.mutable_policy_response()->add_response()->CopyFrom(
       device_local_account_policy_.policy());
   EXPECT_CALL(mock_device_management_service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH))
+              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
       .WillOnce(mock_device_management_service_.SucceedJob(response));
   EXPECT_CALL(mock_device_management_service_,
               StartJob(dm_protocol::kValueRequestPolicy,
@@ -443,13 +451,6 @@ TEST_F(DeviceLocalAccountPolicyServiceTest, FetchPolicy) {
   EXPECT_TRUE(expected_policy_map_.Equals(
       broker->core()->store()->policy_map()));
   EXPECT_TRUE(service_->IsPolicyAvailableForUser(account_1_user_id_));
-
-  EXPECT_CALL(service_observer_, OnPolicyUpdated(account_1_user_id_))
-      .Times(0);
-  service_->Disconnect();
-  EXPECT_FALSE(broker->core()->client());
-  Mock::VerifyAndClearExpectations(&service_observer_);
-  EXPECT_TRUE(service_->IsPolicyAvailableForUser(account_1_user_id_));
 }
 
 TEST_F(DeviceLocalAccountPolicyServiceTest, RefreshPolicy) {
@@ -468,7 +469,7 @@ TEST_F(DeviceLocalAccountPolicyServiceTest, RefreshPolicy) {
   em::DeviceManagementResponse response;
   response.mutable_policy_response()->add_response()->CopyFrom(
       device_local_account_policy_.policy());
-  EXPECT_CALL(mock_device_management_service_, CreateJob(_))
+  EXPECT_CALL(mock_device_management_service_, CreateJob(_, _))
       .WillOnce(mock_device_management_service_.SucceedJob(response));
   EXPECT_CALL(mock_device_management_service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(*this, OnRefreshDone(true)).Times(1);
@@ -517,7 +518,7 @@ void DeviceLocalAccountPolicyExtensionCacheTest::SetUp() {
   DeviceLocalAccountPolicyServiceTestBase::SetUp();
   ASSERT_TRUE(cache_root_dir_.CreateUniqueTempDir());
   cache_root_dir_override_.reset(new base::ScopedPathOverride(
-      chromeos::DIR_DEVICE_LOCAL_ACCOUNT_CACHE,
+      chromeos::DIR_DEVICE_LOCAL_ACCOUNT_EXTENSIONS,
       cache_root_dir_.path()));
 
   cache_dir_1_ = GetCacheDirectoryForAccountID(kAccount1);
@@ -548,12 +549,12 @@ TEST_F(DeviceLocalAccountPolicyExtensionCacheTest, Startup) {
       base::StringPrintf("%s-%s.crx", kExtensionID, kExtensionVersion);
 
   // Create and pre-populate a cache directory for account 1.
-  EXPECT_TRUE(file_util::CreateDirectory(cache_dir_1_));
+  EXPECT_TRUE(base::CreateDirectory(cache_dir_1_));
   EXPECT_TRUE(CopyFile(source_crx_file,
                        cache_dir_1_.Append(target_crx_file_name)));
 
   // Create and pre-populate a cache directory for account 3.
-  EXPECT_TRUE(file_util::CreateDirectory(cache_dir_3_));
+  EXPECT_TRUE(base::CreateDirectory(cache_dir_3_));
   EXPECT_TRUE(CopyFile(source_crx_file,
                        cache_dir_3_.Append(target_crx_file_name)));
 
@@ -776,6 +777,7 @@ class DeviceLocalAccountPolicyProviderTest
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
 
+  SchemaRegistry schema_registry_;
   scoped_ptr<DeviceLocalAccountPolicyProvider> provider_;
   MockConfigurationPolicyObserver provider_observer_;
 
@@ -793,7 +795,7 @@ DeviceLocalAccountPolicyProviderTest::DeviceLocalAccountPolicyProviderTest() {
 
 void DeviceLocalAccountPolicyProviderTest::SetUp() {
   DeviceLocalAccountPolicyServiceTestBase::SetUp();
-  provider_->Init();
+  provider_->Init(&schema_registry_);
   provider_->AddObserver(&provider_observer_);
 }
 
@@ -914,7 +916,7 @@ TEST_F(DeviceLocalAccountPolicyProviderTest, RefreshPolicies) {
 
   // Bring up the cloud connection. The refresh scheduler may fire refreshes at
   // this point which are not relevant for the test.
-  EXPECT_CALL(mock_device_management_service_, CreateJob(_))
+  EXPECT_CALL(mock_device_management_service_, CreateJob(_, _))
       .WillRepeatedly(
           mock_device_management_service_.FailJob(DM_STATUS_REQUEST_FAILED));
   EXPECT_CALL(mock_device_management_service_, StartJob(_, _, _, _, _, _, _))
@@ -926,7 +928,7 @@ TEST_F(DeviceLocalAccountPolicyProviderTest, RefreshPolicies) {
   // No callbacks until the refresh completes.
   EXPECT_CALL(provider_observer_, OnUpdatePolicy(_)).Times(0);
   MockDeviceManagementJob* request_job;
-  EXPECT_CALL(mock_device_management_service_, CreateJob(_))
+  EXPECT_CALL(mock_device_management_service_, CreateJob(_, _))
       .WillOnce(mock_device_management_service_.CreateAsyncJob(&request_job));
   EXPECT_CALL(mock_device_management_service_, StartJob(_, _, _, _, _, _, _));
   provider_->RefreshPolicies();

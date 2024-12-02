@@ -27,7 +27,7 @@
   },
   "content_scripts": {
     "documentation": "content_scripts.html",
-    "example": {}
+    "example": [{}]
   },
   "content_security_policy": {
     "documentation": "contentSecurityPolicy.html",
@@ -97,7 +97,7 @@
   },
   "name": {
     "documentation": "manifest/name.html#name",
-    "example": "My {{title}}",
+    "example": "My {{platform}}",
     "level": "required"
   },
   "offline_enabled": {
@@ -138,6 +138,12 @@
   "short_name": {
     "documentation": "manifest/name.html#short_name",
     "example": "Short Name"
+  },
+  "storage": {
+    "documentation": "manifest/storage.html",
+    "example": {
+      "managed_schema": "schema.json"
+    }
   },
   "theme": {
     "documentation": "themes.html",

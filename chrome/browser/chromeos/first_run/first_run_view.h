@@ -31,10 +31,14 @@ class FirstRunView : public views::View,
   FirstRunView();
   void Init(content::BrowserContext* context);
   FirstRunActor* GetActor();
- private:
+
   // Overriden from views::View.
   virtual void Layout() OVERRIDE;
+  virtual void RequestFocus() OVERRIDE;
 
+  content::WebContents* GetWebContents();
+
+ private:
   // Overriden from content::WebContentsDelegate.
   virtual bool HandleContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;

@@ -573,7 +573,7 @@ void PanelView::HandlePanelKeyboardEvent(
   ui::Accelerator accelerator(
       static_cast<ui::KeyboardCode>(event.windowsKeyCode),
       content::GetModifiersFromNativeWebKeyboardEvent(event));
-  if (event.type == WebKit::WebInputEvent::KeyUp)
+  if (event.type == blink::WebInputEvent::KeyUp)
     accelerator.set_type(ui::ET_KEY_RELEASED);
   focus_manager->ProcessAccelerator(accelerator);
 }
@@ -757,7 +757,7 @@ bool PanelView::CanMaximize() const {
   return false;
 }
 
-string16 PanelView::GetWindowTitle() const {
+base::string16 PanelView::GetWindowTitle() const {
   return panel_->GetWindowTitle();
 }
 

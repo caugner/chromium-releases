@@ -13,15 +13,19 @@
 #include "android_webview/browser/net/init_native_callback.h"
 #include "android_webview/common/aw_switches.h"
 #include "base/command_line.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/cache_type.h"
 #include "net/cookies/cookie_store.h"
+#include "net/dns/mapped_host_resolver.h"
 #include "net/http/http_cache.h"
+#include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
@@ -36,6 +40,38 @@ namespace android_webview {
 
 namespace {
 
+void ApplyCmdlineOverridesToURLRequestContextBuilder(
+    net::URLRequestContextBuilder* builder) {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kHostResolverRules)) {
+    // If hostname remappings were specified on the command-line, layer these
+    // rules on top of the real host resolver. This allows forwarding all
+    // requests through a designated test server.
+    scoped_ptr<net::MappedHostResolver> host_resolver(
+        new net::MappedHostResolver(
+            net::HostResolver::CreateDefaultResolver(NULL)));
+    host_resolver->SetRulesFromString(
+        command_line.GetSwitchValueASCII(switches::kHostResolverRules));
+    builder->set_host_resolver(host_resolver.release());
+  }
+}
+
+void ApplyCmdlineOverridesToNetworkSessionParams(
+    net::HttpNetworkSession::Params* params) {
+  int value;
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
+    base::StringToInt(command_line.GetSwitchValueASCII(
+        switches::kTestingFixedHttpPort), &value);
+    params->testing_fixed_http_port = value;
+  }
+  if (command_line.HasSwitch(switches::kTestingFixedHttpsPort)) {
+    base::StringToInt(command_line.GetSwitchValueASCII(
+        switches::kTestingFixedHttpsPort), &value);
+    params->testing_fixed_https_port = value;
+  }
+}
+
 void PopulateNetworkSessionParams(
     net::URLRequestContext* context,
     net::HttpNetworkSession::Params* params) {
@@ -49,6 +85,7 @@ void PopulateNetworkSessionParams(
   params->network_delegate = context->network_delegate();
   params->http_server_properties = context->http_server_properties();
   params->net_log = context->net_log();
+  ApplyCmdlineOverridesToNetworkSessionParams(params);
 }
 
 scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
@@ -147,6 +184,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   builder.set_proxy_config_service(proxy_config_service_.release());
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
       AwContentBrowserClient::GetAcceptLangsImpl()));
+  ApplyCmdlineOverridesToURLRequestContextBuilder(&builder);
 
   url_request_context_.reset(builder.Build());
   // TODO(mnaganov): Fix URLRequestContextBuilder to use proper threads.
@@ -159,13 +197,14 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   }
   PopulateNetworkSessionParams(url_request_context_.get(),
                                &network_session_params);
+
   net::HttpCache* main_cache = new net::HttpCache(
       network_session_params,
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE,
           cache_type,
           partition_path_.Append(FILE_PATH_LITERAL("Cache")),
-          10 * 1024 * 1024,  // 10M
+          20 * 1024 * 1024,  // 20M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
@@ -173,6 +212,10 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
 
   job_factory_ = CreateJobFactory(&protocol_handlers_);
   url_request_context_->set_job_factory(job_factory_.get());
+
+  // TODO(sgurun) remove once crbug.com/329681 is fixed. Should be
+  // called only once.
+  net::HttpStreamFactory::EnableNpnSpdy31();
 }
 
 net::URLRequestContext* AwURLRequestContextGetter::GetURLRequestContext() {

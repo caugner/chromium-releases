@@ -63,7 +63,8 @@ std::string GetFormattedIdString(const std::string& data_store_id) {
 }
 
 // Helper function to get device label from storage information.
-string16 GetDeviceLabelFromStorageInfo(const MtpStorageInfo& storage_info) {
+base::string16 GetDeviceLabelFromStorageInfo(
+    const MtpStorageInfo& storage_info) {
   std::string device_label;
   const std::string& vendor_name = storage_info.vendor();
   device_label = vendor_name;
@@ -95,7 +96,7 @@ string16 GetDeviceLabelFromStorageInfo(const MtpStorageInfo& storage_info) {
 void GetStorageInfo(const std::string& storage_name,
                     device::MediaTransferProtocolManager* mtp_manager,
                     std::string* id,
-                    string16* label,
+                    base::string16* label,
                     std::string* location) {
   DCHECK(!storage_name.empty());
   const MtpStorageInfo* storage_info =
@@ -187,7 +188,7 @@ void MediaTransferProtocolDeviceObserverLinux::StorageChanged(
   // New storage is attached.
   if (is_attached) {
     std::string device_id;
-    string16 device_name;
+    base::string16 device_name;
     std::string location;
     get_storage_info_func_(storage_name, mtp_manager_,
                            &device_id, &device_name, &location);
@@ -201,7 +202,7 @@ void MediaTransferProtocolDeviceObserverLinux::StorageChanged(
     DCHECK(!ContainsKey(storage_map_, location));
 
     StorageInfo storage_info(device_id, device_name, location, device_name,
-                             string16(), string16(), 0);
+                             base::string16(), base::string16(), 0);
     storage_map_[location] = storage_info;
     notifications_->ProcessAttach(storage_info);
   } else {

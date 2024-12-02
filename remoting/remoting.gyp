@@ -275,7 +275,7 @@
             '../google_apis/google_apis.gyp:google_apis',
             '../ipc/ipc.gyp:ipc',
             '../third_party/webrtc/modules/modules.gyp:desktop_capture',
-            '../ui/ui.gyp:keycode_converter',
+            '../ui/events/events.gyp:dom4_keycode_converter',
           ],
           'defines': [
             'VERSION=<(version_full)',
@@ -313,6 +313,7 @@
             'host/clipboard_x11.cc',
             'host/config_file_watcher.cc',
             'host/config_file_watcher.h',
+            'host/config_watcher.h',
             'host/constants_mac.cc',
             'host/constants_mac.h',
             'host/continue_window.cc',
@@ -329,6 +330,10 @@
             'host/desktop_session_connector.h',
             'host/desktop_session_proxy.cc',
             'host/desktop_session_proxy.h',
+            'host/desktop_shape_tracker.h',
+            'host/desktop_shape_tracker_mac.cc',
+            'host/desktop_shape_tracker_win.cc',
+            'host/desktop_shape_tracker_x11.cc',
             'host/disconnect_window_aura.cc',
             'host/disconnect_window_gtk.cc',
             'host/disconnect_window_mac.h',
@@ -338,18 +343,18 @@
             'host/dns_blackhole_checker.h',
             'host/heartbeat_sender.cc',
             'host/heartbeat_sender.h',
-            'host/host_status_sender.cc',
-            'host/host_status_sender.h',
             'host/host_change_notification_listener.cc',
             'host/host_change_notification_listener.h',
             'host/host_config.cc',
             'host/host_config.h',
-            'host/host_exit_codes.h',
             'host/host_exit_codes.cc',
+            'host/host_exit_codes.h',
             'host/host_secret.cc',
             'host/host_secret.h',
             'host/host_status_monitor.h',
             'host/host_status_observer.h',
+            'host/host_status_sender.cc',
+            'host/host_status_sender.h',
             'host/host_window.h',
             'host/host_window_proxy.cc',
             'host/host_window_proxy.h',
@@ -436,6 +441,8 @@
             'host/usage_stats_consent.h',
             'host/usage_stats_consent_mac.cc',
             'host/usage_stats_consent_win.cc',
+            'host/username.cc',
+            'host/username.h',
             'host/video_scheduler.cc',
             'host/video_scheduler.h',
             'host/win/com_security.cc',
@@ -604,8 +611,6 @@
             'host/setup/daemon_controller_delegate_win.h',
             'host/setup/daemon_installer_win.cc',
             'host/setup/daemon_installer_win.h',
-            'host/setup/host_starter.cc',
-            'host/setup/host_starter.h',
             'host/setup/me2me_native_messaging_host.cc',
             'host/setup/me2me_native_messaging_host.h',
             'host/setup/oauth_client.cc',
@@ -728,14 +733,8 @@
               'msvs_settings': {
                 'VCManifestTool': {
                   'EmbedManifest': 'true',
-                },
-                'VCLinkerTool': {
-                  'AdditionalOptions': [
-                    "\"/manifestdependency:type='win32' "
-                        "name='Microsoft.Windows.Common-Controls' "
-                        "version='6.0.0.0' "
-                        "processorArchitecture='*' "
-                        "publicKeyToken='6595b64144ccf1df' language='*'\"",
+                  'AdditionalManifestFiles': [
+                    'host/win/common-controls.manifest',
                   ],
                 },
               },
@@ -754,15 +753,42 @@
             'remoting_host_event_logger',
             'remoting_host_logging',
             'remoting_infoplist_strings',
-            'remoting_host_setup_base',
             'remoting_jingle_glue',
             'remoting_resources',
+          ],
+          'defines': [
+            'VERSION=<(version_full)',
           ],
           'sources': [
             'host/it2me/it2me_host.cc',
             'host/it2me/it2me_host.h',
+            'host/it2me/it2me_native_messaging_host.cc',
+            'host/it2me/it2me_native_messaging_host.h',
           ],
         },  # end of target 'remoting_it2me_host_static'
+        {
+          'target_name': 'remoting_it2me_native_messaging_host',
+          'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'dependencies': [
+            '../base/base.gyp:base',
+            'remoting_base',
+            'remoting_host',
+            'remoting_jingle_glue',
+            'remoting_it2me_host_static',
+            'remoting_native_messaging_base',
+          ],
+          'sources': [
+            'host/it2me/it2me_native_messaging_host_main.cc',
+          ],
+          'conditions': [
+            ['OS=="linux" and linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        },  # end of target 'remoting_it2me_native_messaging_host'
         {
           'target_name': 'remoting_infoplist_strings',
           'type': 'none',
@@ -1104,6 +1130,8 @@
             'remoting_host_setup_base',
           ],
           'sources': [
+            'host/setup/host_starter.cc',
+            'host/setup/host_starter.h',
             'host/setup/start_host.cc',
           ],
           'conditions': [
@@ -1443,44 +1471,6 @@
             },
           ],
         },  # end of target 'remoting_lib_rc'
-        {
-          'target_name': 'remoting_configurer',
-          'type': 'executable',
-          'defines': [
-            '_ATL_NO_EXCEPTIONS',
-          ],
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../crypto/crypto.gyp:crypto',
-            'remoting_host',
-            'remoting_host_setup_base',
-          ],
-          'sources': [
-            'host/branding.cc',
-            'host/setup/win/host_configurer.cc',
-            'host/setup/win/host_configurer.rc',
-            'host/setup/win/host_configurer_window.cc',
-            'host/setup/win/host_configurer_window.h',
-            'host/setup/win/host_configurer_resource.h',
-            'host/setup/win/load_string_from_resource.cc',
-            'host/setup/win/load_string_from_resource.h',
-            'host/setup/win/start_host_window.cc',
-            'host/setup/win/start_host_window.h',
-          ],
-          'msvs_settings': {
-            'VCLinkerTool': {
-              'AdditionalOptions': [
-                "\"/manifestdependency:type='win32' "
-                    "name='Microsoft.Windows.Common-Controls' "
-                    "version='6.0.0.0' "
-                    "processorArchitecture='*' "
-                    "publicKeyToken='6595b64144ccf1df' language='*'\"",
-              ],
-              # 2 == /SUBSYSTEM:WINDOWS
-              'SubSystem': '2',
-            },
-          },
-        },  # end of target 'remoting_configurer'
         # The only difference between |remoting_console.exe| and
         # |remoting_host.exe| is that the former is a console application.
         # |remoting_console.exe| is used for debugging purposes.
@@ -1560,6 +1550,7 @@
             'host/chromoting_messages.h',
             'host/config_file_watcher.cc',
             'host/config_file_watcher.h',
+            'host/config_watcher.h',
             'host/daemon_process.cc',
             'host/daemon_process.h',
             'host/daemon_process_win.cc',
@@ -1608,6 +1599,9 @@
           'msvs_settings': {
             'VCManifestTool': {
               'EmbedManifest': 'true',
+              'AdditionalManifestFiles': [
+                'host/win/common-controls.manifest',
+              ],
             },
             'VCLinkerTool': {
               'AdditionalDependencies': [
@@ -1618,12 +1612,6 @@
                 'wtsapi32.lib',
               ],
               'AdditionalOptions': [
-                "\"/manifestdependency:type='win32' "
-                    "name='Microsoft.Windows.Common-Controls' "
-                    "version='6.0.0.0' "
-                    "processorArchitecture='*' "
-                    "publicKeyToken='6595b64144ccf1df' language='*'\"",
-
                 # Export the proxy/stub entry points. Note that the generated
                 # routines have 'Ps' prefix to avoid conflicts with our own
                 # DllMain().
@@ -1929,6 +1917,23 @@
       ],  # end of 'targets'
     }],  # 'OS=="android"'
 
+    ['OS=="android" and gtest_target_type=="shared_library"', {
+      'targets': [
+        {
+          'target_name': 'remoting_unittests_apk',
+          'type': 'none',
+          'dependencies': [
+            'remoting_unittests',
+          ],
+          'variables': {
+            'test_suite_name': 'remoting_unittests',
+            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)remoting_unittests<(SHARED_LIB_SUFFIX)',
+          },
+          'includes': [ '../build/apk_test.gypi' ],
+        },
+      ],
+    }],  # 'OS=="android" and gtest_target_type=="shared_library"'
+
     # The host installation is generated only if WiX is available. If
     # component build is used the produced installation will not work due to
     # missing DLLs. We build it anyway to make sure the GYP scripts are executed
@@ -2104,8 +2109,8 @@
         'remoting_jingle_glue',
         '../net/net.gyp:net',
         '../ppapi/ppapi.gyp:ppapi_cpp_objects',
-        '../skia/skia.gyp:skia',
         '../third_party/webrtc/modules/modules.gyp:desktop_capture',
+        '../ui/events/events.gyp:dom4_keycode_converter',
       ],
       'sources': [
         'client/plugin/chromoting_instance.cc',
@@ -2143,9 +2148,13 @@
             'client/plugin/normalizing_input_filter_cros.cc',
           ],
         }],
+        [ 'OS=="android"', {
+          'sources/': [
+            ['exclude', '^client/plugin/'],
+          ],
+        }],
       ],
     },  # end of target 'remoting_client_plugin'
-
     {
       'target_name': 'remoting_host_event_logger',
       'type': 'static_library',
@@ -2469,6 +2478,11 @@
             '-x', '<(copy_output_dir)/.',
             '<@(remoting_locales)',
           ],
+          # Without this, the /. in the -x command above fails, but only in VS
+          # builds (because VS puts the command in to a batch file and then
+          # the normalization and substitution of "...\Release\" cause the
+          # trailing " to be escaped.
+          'msvs_cygwin_shell': 1,
         }
       ],
       'includes': [ '../build/grit_target.gypi' ],
@@ -2481,11 +2495,9 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-        '../ui/events/events.gyp:events',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/ui.gyp:ui',
         '../net/net.gyp:net',
-        '../skia/skia.gyp:skia',
         '../third_party/libvpx/libvpx.gyp:libvpx',
         '../third_party/libyuv/libyuv.gyp:libyuv',
         '../third_party/opus/opus.gyp:opus',
@@ -2500,7 +2512,6 @@
       'export_dependent_settings': [
         '../base/base.gyp:base',
         '../net/net.gyp:net',
-        '../skia/skia.gyp:skia',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
       ],
@@ -2756,8 +2767,6 @@
         'protocol/ssl_hmac_channel_authenticator.h',
         'protocol/transport.cc',
         'protocol/transport.h',
-        'protocol/transport_config.cc',
-        'protocol/transport_config.h',
         'protocol/util.cc',
         'protocol/util.h',
         'protocol/third_party_authenticator_base.cc',
@@ -2779,7 +2788,7 @@
     # Remoting unit tests
     {
       'target_name': 'remoting_unittests',
-      'type': 'executable',
+      'type': '<(gtest_target_type)',
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -2789,7 +2798,6 @@
         '../ppapi/ppapi.gyp:ppapi_cpp',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../ui/events/events.gyp:events',
         '../ui/gfx/gfx.gyp:gfx',
         '../ui/ui.gyp:ui',
         'remoting_base',
@@ -2799,6 +2807,7 @@
         'remoting_host',
         'remoting_host_event_logger',
         'remoting_host_setup_base',
+        'remoting_it2me_host_static',
         'remoting_jingle_glue',
         'remoting_native_messaging_base',
         'remoting_protocol',
@@ -2852,6 +2861,7 @@
         'host/desktop_process_unittest.cc',
         'host/desktop_session.cc',
         'host/desktop_session.h',
+        'host/desktop_shape_tracker_unittest.cc',
         'host/desktop_session_agent.cc',
         'host/desktop_session_agent.h',
         'host/heartbeat_sender_unittest.cc',
@@ -2861,6 +2871,7 @@
         'host/host_mock_objects.h',
         'host/host_status_monitor_fake.h',
         'host/ipc_desktop_environment_unittest.cc',
+        'host/it2me/it2me_native_messaging_host_unittest.cc',
         'host/json_host_config_unittest.cc',
         'host/linux/x_server_clipboard_unittest.cc',
         'host/local_input_monitor_unittest.cc',
@@ -2976,6 +2987,11 @@
             '<@(remoting_webapp_js_files)',
           ],
         }],
+        ['OS=="android" and gtest_target_type=="shared_library"', {
+          'dependencies': [
+            '../testing/android/native_test.gyp:native_test_native_code',
+          ],
+        }],
         [ '(OS!="linux" or chromeos==0)', {
           'sources!': [
             'client/plugin/normalizing_input_filter_cros_unittest.cc',
@@ -2985,11 +3001,13 @@
           'dependencies!': [
             'remoting_host',
             'remoting_host_setup_base',
+            'remoting_it2me_host_static',
             'remoting_native_messaging_base',
           ],
           'sources/': [
-            ['exclude', 'codec/*'],
-            ['exclude', 'host/*'],
+            ['exclude', '^codec/'],
+            ['exclude', '^host/'],
+            ['exclude', '^base/resources_unittest\\.cc$'],
           ]
         }],
         ['toolkit_uses_gtk == 1', {

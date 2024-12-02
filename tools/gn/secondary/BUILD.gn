@@ -3,11 +3,13 @@
 # found in the LICENSE file.
 
 gyp_file = "root.gyp"
+external = true
 
 group("root") {
   deps = [
     "//base(//build/toolchain/nacl:x86_newlib)",
     "//chrome",
+    "//components/onc:onc_component",
     "//crypto",
     "//device/usb:device_usb",
     "//ipc",

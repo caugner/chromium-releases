@@ -67,17 +67,6 @@ void DisableShowProfileSwitcherTrialIfNecessary() {
     trial->Disable();
 }
 
-void SetupLowLatencyFlashAudioFieldTrial() {
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial(
-          content::kLowLatencyFlashAudioFieldTrialName, 100, "Standard",
-          2013, 9, 1, base::FieldTrial::SESSION_RANDOMIZED, NULL));
-
-  // Trial is enabled for dev / beta / canary users only.
-  if (chrome::VersionInfo::GetChannel() != chrome::VersionInfo::CHANNEL_STABLE)
-    trial->AppendGroup(content::kLowLatencyFlashAudioFieldTrialEnabledName, 25);
-}
-
 void SetupPreReadFieldTrial() {
   // The chrome executable will have set (or not) an environment variable with
   // the group name into which this client belongs.
@@ -127,13 +116,12 @@ void SetupPreReadFieldTrial() {
 void SetupDesktopFieldTrials(const CommandLine& parsed_command_line,
                              const base::Time& install_time,
                              PrefService* local_state) {
-  prerender::ConfigurePrefetchAndPrerender(parsed_command_line);
+  prerender::ConfigurePrerender(parsed_command_line);
   AutoLaunchChromeFieldTrial();
   OmniboxFieldTrial::ActivateStaticTrials();
   SetupInfiniteCacheFieldTrial();
   DisableShowProfileSwitcherTrialIfNecessary();
   SetupShowAppLauncherPromoFieldTrial(local_state);
-  SetupLowLatencyFlashAudioFieldTrial();
   SetupPreReadFieldTrial();
 }
 

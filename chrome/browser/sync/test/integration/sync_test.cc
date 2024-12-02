@@ -31,7 +31,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/sync/profile_sync_service_harness.h"
+#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -48,7 +48,6 @@
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
-#include "net/http/http_status_code.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
@@ -58,7 +57,6 @@
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_status.h"
 #include "sync/engine/sync_scheduler_impl.h"
 #include "sync/notifier/p2p_invalidator.h"
 #include "sync/protocol/sync.pb.h"
@@ -141,7 +139,8 @@ void SyncTest::SetUp() {
     username_ = cl->GetSwitchValueASCII(switches::kSyncUserForTest);
     password_ = cl->GetSwitchValueASCII(switches::kSyncPasswordForTest);
   } else {
-    SetupMockGaiaResponses();
+    username_ = "user@gmail.com";
+    password_ = "password";
   }
 
   if (!cl->HasSwitch(switches::kSyncServiceURL) &&
@@ -177,6 +176,11 @@ void SyncTest::SetUp() {
 #if defined(OS_MACOSX)
   Encryptor::UseMockKeychain(true);
 #endif
+
+  // Start up a sync test server if one is needed and setup mock gaia responses.
+  // Note: This must be done prior to the call to SetupClients() because we want
+  // the mock gaia responses to be available before GaiaUrls is initialized.
+  SetUpTestServerIfRequired();
 
   // Yield control back to the InProcessBrowserTest framework.
   InProcessBrowserTest::SetUp();
@@ -224,7 +228,7 @@ Profile* SyncTest::MakeProfile(const base::FilePath::StringType name) {
   path = path.Append(name);
 
   if (!base::PathExists(path))
-    CHECK(file_util::CreateDirectory(path));
+    CHECK(base::CreateDirectory(path));
 
   Profile* profile =
       Profile::CreateProfile(path, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
@@ -273,9 +277,6 @@ bool SyncTest::SetupClients() {
     LOG(FATAL) << "num_clients_ incorrectly initialized.";
   if (!profiles_.empty() || !browsers_.empty() || !clients_.empty())
     LOG(FATAL) << "SetupClients() has already been called.";
-
-  // Start up a sync test server if one is needed.
-  SetUpTestServerIfRequired();
 
   // Create the required number of sync profiles, browsers and clients.
   profiles_.resize(num_clients_);
@@ -423,30 +424,28 @@ void SyncTest::ReadPasswordFile() {
 }
 
 void SyncTest::SetupMockGaiaResponses() {
-  username_ = "user@gmail.com";
-  password_ = "password";
   factory_.reset(new net::URLFetcherImplFactory());
   fake_factory_.reset(new net::FakeURLFetcherFactory(factory_.get()));
   fake_factory_->SetFakeResponse(
-      GaiaUrls::GetInstance()->client_login_url(),
-      "SID=sid\nLSID=lsid",
-      net::HTTP_OK);
-  fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->get_user_info_url(),
       "email=user@gmail.com\ndisplayEmail=user@gmail.com",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->issue_auth_token_url(),
       "auth",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
   fake_factory_->SetFakeResponse(
       GURL(GoogleURLTracker::kSearchDomainCheckURL),
       ".google.com",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->client_login_to_oauth2_url(),
       "some_response",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->oauth2_token_url(),
       "{"
@@ -455,11 +454,33 @@ void SyncTest::SetupMockGaiaResponses() {
       "  \"expires_in\": 3600,"
       "  \"token_type\": \"Bearer\""
       "}",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->oauth_user_info_url(),
+      "{"
+      "  \"id\": \"12345\""
+      "}",
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->oauth1_login_url(),
       "SID=sid\nLSID=lsid\nAuth=auth_token",
-      net::HTTP_OK);
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->oauth2_revoke_url(),
+      "",
+      net::HTTP_OK,
+      net::URLRequestStatus::SUCCESS);
+}
+
+void SyncTest::SetOAuth2TokenResponse(const std::string& response_data,
+                                      net::HttpStatusCode response_code,
+                                      net::URLRequestStatus::Status status) {
+  ASSERT_TRUE(NULL != fake_factory_.get());
+  fake_factory_->SetFakeResponse(GaiaUrls::GetInstance()->oauth2_token_url(),
+                                 response_data, response_code, status);
 }
 
 void SyncTest::ClearMockGaiaResponses() {
@@ -481,6 +502,7 @@ void SyncTest::SetUpTestServerIfRequired() {
   if (server_type_ == LOCAL_PYTHON_SERVER) {
     if (!SetUpLocalPythonTestServer())
       LOG(FATAL) << "Failed to set up local python sync and XMPP servers";
+    SetupMockGaiaResponses();
   } else if (server_type_ == LOCAL_LIVE_SERVER) {
     // Using mock gaia credentials requires the use of a mock XMPP server.
     if (username_ == "user@gmail.com" && !SetUpLocalPythonTestServer())
@@ -624,12 +646,12 @@ void SyncTest::DisableNetwork(Profile* profile) {
   net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
 }
 
-bool SyncTest::EnableEncryption(int index, syncer::ModelType type) {
-  return GetClient(index)->EnableEncryptionForType(type);
+bool SyncTest::EnableEncryption(int index) {
+  return GetClient(index)->EnableEncryption();
 }
 
-bool SyncTest::IsEncrypted(int index, syncer::ModelType type) {
-  return GetClient(index)->IsTypeEncrypted(type);
+bool SyncTest::IsEncryptionComplete(int index) {
+  return GetClient(index)->IsEncryptionComplete();
 }
 
 bool SyncTest::AwaitQuiescence() {
@@ -731,9 +753,11 @@ void SyncTest::TriggerTransientError() {
                 GetTitle()));
 }
 
-void SyncTest::TriggerAuthError() {
+void SyncTest::TriggerAuthState(PythonServerAuthState auth_state) {
   ASSERT_TRUE(ServerSupportsErrorTriggering());
   std::string path = "chromiumsync/cred";
+  path.append(auth_state == AUTHENTICATED_TRUE ? "?valid=True" :
+                                                 "?valid=False");
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
 }
 
@@ -813,7 +837,7 @@ void SyncTest::TriggerSyncError(const syncer::SyncProtocolError& error,
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   std::string output = UTF16ToASCII(
       browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
-  ASSERT_TRUE(output.find("SetError: 200") != string16::npos);
+  ASSERT_TRUE(output.find("SetError: 200") != base::string16::npos);
 }
 
 void SyncTest::TriggerCreateSyncedBookmarks() {

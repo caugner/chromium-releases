@@ -34,7 +34,6 @@ LayerTreePixelTest::~LayerTreePixelTest() {}
 
 scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface(
     bool fallback) {
-  gfx::Vector2d viewport_offset(20, 10);
   gfx::Size surface_expansion_size(40, 60);
   scoped_ptr<PixelTestOutputSurface> output_surface;
 
@@ -62,17 +61,30 @@ scoped_ptr<OutputSurface> LayerTreePixelTest::CreateOutputSurface(
     }
   }
 
-  output_surface->set_viewport_offset(viewport_offset);
   output_surface->set_surface_expansion_size(surface_expansion_size);
   return output_surface.PassAs<OutputSurface>();
 }
 
-scoped_refptr<cc::ContextProvider>
-LayerTreePixelTest::OffscreenContextProvider() {
+scoped_refptr<ContextProvider> LayerTreePixelTest::OffscreenContextProvider() {
   scoped_refptr<webkit::gpu::ContextProviderInProcess> provider =
       webkit::gpu::ContextProviderInProcess::CreateOffscreen();
   CHECK(provider.get());
   return provider;
+}
+
+void LayerTreePixelTest::CommitCompleteOnThread(LayerTreeHostImpl* impl) {
+  LayerTreeImpl* commit_tree =
+      impl->pending_tree() ? impl->pending_tree() : impl->active_tree();
+  if (commit_tree->source_frame_number() != 0)
+    return;
+
+  gfx::Rect viewport = impl->DeviceViewport();
+  // The viewport has a 0,0 origin without external influence.
+  EXPECT_EQ(gfx::Point().ToString(), viewport.origin().ToString());
+  // Be that influence!
+  viewport += gfx::Vector2d(20, 10);
+  impl->SetExternalDrawConstraints(gfx::Transform(), viewport, viewport, true);
+  EXPECT_EQ(viewport.ToString(), impl->DeviceViewport().ToString());
 }
 
 scoped_ptr<CopyOutputRequest> LayerTreePixelTest::CreateCopyOutputRequest() {
@@ -95,7 +107,7 @@ void LayerTreePixelTest::BeginTest() {
 
 void LayerTreePixelTest::AfterTest() {
   base::FilePath test_data_dir;
-  EXPECT_TRUE(PathService::Get(cc::DIR_TEST_DATA, &test_data_dir));
+  EXPECT_TRUE(PathService::Get(CCPaths::DIR_TEST_DATA, &test_data_dir));
   base::FilePath ref_file_path = test_data_dir.Append(ref_file_);
 
   CommandLine* cmd = CommandLine::ForCurrentProcess();
@@ -223,9 +235,9 @@ scoped_ptr<SkBitmap> LayerTreePixelTest::CopyTextureMailboxToBitmap(
     return scoped_ptr<SkBitmap>();
 
   using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
-  scoped_ptr<WebKit::WebGraphicsContext3D> context3d(
+  scoped_ptr<blink::WebGraphicsContext3D> context3d(
       WebGraphicsContext3DInProcessCommandBufferImpl::CreateOffscreenContext(
-          WebKit::WebGraphicsContext3D::Attributes()));
+          blink::WebGraphicsContext3D::Attributes()));
 
   EXPECT_TRUE(context3d->makeContextCurrent());
 
@@ -293,7 +305,7 @@ scoped_ptr<SkBitmap> LayerTreePixelTest::CopyTextureMailboxToBitmap(
 }
 
 void LayerTreePixelTest::ReleaseTextureMailbox(
-    scoped_ptr<WebKit::WebGraphicsContext3D> context3d,
+    scoped_ptr<blink::WebGraphicsContext3D> context3d,
     uint32 texture,
     uint32 sync_point,
     bool lost_resource) {
@@ -314,9 +326,9 @@ void LayerTreePixelTest::CopyBitmapToTextureMailboxAsTexture(
   CHECK(gfx::InitializeGLBindings(gfx::kGLImplementationOSMesaGL));
 
   using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
-  scoped_ptr<WebKit::WebGraphicsContext3D> context3d(
+  scoped_ptr<blink::WebGraphicsContext3D> context3d(
       WebGraphicsContext3DInProcessCommandBufferImpl::CreateOffscreenContext(
-          WebKit::WebGraphicsContext3D::Attributes()));
+          blink::WebGraphicsContext3D::Attributes()));
 
   EXPECT_TRUE(context3d->makeContextCurrent());
 

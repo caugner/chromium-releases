@@ -17,10 +17,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/dom_action_types.h"
-#include "chrome/common/extensions/extension_builder.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "extensions/common/extension_builder.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -117,7 +117,7 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
     ASSERT_EQ(4U, i->size());
     scoped_refptr<Action> action = i->at(0);
     ASSERT_EQ("XMLHttpRequest.open", action->api_name());
-    ASSERT_EQ("[\"POST\",\"\\u003Carg_url\\u003E\"]",
+    ASSERT_EQ("[\"POST\",\"\\u003Carg_url>\"]",
               ActivityLogPolicy::Util::Serialize(action->args()));
     ASSERT_EQ("http://api.google.com/", action->arg_url().spec());
     // Test that the dom_verb field was changed to XHR (from METHOD).  This
@@ -131,7 +131,7 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
 
     action = i->at(1);
     ASSERT_EQ("XMLHttpRequest.open", action->api_name());
-    ASSERT_EQ("[\"POST\",\"\\u003Carg_url\\u003E\"]",
+    ASSERT_EQ("[\"POST\",\"\\u003Carg_url>\"]",
               ActivityLogPolicy::Util::Serialize(action->args()));
     ASSERT_EQ("http://www.google.com/api/", action->arg_url().spec());
 
@@ -143,7 +143,7 @@ class ActivityLogTest : public ChromeRenderViewHostTestHarness {
 
     action = i->at(3);
     ASSERT_EQ("windows.create", action->api_name());
-    ASSERT_EQ("[{\"url\":\"\\u003Carg_url\\u003E\"}]",
+    ASSERT_EQ("[{\"url\":\"\\u003Carg_url>\"}]",
               ActivityLogPolicy::Util::Serialize(action->args()));
     ASSERT_EQ("http://www.google.co.uk/", action->arg_url().spec());
   }

@@ -6,9 +6,9 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "grit/generated_resources.h"
 
@@ -23,7 +23,7 @@ PageActionHandler::PageActionHandler() {
 PageActionHandler::~PageActionHandler() {
 }
 
-bool PageActionHandler::Parse(Extension* extension, string16* error) {
+bool PageActionHandler::Parse(Extension* extension, base::string16* error) {
   scoped_ptr<ActionInfo> page_action_info;
   const base::DictionaryValue* page_action_value = NULL;
 

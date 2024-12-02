@@ -31,7 +31,9 @@ Operation::Operation(base::WeakPtr<OperationManager> manager,
                      const std::string& storage_unit_id)
     : manager_(manager),
       extension_id_(extension_id),
-      storage_unit_id_(storage_unit_id) {
+      storage_unit_id_(storage_unit_id),
+      stage_(image_writer_api::STAGE_UNKNOWN),
+      progress_(0) {
 }
 
 Operation::~Operation() {
@@ -49,6 +51,14 @@ void Operation::Cancel() {
 
 void Operation::Abort() {
   Error(error::kAborted);
+}
+
+int Operation::GetProgress() {
+  return progress_;
+}
+
+image_writer_api::Stage Operation::GetStage() {
+  return stage_;
 }
 
 void Operation::Error(const std::string& error_message) {
@@ -179,17 +189,17 @@ void Operation::UnzipStart(scoped_ptr<base::FilePath> zip_file) {
   SetStage(image_writer_api::STAGE_UNZIP);
 
   base::FilePath tmp_dir;
-  if (!file_util::CreateTemporaryDirInDir(zip_file->DirName(),
-                                          FILE_PATH_LITERAL("image_writer"),
-                                          &tmp_dir)) {
-    Error(error::kTempDir);
+  if (!base::CreateTemporaryDirInDir(zip_file->DirName(),
+                                     FILE_PATH_LITERAL("image_writer"),
+                                     &tmp_dir)) {
+    Error(error::kTempDirError);
     return;
   }
 
   AddCleanUpFunction(base::Bind(&RemoveTempDirectory, tmp_dir));
 
   if (!zip::Unzip(*zip_file, tmp_dir)) {
-    Error(error::kUnzip);
+    Error(error::kUnzipGenericError);
     return;
   }
 
@@ -201,12 +211,12 @@ void Operation::UnzipStart(scoped_ptr<base::FilePath> zip_file) {
       new base::FilePath(file_enumerator.Next()));
 
   if (unzipped_file->empty()) {
-    Error(error::kEmptyUnzip);
+    Error(error::kUnzipInvalidArchive);
     return;
   }
 
   if (!file_enumerator.Next().empty()) {
-    Error(error::kMultiFileZip);
+    Error(error::kUnzipInvalidArchive);
     return;
   }
 
@@ -238,7 +248,7 @@ void Operation::GetMD5SumOfFile(
       new image_writer_utils::ImageReader());
 
   if (!reader->Open(*file_path)) {
-    Error(error::kOpenImage);
+    Error(error::kImageOpenError);
     return;
   }
   if (file_size <= 0) {
@@ -302,7 +312,7 @@ void Operation::MD5Chunk(
   } else if (len == 0) {
     if (bytes_processed + len < bytes_total) {
       reader->Close();
-      Error(error::kPrematureEndOfFile);
+      Error(error::kHashReadError);
     } else {
       base::MD5Digest digest;
       base::MD5Final(&digest, &md5_context_);
@@ -312,7 +322,7 @@ void Operation::MD5Chunk(
     }
   } else {  // len < 0
     reader->Close();
-    Error(error::kReadImage);
+    Error(error::kHashReadError);
   }
 }
 

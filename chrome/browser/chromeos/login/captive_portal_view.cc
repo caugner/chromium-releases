@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/login/captive_portal_view.h"
 
-#include "ash/wm/custom_frame_view_ash.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/captive_portal/captive_portal_detector.h"
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
@@ -49,8 +48,8 @@ ui::ModalType CaptivePortalView::GetModalType() const {
   return ui::MODAL_TYPE_SYSTEM;
 }
 
-string16 CaptivePortalView::GetWindowTitle() const {
-  string16 network_name;
+base::string16 CaptivePortalView::GetWindowTitle() const {
+  base::string16 network_name;
   const NetworkState* default_network =
       NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
   std::string default_network_name =
@@ -72,15 +71,7 @@ bool CaptivePortalView::ShouldShowWindowTitle() const {
 
 views::NonClientFrameView* CaptivePortalView::CreateNonClientFrameView(
     views::Widget* widget) {
-  if (views::DialogDelegate::UseNewStyle()) {
-    const bool force_opaque_border = false;
-    return views::DialogDelegate::CreateNewStyleFrameView(widget,
-                                                          force_opaque_border);
-  }
-  ash::CustomFrameViewAsh* frame = new ash::CustomFrameViewAsh(widget);
-  // Always use "active" look.
-  frame->SetInactiveRenderingDisabled(true);
-  return frame;
+  return views::DialogDelegate::CreateDialogFrameView(widget);
 }
 
 void CaptivePortalView::NavigationStateChanged(

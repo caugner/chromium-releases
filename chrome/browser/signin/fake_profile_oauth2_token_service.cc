@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/signin_account_id_helper.h"
 
 FakeProfileOAuth2TokenService::PendingRequest::PendingRequest() {
 }
@@ -19,14 +20,22 @@ BrowserContextKeyedService* FakeProfileOAuth2TokenService::Build(
 }
 
 FakeProfileOAuth2TokenService::FakeProfileOAuth2TokenService() {
+  SigninAccountIdHelper::SetDisableForTest(true);
 }
 
 FakeProfileOAuth2TokenService::~FakeProfileOAuth2TokenService() {
+  SigninAccountIdHelper::SetDisableForTest(false);
 }
 
 bool FakeProfileOAuth2TokenService::RefreshTokenIsAvailable(
     const std::string& account_id) {
   return !GetRefreshToken(account_id).empty();
+}
+
+void FakeProfileOAuth2TokenService::UpdateCredentials(
+    const std::string& account_id,
+    const std::string& refresh_token) {
+  IssueRefreshTokenForUser(account_id, refresh_token);
 }
 
 void FakeProfileOAuth2TokenService::IssueRefreshToken(
@@ -104,6 +113,11 @@ FakeProfileOAuth2TokenService::GetRequestContext() {
   return NULL;
 }
 
+void FakeProfileOAuth2TokenService::RevokeCredentialsOnServer(
+    const std::string& refresh_token) {
+  // Don't try to contact server in tests.
+}
+
 std::vector<FakeProfileOAuth2TokenService::PendingRequest>
 FakeProfileOAuth2TokenService::GetPendingRequests() {
   std::vector<PendingRequest> valid_requests;
@@ -129,4 +143,12 @@ void FakeProfileOAuth2TokenService::FetchOAuth2Token(
   pending_request.scopes = scopes;
   pending_request.request = request->AsWeakPtr();
   pending_requests_.push_back(pending_request);
+}
+
+void FakeProfileOAuth2TokenService::InvalidateOAuth2Token(
+    const std::string& account_id,
+    const std::string& client_id,
+    const ScopeSet& scopes,
+    const std::string& access_token) {
+  // Do nothing, as we don't have a cache from which to remove the token.
 }

@@ -96,13 +96,13 @@ int SigninGlobalError::MenuItemCommandID() {
   return IDC_SHOW_SIGNIN_ERROR;
 }
 
-string16 SigninGlobalError::MenuItemLabel() {
+base::string16 SigninGlobalError::MenuItemLabel() {
   if (account_id_.empty() ||
       auth_error_.state() == GoogleServiceAuthError::NONE ||
       auth_error_.state() == GoogleServiceAuthError::CONNECTION_FAILED) {
     // If the user isn't signed in, or there's no auth error worth elevating to
     // the user, don't display any menu item.
-    return string16();
+    return base::string16();
   } else {
     // There's an auth error the user should know about - notify the user.
     return l10n_util::GetStringUTF16(IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM);
@@ -139,12 +139,12 @@ bool SigninGlobalError::HasBubbleView() {
   return !GetBubbleViewMessages().empty();
 }
 
-string16 SigninGlobalError::GetBubbleViewTitle() {
+base::string16 SigninGlobalError::GetBubbleViewTitle() {
   return l10n_util::GetStringUTF16(IDS_SIGNIN_ERROR_BUBBLE_VIEW_TITLE);
 }
 
-std::vector<string16> SigninGlobalError::GetBubbleViewMessages() {
-  std::vector<string16> messages;
+std::vector<base::string16> SigninGlobalError::GetBubbleViewMessages() {
+  std::vector<base::string16> messages;
 
   // If the user isn't signed in, no need to display an error bubble.
   SigninManagerBase* signin_manager =
@@ -166,6 +166,7 @@ std::vector<string16> SigninGlobalError::GetBubbleViewMessages() {
 
     // User credentials are invalid (bad acct, etc).
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
+    case GoogleServiceAuthError::SERVICE_ERROR:
     case GoogleServiceAuthError::ACCOUNT_DELETED:
     case GoogleServiceAuthError::ACCOUNT_DISABLED:
       messages.push_back(l10n_util::GetStringFUTF16(
@@ -189,7 +190,7 @@ std::vector<string16> SigninGlobalError::GetBubbleViewMessages() {
   return messages;
 }
 
-string16 SigninGlobalError::GetBubbleViewAcceptButtonLabel() {
+base::string16 SigninGlobalError::GetBubbleViewAcceptButtonLabel() {
   // If the service is unavailable, don't give the user the option to try
   // signing in again.
   if (auth_error_.state() == GoogleServiceAuthError::SERVICE_UNAVAILABLE) {
@@ -200,8 +201,8 @@ string16 SigninGlobalError::GetBubbleViewAcceptButtonLabel() {
   }
 }
 
-string16 SigninGlobalError::GetBubbleViewCancelButtonLabel() {
-  return string16();
+base::string16 SigninGlobalError::GetBubbleViewCancelButtonLabel() {
+  return base::string16();
 }
 
 void SigninGlobalError::OnBubbleViewDidClose(Browser* browser) {

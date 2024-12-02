@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "extensions/browser/extension_function.h"
 
 class Profile;
 
@@ -60,6 +60,20 @@ class VirtualKeyboardPrivateHideKeyboardFunction
 
  protected:
   virtual ~VirtualKeyboardPrivateHideKeyboardFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class VirtualKeyboardPrivateLockKeyboardFunction
+    : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION(
+      "virtualKeyboardPrivate.lockKeyboard",
+      VIRTUALKEYBOARDPRIVATE_LOCKKEYBOARD);
+
+ protected:
+  virtual ~VirtualKeyboardPrivateLockKeyboardFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;

@@ -77,6 +77,9 @@ class ComponentLoader {
   // platforms this |skip_session_components| is expected to be unset.
   void AddDefaultComponentExtensions(bool skip_session_components);
 
+  // Similar to above but adds the default component extensions for kiosk mode.
+  void AddDefaultComponentExtensionsForKioskMode(bool skip_session_components);
+
   // Parse the given JSON manifest. Returns NULL if it cannot be parsed, or if
   // if the result is not a DictionaryValue.
   DictionaryValue* ParseManifest(const std::string& manifest_contents) const;
@@ -115,6 +118,7 @@ class ComponentLoader {
   void AddHangoutServicesExtension();
   void AddImageLoaderExtension();
   void AddBookmarksExtensions();
+  void AddNetworkSpeechSynthesisExtension();
 
   void AddWithName(int manifest_resource_id,
                    const base::FilePath& root_directory,
@@ -134,6 +138,9 @@ class ComponentLoader {
   // List of registered component extensions (see Manifest::Location).
   typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
   RegisteredComponentExtensions component_extensions_;
+
+  FRIEND_TEST_ALL_PREFIXES(TtsApiTest, NetworkSpeechEngine);
+  FRIEND_TEST_ALL_PREFIXES(TtsApiTest, NoNetworkSpeechEngineWhenOffline);
 
   DISALLOW_COPY_AND_ASSIGN(ComponentLoader);
 };

@@ -12,6 +12,7 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/keyboard/keyboard_export.h"
+#include "url/gurl.h"
 
 namespace aura {
 class Window;
@@ -51,15 +52,26 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   // KeyboardController.
   aura::Window* GetContainerWindow();
 
+  // Sets the override content url. This is used by for input view for extension
+  // IMEs.
+  void SetOverrideContentUrl(const GURL& url);
+
   // Hides virtual keyboard and notifies observer bounds change.
   // This function should be called with a delay to avoid layout flicker
   // when the focus of input field quickly change. |automatic| is true when the
   // call is made by the system rather than initiated by the user.
   void HideKeyboard(HideReason reason);
 
+  // Notifies the keyboard observer for keyboard bounds changed.
+  void NotifyKeyboardBoundsChanging(const gfx::Rect& new_bounds);
+
   // Management of the observer list.
   virtual void AddObserver(KeyboardControllerObserver* observer);
   virtual void RemoveObserver(KeyboardControllerObserver* observer);
+
+  KeyboardControllerProxy* proxy() { return proxy_.get(); }
+
+  void set_lock_keyboard(bool lock) { lock_keyboard_ = lock; }
 
  private:
   // For access to Observer methods for simulation.
@@ -74,11 +86,8 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
       const ui::TextInputClient* client) OVERRIDE {}
   virtual void OnFocus() OVERRIDE {}
   virtual void OnBlur() OVERRIDE {}
-  virtual void OnUntranslatedIMEMessage(
-      const base::NativeEvent& event) OVERRIDE {}
   virtual void OnCaretBoundsChanged(
       const ui::TextInputClient* client) OVERRIDE {}
-  virtual void OnInputLocaleChanged() OVERRIDE {}
   virtual void OnTextInputStateChanged(
       const ui::TextInputClient* client) OVERRIDE;
   virtual void OnInputMethodDestroyed(
@@ -91,6 +100,7 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
   scoped_ptr<aura::Window> container_;
   ui::InputMethod* input_method_;
   bool keyboard_visible_;
+  bool lock_keyboard_;
 
   ObserverList<KeyboardControllerObserver> observer_list_;
 
