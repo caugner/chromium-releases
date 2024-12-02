@@ -15,6 +15,10 @@
 
 class URLRequestContext;
 
+namespace net {
+struct list_state;
+}
+
 // A URLRequestJob subclass that is built on top of FtpTransaction. It
 // provides an implementation for FTP.
 class URLRequestNewFtpJob : public URLRequestJob {
@@ -26,16 +30,24 @@ class URLRequestNewFtpJob : public URLRequestJob {
 
   static URLRequestJob* Factory(URLRequest* request, const std::string& scheme);
 
+  // URLRequestJob methods:
+  virtual bool GetMimeType(std::string* mime_type) const;
+
  private:
   // URLRequestJob methods:
   virtual void Start();
   virtual void Kill();
+  virtual net::LoadState GetLoadState() const;
+  virtual bool NeedsAuth();
+  virtual void GetAuthChallengeInfo(
+      scoped_refptr<net::AuthChallengeInfo>* auth_info);
+  virtual void SetAuth(const std::wstring& username,
+                       const std::wstring& password);
+  virtual void CancelAuth();
 
   // TODO(ibrar):  Yet to give another look at this function.
   virtual uint64 GetUploadProgress() const { return 0; }
   virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
-
-  void NotifyHeadersComplete();
 
   void DestroyTransaction();
   void StartTransaction();
@@ -43,23 +55,19 @@ class URLRequestNewFtpJob : public URLRequestJob {
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
 
-  int ProcessFtpDir(net::IOBuffer *buf, int buf_size, int bytes_read);
+  void RestartTransactionWithAuth();
 
-  net::AuthState server_auth_state_;
+  void LogFtpServerType(char server_type);
 
   net::FtpRequestInfo request_info_;
   scoped_ptr<net::FtpTransaction> transaction_;
-  const net::FtpResponseInfo* response_info_;
-
-  scoped_refptr<net::IOBuffer> dir_listing_buf_;
-  int dir_listing_buf_size_;
 
   net::CompletionCallbackImpl<URLRequestNewFtpJob> start_callback_;
   net::CompletionCallbackImpl<URLRequestNewFtpJob> read_callback_;
 
-  std::string directory_html_;
   bool read_in_progress_;
-  std::string encoding_;
+
+  scoped_refptr<net::AuthData> server_auth_;
 
   // Keep a reference to the url request context to be sure it's not deleted
   // before us.

@@ -6,12 +6,16 @@
 #define WEBKIT_GLUE_CHROME_CLIENT_IMPL_H_
 
 #include "base/compiler_specific.h"
+#include "base/logging.h"
 
 MSVC_PUSH_WARNING_LEVEL(0);
 #include "ChromeClientChromium.h"
 MSVC_POP_WARNING();
 
 class WebViewImpl;
+
+// TODO(darin): remove this typedef once we roll webkit past r48511
+typedef PlatformWidget PlatformPageClient;
 
 namespace WebCore {
 class HTMLParserQuirks;
@@ -109,11 +113,14 @@ class ChromeClientImpl : public WebCore::ChromeClientChromium {
                       const WebCore::IntRect& clipRect);
   virtual WebCore::IntPoint screenToWindow(const WebCore::IntPoint&) const;
   virtual WebCore::IntRect windowToScreen(const WebCore::IntRect&) const;
-  virtual PlatformWidget platformWindow() const;
+  // TODO(darin): remove platformWindow method once we roll webkit past r48511
+  virtual PlatformWidget platformWindow() const { return NULL; }
+  virtual PlatformPageClient platformPageClient() const { return NULL; }
   virtual void contentsSizeChanged(WebCore::Frame*,
                                    const WebCore::IntSize&) const;
   virtual void scrollRectIntoView(const WebCore::IntRect&, const WebCore::ScrollView*) const { }
 
+  virtual void scrollbarsModeDidChange() const;
   virtual void mouseDidMoveOverElement(const WebCore::HitTestResult& result,
                                        unsigned modifierFlags);
 
@@ -124,6 +131,10 @@ class ChromeClientImpl : public WebCore::ChromeClientChromium {
 
   virtual void exceededDatabaseQuota(WebCore::Frame*,
                                      const WebCore::String& databaseName);
+
+#if ENABLE(OFFLINE_WEB_APPLICATIONS)
+  virtual void reachedMaxAppCacheSize(int64_t spaceNeeded) { NOTREACHED(); }
+#endif
 
   virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*) { }
 
@@ -141,6 +152,10 @@ class ChromeClientImpl : public WebCore::ChromeClientChromium {
   virtual void formStateDidChange(const WebCore::Node*);
 
   virtual PassOwnPtr<WebCore::HTMLParserQuirks> createHTMLParserQuirks() { return 0; }
+
+#if ENABLE(NOTIFICATIONS)
+  virtual WebCore::NotificationPresenter* notificationPresenter() const;
+#endif
 
  private:
   void GetPopupMenuInfo(WebCore::PopupContainer* popup_container,

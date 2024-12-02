@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,13 @@
 
 #include <vector>
 
+#include "app/combobox_model.h"
 #include "app/gfx/canvas.h"
 #include "app/gfx/font.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
-#include "base/gfx/native_theme.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
@@ -38,7 +39,7 @@ static std::vector<CharacterEncoding::EncodingInfo> sorted_encoding_list;
 
 }  // namespace
 
-class DefaultEncodingComboboxModel : public views::Combobox::Model {
+class DefaultEncodingComboboxModel : public ComboboxModel {
  public:
   DefaultEncodingComboboxModel() {
     canonical_encoding_names_length_ =
@@ -57,17 +58,17 @@ class DefaultEncodingComboboxModel : public views::Combobox::Model {
 
   virtual ~DefaultEncodingComboboxModel() {}
 
-  // Overridden from views::Combobox::Model.
-  virtual int GetItemCount(views::Combobox* source) {
+  // Overridden from ComboboxModel.
+  virtual int GetItemCount() {
     return canonical_encoding_names_length_;
   }
 
-  virtual std::wstring GetItemAt(views::Combobox* source, int index) {
+  virtual std::wstring GetItemAt(int index) {
     DCHECK(index >= 0 && canonical_encoding_names_length_ > index);
     return sorted_encoding_list[index].encoding_display_name;
   }
 
-  std::wstring GetEncodingCharsetByIndex(int index) {
+  std::string GetEncodingCharsetByIndex(int index) {
     DCHECK(index >= 0 && canonical_encoding_names_length_ > index);
     int encoding_id = sorted_encoding_list[index].encoding_id;
     return CharacterEncoding::GetCanonicalEncodingNameByCommandId(encoding_id);
@@ -80,7 +81,7 @@ class DefaultEncodingComboboxModel : public views::Combobox::Model {
                                  NULL);
     const std::wstring current_encoding = current_encoding_string.GetValue();
     for (int i = 0; i < canonical_encoding_names_length_; i++) {
-      if (GetEncodingCharsetByIndex(i) == current_encoding)
+      if (GetEncodingCharsetByIndex(i) == WideToASCII(current_encoding))
         return i;
     }
 
@@ -89,7 +90,7 @@ class DefaultEncodingComboboxModel : public views::Combobox::Model {
 
  private:
   int canonical_encoding_names_length_;
-  DISALLOW_EVIL_CONSTRUCTORS(DefaultEncodingComboboxModel);
+  DISALLOW_COPY_AND_ASSIGN(DefaultEncodingComboboxModel);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -228,7 +229,8 @@ FontsPageView::FontsPageView(Profile* profile)
 FontsPageView::~FontsPageView() {
 }
 
-void FontsPageView::ButtonPressed(views::Button* sender) {
+void FontsPageView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   HWND owning_hwnd = GetAncestor(GetWidget()->GetNativeView(), GA_ROOT);
   std::wstring font_name;
   int font_size = 0;
@@ -306,7 +308,7 @@ void FontsPageView::SaveChanges() {
   }
   // Set Encoding.
   if (default_encoding_changed_)
-    default_encoding_.SetValue(default_encoding_selected_);
+    default_encoding_.SetValue(ASCIIToWide(default_encoding_selected_));
 }
 
 void FontsPageView::InitControlLayout() {

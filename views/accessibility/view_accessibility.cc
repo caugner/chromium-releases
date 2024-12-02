@@ -7,6 +7,13 @@
 #include "views/accessibility/view_accessibility_wrapper.h"
 #include "views/widget/widget.h"
 
+const wchar_t kViewsUninitializeAccessibilityInstance[] =
+  L"Views_Uninitialize_AccessibilityInstance";
+
+const wchar_t kViewsNativeHostPropForAccessibility[] =
+  L"Views_NativeViewHostHWNDForAccessibility";
+
+
 HRESULT ViewAccessibility::Initialize(views::View* view) {
   if (!view) {
     return E_INVALIDARG;
@@ -21,6 +28,10 @@ STDMETHODIMP ViewAccessibility::accHitTest(LONG x_left, LONG y_top,
                                            VARIANT* child) {
   if (!child) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   gfx::Point pt(x_left, y_top);
@@ -82,6 +93,10 @@ STDMETHODIMP ViewAccessibility::accLocation(LONG* x_left, LONG* y_top,
     return E_INVALIDARG;
   }
 
+  if (!view_) {
+    return E_FAIL;
+  }
+
   gfx::Rect view_bounds;
   // Retrieving the parent View to be used for converting from view-to-screen
   // coordinates.
@@ -124,6 +139,10 @@ STDMETHODIMP ViewAccessibility::accNavigate(LONG nav_dir, VARIANT start,
                                             VARIANT* end) {
   if (start.vt != VT_I4 || !end) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   switch (nav_dir) {
@@ -181,7 +200,7 @@ STDMETHODIMP ViewAccessibility::accNavigate(LONG nav_dir, VARIANT start,
         // Check navigation bounds, adjusting for View child indexing (MSAA
         // child indexing starts with 1, whereas View indexing starts with 0).
         if (!IsValidNav(nav_dir, view_index, -1,
-                        parent->GetChildViewCount())) {
+                        parent->GetChildViewCount() - 1)) {
           // Navigation attempted to go out-of-bounds.
           end->vt = VT_EMPTY;
           return S_FALSE;
@@ -261,6 +280,10 @@ STDMETHODIMP ViewAccessibility::get_accChild(VARIANT var_child,
     return S_OK;
   }
 
+  if (!view_) {
+    return E_FAIL;
+  }
+
   views::View* child_view = NULL;
   bool get_iaccessible = false;
 
@@ -293,6 +316,12 @@ STDMETHODIMP ViewAccessibility::get_accChild(VARIANT var_child,
       return E_NOINTERFACE;
     }
   } else {
+    if (child_view->GetClassName() == views::NativeViewHost::kViewClassName) {
+      views::NativeViewHost* native_host =
+          static_cast<views::NativeViewHost*>(child_view);
+      if (GetNativeIAccessibleInterface(native_host, disp_child) == S_OK)
+        return S_OK;
+    }
     // When at a leaf, children are handled by the parent object.
     *disp_child = NULL;
     return S_FALSE;
@@ -304,6 +333,10 @@ STDMETHODIMP ViewAccessibility::get_accChildCount(LONG* child_count) {
     return E_INVALIDARG;
   }
 
+  if (!view_) {
+    return E_FAIL;
+  }
+
   *child_count = view_->GetChildViewCount();
   return S_OK;
 }
@@ -312,6 +345,10 @@ STDMETHODIMP ViewAccessibility::get_accDefaultAction(VARIANT var_id,
                                                      BSTR* def_action) {
   if (var_id.vt != VT_I4 || !def_action) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   std::wstring temp_action;
@@ -326,7 +363,7 @@ STDMETHODIMP ViewAccessibility::get_accDefaultAction(VARIANT var_id,
         GetAccessibleDefaultAction(&temp_action);
   }
   if (!temp_action.empty()) {
-    *def_action = CComBSTR(temp_action.c_str()).Detach();
+    *def_action = SysAllocString(temp_action.c_str());
   } else {
     return S_FALSE;
   }
@@ -350,7 +387,7 @@ STDMETHODIMP ViewAccessibility::get_accDescription(VARIANT var_id, BSTR* desc) {
     view_->GetChildViewAt(var_id.lVal - 1)->GetTooltipText(0, 0, &temp_desc);
   }
   if (!temp_desc.empty()) {
-    *desc = CComBSTR(temp_desc.c_str()).Detach();
+    *desc = SysAllocString(temp_desc.c_str());
   } else {
     return S_FALSE;
   }
@@ -361,6 +398,10 @@ STDMETHODIMP ViewAccessibility::get_accDescription(VARIANT var_id, BSTR* desc) {
 STDMETHODIMP ViewAccessibility::get_accFocus(VARIANT* focus_child) {
   if (!focus_child) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   if (view_->GetChildViewCount() == 0 && view_->HasFocus()) {
@@ -401,6 +442,10 @@ STDMETHODIMP ViewAccessibility::get_accKeyboardShortcut(VARIANT var_id,
     return E_INVALIDARG;
   }
 
+  if (!view_) {
+    return E_FAIL;
+  }
+
   std::wstring temp_key;
 
   if (var_id.lVal == CHILDID_SELF) {
@@ -413,7 +458,7 @@ STDMETHODIMP ViewAccessibility::get_accKeyboardShortcut(VARIANT var_id,
         GetAccessibleKeyboardShortcut(&temp_key);
   }
   if (!temp_key.empty()) {
-    *acc_key = CComBSTR(temp_key.c_str()).Detach();
+    *acc_key = SysAllocString(temp_key.c_str());
   } else {
     return S_FALSE;
   }
@@ -424,6 +469,10 @@ STDMETHODIMP ViewAccessibility::get_accKeyboardShortcut(VARIANT var_id,
 STDMETHODIMP ViewAccessibility::get_accName(VARIANT var_id, BSTR* name) {
   if (var_id.vt != VT_I4 || !name) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   std::wstring temp_name;
@@ -440,7 +489,7 @@ STDMETHODIMP ViewAccessibility::get_accName(VARIANT var_id, BSTR* name) {
   }
   if (!temp_name.empty()) {
     // Return name retrieved.
-    *name = CComBSTR(temp_name.c_str()).Detach();
+    *name = SysAllocString(temp_name.c_str());
   } else {
     // If view has no name, return S_FALSE.
     return S_FALSE;
@@ -452,6 +501,10 @@ STDMETHODIMP ViewAccessibility::get_accName(VARIANT var_id, BSTR* name) {
 STDMETHODIMP ViewAccessibility::get_accParent(IDispatch** disp_parent) {
   if (!disp_parent) {
     return E_INVALIDARG;
+  }
+
+  if (!view_) {
+    return E_FAIL;
   }
 
   views::View* parent_view = view_->GetParent();
@@ -614,21 +667,33 @@ void ViewAccessibility::SetState(VARIANT* msaa_state, views::View* view) {
 
 long ViewAccessibility::MSAARole(AccessibilityTypes::Role role) {
   switch (role) {
-    case AccessibilityTypes::ROLE_APPLICATION :
+    case AccessibilityTypes::ROLE_APPLICATION:
       return ROLE_SYSTEM_APPLICATION;
-    case AccessibilityTypes::ROLE_BUTTONDROPDOWN :
+    case AccessibilityTypes::ROLE_BUTTONDROPDOWN:
       return ROLE_SYSTEM_BUTTONDROPDOWN;
-    case AccessibilityTypes::ROLE_GROUPING :
+    case AccessibilityTypes::ROLE_BUTTONMENU:
+      return ROLE_SYSTEM_BUTTONMENU;
+    case AccessibilityTypes::ROLE_GRAPHIC:
+      return ROLE_SYSTEM_GRAPHIC;
+    case AccessibilityTypes::ROLE_GROUPING:
       return ROLE_SYSTEM_GROUPING;
-    case AccessibilityTypes::ROLE_PAGETAB :
+    case AccessibilityTypes::ROLE_PAGETAB:
       return ROLE_SYSTEM_PAGETAB;
-    case AccessibilityTypes::ROLE_PUSHBUTTON :
+    case AccessibilityTypes::ROLE_PAGETABLIST:
+      return ROLE_SYSTEM_PAGETABLIST;
+    case AccessibilityTypes::ROLE_PUSHBUTTON:
       return ROLE_SYSTEM_PUSHBUTTON;
-    case AccessibilityTypes::ROLE_TEXT :
+    case AccessibilityTypes::ROLE_SEPARATOR:
+      return ROLE_SYSTEM_SEPARATOR;
+    case AccessibilityTypes::ROLE_TEXT:
       return ROLE_SYSTEM_TEXT;
-    case AccessibilityTypes::ROLE_TOOLBAR :
+    case AccessibilityTypes::ROLE_TITLEBAR:
+      return ROLE_SYSTEM_TITLEBAR;
+    case AccessibilityTypes::ROLE_TOOLBAR:
       return ROLE_SYSTEM_TOOLBAR;
-    case AccessibilityTypes::ROLE_CLIENT :
+    case AccessibilityTypes::ROLE_WINDOW:
+      return ROLE_SYSTEM_WINDOW;
+    case AccessibilityTypes::ROLE_CLIENT:
     default:
       // This is the default role for MSAA.
       return ROLE_SYSTEM_CLIENT;
@@ -693,6 +758,35 @@ STDMETHODIMP ViewAccessibility::put_accName(VARIANT var_id, BSTR put_name) {
 }
 
 STDMETHODIMP ViewAccessibility::put_accValue(VARIANT var_id, BSTR put_val) {
+  if (V_VT(&var_id) == VT_BSTR) {
+    if (!lstrcmpi(var_id.bstrVal, kViewsUninitializeAccessibilityInstance)) {
+      view_ = NULL;
+      return S_OK;
+    }
+  }
   // Deprecated.
   return E_NOTIMPL;
+}
+
+HRESULT ViewAccessibility::GetNativeIAccessibleInterface(
+    views::NativeViewHost* native_host, IDispatch** disp_child) {
+  if (!native_host || !disp_child) {
+    return E_INVALIDARG;
+  }
+
+  HWND native_view_window =
+      static_cast<HWND>(GetProp(native_host->native_view(),
+                                kViewsNativeHostPropForAccessibility));
+  if (!IsWindow(native_view_window)) {
+    native_view_window = native_host->native_view();
+  }
+
+  if (IsWindow(native_view_window)) {
+    LRESULT ret = SendMessage(native_view_window, WM_GETOBJECT, 0,
+                              OBJID_CLIENT);
+    return ObjectFromLresult(ret, IID_IDispatch, 0,
+                             reinterpret_cast<void**>(disp_child));
+  }
+
+  return E_FAIL;
 }

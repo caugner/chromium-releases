@@ -6,6 +6,7 @@
 #include "chrome/browser/cocoa/browser_test_helper.h"
 #import "chrome/browser/cocoa/custom_home_pages_model.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 // A helper for KVO and NSNotifications. Makes a note that it's been called
 // back.
@@ -28,7 +29,7 @@
 }
 @end
 
-class CustomHomePagesModelTest : public testing::Test {
+class CustomHomePagesModelTest : public PlatformTest {
  public:
   CustomHomePagesModelTest() {
     model_.reset([[CustomHomePagesModel alloc]
@@ -86,6 +87,8 @@ TEST_F(CustomHomePagesModelTest, KVOObserveWhenListChanges) {
   urls.push_back(GURL("http://www.google.com"));
   [model_ setURLs:urls];  // Should send kvo change notification.
   EXPECT_TRUE(kvo_helper.get()->sawNotification_);
+
+  [model_ removeObserver:kvo_helper forKeyPath:@"customHomePages"];
 }
 
 // Test the KVO "to-many" bindings for |customHomePages| and the KVO
@@ -120,7 +123,13 @@ TEST_F(CustomHomePagesModelTest, KVO) {
                   isEqualToString:@"dev.chromium.org"]);
   EXPECT_TRUE([[model_ objectInCustomHomePagesAtIndex:0]
                   isEqualToString:@"www.google.com"]);
+
+  [model_ removeObserver:kvo_helper forKeyPath:@"customHomePages"];
 }
+
+@interface NSObject()
+- (void)setURL:(NSString*)url;
+@end
 
 // Test that when individual items are changed that they broadcast a message.
 TEST_F(CustomHomePagesModelTest, ModelChangedNotification) {
@@ -135,7 +144,8 @@ TEST_F(CustomHomePagesModelTest, ModelChangedNotification) {
   std::vector<GURL> urls;
   urls.push_back(GURL("http://www.google.com"));
   [model_ setURLs:urls];
-  id entry = [model_ objectInCustomHomePagesAtIndex:0];
+  NSObject* entry = [model_ objectInCustomHomePagesAtIndex:0];
   [entry setURL:@"http://www.foo.bar"];
   EXPECT_TRUE(kvo_helper.get()->sawNotification_);
+  [[NSNotificationCenter defaultCenter] removeObserver:kvo_helper];
 }

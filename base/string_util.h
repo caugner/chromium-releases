@@ -16,6 +16,10 @@
 #include "base/string16.h"
 #include "base/string_piece.h"  // For implicit conversions.
 
+// TODO(brettw) this dependency should be removed and callers that need
+// these functions should include this file directly.
+#include "base/utf_string_conversions.h"
+
 // Safe standard library wrappers for all platforms.
 
 namespace base {
@@ -116,16 +120,17 @@ const std::wstring& EmptyWString();
 const string16& EmptyString16();
 
 extern const wchar_t kWhitespaceWide[];
+extern const char16 kWhitespaceUTF16[];
 extern const char kWhitespaceASCII[];
-
-// Names of codepages (charsets) understood by icu.
-extern const char* const kCodepageUTF8;
 
 // Removes characters in trim_chars from the beginning and end of input.
 // NOTE: Safe to use the same variable for both input and output.
 bool TrimString(const std::wstring& input,
                 const wchar_t trim_chars[],
                 std::wstring* output);
+bool TrimString(const string16& input,
+                const char16 trim_chars[],
+                string16* output);
 bool TrimString(const std::string& input,
                 const char trim_chars[],
                 std::string* output);
@@ -135,8 +140,6 @@ bool TrimString(const std::string& input,
 // The non-wide version has two functions:
 // * TrimWhitespaceASCII()
 //   This function is for ASCII strings and only looks for ASCII whitespace;
-// * TrimWhitespaceUTF8()
-//   This function is for UTF-8 strings and looks for Unicode whitespace.
 // Please choose the best one according to your usage.
 // NOTE: Safe to use the same variable for both input and output.
 enum TrimPositions {
@@ -148,12 +151,12 @@ enum TrimPositions {
 TrimPositions TrimWhitespace(const std::wstring& input,
                              TrimPositions positions,
                              std::wstring* output);
+TrimPositions TrimWhitespace(const string16& input,
+                             TrimPositions positions,
+                             string16* output);
 TrimPositions TrimWhitespaceASCII(const std::string& input,
                                   TrimPositions positions,
                                   std::string* output);
-TrimPositions TrimWhitespaceUTF8(const std::string& input,
-                                 TrimPositions positions,
-                                 std::string* output);
 
 // Deprecated. This function is only for backward compatibility and calls
 // TrimWhitespaceASCII().
@@ -164,7 +167,7 @@ TrimPositions TrimWhitespace(const std::string& input,
 // Searches  for CR or LF characters.  Removes all contiguous whitespace
 // strings that contain them.  This is useful when trying to deal with text
 // copied from terminals.
-// Returns |text, with the following three transformations:
+// Returns |text|, with the following three transformations:
 // (1) Leading and trailing whitespace is trimmed.
 // (2) If |trim_sequences_with_line_breaks| is true, any other whitespace
 //     sequences containing a CR or LF are trimmed.
@@ -176,97 +179,9 @@ std::string CollapseWhitespaceASCII(const std::string& text,
 
 // These convert between ASCII (7-bit) and Wide/UTF16 strings.
 std::string WideToASCII(const std::wstring& wide);
-std::wstring ASCIIToWide(const StringPiece& ascii);
+std::wstring ASCIIToWide(const base::StringPiece& ascii);
 std::string UTF16ToASCII(const string16& utf16);
-string16 ASCIIToUTF16(const StringPiece& ascii);
-
-// These convert between UTF-8, -16, and -32 strings. They are potentially slow,
-// so avoid unnecessary conversions. The low-level versions return a boolean
-// indicating whether the conversion was 100% valid. In this case, it will still
-// do the best it can and put the result in the output buffer. The versions that
-// return strings ignore this error and just return the best conversion
-// possible.
-//
-// Note that only the structural validity is checked and non-character
-// codepoints and unassigned are regarded as valid.
-// TODO(jungshik): Consider replacing an invalid input sequence with
-// the Unicode replacement character or adding |replacement_char| parameter.
-// Currently, it's skipped in the ouput, which could be problematic in
-// some situations.
-bool WideToUTF8(const wchar_t* src, size_t src_len, std::string* output);
-std::string WideToUTF8(const std::wstring& wide);
-bool UTF8ToWide(const char* src, size_t src_len, std::wstring* output);
-std::wstring UTF8ToWide(const StringPiece& utf8);
-
-bool WideToUTF16(const wchar_t* src, size_t src_len, string16* output);
-string16 WideToUTF16(const std::wstring& wide);
-bool UTF16ToWide(const char16* src, size_t src_len, std::wstring* output);
-std::wstring UTF16ToWide(const string16& utf16);
-
-bool UTF8ToUTF16(const char* src, size_t src_len, string16* output);
-string16 UTF8ToUTF16(const std::string& utf8);
-bool UTF16ToUTF8(const char16* src, size_t src_len, std::string* output);
-std::string UTF16ToUTF8(const string16& utf16);
-
-// We are trying to get rid of wstring as much as possible, but it's too big
-// a mess to do it all at once.  These conversions should be used when we
-// really should just be passing a string16 around, but we haven't finished
-// porting whatever module uses wstring and the conversion is being used as a
-// stopcock.  This makes it easy to grep for the ones that should be removed.
-#if defined(OS_WIN)
-# define WideToUTF16Hack
-# define UTF16ToWideHack
-#else
-# define WideToUTF16Hack WideToUTF16
-# define UTF16ToWideHack UTF16ToWide
-#endif
-
-// Defines the error handling modes of UTF16ToCodepage, CodepageToUTF16,
-// WideToCodepage and CodepageToWide.
-class OnStringUtilConversionError {
- public:
-  enum Type {
-    // The function will return failure. The output buffer will be empty.
-    FAIL,
-
-    // The offending characters are skipped and the conversion will proceed as
-    // if they did not exist.
-    SKIP,
-
-    // When converting to Unicode, the offending byte sequences are substituted
-    // by Unicode replacement character (U+FFFD). When converting from Unicode,
-    // this is the same as SKIP.
-    SUBSTITUTE,
-  };
-
- private:
-  OnStringUtilConversionError();
-};
-
-// Converts between UTF-16 strings and the encoding specified.  If the
-// encoding doesn't exist or the encoding fails (when on_error is FAIL),
-// returns false.
-bool UTF16ToCodepage(const string16& utf16,
-                     const char* codepage_name,
-                     OnStringUtilConversionError::Type on_error,
-                     std::string* encoded);
-
-bool CodepageToUTF16(const std::string& encoded,
-                     const char* codepage_name,
-                     OnStringUtilConversionError::Type on_error,
-                     string16* utf16);
-
-// Converts between wide strings and the encoding specified.  If the
-// encoding doesn't exist or the encoding fails (when on_error is FAIL),
-// returns false.
-bool WideToCodepage(const std::wstring& wide,
-                    const char* codepage_name,
-                    OnStringUtilConversionError::Type on_error,
-                    std::string* encoded);
-bool CodepageToWide(const std::string& encoded,
-                    const char* codepage_name,
-                    OnStringUtilConversionError::Type on_error,
-                    std::wstring* wide);
+string16 ASCIIToUTF16(const base::StringPiece& ascii);
 
 // Converts the given wide string to the corresponding Latin1. This will fail
 // (return false) if any characters are more than 255.
@@ -287,7 +202,7 @@ bool IsString8Bit(const std::wstring& str);
 bool IsStringUTF8(const std::string& str);
 bool IsStringWideUTF8(const std::wstring& str);
 bool IsStringASCII(const std::wstring& str);
-bool IsStringASCII(const StringPiece& str);
+bool IsStringASCII(const base::StringPiece& str);
 bool IsStringASCII(const string16& str);
 
 // ASCII-specific tolower.  The standard library's tolower is locale sensitive,
@@ -336,6 +251,7 @@ template <class str> inline str StringToUpperASCII(const str& s) {
 // borrowed from the equivalent APIs in Mozilla.
 bool LowerCaseEqualsASCII(const std::string& a, const char* b);
 bool LowerCaseEqualsASCII(const std::wstring& a, const char* b);
+bool LowerCaseEqualsASCII(const string16& a, const char* b);
 
 // Same thing, but with string iterators instead.
 bool LowerCaseEqualsASCII(std::string::const_iterator a_begin,
@@ -344,16 +260,22 @@ bool LowerCaseEqualsASCII(std::string::const_iterator a_begin,
 bool LowerCaseEqualsASCII(std::wstring::const_iterator a_begin,
                           std::wstring::const_iterator a_end,
                           const char* b);
+bool LowerCaseEqualsASCII(string16::const_iterator a_begin,
+                          string16::const_iterator a_end,
+                          const char* b);
 bool LowerCaseEqualsASCII(const char* a_begin,
                           const char* a_end,
                           const char* b);
 bool LowerCaseEqualsASCII(const wchar_t* a_begin,
                           const wchar_t* a_end,
                           const char* b);
+bool LowerCaseEqualsASCII(const char16* a_begin,
+                          const char16* a_end,
+                          const char* b);
 
 // Performs a case-sensitive string compare. The behavior is undefined if both
 // strings are not ASCII.
-bool EqualsASCII(const string16& a, const StringPiece& b);
+bool EqualsASCII(const string16& a, const base::StringPiece& b);
 
 // Returns true if str starts with search, or false otherwise.
 bool StartsWithASCII(const std::string& str,
@@ -362,10 +284,16 @@ bool StartsWithASCII(const std::string& str,
 bool StartsWith(const std::wstring& str,
                 const std::wstring& search,
                 bool case_sensitive);
+bool StartsWith(const string16& str,
+                const string16& search,
+                bool case_sensitive);
 
 // Returns true if str ends with search, or false otherwise.
 bool EndsWith(const std::wstring& str,
               const std::wstring& search,
+              bool case_sensitive);
+bool EndsWith(const string16& str,
+              const string16& search,
               bool case_sensitive);
 
 
@@ -552,6 +480,8 @@ inline typename string_type::value_type* WriteInto(string_type* str,
 template<typename Char> struct CaseInsensitiveCompare {
  public:
   bool operator()(Char x, Char y) const {
+    // TODO(darin): Do we really want to do locale sensitive comparisons here?
+    // See http://crbug.com/24917
     return tolower(x) == tolower(y);
   }
 };
@@ -573,6 +503,9 @@ template<typename Char> struct CaseInsensitiveCompareASCII {
 void SplitString(const std::wstring& str,
                  wchar_t s,
                  std::vector<std::wstring>* r);
+void SplitString(const string16& str,
+                 char16 s,
+                 std::vector<string16>* r);
 void SplitString(const std::string& str,
                  char s,
                  std::vector<std::string>* r);
@@ -581,12 +514,16 @@ void SplitString(const std::string& str,
 void SplitStringDontTrim(const std::wstring& str,
                          wchar_t s,
                          std::vector<std::wstring>* r);
+void SplitStringDontTrim(const string16& str,
+                         char16 s,
+                         std::vector<string16>* r);
 void SplitStringDontTrim(const std::string& str,
                          char s,
                          std::vector<std::string>* r);
 
 // Does the opposite of SplitString().
 std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t s);
+string16 JoinString(const std::vector<string16>& parts, char16 s);
 std::string JoinString(const std::vector<std::string>& parts, char s);
 
 // WARNING: this uses whitespace as defined by the HTML5 spec. If you need
@@ -599,6 +536,10 @@ std::string JoinString(const std::vector<std::string>& parts, char s);
 // characters is added to result.
 void SplitStringAlongWhitespace(const std::wstring& str,
                                 std::vector<std::wstring>* result);
+void SplitStringAlongWhitespace(const string16& str,
+                                std::vector<string16>* result);
+void SplitStringAlongWhitespace(const std::string& str,
+                                std::vector<std::string>* result);
 
 // Replace $1-$2-$3..$9 in the format string with |a|-|b|-|c|..|i| respectively.
 // Additionally, $$ is replaced by $. The offsets parameter here can
@@ -606,6 +547,10 @@ void SplitStringAlongWhitespace(const std::wstring& str,
 string16 ReplaceStringPlaceholders(const string16& format_string,
                                    const std::vector<string16>& subst,
                                    std::vector<size_t>* offsets);
+
+std::string ReplaceStringPlaceholders(const std::string& format_string,
+                                      const std::vector<std::string>& subst,
+                                      std::vector<size_t>* offsets);
 
 // Single-string shortcut for ReplaceStringHolders.
 string16 ReplaceStringPlaceholders(const string16& format_string,

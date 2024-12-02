@@ -260,6 +260,17 @@ LRESULT CHostControl::OnDestroy(UINT uMsg,
   return 0;
 }
 
+LRESULT CHostControl::OnPluginAsyncCall(UINT message,
+                                        WPARAM w_param,
+                                        LPARAM l_param,
+                                        BOOL& handled) {
+  typedef void (*Function)(void*);
+  Function function = reinterpret_cast<Function>(w_param);
+  void* data = reinterpret_cast<void*>(l_param);
+  function(data);
+  handled = TRUE;
+  return 0;
+}
 
 HRESULT CHostControl::FinalConstruct() {
   return ConstructPluginProxy();
@@ -515,7 +526,7 @@ STDMETHODIMP CHostControl::Load(IPropertyBag* property_bag,
   if (property_bag2) {
     ULONG property_count;
     if (SUCCEEDED(property_bag2->CountProperties(&property_count))) {
-      for (int x = 0; x < property_count; ++x) {
+      for (ULONG x = 0; x < property_count; ++x) {
         PROPBAG2 property = {0};
         ULONG properties_read = 0;
         if (SUCCEEDED(property_bag2->GetPropertyInfo(x, 1, &property,
@@ -540,6 +551,25 @@ STDMETHODIMP CHostControl::Load(IPropertyBag* property_bag,
   }
 
   return IPersistPropertyBagImpl<CHostControl>::Load(property_bag, error_log);
+}
+
+STDMETHODIMP CHostControl::SetObjectRects(LPCRECT lprcPosRect,
+                                          LPCRECT lprcClipRect) {
+  if (plugin_proxy_.get()) {
+    NPWindow window = {0};
+    window.window = m_hWnd;
+    window.type = NPWindowTypeWindow;
+    window.x = lprcPosRect->left;
+    window.y = lprcPosRect->top;
+    window.width = lprcPosRect->right - lprcPosRect->left;
+    window.height = lprcPosRect->bottom - lprcPosRect->top;
+    if (!plugin_proxy_->SetWindow(window)) {
+      return E_FAIL;
+    }
+  }
+
+  return CComControlBase::IOleInPlaceObject_SetObjectRects(lprcPosRect,
+                                                           lprcClipRect);
 }
 
 HRESULT CHostControl::GetStringProperty(NPPVariable np_property_variable,

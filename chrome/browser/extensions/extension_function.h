@@ -22,6 +22,9 @@ class Profile;
     } \
   } while (0)
 
+#define DECLARE_EXTENSION_FUNCTION_NAME(name) \
+  public: static const char* function_name() { return name; }
+
 // Abstract base class for extension functions the ExtensionFunctionDispatcher
 // knows how to dispatch to.
 //
@@ -29,14 +32,15 @@ class Profile;
 // APIs that live beyond a single stack frame.
 class ExtensionFunction : public base::RefCounted<ExtensionFunction> {
  public:
-  ExtensionFunction() : request_id_(-1), has_callback_(false) {}
+  ExtensionFunction() : request_id_(-1), name_(""), has_callback_(false) {}
   virtual ~ExtensionFunction() {}
 
   // Specifies the name of the function.
-  virtual void SetName(const std::string& name) { }
+  void set_name(const std::string& name) { name_ = name; }
+  const std::string name() { return name_; }
 
-  // Specifies the raw arguments to the function, as a JSON-encoded string.
-  virtual void SetArgs(const std::string& args) = 0;
+  // Specifies the raw arguments to the function, as a JSON value.
+  virtual void SetArgs(const Value* args) = 0;
 
   // Retrieves the results of the function as a JSON-encoded string (may
   // be empty).
@@ -65,11 +69,23 @@ class ExtensionFunction : public base::RefCounted<ExtensionFunction> {
   virtual void Run() = 0;
 
  protected:
+  // Gets the extension that called this function. This can return NULL for
+  // async functions.
+  Extension* GetExtension() {
+    if (dispatcher())
+      return dispatcher()->GetExtension();
+    else
+      return NULL;
+  }
+
   // The peer to the dispatcher that will service this extension function call.
   scoped_refptr<ExtensionFunctionDispatcher::Peer> peer_;
 
   // Id of this request, used to map the response back to the caller.
   int request_id_;
+
+  // The name of this function.
+  std::string name_;
 
   // True if the js caller provides a callback function to receive the response
   // of this call.
@@ -90,7 +106,7 @@ class AsyncExtensionFunction : public ExtensionFunction {
   AsyncExtensionFunction() : args_(NULL), bad_message_(false) {}
   virtual ~AsyncExtensionFunction() {}
 
-  virtual void SetArgs(const std::string& args);
+  virtual void SetArgs(const Value* args);
   virtual const std::string GetResult();
   virtual const std::string GetError() { return error_; }
   virtual void Run() {

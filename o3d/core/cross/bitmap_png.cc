@@ -32,11 +32,9 @@
 
 // This file contains the image codec operations for PNG files.
 
-// precompiled header must appear before anything else.
-#include "core/cross/precompile.h"
-
 #include <fstream>
 #include "core/cross/bitmap.h"
+#include "core/cross/error.h"
 #include "core/cross/types.h"
 #include "utils/cross/file_path_utils.h"
 #include "base/file_path.h"
@@ -44,27 +42,45 @@
 #include "import/cross/memory_buffer.h"
 #include "import/cross/memory_stream.h"
 #include "png.h"
+#include "utils/cross/dataurl.h"
 
 using file_util::OpenFile;
 using file_util::CloseFile;
 
 namespace o3d {
 
+namespace {
+
 // Helper function for LoadFromPNGFile that converts a stream into the
 // necessary abstract byte reading function.
-static void stream_read_data(png_structp png_ptr,
-                             png_bytep data,
-                             png_size_t length) {
+void StreamReadData(png_structp png_ptr, png_bytep data, png_size_t length) {
   MemoryReadStream *stream =
     static_cast<MemoryReadStream*>(png_get_io_ptr(png_ptr));
   stream->Read(data, length);
 }
 
+// Helper function for ToDataURL that converts a stream into the necessary
+// abstract byte writing function.
+void StreamWriteData(png_structp png_ptr, png_bytep data, png_size_t length) {
+  std::vector<uint8>* stream =
+     static_cast<std::vector<uint8>*>(png_get_io_ptr(png_ptr));
+  stream->insert(stream->end(),
+                 static_cast<uint8*>(data),
+                 static_cast<uint8*>(data) + length);
+}
+
+// Because libpng requires a flush function according to the docs.
+void StreamFlush(png_structp png_ptr) {
+}
+
+}  // anonymous namespace
 
 // Loads the raw RGB data from a compressed PNG file.
-bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
+bool Bitmap::LoadFromPNGStream(ServiceLocator* service_locator,
+                               MemoryReadStream *stream,
                                const String &filename,
-                               bool generate_mipmaps) {
+                               BitmapRefArray* bitmaps) {
+  DCHECK(bitmaps);
   // Read the magic header.
   char magic[4];
   size_t bytes_read = stream->Read(magic, sizeof(magic));
@@ -101,7 +117,7 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
 
   // NOTE: The following smart pointer needs to be declared before the
   // setjmp so that it is properly destroyed if we jump back.
-  scoped_array<unsigned char> image_data;
+  scoped_array<uint8> image_data;
   png_bytepp row_pointers = NULL;
 
   // Set error handling if you are using the setjmp/longjmp method. If any
@@ -117,7 +133,7 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
   }
 
   // Set up our STL stream input control
-  png_set_read_fn(png_ptr, stream, &stream_read_data);
+  png_set_read_fn(png_ptr, stream, &StreamReadData);
 
   // We have already read some of the signature, advance the pointer.
   png_set_sig_bytes(png_ptr, sizeof(magic));
@@ -139,7 +155,7 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
                NULL,
                NULL);
 
-  if (!CheckImageDimensions(png_width, png_height)) {
+  if (!image::CheckImageDimensions(png_width, png_height)) {
     DLOG(ERROR) << "Failed to load " << filename
                 << ": dimensions are too large (" << png_width
                 << ", " << png_height << ").";
@@ -199,7 +215,7 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
   // Turn on interlace handling.  REQURIED if you are not using
   // png_read_image().  To see how to handle interlacing passes,
   // see the png_read_row() method below:
-  int png_number_passes = png_set_interlace_handling(png_ptr);
+  png_set_interlace_handling(png_ptr);
 
   // Execute any setup steps for each Transform, i.e. to gamma correct and
   // add the background to the palette and update info structure.  REQUIRED
@@ -207,13 +223,10 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
   // selected such a transform above).
   png_read_update_info(png_ptr, info_ptr);
 
-  // Allocate storage for the pixels.
-  unsigned int num_mipmaps =
-      generate_mipmaps ? GetMipMapCount(png_width, png_height) : 1;
-  // Allocate storage for the pixels.
-  unsigned int png_image_size = GetMipChainSize(png_width, png_height, format,
-                                                num_mipmaps);
-  image_data.reset(new unsigned char[png_image_size]);
+  // Allocate storage for the pixels. Bitmap requires we allocate enough
+  // memory for all mips even if we don't use them.
+  size_t png_image_size = Bitmap::ComputeMaxSize(png_width, png_height, format);
+  image_data.reset(new uint8[png_image_size]);
   if (image_data.get() == NULL) {
     DLOG(ERROR) << "PNG image memory allocation error \"" << filename << "\"";
     png_error(png_ptr, "Cannot allocate memory for bitmap");
@@ -231,13 +244,10 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
 
   // Fill the row pointer array.
   DCHECK_LE(png_get_rowbytes(png_ptr, info_ptr), png_width * dst_components);
-  // NOTE: we load images bottom to up to respect max/maya's UV
-  // orientation.
-  png_bytep row_ptr = reinterpret_cast<png_bytep>(image_data.get())
-      + png_width * dst_components * (png_height - 1);
+  png_bytep row_ptr = reinterpret_cast<png_bytep>(image_data.get());
   for (unsigned int i = 0; i < png_height; ++i) {
     row_pointers[i] = row_ptr;
-    row_ptr -= png_width * dst_components;
+    row_ptr += png_width * dst_components;
   }
 
   // Read the image, applying format transforms and de-interlacing as we go.
@@ -249,44 +259,23 @@ bool Bitmap::LoadFromPNGStream(MemoryReadStream *stream,
   png_free(png_ptr, row_pointers);
   png_destroy_read_struct(&png_ptr, &info_ptr, png_infopp_NULL);
 
-  if (generate_mipmaps) {
-    if (!GenerateMipmaps(png_width, png_height, format, num_mipmaps,
-                         image_data.get())) {
-      DLOG(ERROR) << "Mip-map generation failed for \"" << filename << "\"";
-      return false;
-    }
-  }
-
   // Success.
-  image_data_.swap(image_data);
-  format_ = format;
-  width_ = png_width;
-  height_ = png_height;
-  num_mipmaps_ = num_mipmaps;
+  Bitmap::Ref bitmap(new Bitmap(service_locator));
+  bitmap->SetContents(format, 1, png_width, png_height, IMAGE, &image_data);
+  bitmaps->push_back(bitmap);
   return true;
 }
 
-// Saves the BGRA data from a compressed PNG file.
-bool Bitmap::SaveToPNGFile(const char* filename) {
-  if (format_ != Texture::ARGB8) {
-    DLOG(ERROR) << "Can only save ARGB8 images.";
-    return false;
-  }
-  if (num_mipmaps_ != 1 || is_cubemap_) {
-    DLOG(ERROR) << "Only 2D images with only the base level can be saved.";
-    return false;
-  }
-  FILE *fp = fopen(filename, "wb");
-  if (!fp) {
-    DLOG(ERROR) << "Could not open file " << filename << " for writing.";
-    return false;
-  }
+namespace {
+
+bool CreatePNGInUInt8Vector(const Bitmap& bitmap, std::vector<uint8>* buffer) {
+  DCHECK(bitmap.format() == Texture::ARGB8);
+  DCHECK(bitmap.num_mipmaps() == 1);
 
   png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL,
                                                 NULL, NULL);
   if (!png_ptr) {
     DLOG(ERROR) << "Could not create PNG structure.";
-    fclose(fp);
     return false;
   }
 
@@ -294,26 +283,27 @@ bool Bitmap::SaveToPNGFile(const char* filename) {
   if (!info_ptr) {
     DLOG(ERROR) << "Could not create PNG info structure.";
     png_destroy_write_struct(&png_ptr,  png_infopp_NULL);
-    fclose(fp);
     return false;
   }
 
-  scoped_array<png_bytep> row_pointers(new png_bytep[height_]);
-  for (unsigned int i = 0; i < height_; ++i) {
-    row_pointers[height_-1-i] = image_data_.get() + i * width_ * 4;
+  unsigned width = bitmap.width();
+  unsigned height = bitmap.height();
+  scoped_array<png_bytep> row_pointers(new png_bytep[height]);
+  for (unsigned int i = 0; i < height; ++i) {
+    row_pointers[height - 1 - i] = bitmap.GetMipData(0) + i * width * 4;
   }
 
   if (setjmp(png_jmpbuf(png_ptr))) {
     // If we get here, we had a problem reading the file.
-    DLOG(ERROR) << "Error while writing file " << filename << ".";
+    DLOG(ERROR) << "Error while getting dataURL.";
     png_destroy_write_struct(&png_ptr, &info_ptr);
-    fclose(fp);
     return false;
   }
 
-  png_init_io(png_ptr, fp);
+  // Set up our STL stream output.
+  png_set_write_fn(png_ptr, buffer, &StreamWriteData, &StreamFlush);
 
-  png_set_IHDR(png_ptr, info_ptr, width_, height_, 8,
+  png_set_IHDR(png_ptr, info_ptr, width, height, 8,
                PNG_COLOR_TYPE_RGB_ALPHA, PNG_INTERLACE_NONE,
                PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
   png_set_bgr(png_ptr);
@@ -321,8 +311,28 @@ bool Bitmap::SaveToPNGFile(const char* filename) {
   png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, png_voidp_NULL);
 
   png_destroy_write_struct(&png_ptr, &info_ptr);
-  fclose(fp);
   return true;
+}
+
+}  // anonymous namespace
+
+String Bitmap::ToDataURL() {
+  if (format_ != Texture::ARGB8) {
+    O3D_ERROR(service_locator()) << "Can only get data URL from ARGB8 images.";
+    return dataurl::kEmptyDataURL;
+  }
+  if (num_mipmaps_ != 1) {
+    O3D_ERROR(service_locator()) <<
+        "Can only get data URL from 2d images with no mips.";
+    return dataurl::kEmptyDataURL;
+  }
+
+  std::vector<uint8> stream;
+  if (!CreatePNGInUInt8Vector(*this, &stream)) {
+    return dataurl::kEmptyDataURL;
+  }
+
+  return dataurl::ToDataURL("image/png", &stream[0], stream.size());
 }
 
 }  // namespace o3d

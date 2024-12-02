@@ -4,11 +4,12 @@
 
 #include "base/platform_file.h"
 
+#include "base/file_path.h"
 #include "base/logging.h"
 
 namespace base {
 
-PlatformFile CreatePlatformFile(const std::wstring& name,
+PlatformFile CreatePlatformFile(const FilePath& name,
                                 int flags,
                                 bool* created) {
   DWORD disposition = 0;
@@ -47,9 +48,15 @@ PlatformFile CreatePlatformFile(const std::wstring& name,
   DWORD create_flags = 0;
   if (flags & PLATFORM_FILE_ASYNC)
     create_flags |= FILE_FLAG_OVERLAPPED;
+  if (flags & PLATFORM_FILE_TEMPORARY)
+    create_flags |= FILE_ATTRIBUTE_TEMPORARY;
+  if (flags & PLATFORM_FILE_HIDDEN)
+    create_flags |= FILE_ATTRIBUTE_HIDDEN;
+  if (flags & PLATFORM_FILE_DELETE_ON_CLOSE)
+    create_flags |= FILE_FLAG_DELETE_ON_CLOSE;
 
-  HANDLE file = CreateFile(name.c_str(), access, sharing, NULL, disposition,
-                           create_flags, NULL);
+  HANDLE file = CreateFile(name.value().c_str(), access, sharing, NULL,
+                           disposition, create_flags, NULL);
 
   if ((flags & PLATFORM_FILE_OPEN_ALWAYS) && created &&
       INVALID_HANDLE_VALUE != file) {
@@ -57,6 +64,15 @@ PlatformFile CreatePlatformFile(const std::wstring& name,
   }
 
   return file;
+}
+
+PlatformFile CreatePlatformFile(const std::wstring& name, int flags,
+                                bool* created) {
+  return CreatePlatformFile(FilePath::FromWStringHack(name), flags, created);
+}
+
+bool ClosePlatformFile(PlatformFile file) {
+  return (CloseHandle(file) == 0);
 }
 
 }  // namespace disk_cache

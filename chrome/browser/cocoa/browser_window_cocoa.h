@@ -38,12 +38,14 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual BrowserWindowTesting* GetBrowserWindowTesting();
   virtual StatusBubble* GetStatusBubble();
   virtual void SelectedTabToolbarSizeChanged(bool is_animating);
+  virtual void SelectedTabExtensionShelfSizeChanged();
   virtual void UpdateTitleBar();
+  virtual void ShelfVisibilityChanged();
   virtual void UpdateDevTools();
   virtual void FocusDevTools();
   virtual void UpdateLoadingAnimations(bool should_animate);
   virtual void SetStarredState(bool is_starred);
-  virtual gfx::Rect GetNormalBounds() const;
+  virtual gfx::Rect GetRestoredBounds() const;
   virtual bool IsMaximized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
@@ -58,6 +60,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile);
   virtual void ToggleBookmarkBar();
+  virtual void ToggleExtensionShelf();
   virtual void ShowAboutChromeDialog();
   virtual void ShowTaskManager();
   virtual void ShowBookmarkManager();
@@ -71,6 +74,9 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ShowPasswordManager();
   virtual void ShowSelectProfileDialog();
   virtual void ShowNewProfileDialog();
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
+  virtual void ShowHistoryTooNewDialog();
+  virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
   virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
                               gfx::NativeWindow parent_window);
@@ -81,6 +87,9 @@ class BrowserWindowCocoa : public BrowserWindow,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
+  virtual void ShowPageMenu();
+  virtual void ShowAppMenu();
+  virtual int GetCommandId(const NativeWebKeyboardEvent& event);
 
   // Overridden from NotificationObserver
   virtual void Observe(NotificationType type,
@@ -90,6 +99,9 @@ class BrowserWindowCocoa : public BrowserWindow,
   // Adds the given FindBar cocoa controller to this browser window.
   void AddFindBar(FindBarCocoaController* find_bar_cocoa_controller);
 
+  // Returns the cocoa-world BrowserWindowController
+  BrowserWindowController* cocoa_controller() { return controller_; }
+
  protected:
   virtual void DestroyBrowser();
 
@@ -98,12 +110,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   NSWindow* window_;  // weak, owned by controller
   Browser* browser_;  // weak, owned by controller
   BrowserWindowController* controller_;  // weak, owns us
-
-  // Data for shelves and stuff ------------------------------------------------
-  // FIXME(thakis): This should probably in the controller on OS X.
-
-  // The download shelf view (view at the bottom of the page).
-  scoped_ptr<DownloadShelf> download_shelf_;
 };
 
 #endif  // CHROME_BROWSER_COCOA_BROWSER_WINDOW_COCOA_H_

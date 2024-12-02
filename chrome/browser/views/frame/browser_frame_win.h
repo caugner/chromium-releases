@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_
-#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_
+#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_H_
+#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_H_
 
 #include "base/basictypes.h"
 #include "chrome/browser/views/frame/browser_frame.h"
@@ -34,6 +34,8 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
   // separate to avoid recursive calling of the frame from its constructor.
   void Init();
 
+  BrowserView* browser_view() const { return browser_view_; }
+
   // BrowserFrame implementation.
   virtual views::Window* GetWindow();
   virtual void TabStripCreated(TabStripWrapper* tabstrip);
@@ -42,16 +44,10 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
   virtual void UpdateThrobber(bool running);
   virtual void ContinueDraggingDetachedTab();
   virtual ThemeProvider* GetThemeProviderForFrame() const;
-
-  // Overridden from views::Widget.
-  virtual ThemeProvider* GetThemeProvider() const;
-  virtual ThemeProvider* GetDefaultThemeProvider() const;
-
-  BrowserView* browser_view() const { return browser_view_; }
+  virtual bool AlwaysUseNativeFrame() const;
 
  protected:
   // Overridden from views::WidgetWin:
-  virtual bool AcceleratorPressed(views::Accelerator* accelerator);
   virtual bool GetAccelerator(int cmd_id, views::Accelerator* accelerator);
   virtual void OnEndSession(BOOL ending, UINT logoff);
   virtual void OnEnterSizeMove();
@@ -61,11 +57,13 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
                                   UINT hittest_code,
                                   UINT message);
   virtual void OnMove(const CPoint& point);
-  virtual void OnMoving(UINT param, const RECT* new_bounds);
+  virtual void OnMoving(UINT param, LPRECT new_bounds);
   virtual LRESULT OnNCActivate(BOOL active);
   virtual LRESULT OnNCCalcSize(BOOL mode, LPARAM l_param);
   virtual LRESULT OnNCHitTest(const CPoint& pt);
   virtual void OnWindowPosChanged(WINDOWPOS* window_pos);
+  virtual ThemeProvider* GetThemeProvider() const;
+  virtual ThemeProvider* GetDefaultThemeProvider() const;
 
   // Overridden from views::Window:
   virtual int GetShowState() const;
@@ -113,4 +111,4 @@ class BrowserFrameWin : public BrowserFrame, public views::WindowWin {
   DISALLOW_COPY_AND_ASSIGN(BrowserFrameWin);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_
+#endif  // CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_WIN_H_

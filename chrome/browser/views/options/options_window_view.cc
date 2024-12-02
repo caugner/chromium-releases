@@ -14,14 +14,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#ifdef CHROME_PERSONALIZATION
-#include "chrome/personalization/personalization.h"
-#include "chrome/personalization/views/user_data_page_view.h"
-#endif
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "views/controls/tabbed_pane.h"
+#include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/widget/root_view.h"
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
@@ -93,9 +89,6 @@ OptionsWindowView::OptionsWindowView(Profile* profile)
       // the record comes from the original profile, but we explicitly use
       // the original profile to avoid potential problems.
     : profile_(profile->GetOriginalProfile()) {
-  // The download manager needs to be initialized before the contents of the
-  // Options Window are created.
-  profile_->GetDownloadManager();
   // We don't need to observe changes in this value.
   last_selected_page_.Init(prefs::kOptionsWindowLastTabIndex,
                            g_browser_process->local_state(), NULL);
@@ -202,15 +195,6 @@ void OptionsWindowView::Init() {
                        l10n_util::GetString(IDS_OPTIONS_CONTENT_TAB_LABEL),
                        content_page, false);
 
-#ifdef CHROME_PERSONALIZATION
-  if (!Personalization::IsP13NDisabled(profile_)) {
-    UserDataPageView* user_data_page = new UserDataPageView(profile_);
-    tabs_->AddTabAtIndex(tab_index++,
-                         l10n_util::GetString(IDS_OPTIONS_USER_DATA_TAB_LABEL),
-                         user_data_page, false);
-  }
-#endif
-
   AdvancedPageView* advanced_page = new AdvancedPageView(profile_);
   tabs_->AddTabAtIndex(tab_index++,
                        l10n_util::GetString(IDS_OPTIONS_ADVANCED_TAB_LABEL),
@@ -220,9 +204,7 @@ void OptionsWindowView::Init() {
 }
 
 OptionsPageView* OptionsWindowView::GetCurrentOptionsPageView() const {
-  views::RootView* contents_root_view = tabs_->GetContentsRootView();
-  DCHECK(contents_root_view->GetChildViewCount() == 1);
-  return static_cast<OptionsPageView*>(contents_root_view->GetChildViewAt(0));
+  return static_cast<OptionsPageView*>(tabs_->GetSelectedTab());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

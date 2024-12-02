@@ -7,9 +7,6 @@
     'msvs_use_common_release': 0,
     'msvs_use_common_linker_extras': 0,
   },
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'conditions': [
     ['OS=="win"', {
       'targets': [
@@ -18,16 +15,17 @@
           'type': 'executable',
           'msvs_guid': '24A5AC7C-280B-4899-9153-6BA570A081E7',
           'dependencies': [
+            '../../app/app.gyp:app_id',
             '../chrome.gyp:chrome',
             '../chrome.gyp:chrome_dll',
             '../chrome.gyp:default_extensions',
-            '../../testing/gtest.gyp:gtest',
             'installer.gyp:setup',
           ],
           'include_dirs': [
             '../..',
             '<(PRODUCT_DIR)',
             '<(INTERMEDIATE_DIR)',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome',
           ],
           'sources': [
             'mini_installer/chrome.release',
@@ -76,6 +74,9 @@
                     'shlwapi.lib',
                   ],
                 },
+                'VCManifestTool': {
+                  'AdditionalManifestFiles': '$(ProjectDir)\\mini_installer\\mini_installer.exe.manifest',
+                },
               },
             },
             'Release': {
@@ -86,6 +87,32 @@
                 },
               },
             },
+            'conditions': [
+              ['OS=="win"', {
+                # TODO(bradnelson): add a gyp mechanism to make this more
+                # graceful.
+                'Purify': {
+                  'msvs_props': [
+                    'mini_installer/mini_installer_release.vsprops'
+                  ],
+                  'msvs_settings': {
+                    'VCCLCompilerTool': {
+                      'BasicRuntimeChecks': '0',
+                    },
+                  },
+                },
+                'Release - no tcmalloc': {
+                  'msvs_props': [
+                    'mini_installer/mini_installer_release.vsprops'
+                  ],
+                  'msvs_settings': {
+                    'VCCLCompilerTool': {
+                      'BasicRuntimeChecks': '0',
+                    },
+                  },
+                },
+              }],
+            ],
           },
           'rules': [
             {
@@ -126,7 +153,7 @@
                 '<(PRODUCT_DIR)/chrome.exe',
                 '<(PRODUCT_DIR)/chrome.dll',
                 '<(PRODUCT_DIR)/locales/en-US.dll',
-                '<(PRODUCT_DIR)/icudt38.dll',
+                '<(PRODUCT_DIR)/icudt42.dll',
               ],
               'outputs': [
                 'xxx.out',
@@ -143,6 +170,10 @@
                 # TODO(sgk):  may just use environment variables
                 #'--distribution=$(CHROMIUM_BUILD)',
                 '--distribution=_google_chrome',
+		# Optional arguments to generate diff installer
+                #'--last_chrome_installer=C:/Temp/base',
+                #'--setup_exe_format=DIFF',
+                #'--diff_algorithm=COURGETTE',
               ],
               'message': 'Create installer archive'
             },
@@ -179,3 +210,9 @@
     }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

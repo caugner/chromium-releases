@@ -59,12 +59,12 @@ Tutorial B4: Cameras and events
 </style>
 <!-- Our javascript code -->
 <script type="text/javascript" src="o3djs/base.js"></script>
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.rendergraph');
 o3djs.require('o3djs.primitives');
-o3djs.require('o3djs.effect');
+o3djs.require('o3djs.material');
 
 // Events
 // Run the init() function once the page has finished loading.
@@ -127,22 +127,11 @@ function initStep2(clientElements) {
   g_animate = false;
   g_animateAngle = 0;
 
-  // Create and load the effect.
-  var effect = g_pack.createObject('Effect');
-  o3djs.effect.loadEffect(effect, 'shaders/vertex-color.shader');
-
-  // Create a material for it.
-  var myMaterial = g_pack.createObject('Material');
-
-  // Set the material's drawList
-  myMaterial.drawList = g_viewInfo.performanceDrawList;
-
-  // Apply our effect to this material. The effect tells the 3D hardware
-  // which shader to use.
-  myMaterial.effect = effect;
-
-  // Create the parameters the effect needs on the material.
-  effect.createUniformParameters(myMaterial);
+  // Create a material.
+  var myMaterial = o3djs.material.createMaterialFromFile(
+      g_pack,
+      'shaders/vertex-color.shader',
+      g_viewInfo.performanceDrawList);
 
   // Create a cube.
   var cube = o3djs.primitives.createRainbowCube(g_pack, myMaterial, 1);
@@ -341,17 +330,21 @@ set the position of the camera.
       <tbody>
         <tr>
           <td>Eye</td>
-          <td><input name="eyeX"
+          <td><input id="eyeX"
+                     name="eyeX"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="eyeY"
+          <td><input id="eyeY"
+                     name="eyeY"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="eyeZ"
+          <td><input id="eyeZ"
+                     name="eyeZ"
                      type="text"
                      onblur="validateFloat(this)"/></td>
           <td rowspan="2">
-            <input name="btnSet"
+            <input id="btnSet"
+                   name="btnSet"
                    type="button"
                    value="Set camera"
                    onClick="setCamera()"/>
@@ -359,29 +352,36 @@ set the position of the camera.
         </tr>
         <tr>
           <td>Target</td>
-          <td><input name="targetX"
+          <td><input id="targetX"
+                     name="targetX"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="targetY"
+          <td><input id="targetY"
+                     name="targetY"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="targetZ"
+          <td><input id="targetZ"
+                     name="targetZ"
                      type="text"
                      onblur="validateFloat(this)"/></td>
         </tr>
         <tr>
           <td>Up vector</td>
-          <td><input name="upX"
+          <td><input id="upX"
+                     name="upX"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="upY"
+          <td><input id="upY"
+                     name="upY"
                      type="text"
                      onblur="validateFloat(this)"/></td>
-          <td><input name="upZ"
+          <td><input id="upZ"
+                     name="upZ"
                      type="text"
                      onblur="validateFloat(this)"/></td>
           <td>
-            <input name="btnDefault"
+            <input id="btnDefault"
+                   name="btnDefault"
                    type="button"
                    value="Restore default camera"
                    onClick="setDefaultCameraValues()"/>
@@ -389,7 +389,8 @@ set the position of the camera.
         </tr>
         <tr>
           <td colspan="5" style="text-align:center">
-            <input name="btnAnimate"
+            <input id="btnAnimate"
+                   name="btnAnimate"
                    type="button"
                    value="Animate"
                    onClick="toggleAnimate()"/>

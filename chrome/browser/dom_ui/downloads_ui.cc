@@ -18,6 +18,7 @@
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 
 #if defined(OS_WIN)
 // TODO(port): re-enable when download_util is ported
@@ -72,7 +73,7 @@ void DownloadsUIHTMLSource::StartDataRequest(const std::string& path,
 
   // Status.
   localized_strings.SetString(L"status_cancelled",
-      l10n_util::GetString(IDS_DOWNLOAD_TAB_CANCELLED));
+      l10n_util::GetString(IDS_DOWNLOAD_TAB_CANCELED));
   localized_strings.SetString(L"status_paused",
       l10n_util::GetString(IDS_DOWNLOAD_PROGRESS_PAUSED));
 
@@ -93,10 +94,12 @@ void DownloadsUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetString(IDS_DOWNLOAD_LINK_CANCEL));
   localized_strings.SetString(L"control_resume",
       l10n_util::GetString(IDS_DOWNLOAD_LINK_RESUME));
+  localized_strings.SetString(L"control_removefromlist",
+      l10n_util::GetString(IDS_DOWNLOAD_LINK_REMOVE));
 
   SetFontAndTextDirection(&localized_strings);
 
-  static const StringPiece downloads_html(
+  static const base::StringPiece downloads_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_DOWNLOADS_HTML));
   const std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
@@ -133,4 +136,10 @@ DownloadsUI::DownloadsUI(TabContents* contents) : DOMUI(contents) {
       NewRunnableMethod(&chrome_url_data_manager,
           &ChromeURLDataManager::AddDataSource,
           html_source));
+}
+
+// static
+RefCountedMemory* DownloadsUI::GetFaviconResourceBytes() {
+  return ResourceBundle::GetSharedInstance().
+      LoadImageResourceBytes(IDR_DOWNLOADS_FAVICON);
 }

@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "app/gfx/native_widget_types.h"
 #include "chrome/common/page_transition_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -78,7 +79,7 @@ class AutocompleteEditView {
   // rather than '?'.
   virtual void SetForcedQuery() = 0;
 
-  // Returns true if all text is selected.
+  // Returns true if all text is selected or there is no text at all.
   virtual bool IsSelectAll() = 0;
 
   // Selects all the text in the edit.  Use this in place of SetSelAll() to
@@ -95,6 +96,9 @@ class AutocompleteEditView {
 
   // Closes the autocomplete popup, if it's open.
   virtual void ClosePopup() = 0;
+
+  // Sets the focus to the autocomplete view.
+  virtual void SetFocus() = 0;
 
   // Called when the temporary text in the model may have changed.
   // |display_text| is the new text to show; |save_original_selection| is true
@@ -121,6 +125,9 @@ class AutocompleteEditView {
   // OnAfterPossibleChange() returns true if there was a change that caused it
   // to call UpdatePopup().
   virtual bool OnAfterPossibleChange() = 0;
+
+  // Returns the gfx::NativeView of the edit view.
+  virtual gfx::NativeView GetNativeView() const = 0;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_H_

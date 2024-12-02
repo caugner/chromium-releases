@@ -7,15 +7,24 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <shellapi.h>
+#elif defined(OS_FREEBSD)
+#include <stdlib.h>
+#include <unistd.h>
 #endif
 
 #include <algorithm>
 
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+
+#if defined(OS_LINUX)
+// Linux/glibc doesn't natively have setproctitle().
+#include "base/setproctitle_linux.h"
+#endif
 
 CommandLine* CommandLine::current_process_commandline_ = NULL;
 
@@ -36,7 +45,7 @@ const char kSwitchValueSeparator[] = "=";
 // Lowercase a string.  This is used to lowercase switch names.
 // Is this what we really want?  It seems crazy to me.  I've left it in
 // for backwards compatibility on Windows.
-static void Lowercase(std::wstring* parameter) {
+static void Lowercase(std::string* parameter) {
   transform(parameter->begin(), parameter->end(), parameter->begin(),
             tolower);
 }
@@ -84,6 +93,15 @@ void CommandLine::ParseFromString(const std::wstring& command_line) {
   if (args)
     LocalFree(args);
 }
+
+CommandLine::CommandLine(const FilePath& program) {
+  if (!program.empty()) {
+    program_ = program.value();
+    command_line_string_ = L'"' + program.value() + L'"';
+  }
+}
+
+// Deprecated version
 CommandLine::CommandLine(const std::wstring& program) {
   if (!program.empty()) {
     program_ = program;
@@ -91,17 +109,14 @@ CommandLine::CommandLine(const std::wstring& program) {
   }
 }
 #elif defined(OS_POSIX)
-CommandLine::CommandLine(int argc, const char* const* argv) {
+void CommandLine::InitFromArgv(int argc, const char* const* argv) {
   for (int i = 0; i < argc; ++i)
     argv_.push_back(argv[i]);
-  InitFromArgv();
-}
-CommandLine::CommandLine(const std::vector<std::string>& argv) {
-  argv_ = argv;
-  InitFromArgv();
+  InitFromArgv(argv_);
 }
 
-void CommandLine::InitFromArgv() {
+void CommandLine::InitFromArgv(const std::vector<std::string>& argv) {
+  argv_ = argv;
   bool parse_switches = true;
   for (size_t i = 1; i < argv_.size(); ++i) {
     const std::string& arg = argv_[i];
@@ -126,8 +141,13 @@ void CommandLine::InitFromArgv() {
   }
 }
 
+CommandLine::CommandLine(const FilePath& program) {
+  argv_.push_back(program.value());
+}
+
+// Deprecated version
 CommandLine::CommandLine(const std::wstring& program) {
-  argv_.push_back(WideToASCII(program));
+  argv_.push_back(base::SysWideToNativeMB(program));
 }
 #endif
 
@@ -155,8 +175,8 @@ bool CommandLine::IsSwitch(const StringType& parameter_string,
       *switch_value = parameter_string.substr(equals_position + 1);
     }
 #if defined(OS_WIN)
-    Lowercase(&switch_native);
     *switch_string = WideToASCII(switch_native);
+    Lowercase(switch_string);
 #else
     *switch_string = switch_native;
 #endif
@@ -168,55 +188,60 @@ bool CommandLine::IsSwitch(const StringType& parameter_string,
 }
 
 // static
-void CommandLine::Reset() {
-  delete current_process_commandline_;
-  current_process_commandline_ = NULL;
-}
-
-// static
 void CommandLine::Init(int argc, const char* const* argv) {
-#if defined(OS_WIN)
+  delete current_process_commandline_;
   current_process_commandline_ = new CommandLine;
+#if defined(OS_WIN)
   current_process_commandline_->ParseFromString(::GetCommandLineW());
 #elif defined(OS_POSIX)
-  current_process_commandline_ = new CommandLine(argc, argv);
+  current_process_commandline_->InitFromArgv(argc, argv);
+#endif
+
+#if defined(OS_LINUX)
+  if (argv)
+    setproctitle_init(const_cast<char**>(argv));
 #endif
 }
 
+#if defined(OS_LINUX) || defined(OS_FREEBSD)
 // static
-void CommandLine::Init(const std::vector<std::string>& argv) {
-  DCHECK(current_process_commandline_ == NULL);
-#if defined(OS_WIN)
-  current_process_commandline_ = new CommandLine;
-  current_process_commandline_->ParseFromString(::GetCommandLineW());
-#elif defined(OS_POSIX)
-  current_process_commandline_ = new CommandLine(argv);
-#endif
+void CommandLine::SetProcTitle() {
+  // Build a single string which consists of all the arguments separated
+  // by spaces. We can't actually keep them separate due to the way the
+  // setproctitle() function works.
+  std::string title;
+  for (size_t i = 1; i < current_process_commandline_->argv_.size(); ++i) {
+    if (!title.empty())
+      title += " ";
+    title += current_process_commandline_->argv_[i];
+  }
+  setproctitle("%s", title.c_str());
 }
+#endif
 
-void CommandLine::Terminate() {
+void CommandLine::Reset() {
   DCHECK(current_process_commandline_ != NULL);
   delete current_process_commandline_;
   current_process_commandline_ = NULL;
 }
 
-bool CommandLine::HasSwitch(const std::wstring& switch_string) const {
-  std::wstring lowercased_switch(switch_string);
+bool CommandLine::HasSwitch(const std::string& switch_string) const {
+  std::string lowercased_switch(switch_string);
 #if defined(OS_WIN)
   Lowercase(&lowercased_switch);
 #endif
-  return switches_.find(WideToASCII(lowercased_switch)) != switches_.end();
+  return switches_.find(lowercased_switch) != switches_.end();
 }
 
 std::wstring CommandLine::GetSwitchValue(
-    const std::wstring& switch_string) const {
-  std::wstring lowercased_switch(switch_string);
+    const std::string& switch_string) const {
+  std::string lowercased_switch(switch_string);
 #if defined(OS_WIN)
   Lowercase(&lowercased_switch);
 #endif
 
   std::map<std::string, StringType>::const_iterator result =
-      switches_.find(WideToASCII(lowercased_switch));
+      switches_.find(lowercased_switch);
 
   if (result == switches_.end()) {
     return L"";
@@ -224,7 +249,7 @@ std::wstring CommandLine::GetSwitchValue(
 #if defined(OS_WIN)
     return result->second;
 #else
-    return ASCIIToWide(result->second);
+    return base::SysNativeMBToWide(result->second);
 #endif
   }
 }
@@ -240,47 +265,51 @@ std::wstring CommandLine::program() const {
 std::vector<std::wstring> CommandLine::GetLooseValues() const {
   std::vector<std::wstring> values;
   for (size_t i = 0; i < loose_values_.size(); ++i)
-    values.push_back(ASCIIToWide(loose_values_[i]));
+    values.push_back(base::SysNativeMBToWide(loose_values_[i]));
   return values;
 }
 std::wstring CommandLine::program() const {
-  DCHECK(argv_.size() > 0);
-  return ASCIIToWide(argv_[0]);
+  DCHECK_GT(argv_.size(), 0U);
+  return base::SysNativeMBToWide(argv_[0]);
 }
 #endif
 
 
 // static
 std::wstring CommandLine::PrefixedSwitchString(
-    const std::wstring& switch_string) {
-  return StringPrintf(L"%ls%ls",
-                      kSwitchPrefixes[0],
-                      switch_string.c_str());
+    const std::string& switch_string) {
+#if defined(OS_WIN)
+  return kSwitchPrefixes[0] + ASCIIToWide(switch_string);
+#else
+  return ASCIIToWide(kSwitchPrefixes[0] + switch_string);
+#endif
 }
 
 // static
 std::wstring CommandLine::PrefixedSwitchStringWithValue(
-    const std::wstring& switch_string, const std::wstring& value_string) {
+    const std::string& switch_string, const std::wstring& value_string) {
   if (value_string.empty()) {
     return PrefixedSwitchString(switch_string);
   }
 
-  return StringPrintf(L"%ls%ls%ls%ls",
-                      kSwitchPrefixes[0],
-                      switch_string.c_str(),
-                      kSwitchValueSeparator,
-                      value_string.c_str());
+  return PrefixedSwitchString(switch_string +
+#if defined(OS_WIN)
+                              WideToASCII(kSwitchValueSeparator)
+#else
+                              kSwitchValueSeparator
+#endif
+                              ) + value_string;
 }
 
 #if defined(OS_WIN)
-void CommandLine::AppendSwitch(const std::wstring& switch_string) {
+void CommandLine::AppendSwitch(const std::string& switch_string) {
   std::wstring prefixed_switch_string = PrefixedSwitchString(switch_string);
   command_line_string_.append(L" ");
   command_line_string_.append(prefixed_switch_string);
-  switches_[WideToASCII(switch_string)] = L"";
+  switches_[switch_string] = L"";
 }
 
-void CommandLine::AppendSwitchWithValue(const std::wstring& switch_string,
+void CommandLine::AppendSwitchWithValue(const std::string& switch_string,
                                         const std::wstring& value_string) {
   std::wstring value_string_edit;
 
@@ -297,12 +326,12 @@ void CommandLine::AppendSwitchWithValue(const std::wstring& switch_string,
   }
 
   std::wstring combined_switch_string =
-    PrefixedSwitchStringWithValue(switch_string, value_string_edit);
+      PrefixedSwitchStringWithValue(switch_string, value_string_edit);
 
   command_line_string_.append(L" ");
   command_line_string_.append(combined_switch_string);
 
-  switches_[WideToASCII(switch_string)] = value_string;
+  switches_[switch_string] = value_string;
 }
 
 void CommandLine::AppendLooseValue(const std::wstring& value) {
@@ -332,24 +361,22 @@ void CommandLine::PrependWrapper(const std::wstring& wrapper) {
 }
 
 #elif defined(OS_POSIX)
-void CommandLine::AppendSwitch(const std::wstring& switch_string) {
-  std::string ascii_switch = WideToASCII(switch_string);
-  argv_.push_back(kSwitchPrefixes[0] + ascii_switch);
-  switches_[ascii_switch] = "";
+void CommandLine::AppendSwitch(const std::string& switch_string) {
+  argv_.push_back(kSwitchPrefixes[0] + switch_string);
+  switches_[switch_string] = "";
 }
 
-void CommandLine::AppendSwitchWithValue(const std::wstring& switch_string,
+void CommandLine::AppendSwitchWithValue(const std::string& switch_string,
                                         const std::wstring& value_string) {
-  std::string ascii_switch = WideToASCII(switch_string);
-  std::string ascii_value = WideToASCII(value_string);
+  std::string mb_value = base::SysWideToNativeMB(value_string);
 
-  argv_.push_back(kSwitchPrefixes[0] + ascii_switch +
-                  kSwitchValueSeparator + ascii_value);
-  switches_[ascii_switch] = ascii_value;
+  argv_.push_back(kSwitchPrefixes[0] + switch_string +
+                  kSwitchValueSeparator + mb_value);
+  switches_[switch_string] = mb_value;
 }
 
 void CommandLine::AppendLooseValue(const std::wstring& value) {
-  argv_.push_back(WideToASCII(value));
+  argv_.push_back(base::SysWideToNativeMB(value));
 }
 
 void CommandLine::AppendArguments(const CommandLine& other,
@@ -369,7 +396,7 @@ void CommandLine::AppendArguments(const CommandLine& other,
 void CommandLine::PrependWrapper(const std::wstring& wrapper_wide) {
   // The wrapper may have embedded arguments (like "gdb --args"). In this case,
   // we don't pretend to do anything fancy, we just split on spaces.
-  const std::string wrapper = WideToASCII(wrapper_wide);
+  const std::string wrapper = base::SysWideToNativeMB(wrapper_wide);
   std::vector<std::string> wrapper_and_args;
   SplitString(wrapper, ' ', &wrapper_and_args);
   argv_.insert(argv_.begin(), wrapper_and_args.begin(), wrapper_and_args.end());

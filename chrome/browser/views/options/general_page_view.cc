@@ -4,27 +4,25 @@
 
 #include "chrome/browser/views/options/general_page_view.h"
 
+#include "app/combobox_model.h"
+#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/png_decoder.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-#include "base/thread.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/keyword_editor_view.h"
 #include "chrome/browser/views/options/options_group_view.h"
-#include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
@@ -51,118 +49,6 @@ static const SkColor kNotDefaultBrowserLabelColor = SkColorSetRGB(135, 0, 0);
 std::wstring GetNewTabUIURLString() {
   return UTF8ToWide(chrome::kChromeUINewTabURL);
 }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// GeneralPageView::DefaultBrowserWorker
-//
-//  A helper object that handles checking if Chrome is the default browser on
-//  Windows and also setting it as the default browser. These operations are
-//  performed asynchronously on the file thread since registry access is
-//  involved and this can be slow.
-//
-class GeneralPageView::DefaultBrowserWorker
-    : public base::RefCountedThreadSafe<GeneralPageView::DefaultBrowserWorker> {
- public:
-  explicit DefaultBrowserWorker(GeneralPageView* general_page_view);
-
-  // Checks if Chrome is the default browser.
-  void StartCheckDefaultBrowser();
-
-  // Sets Chrome as the default browser.
-  void StartSetAsDefaultBrowser();
-
-  // Called to notify the worker that the view is gone.
-  void ViewDestroyed();
-
- private:
-  // Functions that track the process of checking if Chrome is the default
-  // browser.
-  // |ExecuteCheckDefaultBrowser| checks the registry on the file thread.
-  // |CompleteCheckDefaultBrowser| notifies the view to update on the UI thread.
-  void ExecuteCheckDefaultBrowser();
-  void CompleteCheckDefaultBrowser(bool is_default);
-
-  // Functions that track the process of setting Chrome as the default browser.
-  // |ExecuteSetAsDefaultBrowser| updates the registry on the file thread.
-  // |CompleteSetAsDefaultBrowser| notifies the view to update on the UI thread.
-  void ExecuteSetAsDefaultBrowser();
-  void CompleteSetAsDefaultBrowser();
-
-  // Updates the UI in our associated view with the current default browser
-  // state.
-  void UpdateUI(bool is_default);
-
-  GeneralPageView* general_page_view_;
-
-  MessageLoop* ui_loop_;
-  MessageLoop* file_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(GeneralPageView::DefaultBrowserWorker);
-};
-
-GeneralPageView::DefaultBrowserWorker::DefaultBrowserWorker(
-    GeneralPageView* general_page_view)
-    : general_page_view_(general_page_view),
-      ui_loop_(MessageLoop::current()),
-      file_loop_(g_browser_process->file_thread()->message_loop()) {
-}
-
-void GeneralPageView::DefaultBrowserWorker::StartCheckDefaultBrowser() {
-  general_page_view_->SetDefaultBrowserUIState(STATE_PROCESSING);
-  file_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::ExecuteCheckDefaultBrowser));
-}
-
-void GeneralPageView::DefaultBrowserWorker::StartSetAsDefaultBrowser() {
-  general_page_view_->SetDefaultBrowserUIState(STATE_PROCESSING);
-  file_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::ExecuteSetAsDefaultBrowser));
-}
-
-void GeneralPageView::DefaultBrowserWorker::ViewDestroyed() {
-  // Our associated view has gone away, so we shouldn't call back to it if
-  // our worker thread returns after the view is dead.
-  general_page_view_ = NULL;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// DefaultBrowserWorker, private:
-
-void GeneralPageView::DefaultBrowserWorker::ExecuteCheckDefaultBrowser() {
-  DCHECK(MessageLoop::current() == file_loop_);
-  bool is_default = ShellIntegration::IsDefaultBrowser();
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::CompleteCheckDefaultBrowser, is_default));
-}
-
-void GeneralPageView::DefaultBrowserWorker::CompleteCheckDefaultBrowser(
-    bool is_default) {
-  DCHECK(MessageLoop::current() == ui_loop_);
-  UpdateUI(is_default);
-}
-
-void GeneralPageView::DefaultBrowserWorker::ExecuteSetAsDefaultBrowser() {
-  DCHECK(MessageLoop::current() == file_loop_);
-  bool result = ShellIntegration::SetAsDefaultBrowser();
-  ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &DefaultBrowserWorker::CompleteSetAsDefaultBrowser));
-}
-
-void GeneralPageView::DefaultBrowserWorker::CompleteSetAsDefaultBrowser() {
-  DCHECK(MessageLoop::current() == ui_loop_);
-  if (general_page_view_) {
-    // Set as default completed, check again to make sure it stuck...
-    StartCheckDefaultBrowser();
-  }
-}
-
-void GeneralPageView::DefaultBrowserWorker::UpdateUI(bool is_default) {
-  if (general_page_view_) {
-    DefaultBrowserUIState state =
-        is_default ? STATE_DEFAULT : STATE_NOT_DEFAULT;
-    general_page_view_->SetDefaultBrowserUIState(state);
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -207,7 +93,7 @@ class CustomHomePagesTableModel : public TableModel {
     SkBitmap icon;
 
     // If non-zero, indicates we're loading the favicon for the page.
-    HistoryService::Handle fav_icon_handle;
+    FaviconService::Handle fav_icon_handle;
   };
 
   static void InitClass();
@@ -217,7 +103,7 @@ class CustomHomePagesTableModel : public TableModel {
 
   // Callback from history service. Updates the icon of the Entry whose
   // fav_icon_handle matches handle and notifies the observer of the change.
-  void OnGotFavIcon(HistoryService::Handle handle,
+  void OnGotFavIcon(FaviconService::Handle handle,
                     bool know_fav_icon,
                     scoped_refptr<RefCountedBytes> image_data,
                     bool is_expired,
@@ -225,7 +111,7 @@ class CustomHomePagesTableModel : public TableModel {
 
   // Returns the entry whose fav_icon_handle matches handle and sets entry_index
   // to the index of the entry.
-  Entry* GetEntryByLoadHandle(HistoryService::Handle handle, int* entry_index);
+  Entry* GetEntryByLoadHandle(FaviconService::Handle handle, int* entry_index);
 
   // Set of entries we're showing.
   std::vector<Entry> entries_;
@@ -279,10 +165,10 @@ void CustomHomePagesTableModel::Remove(int index) {
   if (entry->fav_icon_handle) {
     // Pending load request, cancel it now so we don't deref a bogus pointer
     // when we get loaded notification.
-    HistoryService* history =
-        profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-    if (history)
-      history->CancelRequest(entry->fav_icon_handle);
+    FaviconService* favicon_service =
+        profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+    if (favicon_service)
+      favicon_service->CancelRequest(entry->fav_icon_handle);
   }
   entries_.erase(entries_.begin() + static_cast<size_t>(index));
   if (observer_)
@@ -331,17 +217,17 @@ void CustomHomePagesTableModel::InitClass() {
 }
 
 void CustomHomePagesTableModel::LoadFavIcon(Entry* entry) {
-  HistoryService* history =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  if (!history)
+  FaviconService* favicon_service =
+      profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  if (!favicon_service)
     return;
-  entry->fav_icon_handle = history->GetFavIconForURL(
+  entry->fav_icon_handle = favicon_service->GetFaviconForURL(
       entry->url, &fav_icon_consumer_,
       NewCallback(this, &CustomHomePagesTableModel::OnGotFavIcon));
 }
 
 void CustomHomePagesTableModel::OnGotFavIcon(
-    HistoryService::Handle handle,
+    FaviconService::Handle handle,
     bool know_fav_icon,
     scoped_refptr<RefCountedBytes> image_data,
     bool is_expired,
@@ -353,9 +239,10 @@ void CustomHomePagesTableModel::OnGotFavIcon(
   if (know_fav_icon && image_data.get() && !image_data->data.empty()) {
     int width, height;
     std::vector<unsigned char> decoded_data;
-    if (PNGDecoder::Decode(&image_data->data.front(), image_data->data.size(),
-                           PNGDecoder::FORMAT_BGRA, &decoded_data, &width,
-                           &height)) {
+    if (gfx::PNGCodec::Decode(&image_data->data.front(),
+                              image_data->data.size(),
+                              gfx::PNGCodec::FORMAT_BGRA, &decoded_data,
+                              &width, &height)) {
       entry->icon.setConfig(SkBitmap::kARGB_8888_Config, width, height);
       entry->icon.allocPixels();
       memcpy(entry->icon.getPixels(), &decoded_data.front(),
@@ -368,7 +255,7 @@ void CustomHomePagesTableModel::OnGotFavIcon(
 
 CustomHomePagesTableModel::Entry*
     CustomHomePagesTableModel::GetEntryByLoadHandle(
-    HistoryService::Handle handle,
+    FaviconService::Handle handle,
     int* index) {
   for (size_t i = 0; i < entries_.size(); ++i) {
     if (entries_[i].fav_icon_handle == handle) {
@@ -382,7 +269,7 @@ CustomHomePagesTableModel::Entry*
 ///////////////////////////////////////////////////////////////////////////////
 // SearchEngineListModel
 
-class SearchEngineListModel : public views::Combobox::Model,
+class SearchEngineListModel : public ComboboxModel,
                               public TemplateURLModelObserver {
  public:
   explicit SearchEngineListModel(Profile* profile);
@@ -392,9 +279,9 @@ class SearchEngineListModel : public views::Combobox::Model,
   // so that when the TemplateURLModel changes the combobox can be updated.
   void SetCombobox(views::Combobox* combobox);
 
-  // views::Combobox::Model overrides:
-  virtual int GetItemCount(views::Combobox* source);
-  virtual std::wstring GetItemAt(views::Combobox* source, int index);
+  // ComboboxModel overrides:
+  virtual int GetItemCount();
+  virtual std::wstring GetItemAt(int index);
 
   // Returns the TemplateURL at the specified index.
   const TemplateURL* GetTemplateURLAt(int index);
@@ -447,13 +334,12 @@ void SearchEngineListModel::SetCombobox(views::Combobox* combobox) {
     combobox_->SetEnabled(false);
 }
 
-int SearchEngineListModel::GetItemCount(views::Combobox* source) {
+int SearchEngineListModel::GetItemCount() {
   return static_cast<int>(template_urls_.size());
 }
 
-std::wstring SearchEngineListModel::GetItemAt(views::Combobox* source,
-                                              int index) {
-  DCHECK(index < GetItemCount(combobox_));
+std::wstring SearchEngineListModel::GetItemAt(int index) {
+  DCHECK(index < GetItemCount());
   return template_urls_[index]->short_name();
 }
 
@@ -525,7 +411,8 @@ GeneralPageView::GeneralPageView(Profile* profile)
       default_browser_status_label_(NULL),
       default_browser_use_as_default_button_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          default_browser_worker_(new DefaultBrowserWorker(this))),
+          default_browser_worker_(
+              new ShellIntegration::DefaultBrowserWorker(this))),
       OptionsPageView(profile) {
 }
 
@@ -535,13 +422,14 @@ GeneralPageView::~GeneralPageView() {
       prefs::kURLsToRestoreOnStartup, this);
   if (startup_custom_pages_table_)
     startup_custom_pages_table_->SetModel(NULL);
-  default_browser_worker_->ViewDestroyed();
+  default_browser_worker_->ObserverDestroyed();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // GeneralPageView, views::ButtonListener implementation:
 
-void GeneralPageView::ButtonPressed(views::Button* sender) {
+void GeneralPageView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == startup_homepage_radio_ ||
       sender == startup_last_session_radio_ ||
       sender == startup_custom_radio_) {
@@ -755,18 +643,25 @@ void GeneralPageView::Layout() {
 ///////////////////////////////////////////////////////////////////////////////
 // GeneralPageView, private:
 
-void GeneralPageView::SetDefaultBrowserUIState(DefaultBrowserUIState state) {
-  bool button_enabled = state == STATE_NOT_DEFAULT;
+void GeneralPageView::SetDefaultBrowserUIState(
+    ShellIntegration::DefaultBrowserUIState state) {
+  bool button_enabled = state == ShellIntegration::STATE_NOT_DEFAULT;
   default_browser_use_as_default_button_->SetEnabled(button_enabled);
-  if (state == STATE_DEFAULT) {
+  if (state == ShellIntegration::STATE_IS_DEFAULT) {
     default_browser_status_label_->SetText(
       l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_DEFAULT,
                             l10n_util::GetString(IDS_PRODUCT_NAME)));
     default_browser_status_label_->SetColor(kDefaultBrowserLabelColor);
     Layout();
-  } else if (state == STATE_NOT_DEFAULT) {
+  } else if (state == ShellIntegration::STATE_NOT_DEFAULT) {
     default_browser_status_label_->SetText(
         l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT,
+                              l10n_util::GetString(IDS_PRODUCT_NAME)));
+    default_browser_status_label_->SetColor(kNotDefaultBrowserLabelColor);
+    Layout();
+  } else if (state == ShellIntegration::STATE_UNKNOWN) {
+    default_browser_status_label_->SetText(
+        l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN,
                               l10n_util::GetString(IDS_PRODUCT_NAME)));
     default_browser_status_label_->SetColor(kNotDefaultBrowserLabelColor);
     Layout();
@@ -801,7 +696,7 @@ void GeneralPageView::InitStartupGroup() {
   columns.push_back(TableColumn());
   startup_custom_pages_table_ = new views::TableView(
       startup_custom_pages_table_model_.get(), columns,
-      views::ICON_AND_TEXT, true, false, true);
+      views::ICON_AND_TEXT, false, false, true);
   // URLs are inherently left-to-right, so do not mirror the table.
   startup_custom_pages_table_->EnableUIMirroringForRTLLanguages(false);
   startup_custom_pages_table_->SetObserver(this);
@@ -1002,15 +897,25 @@ void GeneralPageView::SaveStartupPref() {
 }
 
 void GeneralPageView::AddURLToStartupURLs() {
-  ShelfItemDialog* dialog = new ShelfItemDialog(this, profile(), false);
+  UrlPicker* dialog = new UrlPicker(this, profile(), false);
   dialog->Show(GetWindow()->GetNativeWindow());
 }
 
 void GeneralPageView::RemoveURLsFromStartupURLs() {
+  int selected_row = 0;
   for (views::TableView::iterator i =
        startup_custom_pages_table_->SelectionBegin();
        i != startup_custom_pages_table_->SelectionEnd(); ++i) {
     startup_custom_pages_table_model_->Remove(*i);
+    selected_row = *i;
+  }
+  int row_count = startup_custom_pages_table_->RowCount();
+  if (selected_row >= row_count)
+    selected_row = row_count - 1;
+  if (selected_row >= 0) {
+    // Select the next row after the last row deleted, or the above item if the
+    // latest item was deleted or nothing when the table doesn't have any items.
+    startup_custom_pages_table_->Select(selected_row);
   }
   SaveStartupPref();
 }
@@ -1049,7 +954,7 @@ void GeneralPageView::EnableCustomHomepagesControls(bool enable) {
   startup_custom_pages_table_->SetEnabled(enable);
 }
 
-void GeneralPageView::AddBookmark(ShelfItemDialog* dialog,
+void GeneralPageView::AddBookmark(UrlPicker* dialog,
                                   const std::wstring& title,
                                   const GURL& url) {
   int index = startup_custom_pages_table_->FirstSelectedRow();
@@ -1058,6 +963,7 @@ void GeneralPageView::AddBookmark(ShelfItemDialog* dialog,
   else
     index++;
   startup_custom_pages_table_model_->Add(index, url);
+  startup_custom_pages_table_->Select(index);
 
   SaveStartupPref();
 }

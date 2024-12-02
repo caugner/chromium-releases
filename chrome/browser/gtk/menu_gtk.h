@@ -8,7 +8,9 @@
 #include <gtk/gtk.h>
 
 #include <string>
+#include <vector>
 
+#include "base/task.h"
 #include "chrome/common/owned_widget_gtk.h"
 
 class SkBitmap;
@@ -34,7 +36,7 @@ class MenuGtk {
     // Called when the menu stops showing. This will be called along with
     // ExecuteCommand if the user clicks an item, but will also be called when
     // the user clicks away from the menu.
-    virtual void StoppedShowing() { };
+    virtual void StoppedShowing() {}
 
     // Functions needed for creation of non-static menus.
     virtual int GetItemCount() const { return 0; }
@@ -42,6 +44,9 @@ class MenuGtk {
     virtual std::string GetLabel(int command_id) const { return std::string(); }
     virtual bool HasIcon(int command_id) const { return false; }
     virtual const SkBitmap* GetIcon(int command_id) const { return NULL; }
+    // Return true if we should override the "gtk-menu-images" system setting
+    // when showing image menu items for this menu.
+    virtual bool AlwaysShowImages() const { return false; }
   };
 
   // Builds a MenuGtk that uses |delegate| to perform actions and |menu_data|
@@ -78,6 +83,10 @@ class MenuGtk {
   // triggering event (e.g. right mouse click, context menu key, etc.).
   void PopupAsContext(guint32 event_time);
 
+  // Displays the menu following a keyboard event (such as selecting |widget|
+  // and pressing "enter").
+  void PopupAsFromKeyEvent(GtkWidget* widget);
+
   // Closes the menu.
   void Cancel();
 
@@ -110,6 +119,9 @@ class MenuGtk {
   // recursive and does not support sub-menus.
   void BuildMenuFromDelegate();
 
+  // Contains implementation for OnMenuShow.
+  void UpdateMenu();
+
   // Callback for when a menu item is clicked.
   static void OnMenuItemActivated(GtkMenuItem* menuitem, MenuGtk* menu);
 
@@ -133,6 +145,16 @@ class MenuGtk {
   // gtk_menu_popup() does not appear to take ownership of popup menus, so
   // MenuGtk explicitly manages the lifetime of the menu.
   OwnedWidgetGtk menu_;
+
+  // True when we should ignore "activate" signals.  Used to prevent
+  // menu items from getting activated when we are setting up the
+  // menu.
+  static bool block_activation_;
+
+  // We must free these at shutdown.
+  std::vector<MenuGtk*> submenus_we_own_;
+
+  ScopedRunnableMethodFactory<MenuGtk> factory_;
 };
 
 #endif  // CHROME_BROWSER_GTK_MENU_GTK_H_

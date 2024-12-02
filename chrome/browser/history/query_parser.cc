@@ -7,10 +7,10 @@
 #include "chrome/browser/history/query_parser.h"
 
 #include "app/l10n_util.h"
+#include "base/i18n/word_iterator.h"
 #include "base/logging.h"
 #include "base/scoped_vector.h"
 #include "base/string_util.h"
-#include "base/word_iterator.h"
 #include "unicode/uscript.h"
 
 namespace {
@@ -66,7 +66,8 @@ void CoalseAndSortMatchPositions(Snippet::MatchPositions* matches) {
 // A QueryNodeWord is a single word in the query.
 class QueryNodeWord : public QueryNode {
  public:
-  QueryNodeWord(const std::wstring& word) : word_(word), literal_(false) {}
+  explicit QueryNodeWord(const std::wstring& word)
+      : word_(word), literal_(false) {}
   virtual ~QueryNodeWord() {}
   virtual int AppendToSQLiteQuery(std::wstring* query) const;
   virtual bool IsWord() const { return true; }

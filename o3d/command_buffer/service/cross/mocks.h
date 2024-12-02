@@ -36,8 +36,8 @@
 // would be definitely preferable, unfortunately it doesn't work on Windows
 // yet.
 
-#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H__
-#define O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H__
+#ifndef O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H_
+#define O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H_
 
 #include <vector>
 #include "gmock/gmock.h"
@@ -51,18 +51,21 @@ namespace command_buffer {
 class AsyncAPIMock : public AsyncAPIInterface {
  public:
   AsyncAPIMock() {
-    testing::DefaultValue<BufferSyncInterface::ParseError>::Set(
-        BufferSyncInterface::PARSE_NO_ERROR);
+    testing::DefaultValue<parse_error::ParseError>::Set(
+        parse_error::kParseNoError);
   }
 
   // Predicate that matches args passed to DoCommand, by looking at the values.
   class IsArgs {
    public:
-    IsArgs(unsigned int arg_count, CommandBufferEntry *args)
+    IsArgs(unsigned int arg_count, const void* args)
         : arg_count_(arg_count),
-          args_(args) { }
+          args_(static_cast<CommandBufferEntry*>(const_cast<void*>(args))) {
+    }
 
-    bool operator() (CommandBufferEntry *args) const {
+    bool operator() (const void* _args) const {
+      const CommandBufferEntry* args =
+          static_cast<const CommandBufferEntry*>(_args) + 1;
       for (unsigned int i = 0; i < arg_count_; ++i) {
         if (args[i].value_uint32 != args_[i].value_uint32) return false;
       }
@@ -74,76 +77,30 @@ class AsyncAPIMock : public AsyncAPIInterface {
     CommandBufferEntry *args_;
   };
 
-  MOCK_METHOD3(DoCommand, BufferSyncInterface::ParseError(
+  MOCK_METHOD3(DoCommand, parse_error::ParseError(
       unsigned int command,
       unsigned int arg_count,
-      CommandBufferEntry *args));
+      const void* cmd_data));
 
-  // Sets the engine, to forward SET_TOKEN commands to it.
+  // Sets the engine, to forward SetToken commands to it.
   void set_engine(CommandBufferEngine *engine) { engine_ = engine; }
 
   // Forwards the SetToken commands to the engine.
   void SetToken(unsigned int command,
                 unsigned int arg_count,
-                CommandBufferEntry *args) {
+                const void* _args) {
     DCHECK(engine_);
-    DCHECK_EQ(1, command);
-    DCHECK_EQ(1, arg_count);
+    DCHECK_EQ(1u, command);
+    DCHECK_EQ(1u, arg_count);
+    const CommandBufferEntry* args =
+        static_cast<const CommandBufferEntry*>(_args);
     engine_->set_token(args[0].value_uint32);
   }
  private:
   CommandBufferEngine *engine_;
 };
 
-class RPCProcessMock : public RPCProcessInterface {
- public:
-  RPCProcessMock()
-      : would_have_blocked_(false),
-        message_count_(0) {
-    ON_CALL(*this, ProcessMessage()).WillByDefault(
-        testing::Invoke(this, &RPCProcessMock::DefaultProcessMessage));
-    ON_CALL(*this, HasMessage()).WillByDefault(
-        testing::Invoke(this, &RPCProcessMock::DefaultHasMessage));
-  }
-  MOCK_METHOD0(ProcessMessage, bool());
-  MOCK_METHOD0(HasMessage, bool());
-
-  void Reset() {
-    would_have_blocked_ = false;
-    message_count_ = 0;
-  }
-
-  bool DefaultProcessMessage() {
-    if (message_count_ > 0) {
-      --message_count_;
-    } else {
-      would_have_blocked_ = true;
-    }
-    return true;
-  }
-
-  bool DefaultHasMessage() {
-    return message_count_ > 0;
-  }
-
-  bool AddMessage() {
-    ++message_count_;
-  }
-
-  bool would_have_blocked() { return would_have_blocked_; }
-  void set_would_have_blocked(bool would_have_blocked) {
-    would_have_blocked_ = would_have_blocked;
-  }
-
-  unsigned int message_count() { return message_count_; }
-  void set_message_count(unsigned int count) { message_count_ = count; }
- private:
-  bool would_have_blocked_;
-  unsigned int message_count_;
-};
-
-
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H__
+#endif  // O3D_COMMAND_BUFFER_SERVICE_CROSS_MOCKS_H_

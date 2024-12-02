@@ -46,7 +46,7 @@ Tutorial A1: Loading a scene
 <script type="text/javascript" src="o3djs/base.js"></script>
 
 <!-- Our javascript code -->
-<script type="text/javascript">
+<script type="text/javascript" id="o3dscript">
 o3djs.require('o3djs.util');
 o3djs.require('o3djs.math');
 o3djs.require('o3djs.rendergraph');
@@ -57,6 +57,8 @@ o3djs.require('o3djs.scene');
 // Events
 // init() once the page has finished loading.
 window.onload = init;
+// unload() when leaving the page.
+window.onunload = unload;
 
 // global variables
 var g_o3d;
@@ -116,6 +118,15 @@ function loadScene(pack, fileName, parent) {
  */
 function init() {
   o3djs.util.makeClients(initStep2);
+}
+
+/**
+ * Remove any callbacks so they don't get called after the page has unloaded.
+ */
+function unload() {
+  if (g_client) {
+    g_client.cleanup();
+  }
 }
 
 /**

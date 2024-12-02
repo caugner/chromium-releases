@@ -12,12 +12,13 @@
 #include <vsstyle.h>
 #include <vssym32.h>
 
+#include "app/combobox_model.h"
 #include "app/gfx/canvas.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/gfx/native_theme.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
@@ -30,7 +31,6 @@
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/views/options/cookies_view.h"
 #include "chrome/browser/views/options/fonts_languages_window_view.h"
-#include "chrome/browser/views/options/language_combobox_model.h"
 #include "chrome/browser/views/restart_message_box.h"
 #include "chrome/common/pref_member.h"
 #include "chrome/common/pref_names.h"
@@ -39,7 +39,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "net/base/ssl_config_service.h"
+#include "net/base/ssl_config_service_win.h"
 #include "net/base/cookie_policy.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -420,16 +420,16 @@ void AdvancedSection::InitControlLayout() {
 ////////////////////////////////////////////////////////////////////////////////
 // PrivacySection
 
-class CookieBehaviorComboModel : public views::Combobox::Model {
+class CookieBehaviorComboModel : public ComboboxModel {
  public:
   CookieBehaviorComboModel() {}
 
   // Return the number of items in the combo box.
-  virtual int GetItemCount(views::Combobox* source) {
+  virtual int GetItemCount() {
     return 3;
   }
 
-  virtual std::wstring GetItemAt(views::Combobox* source, int index) {
+  virtual std::wstring GetItemAt(int index) {
     const int kStringIDs[] = {
       IDS_OPTIONS_COOKIES_ACCEPT_ALL_COOKIES,
       IDS_OPTIONS_COOKIES_RESTRICT_THIRD_PARTY_COOKIES,
@@ -467,7 +467,7 @@ class PrivacySection : public AdvancedSection,
   virtual ~PrivacySection() {}
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Overridden from views::Combobox::Listener:
   virtual void ItemChanged(views::Combobox* sender,
@@ -529,7 +529,8 @@ PrivacySection::PrivacySection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_PRIVACY)) {
 }
 
-void PrivacySection::ButtonPressed(views::Button* sender) {
+void PrivacySection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == enable_link_doctor_checkbox_) {
     bool enabled = enable_link_doctor_checkbox_->checked();
     UserMetricsRecordAction(enabled ?
@@ -758,7 +759,7 @@ class WebContentSection : public AdvancedSection,
   virtual ~WebContentSection() {}
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
  protected:
   // OptionsPageView overrides:
@@ -783,7 +784,8 @@ WebContentSection::WebContentSection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT)) {
 }
 
-void WebContentSection::ButtonPressed(views::Button* sender) {
+void WebContentSection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == gears_settings_button_) {
     UserMetricsRecordAction(L"Options_GearsSettings", NULL);
     GearsSettingsPressed(GetAncestor(GetWidget()->GetNativeView(), GA_ROOT));
@@ -853,7 +855,7 @@ class SecuritySection : public AdvancedSection,
   virtual ~SecuritySection() {}
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
  protected:
   // OptionsPageView overrides:
@@ -881,7 +883,8 @@ SecuritySection::SecuritySection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_SECURITY)) {
 }
 
-void SecuritySection::ButtonPressed(views::Button* sender) {
+void SecuritySection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == enable_ssl2_checkbox_) {
     bool enabled = enable_ssl2_checkbox_->checked();
     if (enabled) {
@@ -889,7 +892,7 @@ void SecuritySection::ButtonPressed(views::Button* sender) {
     } else {
       UserMetricsRecordAction(L"Options_SSL2_Disable", NULL);
     }
-    net::SSLConfigService::SetSSL2Enabled(enabled);
+    net::SSLConfigServiceWin::SetSSL2Enabled(enabled);
   } else if (sender == check_for_cert_revocation_checkbox_) {
     bool enabled = check_for_cert_revocation_checkbox_->checked();
     if (enabled) {
@@ -897,7 +900,7 @@ void SecuritySection::ButtonPressed(views::Button* sender) {
     } else {
       UserMetricsRecordAction(L"Options_CheckCertRevocation_Disable", NULL);
     }
-    net::SSLConfigService::SetRevCheckingEnabled(enabled);
+    net::SSLConfigServiceWin::SetRevCheckingEnabled(enabled);
   } else if (sender == manage_certificates_button_) {
     UserMetricsRecordAction(L"Options_ManagerCerts", NULL);
     CRYPTUI_CERT_MGR_STRUCT cert_mgr = { 0 };
@@ -955,7 +958,7 @@ void SecuritySection::NotifyPrefChanged(const std::wstring* pref_name) {
   // These SSL options are system settings and stored in the OS.
   if (!pref_name) {
     net::SSLConfig config;
-    if (net::SSLConfigService::GetSSLConfigNow(&config)) {
+    if (net::SSLConfigServiceWin::GetSSLConfigNow(&config)) {
       enable_ssl2_checkbox_->SetChecked(config.ssl2_enabled);
       check_for_cert_revocation_checkbox_->SetChecked(
           config.rev_checking_enabled);
@@ -1010,7 +1013,7 @@ class NetworkSection : public AdvancedSection,
   virtual ~NetworkSection() {}
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
  protected:
   // OptionsPageView overrides:
@@ -1032,7 +1035,8 @@ NetworkSection::NetworkSection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_ADVANCED_SECTION_TITLE_NETWORK)) {
 }
 
-void NetworkSection::ButtonPressed(views::Button* sender) {
+void NetworkSection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == change_proxies_button_) {
     UserMetricsRecordAction(L"Options_ChangeProxies", NULL);
     base::Thread* thread = g_browser_process->file_thread();
@@ -1086,7 +1090,7 @@ class DownloadSection : public AdvancedSection,
   }
 
   // Overridden from views::ButtonListener.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // SelectFileDialog::Listener implementation.
   virtual void FileSelected(const FilePath& path, int index, void* params);
@@ -1135,7 +1139,8 @@ DownloadSection::DownloadSection(Profile* profile)
           l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME)) {
 }
 
-void DownloadSection::ButtonPressed(views::Button* sender) {
+void DownloadSection::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == download_browse_button_) {
     const std::wstring dialog_title =
        l10n_util::GetString(IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE);

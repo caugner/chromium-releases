@@ -1,13 +1,13 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/tools/test_shell/test_shell.h"
 
 #include <windows.h>
-#include <atlbase.h>
 #include <commdlg.h>
 #include <objbase.h>
+#include <process.h>
 #include <shlwapi.h>
 #include <wininet.h>  // For INTERNET_MAX_URL_LENGTH
 
@@ -27,10 +27,10 @@
 #include "net/base/net_module.h"
 #include "net/url_request/url_request_file_job.h"
 #include "skia/ext/bitmap_platform_device.h"
-#include "webkit/glue/webframe.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
@@ -44,8 +44,8 @@ using WebKit::WebWidget;
 #define URLBAR_HEIGHT  24
 
 // Global Variables:
-static TCHAR g_windowTitle[MAX_LOADSTRING];     // The title bar text
-static TCHAR g_windowClass[MAX_LOADSTRING];     // The main window class name
+static wchar_t g_windowTitle[MAX_LOADSTRING];     // The title bar text
+static wchar_t g_windowClass[MAX_LOADSTRING];     // The main window class name
 
 // This is only set for layout tests.  It is used to determine the name of a
 // minidump file.
@@ -126,16 +126,17 @@ FilePath GetResourcesFilePath() {
   return path.AppendASCII("resources");
 }
 
-static StringPiece GetRawDataResource(HMODULE module, int resource_id) {
+static base::StringPiece GetRawDataResource(HMODULE module, int resource_id) {
   void* data_ptr;
   size_t data_size;
   return base::GetDataResourceFromModule(module, resource_id, &data_ptr,
-                                         &data_size) ?
-      StringPiece(static_cast<char*>(data_ptr), data_size) : StringPiece();
+                                         &data_size)
+      ? base::StringPiece(static_cast<char*>(data_ptr), data_size)
+      : base::StringPiece();
 }
 
 // This is called indirectly by the network layer to access resources.
-StringPiece NetResourceProvider(int key) {
+base::StringPiece NetResourceProvider(int key) {
   return GetRawDataResource(::GetModuleHandle(NULL), key);
 }
 
@@ -237,7 +238,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
   shell->m_focusedWidgetHost = NULL;
 
   // Make sure the previous load is stopped.
-  shell->webView()->StopLoading();
+  shell->webView()->mainFrame()->stopLoading();
   shell->navigation_controller()->Reset();
 
   // StopLoading may update state maintained in the test controller (for
@@ -254,7 +255,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
   // Clean up state between test runs.
   webkit_glue::ResetBeforeTestRun(shell->webView());
   ResetWebPreferences();
-  shell->webView()->SetPreferences(*web_prefs_);
+  web_prefs_->Apply(shell->webView());
 
   SetWindowPos(shell->m_mainWnd, NULL,
                kTestWindowXLocation, kTestWindowYLocation, 0, 0,
@@ -267,8 +268,7 @@ bool TestShell::RunFileTest(const TestParams& params) {
 
   shell->test_is_preparing_ = true;
   shell->set_test_params(&params);
-  std::wstring wstr = UTF8ToWide(params.test_url.c_str());
-  shell->LoadURL(wstr.c_str());
+  shell->LoadURL(GURL(params.test_url));
 
   shell->test_is_preparing_ = false;
   shell->WaitTestFinished();
@@ -311,7 +311,7 @@ void TestShell::PlatformCleanUp() {
   win_util::SetWindowUserData(m_editWnd, NULL);
 }
 
-bool TestShell::Initialize(const std::wstring& startingURL) {
+bool TestShell::Initialize(const GURL& starting_url) {
   // Perform application initialization:
   m_mainWnd = CreateWindow(g_windowClass, g_windowTitle,
                            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -359,18 +359,15 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
   // create webview
   m_webViewHost.reset(
       WebViewHost::Create(m_mainWnd, delegate_.get(), *TestShell::web_prefs_));
-  webView()->SetUseEditorDelegate(true);
   delegate_->RegisterDragDrop();
 
   // Load our initial content.
-  if (!startingURL.empty())
-    LoadURL(startingURL.c_str());
+  if (starting_url.is_valid())
+    LoadURL(starting_url);
 
   ShowWindow(webViewWnd(), SW_SHOW);
 
-  bool bIsSVGTest = startingURL.find(L"W3C-SVG-1.1") != std::wstring::npos;
-
-  if (bIsSVGTest) {
+  if (IsSVGTestURL(starting_url)) {
     SizeToSVG();
   } else {
     SizeToDefault();
@@ -402,7 +399,7 @@ unsigned int __stdcall WatchDogThread(void *arg) {
     return 0;
 
   TestShell* shell = static_cast<TestShell*>(arg);
-  DWORD timeout = static_cast<DWORD>(shell->GetLayoutTestTimeout() * 2.5);
+  DWORD timeout = static_cast<DWORD>(shell->GetLayoutTestTimeoutForWatchDog());
   DWORD rv = WaitForSingleObject(shell->finished_event(), timeout);
   if (rv == WAIT_TIMEOUT) {
     // Print a warning to be caught by the layout-test script.
@@ -457,7 +454,7 @@ void TestShell::InteractiveSetFocus(WebWidgetHost* host, bool enable) {
     ::SetFocus(NULL);
 }
 
-WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
+WebWidget* TestShell::CreatePopupWidget() {
   DCHECK(!m_popupHost);
   m_popupHost = WebWidgetHost::Create(NULL, popup_delegate_.get());
   ShowWindow(popupWnd(), SW_SHOW);
@@ -501,15 +498,14 @@ void TestShell::ResizeSubViews() {
              rc.bottom - URLBAR_HEIGHT, TRUE);
 }
 
-void TestShell::LoadURLForFrame(const wchar_t* url,
-                                const wchar_t* frame_name) {
-  if (!url)
-      return;
+void TestShell::LoadURLForFrame(const GURL& url,
+                                const std::wstring& frame_name) {
+  if (!url.is_valid())
+    return;
 
-  TRACE_EVENT_BEGIN("url.load", this, WideToUTF8(url));
-  bool bIsSVGTest = wcsstr(url, L"W3C-SVG-1.1") > 0;
+  TRACE_EVENT_BEGIN("url.load", this, url.spec());
 
-  if (bIsSVGTest) {
+  if (IsSVGTestURL(url)) {
     SizeToSVG();
   } else {
     // only resize back to the default when running tests
@@ -517,20 +513,8 @@ void TestShell::LoadURLForFrame(const wchar_t* url,
       SizeToDefault();
   }
 
-  std::wstring urlString(url);
-  if (!urlString.empty() && (PathFileExists(url) || PathIsUNC(url))) {
-      TCHAR fileURL[INTERNET_MAX_URL_LENGTH];
-      DWORD fileURLLength = sizeof(fileURL)/sizeof(fileURL[0]);
-      if (SUCCEEDED(UrlCreateFromPath(url, fileURL, &fileURLLength, 0)))
-          urlString.assign(fileURL);
-  }
-
-  std::wstring frame_string;
-  if (frame_name)
-      frame_string = frame_name;
-
-  navigation_controller_->LoadEntry(new TestNavigationEntry(
-      -1, GURL(urlString), std::wstring(), frame_string));
+  navigation_controller_->LoadEntry(
+      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
 }
 
 LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
@@ -563,7 +547,7 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
           if (wmId == IDC_NAV_RELOAD) {
             shell->Reload();
           } else {
-            shell->webView()->StopLoading();
+            shell->webView()->mainFrame()->stopLoading();
           }
         }
         break;
@@ -572,9 +556,6 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
         break;
       case IDM_DUMP_RENDER_TREE:
         shell->DumpRenderTree();
-        break;
-      case IDM_SHOW_WEB_INSPECTOR:
-        shell->webView()->InspectElement(0, 0);
         break;
       }
     }
@@ -616,12 +597,12 @@ LRESULT CALLBACK TestShell::EditWndProc(HWND hwnd, UINT message,
   switch (message) {
     case WM_CHAR:
       if (wParam == VK_RETURN) {
-        wchar_t strPtr[MAX_URL_LENGTH + 1];  // Leave room for adding a NULL;
-        *((LPWORD)strPtr) = MAX_URL_LENGTH;
-        LRESULT strLen = SendMessage(hwnd, EM_GETLINE, 0, (LPARAM)strPtr);
-        if (strLen > 0) {
-          strPtr[strLen] = 0;  // EM_GETLINE doesn't NULL terminate.
-          shell->LoadURL(strPtr);
+        wchar_t str[MAX_URL_LENGTH + 1];  // Leave room for adding a NULL;
+        *((LPWORD)str) = MAX_URL_LENGTH;
+        LRESULT str_len = SendMessage(hwnd, EM_GETLINE, 0, (LPARAM)str);
+        if (str_len > 0) {
+          str[str_len] = 0;  // EM_GETLINE doesn't NULL terminate.
+          shell->LoadURL(GURL(str));
         }
 
         return 0;
@@ -675,7 +656,7 @@ void TestShell::ShowStartupDebuggingDialog() {
 }
 
 // static
-StringPiece TestShell::NetResourceProvider(int key) {
+base::StringPiece TestShell::NetResourceProvider(int key) {
   return GetRawDataResource(::GetModuleHandle(NULL), key);
 }
 
@@ -686,18 +667,18 @@ StringPiece TestShell::NetResourceProvider(int key) {
 namespace webkit_glue {
 
 string16 GetLocalizedString(int message_id) {
-  const ATLSTRINGRESOURCEIMAGE* image =
-      AtlGetStringResourceImage(_AtlBaseModule.GetModuleInstance(),
-                                message_id);
-  if (!image) {
+  wchar_t localized[MAX_LOADSTRING];
+  int length = LoadString(GetModuleHandle(NULL), message_id,
+                          localized, MAX_LOADSTRING);
+  if (!length && GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND) {
     NOTREACHED();
     return L"No string for this identifier!";
   }
-  return string16(image->achString, image->nLength);
+  return string16(localized, length);
 }
 
 // TODO(tc): Convert this to using resources from test_shell.rc.
-StringPiece GetDataResource(int resource_id) {
+base::StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
   case IDR_BROKENIMAGE: {
     // Use webkit's broken image icon (16x16)
@@ -705,8 +686,7 @@ StringPiece GetDataResource(int resource_id) {
     if (broken_image_data.empty()) {
       FilePath path = GetResourcesFilePath();
       path = path.AppendASCII("missingImage.gif");
-      bool success = file_util::ReadFileToString(path.ToWStringHack(),
-                                                 &broken_image_data);
+      bool success = file_util::ReadFileToString(path, &broken_image_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();
       }
@@ -725,8 +705,7 @@ StringPiece GetDataResource(int resource_id) {
     if (resize_corner_data.empty()) {
       FilePath path = GetResourcesFilePath();
       path = path.AppendASCII("textAreaResizeCorner.png");
-      bool success = file_util::ReadFileToString(path.ToWStringHack(),
-                                                 &resize_corner_data);
+      bool success = file_util::ReadFileToString(path, &resize_corner_data);
       if (!success) {
         LOG(FATAL) << "Failed reading: " << path.value();
       }
@@ -745,21 +724,22 @@ StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_SOUND_NONE_BUTTON:
   case IDR_MEDIA_SOUND_DISABLED:
   case IDR_MEDIA_SLIDER_THUMB:
+  case IDR_MEDIA_VOLUME_SLIDER_THUMB:
     return NetResourceProvider(resource_id);
 
   default:
     break;
   }
 
-  return StringPiece();
+  return base::StringPiece();
 }
 
 HCURSOR LoadCursor(int cursor_id) {
   return NULL;
 }
 
-bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  return NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 bool EnsureFontLoaded(HFONT font) {

@@ -28,6 +28,7 @@ class Path : public SkPath {
 #elif defined(OS_LINUX)
   // Creates a Gdkregion from the path. The caller is responsible for freeing
   // resources used by this region.  This only supports polygon paths.
+  // WARNING: this returns NULL for an empty Path.
   GdkRegion* CreateGdkRegion() const;
 #endif
 
@@ -37,4 +38,4 @@ class Path : public SkPath {
 
 }
 
-#endif  // #ifndef APP_GFX_PATH_H_
+#endif  // APP_GFX_PATH_H_

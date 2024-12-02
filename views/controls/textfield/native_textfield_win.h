@@ -13,6 +13,8 @@
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl
 #include <vsstyle.h>
 
+#include "app/gfx/insets.h"
+#include "base/scoped_comptr_win.h"
 #include "views/controls/menu/simple_menu_model.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 
@@ -36,18 +38,23 @@ class NativeTextfieldWin
   explicit NativeTextfieldWin(Textfield* parent);
   ~NativeTextfieldWin();
 
+  // See the code in textfield.cc that calls this for why this is here.
+  void AttachHack();
+
   // Overridden from NativeTextfieldWrapper:
-  virtual std::wstring GetText() const;
+  virtual string16 GetText() const;
   virtual void UpdateText();
-  virtual void AppendText(const std::wstring& text);
-  virtual std::wstring GetSelectedText() const;
+  virtual void AppendText(const string16& text);
+  virtual string16 GetSelectedText() const;
   virtual void SelectAll();
   virtual void ClearSelection();
   virtual void UpdateBorder();
+  virtual void UpdateTextColor();
   virtual void UpdateBackgroundColor();
   virtual void UpdateReadOnly();
   virtual void UpdateFont();
   virtual void UpdateEnabled();
+  virtual gfx::Insets CalculateInsets();
   virtual void SetHorizontalMargins(int left, int right);
   virtual void SetFocus();
   virtual View* GetView();
@@ -109,7 +116,7 @@ class NativeTextfieldWin
 
   // message handlers
   void OnChar(TCHAR key, UINT repeat_count, UINT flags);
-  void OnContextMenu(HWND window, const CPoint& point);
+  void OnContextMenu(HWND window, const POINT& point);
   void OnCopy();
   void OnCut();
   LRESULT OnImeChar(UINT message, WPARAM wparam, LPARAM lparam);
@@ -192,7 +199,7 @@ class NativeTextfieldWin
   gfx::Insets content_insets_;
 
   // This interface is useful for accessing the CRichEditCtrl at a low level.
-  mutable CComQIPtr<ITextDocument> text_object_model_;
+  mutable ScopedComPtr<ITextDocument> text_object_model_;
 
   // The position and the length of the ongoing composition string.
   // These values are used for removing a composition string from a search

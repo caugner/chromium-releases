@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_GTK_TABS_TAB_RENDERER_GTK_H_
 
 #include <gtk/gtk.h>
+#include <map>
 
 #include "app/animation.h"
 #include "app/gfx/canvas.h"
@@ -24,6 +25,7 @@ class Size;
 }  // namespace gfx
 
 class CustomDrawButton;
+class GtkThemeProvider;
 class TabContents;
 class ThemeProvider;
 
@@ -55,8 +57,9 @@ class TabRendererGtk : public AnimationDelegate {
     explicit LoadingAnimation(const LoadingAnimation::Data& data);
 
     // Advance the loading animation to the next frame, or hide the animation if
-    // the tab isn't loading.
-    void ValidateLoadingAnimation(AnimationState animation_state);
+    // the tab isn't loading. Returns |true| if the icon area needs to be
+    // repainted.
+    bool ValidateLoadingAnimation(AnimationState animation_state);
 
     AnimationState animation_state() const { return animation_state_; }
     int animation_frame() const { return animation_frame_; }
@@ -103,6 +106,9 @@ class TabRendererGtk : public AnimationDelegate {
   void set_pinned(bool pinned);
   bool is_pinned() const;
 
+  // Are we in the process of animating a pinned state change on this tab?
+  void set_animating_pinned_change(bool value);
+
   // Updates the display to reflect the contents of this TabRenderer's model.
   void UpdateFromModel();
 
@@ -128,9 +134,16 @@ class TabRendererGtk : public AnimationDelegate {
   // Notifies the Tab that the close button has been clicked.
   virtual void CloseButtonClicked();
 
+  // Sets the bounds of the tab.
+  virtual void SetBounds(const gfx::Rect& bounds);
+
   // Advance the loading animation to the next frame, or hide the animation if
-  // the tab isn't loading.
-  void ValidateLoadingAnimation(AnimationState animation_state);
+  // the tab isn't loading.  Returns |true| if the icon area needs to be
+  // repainted.
+  bool ValidateLoadingAnimation(AnimationState animation_state);
+
+  // Repaint only the area of the tab that contains the favicon.
+  void PaintFavIconArea(GdkEventExpose* event);
 
   // Returns the minimum possible size of a single unselected Tab.
   static gfx::Size GetMinimumUnselectedSize();
@@ -152,6 +165,8 @@ class TabRendererGtk : public AnimationDelegate {
   static void SetSelectedTitleColor(SkColor color);
   static void SetUnselectedTitleColor(SkColor color);
 
+  static gfx::Font* title_font() { return title_font_; }
+
   // Returns the bounds of the Tab.
   int x() const { return bounds_.x(); }
   int y() const { return bounds_.y(); }
@@ -160,8 +175,13 @@ class TabRendererGtk : public AnimationDelegate {
 
   gfx::Rect bounds() const { return bounds_; }
 
-  // Sets the bounds of the tab.
-  void SetBounds(const gfx::Rect& bounds);
+  gfx::Rect favicon_bounds() const { return favicon_bounds_; }
+
+  // Returns the non-mirrored (LTR) bounds of this tab.
+  gfx::Rect GetNonMirroredBounds(GtkWidget* parent) const;
+
+  // Returns the requested bounds of the tab.
+  gfx::Rect GetRequisition() const;
 
   GtkWidget* widget() const { return tab_.get(); }
 
@@ -172,27 +192,41 @@ class TabRendererGtk : public AnimationDelegate {
   // Returns the title of the Tab.
   std::wstring GetTitle() const;
 
-  // Called by TabGtk to notify the renderer that the tab is being hovered.
-  void OnMouseEntered();
+  // enter-notify-event handler that signals when the mouse enters the tab.
+  static gboolean OnEnterNotifyEvent(GtkWidget* widget, GdkEventCrossing* event,
+                                     TabRendererGtk* tab);
 
-  // Called by TabGtk to notify the renderer that the tab is no longer being
-  // hovered.
-  void OnMouseExited();
+  // leave-notify-event handler that signals when the mouse enters the tab.
+  static gboolean OnLeaveNotifyEvent(GtkWidget* widget, GdkEventCrossing* event,
+                                     TabRendererGtk* tab);
 
  private:
   class FavIconCrashAnimation;
+
+  // The data structure used to hold cached bitmaps.  We need to manually free
+  // the bitmap in CachedBitmap when we remove it from |cached_bitmaps_|.  We
+  // handle this when we replace images in the map and in the destructor.
+  struct CachedBitmap {
+    int bg_offset_x;
+    int bg_offset_y;
+    SkBitmap* bitmap;
+  };
+  typedef std::map<std::pair<const SkBitmap*, const SkBitmap*>, CachedBitmap>
+      BitmapCache;
 
   // Model data. We store this here so that we don't need to ask the underlying
   // model, which is tricky since instances of this object can outlive the
   // corresponding objects in the underlying model.
   struct TabData {
     SkBitmap favicon;
+    bool is_default_favicon;
     string16 title;
     bool loading;
     bool crashed;
     bool off_the_record;
     bool show_icon;
     bool pinned;
+    bool animating_pinned_change;
   };
 
   // TODO(jhawkins): Move into TabResources class.
@@ -235,6 +269,15 @@ class TabRendererGtk : public AnimationDelegate {
   // Returns the largest of the favicon, title text, and the close button.
   static int GetContentHeight();
 
+  // A helper method for generating the masked bitmaps used to draw the curved
+  // edges of tabs.  We cache the generated bitmaps because they can take a
+  // long time to compute.
+  SkBitmap* GetMaskedBitmap(const SkBitmap* mask,
+                            const SkBitmap* background,
+                            int bg_offset_x,
+                            int bg_offset_y);
+  BitmapCache cached_bitmaps_;
+
   // Paints the tab, minus the close button.
   void PaintTab(GdkEventExpose* event);
 
@@ -244,7 +287,6 @@ class TabRendererGtk : public AnimationDelegate {
   void PaintTabBackground(gfx::Canvas* canvas);
   void PaintInactiveTabBackground(gfx::Canvas* canvas);
   void PaintActiveTabBackground(gfx::Canvas* canvas);
-  void PaintPinnedTabBackground(gfx::Canvas* canvas);
   void PaintLoadingAnimation(gfx::Canvas* canvas);
 
   // Returns the number of favicon-size elements that can fit in the tab's
@@ -268,8 +310,12 @@ class TabRendererGtk : public AnimationDelegate {
                                             TabRendererGtk* tab);
 
   // expose-event handler that redraws the tab.
-  static gboolean OnExpose(GtkWidget* widget, GdkEventExpose* e,
-                           TabRendererGtk* tab);
+  static gboolean OnExposeEvent(GtkWidget* widget, GdkEventExpose* event,
+                                TabRendererGtk* tab);
+
+  // size-allocate handler used to update the current bounds of the tab.
+  static void OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation,
+                             TabRendererGtk* tab);
 
   // TODO(jhawkins): Move to TabResources.
   static void InitResources();
@@ -284,7 +330,7 @@ class TabRendererGtk : public AnimationDelegate {
 
   static TabImage tab_active_;
   static TabImage tab_inactive_;
-  static TabImage tab_alpha;
+  static TabImage tab_alpha_;
 
   static gfx::Font* title_font_;
   static int title_font_height_;
@@ -318,18 +364,26 @@ class TabRendererGtk : public AnimationDelegate {
   // The bounds of this Tab.
   gfx::Rect bounds_;
 
+  // The requested bounds of this tab.  These bounds are relative to the
+  // tabstrip.
+  gfx::Rect requisition_;
+
   // Hover animation.
   scoped_ptr<SlideAnimation> hover_animation_;
 
   // Contains the loading animation state.
   LoadingAnimation loading_animation_;
 
-  // TODO(jhawkins): If the theme is changed after the tab is created, we'll
-  // still render the old theme for this tab.
-  ThemeProvider* theme_provider_;
+  // The offset used to paint the tab theme images.
+  int background_offset_x_;
+
+  GtkThemeProvider* theme_provider_;
 
   // The close button.
   scoped_ptr<CustomDrawButton> close_button_;
+
+  // The current color of the close button.
+  SkColor close_button_color_;
 
   DISALLOW_COPY_AND_ASSIGN(TabRendererGtk);
 };

@@ -9,8 +9,9 @@
 #include <string>
 
 #include "base/scoped_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_view.h"
+#include "chrome/browser/bubble_positioner.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/gtk/menu_bar_helper.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -18,13 +19,13 @@
 
 class BackForwardButtonGtk;
 class Browser;
+class BrowserActionsToolbarGtk;
 class BrowserWindowGtk;
 class CustomDrawButton;
 class GtkThemeProvider;
 class GoButtonGtk;
 class LocationBar;
 class LocationBarViewGtk;
-class NineBox;
 class Profile;
 class TabContents;
 class ToolbarModel;
@@ -35,7 +36,8 @@ class ToolbarStarToggleGtk;
 class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                           public MenuGtk::Delegate,
                           public NotificationObserver,
-                          public AutocompletePopupPositioner {
+                          public BubblePositioner,
+                          public MenuBarHelper::Delegate {
  public:
   explicit BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window);
   virtual ~BrowserToolbarGtk();
@@ -44,8 +46,8 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   // to which we attach our accelerators.
   void Init(Profile* profile, GtkWindow* top_level_window);
 
-  // Adds this GTK toolbar into a sizing box.
-  void AddToolbarToBox(GtkWidget* box);
+  // Set the various widgets' ViewIDs.
+  void SetViewIDs();
 
   void Show();
   void Hide();
@@ -55,9 +57,18 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
     return event_box_;
   }
 
+  // Getter for associated browser object.
+  Browser* browser() {
+    return browser_;
+  }
+
   virtual LocationBar* GetLocationBar() const;
 
   GoButtonGtk* GetGoButton() { return go_.get(); }
+
+  // We have to show padding on the bottom of the toolbar when the bookmark
+  // is in floating mode. Otherwise the bookmark bar will paint it for us.
+  void UpdateForBookmarkBarVisibility(bool show_bottom_padding);
 
   // Overridden from CommandUpdater::CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled);
@@ -81,9 +92,13 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   ToolbarStarToggleGtk* star() { return star_.get(); }
 
-  // Implement AutocompletePopupPositioner, return the position of where the
-  // Omnibox results popup should go (from the star to the go buttons).
-  virtual gfx::Rect GetPopupBounds() const;
+  // BubblePositioner:
+  virtual gfx::Rect GetLocationStackBounds() const;
+
+  // MenuBarHelper::Delegate implementation ------------------------------------
+  virtual void PopupForButton(GtkWidget* button);
+  virtual void PopupForButtonNextTo(GtkWidget* button,
+                                    GtkMenuDirectionType dir);
 
  private:
   // Builds a toolbar button with all the properties set.
@@ -112,8 +127,9 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   void ChangeActiveMenu(GtkWidget* active_menu, guint timestamp);
 
   // Gtk callback for the "expose-event" signal.
-  static gboolean OnToolbarExpose(GtkWidget* widget, GdkEventExpose* e,
-                                  BrowserToolbarGtk* toolbar);
+  // The alignment contains the toolbar.
+  static gboolean OnAlignmentExpose(GtkWidget* widget, GdkEventExpose* e,
+                                    BrowserToolbarGtk* toolbar);
   static gboolean OnLocationHboxExpose(GtkWidget* omnibox_hbox,
                                        GdkEventExpose* e,
                                        BrowserToolbarGtk* toolbar);
@@ -121,14 +137,14 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   // Gtk callback for the "clicked" signal.
   static void OnButtonClick(GtkWidget* button, BrowserToolbarGtk* toolbar);
 
-  // Gtk callback for the "button-release-event" signal.
-  static gboolean OnButtonRelease(GtkWidget* button, GdkEventButton* event,
-                                  BrowserToolbarGtk* toolbar);
-
   // Gtk callback to intercept mouse clicks to the menu buttons.
   static gboolean OnMenuButtonPressEvent(GtkWidget* button,
                                          GdkEventButton* event,
                                          BrowserToolbarGtk* toolbar);
+
+  // Gtk callback used when a hotkey activates the menu buttons.
+  static gboolean OnMenuClicked(GtkWidget* button,
+                                BrowserToolbarGtk* toolbar);
 
   // Used for drags onto home button.
   static void OnDragDataReceived(GtkWidget* widget,
@@ -138,26 +154,18 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
                                  guint info, guint time,
                                  BrowserToolbarGtk* toolbar);
 
-  // These event handlers are used to fake menu-bar behavior in the page and
-  // app menus.
-  static gboolean OnPageAppMenuMouseMotion(GtkWidget* widget,
-                                           GdkEventMotion* event,
-                                           BrowserToolbarGtk* toolbar);
-  static void OnPageAppMenuMoveCurrent(GtkWidget* widget,
-                                       GtkMenuDirectionType dir,
-                                       BrowserToolbarGtk* toolbar);
-
-  // Initialize the background NineBox.
-  void InitNineBox();
-
-  // Ninebox for the toolbar background
-  scoped_ptr<NineBox> background_ninebox_;
+  // Sometimes we only want to show the location w/o the toolbar buttons (e.g.,
+  // in a popup window).
+  bool ShouldOnlyShowLocation() const;
 
   // An event box that holds |toolbar_|. We need the toolbar to have its own
   // GdkWindow when we use the GTK drawing because otherwise the color from our
   // parent GdkWindow will leak through with some theme engines (such as
   // Clearlooks).
   GtkWidget* event_box_;
+
+  // This widget handles padding around the outside of the toolbar.
+  GtkWidget* alignment_;
 
   // Gtk widgets. The toolbar is an hbox with each of the other pieces of the
   // toolbar placed side by side.
@@ -175,6 +183,7 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   scoped_ptr<CustomDrawButton> home_;
   scoped_ptr<ToolbarStarToggleGtk> star_;
   scoped_ptr<GoButtonGtk> go_;
+  scoped_ptr<BrowserActionsToolbarGtk> actions_toolbar_;
   OwnedWidgetGtk page_menu_button_, app_menu_button_;
 
   // Keep a pointer to the menu button images because we change them when
@@ -189,7 +198,6 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
 
   scoped_ptr<MenuGtk> page_menu_;
   scoped_ptr<MenuGtk> app_menu_;
-  scoped_ptr<MenuGtk> encodings_menu_;
 
   Browser* browser_;
   BrowserWindowGtk* window_;
@@ -198,10 +206,13 @@ class BrowserToolbarGtk : public CommandUpdater::CommandObserver,
   // Controls whether or not a home button should be shown on the toolbar.
   BooleanPrefMember show_home_button_;
 
-  // The event state the last time we observed a button release event.
-  int last_release_event_flags_;
-
   NotificationRegistrar registrar_;
+
+  // A GtkEntry that isn't part of the hierarchy. We keep this for native
+  // rendering.
+  OwnedWidgetGtk offscreen_entry_;
+
+  MenuBarHelper menu_bar_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserToolbarGtk);
 };

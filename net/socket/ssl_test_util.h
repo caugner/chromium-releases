@@ -26,6 +26,7 @@ namespace net {
 class TestServerLauncher {
  public:
   TestServerLauncher();
+  TestServerLauncher(int connection_attempts, int connection_timeout);
 
   virtual ~TestServerLauncher();
 
@@ -35,6 +36,10 @@ class TestServerLauncher {
 
   // Load the test root cert, if it hasn't been loaded yet.
   bool LoadTestRootCert();
+
+  // Tells the server to enable/disable servicing each request
+  // in a separate process. Takes effect only if called before Start.
+  void set_forking(bool forking) { forking_ = forking; }
 
   // Start src/net/tools/testserver/testserver.py and
   // ask it to serve the given protocol.
@@ -94,6 +99,9 @@ class TestServerLauncher {
   // Returns false if our test root certificate is not trusted.
   bool CheckCATrusted();
 
+  // Initilize the certificate path.
+  void InitCertPath();
+
   FilePath document_root_dir_;
 
   FilePath cert_dir_;
@@ -101,6 +109,13 @@ class TestServerLauncher {
   FilePath python_runtime_;
 
   base::ProcessHandle process_handle_;
+
+  // True if the server should handle each request in a separate process.
+  bool forking_;
+
+  // Number of tries and timeout for each try used for WaitToStart.
+  int connection_attempts_;
+  int connection_timeout_;
 
 #if defined(OS_LINUX)
   struct PrivateCERTCertificate;

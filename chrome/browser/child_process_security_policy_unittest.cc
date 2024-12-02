@@ -13,7 +13,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 class ChildProcessSecurityPolicyTest : public testing::Test {
-protected:
+ protected:
   // testing::Test
   virtual void SetUp() {
     // In the real world, "chrome:" is a handled scheme.
@@ -30,12 +30,12 @@ static int kRendererID = 42;
 TEST_F(ChildProcessSecurityPolicyTest, IsWebSafeSchemeTest) {
   ChildProcessSecurityPolicy* p = ChildProcessSecurityPolicy::GetInstance();
 
-  EXPECT_TRUE(p->IsWebSafeScheme("http"));
-  EXPECT_TRUE(p->IsWebSafeScheme("https"));
-  EXPECT_TRUE(p->IsWebSafeScheme("ftp"));
-  EXPECT_TRUE(p->IsWebSafeScheme("data"));
+  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kHttpScheme));
+  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kHttpsScheme));
+  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kFtpScheme));
+  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kDataScheme));
   EXPECT_TRUE(p->IsWebSafeScheme("feed"));
-  EXPECT_TRUE(p->IsWebSafeScheme("chrome-extension"));
+  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kExtensionScheme));
 
   EXPECT_FALSE(p->IsWebSafeScheme("registered-web-safe-scheme"));
   p->RegisterWebSafeScheme("registered-web-safe-scheme");
@@ -45,9 +45,9 @@ TEST_F(ChildProcessSecurityPolicyTest, IsWebSafeSchemeTest) {
 TEST_F(ChildProcessSecurityPolicyTest, IsPseudoSchemeTest) {
   ChildProcessSecurityPolicy* p = ChildProcessSecurityPolicy::GetInstance();
 
-  EXPECT_TRUE(p->IsPseudoScheme("about"));
-  EXPECT_TRUE(p->IsPseudoScheme("javascript"));
-  EXPECT_TRUE(p->IsPseudoScheme("view-source"));
+  EXPECT_TRUE(p->IsPseudoScheme(chrome::kAboutScheme));
+  EXPECT_TRUE(p->IsPseudoScheme(chrome::kJavaScriptScheme));
+  EXPECT_TRUE(p->IsPseudoScheme(chrome::kViewSourceScheme));
 
   EXPECT_FALSE(p->IsPseudoScheme("registered-psuedo-scheme"));
   p->RegisterPseudoScheme("registered-psuedo-scheme");
@@ -71,8 +71,6 @@ TEST_F(ChildProcessSecurityPolicyTest, StandardSchemesTest) {
   // Dangerous
   EXPECT_FALSE(p->CanRequestURL(kRendererID,
                                 GURL("file:///etc/passwd")));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID,
-                                GURL("view-cache:http://www.google.com/")));
   EXPECT_FALSE(p->CanRequestURL(kRendererID,
                                 GURL("chrome://foo/bar")));
 
@@ -98,17 +96,17 @@ TEST_F(ChildProcessSecurityPolicyTest, AboutTest) {
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:CrASh")));
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("abOuT:cAChe")));
 
-  p->GrantRequestURL(kRendererID, GURL("about:memory"));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:memory")));
+  p->GrantRequestURL(kRendererID, GURL(chrome::kAboutMemoryURL));
+  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kAboutMemoryURL)));
 
-  p->GrantRequestURL(kRendererID, GURL("about:crash"));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:crash")));
+  p->GrantRequestURL(kRendererID, GURL(chrome::kAboutCrashURL));
+  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kAboutCrashURL)));
 
-  p->GrantRequestURL(kRendererID, GURL("about:cache"));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:cache")));
+  p->GrantRequestURL(kRendererID, GURL(chrome::kAboutCacheURL));
+  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kAboutCacheURL)));
 
-  p->GrantRequestURL(kRendererID, GURL("about:hang"));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:hang")));
+  p->GrantRequestURL(kRendererID, GURL(chrome::kAboutHangURL));
+  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL(chrome::kAboutHangURL)));
 
   p->Remove(kRendererID);
 }
@@ -258,8 +256,8 @@ TEST_F(ChildProcessSecurityPolicyTest, RemoveRace) {
   p->Remove(kRendererID);
 
   // Renderers are added and removed on the UI thread, but the policy can be
-  // queried on the IO thread.  The ChildProcessSecurityPolicy needs to be prepared
-  // to answer policy questions about renderers who no longer exist.
+  // queried on the IO thread.  The ChildProcessSecurityPolicy needs to be
+  // prepared to answer policy questions about renderers who no longer exist.
 
   // In this case, we default to secure behavior.
   EXPECT_FALSE(p->CanRequestURL(kRendererID, url));

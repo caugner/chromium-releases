@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/gfx/point.h"
 #include "base/gfx/rect.h"
 #include "base/string16.h"
 #include "chrome/common/navigation_types.h"
@@ -81,6 +82,10 @@ IPC_BEGIN_MESSAGES(Automation)
   // the tab resource. The second parameter is the target url.  The return
   // value contains a status code which is nonnegative on success.
   // See AutomationMsg_NavigationResponseValues for the return value.
+  //
+  // Deprecated in favor of
+  // AutomationMsg_NavigateToURLBlockUntilNavigationsComplete.
+  // TODO(phajdan.jr): Remove when the reference build gets updated.
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_NavigateToURL, int, GURL,
                              AutomationMsg_NavigationResponseValues)
 
@@ -93,19 +98,24 @@ IPC_BEGIN_MESSAGES(Automation)
 
   // This message notifies the AutomationProvider to navigate back in session
   // history in the tab with given handle. The first parameter is the handle
-  // to the tab resource.  The return value contains a status code which is
-  // nonnegative on success.
-  // see AutomationMsg_NavigationResponseValues for the navigation response
+  // to the tab resource.
+  // See AutomationMsg_NavigationResponseValues for the navigation response
   // values.
+  //
+  // Deprecated in favor of AutomationMsg_GoBackBlockUntilNavigationsComplete.
+  // TODO(phajdan.jr): Remove when the reference build gets updated.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GoBack, int,
                              AutomationMsg_NavigationResponseValues)
 
   // This message notifies the AutomationProvider to navigate forward in session
   // history in the tab with given handle. The first parameter is the handle
-  // to the tab resource.  The response contains a status code which is
-  // nonnegative on success.
-  // see AutomationMsg_NavigationResponseValues for the navigation response
+  // to the tab resource.
+  // See AutomationMsg_NavigationResponseValues for the navigation response
   // values.
+  //
+  // Deprecated in favor of
+  // AutomationMsg_GoForwardBlockUntilNavigationsComplete.
+  // TODO(phajdan.jr): Remove when the reference build gets updated.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GoForward, int,
                              AutomationMsg_NavigationResponseValues)
 
@@ -147,18 +157,16 @@ IPC_BEGIN_MESSAGES(Automation)
                              GURL)
 
 #if defined(OS_WIN)
-  // TODO(port): Port these messages.
-  //
-  // This message requests the HWND of the top-level window that corresponds
-  // to the given automation handle.
-  // The return value contains the HWND value, which is 0 if the call fails.
-  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_WindowHWND,
-                             int /* automation handle */,
-                             HWND /* Win32 handle */ )
+  // TODO(estade): delete this unused message.
+  IPC_SYNC_MESSAGE_ROUTED0_0(AutomationMsg_WindowHWND)
 
   // This message requests the HWND of the tab that corresponds
   // to the given automation handle.
   // The return value contains the HWND value, which is 0 if the call fails.
+  //
+  // TODO(estade): The only test that uses this message is
+  // NPAPIVisiblePluginTester.SelfDeletePluginInvokeInSynchronousMouseMove. It
+  // can probably be done in another way, and this can be removed.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_TabHWND,
                              int /* tab_handle */,
                              HWND /* win32 Window Handle */)
@@ -178,19 +186,17 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message tells the AutomationProvider to provide the given
   // authentication data to the specified tab, in response to an HTTP/FTP
   // authentication challenge.
-  // The response status will be negative on error.
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetAuth,
                              int,  // tab handle
                              std::wstring,  // username
                              std::wstring,  // password
-                             int) // status
+                             AutomationMsg_NavigationResponseValues)  // status
 
   // This message tells the AutomationProvider to cancel the login in the
   // specified tab.
-  // The response status will be negative on error.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_CancelAuth,
                              int,  // tab handle
-                             int)  // status
+                             AutomationMsg_NavigationResponseValues)  // status
 
   // Requests that the automation provider ask history for the most recent
   // chain of redirects coming from the given URL. The response must be
@@ -206,18 +212,18 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message asks the AutomationProvider whether a tab is waiting for
   // login info.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_NeedsAuth,
-                             int, // tab handle
-                             bool) // status
+                             int,   // tab handle
+                             bool)  // status
 
   // This message requests the AutomationProvider to apply a certain
   // accelerator. It is completely asynchronous with the resulting accelerator
   // action.
   IPC_SYNC_MESSAGE_ROUTED2_0(AutomationMsg_ApplyAccelerator,
-                             int, // window handle
-                             int) // accelerator id like (IDC_BACK,
-                                  //  IDC_FORWARD, etc)
-                                  // The list can be found at
-                                  // chrome/app/chrome_dll_resource.h
+                             int,  // window handle
+                             int)  // accelerator id like (IDC_BACK,
+                                   //  IDC_FORWARD, etc)
+                                   // The list can be found at
+                                   // chrome/app/chrome_dll_resource.h
 
   // This message requests that the AutomationProvider executes a JavaScript,
   // which is sent embedded in a 'javascript:' URL.
@@ -272,14 +278,15 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message requests that a drag be performed in window coordinate space
   // Request:
   //   int - the handle of the window that's the context for this drag
-  //   std::vector<POINT> - the path of the drag in window coordinate space;
-  //       it should have at least 2 points (start and end)
+  //   std::vector<gfx::Point> - the path of the drag in window coordinate
+  //                             space; it should have at least 2 points
+  //                             (start and end)
   //   int - the flags which identify the mouse button(s) for the drag, as
-  //       defined in chrome/views/event.h
+  //         defined in chrome/views/event.h
   // Response:
   //   bool - true if the drag could be performed
   IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_WindowDrag,
-                             int, std::vector<POINT>, int, bool, bool)
+                             int, std::vector<gfx::Point>, int, bool, bool)
 #endif  // defined(OS_WIN)
 
   // Similar to AutomationMsg_InitialLoadsComplete, this indicates that the
@@ -331,7 +338,7 @@ IPC_BEGIN_MESSAGES(Automation)
   // Gets the directory that downloads will occur in for the active profile.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_DownloadDirectory,
                              int /* tab_handle */,
-                             std::wstring /* directory */)
+                             FilePath /* directory */)
 
   // This message requests the id of the view that has the focus in the
   // specified window. If no view is focused, -1 is returned.  Note that the
@@ -389,25 +396,29 @@ IPC_BEGIN_MESSAGES(Automation)
                              int /* AutocompleteEdit handle */)
 
 #if defined(OS_WIN)
-  // TODO(port): Port this message.
+  // TODO(estade): This message is defined later on for Mac and Linux. This is
+  // to avoid adding a new IPC in the middle for those platforms (see comment
+  // at top). The message is exactly the same, so they should be remerged when
+  // all messages in this file have been made cross-platform (at which point we
+  // will need to check in new reference builds).
   //
   // This message requests that a mouse click be performed in window coordinate
   // space.
   // Request:
   //   int - the handle of the window that's the context for this click
-  //   POINT - the point to click
+  //   gfx::Point - the point to click
   //   int - the flags which identify the mouse button(s) for the click, as
   //       defined in chrome/views/event.h
-  IPC_MESSAGE_ROUTED3(AutomationMsg_WindowClick, int, POINT, int)
+  IPC_MESSAGE_ROUTED3(AutomationMsg_WindowClick, int, gfx::Point, int)
 #endif  // defined(OS_WIN)
 
   // This message requests that a key press be performed.
   // Request:
   //   int - the handle of the window that's the context for this click
-  //   wchar_t - char of the key that was pressed.
+  //   int - the base::KeyboardCode of the key that was pressed.
   //   int - the flags which identify the modifiers (shift, ctrl, alt)
   //         associated for, as defined in chrome/views/event.h
-  IPC_MESSAGE_ROUTED3(AutomationMsg_WindowKeyPress, int, wchar_t, int)
+  IPC_MESSAGE_ROUTED3(AutomationMsg_WindowKeyPress, int, int, int)
 
   // This message notifies the AutomationProvider to create a tab which is
   // hosted by an external process.
@@ -422,9 +433,13 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message notifies the AutomationProvider to navigate to a specified
   // url in the external tab with given handle. The first parameter is the
   // handle to the tab resource. The second parameter is the target url.
+  // The third parameter is the referrer.
   // The return value contains a status code which is nonnegative on success.
   // see AutomationMsg_NavigationResponseValues for the navigation response.
-  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_NavigateInExternalTab, int, GURL,
+  IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_NavigateInExternalTab,
+                             int,
+                             GURL,
+                             GURL,
                              AutomationMsg_NavigationResponseValues)
 
   // This message is an outgoing message from Chrome to an external host.
@@ -434,9 +449,10 @@ IPC_BEGIN_MESSAGES(Automation)
   //         (see TabContents::InvalidateTypes)
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED2(AutomationMsg_NavigationStateChanged,
-                      int, // tab handle
-                      int) // TabContents::InvalidateTypes
+  IPC_MESSAGE_ROUTED3(AutomationMsg_NavigationStateChanged,
+                      int,  // tab handle
+                      int,  // TabContents::InvalidateTypes
+                      IPC::NavigationInfo)  // title, url etc.
 
   // This message is an outgoing message from Chrome to an external host.
   // It is a notification that the target URL has changed (the target URL
@@ -456,7 +472,7 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_ShowInterstitialPage,
                              int,
                              std::string,
-                             bool)
+                             AutomationMsg_NavigationResponseValues)
 
   // This message notifies the AutomationProvider to hide the current
   // interstitial page in the tab with given handle. The parameter is the
@@ -540,11 +556,12 @@ IPC_BEGIN_MESSAGES(Automation)
   // Request:
   //   -int: Tab handle
   //   -GURL: The URL to open
+  //   -GURL: The referrer
   //   -int: The WindowOpenDisposition that specifies where the URL should
   //         be opened (new tab, new window etc).
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED3(AutomationMsg_OpenURL, int, GURL, int)
+  IPC_MESSAGE_ROUTED4(AutomationMsg_OpenURL, int, GURL, GURL, int)
 
   // This message requests the provider to wait until the specified tab has
   // finished restoring after session restore.
@@ -557,15 +574,11 @@ IPC_BEGIN_MESSAGES(Automation)
   // This message is an outgoing message from Chrome to an external host.
   // It is a notification that a navigation happened
   // Request:
-  //   -int: Tab handle
-  //   -int : Indicates the type of navigation (see the NavigationType enum)
-  //   -int:  If this was not a new navigation, then this value indicates the
-  //          relative offset of the navigation. A positive offset means a
-  //          forward navigation, a negative value means a backward navigation
-  //          and 0 means this was a redirect
+  //   -int:  Tab handle
+  //
   // Response:
   //   None expected
-  IPC_MESSAGE_ROUTED4(AutomationMsg_DidNavigate, int, int, int, GURL)
+  IPC_MESSAGE_ROUTED2(AutomationMsg_DidNavigate, int, IPC::NavigationInfo)
 
   // This message requests the different security states of the page displayed
   // in the specified tab.
@@ -602,9 +615,9 @@ IPC_BEGIN_MESSAGES(Automation)
   //   - int: handle of the tab
   //   - bool: whether to proceed or abort the navigation
   // Response:
-  //  - bool: whether the operation was successful.
+  //  - AutomationMsg_NavigationResponseValues: result of the operation.
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_ActionOnSSLBlockingPage, int, bool,
-                             bool)
+                             AutomationMsg_NavigationResponseValues)
 
   // Message to request that a browser window is brought to the front and
   // activated.
@@ -650,8 +663,8 @@ IPC_BEGIN_MESSAGES(Automation)
   // for saving resources. The fourth parameter is the saving type: 0 for HTML
   // only; 1 for complete web page.
   // The return value contains a bool which is true on success.
-  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_SavePage, int, std::wstring,
-                             std::wstring, int, bool)
+  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_SavePage, int, FilePath, FilePath,
+                             int, bool)
 
   // This message requests the text currently being displayed in the
   // AutocompleteEdit.  The parameter is the handle to the AutocompleteEdit.
@@ -771,7 +784,9 @@ IPC_BEGIN_MESSAGES(Automation)
                              int /* tab_handle */,
                              int /* info bar index */,
                              bool /* wait for navigation */,
-                             bool /* success flag */)
+
+                             /* navigation result */
+                             AutomationMsg_NavigationResponseValues)
 
   // This message retrieves the last time a navigation occurred in the specified
   // tab.  The value is intended to be used with WaitForNavigation.
@@ -784,7 +799,9 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_WaitForNavigation,
                              int /* tab_handle */,
                              int64 /* last navigation time */,
-                             bool /* success */)
+
+                             /* navigation result */
+                             AutomationMsg_NavigationResponseValues)
 
   // This messages sets an int-value preference.
   IPC_SYNC_MESSAGE_ROUTED3_1(AutomationMsg_SetIntPreference,
@@ -830,13 +847,13 @@ IPC_BEGIN_MESSAGES(Automation)
   // web content tab.
   IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GetPageCurrentEncoding,
                              int /* tab handle */,
-                             std::wstring /* current used encoding name */)
+                             std::string /* current used encoding name */)
 
   // Uses the specified encoding to override the encoding of the page in the
   // specified web content tab.
   IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_OverrideEncoding,
                              int /* tab handle */,
-                             std::wstring /* overrided encoding name */,
+                             std::string /* overrided encoding name */,
                              bool /* success */)
 
   // Used to disable the dialog box that prompts the user for a path when
@@ -960,10 +977,157 @@ IPC_BEGIN_MESSAGES(Automation)
   IPC_MESSAGE_ROUTED1(AutomationMsg_PrintAsync,
                       int /* tab_handle */)
 
+  IPC_MESSAGE_ROUTED3(AutomationMsg_SetCookieAsync,
+                      int /* tab_handle */,
+                      GURL /* url */,
+                      std::string /* cookie */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_SelectAll,
+                      int /* tab handle */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_Cut,
+                      int /* tab handle */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_Copy,
+                      int /* tab handle */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_Paste,
+                      int /* tab handle */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_ReloadAsync,
+                      int /* tab handle */)
+
+  IPC_MESSAGE_ROUTED1(AutomationMsg_StopAsync,
+                      int /* tab handle */)
 
   // Returns the number of times a filter was used to service an URL request.
   // See AutomationMsg_SetFilteredInet.
   IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_GetFilteredInetHitCount,
                              int /* hit_count */)
+
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+  // See previous definition of this message for explanation of why it is
+  // defined twice.
+  IPC_MESSAGE_ROUTED3(AutomationMsg_WindowClick, int, gfx::Point, int)
+#endif
+
+  // This message notifies the AutomationProvider to navigate to a specified
+  // url in the tab with given handle. The first parameter is the handle to
+  // the tab resource. The second parameter is the target url.  The third
+  // parameter is the number of navigations that are required for a successful
+  // return value. See AutomationMsg_NavigationResponseValues for the return
+  // value.
+  IPC_SYNC_MESSAGE_ROUTED3_1(
+      AutomationMsg_NavigateToURLBlockUntilNavigationsComplete, int, GURL, int,
+      AutomationMsg_NavigationResponseValues)
+
+  // This message notifies the AutomationProvider to navigate to a specified
+  // navigation entry index in the external tab with given handle. The first
+  // parameter is the handle to the tab resource. The second parameter is the
+  // index of navigation entry.
+  // The return value contains a status code which is nonnegative on success.
+  // see AutomationMsg_NavigationResponseValues for the navigation response.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_NavigateExternalTabAtIndex, int, int,
+                             AutomationMsg_NavigationResponseValues)
+
+  // This message requests the provider to wait until the window count
+  // reached the specified value.
+  // Request:
+  //   - int: target browser window count
+  // Response:
+  //  - bool: whether the operation was successful.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_WaitForBrowserWindowCountToBecome,
+                             int, bool)
+
+  // This message requests the provider to wait until an application modal
+  // dialog is shown.
+  // Response:
+  //  - bool: whether the operation was successful
+  IPC_SYNC_MESSAGE_ROUTED0_1(AutomationMsg_WaitForAppModalDialogToBeShown, bool)
+
+  // This message notifies the AutomationProvider to navigate back in session
+  // history in the tab with given handle. The first parameter is the handle
+  // to the tab resource. The second parameter is the number of navigations the
+  // provider will wait for.
+  // See AutomationMsg_NavigationResponseValues for the navigation response
+  // values.
+  IPC_SYNC_MESSAGE_ROUTED2_1(AutomationMsg_GoBackBlockUntilNavigationsComplete,
+                             int, int,
+                             AutomationMsg_NavigationResponseValues)
+
+  // This message notifies the AutomationProvider to navigate forward in session
+  // history in the tab with given handle. The first parameter is the handle
+  // to the tab resource. The second parameter is the number of navigations
+  // the provider will wait for.
+  // See AutomationMsg_NavigationResponseValues for the navigation response
+  // values.
+  IPC_SYNC_MESSAGE_ROUTED2_1(
+      AutomationMsg_GoForwardBlockUntilNavigationsComplete, int, int,
+      AutomationMsg_NavigationResponseValues)
+
+  // This message is used by automaton clients to upload histogram data to the
+  // browser process.
+  IPC_MESSAGE_ROUTED1(AutomationMsg_RecordHistograms,
+                      std::vector<std::string> /* histogram_list */)
+
+  IPC_MESSAGE_ROUTED3(AutomationMsg_AttachExternalTab,
+                      int /* tab_handle */,
+                      intptr_t /* cookie */,
+                      int /* disposition */)
+
+  // Sent when the automation client connects to an existing tab.
+  IPC_SYNC_MESSAGE_ROUTED1_3(AutomationMsg_ConnectExternalTab,
+                             intptr_t /* cookie */,
+                             gfx::NativeWindow  /* Tab container window */,
+                             gfx::NativeWindow  /* Tab window */,
+                             int  /* Handle to the new tab */)
+
+#if defined(OS_LINUX) || defined(OS_MACOSX)
+  // TODO(estade): this should be merged with the windows message of the same
+  // name. See comment for WindowClick.
+  IPC_SYNC_MESSAGE_ROUTED4_1(AutomationMsg_WindowDrag,
+                             int, std::vector<gfx::Point>, int, bool, bool)
+#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
+
+  // This message gets the bounds of the window.
+  // Request:
+  //   int - the handle of the window to query
+  // Response:
+  //   gfx::Rect - the bounds of the window
+  //   bool - true if the query was successful
+  IPC_SYNC_MESSAGE_ROUTED1_2(AutomationMsg_GetWindowBounds, int, gfx::Rect,
+                             bool)
+
+  // Simulate an end of session. Normally this happens when the user
+  // shuts down the machine or logs off.
+  // Request:
+  //   int - the handle of the browser
+  // Response:
+  //   bool - true if succesful
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_TerminateSession, int, bool)
+
+  // Returns whether the window is maximized.
+  // Request:
+  //   int - the handle of the window
+  // Response:
+  //   bool - true if the window is maximized
+  //   bool - true if query is successful
+  IPC_SYNC_MESSAGE_ROUTED1_2(AutomationMsg_IsWindowMaximized, int, bool, bool)
+
+  IPC_MESSAGE_ROUTED2(AutomationMsg_SetPageFontSize,
+                      int /* tab_handle */,
+                      int /* The font size */)
+
+  // Returns a metric event duration that was last recorded.  Returns -1 if the
+  // event hasn't occurred yet.
+  IPC_SYNC_MESSAGE_ROUTED1_1(AutomationMsg_GetMetricEventDuration,
+                             std::string /* event_name */,
+                             int /* duration ms */)
+
+  // Sent by automation provider - go to history entry via automation.
+  IPC_MESSAGE_ROUTED2(AutomationMsg_RequestGoToHistoryEntryOffset,
+                             int,   // tab handle
+                             int)   // numbers of entries (negative or positive)
+
 
 IPC_END_MESSAGES(Automation)

@@ -12,6 +12,7 @@
 #endif
 
 #include <string>
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/string16.h"
@@ -34,6 +35,9 @@ struct Parsed;
 }
 
 namespace net {
+
+// Holds a list of ports that should be accepted despite bans.
+extern std::set<int> explicitly_allowed_ports;
 
 // Given the full path to a file name, creates a file: URL. The returned URL
 // may not be valid if the input is malformed.
@@ -72,6 +76,12 @@ std::string NetAddressToString(const struct addrinfo* net_address);
 
 // Returns the hostname of the current system. Returns empty string on failure.
 std::string GetHostName();
+
+// Extracts the unescaped username/password from |url|, saving the results
+// into |*username| and |*password|.
+void GetIdentityFromURL(const GURL& url,
+                        std::wstring* username,
+                        std::wstring* password);
 
 // Return the value of the HTTP response header with name 'name'.  'headers'
 // should be in the format that URLRequest::GetResponseHeaders() returns.
@@ -148,6 +158,17 @@ std::string CanonicalizeHost(const std::string& host,
 std::string CanonicalizeHost(const std::wstring& host,
                              url_canon::CanonHostInfo* host_info);
 
+// Returns true if |host| is RFC 1738-compliant (and not an IP address).  The
+// rules are:
+//   * One or more components separated by '.'
+//   * Each component begins and ends with an alphanumeric character
+//   * Each component contains only alphanumeric characters and '-'
+//   * The last component does not begin with a digit
+//
+// NOTE: You should only pass in hosts that have been returned from
+// CanonicalizeHost(), or you may not get accurate results.
+bool IsCanonicalizedHostRFC1738Compliant(const std::string& host);
+
 // Call these functions to get the html snippet for a directory listing.
 // The return values of both functions are in UTF-8.
 std::string GetDirectoryListingHeader(const string16& title);
@@ -174,7 +195,7 @@ std::wstring StripWWW(const std::wstring& text);
 // Gets the filename from the raw Content-Disposition header (as read from the
 // network).  Otherwise uses the last path component name or hostname from
 // |url|.  Note: it's possible for the suggested filename to be empty (e.g.,
-// file:/// or view-cache:). referrer_charset is used as one of charsets
+// file:///). referrer_charset is used as one of charsets
 // to interpret a raw 8bit string in C-D header (after interpreting
 // as UTF-8 fails). See the comment for GetFilenameFromCD for more details.
 std::wstring GetSuggestedFilename(const GURL& url,
@@ -190,6 +211,10 @@ bool IsPortAllowedByDefault(int port);
 // FTP protocol.  Returns true if the port is allowed, false if it is
 // restricted.
 bool IsPortAllowedByFtp(int port);
+
+// Check if banned |port| has been overriden by an entry in
+// |explicitly_allowed_ports_|.
+bool IsPortAllowedByOverride(int port);
 
 // Set socket to non-blocking mode
 int SetNonBlocking(int fd);
@@ -224,6 +249,13 @@ std::wstring FormatUrl(const GURL& url,
 inline std::wstring FormatUrl(const GURL& url, const std::wstring& languages) {
   return FormatUrl(url, languages, true, UnescapeRule::SPACES, NULL, NULL);
 }
+
+// Strip the portions of |url| that aren't core to the network request.
+//   - user name / password
+//   - reference section
+GURL SimplifyUrlForRequest(const GURL& url);
+
+void SetExplicitlyAllowedPorts(const std::wstring& allowed_ports);
 
 }  // namespace net
 

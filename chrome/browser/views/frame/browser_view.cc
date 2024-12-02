@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "app/os_exchange_data.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
+#include "base/keyboard_codes.h"
 #include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -27,9 +28,8 @@
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/find_bar_controller.h"
-#if defined(OS_WIN)
-#include "chrome/browser/jumplist.h"
-#endif
+#include "chrome/browser/ntp_background_util.h"
+#include "chrome/browser/page_info_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/bookmark_bar_view.h"
@@ -53,6 +53,7 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/window_sizer.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/native_window_notification_source.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -62,22 +63,33 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/webkit_resources.h"
-#if defined(OS_WIN)
-#include "views/controls/scrollbar/native_scroll_bar.h"
-#endif
 #include "views/controls/single_split_view.h"
 #include "views/fill_layout.h"
 #include "views/focus/external_focus_tracker.h"
+#include "views/grid_layout.h"
 #include "views/view.h"
 #include "views/widget/root_view.h"
 #include "views/window/dialog_delegate.h"
-#if !defined(OS_WIN)
-#include "views/window/hit_test.h"
-#endif
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
 
+#if defined(OS_WIN)
+#include "app/win_util.h"
+#include "chrome/browser/jumplist.h"
+#include "chrome/browser/views/theme_install_bubble_view.h"
+#include "views/controls/scrollbar/native_scroll_bar.h"
+#elif defined(OS_LINUX)
+#include "chrome/browser/views/accelerator_table_gtk.h"
+#include "views/window/hit_test.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/browser_extender.h"
+#endif
+
 using base::TimeDelta;
+using views::ColumnSet;
+using views::GridLayout;
 
 // static
 SkBitmap BrowserView::default_favicon_;
@@ -111,8 +123,85 @@ static const int kWindowBorderWidth = 5;
 // If not -1, windows are shown with this state.
 static int explicit_show_state = -1;
 
+// How round the 'new tab' style bookmarks bar is.
+static const int kNewtabBarRoundness = 5;
+// ------------
+
 // Returned from BrowserView::GetClassName.
 static const char kBrowserViewClassName[] = "browser/views/BrowserView";
+
+///////////////////////////////////////////////////////////////////////////////
+// BookmarkExtensionBackground, private:
+// This object serves as the views::Background object which is used to layout
+// and paint the bookmark bar.
+class BookmarkExtensionBackground : public views::Background {
+ public:
+  explicit BookmarkExtensionBackground(BrowserView* browser_view,
+                                       DetachableToolbarView* host_view,
+                                       Browser* browser);
+
+  // View methods overridden from views:Background.
+  virtual void Paint(gfx::Canvas* canvas, views::View* view) const;
+
+ private:
+  BrowserView* browser_view_;
+
+  // The view hosting this background.
+  DetachableToolbarView* host_view_;
+
+  Browser* browser_;
+
+  DISALLOW_COPY_AND_ASSIGN(BookmarkExtensionBackground);
+};
+
+BookmarkExtensionBackground::BookmarkExtensionBackground(
+    BrowserView* browser_view,
+    DetachableToolbarView* host_view,
+    Browser* browser)
+    : browser_view_(browser_view),
+      host_view_(host_view),
+      browser_(browser) {
+}
+
+void BookmarkExtensionBackground::Paint(gfx::Canvas* canvas,
+                                        views::View* view) const {
+  ThemeProvider* tp = host_view_->GetThemeProvider();
+  if (host_view_->IsDetached()) {
+    // Draw the background to match the new tab page.
+    int height = 0;
+    TabContents* contents = browser_->GetSelectedTabContents();
+    if (contents && contents->view())
+      height = contents->view()->GetContainerSize().height();
+    NtpBackgroundUtil::PaintBackgroundDetachedMode(
+        host_view_->GetThemeProvider(), canvas,
+        gfx::Rect(0, 0, host_view_->width(), host_view_->height()),
+        height);
+
+    SkRect rect;
+
+    // As 'hidden' according to the animation is the full in-tab state,
+    // we invert the value - when current_state is at '0', we expect the
+    // bar to be docked.
+    double current_state = 1 - host_view_->GetAnimationValue();
+
+    double h_padding = static_cast<double>
+        (BookmarkBarView::kNewtabHorizontalPadding) * current_state;
+    double v_padding = static_cast<double>
+        (BookmarkBarView::kNewtabVerticalPadding) * current_state;
+    double roundness = 0;
+
+    DetachableToolbarView::CalculateContentArea(current_state,
+                                                h_padding, v_padding,
+                                                &rect, &roundness, host_view_);
+    DetachableToolbarView::PaintContentAreaBackground(
+        canvas, tp, rect, roundness);
+    DetachableToolbarView::PaintContentAreaBorder(canvas, tp, rect, roundness);
+    DetachableToolbarView::PaintHorizontalBorder(canvas, host_view_);
+  } else {
+    DetachableToolbarView::PaintBackgroundAttachedMode(canvas, host_view_);
+    DetachableToolbarView::PaintHorizontalBorder(canvas, host_view_);
+  }
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // ResizeCorner, private:
@@ -184,33 +273,62 @@ class DownloadInProgressConfirmDialogDelegate : public views::DialogDelegate,
                                                 public views::View {
  public:
   explicit DownloadInProgressConfirmDialogDelegate(Browser* browser)
-      : browser_(browser) {
+      : browser_(browser),
+        product_name_(l10n_util::GetString(IDS_PRODUCT_NAME)) {
     int download_count = browser->profile()->GetDownloadManager()->
         in_progress_count();
 
-    std::wstring label_text;
+    std::wstring warning_text;
+    std::wstring explanation_text;
     if (download_count == 1) {
-      label_text =
-          l10n_util::GetString(IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_TITLE);
+      warning_text =
+          l10n_util::GetStringF(IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING,
+                                product_name_);
+      explanation_text =
+          l10n_util::GetStringF(IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION,
+                                product_name_);
       ok_button_text_ = l10n_util::GetString(
           IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
       cancel_button_text_ = l10n_util::GetString(
           IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
     } else {
-      label_text =
-          l10n_util::GetStringF(IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE,
-                                download_count);
+      warning_text =
+          l10n_util::GetStringF(IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
+                                product_name_, IntToWString(download_count));
+      explanation_text =
+          l10n_util::GetStringF(
+              IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION, product_name_);
       ok_button_text_ = l10n_util::GetString(
           IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
       cancel_button_text_ = l10n_util::GetString(
           IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
     }
-    label_ = new views::Label(label_text);
-    label_->SetMultiLine(true);
-    label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-    label_->set_border(views::Border::CreateEmptyBorder(10, 10, 10, 10));
-    AddChildView(label_);
-    SetLayoutManager(new views::FillLayout());
+
+    // There are two lines of text: the bold warning label and the text
+    // explanation label.
+    GridLayout* layout = new GridLayout(this);
+    SetLayoutManager(layout);
+    const int columnset_id = 0;
+    ColumnSet* column_set = layout->AddColumnSet(columnset_id);
+    column_set->AddColumn(GridLayout::FILL, GridLayout::LEADING, 1,
+                          GridLayout::USE_PREF, 0, 0);
+
+    gfx::Font bold_font =
+        ResourceBundle::GetSharedInstance().GetFont(
+            ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD);
+    warning_ = new views::Label(warning_text, bold_font);
+    warning_->SetMultiLine(true);
+    warning_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    warning_->set_border(views::Border::CreateEmptyBorder(10, 10, 10, 10));
+    layout->StartRow(0, columnset_id);
+    layout->AddView(warning_);
+
+    explanation_ = new views::Label(explanation_text);
+    explanation_->SetMultiLine(true);
+    explanation_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    explanation_->set_border(views::Border::CreateEmptyBorder(10, 10, 10, 10));
+    layout->StartRow(0, columnset_id);
+    layout->AddView(explanation_);
   }
 
   ~DownloadInProgressConfirmDialogDelegate() {
@@ -219,7 +337,9 @@ class DownloadInProgressConfirmDialogDelegate : public views::DialogDelegate,
   // View implementation:
   virtual gfx::Size GetPreferredSize() {
     const int kContentWidth = 400;
-    return gfx::Size(kContentWidth, label_->GetHeightForWidth(kContentWidth));
+    const int height = warning_->GetHeightForWidth(kContentWidth) +
+                       explanation_->GetHeightForWidth(kContentWidth);
+    return gfx::Size(kContentWidth, height);
   }
 
   // DialogDelegate implementation:
@@ -254,15 +374,18 @@ class DownloadInProgressConfirmDialogDelegate : public views::DialogDelegate,
   }
 
   virtual std::wstring GetWindowTitle() const {
-    return l10n_util::GetString(IDS_PRODUCT_NAME);
+    return product_name_;
   }
 
  private:
   Browser* browser_;
-  views::Label* label_;
+  views::Label* warning_;
+  views::Label* explanation_;
 
   std::wstring ok_button_text_;
   std::wstring cancel_button_text_;
+
+  std::wstring product_name_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadInProgressConfirmDialogDelegate);
 };
@@ -313,7 +436,7 @@ BrowserView::~BrowserView() {
   // notifications will call back into deleted objects).
   download_shelf_.reset();
 
-  // Explicitly set browser_ to NULL
+  // Explicitly set browser_ to NULL.
   browser_.reset();
 }
 
@@ -359,8 +482,11 @@ void BrowserView::WindowMoved() {
 
   status_bubble_->Reposition();
 
-  BubbleSet::iterator bubble = browser_bubbles_.begin();
-  for (; bubble != browser_bubbles_.end(); ++bubble) {
+  // Do safe iteration in case the bubble winds up closing as a result of this
+  // message.
+  for (BubbleSet::iterator i = browser_bubbles_.begin();
+       i != browser_bubbles_.end();) {
+    BubbleSet::iterator bubble = i++;
     (*bubble)->BrowserWindowMoved();
   }
 
@@ -462,10 +588,9 @@ bool BrowserView::ShouldShowOffTheRecordAvatar() const {
 }
 
 bool BrowserView::AcceleratorPressed(const views::Accelerator& accelerator) {
-  DCHECK(accelerator_table_.get());
   std::map<views::Accelerator, int>::const_iterator iter =
-      accelerator_table_->find(accelerator);
-  DCHECK(iter != accelerator_table_->end());
+      accelerator_table_.find(accelerator);
+  DCHECK(iter != accelerator_table_.end());
 
   int command_id = iter->second;
   if (browser_->command_updater()->SupportsCommand(command_id) &&
@@ -481,19 +606,19 @@ bool BrowserView::GetAccelerator(int cmd_id, views::Accelerator* accelerator) {
   // anywhere so we need to check for them explicitly here.
   switch (cmd_id) {
     case IDC_CUT:
-      *accelerator = views::Accelerator(L'X', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_X, false, true, false);
       return true;
     case IDC_COPY:
-      *accelerator = views::Accelerator(L'C', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_C, false, true, false);
       return true;
     case IDC_PASTE:
-      *accelerator = views::Accelerator(L'V', false, true, false);
+      *accelerator = views::Accelerator(base::VKEY_V, false, true, false);
       return true;
   }
   // Else, we retrieve the accelerator information from the accelerator table.
   std::map<views::Accelerator, int>::iterator it =
-      accelerator_table_->begin();
-  for (; it != accelerator_table_->end(); ++it) {
+      accelerator_table_.begin();
+  for (; it != accelerator_table_.end(); ++it) {
     if (it->second == cmd_id) {
       *accelerator = it->first;
       return true;
@@ -602,12 +727,15 @@ void BrowserView::SetBounds(const gfx::Rect& bounds) {
 }
 
 void BrowserView::Close() {
-  frame_->GetWindow()->Close();
-
-  BubbleSet::iterator bubble = browser_bubbles_.begin();
-  for (; bubble != browser_bubbles_.end(); ++bubble) {
-    (*bubble)->BrowserWindowClosed();
+  // BrowserWindowClosing will usually cause the bubble to remove itself from
+  // the set, so we need to iterate in a way that's safe against deletion.
+  for (BubbleSet::iterator i = browser_bubbles_.begin();
+       i != browser_bubbles_.end();) {
+    BubbleSet::iterator bubble = i++;
+    (*bubble)->BrowserWindowClosing();
   }
+
+  frame_->GetWindow()->Close();
 }
 
 void BrowserView::Activate() {
@@ -628,7 +756,7 @@ void BrowserView::FlashFrame() {
   fwi.dwTimeout = 0;
   FlashWindowEx(&fwi);
 #else
-  NOTIMPLEMENTED();
+  // Doesn't matter for chrome os.
 #endif
 }
 
@@ -641,11 +769,7 @@ BrowserWindowTesting* BrowserView::GetBrowserWindowTesting() {
 }
 
 StatusBubble* BrowserView::GetStatusBubble() {
-#if defined(OS_WIN)
   return status_bubble_.get();
-#else
-  return NULL;
-#endif
 }
 
 void BrowserView::SelectedTabToolbarSizeChanged(bool is_animating) {
@@ -659,10 +783,18 @@ void BrowserView::SelectedTabToolbarSizeChanged(bool is_animating) {
   }
 }
 
+void BrowserView::SelectedTabExtensionShelfSizeChanged() {
+  Layout();
+}
+
 void BrowserView::UpdateTitleBar() {
   frame_->GetWindow()->UpdateWindowTitle();
   if (ShouldShowWindowIcon())
     frame_->GetWindow()->UpdateWindowIcon();
+}
+
+void BrowserView::ShelfVisibilityChanged() {
+  Layout();
 }
 
 void BrowserView::UpdateDevTools() {
@@ -696,7 +828,7 @@ void BrowserView::SetStarredState(bool is_starred) {
   toolbar_->star_button()->SetToggled(is_starred);
 }
 
-gfx::Rect BrowserView::GetNormalBounds() const {
+gfx::Rect BrowserView::GetRestoredBounds() const {
   return frame_->GetWindow()->GetNormalBounds();
 }
 
@@ -705,7 +837,6 @@ bool BrowserView::IsMaximized() const {
 }
 
 void BrowserView::SetFullscreen(bool fullscreen) {
-#if defined(OS_WIN)
   if (IsFullscreen() == fullscreen)
     return;  // Nothing to do.
 
@@ -715,8 +846,10 @@ void BrowserView::SetFullscreen(bool fullscreen) {
   //     thus are slow and look ugly
   ignore_layout_ = true;
   LocationBarView* location_bar = toolbar_->location_bar();
+#if defined(OS_WIN)
   AutocompleteEditViewWin* edit_view =
       static_cast<AutocompleteEditViewWin*>(location_bar->location_entry());
+#endif
   if (IsFullscreen()) {
     // Hide the fullscreen bubble as soon as possible, since the mode toggle can
     // take enough time for the user to notice.
@@ -728,6 +861,7 @@ void BrowserView::SetFullscreen(bool fullscreen) {
     if (focus_manager->GetFocusedView() == location_bar)
       focus_manager->ClearFocus();
 
+#if defined(OS_WIN)
     // If we don't hide the edit and force it to not show until we come out of
     // fullscreen, then if the user was on the New Tab Page, the edit contents
     // will appear atop the web contents once we go into fullscreen mode.  This
@@ -735,32 +869,41 @@ void BrowserView::SetFullscreen(bool fullscreen) {
     // if we don't hide the main window below, we don't get this problem.
     edit_view->set_force_hidden(true);
     ShowWindow(edit_view->m_hWnd, SW_HIDE);
+#endif
   }
+#if defined(OS_WIN)
   frame_->GetWindow()->PushForceHidden();
+#endif
 
   // Notify bookmark bar, so it can set itself to the appropriate drawing state.
   if (bookmark_bar_view_.get())
     bookmark_bar_view_->OnFullscreenToggled(fullscreen);
 
+  // Notify extension shelf, so it can set itself to the appropriate drawing
+  // state.
+  if (extension_shelf_)
+    extension_shelf_->OnFullscreenToggled(fullscreen);
+
   // Toggle fullscreen mode.
   frame_->GetWindow()->SetFullscreen(fullscreen);
 
-  if (IsFullscreen()) {
+  if (fullscreen) {
     fullscreen_bubble_.reset(new FullscreenExitBubble(GetWidget(),
                                                       browser_.get()));
   } else {
+#if defined(OS_WIN)
     // Show the edit again since we're no longer in fullscreen mode.
     edit_view->set_force_hidden(false);
     ShowWindow(edit_view->m_hWnd, SW_SHOW);
+#endif
   }
 
   // Undo our anti-jankiness hacks and force the window to relayout now that
   // it's in its final position.
   ignore_layout_ = false;
   Layout();
+#if defined(OS_WIN)
   frame_->GetWindow()->PopForceHidden();
-#else
-  NOTIMPLEMENTED();
 #endif
 }
 
@@ -840,7 +983,9 @@ gfx::Rect BrowserView::GetRootWindowResizerRect() const {
 }
 
 void BrowserView::DisableInactiveFrame() {
+#if defined(OS_WIN)
   frame_->GetWindow()->DisableInactiveRendering();
+#endif  // No tricks are needed to get the right behavior on Linux.
 }
 
 void BrowserView::ConfirmAddSearchProvider(const TemplateURL* template_url,
@@ -853,8 +998,13 @@ void BrowserView::ToggleBookmarkBar() {
   bookmark_utils::ToggleWhenVisible(browser_->profile());
 }
 
+void BrowserView::ToggleExtensionShelf() {
+  ExtensionShelf::ToggleWhenExtensionShelfVisible(browser_->profile());
+}
+
 void BrowserView::ShowAboutChromeDialog() {
-  browser::ShowAboutChromeView(GetWidget(), browser_->profile());
+  browser::ShowAboutChromeView(GetWindow()->GetNativeWindow(),
+                               browser_->profile());
 }
 
 void BrowserView::ShowTaskManager() {
@@ -933,6 +1083,45 @@ void BrowserView::ShowNewProfileDialog() {
   browser::ShowNewProfileDialog();
 }
 
+void BrowserView::ShowRepostFormWarningDialog(TabContents* tab_contents) {
+  browser::ShowRepostFormWarningDialog(GetNativeHandle(), tab_contents);
+}
+
+void BrowserView::ShowHistoryTooNewDialog() {
+#if defined(OS_WIN)
+  std::wstring title = l10n_util::GetString(IDS_PRODUCT_NAME);
+  std::wstring message = l10n_util::GetString(IDS_PROFILE_TOO_NEW_ERROR);
+  win_util::MessageBox(GetNativeHandle(), message, title,
+                       MB_OK | MB_ICONWARNING | MB_TOPMOST);
+#elif defined(OS_LINUX)
+  std::string title = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
+  std::string message = l10n_util::GetStringUTF8(IDS_PROFILE_TOO_NEW_ERROR);
+  GtkWidget* dialog = gtk_message_dialog_new(GetNativeHandle(),
+      static_cast<GtkDialogFlags>(0), GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,
+      "%s", message.c_str());
+  gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
+  g_signal_connect(dialog, "response", G_CALLBACK(gtk_widget_destroy), NULL);
+  gtk_widget_show_all(dialog);
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+
+void BrowserView::ShowThemeInstallBubble() {
+#if defined(OS_WIN)
+  TabContents* tab_contents = browser_->GetSelectedTabContents();
+  if (!tab_contents)
+    return;
+  ThemeInstallBubbleView::Show(tab_contents);
+#elif defined(OS_LINUX)
+  // Alas, the Views version of ThemeInstallBubbleView is Windows Views only.
+  // http://crbug.com/24360
+  NOTIMPLEMENTED();
+#else
+  NOTIMPLEMENTED();
+#endif
+}
+
 void BrowserView::ConfirmBrowserCloseWithPendingDownloads() {
   DownloadInProgressConfirmDialogDelegate* delegate =
       new DownloadInProgressConfirmDialogDelegate(browser_.get());
@@ -972,6 +1161,32 @@ void BrowserView::ShowPageInfo(Profile* profile,
                                bool show_history) {
   browser::ShowPageInfo(GetWindow()->GetNativeWindow(), profile, url, ssl,
                         show_history);
+}
+
+void BrowserView::ShowPageMenu() {
+  toolbar_->page_menu()->Activate();
+}
+
+void BrowserView::ShowAppMenu() {
+  toolbar_->app_menu()->Activate();
+}
+
+int BrowserView::GetCommandId(const NativeWebKeyboardEvent& event) {
+  views::Accelerator accelerator(
+      static_cast<base::KeyboardCode>(event.windowsKeyCode),
+      (event.modifiers & NativeWebKeyboardEvent::ShiftKey) ==
+          NativeWebKeyboardEvent::ShiftKey,
+      (event.modifiers & NativeWebKeyboardEvent::ControlKey) ==
+          NativeWebKeyboardEvent::ControlKey,
+      (event.modifiers & NativeWebKeyboardEvent::AltKey) ==
+          NativeWebKeyboardEvent::AltKey);
+
+  std::map<views::Accelerator, int>::const_iterator iter =
+      accelerator_table_.find(accelerator);
+  if (iter == accelerator_table_.end())
+    return -1;
+
+  return iter->second;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1321,6 +1536,11 @@ int BrowserView::NonClientHitTest(const gfx::Point& point) {
     }
   }
 
+#if defined(OS_CHROMEOS)
+  if (browser_extender_->NonClientHitTest(point))
+    return HTCLIENT;
+#endif
+
   // If the point's y coordinate is below the top of the toolbar and otherwise
   // within the bounds of this view, the point is considered to be within the
   // client area.
@@ -1392,8 +1612,7 @@ void BrowserView::Layout() {
   int top = LayoutTabStrip();
   top = LayoutToolbar(top);
   top = LayoutBookmarkAndInfoBars(top);
-  int bottom = LayoutExtensionShelf();
-  bottom = LayoutDownloadShelf(bottom);
+  int bottom = LayoutExtensionAndDownloadShelves();
   LayoutTabContents(top, bottom);
   // This must be done _after_ we lay out the TabContents since this code calls
   // back into us to find the bounding box the find bar must be laid out within,
@@ -1420,6 +1639,27 @@ void BrowserView::ChildPreferredSizeChanged(View* child) {
   Layout();
 }
 
+bool BrowserView::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_CLIENT;
+  return true;
+}
+
+bool BrowserView::GetAccessibleName(std::wstring* name) {
+  DCHECK(name);
+
+  if (!accessible_name_.empty()) {
+    *name = accessible_name_;
+    return true;
+  }
+  return false;
+}
+
+void BrowserView::SetAccessibleName(const std::wstring& name) {
+  accessible_name_ = name;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserView, private:
 
@@ -1444,7 +1684,8 @@ void BrowserView::Init() {
   SetAccessibleName(l10n_util::GetString(IDS_PRODUCT_NAME));
 
   tabstrip_ = TabStripWrapper::CreateTabStrip(browser_->tabstrip_model());
-  tabstrip_->GetView()->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_TABSTRIP));
+  tabstrip_->
+      GetView()->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_TABSTRIP));
   AddChildView(tabstrip_->GetView());
   frame_->TabStripCreated(tabstrip_);
 
@@ -1459,6 +1700,7 @@ void BrowserView::Init() {
 
   contents_container_ = new TabContentsContainer;
   devtools_container_ = new TabContentsContainer;
+  devtools_container_->SetID(VIEW_ID_DEV_TOOLS_DOCKED);
   devtools_container_->SetVisible(false);
   contents_split_ = new views::SingleSplitView(
       contents_container_,
@@ -1473,8 +1715,15 @@ void BrowserView::Init() {
 
   status_bubble_.reset(new StatusBubbleViews(GetWidget()));
 
-  extension_shelf_ = new ExtensionShelf(browser_.get());
-  AddChildView(extension_shelf_);
+  if (browser_->SupportsWindowFeature(Browser::FEATURE_EXTENSIONSHELF)) {
+    extension_shelf_ = new ExtensionShelf(browser_.get());
+    extension_shelf_->set_background(
+        new BookmarkExtensionBackground(this, extension_shelf_,
+                                        browser_.get()));
+    extension_shelf_->
+        SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_EXTENSIONS));
+    AddChildView(extension_shelf_);
+  }
 
 #if defined(OS_WIN)
   InitSystemMenu();
@@ -1484,6 +1733,13 @@ void BrowserView::Init() {
   if (JumpList::Enabled()) {
     jumplist_.reset(new JumpList);
     jumplist_->AddObserver(browser_->profile());
+  }
+#endif
+
+#if defined(OS_CHROMEOS)
+  if (browser_->type() == Browser::TYPE_NORMAL) {
+    browser_extender_.reset(new BrowserExtender(this));
+    browser_extender_->Init();
   }
 #endif
 }
@@ -1514,6 +1770,12 @@ int BrowserView::LayoutTabStrip() {
   gfx::Point tabstrip_origin = tabstrip_bounds.origin();
   ConvertPointToView(GetParent(), this, &tabstrip_origin);
   tabstrip_bounds.set_origin(tabstrip_origin);
+
+#if defined(OS_CHROMEOS)
+  // Layout chromeos specific components.
+  tabstrip_bounds = browser_extender_->Layout(tabstrip_bounds);
+#endif
+
   bool visible = IsTabStripVisible();
   int y = visible ? tabstrip_bounds.y() : 0;
   int height = visible ? tabstrip_bounds.height() : 0;
@@ -1542,29 +1804,64 @@ int BrowserView::LayoutBookmarkAndInfoBars(int top) {
     // If we're showing the Bookmark bar in detached style, then we need to show
     // any Info bar _above_ the Bookmark bar, since the Bookmark bar is styled
     // to look like it's part of the page.
-    if (bookmark_bar_view_->IsDetachedStyle())
-      return LayoutBookmarkBar(LayoutInfoBar(top));
+    if (bookmark_bar_view_->IsDetached())
+      return LayoutTopBar(LayoutInfoBar(top));
     // Otherwise, Bookmark bar first, Info bar second.
-    top = LayoutBookmarkBar(top);
+    top = LayoutTopBar(top);
   }
   find_bar_y_ = top + y() - 1;
   return LayoutInfoBar(top);
 }
 
-int BrowserView::LayoutBookmarkBar(int top) {
+int BrowserView::LayoutTopBar(int top) {
+  // This method lays out the the bookmark bar, and, if required, the extension
+  // shelf by its side. The bookmark bar appears on the right of the extension
+  // shelf. If there are too many bookmark items and extension toolstrips to fit
+  // in the single bar, some compromises are made as follows:
+  // 1. The bookmark bar is shrunk till it reaches the minimum width.
+  // 2. After reaching the minimum width, the bookmark bar width is kept fixed -
+  //    the extension shelf bar width is reduced.
   DCHECK(active_bookmark_bar_);
-  bool visible = IsBookmarkBarVisible();
-  int height, y = top;
-  if (visible) {
-    y -= kSeparationLineHeight + (bookmark_bar_view_->IsDetachedStyle() ?
-        0 : bookmark_bar_view_->GetToolbarOverlap(false));
-    height = bookmark_bar_view_->GetPreferredSize().height();
-  } else {
-    height = 0;
+  int y = top, x = 0;
+  if (!IsBookmarkBarVisible()) {
+    bookmark_bar_view_->SetVisible(false);
+    bookmark_bar_view_->SetBounds(0, y, width(), 0);
+    if (extension_shelf_->IsOnTop())
+      extension_shelf_->SetVisible(false);
+    return y;
   }
-  bookmark_bar_view_->SetVisible(visible);
-  bookmark_bar_view_->SetBounds(0, y, width(), height);
-  return y + height;
+
+  int bookmark_bar_height = bookmark_bar_view_->GetPreferredSize().height();
+  y -= kSeparationLineHeight + (bookmark_bar_view_->IsDetached() ?
+      0 : bookmark_bar_view_->GetToolbarOverlap(false));
+
+  if (extension_shelf_->IsOnTop()) {
+    if (!bookmark_bar_view_->IsDetached()) {
+      int extension_shelf_width =
+          extension_shelf_->GetPreferredSize().width();
+      int bookmark_bar_given_width = width() - extension_shelf_width;
+      int minimum_allowed_bookmark_bar_width =
+          bookmark_bar_view_->GetMinimumSize().width();
+      if (bookmark_bar_given_width < minimum_allowed_bookmark_bar_width) {
+        // The bookmark bar cannot compromise on its width any more. The
+        // extension shelf needs to shrink now.
+        extension_shelf_width =
+            width() - minimum_allowed_bookmark_bar_width;
+      }
+      extension_shelf_->SetVisible(true);
+      extension_shelf_->SetBounds(x, y, extension_shelf_width,
+                                  bookmark_bar_height);
+      x += extension_shelf_width;
+    } else {
+      // TODO(sidchat): For detached style bookmark bar, set the extensions
+      // shelf in a better position. Issue = 20741.
+      extension_shelf_->SetVisible(false);
+    }
+  }
+
+  bookmark_bar_view_->SetVisible(true);
+  bookmark_bar_view_->SetBounds(x, y, width() - x, bookmark_bar_height);
+  return y + bookmark_bar_height;
 }
 
 int BrowserView::LayoutInfoBar(int top) {
@@ -1577,6 +1874,22 @@ int BrowserView::LayoutInfoBar(int top) {
 
 void BrowserView::LayoutTabContents(int top, int bottom) {
   contents_split_->SetBounds(0, top, width(), bottom - top);
+}
+
+int BrowserView::LayoutExtensionAndDownloadShelves() {
+  // If we're showing the Bookmark bar in detached style, then we need to show
+  // any Info bar _above_ the Bookmark bar, since the Bookmark bar is styled
+  // to look like it's part of the page.
+  int bottom = height();
+  if (extension_shelf_) {
+    if (extension_shelf_->IsDetached()) {
+      bottom = LayoutDownloadShelf(bottom);
+      return LayoutExtensionShelf(bottom);
+    }
+    // Otherwise, Extension shelf first, Download shelf second.
+    bottom = LayoutExtensionShelf(bottom);
+  }
+  return LayoutDownloadShelf(bottom);
 }
 
 int BrowserView::LayoutDownloadShelf(int bottom) {
@@ -1607,8 +1920,10 @@ void BrowserView::LayoutStatusBubble(int top) {
   status_bubble_->SetBounds(origin.x(), origin.y(), width() / 3, height);
 }
 
-int BrowserView::LayoutExtensionShelf() {
-  int bottom = height();
+int BrowserView::LayoutExtensionShelf(int bottom) {
+  if (!extension_shelf_ || extension_shelf_->IsOnTop())
+    return bottom;
+
   if (extension_shelf_) {
     bool visible = browser_->SupportsWindowFeature(
         Browser::FEATURE_EXTENSIONSHELF);
@@ -1630,10 +1945,15 @@ bool BrowserView::MaybeShowBookmarkBar(TabContents* contents) {
       bookmark_bar_view_.reset(new BookmarkBarView(contents->profile(),
                                                    browser_.get()));
       bookmark_bar_view_->SetParentOwned(false);
+      bookmark_bar_view_->set_background(
+          new BookmarkExtensionBackground(this, bookmark_bar_view_.get(),
+                                          browser_.get()));
     } else {
       bookmark_bar_view_->SetProfile(contents->profile());
     }
     bookmark_bar_view_->SetPageNavigator(contents);
+    bookmark_bar_view_->
+        SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_BOOKMARKS));
     new_bookmark_bar_view = bookmark_bar_view_.get();
   }
   return UpdateChildViewAndLayout(new_bookmark_bar_view, &active_bookmark_bar_);
@@ -1669,6 +1989,7 @@ void BrowserView::UpdateDevToolsForContents(TabContents* tab_contents) {
     // Store split offset when hiding devtools window only.
     g_browser_process->local_state()->SetInteger(
         prefs::kDevToolsSplitLocation, contents_split_->divider_offset());
+
     // Restore focus to the last focused view when hiding devtools window.
     devtools_focus_tracker_->FocusLastFocusedExternalView();
 
@@ -1748,15 +2069,15 @@ void BrowserView::LoadAccelerators() {
   views::FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
 
-  // Let's build our own accelerator table.
-  accelerator_table_.reset(new std::map<views::Accelerator, int>);
+  // Let's fill our own accelerator table.
   for (int i = 0; i < count; ++i) {
     bool alt_down = (accelerators[i].fVirt & FALT) == FALT;
     bool ctrl_down = (accelerators[i].fVirt & FCONTROL) == FCONTROL;
     bool shift_down = (accelerators[i].fVirt & FSHIFT) == FSHIFT;
-    views::Accelerator accelerator(accelerators[i].key, shift_down, ctrl_down,
-                                   alt_down);
-    (*accelerator_table_)[accelerator] = accelerators[i].cmd;
+    views::Accelerator accelerator(
+        static_cast<base::KeyboardCode>(accelerators[i].key),
+        shift_down, ctrl_down, alt_down);
+    accelerator_table_[accelerator] = accelerators[i].cmd;
 
     // Also register with the focus manager.
     focus_manager->RegisterAccelerator(accelerator, this);
@@ -1765,7 +2086,19 @@ void BrowserView::LoadAccelerators() {
   // We don't need the Windows accelerator table anymore.
   free(accelerators);
 #else
-  NOTIMPLEMENTED();
+  views::FocusManager* focus_manager = GetFocusManager();
+  DCHECK(focus_manager);
+  // Let's fill our own accelerator table.
+  for (size_t i = 0; i < browser::kAcceleratorMapLength; ++i) {
+    views::Accelerator accelerator(browser::kAcceleratorMap[i].keycode,
+                                   browser::kAcceleratorMap[i].shift_pressed,
+                                   browser::kAcceleratorMap[i].ctrl_pressed,
+                                   browser::kAcceleratorMap[i].alt_pressed);
+    accelerator_table_[accelerator] = browser::kAcceleratorMap[i].command_id;
+
+    // Also register with the focus manager.
+    focus_manager->RegisterAccelerator(accelerator, this);
+  }
 #endif
 }
 

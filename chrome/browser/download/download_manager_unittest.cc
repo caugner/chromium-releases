@@ -1,12 +1,18 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
+#include "base/string_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_LINUX)
+#include <locale.h>
+#endif
 
 class DownloadManagerTest : public testing::Test {
  public:
@@ -64,7 +70,13 @@ const struct {
    L"a_file_name.txt"},
 
   // No useful information in disposition or URL, use default
-  {"", "http://www.truncated.com/path/", "text/plain", L"download.txt"},
+  {"", "http://www.truncated.com/path/", "text/plain",
+#if defined(OS_LINUX)
+   L"download"
+#else
+   L"download.txt"
+#endif
+  },
 
   // A normal avi should get .avi and not .avi.avi
   {"", "https://blah.google.com/misc/2.avi", "video/x-msvideo", L"2.avi"},
@@ -75,6 +87,10 @@ const struct {
    "application/octet-stream",
    L"My Downloaded File.exe"},
 
+  // This block tests whether we append extensions based on MIME types;
+  // we don't do this on Linux, so we skip the tests rather than #ifdef
+  // them up.
+#if !defined(OS_LINUX)
   {"filename=my-cat",
    "http://www.example.com/my-cat",
    "image/jpeg",
@@ -94,12 +110,15 @@ const struct {
    "http://www.example.com/my-cat",
    "dance/party",
    L"my-cat"},
+#endif  // defined(OS_LINUX)
 
   {"filename=my-cat.jpg",
    "http://www.example.com/my-cat.jpg",
    "text/plain",
    L"my-cat.jpg"},
 
+  // .exe tests.
+#if defined(OS_WIN)
   {"filename=evil.exe",
    "http://www.goodguy.com/evil.exe",
    "image/jpeg",
@@ -129,6 +148,7 @@ const struct {
    "http://www.goodguy.com/evil.exe",
    "application/rss+xml",
    L"evil.download"},
+#endif  // OS_WIN
 
   {"filename=utils.js",
    "http://www.goodguy.com/utils.js",
@@ -173,22 +193,38 @@ const struct {
   {"filename=..\\foo.txt",
    "http://www.evil.com/..\\foo.txt",
    "text/plain",
-   L"foo.txt"},
+#if defined(OS_WIN)
+   L"foo.txt"
+#else
+   L"\\foo.txt"
+#endif
+  },
 
   {"filename=.hidden",
    "http://www.evil.com/.hidden",
    "text/plain",
-   L"hidden.txt"},
+#if defined(OS_LINUX)
+   L"hidden"
+#else
+   L"hidden.txt"
+#endif
+  },
 
   {"filename=trailing.",
    "http://www.evil.com/trailing.",
    "dance/party",
-   L"trailing"},
+   L"trailing"
+  },
 
   {"filename=trailing.",
    "http://www.evil.com/trailing.",
    "text/plain",
-   L"trailing.txt"},
+#if defined(OS_LINUX)
+   L"trailing"
+#else
+   L"trailing.txt"
+#endif
+  },
 
   {"filename=.",
    "http://www.evil.com/.",
@@ -205,15 +241,26 @@ const struct {
    "dance/party",
    L"download"},
 
+  // Note that this one doesn't have "filename=" on it.
   {"a_file_name.txt",
    "http://www.evil.com/",
    "image/jpeg",
-   L"download.jpg"},
+#if defined(OS_LINUX)
+   L"download"
+#else
+   L"download.jpg"
+#endif
+  },
 
   {"filename=",
    "http://www.evil.com/",
    "image/jpeg",
-   L"download.jpg"},
+#if defined(OS_LINUX)
+   L"download"
+#else
+   L"download.jpg"
+#endif
+  },
 
   {"filename=simple",
    "http://www.example.com/simple",
@@ -223,22 +270,42 @@ const struct {
   {"filename=COM1",
    "http://www.goodguy.com/COM1",
    "application/foo-bar",
-   L"_COM1"},
+#if defined(OS_WIN)
+   L"_COM1"
+#else
+   L"COM1"
+#endif
+  },
 
   {"filename=COM4.txt",
    "http://www.goodguy.com/COM4.txt",
    "text/plain",
-   L"_COM4.txt"},
+#if defined(OS_WIN)
+   L"_COM4.txt"
+#else
+   L"COM4.txt"
+#endif
+  },
 
   {"filename=lpt1.TXT",
    "http://www.goodguy.com/lpt1.TXT",
    "text/plain",
-   L"_lpt1.TXT"},
+#if defined(OS_WIN)
+   L"_lpt1.TXT"
+#else
+   L"lpt1.TXT"
+#endif
+  },
 
   {"filename=clock$.txt",
    "http://www.goodguy.com/clock$.txt",
    "text/plain",
-   L"_clock$.txt"},
+#if defined(OS_WIN)
+   L"_clock$.txt"
+#else
+   L"clock$.txt"
+#endif
+  },
 
   {"filename=mycom1.foo",
    "http://www.goodguy.com/mycom1.foo",
@@ -248,32 +315,62 @@ const struct {
   {"filename=Setup.exe.local",
    "http://www.badguy.com/Setup.exe.local",
    "application/foo-bar",
-   L"Setup.exe.download"},
+#if defined(OS_WIN)
+   L"Setup.exe.download"
+#else
+   L"Setup.exe.local"
+#endif
+  },
 
   {"filename=Setup.exe.local.local",
    "http://www.badguy.com/Setup.exe.local",
    "application/foo-bar",
-   L"Setup.exe.local.download"},
+#if defined(OS_WIN)
+   L"Setup.exe.local.download"
+#else
+   L"Setup.exe.local.local"
+#endif
+  },
 
   {"filename=Setup.exe.lnk",
    "http://www.badguy.com/Setup.exe.lnk",
    "application/foo-bar",
-   L"Setup.exe.download"},
+#if defined(OS_WIN)
+   L"Setup.exe.download"
+#else
+   L"Setup.exe.lnk"
+#endif
+  },
 
   {"filename=Desktop.ini",
    "http://www.badguy.com/Desktop.ini",
    "application/foo-bar",
-   L"_Desktop.ini"},
+#if defined(OS_WIN)
+   L"_Desktop.ini"
+#else
+   L"Desktop.ini"
+#endif
+  },
 
   {"filename=Thumbs.db",
    "http://www.badguy.com/Thumbs.db",
    "application/foo-bar",
-   L"_Thumbs.db"},
+#if defined(OS_WIN)
+   L"_Thumbs.db"
+#else
+   L"Thumbs.db"
+#endif
+  },
 
   {"filename=source.srf",
    "http://www.hotmail.com",
    "image/jpeg",
-   L"source.srf.jpg"},
+#if defined(OS_WIN)
+   L"source.srf.jpg"
+#else
+   L"source.srf"
+#endif
+},
 
   {"filename=source.jpg",
    "http://www.hotmail.com",
@@ -302,7 +399,12 @@ const struct {
   {"attachment; filename==?iiso88591?Q?caf=EG?=",
    "http://www.example.com/test%20123",
    "image/jpeg",
-   L"test 123.jpg"},
+#if defined(OS_LINUX)
+   L"test 123"
+#else
+   L"test 123.jpg"
+#endif
+  },
 
   {"malformed_disposition",
    "http://www.google.com/%EC%98%88%EC%88%A0%20%EC%98%88%EC%88%A0.jpg",
@@ -313,7 +415,12 @@ const struct {
   {"attachment; filename==?iso88591?Q?caf=E3?",
    "http://www.google.com/path1/path2/",
    "image/jpeg",
-   L"download.jpg"},
+#if defined(OS_LINUX)
+   L"download"
+#else
+   L"download.jpg"
+#endif
+  },
 
   // Issue=5772.
   {"",
@@ -335,8 +442,18 @@ const struct {
   {"",
    "http://www.example.com/bar.bogus",
    "application/x-tar",
-   L"bar.bogus.tar"},
+#if defined(OS_LINUX)
+   L"bar.bogus"
+#else
+   L"bar.bogus.tar"
+#endif
+  },
 
+  // http://code.google.com/p/chromium/issues/detail?id=20337
+  {"filename=.download.txt",
+   "http://www.example.com/.download.txt",
+   "text/plain",
+   L"download.txt"},
 };
 
 }  // namespace
@@ -344,8 +461,18 @@ const struct {
 // Tests to ensure that the file names we generate from hints from the server
 // (content-disposition, URL name, etc) don't cause security holes.
 TEST_F(DownloadManagerTest, TestDownloadFilename) {
+#if defined(OS_LINUX)
+  // This test doesn't run when the locale is not UTF-8 becuase some of the
+  // string conversions fail. This is OK (we have the default value) but they
+  // don't match our expectations.
+  std::string locale = setlocale(LC_CTYPE, NULL);
+  StringToLowerASCII(&locale);
+  ASSERT_NE(std::string::npos, locale.find("utf-8"))
+      << "Your locale must be set to UTF-8 for this test to pass!";
+#endif
+
   std::wstring file_name;
-  for (int i = 0; i < arraysize(kGeneratedFiles); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kGeneratedFiles); ++i) {
     GetGeneratedFilename(kGeneratedFiles[i].disposition,
                          kGeneratedFiles[i].url,
                          kGeneratedFiles[i].mime_type,
@@ -420,11 +547,14 @@ const struct {
 
 }  // namespace
 
+#if defined(OS_WIN)
+// TODO(port): port to non-Windows.
 TEST_F(DownloadManagerTest, GetSafeFilename) {
-  for (int i = 0; i < arraysize(kSafeFilenameCases); ++i) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSafeFilenameCases); ++i) {
     FilePath path(kSafeFilenameCases[i].path);
     download_manager_->GenerateSafeFilename(kSafeFilenameCases[i].mime_type,
         &path);
     EXPECT_EQ(kSafeFilenameCases[i].expected_path, path.value());
   }
 }
+#endif  // OS_WIN

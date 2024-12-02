@@ -4,10 +4,12 @@
 
 #include <map>
 
+#include "app/clipboard/clipboard.h"
 #include "app/gfx/canvas.h"
 #include "app/gfx/path.h"
-#include "base/clipboard.h"
+#include "base/keyboard_codes.h"
 #include "base/message_loop.h"
+#include "base/string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
@@ -17,6 +19,7 @@
 #include "views/controls/scroll_view.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/event.h"
+#include "views/focus/accelerator_handler.h"
 #include "views/focus/view_storage.h"
 #include "views/view.h"
 #include "views/views_delegate.h"
@@ -25,6 +28,7 @@
 #include "views/widget/widget_win.h"
 #elif defined(OS_LINUX)
 #include "views/widget/widget_gtk.h"
+#include "views/window/window_gtk.h"
 #endif
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
@@ -203,7 +207,6 @@ TEST_F(ViewTest, DidChangeBounds) {
   EXPECT_EQ(v->bounds(), gfx::Rect(new_rect));
   delete v;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // AddRemoveNotifications
@@ -615,6 +618,42 @@ TEST_F(ViewTest, HitTestMasks) {
   EXPECT_EQ(root_view, root_view->GetViewForPoint(v2_origin));
 }
 
+TEST_F(ViewTest, Textfield) {
+  const string16 kText = ASCIIToUTF16("Reality is that which, when you stop "
+                                      "believing it, doesn't go away.");
+  const string16 kExtraText = ASCIIToUTF16("Pretty deep, Philip!");
+  const string16 kEmptyString;
+
+  Clipboard clipboard;
+
+  Widget* window = CreateWidget();
+#if defined(OS_WIN)
+  static_cast<WidgetWin*>(window)->Init(NULL, gfx::Rect(0, 0, 100, 100));
+#else
+  static_cast<WidgetGtk*>(window)->Init(NULL, gfx::Rect(0, 0, 100, 100));
+#endif
+  RootView* root_view = window->GetRootView();
+
+  Textfield* textfield = new Textfield();
+  root_view->AddChildView(textfield);
+
+  // Test setting, appending text.
+  textfield->SetText(kText);
+  EXPECT_EQ(kText, textfield->text());
+  textfield->AppendText(kExtraText);
+  EXPECT_EQ(kText + kExtraText, textfield->text());
+  textfield->SetText(string16());
+  EXPECT_EQ(kEmptyString, textfield->text());
+
+  // Test selection related methods.
+  textfield->SetText(kText);
+  EXPECT_EQ(kEmptyString, textfield->GetSelectedText());
+  textfield->SelectAll();
+  EXPECT_EQ(kText, textfield->text());
+  textfield->ClearSelection();
+  EXPECT_EQ(kEmptyString, textfield->GetSelectedText());
+}
+
 #if defined(OS_WIN)
 class TestViewsDelegate : public views::ViewsDelegate {
  public:
@@ -688,7 +727,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   ::SendMessage(normal->GetTestingHandle(), WM_CUT, 0, 0);
 
   string16 result;
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   EXPECT_EQ(kNormalText, result);
   normal->SetText(kNormalText);  // Let's revert to the original content.
 
@@ -696,7 +735,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   read_only->SelectAll();
   ::SendMessage(read_only->GetTestingHandle(), WM_CUT, 0, 0);
   result.clear();
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
@@ -704,7 +743,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   password->SelectAll();
   ::SendMessage(password->GetTestingHandle(), WM_CUT, 0, 0);
   result.clear();
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
@@ -717,19 +756,19 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   read_only->SelectAll();
   ::SendMessage(read_only->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   EXPECT_EQ(kReadOnlyText, result);
 
   normal->SelectAll();
   ::SendMessage(normal->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll();
   ::SendMessage(password->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
-  clipboard.ReadText(&result);
+  clipboard.ReadText(Clipboard::BUFFER_STANDARD, &result);
   // We don't let you copy from a password field, clipboard should not have
   // changed.
   EXPECT_EQ(kNormalText, result);
@@ -778,7 +817,7 @@ bool TestView::AcceleratorPressed(const Accelerator& accelerator) {
 #if defined(OS_WIN)
 TEST_F(ViewTest, ActivateAccelerator) {
   // Register a keyboard accelerator before the view is added to a window.
-  views::Accelerator return_accelerator(VK_RETURN, false, false, false);
+  views::Accelerator return_accelerator(base::VKEY_RETURN, false, false, false);
   TestView* view = new TestView();
   view->Reset();
   view->AddAccelerator(return_accelerator);
@@ -802,7 +841,7 @@ TEST_F(ViewTest, ActivateAccelerator) {
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 1);
 
   // Hit the escape key. Nothing should happen.
-  views::Accelerator escape_accelerator(VK_ESCAPE, false, false, false);
+  views::Accelerator escape_accelerator(base::VKEY_ESCAPE, false, false, false);
   EXPECT_FALSE(focus_manager->ProcessAccelerator(escape_accelerator));
   EXPECT_EQ(view->accelerator_count_map_[return_accelerator], 1);
   EXPECT_EQ(view->accelerator_count_map_[escape_accelerator], 0);
@@ -960,17 +999,15 @@ TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
 }
 #endif
 
-#if defined(OS_WIN)
 ////////////////////////////////////////////////////////////////////////////////
 // Dialogs' default button
 ////////////////////////////////////////////////////////////////////////////////
 
-class TestDialogView : public views::View,
-                       public views::DialogDelegate,
-                       public views::ButtonListener {
+class TestDialog : public DialogDelegate, public ButtonListener {
  public:
-  TestDialogView()
-      : button1_(NULL),
+  TestDialog()
+      : contents_(NULL),
+        button1_(NULL),
         button2_(NULL),
         checkbox_(NULL),
         last_pressed_button_(NULL),
@@ -984,14 +1021,16 @@ class TestDialogView : public views::View,
   }
 
   virtual View* GetContentsView() {
-    views::View* container = new views::View();
-    button1_ = new views::NativeButton(this, L"Button1");
-    button2_ = new views::NativeButton(this, L"Button2");
-    checkbox_ = new views::Checkbox(L"My checkbox");
-    container->AddChildView(button1_);
-    container->AddChildView(button2_);
-    container->AddChildView(checkbox_);
-    return container;
+    if (!contents_) {
+      contents_ = new View();
+      button1_ = new NativeButton(this, L"Button1");
+      button2_ = new NativeButton(this, L"Button2");
+      checkbox_ = new Checkbox(L"My checkbox");
+      contents_->AddChildView(button1_);
+      contents_->AddChildView(button2_);
+      contents_->AddChildView(checkbox_);
+    }
+    return contents_;
   }
 
   // Prevent the dialog from really closing (so we can click the OK/Cancel
@@ -1006,7 +1045,7 @@ class TestDialogView : public views::View,
   }
 
   // views::ButtonListener implementation.
-  virtual void ButtonPressed(Button* sender) {
+  virtual void ButtonPressed(Button* sender, const views::Event& event) {
     last_pressed_button_ = sender;
   }
 
@@ -1016,10 +1055,11 @@ class TestDialogView : public views::View,
     last_pressed_button_ = NULL;
   }
 
-  views::NativeButton* button1_;
-  views::NativeButton* button2_;
-  views::NativeButton* checkbox_;
-  views::Button* last_pressed_button_;
+  View* contents_;
+  NativeButton* button1_;
+  NativeButton* button2_;
+  NativeButton* checkbox_;
+  Button* last_pressed_button_;
 
   bool canceled_;
   bool oked_;
@@ -1035,21 +1075,21 @@ class DefaultButtonTest : public ViewTest {
   };
 
   DefaultButtonTest()
-      : native_window_(NULL),
-        focus_manager_(NULL),
+      : focus_manager_(NULL),
+        test_dialog_(NULL),
         client_view_(NULL),
         ok_button_(NULL),
         cancel_button_(NULL) {
   }
 
   virtual void SetUp() {
-    dialog_view_ = new TestDialogView();
+    test_dialog_ = new TestDialog();
     views::Window* window =
         views::Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 100, 100),
-                                          dialog_view_);
+                                          test_dialog_);
     window->Show();
-    native_window_ = window->GetNativeWindow();
-    focus_manager_ = FocusManager::GetFocusManagerForNativeView(native_window_);
+    focus_manager_ = test_dialog_->contents_->GetFocusManager();
+    ASSERT_TRUE(focus_manager_ != NULL);
     client_view_ =
         static_cast<views::DialogClientView*>(window->GetClientView());
     ok_button_ = client_view_->ok_button();
@@ -1057,42 +1097,37 @@ class DefaultButtonTest : public ViewTest {
   }
 
   void SimularePressingEnterAndCheckDefaultButton(ButtonID button_id) {
-#if defined(OS_WIN)
-    focus_manager_->OnKeyDown(native_window_, WM_KEYDOWN, VK_RETURN, 0);
-#else
-    // TODO(platform)
-    return;
-#endif
+    KeyEvent event(Event::ET_KEY_PRESSED, base::VKEY_RETURN, 0, 0, 0);
+    focus_manager_->OnKeyEvent(event);
     switch (button_id) {
       case OK:
-        EXPECT_TRUE(dialog_view_->oked_);
-        EXPECT_FALSE(dialog_view_->canceled_);
-        EXPECT_FALSE(dialog_view_->last_pressed_button_);
+        EXPECT_TRUE(test_dialog_->oked_);
+        EXPECT_FALSE(test_dialog_->canceled_);
+        EXPECT_FALSE(test_dialog_->last_pressed_button_);
         break;
       case CANCEL:
-        EXPECT_FALSE(dialog_view_->oked_);
-        EXPECT_TRUE(dialog_view_->canceled_);
-        EXPECT_FALSE(dialog_view_->last_pressed_button_);
+        EXPECT_FALSE(test_dialog_->oked_);
+        EXPECT_TRUE(test_dialog_->canceled_);
+        EXPECT_FALSE(test_dialog_->last_pressed_button_);
         break;
       case BUTTON1:
-        EXPECT_FALSE(dialog_view_->oked_);
-        EXPECT_FALSE(dialog_view_->canceled_);
-        EXPECT_TRUE(dialog_view_->last_pressed_button_ ==
-            dialog_view_->button1_);
+        EXPECT_FALSE(test_dialog_->oked_);
+        EXPECT_FALSE(test_dialog_->canceled_);
+        EXPECT_TRUE(test_dialog_->last_pressed_button_ ==
+            test_dialog_->button1_);
         break;
       case BUTTON2:
-        EXPECT_FALSE(dialog_view_->oked_);
-        EXPECT_FALSE(dialog_view_->canceled_);
-        EXPECT_TRUE(dialog_view_->last_pressed_button_ ==
-            dialog_view_->button2_);
+        EXPECT_FALSE(test_dialog_->oked_);
+        EXPECT_FALSE(test_dialog_->canceled_);
+        EXPECT_TRUE(test_dialog_->last_pressed_button_ ==
+            test_dialog_->button2_);
         break;
     }
-    dialog_view_->ResetStates();
+    test_dialog_->ResetStates();
   }
 
-  gfx::NativeWindow native_window_;
   views::FocusManager* focus_manager_;
-  TestDialogView* dialog_view_;
+  TestDialog* test_dialog_;
   DialogClientView* client_view_;
   views::NativeButton* ok_button_;
   views::NativeButton* cancel_button_;
@@ -1107,41 +1142,68 @@ TEST_F(DefaultButtonTest, DialogDefaultButtonTest) {
   SimularePressingEnterAndCheckDefaultButton(OK);
 
   // Simulate focusing another button, it should become the default button.
-  client_view_->FocusWillChange(ok_button_, dialog_view_->button1_);
+  client_view_->FocusWillChange(ok_button_, test_dialog_->button1_);
   EXPECT_FALSE(ok_button_->is_default());
-  EXPECT_TRUE(dialog_view_->button1_->is_default());
+  EXPECT_TRUE(test_dialog_->button1_->is_default());
   // Simulate pressing enter, that should trigger button1.
   SimularePressingEnterAndCheckDefaultButton(BUTTON1);
 
   // Now select something that is not a button, the OK should become the default
   // button again.
-  client_view_->FocusWillChange(dialog_view_->button1_,
-                                dialog_view_->checkbox_);
+  client_view_->FocusWillChange(test_dialog_->button1_,
+                                test_dialog_->checkbox_);
   EXPECT_TRUE(ok_button_->is_default());
-  EXPECT_FALSE(dialog_view_->button1_->is_default());
+  EXPECT_FALSE(test_dialog_->button1_->is_default());
   SimularePressingEnterAndCheckDefaultButton(OK);
 
   // Select yet another button.
-  client_view_->FocusWillChange(dialog_view_->checkbox_,
-                                dialog_view_->button2_);
+  client_view_->FocusWillChange(test_dialog_->checkbox_,
+                                test_dialog_->button2_);
   EXPECT_FALSE(ok_button_->is_default());
-  EXPECT_FALSE(dialog_view_->button1_->is_default());
-  EXPECT_TRUE(dialog_view_->button2_->is_default());
+  EXPECT_FALSE(test_dialog_->button1_->is_default());
+  EXPECT_TRUE(test_dialog_->button2_->is_default());
   SimularePressingEnterAndCheckDefaultButton(BUTTON2);
 
   // Focus nothing.
-  client_view_->FocusWillChange(dialog_view_->button2_, NULL);
+  client_view_->FocusWillChange(test_dialog_->button2_, NULL);
   EXPECT_TRUE(ok_button_->is_default());
-  EXPECT_FALSE(dialog_view_->button1_->is_default());
-  EXPECT_FALSE(dialog_view_->button2_->is_default());
+  EXPECT_FALSE(test_dialog_->button1_->is_default());
+  EXPECT_FALSE(test_dialog_->button2_->is_default());
   SimularePressingEnterAndCheckDefaultButton(OK);
 
   // Focus the cancel button.
   client_view_->FocusWillChange(NULL, cancel_button_);
   EXPECT_FALSE(ok_button_->is_default());
   EXPECT_TRUE(cancel_button_->is_default());
-  EXPECT_FALSE(dialog_view_->button1_->is_default());
-  EXPECT_FALSE(dialog_view_->button2_->is_default());
+  EXPECT_FALSE(test_dialog_->button1_->is_default());
+  EXPECT_FALSE(test_dialog_->button2_->is_default());
   SimularePressingEnterAndCheckDefaultButton(CANCEL);
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// View hierachy / Visibility changes
+////////////////////////////////////////////////////////////////////////////////
+/*
+TEST_F(ViewTest, ChangeVisibility) {
+#if defined(OS_LINUX)
+  // Make CRITICAL messages fatal
+  // TODO(oshima): we probably should enable this for entire tests on linux.
+  g_log_set_always_fatal(G_LOG_LEVEL_CRITICAL);
 #endif
+  scoped_ptr<views::Widget> window(CreateWidget());
+  window->Init(NULL, gfx::Rect(0, 0, 500, 300));
+  views::RootView* root_view = window->GetRootView();
+  NativeButton* native = new NativeButton(NULL, L"Native");
+
+  root_view->SetContentsView(native);
+  native->SetVisible(true);
+
+  root_view->RemoveChildView(native);
+  native->SetVisible(false);
+  // Change visibility to true with no widget.
+  native->SetVisible(true);
+
+  root_view->SetContentsView(native);
+  native->SetVisible(true);
+}
+*/

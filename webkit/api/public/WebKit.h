@@ -32,10 +32,7 @@
 #define WebKit_h
 
 #include "WebCommon.h"
-
-namespace v8 {
-    class Extension;
-}
+#include "WebURL.h"
 
 namespace WebKit {
     class WebKitClient;
@@ -69,19 +66,26 @@ namespace WebKit {
     // any other URL scheme.
     WEBKIT_API void registerURLSchemeAsNoAccess(const WebString&);
 
-    // Registers a v8 extension to be available on webpages with a particular
-    // scheme. If the scheme argument is empty, the extension is available on
-    // all pages. Will only affect v8 contexts initialized after this call.
-    // Takes ownership of the v8::Extension object passed.
-    WEBKIT_API void registerExtension(v8::Extension*);
-    WEBKIT_API void registerExtension(v8::Extension*,
-                                      const WebString& schemeRestriction);
-
     // Enables HTML5 media support.
     WEBKIT_API void enableMediaPlayer();
 
-    // Purge the plugin list cache.
-    WEBKIT_API void resetPluginCache();
+    // Purge the plugin list cache. If |reloadPages| is true, any pages
+    // containing plugins will be reloaded after refreshing the plugin list.
+    WEBKIT_API void resetPluginCache(bool reloadPages);
+
+    // Enables HTML5 database support.
+    WEBKIT_API void enableDatabases();
+    WEBKIT_API bool databasesEnabled();
+
+    // Support for whitelisting access to origins beyond the same-origin policy.
+    WEBKIT_API void whiteListAccessFromOrigin(
+        const WebURL& sourceOrigin, const WebString& destinationProtocol,
+        const WebString& destinationHost, bool allowDestinationSubdomains);
+    WEBKIT_API void resetOriginAccessWhiteLists();
+
+    // Enables HTML5 Web Sockets support.
+    WEBKIT_API void enableWebSockets();
+    WEBKIT_API bool webSocketsEnabled();
 
 } // namespace WebKit
 

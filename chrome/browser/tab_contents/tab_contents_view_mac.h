@@ -7,6 +7,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <string>
+
 #include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_nsobject.h"
@@ -14,16 +16,23 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/notification_registrar.h"
 
+class FilePath;
 class FindBarMac;
+@class FocusTracker;
 @class SadTabView;
 class TabContentsViewMac;
+@class WebDragSource;
 @class WebDropTarget;
 
 @interface TabContentsViewCocoa : BaseView {
  @private
   TabContentsViewMac* tabContentsView_;  // WEAK; owns us
+  scoped_nsobject<WebDragSource> dragSource_;
   scoped_nsobject<WebDropTarget> dropTarget_;
 }
+
+// Expose this, since sometimes one needs both the NSView and the TabContents.
+- (TabContents*)tabContents;
 @end
 
 // Mac-specific implementation of the TabContentsView. It owns an NSView that
@@ -35,18 +44,16 @@ class TabContentsViewMac : public TabContentsView,
   // lifetime. This doesn't need to be the case, but is this way currently
   // because that's what was easiest when they were split.
   explicit TabContentsViewMac(TabContents* web_contents);
-  virtual ~TabContentsViewMac();
 
   // TabContentsView implementation --------------------------------------------
 
-  virtual void CreateView();
+  virtual void CreateView(const gfx::Size& initial_size);
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host);
   virtual gfx::NativeView GetNativeView() const;
   virtual gfx::NativeView GetContentNativeView() const;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
   virtual void GetContainerBounds(gfx::Rect* out) const;
-  virtual void OnContentsDestroy();
   virtual void RenderViewCreated(RenderViewHost* host);
   virtual void SetPageTitle(const std::wstring& title);
   virtual void OnTabCrashed();
@@ -62,8 +69,9 @@ class TabContentsViewMac : public TabContentsView,
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask allowed_operations);
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
@@ -75,15 +83,12 @@ class TabContentsViewMac : public TabContentsView,
                        const NotificationDetails& details);
 
  private:
-  // Returns a drag pasteboard filled with the appropriate data. The types are
-  // populated in decending order of richness.
-  NSPasteboard* FillDragData(const WebDropData& drop_data);
-
   // The Cocoa NSView that lives in the view hierarchy.
   scoped_nsobject<TabContentsViewCocoa> cocoa_view_;
 
-  // The Cocoa NSView to restore the focus to when focus returns.
-  scoped_nsobject<NSView> latent_focus_view_;
+  // Keeps track of which NSView has focus so we can restore the focus when
+  // focus returns.
+  scoped_nsobject<FocusTracker> focus_tracker_;
 
   // Used to get notifications about renderers coming and going.
   NotificationRegistrar registrar_;

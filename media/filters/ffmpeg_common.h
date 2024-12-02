@@ -11,6 +11,9 @@
 #include "base/compiler_specific.h"
 #include "base/singleton.h"
 
+// Used with URLProtocol.
+typedef int64 offset_t;
+
 // Include FFmpeg header files.
 extern "C" {
 // Temporarily disable possible loss of data warning.
@@ -18,6 +21,7 @@ extern "C" {
 MSVC_PUSH_DISABLE_WARNING(4244);
 #include "third_party/ffmpeg/include/libavcodec/avcodec.h"
 #include "third_party/ffmpeg/include/libavformat/avformat.h"
+#include "third_party/ffmpeg/include/libavutil/log.h"
 MSVC_POP_WARNING();
 }  // extern "C"
 

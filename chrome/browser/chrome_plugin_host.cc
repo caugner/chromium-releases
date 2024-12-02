@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/gfx/png_encoder.h"
 #include "base/histogram.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -102,7 +101,7 @@ class PluginRequestInterceptor
     // poked on a different thread, but never from more than one thread at a
     // time.  We need a way to have the URLRequestJobManager get reset between
     // unit tests.
-    //DCHECK(CalledOnValidThread());
+    // DCHECK(CalledOnValidThread());
 
     if (!IsHandledProtocol(request->url().scheme()))
       return NULL;
@@ -367,14 +366,11 @@ class ModelessHtmlDialogDelegate : public HtmlDialogUIDelegate {
 
 // Allows InvokeLater without adding refcounting.  The object is only deleted
 // when its last InvokeLater is run anyway.
-template<>
-void RunnableMethodTraits<ModelessHtmlDialogDelegate>::RetainCallee(
-    ModelessHtmlDialogDelegate* remover) {
-}
-template<>
-void RunnableMethodTraits<ModelessHtmlDialogDelegate>::ReleaseCallee(
-    ModelessHtmlDialogDelegate* remover) {
-}
+template <>
+struct RunnableMethodTraits<ModelessHtmlDialogDelegate> {
+  void RetainCallee(ModelessHtmlDialogDelegate* delegate) {}
+  void ReleaseCallee(ModelessHtmlDialogDelegate* delegate) {}
+};
 
 namespace {
 
@@ -711,7 +707,7 @@ CPError STDCALL CPB_SendMessage(CPID id, const void *data, uint32 data_len) {
   if (!service)
     return CPERR_FAILURE;
   PluginProcessHost *host =
-  service->FindOrStartPluginProcess(plugin->filename(), std::string());
+  service->FindOrStartPluginProcess(plugin->filename());
   if (!host)
     return CPERR_FAILURE;
 
@@ -759,7 +755,7 @@ CPError STDCALL CPB_OpenFileDialog(CPID id,
   return CPERR_FAILURE;
 }
 
-}
+}  // namespace
 
 CPBrowserFuncs* GetCPBrowserFuncsForBrowser() {
   static CPBrowserFuncs browser_funcs;

@@ -5,6 +5,7 @@
 #include <string>
 #include <windows.h>
 #include <msi.h>
+#include <shellapi.h>
 #include <shlobj.h>
 
 #include "base/at_exit.h"
@@ -13,6 +14,7 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/registry.h"
+#include "base/scoped_handle_win.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
 #include "chrome/installer/setup/install.h"
@@ -32,51 +34,12 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/work_item.h"
-#include "courgette/courgette.h"
-#include "third_party/bspatch/mbspatch.h"
 
 #include "installer_util_strings.h"
 
 namespace {
 
-// Applies a binary patch to existing Chrome installer archive on the system.
-// Uses bspatch library.
-int PatchArchiveFile(bool system_install, const std::wstring& archive_path,
-                     const std::wstring& uncompressed_archive,
-                     const installer::Version* installed_version) {
-  std::wstring existing_archive =
-      installer::GetChromeInstallPath(system_install);
-  file_util::AppendToPath(&existing_archive,
-                          installed_version->GetString());
-  file_util::AppendToPath(&existing_archive, installer_util::kInstallerDir);
-  file_util::AppendToPath(&existing_archive, installer::kChromeArchive);
-
-  std::wstring patch_archive(archive_path);
-  file_util::AppendToPath(&patch_archive, installer::kChromeArchivePatch);
-
-  LOG(INFO) << "Applying patch " << patch_archive
-            << " to file " << existing_archive
-            << " and generating file " << uncompressed_archive;
-
-  // Try Courgette first.  Courgette checks the patch file first and fails
-  // quickly if the patch file does not have a valid Courgette header.
-  courgette::Status patch_status =
-      courgette::ApplyEnsemblePatch(existing_archive.c_str(),
-                                    patch_archive.c_str(),
-                                    uncompressed_archive.c_str());
-
-  if (patch_status == courgette::C_OK) {
-    return 0;
-  }
-
-  return ApplyBinaryPatch(existing_archive.c_str(),
-                          patch_archive.c_str(),
-                          uncompressed_archive.c_str());
-}
-
-
-// This method unpacks and uncompresses the given archive file. For Chrome
+  // This method unpacks and uncompresses the given archive file. For Chrome
 // install we are creating a uncompressed archive that contains all the files
 // needed for the installer. This uncompressed archive is later compressed.
 //
@@ -90,68 +53,43 @@ DWORD UnPackArchive(const std::wstring& archive, bool system_install,
                     const installer::Version* installed_version,
                     const std::wstring& temp_path, const std::wstring& path,
                     bool& incremental_install) {
-    DWORD ret = NO_ERROR;
-    installer::LzmaUtil util;
-    // First uncompress the payload. This could be a differential
-    // update (patch.7z) or full archive (chrome.7z). If this uncompress fails
-    // return with error.
-    LOG(INFO) << "Opening archive " << archive;
-    if ((ret = util.OpenArchive(archive)) != NO_ERROR) {
-      LOG(ERROR) << "Unable to open install archive: " << archive;
-    } else {
-      LOG(INFO) << "Uncompressing archive to path " << temp_path;
-      if ((ret = util.UnPack(temp_path)) != NO_ERROR) {
-        LOG(ERROR) << "Error during uncompression: " << ret;
-      }
-      util.CloseArchive();
-    }
-    if (ret != NO_ERROR)
-      return ret;
-
-    std::wstring uncompressed_archive(temp_path);
-    file_util::AppendToPath(&uncompressed_archive, installer::kChromeArchive);
-
-    // Check if this is differential update and if it is, patch it to the
-    // installer archive that should already be on the machine.
-    std::wstring archive_name = file_util::GetFilenameFromPath(archive);
-    std::wstring prefix = installer::kChromeCompressedPatchArchivePrefix;
-    if ((archive_name.size() >= prefix.size()) &&
-        (std::equal(prefix.begin(), prefix.end(), archive_name.begin(),
-                    CaseInsensitiveCompare<wchar_t>()))) {
-      incremental_install = true;
-      LOG(INFO) << "Differential patch found. Applying to existing archive.";
-      // First pre-emptively set flag in registry to get full installer next
-      // time. If the current installer works, this flag will get reset at the
-      // the end of installation.
-      BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-      dist->UpdateDiffInstallStatus(system_install, incremental_install,
-                                    installer_util::INSTALL_FAILED);
-      if (!installed_version) {
-        LOG(ERROR) << "Can not use differential update when Chrome is not "
-                   << "installed on the system.";
-        return installer_util::InstallStatus::CHROME_NOT_INSTALLED;
-      }
-      if (int i = PatchArchiveFile(system_install, temp_path,
-                                   uncompressed_archive, installed_version)) {
-        LOG(ERROR) << "Binary patching failed with error " << i;
-        return 1;
-      }
-    }
-
-    // If we got the uncompressed archive, lets unpack it
-    LOG(INFO) << "Opening archive " << uncompressed_archive;
-    if ((ret = util.OpenArchive(uncompressed_archive)) != NO_ERROR) {
-      LOG(ERROR) << "Unable to open install archive: " <<
-          uncompressed_archive;
-    } else {
-      LOG(INFO) << "Unpacking archive to path " << path;
-      if ((ret = util.UnPack(path)) != NO_ERROR) {
-        LOG(ERROR) << "Error during uncompression: " << ret;
-      }
-      util.CloseArchive();
-    }
-
+  // First uncompress the payload. This could be a differential
+  // update (patch.7z) or full archive (chrome.7z). If this uncompress fails
+  // return with error.
+  std::wstring unpacked_file;
+  int32 ret = LzmaUtil::UnPackArchive(archive, temp_path, &unpacked_file);
+  if (ret != NO_ERROR)
     return ret;
+
+  std::wstring uncompressed_archive(temp_path);
+  file_util::AppendToPath(&uncompressed_archive, installer::kChromeArchive);
+
+  // Check if this is differential update and if it is, patch it to the
+  // installer archive that should already be on the machine. We assume
+  // it is a differential installer if chrome.7z is not found.
+  if (!file_util::PathExists(FilePath::FromWStringHack(uncompressed_archive))) {
+    incremental_install = true;
+    LOG(INFO) << "Differential patch found. Applying to existing archive.";
+    if (!installed_version) {
+      LOG(ERROR) << "Can not use differential update when Chrome is not "
+                 << "installed on the system.";
+      return installer_util::CHROME_NOT_INSTALLED;
+    }
+    std::wstring existing_archive =
+        installer::GetChromeInstallPath(system_install);
+    file_util::AppendToPath(&existing_archive,
+                            installed_version->GetString());
+    file_util::AppendToPath(&existing_archive, installer_util::kInstallerDir);
+    file_util::AppendToPath(&existing_archive, installer::kChromeArchive);
+    if (int i = setup_util::ApplyDiffPatch(existing_archive, unpacked_file,
+                                           uncompressed_archive)) {
+      LOG(ERROR) << "Binary patching failed with error " << i;
+      return i;
+    }
+  }
+
+  // Unpack the uncompressed archive.
+  return LzmaUtil::UnPackArchive(uncompressed_archive, path, &unpacked_file);
 }
 
 
@@ -204,47 +142,6 @@ installer_util::InstallStatus RenameChromeExecutables(bool system_install) {
   return ret;
 }
 
-// Parse command line and read master profile, if present, to get distribution
-// related install options.
-DictionaryValue* GetInstallPreferences(const CommandLine& cmd_line) {
-  DictionaryValue* prefs = NULL;
-
-  if (cmd_line.HasSwitch(installer_util::switches::kInstallerData)) {
-    FilePath prefs_path(
-        cmd_line.GetSwitchValue(installer_util::switches::kInstallerData));
-    prefs = installer_util::ParseDistributionPreferences(prefs_path);
-  }
-
-  if (!prefs)
-    prefs = new DictionaryValue();
-
-  if (cmd_line.HasSwitch(installer_util::switches::kCreateAllShortcuts))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kCreateAllShortcuts, true);
-
-  if (cmd_line.HasSwitch(installer_util::switches::kDoNotLaunchChrome))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kDoNotLaunchChrome, true);
-
-  if (cmd_line.HasSwitch(installer_util::switches::kMakeChromeDefault))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kMakeChromeDefault, true);
-
-  if (cmd_line.HasSwitch(installer_util::switches::kSystemLevel))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kSystemLevel, true);
-
-  if (cmd_line.HasSwitch(installer_util::switches::kVerboseLogging))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kVerboseLogging, true);
-
-  if (cmd_line.HasSwitch(installer_util::switches::kAltDesktopShortcut))
-    installer_util::SetDistroBooleanPreference(
-        prefs, installer_util::master_preferences::kAltShortcutText, true);
-
-  return prefs;
-}
-
 bool CheckPreInstallConditions(const installer::Version* installed_version,
                                bool system_install,
                                installer_util::InstallStatus& status) {
@@ -266,10 +163,11 @@ bool CheckPreInstallConditions(const installer::Version* installed_version,
   // either does not exist or can be deleted (i.e. is not locked by some other
   // process).
   if (!installed_version) {
-    std::wstring install_path(installer::GetChromeInstallPath(system_install));
+    FilePath install_path = FilePath::FromWStringHack(
+        installer::GetChromeInstallPath(system_install));
     if (file_util::PathExists(install_path) &&
         !file_util::Delete(install_path, true)) {
-      LOG(ERROR) << "Installation directory " << install_path
+      LOG(ERROR) << "Installation directory " << install_path.value()
                  << " exists and can not be deleted.";
       status = installer_util::INSTALL_DIR_IN_USE;
       int str_id = IDS_INSTALL_DIR_IN_USE_BASE;
@@ -376,8 +274,16 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
             install_msg_base = 0;
           }
         }
+
+        bool value = false;
+        installer_util::GetDistroBooleanPreference(prefs,
+            installer_util::master_preferences::kDoNotRegisterForUpdateLaunch,
+            &value);
+        bool write_chrome_launch_string = !value;
+
         InstallUtil::WriteInstallerResult(system_level, install_status,
-                                          install_msg_base, &chrome_exe);
+            install_msg_base, write_chrome_launch_string ? &chrome_exe : NULL);
+
         if (install_status == installer_util::FIRST_INSTALL_SUCCESS) {
           LOG(INFO) << "First install successful.";
           // We never want to launch Chrome in system level install mode.
@@ -387,6 +293,8 @@ installer_util::InstallStatus InstallChrome(const CommandLine& cmd_line,
               &do_not_launch_chrome);
           if (!system_level && !do_not_launch_chrome)
             installer::LaunchChrome(system_level);
+        } else if (install_status == installer_util::NEW_VERSION_UPDATED) {
+          installer_setup::RemoveLegacyRegistryKeys();
         }
       }
     }
@@ -431,6 +339,7 @@ installer_util::InstallStatus UninstallChrome(const CommandLine& cmd_line,
 
   bool remove_all = !cmd_line.HasSwitch(
       installer_util::switches::kDoNotRemoveSharedItems);
+
   return installer_setup::UninstallChrome(cmd_line.program(), system_install,
                                           remove_all, force,
                                           cmd_line, cmd_params);
@@ -481,51 +390,19 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     if (!file_util::CreateNewTempDirectory(std::wstring(L"chrome_"),
                                            &temp_path)) {
       LOG(ERROR) << "Could not create temporary path.";
-      status = installer_util::SETUP_PATCH_FAILED;
     } else {
       std::wstring setup_patch = cmd_line.GetSwitchValue(
           installer_util::switches::kUpdateSetupExe);
       LOG(INFO) << "Opening archive " << setup_patch;
-      DWORD ret = NO_ERROR;
-      installer::LzmaUtil util;
-      if ((ret = util.OpenArchive(setup_patch)) != NO_ERROR) {
-        LOG(ERROR) << "Unable to open install archive: " << setup_patch;
-      } else {
-        LOG(INFO) << "Uncompressing archive to path " << temp_path;
-        if ((ret = util.UnPack(temp_path)) != NO_ERROR) {
-          LOG(ERROR) << "Error during uncompression: " << ret;
-        }
-        util.CloseArchive();
-      }
-
-      if (ret != NO_ERROR) {
-        status = installer_util::SETUP_PATCH_FAILED;
-      } else {
+      std::wstring uncompressed_patch;
+      if (LzmaUtil::UnPackArchive(setup_patch, temp_path,
+                                  &uncompressed_patch) == NO_ERROR) {
         std::wstring old_setup_exe = cmd_line.program();
-        std::wstring uncompressed_setup_patch(temp_path);
-        file_util::AppendToPath(&uncompressed_setup_patch,
-                                installer::kSetupExePatch);
         std::wstring new_setup_exe = cmd_line.GetSwitchValue(
             installer_util::switches::kNewSetupExe);
-        LOG(INFO) << "Patching " << old_setup_exe
-                  << " with patch " << uncompressed_setup_patch
-                  << " and creating new exe " << new_setup_exe;
-
-        // Try Courgette first.
-        courgette::Status patch_status = courgette::ApplyEnsemblePatch(
-            old_setup_exe.c_str(), uncompressed_setup_patch.c_str(),
-            new_setup_exe.c_str());
-
-        // If courgette didn't work, try regular bspatch.
-        if (patch_status != courgette::C_OK) {
-          LOG(WARNING) << "setup patch failed using courgette " << patch_status;
-          if (!ApplyBinaryPatch(old_setup_exe.c_str(),
-                                uncompressed_setup_patch.c_str(),
-                                new_setup_exe.c_str()))
-            status = installer_util::NEW_VERSION_UPDATED;
-        } else {
+        if (!setup_util::ApplyDiffPatch(old_setup_exe, uncompressed_patch,
+                                        new_setup_exe))
           status = installer_util::NEW_VERSION_UPDATED;
-        }
       }
     }
 
@@ -535,6 +412,7 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
       InstallUtil::WriteInstallerResult(system_install, status,
                                         IDS_SETUP_PATCH_FAILED_BASE, NULL);
     }
+    file_util::Delete(temp_path, true);
     return true;
   } else if (cmd_line.HasSwitch(installer_util::switches::kShowEula)) {
     // Check if we need to show the EULA. If it is passed as a command line
@@ -544,7 +422,7 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     exit_code = ShowEULADialog(inner_frame);
     if (installer_util::EULA_REJECTED != exit_code)
       GoogleUpdateSettings::SetEULAConsent(true);
-    return true;;
+    return true;
   } else if (cmd_line.HasSwitch(
       installer_util::switches::kRegisterChromeBrowser)) {
     // If --register-chrome-browser option is specified, register all
@@ -585,13 +463,48 @@ bool HandleNonInstallCmdLineOptions(const CommandLine& cmd_line,
     exit_code = tmp;
     return true;
   } else if (cmd_line.HasSwitch(installer_util::switches::kInactiveUserToast)) {
-    // Launch the inactive user toast experiment.
+    // Launch the inactive user toast experiment. If there is no value
+    // associated with the switch the function uses 0 as the flavor.
     std::wstring flavor =
         cmd_line.GetSwitchValue(installer_util::switches::kInactiveUserToast);
     dist->InactiveUserToastExperiment(StringToInt(flavor));
     return true;
   }
   return false;
+}
+
+bool ShowRebootDialog() {
+  // Get a token for this process.
+  HANDLE token;
+  if (!OpenProcessToken(GetCurrentProcess(),
+                        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+                        &token)) {
+    LOG(ERROR) << "Failed to open token.";
+    return false;
+  }
+
+  // Use a ScopedHandle to keep track of and eventually close our handle.
+  // TODO(robertshield): Add a Receive() method to base's ScopedHandle.
+  ScopedHandle scoped_handle(token);
+
+  // Get the LUID for the shutdown privilege.
+  TOKEN_PRIVILEGES tkp = {0};
+  LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid);
+  tkp.PrivilegeCount = 1;
+  tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+  // Get the shutdown privilege for this process.
+  AdjustTokenPrivileges(token, FALSE, &tkp, 0,
+                        reinterpret_cast<PTOKEN_PRIVILEGES>(NULL), 0);
+  if (GetLastError() != ERROR_SUCCESS) {
+    LOG(ERROR) << "Unable to get shutdown privileges.";
+    return false;
+  }
+
+  // Popup a dialog that will prompt to reboot using the default system message.
+  // TODO(robertshield): Add a localized, more specific string to the prompt.
+  RestartDialog(NULL, NULL, EWX_REBOOT | EWX_FORCEIFHUNG);
+  return true;
 }
 
 }  // namespace
@@ -603,12 +516,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   CommandLine::Init(0, NULL);
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   installer::InitInstallerLogging(parsed_command_line);
-  scoped_ptr<DictionaryValue> prefs(GetInstallPreferences(parsed_command_line));
-  bool verbose_logging = false;
+  scoped_ptr<DictionaryValue> prefs(setup_util::GetInstallPreferences(
+      parsed_command_line));
+  bool value = false;
   if (installer_util::GetDistroBooleanPreference(prefs.get(),
-         installer_util::master_preferences::kVerboseLogging,
-         &verbose_logging) &&
-      verbose_logging)
+          installer_util::master_preferences::kVerboseLogging, &value) &&
+      value)
     logging::SetMinLogLevel(logging::LOG_INFO);
 
   bool system_install = false;
@@ -683,7 +596,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
                                    prefs.get());
   }
 
+  if (install_status == installer_util::UNINSTALL_REQUIRES_REBOOT) {
+    install_status = installer_util::UNINSTALL_SUCCESSFUL;
+#if defined(CHROME_FRAME_BUILD)
+    ShowRebootDialog();
+#endif
+  }
+
   CoUninitialize();
+
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   return dist->GetInstallReturnCode(install_status);
 }

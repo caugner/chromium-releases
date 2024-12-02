@@ -8,6 +8,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/page_transition_types.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,11 +46,10 @@ class RendererCrashObserver : public NotificationObserver {
 };
 
 void SimulateRendererCrash(Browser* browser) {
-  browser->OpenURL(GURL("about:crash"), GURL(), CURRENT_TAB,
+  browser->OpenURL(GURL(chrome::kAboutCrashURL), GURL(), CURRENT_TAB,
                    PageTransition::TYPED);
   RendererCrashObserver crash_observer;
   crash_observer.WaitForRendererCrash();
-
 }
 
 }  // namespace
@@ -70,7 +70,8 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, Reload) {
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_before_crash));
   SimulateRendererCrash(browser());
-  ASSERT_TRUE(ui_test_utils::ReloadCurrentTab(browser()));
+  browser()->Reload();
+  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_after_crash));
   EXPECT_NE(title_before_crash, title_after_crash);
@@ -90,7 +91,8 @@ IN_PROC_BROWSER_TEST_F(CrashRecoveryBrowserTest, LoadInNewTab) {
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_before_crash));
   SimulateRendererCrash(browser());
-  ASSERT_TRUE(ui_test_utils::ReloadCurrentTab(browser()));
+  browser()->Reload();
+  ASSERT_TRUE(ui_test_utils::WaitForNavigationInCurrentTab(browser()));
   ASSERT_TRUE(ui_test_utils::GetCurrentTabTitle(browser(),
                                                 &title_after_crash));
   EXPECT_EQ(title_before_crash, title_after_crash);

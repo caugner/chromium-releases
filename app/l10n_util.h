@@ -8,12 +8,12 @@
 #ifndef APP_L10N_UTIL_H_
 #define APP_L10N_UTIL_H_
 
-#include "build/build_config.h"
-
 #include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
+
+#include "build/build_config.h"
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -25,6 +25,10 @@
 #include "unicode/rbbi.h"
 #include "unicode/ubidi.h"
 #include "unicode/uchar.h"
+
+#if defined(OS_MACOSX)
+#include "app/l10n_util.h"
+#endif  // OS_MACOSX
 
 class FilePath;
 class PrefService;
@@ -65,6 +69,10 @@ bool IsLocaleSupportedByOS(const std::string& locale);
 string16 GetDisplayNameForLocale(const std::string& locale_code,
                                  const std::string& display_locale,
                                  bool is_for_ui);
+
+//
+// Mac Note: See l10n_util_mac.h for some NSString versions and other support.
+//
 
 // Pulls resource string from the string bundle and returns it.
 std::wstring GetString(int message_id);
@@ -171,6 +179,9 @@ std::wstring ToLower(const std::wstring& string);
 #endif  // defined(WCHAR_T_IS_UTF32)
 string16 ToLower(const string16& string);
 
+// Returns the upper case equivalent of string.
+string16 ToUpper(const string16& string);
+
 // Represents the text direction returned by the GetTextDirection() function.
 enum TextDirection {
   UNKNOWN_DIRECTION,
@@ -237,11 +248,17 @@ void WrapStringWithLTRFormatting(std::wstring* text);
 // strings are rendered properly in an LTR context.
 void WrapStringWithRTLFormatting(std::wstring* text);
 
-// Wraps individual file path components to get them to display correctly in an
-// RTL UI. All filepaths should be passed through this function before display
-// in UI for RTL locales.
+// Wraps file path to get it to display correctly in RTL UI. All filepaths
+// should be passed through this function before display in UI for RTL locales.
 void WrapPathWithLTRFormatting(const FilePath& path,
                                string16* rtl_safe_path);
+
+// Given the string in |text|, this function returns the adjusted string having
+// LTR directionality for display purpose. Which means that in RTL locale the
+// string is wrapped with LRE (Left-To-Right Embedding) and PDF (Pop
+// Directional Formatting) marks and returned. In LTR locale, the string itself
+// is returned.
+std::wstring GetDisplayStringInLTRDirectionality(std::wstring* text);
 
 // Returns the default text alignment to be used when drawing text on a
 // gfx::Canvas based on the directionality of the system locale language. This
@@ -310,12 +327,12 @@ void SortStringsUsingMethod(const std::wstring& locale,
   scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(loc, error));
   if (U_FAILURE(error)) {
     sort(elements->begin(), elements->end(),
-         StringMethodComparator<T,Method>(method));
+         StringMethodComparator<T, Method>(method));
     return;
   }
 
   std::sort(elements->begin(), elements->end(),
-      StringMethodComparatorWithCollator<T,Method>(collator.get(), method));
+      StringMethodComparatorWithCollator<T, Method>(collator.get(), method));
 }
 
 // Compares two elements' string keys and returns true if the first element's
@@ -360,7 +377,7 @@ void SortVectorWithStringKey(const std::string& locale,
                              unsigned int begin_index,
                              unsigned int end_index,
                              bool needs_stable_sort) {
-  DCHECK(begin_index >= 0 && begin_index < end_index &&
+  DCHECK(begin_index < end_index &&
          end_index <= static_cast<unsigned int>(elements->size()));
   UErrorCode error = U_ZERO_ERROR;
   icu::Locale loc(locale.c_str());
@@ -393,6 +410,10 @@ void SortStrings(const std::string& locale,
 // Returns a vector of available locale codes. E.g., a vector containing
 // en-US, es, fr, fi, pt-PT, pt-BR, etc.
 const std::vector<std::string>& GetAvailableLocales();
+
+// Returns a vector of locale codes usable for accept-languages.
+void GetAcceptLanguagesForLocale(const std::string& display_locale,
+                                 std::vector<std::string>* locale_codes);
 
 // A simple wrapper class for the bidirectional iterator of ICU.
 // This class uses the bidirectional iterator of ICU to split a line of

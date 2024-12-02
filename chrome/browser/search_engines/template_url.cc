@@ -6,13 +6,17 @@
 
 #include "app/gfx/favicon_size.h"
 #include "app/l10n_util.h"
+#include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "net/base/escape.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/rlz/rlz.h"
+#endif
 
 // The TemplateURLRef has any number of terms that need to be replaced. Each of
 // the terms is enclosed in braces. If the character preceeding the final
@@ -298,19 +302,26 @@ std::wstring TemplateURLRef::ReplaceSearchTerms(
         break;
 
       case GOOGLE_RLZ: {
+        // On platforms that don't have RLZ, we still want this branch
+        // to happen so that we replace the RLZ template with the
+        // empty string.  (If we don't handle this case, we hit a
+        // NOTREACHED below.)
+#if defined(OS_WIN)
         std::wstring rlz_string;
         RLZTracker::GetAccessPointRlz(RLZTracker::CHROME_OMNIBOX, &rlz_string);
         if (!rlz_string.empty()) {
           rlz_string = L"rlz=" + rlz_string + L"&";
           url.insert(i->index, rlz_string);
         }
+#endif
         break;
       }
 
       case GOOGLE_UNESCAPED_SEARCH_TERMS: {
         std::string unescaped_terms;
-        WideToCodepage(terms, WideToASCII(input_encoding).c_str(),
-                       OnStringUtilConversionError::SKIP, &unescaped_terms);
+        base::WideToCodepage(terms, WideToASCII(input_encoding).c_str(),
+                             base::OnStringConversionError::SKIP,
+                             &unescaped_terms);
         url.insert(i->index, std::wstring(unescaped_terms.begin(),
                                           unescaped_terms.end()));
         break;
@@ -402,14 +413,14 @@ std::wstring TemplateURLRef::SearchTermToWide(const TemplateURL& host,
       UnescapeURLComponent(term, UnescapeRule::REPLACE_PLUS_WITH_SPACE |
                                  UnescapeRule::URL_SPECIAL_CHARS);
   for (size_t i = 0; i < encodings.size(); ++i) {
-    if (CodepageToWide(unescaped, encodings[i].c_str(),
-                       OnStringUtilConversionError::FAIL, &result))
+    if (base::CodepageToWide(unescaped, encodings[i].c_str(),
+                             base::OnStringConversionError::FAIL, &result))
       return result;
   }
 
   // Always fall back on UTF-8 if it works.
-  if (CodepageToWide(unescaped, "UTF-8",
-                     OnStringUtilConversionError::FAIL, &result))
+  if (base::CodepageToWide(unescaped, base::kCodepageUTF8,
+                           base::OnStringConversionError::FAIL, &result))
     return result;
 
   // When nothing worked, just use the escaped text. We have no idea what the

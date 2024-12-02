@@ -12,6 +12,7 @@
 #include "base/file_path.h"
 #include "base/native_library.h"
 #include "base/ref_counted.h"
+#include "build/build_config.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/webplugin.h"
 
@@ -34,6 +35,13 @@ class PluginLib : public base::RefCounted<PluginLib> {
   // Returns false if the library couldn't be found, or if it's not a plugin.
   static bool ReadWebPluginInfo(const FilePath& filename, WebPluginInfo* info);
 
+#if defined(OS_LINUX)
+  // Parse the result of an NP_GetMIMEDescription() call.
+  // This API is only used on Linux, and is exposed here for testing.
+  static void ParseMIMEDescription(const std::string& description,
+                                   std::vector<WebPluginMimeType>* mime_types);
+#endif
+
   // Unloads all the loaded plugin libraries and cleans up the plugin map.
   static void UnloadAllPlugins();
 
@@ -52,6 +60,8 @@ class PluginLib : public base::RefCounted<PluginLib> {
   // Gets information about this plugin and the mime types that it
   // supports.
   const WebPluginInfo& plugin_info() { return web_plugin_info_; }
+
+  bool internal() { return internal_; }
 
   //
   // NPAPI functions
@@ -83,7 +93,7 @@ class PluginLib : public base::RefCounted<PluginLib> {
   void Shutdown();
 
  private:
-  bool internal_;  // Whether this an internal plugin.
+  bool internal_;  // True for plugins that are built-in into chrome binaries.
   WebPluginInfo web_plugin_info_;  // supported mime types, description
   base::NativeLibrary library_;  // the opened library reference
   NPPluginFuncs plugin_funcs_;  // the struct of plugin side functions

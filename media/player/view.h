@@ -2,48 +2,30 @@
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
-// View.h : Paints the current movie frame (with scaling) to the display.
-// TODO(fbarchard): Consider rewriting as view.cc and view.h
-
 #ifndef MEDIA_PLAYER_VIEW_H_
 #define MEDIA_PLAYER_VIEW_H_
 
-// Enable timing code by turning on TESTING macro.
-// #define TESTING 1
-
-#ifdef TESTING
-#define _CRT_SECURE_NO_WARNINGS
-#include <windows.h>
 #include <stdio.h>
 #include <process.h>
 #include <string.h>
-#endif
 
-// Enable swscaler.
-// TODO(fbarchard): Include header and change bilinear to point sampling.
-// #define TEST_SWSCALER 1
-
-#include <atlscrl.h>
-
-#include "base/basictypes.h"
 #include "media/base/buffers.h"
-#include "media/base/factory.h"
-#include "media/base/filters.h"
 #include "media/base/yuv_convert.h"
 #include "media/player/movie.h"
+#include "media/player/player_wtl.h"
 #include "media/player/wtl_renderer.h"
 
-#ifdef TESTING
-// Fetch current time as milliseconds.
-// Return as double for high duration and precision.
-static inline double GetTime() {
+// Fetchs current time as milliseconds.
+// Returns as double for high duration and precision.
+inline double GetTime() {
   LARGE_INTEGER perf_time, perf_hz;
   QueryPerformanceFrequency(&perf_hz);  // May change with speed step.
   QueryPerformanceCounter(&perf_time);
   return perf_time.QuadPart * 1000.0 / perf_hz.QuadPart;  // Convert to ms.
 }
-#endif
 
+// Paints the current movie frame (with scaling) to the display.
+// TODO(fbarchard): Consider rewriting as view.cc and view.h
 class WtlVideoWindow : public CScrollWindowImpl<WtlVideoWindow> {
  public:
   DECLARE_WND_CLASS_EX(NULL, 0, -1)
@@ -213,42 +195,14 @@ class WtlVideoWindow : public CScrollWindowImpl<WtlVideoWindow> {
 
     bool enable_draw = media::Movie::get()->GetDrawEnable();
     if (enable_draw) {
-#ifdef TEST_SWSCALER
-      bool enable_swscaler = media::Movie::get()->GetSwscalerEnable();
-      if (enable_swscaler) {
-        uint8* data_out[3];
-        int stride_out[3];
-        data_out[0] = movie_dib_bits;
-        data_out[1] = NULL;
-        data_out[2] = NULL;
-        stride_out[0] = dibrowbytes;
-        stride_out[1] = 0;
-        stride_out[2] = 0;
-
-        if (!sws_context_) {
-          DCHECK(frame_in.format == VideoSurface::YV12);
-          sws_context_ = sws_getContext(frame_in.width, frame_in.height,
-                                        PIX_FMT_YUV420P, width_, height_,
-                                        PIX_FMT_RGB32, SWS_FAST_BILINEAR,
-                                        NULL, NULL, NULL);
-          DCHECK(sws_context_);
-        }
-
-        sws_scale(sws_context_, frame_in.data, frame_in.strides, 0,
-                  height_, data_out, stride_out);
-      } else {
-#endif
-        DCHECK(bm.bmBitsPixel == 32);
-        DrawYUV(frame_in,
-                movie_dib_bits,
-                dibrowbytes,
-                clipped_width,
-                clipped_height,
-                scaled_width,
-                scaled_height);
-#ifdef TEST_SWSCALER
-      }
-#endif
+      DCHECK(bm.bmBitsPixel == 32);
+      DrawYUV(frame_in,
+              movie_dib_bits,
+              dibrowbytes,
+              clipped_width,
+              clipped_height,
+              scaled_width,
+              scaled_height);
     }
 #ifdef TESTING
     double yuv_time_end = GetTime();
@@ -464,4 +418,3 @@ class WtlVideoWindow : public CScrollWindowImpl<WtlVideoWindow> {
 };
 
 #endif  // MEDIA_PLAYER_VIEW_H_
-

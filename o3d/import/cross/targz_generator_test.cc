@@ -33,7 +33,6 @@
 #include <string>
 
 #include "base/file_util.h"
-#include "core/cross/client.h"
 #include "import/cross/memory_stream.h"
 #include "import/cross/targz_generator.h"
 #include "tests/common/cross/test_utils.h"
@@ -54,10 +53,12 @@ class TarGzTestClient : public StreamProcessor {
  public:
   explicit TarGzTestClient(size_t reference_size)
       : compressed_data_(reference_size),
-        write_stream_(compressed_data_, reference_size) {
+        write_stream_(compressed_data_, reference_size),
+        closed_(false),
+        success_(false) {
   };
 
-  virtual int     ProcessBytes(MemoryReadStream *stream,
+  virtual Status ProcessBytes(MemoryReadStream *stream,
                                size_t bytes_to_process) {
     // Simply buffer up the tar.gz bytes
     // When we've gotten them all our Validate() method will be called
@@ -69,20 +70,23 @@ class TarGzTestClient : public StreamProcessor {
 
     write_stream_.Write(p, bytes_to_process);
 
-    return 0;
+    return SUCCESS;
+  }
+
+  virtual void Close(bool success) {
+    closed_ = true;
+    success_ = success;
   }
 
   // Checks that the data from the reference tar.gz file matches the tar.gz
   // stream we just ge5nerated
-  void            Validate(uint8 *reference_data) {
+  uint8* compressed_data() {
     uint8 *received_data = compressed_data_;
+    return received_data;
+  }
 
-    // on Windows the platform field is different than our reference file
-    received_data[9] = 3;  // Force platform in header to 'UNIX'.
-
-    EXPECT_EQ(0, memcmp(reference_data,
-                        received_data,
-                        compressed_data_.GetLength()));
+  size_t compressed_data_length() {
+    return compressed_data_.GetLength();
   }
 
 #if defined(GENERATE_GOLDEN)
@@ -97,9 +101,19 @@ class TarGzTestClient : public StreamProcessor {
   }
 #endif
 
+  bool closed() const {
+    return closed_;
+  }
+
+  bool success() const {
+    return success_;
+  }
+
  private:
   MemoryBuffer<uint8>  compressed_data_;
   MemoryWriteStream    write_stream_;
+  bool closed_;
+  bool success_;
 
   DISALLOW_COPY_AND_ASSIGN(TarGzTestClient);
 };
@@ -130,7 +144,7 @@ TEST_F(TarGzGeneratorTest, GenerateTarGz) {
   ASSERT_TRUE(audio_data != NULL);
   ASSERT_TRUE(shader_data != NULL);
 
-  ASSERT_NE(0, targz_reference_size);
+  ASSERT_NE(0U, targz_reference_size);
 
   TarGzTestClient test_client(targz_reference_size);
   TarGzGenerator targz_generator(&test_client);
@@ -144,7 +158,7 @@ TEST_F(TarGzGeneratorTest, GenerateTarGz) {
   targz_generator.AddFile("test/shaders/BumpReflect.fx", shader_size);
   targz_generator.AddFileBytes(shader_data, shader_size);
 
-  targz_generator.Finalize();
+  targz_generator.Close(true);
 
 #if defined(GENERATE_GOLDEN)
   std::string new_golden_file = *g_program_path +
@@ -155,7 +169,18 @@ TEST_F(TarGzGeneratorTest, GenerateTarGz) {
 
 #endif
 
-  test_client.Validate(targz_data);
+  uint8 *received_data = test_client.compressed_data();
+
+  // The platform header in our reference file is set to UNIX, so
+  // force received data to match for all platforms.
+  received_data[9] = 3;
+
+  EXPECT_EQ(0, memcmp(targz_data,
+                      received_data,
+                      test_client.compressed_data_length()));
+
+  EXPECT_TRUE(test_client.closed());
+  EXPECT_TRUE(test_client.success());
 
   free(targz_data);
   free(image_data);
@@ -163,4 +188,12 @@ TEST_F(TarGzGeneratorTest, GenerateTarGz) {
   free(shader_data);
 }
 
+TEST_F(TarGzGeneratorTest, PassesThroughCloseFailure) {
+  TarGzTestClient test_client(1000);
+  TarGzGenerator targz_generator(&test_client);
+  targz_generator.Close(false);
+
+  EXPECT_TRUE(test_client.closed());
+  EXPECT_FALSE(test_client.success());
+}
 }  // namespace o3d

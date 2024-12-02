@@ -13,7 +13,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "webkit/glue/media/buffered_data_source.h"
-#include "webkit/glue/webappcachecontext.h"
+#include "webkit/glue/webkit_glue.h"
 
 namespace {
 
@@ -57,12 +57,9 @@ const int kReadTrials = 3;
 // of FFmpeg.
 const int kInitialReadBufferSize = 32768;
 
-// A helper method that accepts only HTTP, HTTPS and FILE protocol.
-// TODO(hclam): Support also FTP protocol.
-bool IsSchemeSupported(const GURL& url) {
-  return url.SchemeIs(kHttpScheme) ||
-         url.SchemeIs(kHttpsScheme) ||
-         url.SchemeIsFile();
+// Returns true if |url| operates on HTTP protocol.
+bool IsHttpProtocol(const GURL& url) {
+  return url.SchemeIs(kHttpScheme) || url.SchemeIs(kHttpsScheme);
 }
 
 }  // namespace
@@ -80,6 +77,7 @@ BufferedResourceLoader::BufferedResourceLoader(
       deferred_(false),
       completed_(false),
       range_requested_(false),
+      partial_response_(false),
       bridge_factory_(bridge_factory),
       url_(url),
       first_byte_position_(first_byte_position),
@@ -100,13 +98,17 @@ BufferedResourceLoader::BufferedResourceLoader(
 BufferedResourceLoader::~BufferedResourceLoader() {
 }
 
-void BufferedResourceLoader::Start(net::CompletionCallback* start_callback) {
+void BufferedResourceLoader::Start(net::CompletionCallback* start_callback,
+                                   NetworkEventCallback* event_callback) {
   // Make sure we have not started.
   DCHECK(!bridge_.get());
   DCHECK(!start_callback_.get());
+  DCHECK(!event_callback_.get());
   DCHECK(start_callback);
+  DCHECK(event_callback);
 
   start_callback_.reset(start_callback);
+  event_callback_.reset(event_callback);
 
   if (first_byte_position_ != kPositionNotSpecified) {
     range_requested_ = true;
@@ -117,10 +119,12 @@ void BufferedResourceLoader::Start(net::CompletionCallback* start_callback) {
 
   // Creates the bridge on render thread since we can only access
   // ResourceDispatcher on this thread.
-  bridge_.reset(bridge_factory_->CreateBridge(url_,
-                                              net::LOAD_BYPASS_CACHE,
-                                              first_byte_position_,
-                                              last_byte_position_));
+  bridge_.reset(
+      bridge_factory_->CreateBridge(
+          url_,
+          IsMediaCacheEnabled() ? net::LOAD_NORMAL : net::LOAD_BYPASS_CACHE,
+          first_byte_position_,
+          last_byte_position_));
 
   // Increment the reference count right before we start the request. This
   // reference will be release when this request has ended.
@@ -133,7 +137,13 @@ void BufferedResourceLoader::Start(net::CompletionCallback* start_callback) {
 void BufferedResourceLoader::Stop() {
   // Reset callbacks.
   start_callback_.reset();
+  event_callback_.reset();
   read_callback_.reset();
+
+  // Use the internal buffer to signal that we have been stopped.
+  // TODO(hclam): Not so pretty to do this.
+  if (!buffer_.get())
+    return;
 
   // Destroy internal buffer.
   buffer_.reset();
@@ -158,7 +168,7 @@ void BufferedResourceLoader::Read(int64 position,
   DCHECK(read_callback);
   DCHECK(buffer);
 
-  // Saves the parameter of reading.
+  // Save the parameter of reading.
   read_callback_.reset(read_callback);
   read_position_ = position;
   read_size_ = read_size;
@@ -199,6 +209,18 @@ void BufferedResourceLoader::Read(int64 position,
   DoneRead(net::ERR_CACHE_MISS);
 }
 
+int64 BufferedResourceLoader::GetBufferedFirstBytePosition() {
+  if (buffer_.get())
+    return offset_ - static_cast<int>(buffer_->backward_bytes());
+  return kPositionNotSpecified;
+}
+
+int64 BufferedResourceLoader::GetBufferedLastBytePosition() {
+  if (buffer_.get())
+    return offset_ + static_cast<int>(buffer_->forward_bytes()) - 1;
+  return kPositionNotSpecified;
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // BufferedResourceLoader,
 //     webkit_glue::ResourceLoaderBridge::Peer implementations
@@ -207,7 +229,7 @@ bool BufferedResourceLoader::OnReceivedRedirect(
     const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
   DCHECK(bridge_.get());
 
-  // Saves the new URL.
+  // Save the new URL.
   url_ = new_url;
 
   // The load may have been stopped and |start_callback| is destroyed.
@@ -215,12 +237,11 @@ bool BufferedResourceLoader::OnReceivedRedirect(
   if (!start_callback_.get())
     return true;
 
-  // If we got redirected to an unsupported protocol then stop.
-  if (!IsSchemeSupported(new_url)) {
+  if (!IsProtocolSupportedForMedia(new_url)) {
     DoneStart(net::ERR_ADDRESS_INVALID);
     Stop();
+    return false;
   }
-
   return true;
 }
 
@@ -234,26 +255,29 @@ void BufferedResourceLoader::OnReceivedResponse(
   if (!start_callback_.get())
     return;
 
-  int64 first_byte_position = -1;
-  int64 last_byte_position = -1;
-  int64 instance_size = -1;
-
-  // The file:// protocol should be able to serve any request we want, so we
-  // take an exception for file protocol.
-  if (!url_.SchemeIsFile()) {
+  // We make a strong assumption that when we reach here we have either
+  // received a response from HTTP/HTTPS protocol or the request was
+  // successful (in particular range request). So we only verify the partial
+  // response for HTTP and HTTPS protocol.
+  if (IsHttpProtocol(url_)) {
     int error = net::OK;
     if (!info.headers) {
       // We expect to receive headers because this is a HTTP or HTTPS protocol,
       // if not report failure.
       error = net::ERR_INVALID_RESPONSE;
-    } else if (range_requested_) {
-      // If we have verified the partial response and it is correct, we will
-      // return net::OK.
-      if (!VerifyPartialResponse(info))
-        error = net::ERR_REQUEST_RANGE_NOT_SATISFIABLE;
-    } else if (info.headers->response_code() != kHttpOK) {
-      // We didn't request a range but server didn't reply with "200 OK".
-      error = net::ERR_FAILED;
+    } else {
+      if (info.headers->response_code() == kHttpPartialContent)
+        partial_response_ = true;
+
+      if (range_requested_ && partial_response_) {
+        // If we have verified the partial response and it is correct, we will
+        // return net::OK.
+        if (!VerifyPartialResponse(info))
+          error = net::ERR_INVALID_RESPONSE;
+      } else if (info.headers->response_code() != kHttpOK) {
+        // We didn't request a range but server didn't reply with "200 OK".
+        error = net::ERR_FAILED;
+      }
     }
 
     if (error != net::OK) {
@@ -261,6 +285,10 @@ void BufferedResourceLoader::OnReceivedResponse(
       Stop();
       return;
     }
+  } else {
+    // For any protocol other than HTTP and HTTPS, assume range request is
+    // always fulfilled.
+    partial_response_ = range_requested_;
   }
 
   // |info.content_length| can be -1, in that case |content_length_| is
@@ -269,14 +297,8 @@ void BufferedResourceLoader::OnReceivedResponse(
 
   // If we have not requested a range, then the size of the instance is equal
   // to the content length.
-  if (!range_requested_)
+  if (!partial_response_)
     instance_size_ = content_length_;
-
-  // We only care about the first byte position if it's given by the server.
-  // TODO(hclam): If server replies with a different offset, consider failing
-  // here.
-  if (first_byte_position != kPositionNotSpecified)
-    offset_ = first_byte_position;
 
   // Calls with a successful response.
   DoneStart(net::OK);
@@ -300,6 +322,9 @@ void BufferedResourceLoader::OnReceivedData(const char* data, int len) {
 
   // At last see if the buffer is full and we need to defer the downloading.
   EnableDeferIfNeeded();
+
+  // Notify that we have received some data.
+  NotifyNetworkEvent();
 }
 
 void BufferedResourceLoader::OnCompletedRequest(
@@ -335,6 +360,9 @@ void BufferedResourceLoader::OnCompletedRequest(
   // There must not be any outstanding read request.
   DCHECK(!HasPendingRead());
 
+  // Notify that network response is completed.
+  NotifyNetworkEvent();
+
   // We incremented the reference count when the loader was started. We balance
   // that reference here so that we get destroyed. This is also the only safe
   // place to destroy the ResourceLoaderBridge.
@@ -351,6 +379,8 @@ void BufferedResourceLoader::EnableDeferIfNeeded() {
 
     if (bridge_.get())
       bridge_->SetDefersLoading(true);
+
+    NotifyNetworkEvent();
   }
 }
 
@@ -361,6 +391,8 @@ void BufferedResourceLoader::DisableDeferIfNeeded() {
 
     if (bridge_.get())
       bridge_->SetDefersLoading(false);
+
+    NotifyNetworkEvent();
   }
 }
 
@@ -418,26 +450,8 @@ void BufferedResourceLoader::ReadInternal() {
   DoneRead(read);
 }
 
-void BufferedResourceLoader::DoneRead(int error) {
-  read_callback_->RunWithParams(Tuple1<int>(error));
-  read_callback_.reset();
-  read_position_ = 0;
-  read_size_ = 0;
-  read_buffer_ = NULL;
-  first_offset_ = 0;
-  last_offset_ = 0;
-}
-
-void BufferedResourceLoader::DoneStart(int error) {
-  start_callback_->RunWithParams(Tuple1<int>(error));
-  start_callback_.reset();
-}
-
 bool BufferedResourceLoader::VerifyPartialResponse(
     const ResourceLoaderBridge::ResponseInfo& info) {
-  if (info.headers->response_code() != kHttpPartialContent)
-    return false;
-
   int64 first_byte_position, last_byte_position, instance_size;
   if (!info.headers->GetContentRange(&first_byte_position,
                                      &last_byte_position,
@@ -458,27 +472,48 @@ bool BufferedResourceLoader::VerifyPartialResponse(
   return true;
 }
 
-//////////////////////////////////////////////////////////////////////////////
+void BufferedResourceLoader::DoneRead(int error) {
+  read_callback_->RunWithParams(Tuple1<int>(error));
+  read_callback_.reset();
+  read_position_ = 0;
+  read_size_ = 0;
+  read_buffer_ = NULL;
+  first_offset_ = 0;
+  last_offset_ = 0;
+}
+
+void BufferedResourceLoader::DoneStart(int error) {
+  start_callback_->RunWithParams(Tuple1<int>(error));
+  start_callback_.reset();
+}
+
+void BufferedResourceLoader::NotifyNetworkEvent() {
+  if (event_callback_.get())
+    event_callback_->Run();
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // BufferedDataSource, protected
 BufferedDataSource::BufferedDataSource(
     MessageLoop* render_loop,
     webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory)
     : total_bytes_(kPositionNotSpecified),
+      loaded_(false),
       streaming_(false),
       bridge_factory_(bridge_factory),
       loader_(NULL),
+      network_activity_(false),
       initialize_callback_(NULL),
       read_callback_(NULL),
       read_position_(0),
       read_size_(0),
       read_buffer_(NULL),
-      initial_response_received_(false),
-      probe_response_received_(false),
+      read_attempts_(0),
       intermediate_read_buffer_(new uint8[kInitialReadBufferSize]),
       intermediate_read_buffer_size_(kInitialReadBufferSize),
       render_loop_(render_loop),
-      stopped_(false),
-      stop_task_finished_(false) {
+      stop_signal_received_(false),
+      stopped_on_render_loop_(false) {
 }
 
 BufferedDataSource::~BufferedDataSource() {
@@ -487,7 +522,7 @@ BufferedDataSource::~BufferedDataSource() {
 // A factory method to create BufferedResourceLoader using the read parameters.
 // This method can be overrided to inject mock BufferedResourceLoader object
 // for testing purpose.
-BufferedResourceLoader* BufferedDataSource::CreateLoader(
+BufferedResourceLoader* BufferedDataSource::CreateResourceLoader(
     int64 first_byte_position, int64 last_byte_position) {
   DCHECK(MessageLoop::current() == render_loop_);
 
@@ -507,17 +542,20 @@ base::TimeDelta BufferedDataSource::GetTimeoutMilliseconds() {
 // BufferedDataSource, media::MediaFilter implementation
 void BufferedDataSource::Initialize(const std::string& url,
                                     media::FilterCallback* callback) {
-  DCHECK(callback);
-  initialize_callback_.reset(callback);
-
   // Saves the url.
   url_ = GURL(url);
 
-  if (!IsSchemeSupported(url_)) {
+  if (!IsProtocolSupportedForMedia(url_)) {
+    // This method is called on the thread where host() lives so it is safe
+    // to make this call.
     host()->SetError(media::PIPELINE_ERROR_NETWORK);
-    DoneInitialization();
+    callback->Run();
+    delete callback;
     return;
   }
+
+  DCHECK(callback);
+  initialize_callback_.reset(callback);
 
   media_format_.SetAsString(media::MediaFormat::kMimeType,
                             media::mime_type::kApplicationOctetStream);
@@ -531,7 +569,7 @@ void BufferedDataSource::Initialize(const std::string& url,
 void BufferedDataSource::Stop() {
   {
     AutoLock auto_lock(lock_);
-    stopped_ = true;
+    stop_signal_received_ = true;
   }
   render_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &BufferedDataSource::StopTask));
@@ -539,8 +577,7 @@ void BufferedDataSource::Stop() {
 
 /////////////////////////////////////////////////////////////////////////////
 // BufferedDataSource, media::DataSource implementation
-void BufferedDataSource::Read(int64 position, size_t size,
-                              uint8* data,
+void BufferedDataSource::Read(int64 position, size_t size, uint8* data,
                               media::DataSource::ReadCallback* read_callback) {
   render_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &BufferedDataSource::ReadTask,
@@ -565,7 +602,7 @@ bool BufferedDataSource::IsStreaming() {
 void BufferedDataSource::InitializeTask() {
   DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(!loader_.get());
-  DCHECK(!probe_loader_.get());
+  DCHECK(!stopped_on_render_loop_);
 
   // Kick starts the watch dog task that will handle connection timeout.
   // We run the watch dog 2 times faster the actual timeout so as to catch
@@ -575,18 +612,25 @@ void BufferedDataSource::InitializeTask() {
       this,
       &BufferedDataSource::WatchDogTask);
 
-  // Creates a new resource loader with the full range and a probe resource
-  // loader. Creates a probe resource loader to make sure the server supports
-  // partial range request.
-  // TODO(hclam): Only request 1 byte for this probe request, it may be useful
-  // that we perform a suffix range request and fetch the index. That way we
-  // can minimize the number of requests made.
-  loader_ = CreateLoader(-1, -1);
-  probe_loader_ = CreateLoader(1, 1);
-
-  loader_->Start(NewCallback(this, &BufferedDataSource::InitialStartCallback));
-  probe_loader_->Start(
-      NewCallback(this, &BufferedDataSource::ProbeStartCallback));
+  if (IsHttpProtocol(url_)) {
+    // Fetch only first 1024 bytes as this usually covers the header portion
+    // of a media file that gives enough information about the codecs, etc.
+    // This also serve as a probe to determine server capability to serve
+    // range request.
+    // TODO(hclam): Do some experiments for the best approach.
+    loader_ = CreateResourceLoader(0, 1024);
+    loader_->Start(
+        NewCallback(this, &BufferedDataSource::HttpInitialStartCallback),
+        NewCallback(this, &BufferedDataSource::NetworkEventCallback));
+  } else {
+    // For all other protocols, assume they support range request. We fetch
+    // the full range of the resource to obtain the instance size because
+    // we won't be served HTTP headers.
+    loader_ = CreateResourceLoader(-1, -1);
+    loader_->Start(
+        NewCallback(this, &BufferedDataSource::NonHttpInitialStartCallback),
+        NewCallback(this, &BufferedDataSource::NetworkEventCallback));
+  }
 }
 
 void BufferedDataSource::ReadTask(
@@ -596,9 +640,9 @@ void BufferedDataSource::ReadTask(
 
   // If StopTask() was executed we should return immediately. We check this
   // variable to prevent doing any actual work after clean up was done. We do
-  // not check |stopped_| because anything use of it has to be within |lock_|
-  // which is not desirable.
-  if (stop_task_finished_)
+  // not check |stop_signal_received_| because anything use of it has to be
+  // within |lock_| which is not desirable.
+  if (stopped_on_render_loop_)
     return;
 
   DCHECK(!read_callback_.get());
@@ -618,6 +662,7 @@ void BufferedDataSource::ReadTask(
 
 void BufferedDataSource::StopTask() {
   DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(!stopped_on_render_loop_);
 
   // Stop the watch dog.
   watch_dog_timer_.Stop();
@@ -625,10 +670,6 @@ void BufferedDataSource::StopTask() {
   // We just need to stop the loader, so it stops activity.
   if (loader_.get())
     loader_->Stop();
-
-  // If the probe request is still active, stop it too.
-  if (probe_loader_.get())
-    probe_loader_->Stop();
 
   // Reset the parameters of the current read request.
   read_callback_.reset();
@@ -639,21 +680,34 @@ void BufferedDataSource::StopTask() {
   read_attempts_ = 0;
 
   // Signal that stop task has finished execution.
-  stop_task_finished_ = true;
+  stopped_on_render_loop_ = true;
 }
 
-void BufferedDataSource::SwapLoaderTask(
-    scoped_refptr<BufferedResourceLoader> loader) {
+void BufferedDataSource::RestartLoadingTask() {
   DCHECK(MessageLoop::current() == render_loop_);
-  DCHECK(loader);
 
-  loader_ = loader;
-  loader_->Start(NewCallback(this,
-                             &BufferedDataSource::PartialReadStartCallback));
+  // This variable is set in StopTask(). We check this and do an early return.
+  // The sequence of actions which enable this conditions is:
+  // 1. Stop() is called from the pipeline.
+  // 2. ReadCallback() is called from the resource loader.
+  // 3. StopTask() is executed.
+  // 4. RestartLoadingTask() is executed.
+  if (stopped_on_render_loop_)
+    return;
+
+  // If there's no outstanding read then return early.
+  if (!read_callback_.get())
+    return;
+
+  loader_ = CreateResourceLoader(read_position_, -1);
+  loader_->Start(
+      NewCallback(this, &BufferedDataSource::PartialReadStartCallback),
+      NewCallback(this, &BufferedDataSource::NetworkEventCallback));
 }
 
 void BufferedDataSource::WatchDogTask() {
   DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(!stopped_on_render_loop_);
 
   // We only care if there is an active read request.
   if (!read_callback_.get())
@@ -672,10 +726,13 @@ void BufferedDataSource::WatchDogTask() {
   ++read_attempts_;
   read_submitted_time_ = base::Time::Now();
 
-  // Stops the current loader and swap in a new resource loader and
+  // Stops the current loader and creates a new resource loader and
   // retry the request.
   loader_->Stop();
-  SwapLoaderTask(CreateLoader(read_position_, -1));
+  loader_ = CreateResourceLoader(read_position_, -1);
+  loader_->Start(
+      NewCallback(this, &BufferedDataSource::PartialReadStartCallback),
+      NewCallback(this, &BufferedDataSource::NetworkEventCallback));
 }
 
 // This method is the place where actual read happens, |loader_| must be valid
@@ -697,8 +754,9 @@ void BufferedDataSource::ReadInternal() {
 
 // Method to report the results of the current read request. Also reset all
 // the read parameters.
-void BufferedDataSource::DoneRead(int error) {
+void BufferedDataSource::DoneRead_Locked(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(read_callback_.get());
   lock_.AssertAcquired();
 
   if (error >= 0) {
@@ -714,7 +772,8 @@ void BufferedDataSource::DoneRead(int error) {
   read_buffer_ = 0;
 }
 
-void BufferedDataSource::DoneInitialization() {
+void BufferedDataSource::DoneInitialization_Locked() {
+  DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(initialize_callback_.get());
   lock_.AssertAcquired();
 
@@ -726,8 +785,24 @@ void BufferedDataSource::DoneInitialization() {
 // BufferedDataSource, callback methods.
 // These methods are called on the render thread for the events reported by
 // BufferedResourceLoader.
-void BufferedDataSource::InitialStartCallback(int error) {
+void BufferedDataSource::HttpInitialStartCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(loader_.get());
+
+  int64 instance_size = loader_->instance_size();
+  bool partial_response = loader_->partial_response();
+  bool success = error == net::OK;
+
+  if (success) {
+    // TODO(hclam): Needs more thinking about supporting servers without range
+    // request or their partial response is not complete.
+    total_bytes_ = instance_size;
+    loaded_ = false;
+    streaming_ = (instance_size == kPositionNotSpecified) || !partial_response;
+  } else {
+    // TODO(hclam): In case of failure, we can retry several times.
+    loader_->Stop();
+  }
 
   // We need to prevent calling to filter host and running the callback if
   // we have received the stop signal. We need to lock down the whole callback
@@ -738,43 +813,44 @@ void BufferedDataSource::InitialStartCallback(int error) {
   // this object when Stop() method is ever called. Locking this method is safe
   // because |lock_| is only acquired in tasks on render thread.
   AutoLock auto_lock(lock_);
-  if (stopped_)
+  if (stop_signal_received_)
     return;
 
-  if (error != net::OK) {
-    // TODO(hclam): In case of failure, we can retry several times.
+  if (!success) {
     host()->SetError(media::PIPELINE_ERROR_NETWORK);
-    DCHECK(loader_.get());
-    DCHECK(probe_loader_.get());
-    loader_->Stop();
-    probe_loader_->Stop();
-    DoneInitialization();
+    DoneInitialization_Locked();
     return;
   }
 
-  total_bytes_ = loader_->instance_size();
-  if (total_bytes_ >= 0) {
+  if (streaming_) {
+    // If the server didn't reply with an instance size, it is likely this
+    // is a streaming response.
+    host()->SetStreaming(true);
+  } else {
     // This value governs the range that we can seek to.
     // TODO(hclam): Report the correct value of buffered bytes.
     host()->SetTotalBytes(total_bytes_);
-    host()->SetBufferedBytes(total_bytes_);
-  } else {
-    // If the server didn't reply with a content length, it is likely this
-    // is a streaming response.
-    streaming_ = true;
-    host()->SetStreaming(true);
+    host()->SetBufferedBytes(0);
   }
 
   // Currently, only files can be used reliably w/o a network.
-  host()->SetLoaded(url_.SchemeIsFile());
-
-  initial_response_received_ = true;
-  if (probe_response_received_)
-    DoneInitialization();
+  host()->SetLoaded(false);
+  DoneInitialization_Locked();
 }
 
-void BufferedDataSource::ProbeStartCallback(int error) {
+void BufferedDataSource::NonHttpInitialStartCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(loader_.get());
+
+  int64 instance_size = loader_->instance_size();
+  bool success = error == net::OK && instance_size != kPositionNotSpecified;
+
+  if (success) {
+    total_bytes_ = instance_size;
+    loaded_ = true;
+  } else {
+    loader_->Stop();
+  }
 
   // We need to prevent calling to filter host and running the callback if
   // we have received the stop signal. We need to lock down the whole callback
@@ -785,49 +861,65 @@ void BufferedDataSource::ProbeStartCallback(int error) {
   // this object when Stop() method is ever called. Locking this method is safe
   // because |lock_| is only acquired in tasks on render thread.
   AutoLock auto_lock(lock_);
-  if (stopped_)
+  if (stop_signal_received_)
     return;
 
-  if (error != net::OK) {
-    streaming_ = true;
-    host()->SetStreaming(true);
+  if (success) {
+    host()->SetTotalBytes(total_bytes_);
+    host()->SetBufferedBytes(total_bytes_);
+    host()->SetLoaded(loaded_);
+  } else {
+    host()->SetError(media::PIPELINE_ERROR_NETWORK);
   }
-
-  DCHECK(probe_loader_.get());
-  probe_loader_->Stop();
-  probe_response_received_ = true;
-  if (initial_response_received_)
-    DoneInitialization();
+  DoneInitialization_Locked();
 }
 
 void BufferedDataSource::PartialReadStartCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
   DCHECK(loader_.get());
 
-  if (error == net::OK) {
-    // Once the range request has start successfully, we can proceed with
+  // This callback method is invoked after we have verified the server has
+  // range request capability, so as a safety guard verify again the response
+  // is partial.
+  if (error == net::OK && loader_->partial_response()) {
+    // Once the range request has started successfully, we can proceed with
     // reading from it.
     ReadInternal();
-  } else {
-    loader_->Stop();
-
-    // We need to prevent calling to filter host and running the callback if
-    // we have received the stop signal. We need to lock down the whole callback
-    // method to prevent bad things from happening. The reason behind this is
-    // that we cannot guarantee tasks on render thread have completely stopped
-    // when we receive the Stop() method call. So only way to solve this is to
-    // let tasks on render thread to run but make sure they don't call outside
-    // this object when Stop() method is ever called. Locking this method is
-    // safe because |lock_| is only acquired in tasks on render thread.
-    AutoLock auto_lock(lock_);
-    if (stopped_)
-      return;
-    DoneRead(net::ERR_INVALID_RESPONSE);
+    return;
   }
+
+  // Stop the resource loader since we have received an error.
+  loader_->Stop();
+
+  // We need to prevent calling to filter host and running the callback if
+  // we have received the stop signal. We need to lock down the whole callback
+  // method to prevent bad things from happening. The reason behind this is
+  // that we cannot guarantee tasks on render thread have completely stopped
+  // when we receive the Stop() method call. So only way to solve this is to
+  // let tasks on render thread to run but make sure they don't call outside
+  // this object when Stop() method is ever called. Locking this method is
+  // safe because |lock_| is only acquired in tasks on render thread.
+  AutoLock auto_lock(lock_);
+  if (stop_signal_received_)
+    return;
+  DoneRead_Locked(net::ERR_INVALID_RESPONSE);
 }
 
 void BufferedDataSource::ReadCallback(int error) {
   DCHECK(MessageLoop::current() == render_loop_);
+
+  if (error < 0) {
+    DCHECK(loader_.get());
+
+    // Stop the resource load if it failed.
+    loader_->Stop();
+
+    if (error == net::ERR_CACHE_MISS) {
+      render_loop_->PostTask(FROM_HERE,
+          NewRunnableMethod(this, &BufferedDataSource::RestartLoadingTask));
+      return;
+    }
+  }
 
   // We need to prevent calling to filter host and running the callback if
   // we have received the stop signal. We need to lock down the whole callback
@@ -838,36 +930,50 @@ void BufferedDataSource::ReadCallback(int error) {
   // this object when Stop() method is ever called. Locking this method is safe
   // because |lock_| is only acquired in tasks on render thread.
   AutoLock auto_lock(lock_);
-  if (stopped_)
+  if (stop_signal_received_)
     return;
 
-  DCHECK(loader_.get());
-  DCHECK(read_callback_.get());
-
-  if (error >= 0) {
+  if (error > 0) {
     // If a position error code is received, read was successful. So copy
     // from intermediate read buffer to the target read buffer.
     memcpy(read_buffer_, intermediate_read_buffer_.get(), error);
-    DoneRead(error);
-  } else if (error == net::ERR_CACHE_MISS) {
-    // If the current loader cannot serve this read request, we need to create
-    // a new one.
-    // TODO(hclam): we need to count how many times it failed to prevent
-    // excessive trials.
-
-    // Stops the current resource loader.
-    loader_->Stop();
-
-    // Since this method is called from the current buffered resource loader,
-    // we cannot delete it. So we need to post a task to swap in a new
-    // resource loader and starts it.
-    render_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &BufferedDataSource::SwapLoaderTask,
-                          CreateLoader(read_position_, -1)));
-  } else {
-    loader_->Stop();
-    DoneRead(error);
   }
+  DoneRead_Locked(error);
+}
+
+void BufferedDataSource::NetworkEventCallback() {
+  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(loader_.get());
+
+  // In case of non-HTTP request we don't need to report network events,
+  // so return immediately.
+  if (loaded_)
+    return;
+
+  bool network_activity = loader_->network_activity();
+  int64 buffered_last_byte_position = loader_->GetBufferedLastBytePosition();
+
+  // If we get an unspecified value, return immediately.
+  if (buffered_last_byte_position == kPositionNotSpecified)
+    return;
+
+  // We need to prevent calling to filter host and running the callback if
+  // we have received the stop signal. We need to lock down the whole callback
+  // method to prevent bad things from happening. The reason behind this is
+  // that we cannot guarantee tasks on render thread have completely stopped
+  // when we receive the Stop() method call. So only way to solve this is to
+  // let tasks on render thread to run but make sure they don't call outside
+  // this object when Stop() method is ever called. Locking this method is safe
+  // because |lock_| is only acquired in tasks on render thread.
+  AutoLock auto_lock(lock_);
+  if (stop_signal_received_)
+    return;
+
+  if (network_activity != network_activity_) {
+    network_activity_ = network_activity;
+    host()->SetNetworkActivity(network_activity);
+  }
+  host()->SetBufferedBytes(buffered_last_byte_position + 1);
 }
 
 }  // namespace webkit_glue

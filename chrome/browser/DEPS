@@ -8,13 +8,16 @@ include_rules = [
   "+grit",  # For generated headers
   "+sandbox/src",
   "+skia/include",
+  "+webkit/database",
   "+webkit/default_plugin",
   "+webkit/glue",  # Defines some types that are marshalled over IPC.
+  "+xib_localizers", # For generated mac localization helpers
 
   # Other libraries.
   "+chrome/third_party/hunspell",
   "+libxml", # For search engine definition parsing.
   "+media/audio", # Chrome's lightweight audio library.
+  "+media/base",
   "+third_party/sqlite",
   "+third_party/libevent", # For the remote V8 debugging server
   "+third_party/cld",

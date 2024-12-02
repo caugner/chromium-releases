@@ -8,8 +8,6 @@
 
 #include "chrome/common/x11_util.h"
 
-#include <string.h>
-
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
 #include <gtk/gtk.h>
@@ -17,6 +15,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
+#include <list>
 #include <set>
 
 #include "base/logging.h"
@@ -25,6 +24,38 @@
 #include "chrome/common/x11_util_internal.h"
 
 namespace x11_util {
+
+namespace {
+
+// Used to cache the XRenderPictFormat for a visual/display pair.
+struct CachedPictFormat {
+  bool equals(Display* display, Visual* visual) const {
+    return display == this->display && visual == this->visual;
+  }
+
+  Display* display;
+  Visual* visual;
+  XRenderPictFormat* format;
+};
+
+typedef std::list<CachedPictFormat> CachedPictFormats;
+
+// Returns the cache of pict formats.
+CachedPictFormats* get_cached_pict_formats() {
+  static CachedPictFormats* formats = NULL;
+  if (!formats)
+    formats = new CachedPictFormats();
+  return formats;
+}
+
+// Maximum number of CachedPictFormats we keep around.
+const size_t kMaxCacheSize = 5;
+
+}  // namespace
+
+bool XDisplayExists() {
+  return (gdk_display_get_default() != NULL);
+}
 
 Display* GetXDisplay() {
   static Display* display = NULL;
@@ -163,6 +194,97 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
   return true;
 }
 
+bool GetIntProperty(XID window, const std::string& property_name, int* value) {
+  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), property_name.c_str());
+
+  Atom type = None;
+  int format = 0;  // size in bits of each item in 'property'
+  long unsigned int num_items = 0, remaining_bytes = 0;
+  unsigned char* property = NULL;
+
+  int result = XGetWindowProperty(GetXDisplay(),
+                                  window,
+                                  property_atom,
+                                  0,      // offset into property data to read
+                                  1,      // max length to get
+                                  False,  // deleted
+                                  AnyPropertyType,
+                                  &type,
+                                  &format,
+                                  &num_items,
+                                  &remaining_bytes,
+                                  &property);
+  if (result != Success)
+    return false;
+
+  if (format != 32 || num_items != 1) {
+    XFree(property);
+    return false;
+  }
+
+  *value = *(reinterpret_cast<int*>(property));
+  XFree(property);
+  return true;
+}
+
+bool GetStringProperty(
+    XID window, const std::string& property_name, std::string* value) {
+  Atom property_atom = gdk_x11_get_xatom_by_name_for_display(
+      gdk_display_get_default(), property_name.c_str());
+
+  Atom type = None;
+  int format = 0;  // size in bits of each item in 'property'
+  long unsigned int num_items = 0, remaining_bytes = 0;
+  unsigned char* property = NULL;
+
+  int result = XGetWindowProperty(GetXDisplay(),
+                                  window,
+                                  property_atom,
+                                  0,      // offset into property data to read
+                                  1024,   // max length to get
+                                  False,  // deleted
+                                  AnyPropertyType,
+                                  &type,
+                                  &format,
+                                  &num_items,
+                                  &remaining_bytes,
+                                  &property);
+  if (result != Success)
+    return false;
+
+  if (format != 8) {
+    XFree(property);
+    return false;
+  }
+
+  value->assign(reinterpret_cast<char*>(property), num_items);
+  XFree(property);
+  return true;
+}
+
+XID GetParentWindow(XID window) {
+  XID root = None;
+  XID parent = None;
+  XID* children = NULL;
+  unsigned int num_children = 0;
+  XQueryTree(GetXDisplay(), window, &root, &parent, &children, &num_children);
+  if (children)
+    XFree(children);
+  return parent;
+}
+
+XID GetHighestAncestorWindow(XID window, XID root) {
+  while (true) {
+    XID parent = x11_util::GetParentWindow(window);
+    if (parent == None)
+      return None;
+    if (parent == root)
+      return window;
+    window = parent;
+  }
+}
+
 // Returns true if |window| is a named window.
 bool IsWindowNamed(XID window) {
   XTextProperty prop;
@@ -203,10 +325,11 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
   // current level, so we need to recurse to the next level.  We use a second
   // loop because the recursion and call to XQueryTree are expensive and is only
   // needed for a small number of cases.
-  depth++;
-  for (iter = windows.rbegin(); iter != windows.rend(); iter++) {
-    if (EnumerateChildren(delegate, *iter, max_depth, depth))
-      return true;
+  if (++depth <= max_depth) {
+    for (iter = windows.rbegin(); iter != windows.rend(); iter++) {
+      if (EnumerateChildren(delegate, *iter, max_depth, depth))
+        return true;
+    }
   }
 
   return false;
@@ -217,15 +340,86 @@ bool EnumerateAllWindows(EnumerateWindowsDelegate* delegate, int max_depth) {
   return EnumerateChildren(delegate, root, max_depth, 0);
 }
 
-XRenderPictFormat* GetRenderVisualFormat(Display* dpy, Visual* visual) {
-  static XRenderPictFormat* pictformat = NULL;
-  if (pictformat)
-    return pictformat;
+bool GetXWindowStack(std::vector<XID>* windows) {
+  windows->clear();
 
+  static Atom atom = XInternAtom(GetXDisplay(),
+                                 "_NET_CLIENT_LIST_STACKING", False);
+
+  Atom type;
+  int format;
+  unsigned long count;
+  unsigned long bytes_after;
+  unsigned char *data = NULL;
+  if (XGetWindowProperty(GetXDisplay(),
+                         GetX11RootWindow(),
+                         atom,
+                         0,                // offset
+                         ~0L,              // length
+                         False,            // delete
+                         AnyPropertyType,  // requested type
+                         &type,
+                         &format,
+                         &count,
+                         &bytes_after,
+                         &data) != Success) {
+    return false;
+  }
+
+  bool result = false;
+  if (type == XA_WINDOW && format == 32 && data && count > 0) {
+    result = true;
+    XID* stack = reinterpret_cast<XID*>(data);
+    for (unsigned long i = 0; i < count; i++)
+      windows->insert(windows->begin(), stack[i]);
+  }
+
+  if (data)
+    XFree(data);
+
+  return result;
+}
+
+void RestackWindow(XID window, XID sibling, bool above) {
+  XWindowChanges changes;
+  changes.sibling = sibling;
+  changes.stack_mode = above ? Above : Below;
+  XConfigureWindow(GetXDisplay(), window, CWSibling | CWStackMode, &changes);
+}
+
+XRenderPictFormat* GetRenderVisualFormat(Display* dpy, Visual* visual) {
   DCHECK(QueryRenderSupport(dpy));
 
-  pictformat = XRenderFindVisualFormat(dpy, visual);
+  CachedPictFormats* formats = get_cached_pict_formats();
+
+  for (CachedPictFormats::const_iterator i = formats->begin();
+       i != formats->end(); ++i) {
+    if (i->equals(dpy, visual))
+      return i->format;
+  }
+
+  // Not cached, look up the value.
+  XRenderPictFormat* pictformat = XRenderFindVisualFormat(dpy, visual);
   CHECK(pictformat) << "XRENDER does not support default visual";
+
+  // And store it in the cache.
+  CachedPictFormat cached_value;
+  cached_value.visual = visual;
+  cached_value.display = dpy;
+  cached_value.format = pictformat;
+  formats->push_front(cached_value);
+
+  if (formats->size() == kMaxCacheSize) {
+    formats->pop_back();
+    // We should really only have at most 2 display/visual combinations:
+    // one for normal browser windows, and possibly another for an argb window
+    // created to display a menu.
+    //
+    // If we get here it's not fatal, we just need to make sure we aren't
+    // always blowing away the cache. If we are, then we should figure out why
+    // and make it bigger.
+    NOTREACHED();
+  }
 
   return pictformat;
 }

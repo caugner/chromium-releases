@@ -1,10 +1,6 @@
 
 // Helpers
 
-function $(id) {
-  return document.getElementById(id);
-}
-
 // TODO(arv): Remove these when classList is available in HTML5.
 // https://bugs.webkit.org/show_bug.cgi?id=20709
 function hasClass(el, name) {
@@ -68,7 +64,6 @@ function bind(fn, selfObj, var_args) {
 var loading = true;
 var mostVisitedData = [];
 var gotMostVisited = false;
-var gotShownSections = false;
 
 function mostVisitedPages(data, firstRun) {
   logEvent('received most visited pages');
@@ -130,7 +125,6 @@ function recentlyClosedTabs(data) {
 }
 
 var recentItems = [];
-var recentItemKeys = {};
 
 function renderRecentlyClosed() {
   // We remove all items but the header and the nav
@@ -190,11 +184,7 @@ function onShownSections(mask) {
 
     mostVisited.updateDisplayMode();
     renderRecentlyClosed();
-    updateOptionMenu();
   }
-
-  gotShownSections = true;
-  onDataLoaded();
 }
 
 function saveShownSections() {
@@ -276,10 +266,6 @@ function chromeSend(name, params, callbackName, callback) {
   chrome.send(name, params);
 }
 
-function useSmallGrid() {
-  return window.innerWidth <= 920;
-}
-
 var LayoutMode = {
   SMALL: 1,
   NORMAL: 2
@@ -303,19 +289,6 @@ function handleWindowResize() {
   }
 }
 
-/**
- * Bitmask for the different UI sections.
- * This matches the Section enum in ../dom_ui/shown_sections_handler.h
- * @enum {number}
- */
-var Section = {
-  THUMB: 1,
-  LIST: 2,
-  RECENT: 4
-};
-
-var shownSections = Section.THUMB | Section.RECENT;
-
 function showSection(section) {
   if (!(section & shownSections)) {
     shownSections |= section;
@@ -333,7 +306,6 @@ function showSection(section) {
       renderRecentlyClosed();
     }
 
-    updateOptionMenu();
     mostVisited.updateDisplayMode();
     mostVisited.layout();
   }
@@ -351,7 +323,6 @@ function hideSection(section) {
       renderRecentlyClosed();
     }
 
-    updateOptionMenu();
     mostVisited.updateDisplayMode();
     mostVisited.layout();
   }
@@ -509,13 +480,16 @@ var mostVisited = {
       thumbCheckbox.checked = true;
       listCheckbox.checked = false;
       removeClass(mostVisitedElement, 'list');
+      removeClass(mostVisitedElement, 'collapsed');
     } else if (shownSections & Section.LIST) {
       thumbCheckbox.checked = false;
       listCheckbox.checked = true;
       addClass(mostVisitedElement, 'list');
+      removeClass(mostVisitedElement, 'collapsed');
     } else {
       thumbCheckbox.checked = false;
       listCheckbox.checked = false;
+      addClass(mostVisitedElement, 'collapsed');
     }
   },
 
@@ -523,7 +497,6 @@ var mostVisited = {
 
   invalidate: function() {
     this.dirty_ = true;
-    this.calculationsDirty_ = true;
   },
 
   layout: function() {
@@ -532,137 +505,40 @@ var mostVisited = {
     }
     var d0 = Date.now();
 
-    this.calculateLayout_();
-
     var mostVisitedElement = $('most-visited');
     var thumbnails = mostVisitedElement.children;
+    var collapsed = false;
 
     if (shownSections & Section.LIST) {
       addClass(mostVisitedElement, 'list');
     } else if (shownSections & Section.THUMB) {
       removeClass(mostVisitedElement, 'list');
+    } else {
+      collapsed = true;
     }
 
-    var cache = this.layoutCache_;
-    mostVisitedElement.style.height = cache.sumHeight + 'px';
-    mostVisitedElement.style.opacity = cache.opacity;
     // We set overflow to hidden so that the most visited element does not
     // "leak" when we hide and show it.
-    if (!cache.opacity) {
+    if (collapsed) {
       mostVisitedElement.style.overflow = 'hidden';
     }
 
-    if (shownSections & Section.THUMB || shownSections & Section.LIST) {
-      for (var i = 0; i < thumbnails.length; i++) {
-        var t = thumbnails[i];
+    applyMostVisitedRects();
 
-        // Remove temporary ID that was used during startup layout.
-        t.id = '';
-
-        var rect = cache.rects[i];
-        t.style.left = rect.left + 'px';
-        t.style.top = rect.top + 'px';
-        t.style.width = rect.width != undefined ? rect.width + 'px' : '';
-        var innerStyle = t.firstElementChild.style;
-        innerStyle.left = innerStyle.top = '';
-      }
-    }
-
-    afterTransition(function() {
-      // Only set overflow to visible if the element is shown.
-      if (cache.opacity) {
+    // Only set overflow to visible if the element is shown.
+    if (!collapsed) {
+      afterTransition(function() {
         mostVisitedElement.style.overflow = '';
-      }
-    });
+      });
+    }
 
     this.dirty_ = false;
 
     logEvent('mostVisited.layout: ' + (Date.now() - d0));
   },
 
-  layoutCache_: {},
-  calculationsDirty_: true,
-
-  /**
-   * Calculates and caches the layout positions for the thumbnails.
-   */
-  calculateLayout_: function() {
-    if (!this.calculationsDirty_) {
-      return;
-    }
-
-    var small = useSmallGrid();
-
-    var cols = 4;
-    var rows = 2;
-    var marginWidth = 10;
-    var marginHeight = 7;
-    var borderWidth = 4;
-    var thumbWidth = small ? 150 : 207;
-    var thumbHeight = small ? 93 : 129;
-    var w = thumbWidth + 2 * borderWidth + 2 * marginWidth;
-    var h = thumbHeight + 40 + 2 * marginHeight;
-    var sumWidth = cols * w  - 2 * marginWidth;
-    var sumHeight = rows * h;
-    var opacity = 1;
-    // Since the list mode does not have a toolbar move it down a little to add
-    // some spacing at the top.
-    var LIST_TOP_SPACING = 22;
-
-    if (shownSections & Section.LIST) {
-      w = sumWidth;
-      h = 34;
-      rows = 8;
-      cols = 1;
-      sumHeight = rows * h + LIST_TOP_SPACING;
-    } else if (!(shownSections & Section.THUMB)) {
-      sumHeight = 0;
-      opacity = 0;
-    }
-
-    var rtl = document.documentElement.dir == 'rtl';
-    var rects = [];
-
-    if (shownSections & Section.THUMB || shownSections & Section.LIST) {
-      for (var i = 0; i < rows * cols; i++) {
-        var row, col, left, top, width;
-        if (shownSections & Section.THUMB) {
-          row = Math.floor(i / cols);
-          col = i % cols;
-        } else {
-          col = Math.floor(i / rows);
-          row = i % rows;
-        }
-
-        if (shownSections & Section.THUMB) {
-          left = rtl ? sumWidth - col * w - thumbWidth - 2 * borderWidth :
-              col * w;
-        } else {
-          left = rtl ? sumWidth - col * w - w + 2 * marginWidth : col * w;
-        }
-        top = row * h;
-
-        if (shownSections & Section.LIST) {
-          width = w;
-          top += LIST_TOP_SPACING;
-        }
-
-        rects[i] = {left: left, top: top, width: width};
-      }
-    }
-
-    this.layoutCache_ = {
-      opacity: opacity,
-      sumHeight: sumHeight,
-      rects: rects
-    }
-
-    this.calculationsDirty_ = false;
-  },
-
   getRectByIndex: function(index) {
-    this.calculateLayout_();
-    return this.layoutCache_.rects[index]
+    return getMostVisitedLayoutRects()[index];
   }
 };
 
@@ -670,15 +546,13 @@ var mostVisited = {
 
 function layoutRecentlyClosed() {
   var recentElement = $('recently-closed');
-
-  var rtl = document.documentElement.dir == 'rtl';
   var recentShown = shownSections & Section.RECENT;
   var style = recentElement.style;
 
   if (!recentShown) {
-    style.opacity = style.height = 0;
+    addClass(recentElement, 'collapsed');
   } else {
-    style.opacity = style.height = '';
+    removeClass(recentElement, 'collapsed');
 
     // We cannot use clientWidth here since the width has a transition.
     var spacing = 20;
@@ -704,6 +578,82 @@ function layoutRecentlyClosed() {
 }
 
 /**
+ * This function is called by the backend whenever the sync status section
+ * needs to be updated to reflect recent sync state changes. The backend passes
+ * the new status information in the newMessage parameter. The state includes
+ * the following:
+ *
+ * syncsectionisvisible: true if the sync section needs to show up on the new
+ *                       tab page and false otherwise.
+ * msgtype: represents the states - "error", "presynced" or "synced".
+ * title: the header for the sync status section.
+ * msg: the actual message (e.g. "Synced to foo@gmail.com").
+ * linkisvisible: true if the link element should be visible within the sync
+ *                section and false otherwise.
+ * linktext: the text to display as the link in the sync status (only used if
+ *           linkisvisible is true).
+ * linkurlisset: true if an URL should be set as the href for the link and false
+ *               otherwise. If this field is false, then clicking on the link
+ *               will result in sending a message to the backend (see
+ *               'SyncLinkClicked').
+ * linkurl: the URL to use as the element's href (only used if linkurlisset is
+ *          true).
+ */
+function syncMessageChanged(newMessage) {
+  var syncStatusElement = $('sync-status');
+  var style = syncStatusElement.style;
+
+  // Hide the section if the message is emtpy.
+  if (!newMessage.syncsectionisvisible) {
+    style.display = 'none';
+    return;
+  }
+  style.display = 'block';
+
+  // Set the sync section background color based on the state.
+  if (newMessage.msgtype == 'error') {
+    style.backgroundColor = 'tomato';
+  } else {
+    style.backgroundColor = '';
+  }
+
+  // Set the text for the header and sync message.
+  var titleElement = syncStatusElement.firstElementChild;
+  titleElement.textContent = newMessage.title;
+  var messageElement = titleElement.nextElementSibling;
+  messageElement.textContent = newMessage.msg;
+
+  // Remove what comes after the message
+  while (messageElement.nextSibling) {
+    syncStatusElement.removeChild(messageElement.nextSibling);
+  }
+
+  if (newMessage.linkisvisible) {
+    var el;
+    if (newMessage.linkurlisset) {
+      // Use a link
+      el = document.createElement('a');
+      el.href = newMessage.linkurl;
+    } else {
+      el = document.createElement('button');
+      el.className = 'link';
+      el.addEventListener('click', syncSectionLinkClicked);
+    }
+    el.textContent = newMessage.linktext;
+    syncStatusElement.appendChild(el);
+    fixLinkUnderline(el);
+  }
+}
+
+/**
+ * Invoked when the link in the sync status section is clicked.
+ */
+function syncSectionLinkClicked(e) {
+  chrome.send('SyncLinkClicked');
+  e.preventDefault();
+}
+
+/**
  * Returns the text used for a recently closed window.
  * @param {number} numTabs Number of tabs in the window.
  * @return {string} The text to use.
@@ -719,7 +669,7 @@ function formatTabsText(numTabs) {
  * @return {boolean}
  */
 function onDataLoaded() {
-  if (gotMostVisited && gotShownSections) {
+  if (gotMostVisited) {
     mostVisited.layout();
     loading = false;
     // Remove class name in a timeout so that changes done in this JS thread are
@@ -886,6 +836,7 @@ function OptionMenu(button, menu) {
 
 OptionMenu.prototype = {
   show: function() {
+    updateOptionMenu();
     this.menu.style.display = 'block';
     addClass(this.button, 'open');
     this.button.focus();
@@ -1077,16 +1028,6 @@ function handleIfEnterKey(f) {
   };
 }
 
-function maybeOpenFile(e) {
-  var el = findAncestor(e.target, function(el) {
-    return el.fileId !== undefined;
-  });
-  if (el) {
-    chrome.send('openFile', [String(el.fileId)]);
-    e.preventDefault();
-  }
-}
-
 function maybeReopenTab(e) {
   var el = findAncestor(e.target, function(el) {
     return el.sessionId !== undefined;
@@ -1094,6 +1035,13 @@ function maybeReopenTab(e) {
   if (el) {
     chrome.send('reopenTab', [String(el.sessionId)]);
     e.preventDefault();
+
+    // HACK(arv): After the window onblur event happens we get a mouseover event
+    // on the next item and we want to make sure that we do not show a tooltip
+    // for that.
+    window.setTimeout(function() {
+      windowTooltip.hide();
+    }, 2 * WindowTooltip.DELAY);
   }
 }
 
@@ -1110,9 +1058,6 @@ function maybeShowWindowTooltip(e) {
 
 
 var recentlyClosedElement = $('recently-closed');
-recentlyClosedElement.addEventListener('click', maybeOpenFile);
-recentlyClosedElement.addEventListener('keydown',
-                                       handleIfEnterKey(maybeOpenFile));
 
 recentlyClosedElement.addEventListener('click', maybeReopenTab);
 recentlyClosedElement.addEventListener('keydown',
@@ -1139,6 +1084,12 @@ WindowTooltip.trackMouseMove_ = function(e) {
   WindowTooltip.clientY = e.clientY;
 };
 
+/**
+ * Time in ms to delay before the tooltip is shown.
+ * @type {number}
+ */
+WindowTooltip.DELAY = 300;
+
 WindowTooltip.prototype = {
   timer: 0,
   handleMouseOver: function(e, linkEl, tabs) {
@@ -1150,13 +1101,13 @@ WindowTooltip.prototype = {
       this.linkEl_.addEventListener('blur', this.boundHide_);
     }
     this.timer = window.setTimeout(bind(this.show, this, e.type, linkEl, tabs),
-                                   300);
+                                   WindowTooltip.DELAY);
   },
   show: function(type, linkEl, tabs) {
     window.addEventListener('blur', this.boundHide_);
     this.linkEl_.removeEventListener('mousemove',
                                      WindowTooltip.trackMouseMove_);
-    clearTimeout(this.timer);
+    window.clearTimeout(this.timer);
 
     this.renderItems(tabs);
     var rect = linkEl.getBoundingClientRect();
@@ -1256,11 +1207,53 @@ $('list-checkbox').addEventListener('change',
 $('list-checkbox').addEventListener('keydown',
                                     getCheckboxHandler(Section.LIST));
 
-window.addEventListener('load', bind(logEvent, global, 'onload fired'));
+window.addEventListener('load', bind(logEvent, global, 'Tab.NewTabOnload', true));
 window.addEventListener('load', onDataLoaded);
+
 window.addEventListener('resize', handleWindowResize);
-document.addEventListener('DOMContentLoaded', bind(logEvent, global,
-                                                   'domcontentloaded fired'));
+document.addEventListener('DOMContentLoaded',
+    bind(logEvent, global, 'Tab.NewTabDOMContentLoaded', true));
+
+// Whether or not we should send the initial 'GetSyncMessage' to the backend
+// depends on the value of the attribue 'syncispresent' which the backend sets
+// to indicate if there is code in the backend which is capable of processing
+// this message. This attribute is loaded by the JSTemplate and therefore we
+// must make sure we check the attribute after the DOM is loaded.
+document.addEventListener('DOMContentLoaded',
+                          callGetSyncMessageIfSyncIsPresent);
+
+// This link allows user to make new tab page as homepage from the new tab
+// page itself (without going to Options dialog box).
+document.addEventListener('DOMContentLoaded', showSetAsHomepageLink);
+
+/**
+ * The sync code is not yet built by default on all platforms so we have to
+ * make sure we don't send the initial sync message to the backend unless the
+ * backend told us that the sync code is present.
+ */
+function callGetSyncMessageIfSyncIsPresent() {
+  if (document.documentElement.getAttribute('syncispresent') == 'true') {
+    chrome.send('GetSyncMessage');
+  }
+}
+
+function setAsHomePageLinkClicked(e) {
+  chrome.send('SetHomepageLinkClicked');
+  e.preventDefault();
+}
+
+function showSetAsHomepageLink() {
+  var setAsHomepageElement = $('set-as-homepage');
+  var style = setAsHomepageElement.style;
+  if (document.documentElement.getAttribute('showsetashomepage') != 'true') {
+    // Hide the section (if new tab page is already homepage).
+    return;
+  }
+
+  style.display = 'block';
+  var buttonElement = setAsHomepageElement.firstElementChild;
+  buttonElement.addEventListener('click', setAsHomePageLinkClicked);
+}
 
 function hideAllMenus() {
   optionMenu.hide();
@@ -1443,6 +1436,8 @@ var dnd = {
     y = Math.min(y, document.body.clientHeight - rect.top - item.offsetHeight -
                  2);
 
+    // Override right in case of RTL.
+    item.style.right = 'auto';
     item.style.left = x + 'px';
     item.style.top = y + 'px';
     item.style.zIndex = 2;

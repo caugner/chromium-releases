@@ -25,13 +25,11 @@ namespace {
 // time taken for each switch. It then prints out the times on the console,
 // with the aim that the page cycler parser can interpret these numbers to
 // draw graphs for page cycler Tab Switching Performance.
-// Usage Flags: -enable-logging -dump-histograms-on-exit
+// Usage Flags: -enable-logging -dump-histograms-on-exit -log-level=0
 class TabSwitchingUITest : public UITest {
  public:
-   TabSwitchingUITest() {
-    PathService::Get(base::DIR_EXE, &path_prefix_);
-    path_prefix_ = path_prefix_.DirName();
-    path_prefix_ = path_prefix_.DirName();
+  TabSwitchingUITest() {
+    PathService::Get(base::DIR_SOURCE_ROOT, &path_prefix_);
     path_prefix_ = path_prefix_.AppendASCII("data");
     path_prefix_ = path_prefix_.AppendASCII("tab_switching");
 
@@ -65,7 +63,7 @@ class TabSwitchingUITest : public UITest {
     // Now open the corresponding log file and collect average and std dev from
     // the histogram stats generated for RenderWidgetHostHWND_WhiteoutDuration
     FilePath log_file_name;
-    PathService::Get(chrome::DIR_LOGS, &log_file_name);
+    ASSERT_TRUE(PathService::Get(chrome::DIR_LOGS, &log_file_name));
     log_file_name = log_file_name.AppendASCII("chrome_debug.log");
 
     bool log_has_been_dumped = false;
@@ -134,11 +132,10 @@ class TabSwitchingUITest : public UITest {
   }
 
   FilePath path_prefix_;
-  int number_of_tabs_to_open_;
   scoped_refptr<BrowserProxy> browser_proxy_;
 
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(TabSwitchingUITest);
+  DISALLOW_COPY_AND_ASSIGN(TabSwitchingUITest);
 };
 
 TEST_F(TabSwitchingUITest, GenerateTabSwitchStats) {

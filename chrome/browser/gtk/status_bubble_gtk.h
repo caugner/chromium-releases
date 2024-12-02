@@ -74,15 +74,11 @@ class StatusBubbleGtk : public StatusBubble,
   // Provides colors.
   GtkThemeProvider* theme_provider_;
 
-  // A GtkAlignment that is the child of |slide_widget_|.
+  // The toplevel event box.
   OwnedWidgetGtk container_;
 
   // The GtkLabel holding the text.
   GtkWidget* label_;
-
-  // The background event box. We keep this so we can change its background
-  // color.
-  GtkWidget* bg_box_;
 
   // The status text we want to display when there are no URLs to display.
   std::string status_text_;

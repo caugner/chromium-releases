@@ -50,7 +50,8 @@
 
 namespace o3d {
 
-typedef Closure ArchiveRequestCallback;
+typedef Closure ArchiveReadyStateChangeCallback;
+typedef Callback1<RawData*> ArchiveFileAvailableCallback;
 
 // An ArchiveRequest object is used to carry out an asynchronous request
 // for a file to be loaded.
@@ -69,15 +70,15 @@ class ArchiveRequest : public ObjectBase, public ArchiveCallbackClient {
   // can not be used to open arbitrary .tgz files but only those files someone
   // has specifically prepared for O3D. This file will not be passed to
   // the onfileavailable callback.
-  static const char* O3D_MARKER;
+  static const char* const kO3DMarker;
 
-  // The contents of the O3D_MARKER file. Arguably the content should not matter
+  // The contents of the O3D marker file. Arguably the content should not matter
   // but for the sake of completeness we define the content so there is no
   // ambiguity.
-  static const char* O3D_MARKER_CONTENT;
+  static const char* const kO3DMarkerContent;
 
   // The size of the O3D_MARKER_CONTENT.
-  static const size_t O3D_MARKER_CONTENT_LENGTH;
+  static const size_t kO3DMarkerContentLength;
 
  public:
   typedef SmartPointer<ArchiveRequest> Ref;
@@ -104,22 +105,24 @@ class ArchiveRequest : public ObjectBase, public ArchiveCallbackClient {
   // ArchiveCallbackClient methods
   virtual void ReceiveFileHeader(const ArchiveFileInfo &file_info);
   virtual bool ReceiveFileData(MemoryReadStream *stream, size_t nbytes);
+  virtual void Close(bool success);
 
   Pack *pack() {
     return pack_.Get();  // Set at creation time and never changed.
   }
 
-  ArchiveRequestCallback *onfileavailable() {
+  ArchiveFileAvailableCallback *onfileavailable() {
     return onfileavailable_.get();
   }
-  void set_onfileavailable(ArchiveRequestCallback *onfileavailable) {
+  void set_onfileavailable(ArchiveFileAvailableCallback *onfileavailable) {
     onfileavailable_.reset(onfileavailable);
   }
 
-  ArchiveRequestCallback *onreadystatechange() {
+  ArchiveReadyStateChangeCallback *onreadystatechange() {
     return onreadystatechange_.get();
   }
-  void set_onreadystatechange(ArchiveRequestCallback *onreadystatechange) {
+  void set_onreadystatechange(
+      ArchiveReadyStateChangeCallback *onreadystatechange) {
     onreadystatechange_.reset(onreadystatechange);
   }
 
@@ -174,8 +177,8 @@ class ArchiveRequest : public ObjectBase, public ArchiveCallbackClient {
   ArchiveRequest(ServiceLocator* service_locator, Pack *pack);
 
   Pack::Ref pack_;
-  scoped_ptr<ArchiveRequestCallback> onreadystatechange_;
-  scoped_ptr<ArchiveRequestCallback> onfileavailable_;
+  scoped_ptr<ArchiveReadyStateChangeCallback> onreadystatechange_;
+  scoped_ptr<ArchiveFileAvailableCallback> onfileavailable_;
   String uri_;
 
   // Request state
@@ -184,7 +187,9 @@ class ArchiveRequest : public ObjectBase, public ArchiveCallbackClient {
   int ready_state_;  // Like the XMLHttpRequest variable of the same name.
   String error_;  // Set after completion on failure.
 
-  TarGzProcessor      *archive_processor_;
+  StreamProcessor     *archive_processor_;
+  StreamProcessor     *extra_processor_;
+  ArchiveCallbackClient* main_thread_archive_callback_client_;
   std::vector<RawData::Ref> raw_data_list_;
   RawData::Ref        raw_data_;
   MemoryBuffer<uint8> temp_buffer_;

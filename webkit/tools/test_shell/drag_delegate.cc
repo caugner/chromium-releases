@@ -1,26 +1,29 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/tools/test_shell/drag_delegate.h"
 
-#include <atltypes.h>
-
 #include "webkit/api/public/WebPoint.h"
-#include "webkit/glue/webview.h"
+#include "webkit/api/public/WebView.h"
 
 using WebKit::WebPoint;
+using WebKit::WebView;
 
 namespace {
 
-void GetCursorPositions(HWND hwnd, CPoint* client, CPoint* screen) {
+void GetCursorPositions(HWND hwnd, gfx::Point* client, gfx::Point* screen) {
   // GetCursorPos will fail if the input desktop isn't the current desktop.
   // See http://b/1173534. (0,0) is wrong, but better than uninitialized.
-  if (!GetCursorPos(screen))
-    screen->SetPoint(0, 0);
+  POINT pos;
+  if (!GetCursorPos(&pos)) {
+    pos.x = 0;
+    pos.y = 0;
+  }
 
-  *client = *screen;
-  ScreenToClient(hwnd, client);
+  *screen = gfx::Point(pos);
+  ScreenToClient(hwnd, &pos);
+  *client = gfx::Point(pos);
 }
 
 }  // anonymous namespace
@@ -30,17 +33,16 @@ void TestDragDelegate::OnDragSourceCancel() {
 }
 
 void TestDragDelegate::OnDragSourceDrop() {
-  CPoint client;
-  CPoint screen;
+  gfx::Point client;
+  gfx::Point screen;
   GetCursorPositions(source_hwnd_, &client, &screen);
-  webview_->DragSourceEndedAt(WebPoint(client.x, client.y),
-                              WebPoint(screen.x, screen.y));
+  webview_->dragSourceEndedAt(client, screen, WebKit::WebDragOperationCopy);
+  // TODO(snej): Pass the real drag operation instead
 }
 
 void TestDragDelegate::OnDragSourceMove() {
-  CPoint client;
-  CPoint screen;
+  gfx::Point client;
+  gfx::Point screen;
   GetCursorPositions(source_hwnd_, &client, &screen);
-  webview_->DragSourceMovedTo(WebPoint(client.x, client.y),
-                              WebPoint(screen.x, screen.y));
+  webview_->dragSourceMovedTo(client, screen);
 }

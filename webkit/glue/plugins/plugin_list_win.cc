@@ -8,10 +8,11 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/registry.h"
+#include "base/scoped_ptr.h"
 #include "base/string_util.h"
-#include "webkit/activex_shim/npp_impl.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
 #include "webkit/glue/plugins/plugin_lib.h"
 #include "webkit/glue/webkit_glue.h"
@@ -28,44 +29,30 @@ const TCHAR kRegistryQuickTime[] = _T("QuickTimePlayer.exe");
 const TCHAR kRegistryPath[] = _T("Path");
 const TCHAR kRegistryFirefoxInstalled[] =
     _T("SOFTWARE\\Mozilla\\Mozilla Firefox");
-const TCHAR kMozillaActiveXPlugin[] = _T("npmozax.dll");
-const TCHAR kNewWMPPlugin[] = _T("np-mswmp.dll");
-const TCHAR kOldWMPPlugin[] = _T("npdsplay.dll");
-const TCHAR kYahooApplicationStatePlugin[] = _T("npystate.dll");
-const TCHAR kWanWangProtocolHandlerPlugin[] = _T("npww.dll");
 const TCHAR kRegistryJava[] =
     _T("Software\\JavaSoft\\Java Runtime Environment");
 const TCHAR kRegistryBrowserJavaVersion[] = _T("BrowserJavaVersion");
 const TCHAR kRegistryCurrentJavaVersion[] = _T("CurrentVersion");
 const TCHAR kRegistryJavaHome[] = _T("JavaHome");
 
-#ifdef GEARS_STATIC_LIB
-// defined in gears/base/common/module.cc
-NPError API_CALL Gears_NP_GetEntryPoints(NPPluginFuncs* funcs);
-NPError API_CALL Gears_NP_Initialize(NPNetscapeFuncs* funcs);
-NPError API_CALL Gears_NP_Shutdown(void);
-#endif
-
 // The application path where we expect to find plugins.
 void GetAppDirectory(std::set<FilePath>* plugin_dirs) {
-  std::wstring app_path;
-  // TODO(avi): use PathService directly
+  FilePath app_path;
   if (!webkit_glue::GetApplicationDirectory(&app_path))
     return;
 
-  app_path.append(L"\\plugins");
-  plugin_dirs->insert(FilePath(app_path));
+  app_path = app_path.AppendASCII("plugins");
+  plugin_dirs->insert(app_path);
 }
 
 // The executable path where we expect to find plugins.
 void GetExeDirectory(std::set<FilePath>* plugin_dirs) {
-  std::wstring exe_path;
-  // TODO(avi): use PathService directly
+  FilePath exe_path;
   if (!webkit_glue::GetExeDirectory(&exe_path))
     return;
 
-  exe_path.append(L"\\plugins");
-  plugin_dirs->insert(FilePath(exe_path));
+  exe_path = exe_path.AppendASCII("plugins");
+  plugin_dirs->insert(exe_path);
 }
 
 // Gets the installed path for a registered app.
@@ -134,10 +121,12 @@ void GetFirefoxDirectory(std::set<FilePath>* plugin_dirs) {
   GetPluginsInRegistryDirectory(
       HKEY_LOCAL_MACHINE, kRegistryMozillaPlugins, plugin_dirs);
 
-  std::wstring firefox_app_data_plugin_path;
+  FilePath firefox_app_data_plugin_path;
   if (PathService::Get(base::DIR_APP_DATA, &firefox_app_data_plugin_path)) {
-    firefox_app_data_plugin_path += L"\\Mozilla\\plugins";
-    plugin_dirs->insert(FilePath(firefox_app_data_plugin_path));
+    firefox_app_data_plugin_path =
+        firefox_app_data_plugin_path.AppendASCII("Mozilla")
+                                    .AppendASCII("plugins");
+    plugin_dirs->insert(firefox_app_data_plugin_path);
   }
 }
 
@@ -164,6 +153,26 @@ void GetWindowsMediaDirectory(std::set<FilePath>* plugin_dirs) {
   FilePath path;
   if (GetInstalledPath(kRegistryWindowsMedia, &path))
     plugin_dirs->insert(path);
+
+  // If the Windows Media Player Firefox plugin is installed before Firefox,
+  // the plugin will get written under PFiles\Plugins on one the drives
+  // (usually, but not always, the last letter).
+  int size = GetLogicalDriveStrings(0, NULL);
+  if (size) {
+    scoped_array<wchar_t> strings(new wchar_t[size]);
+    if (GetLogicalDriveStrings(size, strings.get())) {
+      wchar_t* next_drive = strings.get();
+      while (*next_drive) {
+        if (GetDriveType(next_drive) == DRIVE_FIXED) {
+          FilePath pfiles(next_drive);
+          pfiles = pfiles.Append(L"PFiles\\Plugins");
+          if (file_util::PathExists(pfiles))
+            plugin_dirs->insert(pfiles);
+        }
+        next_drive = &next_drive[wcslen(next_drive) + 1];
+      }
+    }
+  }
 }
 
 // Hardcoded logic to detect Java plugin location.
@@ -205,47 +214,6 @@ namespace NPAPI
 void PluginList::PlatformInit() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   dont_load_new_wmp_ = command_line.HasSwitch(kUseOldWMPPluginSwitch);
-  use_internal_activex_shim_ =
-      !command_line.HasSwitch(kNoNativeActiveXShimSwitch);
-
-  const PluginVersionInfo builtin_plugins[] = {
-  {
-    FilePath(kActiveXShimFileNameForMediaPlayer),
-    kActiveXShimFileNameForMediaPlayer,
-    L"Windows Media Player",
-    L"1, 0, 0, 1",
-    L"application/x-ms-wmp|application/asx|video/x-ms-asf-plugin|"
-        L"application/x-mplayer2|video/x-ms-asf|video/x-ms-wm|audio/x-ms-wma|"
-        L"audio/x-ms-wax|video/x-ms-wmv|video/x-ms-wvx|audio/mpeg|video/mpeg",
-    L"*|*|*|*|asf,asx,*|wm,*|wma,*|wax,*|wmv,*|wvx,*|mp2,mp3,mpa,mpeg,mpg|"
-        L"mpeg,mpg,m1v,mpe",
-    L"",
-    {
-      activex_shim::ActiveX_Shim_NP_GetEntryPoints,
-      activex_shim::ActiveX_Shim_NP_Initialize,
-      activex_shim::ActiveX_Shim_NP_Shutdown
-    }
-  },
-#ifdef GEARS_STATIC_LIB
-  {
-    FilePath(kGearsPluginLibraryName),
-    L"Gears",
-    L"Statically linked Gears",
-    L"1, 0, 0, 1",
-    L"application/x-googlegears",
-    L"",
-    L"",
-    {
-      Gears_NP_GetEntryPoints,
-      Gears_NP_Initialize,
-      Gears_NP_Shutdown
-    }
-  },
-#endif
-  };
-
-  for (int i = 0; i < arraysize(builtin_plugins); ++i)
-    internal_plugins_.push_back(builtin_plugins[i]);
 }
 
 void PluginList::GetPluginDirectories(std::vector<FilePath>* plugin_dirs) {
@@ -275,7 +243,8 @@ void PluginList::GetPluginDirectories(std::vector<FilePath>* plugin_dirs) {
     plugin_dirs->push_back(*i);
 }
 
-void PluginList::LoadPluginsFromDir(const FilePath &path) {
+void PluginList::LoadPluginsFromDir(const FilePath &path,
+                                    std::vector<WebPluginInfo>* plugins) {
   WIN32_FIND_DATA find_file_data;
   HANDLE find_handle;
 
@@ -290,7 +259,7 @@ void PluginList::LoadPluginsFromDir(const FilePath &path) {
   do {
     if (!(find_file_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
       FilePath filename = path.Append(find_file_data.cFileName);
-      LoadPlugin(filename);
+      LoadPlugin(filename, plugins);
     }
   } while (FindNextFile(find_handle, &find_file_data) != 0);
 
@@ -317,13 +286,13 @@ bool IsNewerVersion(const std::wstring& a, const std::wstring& b) {
   return false;
 }
 
-bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info) {
-
+bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
+                                  std::vector<WebPluginInfo>* plugins) {
   // Version check
 
-  for (size_t i = 0; i < plugins_.size(); ++i) {
-    if (plugins_[i].path.BaseName() == info.path.BaseName() &&
-        !IsNewerVersion(plugins_[i].version, info.version)) {
+  for (size_t i = 0; i < plugins->size(); ++i) {
+    if ((*plugins)[i].path.BaseName() == info.path.BaseName() &&
+        !IsNewerVersion((*plugins)[i].version, info.version)) {
       return false;  // We already have a loaded plugin whose version is newer.
     }
   }
@@ -350,43 +319,25 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info) {
 
   // Special WMP handling
 
-  // We will use the ActiveX shim to handle embedded WMP media.
-  if (use_internal_activex_shim_) {
-    if (filename == kNewWMPPlugin || filename == kOldWMPPlugin)
+  // If both the new and old WMP plugins exist, only load the new one.
+  if (filename == kNewWMPPlugin) {
+    if (dont_load_new_wmp_)
       return false;
-  } else {
-    // If both the new and old WMP plugins exist, only load the new one.
-    if (filename == kNewWMPPlugin) {
-      if (dont_load_new_wmp_)
-        return false;
 
-      for (size_t i = 0; i < plugins_.size(); ++i) {
-        if (plugins_[i].path.BaseName().value() == kOldWMPPlugin) {
-          plugins_.erase(plugins_.begin() + i);
-          break;
-        }
+    for (size_t i = 0; i < plugins->size(); ++i) {
+      if ((*plugins)[i].path.BaseName().value() == kOldWMPPlugin) {
+        plugins->erase(plugins->begin() + i);
+        break;
       }
-    } else if (filename == kOldWMPPlugin) {
-      for (size_t i = 0; i < plugins_.size(); ++i) {
-        if (plugins_[i].path.BaseName().value() == kNewWMPPlugin)
-          return false;
-      }
+    }
+  } else if (filename == kOldWMPPlugin) {
+    for (size_t i = 0; i < plugins->size(); ++i) {
+      if ((*plugins)[i].path.BaseName().value() == kNewWMPPlugin)
+        return false;
     }
   }
 
   return true;
-}
-
-void PluginList::LoadInternalPlugins() {
-#ifdef GEARS_STATIC_LIB
-  LoadPlugin(FilePath(kGearsPluginLibraryName));
-#endif
-
-  if (!use_internal_activex_shim_)
-    return;
-
-  LoadPlugin(FilePath(kActiveXShimFileName));
-  LoadPlugin(FilePath(kActiveXShimFileNameForMediaPlayer));
 }
 
 } // namespace NPAPI

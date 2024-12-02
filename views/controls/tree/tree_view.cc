@@ -4,15 +4,15 @@
 
 #include "views/controls/tree/tree_view.h"
 
-#include <atlbase.h>
-#include <atlapp.h>
-#include <atlmisc.h>
+#include <vector>
 
 #include "app/gfx/canvas_paint.h"
 #include "app/gfx/icon_util.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
+#include "base/gfx/point.h"
+#include "base/keyboard_codes.h"
 #include "base/stl_util-inl.h"
 #include "base/win_util.h"
 #include "grit/app_resources.h"
@@ -53,7 +53,7 @@ TreeView::~TreeView() {
 void TreeView::SetModel(TreeModel* model) {
   if (model == model_)
     return;
-  if(model_ && tree_view_)
+  if (model_ && tree_view_)
     DeleteRootItems();
   if (model_)
     model_->SetObserver(NULL);
@@ -460,7 +460,7 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
   return 0;
 }
 
-bool TreeView::OnKeyDown(int virtual_key_code) {
+bool TreeView::OnKeyDown(base::KeyboardCode virtual_key_code) {
   if (virtual_key_code == VK_F2) {
     if (!GetEditingNode()) {
       TreeModelNode* selected_node = GetSelectedNode();
@@ -468,10 +468,10 @@ bool TreeView::OnKeyDown(int virtual_key_code) {
         StartEditing(selected_node);
     }
     return true;
-  } else if (virtual_key_code == VK_RETURN && !process_enter_) {
+  } else if (virtual_key_code == base::VKEY_RETURN && !process_enter_) {
     Widget* widget = GetWidget();
     DCHECK(widget);
-    Accelerator accelerator(Accelerator(static_cast<int>(virtual_key_code),
+    Accelerator accelerator(Accelerator(virtual_key_code,
                                         win_util::IsShiftPressed(),
                                         win_util::IsCtrlPressed(),
                                         win_util::IsAltPressed()));
@@ -481,7 +481,7 @@ bool TreeView::OnKeyDown(int virtual_key_code) {
   return false;
 }
 
-void TreeView::OnContextMenu(const WTL::CPoint& location) {
+void TreeView::OnContextMenu(const POINT& location) {
   if (!GetContextMenuController())
     return;
 
@@ -727,8 +727,7 @@ LRESULT CALLBACK TreeView::TreeWndProc(HWND window,
     case WM_RBUTTONDOWN:
       if (tree->select_on_right_mouse_down_) {
         TVHITTESTINFO hit_info;
-        hit_info.pt.x = GET_X_LPARAM(l_param);
-        hit_info.pt.y = GET_Y_LPARAM(l_param);
+        hit_info.pt = gfx::Point(l_param).ToPOINT();
         HTREEITEM hit_item = TreeView_HitTest(window, &hit_info);
         if (hit_item && (hit_info.flags & (TVHT_ONITEM | TVHT_ONITEMRIGHT |
                                            TVHT_ONITEMINDENT)) != 0)

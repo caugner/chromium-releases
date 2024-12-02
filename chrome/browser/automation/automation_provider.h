@@ -40,11 +40,16 @@ struct Reposition_Params;
 struct ExternalTabSettings;
 }
 
-class LoginHandler;
-class NavigationControllerRestoredObserver;
-class ExternalTabContainer;
 class ExtensionPortContainer;
+class ExternalTabContainer;
+class LoginHandler;
+class MetricEventDurationObserver;
+class NavigationControllerRestoredObserver;
 struct AutocompleteMatchData;
+
+namespace gfx {
+class Point;
+}
 
 class AutomationProvider : public base::RefCounted<AutomationProvider>,
                            public IPC::Channel::Listener,
@@ -65,22 +70,15 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void SetExpectedTabCount(size_t expected_tabs);
 
   // Add a listener for navigation status notification. Currently only
-  // navigation completion is observed; when the navigation completes, the
-  // completed_response object is sent; if the server requires authentication,
-  // we instead send the auth_needed_response object.  A pointer to the added
-  // navigation observer is returned. This object should NOT be deleted and
-  // should be released by calling the corresponding
+  // navigation completion is observed; when the |number_of_navigations|
+  // complete, the completed_response object is sent; if the server requires
+  // authentication, we instead send the auth_needed_response object.  A pointer
+  // to the added navigation observer is returned. This object should NOT be
+  // deleted and should be released by calling the corresponding
   // RemoveNavigationStatusListener method.
-  // The template argument NavigationCodeType facilitate the creation of the
-  // approriate NavigationNotificationObserver instance, which subscribes to
-  // the events published by the NotificationService and sends out a response
-  // to the IPC message.
-  template<class NavigationCodeType>
   NotificationObserver* AddNavigationStatusListener(
       NavigationController* tab, IPC::Message* reply_message,
-      NavigationCodeType success_code,
-      NavigationCodeType auth_needed_code,
-      NavigationCodeType failed_code);
+      int number_of_navigations);
 
   void RemoveNavigationStatusListener(NotificationObserver* obs);
 
@@ -130,6 +128,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
     return reply_message;
   }
 
+  // Adds the external tab passed in to the tab tracker.
+  bool AddExternalTab(ExternalTabContainer* external_tab);
+
  private:
   // IPC Message callbacks.
   void CloseBrowser(int handle, IPC::Message* reply_message);
@@ -157,35 +158,31 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void FindNormalBrowserWindow(int* handle);
   void GetLastActiveBrowserWindow(int* handle);
   void GetActiveWindow(int* handle);
-#if defined(OS_WIN)
-  // TODO(port): Replace HWND.
-  void GetWindowHWND(int handle, HWND* win32_handle);
-#endif  // defined(OS_WIN)
   void ExecuteBrowserCommandAsync(int handle, int command, bool* success);
   void ExecuteBrowserCommand(int handle, int command,
                              IPC::Message* reply_message);
+  void TerminateSession(int handle, bool* success);
   void WindowGetViewBounds(int handle, int view_id, bool screen_coordinates,
                            bool* success, gfx::Rect* bounds);
-#if defined(OS_WIN)
-  // TODO(port): Replace POINT.
   void WindowSimulateDrag(int handle,
-                          std::vector<POINT> drag_path,
+                          std::vector<gfx::Point> drag_path,
                           int flags,
                           bool press_escape_en_route,
                           IPC::Message* reply_message);
   void WindowSimulateClick(const IPC::Message& message,
-                          int handle,
-                          POINT click,
-                          int flags);
-#endif  // defined(OS_WIN)
+                           int handle,
+                           const gfx::Point& click,
+                           int flags);
   void WindowSimulateKeyPress(const IPC::Message& message,
                               int handle,
-                              wchar_t key,
+                              int key,
                               int flags);
+  void GetWindowBounds(int handle, gfx::Rect* bounds, bool* result);
   void SetWindowBounds(int handle, const gfx::Rect& bounds, bool* result);
   void SetWindowVisible(int handle, bool visible, bool* result);
   void IsWindowActive(int handle, bool* success, bool* is_active);
   void ActivateWindow(int handle);
+  void IsWindowMaximized(int handle, bool* is_maximized, bool* success);
 
   void GetTabCount(int handle, int* tab_count);
   void GetTab(int win_handle, int tab_index, int* tab_handle);
@@ -199,6 +196,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void GetTabURL(int handle, bool* success, GURL* url);
   void HandleUnused(const IPC::Message& message, int handle);
   void NavigateToURL(int handle, const GURL& url, IPC::Message* reply_message);
+  void NavigateToURLBlockUntilNavigationsComplete(int handle, const GURL& url,
+                                                  int number_of_navigations,
+                                                  IPC::Message* reply_message);
   void NavigationAsync(int handle, const GURL& url, bool* status);
   void GoBack(int handle, IPC::Message* reply_message);
   void GoForward(int handle, IPC::Message* reply_message);
@@ -221,12 +221,12 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void SetProxyConfig(const std::string& new_proxy_config);
 
 #if defined(OS_WIN)
-  // TODO(port): Replace POINT.
   void ScheduleMouseEvent(views::View* view,
                           views::Event::EventType type,
-                          POINT point,
+                          const gfx::Point& point,
                           int flags);
 #endif  // defined(OS_WIN)
+
   void GetFocusedViewID(int handle, int* view_id);
 
   // Helper function to find the browser window that contains a given
@@ -272,8 +272,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                                    int y,
                                    IPC::Message* reply_message);
 
-  void GetDownloadDirectory(int handle,
-                            std::wstring* download_directory);
+  void GetDownloadDirectory(int handle, FilePath* download_directory);
 
   // Retrieves a Browser from a Window and vice-versa.
   void GetWindowForBrowser(int window_handle, bool* success, int* handle);
@@ -296,9 +295,18 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                          gfx::NativeWindow* tab_window,
                          int* tab_handle);
 
+  void ConnectExternalTab(intptr_t cookie,
+                          gfx::NativeWindow* tab_container_window,
+                          gfx::NativeWindow* tab_window,
+                          int* tab_handle);
+
+  void OnSetPageFontSize(int tab_handle, int font_size);
+
   void NavigateInExternalTab(
-      int handle, const GURL& url,
+      int handle, const GURL& url, const GURL& referrer,
       AutomationMsg_NavigationResponseValues* status);
+  void NavigateExternalTabAtIndex(
+      int handle, int index, AutomationMsg_NavigationResponseValues* status);
 
 // TODO(port): remove windowisms.
 #if defined(OS_WIN)
@@ -330,6 +338,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void GetPageType(int handle, bool* success,
                    NavigationEntry::PageType* page_type);
 
+  // Gets the duration in ms of the last event matching |event_name|.
+  // |duration_ms| is -1 if the event hasn't occurred yet.
+  void GetMetricEventDuration(const std::string& event_name, int* duration_ms);
+
   // Simulates an action on the SSL blocking page at the tab specified by
   // |handle|. If |proceed| is true, it is equivalent to the user pressing the
   // 'Proceed' button, if false the 'Get me out of there button'.
@@ -354,8 +366,8 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   // Save the current web page.
   void SavePage(int tab_handle,
-                const std::wstring& file_name,
-                const std::wstring& dir_path,
+                const FilePath& file_name,
+                const FilePath& dir_path,
                 int type,
                 bool* success);
 
@@ -427,12 +439,12 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                             bool* success);
 
   // Gets the current used encoding name of the page in the specified tab.
-  void GetPageCurrentEncoding(int tab_handle, std::wstring* current_encoding);
+  void GetPageCurrentEncoding(int tab_handle, std::string* current_encoding);
 
   // Uses the specified encoding to override the encoding of the page in the
   // specified tab.
   void OverrideEncoding(int tab_handle,
-                        const std::wstring& encoding_name,
+                        const std::string& encoding_name,
                         bool* success);
 
   void SavePackageShouldPromptUser(bool should_prompt);
@@ -444,6 +456,30 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   // Returns the number of blocked popups in the tab |handle|.
   void GetBlockedPopupCount(int handle, int* count);
+
+  // Selects all contents on the page.
+  void SelectAll(int tab_handle);
+
+  // Edit operations on the page.
+  void Cut(int tab_handle);
+  void Copy(int tab_handle);
+  void Paste(int tab_handle);
+
+  void ReloadAsync(int tab_handle);
+  void StopAsync(int tab_handle);
+
+  void WaitForBrowserWindowCountToBecome(int target_count,
+                                         IPC::Message* reply_message);
+
+  void WaitForAppModalDialogToBeShown(IPC::Message* reply_message);
+
+  void GoBackBlockUntilNavigationsComplete(int handle,
+                                           int number_of_navigations,
+                                           IPC::Message* reply_message);
+
+  void GoForwardBlockUntilNavigationsComplete(int handle,
+                                              int number_of_navigations,
+                                              IPC::Message* reply_message);
 
   // Convert a tab handle into a TabContents. If |tab| is non-NULL a pointer
   // to the tab is also returned. Returns NULL in case of failure or if the tab
@@ -465,6 +501,10 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                                                     const std::string& origin,
                                                     const std::string& target);
 
+  // Returns the associated view for the tab handle passed in.
+  // Returns NULL on failure.
+  RenderViewHost* GetViewForTab(int tab_handle);
+
   typedef ObserverList<NotificationObserver> NotificationObserverList;
   typedef std::map<NavigationController*, LoginHandler*> LoginHandlerMap;
   typedef std::map<int, ExtensionPortContainer*> PortContainerMap;
@@ -475,6 +515,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   scoped_ptr<NotificationObserver> find_in_page_observer_;
   scoped_ptr<NotificationObserver> dom_operation_observer_;
   scoped_ptr<NotificationObserver> dom_inspector_observer_;
+  scoped_ptr<MetricEventDurationObserver> metric_event_duration_observer_;
   scoped_ptr<AutomationBrowserTracker> browser_tracker_;
   scoped_ptr<AutomationTabTracker> tab_tracker_;
   scoped_ptr<AutomationWindowTracker> window_tracker_;

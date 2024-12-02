@@ -8,6 +8,8 @@
 #include <windows.h>
 #endif
 
+#include <iostream>
+
 namespace gfx {
 
 Point::Point() : x_(0), y_(0) {
@@ -17,6 +19,12 @@ Point::Point(int x, int y) : x_(x), y_(y) {
 }
 
 #if defined(OS_WIN)
+Point::Point(DWORD point) {
+  POINTS points = MAKEPOINTS(point);
+  x_ = points.x;
+  y_ = points.y;
+}
+
 Point::Point(const POINT& point) : x_(point.x), y_(point.y) {
 }
 
@@ -42,3 +50,7 @@ CGPoint Point::ToCGPoint() const {
 #endif
 
 }  // namespace gfx
+
+std::ostream& operator<<(std::ostream& out, const gfx::Point& p) {
+  return out << p.x() << "," << p.y();
+}

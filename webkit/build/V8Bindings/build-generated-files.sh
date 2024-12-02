@@ -1,5 +1,9 @@
 #!/usr/bin/bash -x
-#
+
+# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
 # This build script is similar to the one found in webkit.
 # We've temporarily modified it to support conditional compiling of
 # the V8 DerivedSources.  When we build our DerivedSources, we build
@@ -43,7 +47,7 @@ export ENCODINGS_PREFIX=""
 
 # To see what FEATURE_DEFINES Apple uses, look at:
 # webkit/third_party/WebCore/Configurations/WebCore.xcconfig
-export FEATURE_DEFINES="ENABLE_DATABASE ENABLE_SVG ENABLE_SVG_ANIMATION ENABLE_SVG_AS_IMAGE ENABLE_SVG_FONTS ENABLE_SVG_FOREIGN_OBJECT ENABLE_SVG_USE ENABLE_VIDEO ENABLE_WORKERS ENABLE_CHANNEL_MESSAGING ENABLE_XPATH ENABLE_XSLT"
+export FEATURE_DEFINES="ENABLE_DATABASE ENABLE_SVG ENABLE_SVG_ANIMATION ENABLE_SVG_AS_IMAGE ENABLE_SVG_FONTS ENABLE_SVG_FOREIGN_OBJECT ENABLE_SVG_USE ENABLE_VIDEO ENABLE_WORKERS ENABLE_OFFLINE_WEB_APPLICATIONS ENABLE_CHANNEL_MESSAGING ENABLE_XPATH ENABLE_XSLT"
 
 # Adjust the number of jobs spawned according to the CPU count.
 if [ -z "$NUMBER_OF_PROCESSORS" ]; then

@@ -28,12 +28,16 @@ DownloadShelfContextMenu::~DownloadShelfContextMenu() {
 
 bool DownloadShelfContextMenu::ItemIsChecked(int id) const {
   switch (id) {
-    case OPEN_WHEN_COMPLETE:
+    case OPEN_WHEN_COMPLETE: {
       return download_->open_when_complete();
+    }
     case ALWAYS_OPEN_TYPE: {
       const FilePath::StringType extension =
           file_util::GetFileExtensionFromPath(download_->full_path());
       return download_->manager()->ShouldOpenFileExtension(extension);
+    }
+    case TOGGLE_PAUSE: {
+      return download_->is_paused();
     }
   }
   return false;
@@ -46,7 +50,7 @@ bool DownloadShelfContextMenu::ItemIsDefault(int id) const {
 std::wstring DownloadShelfContextMenu::GetItemLabel(int id) const {
   switch (id) {
     case SHOW_IN_FOLDER:
-      return l10n_util::GetString(IDS_DOWNLOAD_LINK_SHOW);
+      return l10n_util::GetString(IDS_DOWNLOAD_MENU_SHOW);
     case OPEN_WHEN_COMPLETE:
       if (download_->state() == DownloadItem::IN_PROGRESS)
         return l10n_util::GetString(IDS_DOWNLOAD_MENU_OPEN_WHEN_COMPLETE);
@@ -55,6 +59,12 @@ std::wstring DownloadShelfContextMenu::GetItemLabel(int id) const {
       return l10n_util::GetString(IDS_DOWNLOAD_MENU_ALWAYS_OPEN_TYPE);
     case CANCEL:
       return l10n_util::GetString(IDS_DOWNLOAD_MENU_CANCEL);
+    case TOGGLE_PAUSE: {
+      if (download_->is_paused())
+        return l10n_util::GetString(IDS_DOWNLOAD_MENU_RESUME_ITEM);
+      else
+        return l10n_util::GetString(IDS_DOWNLOAD_MENU_PAUSE_ITEM);
+    }
     default:
       NOTREACHED();
   }
@@ -69,6 +79,8 @@ bool DownloadShelfContextMenu::IsItemCommandEnabled(int id) const {
     case ALWAYS_OPEN_TYPE:
       return download_util::CanOpenDownload(download_);
     case CANCEL:
+      return download_->state() == DownloadItem::IN_PROGRESS;
+    case TOGGLE_PAUSE:
       return download_->state() == DownloadItem::IN_PROGRESS;
     default:
       return id > 0 && id < MENU_LAST;
@@ -92,6 +104,13 @@ void DownloadShelfContextMenu::ExecuteItemCommand(int id) {
     }
     case CANCEL:
       model_->CancelTask();
+      break;
+    case TOGGLE_PAUSE:
+      // It is possible for the download to complete before the user clicks the
+      // menu item, recheck if the download is in progress state before toggling
+      // pause.
+      if (download_->state() == DownloadItem::IN_PROGRESS)
+        download_->TogglePause();
       break;
     default:
       NOTREACHED();

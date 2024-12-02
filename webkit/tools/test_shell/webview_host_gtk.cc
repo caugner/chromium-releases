@@ -10,20 +10,25 @@
 #include "base/gfx/rect.h"
 #include "base/gfx/size.h"
 #include "skia/ext/platform_canvas.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/plugins/gtk_plugin_container.h"
-#include "webkit/glue/webview.h"
+#include "webkit/glue/webpreferences.h"
+#include "webkit/tools/test_shell/test_webview_delegate.h"
+
+using WebKit::WebView;
 
 // static
 WebViewHost* WebViewHost::Create(GtkWidget* parent_view,
-                                 WebViewDelegate* delegate,
+                                 TestWebViewDelegate* delegate,
                                  const WebPreferences& prefs) {
   WebViewHost* host = new WebViewHost();
 
   host->view_ = WebWidgetHost::CreateWidget(parent_view, host);
   host->plugin_container_manager_.set_host_widget(host->view_);
-  g_object_set_data(G_OBJECT(host->view_), "webwidgethost", host);
 
-  host->webwidget_ = WebView::Create(delegate, prefs);
+  host->webwidget_ = WebView::create(delegate);
+  prefs.Apply(host->webview());
+  host->webview()->initializeMainFrame(delegate);
   host->webwidget_->layout();
 
   return host;
@@ -33,10 +38,10 @@ WebView* WebViewHost::webview() const {
   return static_cast<WebView*>(webwidget_);
 }
 
-GdkNativeWindow WebViewHost::CreatePluginContainer() {
-  return plugin_container_manager_.CreatePluginContainer();
+void WebViewHost::CreatePluginContainer(gfx::PluginWindowHandle id) {
+  plugin_container_manager_.CreatePluginContainer(id);
 }
 
-void WebViewHost::OnPluginWindowDestroyed(GdkNativeWindow id) {
+void WebViewHost::DestroyPluginContainer(gfx::PluginWindowHandle id) {
   plugin_container_manager_.DestroyPluginContainer(id);
 }

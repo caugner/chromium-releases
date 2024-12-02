@@ -7,11 +7,16 @@
 
 #include <map>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "chrome/browser/bookmarks/base_bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/views/bookmark_context_menu.h"
-#include "views/controls/menu/chrome_menu.h"
+#include "views/controls/menu/menu_delegate.h"
+#include "views/controls/menu/menu_item_view.h"
+
+namespace gfx {
+class Rect;
+}
 
 class BookmarkContextMenu;
 class BookmarkNode;
@@ -38,7 +43,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   BookmarkMenuController(Browser* browser,
                          Profile* profile,
                          PageNavigator* page_navigator,
-                         gfx::NativeView parent,
+                         gfx::NativeWindow parent,
                          const BookmarkNode* node,
                          int start_child_index,
                          bool show_other_folder);
@@ -67,6 +72,11 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   // MenuDelegate methods.
   virtual bool IsTriggerableEvent(const views::MouseEvent& e);
   virtual void ExecuteCommand(int id, int mouse_event_flags);
+  virtual bool GetDropFormats(
+      views::MenuItemView* menu,
+      int* formats,
+      std::set<OSExchangeData::CustomFormat>* custom_formats);
+  virtual bool AreDropTypesRequired(views::MenuItemView* menu);
   virtual bool CanDrop(views::MenuItemView* menu, const OSExchangeData& data);
   virtual int GetDropOperation(views::MenuItemView* item,
                                const views::DropTargetEvent& event,
@@ -110,7 +120,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
   PageNavigator* page_navigator_;
 
   // Parent of menus.
-  gfx::NativeView parent_;
+  gfx::NativeWindow parent_;
 
   // The node we're showing the contents of.
   const BookmarkNode* node_;

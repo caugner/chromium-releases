@@ -9,17 +9,21 @@
 
 #include "base/scoped_nsobject.h"
 
+@class GTMTheme;
+
 // Base class for button cells for toolbar and bookmark bar.
 //
 // This is a button cell that handles drawing/highlighting of buttons.
 // The appearance is determined by setting the cell's tag (not the
 // view's) to one of the constants below (ButtonType).
 
+// Set this as the cell's tag.
 enum {
   kLeftButtonType = -1,
   kLeftButtonWithShadowType = -2,
   kStandardButtonType = 0,
   kRightButtonType = 1,
+  kMiddleButtonType = 2,
 };
 typedef NSInteger ButtonType;
 
@@ -30,9 +34,34 @@ typedef NSInteger ButtonType;
   BOOL isMouseInside_;
   scoped_nsobject<NSTrackingArea> trackingArea_;
   BOOL shouldTheme_;
+  CGFloat hoverAlpha_;  // 0-1. Controls the alpha during mouse hover
+  NSTimeInterval lastHoverUpdate_;
+  scoped_nsobject<NSGradient> gradient_;
+  scoped_nsobject<NSImage> underlayImage_;
 }
+
 // Turn off theming.  Temporary work-around.
 - (void)setShouldTheme:(BOOL)shouldTheme;
+
+- (void)drawBorderAndFillForTheme:(GTMTheme*)theme
+                      controlView:(NSView*)controlView
+                        outerPath:(NSBezierPath*)outerPath
+                        innerPath:(NSBezierPath*)innerPath
+              showClickedGradient:(BOOL)showClickedGradient
+            showHighlightGradient:(BOOL)showHighlightGradient
+                       hoverAlpha:(CGFloat)hoverAlpha
+                           active:(BOOL)active
+                        cellFrame:(NSRect)cellFrame;
+
+// An image to underlay beneath the existing image; not themed. May be nil.
+- (NSImage*)underlayImage;
+- (void)setUnderlayImage:(NSImage*)image;
+
+// Let the view know when the mouse moves in and out. A timer will update
+// the current hoverAlpha_ based on these events.
+- (void)setMouseInside:(BOOL)flag animate:(BOOL)animate;
+
+@property(assign, nonatomic)CGFloat hoverAlpha;
 @end
 
 @interface GradientButtonCell(TestingAPI)

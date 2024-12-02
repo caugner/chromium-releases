@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
@@ -12,6 +14,7 @@
 #include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/ssl_config_service.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_request_info.h"
@@ -47,17 +50,19 @@ class Client {
  public:
   Client(net::HttpTransactionFactory* factory, const std::string& url) :
       url_(url),
-      transaction_(factory->CreateTransaction()),
       buffer_(new net::IOBuffer(kBufferSize)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           connect_callback_(this, &Client::OnConnectComplete)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           read_callback_(this, &Client::OnReadComplete)) {
+    int rv = factory->CreateTransaction(&transaction_);
+    DCHECK_EQ(net::OK, rv);
     buffer_->AddRef();
     driver_->ClientStarted();
     request_info_.url = url_;
     request_info_.method = "GET";
-    int state = transaction_->Start(&request_info_, &connect_callback_);
+    int state = transaction_->Start(
+        &request_info_, &connect_callback_, NULL);
     DCHECK(state == net::ERR_IO_PENDING);
   };
 
@@ -113,31 +118,35 @@ int main(int argc, char**argv) {
   StatsTable table("fetchclient", 50, 1000);
   table.set_current(&table);
 
-  CommandLine::Init(0, NULL);
+  CommandLine::Init(argc, argv);
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  std::string url = WideToASCII(parsed_command_line.GetSwitchValue(L"url"));
+  std::string url = WideToASCII(parsed_command_line.GetSwitchValue("url"));
   if (!url.length())
     usage(argv[0]);
   int client_limit = 1;
-  if (parsed_command_line.HasSwitch(L"n"))
-    StringToInt(WideToASCII(parsed_command_line.GetSwitchValue(L"n")),
+  if (parsed_command_line.HasSwitch("n"))
+    StringToInt(WideToASCII(parsed_command_line.GetSwitchValue("n")),
                 &client_limit);
-  bool use_cache = parsed_command_line.HasSwitch(L"use-cache");
+  bool use_cache = parsed_command_line.HasSwitch("use-cache");
 
   // Do work here.
-  MessageLoop loop;
+  MessageLoop loop(MessageLoop::TYPE_IO);
 
   scoped_refptr<net::HostResolver> host_resolver(
       net::CreateSystemHostResolver());
 
-  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
+  scoped_refptr<net::ProxyService> proxy_service(
+      net::ProxyService::CreateNull());
+  scoped_refptr<net::SSLConfigService> ssl_config_service(
+      net::SSLConfigService::CreateSystemSSLConfigService());
   net::HttpTransactionFactory* factory = NULL;
   if (use_cache) {
-    factory = new net::HttpCache(host_resolver, proxy_service.get(), 0);
+    factory = new net::HttpCache(host_resolver, proxy_service,
+                                 ssl_config_service, 0);
   } else {
     factory = new net::HttpNetworkLayer(
         net::ClientSocketFactory::GetDefaultFactory(), host_resolver,
-        proxy_service.get());
+        proxy_service, ssl_config_service);
   }
 
   {
@@ -175,7 +184,7 @@ int main(int argc, char**argv) {
     printf("Bandwidth   : %.2f%s\n", bps, units);
   }
 
-  if (parsed_command_line.HasSwitch(L"stats")) {
+  if (parsed_command_line.HasSwitch("stats")) {
     // Dump the stats table.
     printf("<stats>\n");
     int counter_max = table.GetMaxCounters();

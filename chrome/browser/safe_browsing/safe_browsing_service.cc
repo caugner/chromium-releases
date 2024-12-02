@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -38,16 +38,13 @@ SafeBrowsingService::SafeBrowsingService()
       resetting_(false),
       database_loaded_(false),
       update_in_progress_(false) {
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
-  DCHECK(monitor);
-  if (monitor)
-    monitor->AddObserver(this);
+  base::SystemMonitor::Get()->AddObserver(this);
 }
 
 SafeBrowsingService::~SafeBrowsingService() {
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
-  if (monitor)
-    monitor->RemoveObserver(this);
+  base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
+  if (system_monitor)
+    system_monitor->RemoveObserver(this);
 }
 
 // Only called on the UI thread.
@@ -374,17 +371,11 @@ SafeBrowsingDatabase* SafeBrowsingService::GetDatabase() {
   SafeBrowsingDatabase* database = SafeBrowsingDatabase::Create();
   Callback0::Type* chunk_callback =
       NewCallback(this, &SafeBrowsingService::ChunkInserted);
-  bool init_success = database->Init(path, chunk_callback);
+  database->Init(path, chunk_callback);
+  database_ = database;
 
   io_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &SafeBrowsingService::DatabaseLoadComplete, !init_success));
-
-  if (!init_success) {
-    NOTREACHED();
-    return NULL;
-  }
-
-  database_ = database;
+      this, &SafeBrowsingService::DatabaseLoadComplete));
 
   TimeDelta open_time = Time::Now() - before;
   SB_DLOG(INFO) << "SafeBrowsing database open took " <<
@@ -535,15 +526,14 @@ void SafeBrowsingService::OnChunkInserted() {
     protocol_manager_->OnChunkInserted();
 }
 
-void SafeBrowsingService::DatabaseLoadComplete(bool database_error) {
+void SafeBrowsingService::DatabaseLoadComplete() {
   DCHECK(MessageLoop::current() == io_loop_);
   if (!enabled_)
     return;
 
   database_loaded_ = true;
 
-  // TODO(paulg): More robust database initialization error handling.
-  if (protocol_manager_ && !database_error)
+  if (protocol_manager_)
     protocol_manager_->Initialize();
 
   // If we have any queued requests, we can now check them.
@@ -663,14 +653,11 @@ void SafeBrowsingService::CacheHashResults(
   GetDatabase()->CacheHashResults(prefixes, full_hashes);
 }
 
-void SafeBrowsingService::OnSuspend(base::SystemMonitor*) {
-}
-
 // Tell the SafeBrowsing database not to do expensive disk operations for a few
 // minutes after waking up. It's quite likely that the act of resuming from a
 // low power state will involve much disk activity, which we don't want to
 // exacerbate.
-void SafeBrowsingService::OnResume(base::SystemMonitor*) {
+void SafeBrowsingService::OnResume() {
   if (enabled_) {
     safe_browsing_thread_->message_loop()->PostTask(FROM_HERE,
         NewRunnableMethod(this, &SafeBrowsingService::HandleResume));

@@ -21,7 +21,7 @@
       'filepath': 'cocoa|\.mm$|(_mac|_posix)\.(cc|h)$',
     },
     'base': {
-      'filepath': 'base/.*',
+      'filepath': '^base/.*',
     },
     'extension': {
       'filepath': 'extension',
@@ -60,6 +60,9 @@
     'net': {
       'filepath': 'net/.*',
     },
+    'ftp': {
+      'filepath': 'ftp',
+    },
     'installer': {
       'filepath': 'chrome/installer/.*',
     },
@@ -75,32 +78,62 @@
     'linux-sandboxing': {
       'filepath': 'sandbox/linux/.*',
     },
+    'sync': {
+      'filepath': 'chrome/browser/sync/.*|chrome/browser/views/sync/.*|chrome/test/live_sync/.*',
+    },
+    'layout_tests': {
+      'filepath': 'webkit/(tools|data)/(layout_tests|test_shell)/.*',
+    },
+    'tools': {
+      'filepath': 'tools/.*',
+    },
+    'tests': {
+      'filepath': 'apitest|unittest|browsertest|uitest|chrome/test/.*',
+    },
+    'automation': {
+      'filepath': 'chrome/browser/automation/.*|chrome/test/automation/.*',
+    },
+    'chrome_frame': {
+      'filepath': 'chrome_frame/.*',
+    },
+    'nacl': {
+      'filepath': 'chrome/nacl/.*|chrome/test/nacl/.*|chrome/browser/nacl_process_host.*|chrome/common/nacl.*',
+    },
+
   },
 
   'WATCHLISTS': {
     'this_file': ['nirnimesh@chromium.org'],
-    'valgrind': ['nirnimesh@chromium.org', 'dank@chromium.org', 'timurrrr@gmail.com', 'stuartmorgan@chromium.org', 'ramosian.glider@gmail.com'],
-    'mac': ['jrg@chromium.org'],
-    'base': ['brettw@chromium.org'],
-    'views': ['ben@chromium.org'],
-    'browser': ['ben@chromium.org'],
+    'valgrind': ['nirnimesh@chromium.org', 'dank@chromium.org', 'timurrrr@chromium.org', 'stuartmorgan@chromium.org', 'ramosian.glider@gmail.com'],
+    'mac': ['jrg@chromium.org', 'pam+watch@chromium.org'],
+    'base': ['brettw+cc@chromium.org'],
+    'views': ['ben+cc@chromium.org'],
+    'browser': ['ben+cc@chromium.org'],
     'download': ['paul@chromium.org'],
-    'history': ['brettw@chromium.org'],
-    'renderer': ['darin@chromium.org', 'brettw@chromium.org', 'jam@chromium.org'],
+    'history': ['brettw+cc@chromium.org'],
+    'renderer': ['darin@chromium.org', 'brettw+cc@chromium.org', 'jam@chromium.org'],
     'safe_browsing': ['paul@chromium.org'],
-    'tab_contents': ['brettw@chromium.org'],
+    'tab_contents': ['brettw+cc@chromium.org'],
     'webkit': ['darin@chromium.org'],
     'plugin': ['darin@chromium.org', 'jam@chromium.org'],
     'worker': ['jam@chromium.org'],
-    'extension': ['erikkay@chromium.org'],
+    'extension': ['aa@chromium.org', 'erikkay@chromium.org', 'pam+watch@chromium.org'],
     'purify': ['erikkay@chromium.org'],
-    'net': ['darin@chromium.org', 'willchan@chromium.org'],
+    'net': ['darin@chromium.org'],
+    'ftp': ['phajdan.jr@chromium.org'],
     'installer': ['kuchhal@chromium.org'],
     'importer': ['kuchhal@chromium.org'],
     'media': ['ajwong@chromium.org', 'fbarchard@chromium.org',
-              'hclam@chromium.org', 'kylep@chromium.org',
-              'scherkus@chromium.org'],
+              'hclam@chromium.org', 'scherkus@chromium.org'],
     'ipc': ['jam@chromium.org'],
     'linux-sandboxing': ['agl@chromium.org'],
+    'sync': ['tim@chromium.org', 'nick@chromium.org',
+             'idana@chromium.org'],
+    'layout_tests': ['pam+watch@chromium.org'],
+    'tools': ['pam+watch@chromium.org'],
+    'tests': ['phajdan.jr@chromium.org'],
+    'automation': ['phajdan.jr@chromium.org'],
+    'chrome_frame' : ['amit@chromium.org'],
+    'nacl' : ['native-client-reviews@googlegroups.com'],
   },
 }

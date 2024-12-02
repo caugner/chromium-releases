@@ -8,12 +8,9 @@ MockRenderProcessHost::MockRenderProcessHost(Profile* profile)
     : RenderProcessHost(profile),
       transport_dib_(NULL),
       bad_msg_count_(0) {
-  static int prev_pid = 0;
-  SetProcessID(++prev_pid);
 }
 
 MockRenderProcessHost::~MockRenderProcessHost() {
-  RemoveFromList();
   delete transport_dib_;
 }
 
@@ -49,7 +46,10 @@ void MockRenderProcessHost::WidgetRestored() {
 void MockRenderProcessHost::WidgetHidden() {
 }
 
-void MockRenderProcessHost::AddWord(const std::wstring& word) {
+void MockRenderProcessHost::ViewCreated() {
+}
+
+void MockRenderProcessHost::AddWord(const string16& word) {
 }
 
 void MockRenderProcessHost::AddVisitedLinks(
@@ -60,7 +60,10 @@ void MockRenderProcessHost::ResetVisitedLinks() {
 }
 
 bool MockRenderProcessHost::FastShutdownIfPossible() {
-  return false;
+  // We aren't actually going to do anything, but set |fast_shutdown_started_|
+  // to true so that tests know we've been called.
+  fast_shutdown_started_ = true;
+  return true;
 }
 
 bool MockRenderProcessHost::SendWithTimeout(IPC::Message* msg, int timeout_ms) {

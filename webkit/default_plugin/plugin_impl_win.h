@@ -1,15 +1,14 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_DEFAULT_PLUGIN_PLUGIN_IMPL_WIN_H_
 #define WEBKIT_DEFAULT_PLUGIN_PLUGIN_IMPL_WIN_H_
 
-#include <atlbase.h>
-#include <atlwin.h>
 #include <string>
 #include <vector>
 
+#include "app/win/window_impl.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "webkit/default_plugin/install_dialog.h"
 #include "webkit/default_plugin/plugin_database_handler.h"
@@ -29,32 +28,29 @@ enum PluginInstallerState {
   PluginInstallerLaunchFailure
 };
 
-class ActiveXInstaller;
 class PluginInstallDialog;
 class PluginDatabaseHandler;
 
 // Provides the plugin installation functionality. This class is
 // instantiated with the information like the mime type of the
 // target plugin, the display mode, etc.
-class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
+class PluginInstallerImpl : public app::WindowImpl {
  public:
   static const int kRefreshPluginsMessage  = WM_APP + 1;
   static const int kInstallMissingPluginMessage = WM_APP + 2;
-  static const int kActivexInstallResult = WM_USER + 74;
 
   // mode is the plugin instantiation mode, i.e. whether it is a full
   // page plugin (NP_FULL) or an embedded plugin (NP_EMBED)
   explicit PluginInstallerImpl(int16 mode);
   virtual ~PluginInstallerImpl();
 
-  BEGIN_MSG_MAP(PluginInstallerImpl)
+  BEGIN_MSG_MAP_EX(PluginInstallerImpl)
     MESSAGE_HANDLER(WM_ERASEBKGND, OnEraseBackGround)
     MESSAGE_HANDLER(WM_PAINT, OnPaint)
     MESSAGE_HANDLER(WM_LBUTTONDOWN, OnLButtonDown)
     MESSAGE_HANDLER(kRefreshPluginsMessage, OnRefreshPlugins)
     MESSAGE_HANDLER(WM_COPYDATA, OnCopyData)
     MESSAGE_HANDLER(WM_SETCURSOR, OnSetCursor)
-    MESSAGE_HANDLER(kActivexInstallResult, OnActiveXInstallResult)
   END_MSG_MAP()
 
   // Initializes the plugin with the instance information, mime type
@@ -144,14 +140,9 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
   //   Describes why the notification was sent.
   void URLNotify(const char* url, NPReason reason);
 
-  // Initiates activex installs if applicable.
-  // Note: The null plugin being a windowed plugin does not have to implement
-  // NPP_HandleEvent. However to handle activex installations, we have this
-  // hack to allow the renderer to send out a request for installing the
-  // activex.
+  // Used by the renderer to indicate plugin install through the infobar.
   int16 NPP_HandleEvent(void* event);
 
-  HWND window() const { return m_hWnd; }
   const std::string& mime_type() const { return mime_type_; }
 
   // Replaces a resource string with the placeholder passed in as an argument
@@ -189,43 +180,8 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
 
   // Returns whether or not the UI layout is right-to-left (such as Hebrew or
   // Arabic).
-  bool IsRTLLayout() const;
+  static bool IsRTLLayout();
 
-  // Parses the plugin instantiation arguments. This includes checking for
-  // whether this is an activex install and reading the appropriate
-  // arguments like codebase, etc. For plugin installs we download the
-  // plugin finder URL and initalize the mime type and the plugin instance
-  // info.
-  //
-  // Parameters:
-  // module_handle: The handle to the dll in which this object is instantiated.
-  // instance: The plugins opaque instance handle.
-  // mime_type: Identifies the third party plugin
-  // argc: Indicates the count of arguments passed in from the webpage.
-  // argv: Pointer to the arguments.
-  // raw_activex_clsid: Output parameter which contains the CLSID of the
-  //                    Activex plugin needed for an Activex install
-  // is_activex: Output parameter indicating if this is an activex install
-  // activex_clsid: Output parameter containing the classid of the activex
-  //                for an activex install
-  // activex_codebase: Output parameter containing the activex codebase if
-  //                   this is an activex install
-  // plugin_download_url: Output parameter containing the plugin download url
-  //                      on success.
-  // plugin_finder_url: Output parameter containing the plugin finder url on
-  //                    success.
-  // Returns true on success.
-  static bool ParseInstantiationArguments(NPMIMEType mime_type,
-                                          NPP instance,
-                                          int16 argc,
-                                          char* argn[],
-                                          char* argv[],
-                                          std::string* raw_activex_clsid,
-                                          bool* is_activex,
-                                          std::string* activex_clsid,
-                                          std::string* activex_codebase,
-                                          std::string* plugin_download_url,
-                                          std::string* plugin_finder_url);
  protected:
   // Window message handlers.
   LRESULT OnPaint(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
@@ -244,10 +200,6 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
   // received when the request to download the installer, initiated by
   // plugin completes.
   LRESULT OnCopyData(UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
-
-  // Displays status information for ActiveX installs
-  LRESULT OnActiveXInstallResult(UINT message, WPARAM wparam, LPARAM lparam,
-                                 BOOL& handled);
 
   // Displays the plugin install confirmation dialog.
   void ShowInstallDialog();
@@ -280,17 +232,6 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
   // Update ToolTip text with the message shown inside the default plugin.
   void UpdateToolTip();
 
-  // Resolves the relative URL (could be already an absolute URL too) to return
-  // full URL based on current document's URL and base.
-  //
-  // Parameters:
-  // instance
-  //   The plugins opaque instance handle.
-  // relative_url
-  //   The URL to be resolved.
-  // Returns the resolved URL.
-  static std::string ResolveURL(NPP instance, const std::string& relative_url);
-
   // Initializes resources like the icon, fonts, etc needed by the plugin
   // installer
   //
@@ -320,8 +261,6 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
 
   // The plugins opaque instance handle
   NPP instance_;
-  // If this is to install activex
-  bool is_activex_;
   // The plugin instantiation mode (NP_FULL or NP_EMBED)
   int16 mode_;
   // The handle to the icon displayed in the plugin installation window.
@@ -350,7 +289,7 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
   // The current state of the plugin installer.
   PluginInstallerState plugin_installer_state_;
   // Used to display the UI for plugin installation.
-  PluginInstallDialog install_dialog_;
+  PluginInstallDialog* install_dialog_;
   // To enable auto refresh of the plugin window once the installation
   // is complete, we spawn the installation process in a job, and monitor
   // IO completion events on the job. When the active process count of the
@@ -370,12 +309,8 @@ class PluginInstallerImpl : public CWindowImpl<PluginInstallerImpl> {
   HFONT underline_font_;
   // Tooltip Window.
   HWND tooltip_;
-  // ActiveX related.
-  std::string activex_codebase_;
-  std::string activex_clsid_;
-  CComObject<ActiveXInstaller>* activex_installer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginInstallerImpl);
+  DISALLOW_COPY_AND_ASSIGN(PluginInstallerImpl);
 };
 
 

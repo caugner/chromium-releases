@@ -39,6 +39,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
  protected:
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const;
+  virtual bool AlwaysUseNativeFrame() const;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const;
   virtual gfx::Point GetSystemMenuPoint() const;
@@ -59,7 +60,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual void SetAccessibleName(const std::wstring& name);
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // Overridden from TabIconView::TabIconViewModel:
   virtual bool ShouldTabIconViewAnimate() const;
@@ -92,6 +93,10 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // the entire titlebar including any connected client edge.
   int TitleCoordinates(int* title_top_spacing_ptr,
                        int* title_thickness_ptr) const;
+
+  // Returns the right edge. This is the end the close button starts at (if a
+  // close button is shown).
+  int RightEdge() const;
 
   // Calculates multiple values related to icon layout.  Returns the size of the
   // icon (along one edge).

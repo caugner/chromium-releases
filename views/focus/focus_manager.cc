@@ -12,16 +12,13 @@
 #include <gtk/gtk.h>
 #endif
 
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/accelerator.h"
 #include "views/focus/view_storage.h"
 #include "views/view.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
-
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#endif
 
 namespace views {
 
@@ -41,49 +38,36 @@ FocusManager::~FocusManager() {
   DCHECK(focus_change_listeners_.empty());
 }
 
-#if defined(OS_WIN)
-// Message handlers.
-bool FocusManager::OnKeyDown(HWND window, UINT message, WPARAM wparam,
-                             LPARAM lparam) {
-  DCHECK((message == WM_KEYDOWN) || (message == WM_SYSKEYDOWN));
-  HWND hwnd = widget_->GetNativeView();
-
-  if (!IsWindowVisible(hwnd)) {
-    // We got a message for a hidden window. Because WidgetWin::Close hides the
-    // window, then destroys it, it it possible to get a message after we've
-    // hidden the window. If we allow the message to be dispatched chances are
-    // we'll crash in some weird place. By returning false we make sure the
-    // message isn't dispatched.
-    return false;
-  }
-
-  int virtual_key_code = static_cast<int>(wparam);
-  int repeat_count = LOWORD(lparam);
-  int flags = HIWORD(lparam);
-  KeyEvent key_event(Event::ET_KEY_PRESSED,
-                     virtual_key_code, repeat_count, flags);
-
+bool FocusManager::OnKeyEvent(const KeyEvent& event) {
   // If the focused view wants to process the key event as is, let it be.
-  if (focused_view_ && focused_view_->SkipDefaultKeyEventProcessing(key_event))
+  if (focused_view_ && focused_view_->SkipDefaultKeyEventProcessing(event))
     return true;
 
   // Intercept Tab related messages for focus traversal.
   // Note that we don't do focus traversal if the root window is not part of the
   // active window hierarchy as this would mean we have no focused view and
   // would focus the first focusable view.
+#if defined(OS_WIN)
   HWND top_window = widget_->GetNativeView();
   HWND active_window = ::GetActiveWindow();
   if ((active_window == top_window || ::IsChild(active_window, top_window)) &&
-       IsTabTraversalKeyEvent(key_event)) {
-    AdvanceFocus(win_util::IsShiftPressed());
+       IsTabTraversalKeyEvent(event)) {
+    AdvanceFocus(event.IsShiftDown());
     return false;
   }
+#else
+  if (IsTabTraversalKeyEvent(event)) {
+    AdvanceFocus(event.IsShiftDown());
+    return false;
+  }
+#endif
 
   // Intercept arrow key messages to switch between grouped views.
+  base::KeyboardCode key_code = event.GetKeyCode();
   if (focused_view_ && focused_view_->GetGroup() != -1 &&
-      (virtual_key_code == VK_UP || virtual_key_code == VK_DOWN ||
-       virtual_key_code == VK_LEFT || virtual_key_code == VK_RIGHT)) {
-    bool next = (virtual_key_code == VK_RIGHT || virtual_key_code == VK_DOWN);
+      (key_code == base::VKEY_UP || key_code == base::VKEY_DOWN ||
+       key_code == base::VKEY_LEFT || key_code == base::VKEY_RIGHT)) {
+    bool next = (key_code == base::VKEY_RIGHT || key_code == base::VKEY_DOWN);
     std::vector<View*> views;
     focused_view_->GetParent()->GetViewsWithGroup(focused_view_->GetGroup(),
                                                   &views);
@@ -103,22 +87,19 @@ bool FocusManager::OnKeyDown(HWND window, UINT message, WPARAM wparam,
   }
 
   // Process keyboard accelerators.
-  // We process accelerators here as we have no way of knowing if a HWND has
-  // really processed a key event. If the key combination matches an
-  // accelerator, the accelerator is triggered, otherwise we forward the
-  // event to the HWND.
-  Accelerator accelerator(Accelerator(static_cast<int>(virtual_key_code),
-                                      win_util::IsShiftPressed(),
-                                      win_util::IsCtrlPressed(),
-                                      win_util::IsAltPressed()));
+  // If the key combination matches an accelerator, the accelerator is
+  // triggered, otherwise the key event is processed as usual.
+  Accelerator accelerator(event.GetKeyCode(),
+                          event.IsShiftDown(),
+                          event.IsControlDown(),
+                          event.IsAltDown());
   if (ProcessAccelerator(accelerator)) {
     // If a shortcut was activated for this keydown message, do not propagate
-    // the message further.
+    // the event further.
     return false;
   }
   return true;
 }
-#endif
 
 void FocusManager::ValidateFocusedView() {
   if (focused_view_) {
@@ -243,31 +224,32 @@ View* FocusManager::GetNextFocusableView(View* original_starting_view,
 }
 
 void FocusManager::SetFocusedView(View* view) {
-  if (focused_view_ != view) {
-    View* prev_focused_view = focused_view_;
-    if (focused_view_)
-      focused_view_->WillLoseFocus();
+  if (focused_view_ == view)
+    return;
 
-    if (view)
-      view->WillGainFocus();
+  View* prev_focused_view = focused_view_;
+  if (focused_view_)
+    focused_view_->WillLoseFocus();
 
-    // Notified listeners that the focus changed.
-    FocusChangeListenerList::const_iterator iter;
-    for (iter = focus_change_listeners_.begin();
-         iter != focus_change_listeners_.end(); ++iter) {
-      (*iter)->FocusWillChange(prev_focused_view, view);
-    }
+  if (view)
+    view->WillGainFocus();
 
-    focused_view_ = view;
+  // Notified listeners that the focus changed.
+  FocusChangeListenerList::const_iterator iter;
+  for (iter = focus_change_listeners_.begin();
+       iter != focus_change_listeners_.end(); ++iter) {
+    (*iter)->FocusWillChange(prev_focused_view, view);
+  }
 
-    if (prev_focused_view)
-      prev_focused_view->SchedulePaint();  // Remove focus artifacts.
+  focused_view_ = view;
 
-    if (view) {
-      view->SchedulePaint();
-      view->Focus();
-      view->DidGainFocus();
-    }
+  if (prev_focused_view)
+    prev_focused_view->SchedulePaint();  // Remove focus artifacts.
+
+  if (view) {
+    view->SchedulePaint();
+    view->Focus();
+    view->DidGainFocus();
   }
 }
 
@@ -410,7 +392,6 @@ bool FocusManager::ProcessAccelerator(const Accelerator& accelerator) {
         return true;
     }
   }
-
   return false;
 }
 
@@ -424,12 +405,8 @@ AcceleratorTarget* FocusManager::GetCurrentTargetForAccelerator(
 
 // static
 bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
-#if defined(OS_WIN)
-  return key_event.GetCharacter() == VK_TAB && !win_util::IsCtrlPressed();
-#else
-  NOTIMPLEMENTED();
-  return false;
-#endif
+  return key_event.GetKeyCode() == base::VKEY_TAB &&
+         !key_event.IsControlDown();
 }
 
 void FocusManager::ViewRemoved(View* parent, View* removed) {

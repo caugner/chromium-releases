@@ -38,7 +38,7 @@
 }
 - (void)mouseTimer:(NSTimer*)timer {
   // Fire the mouseUp to break the TabView drag loop.
-  NSEvent* current = [[NSApplication sharedApplication] currentEvent];
+  NSEvent* current = [NSApp currentEvent];
   NSWindow* window = [timer userInfo];
   NSEvent* up = [NSEvent mouseEventWithType:NSLeftMouseUp
                                    location:[current locationInWindow]
@@ -180,7 +180,7 @@ TEST_F(TabControllerTest, UserSelection) {
                                  selector:@selector(mouseTimer:)
                                  userInfo:window
                                   repeats:NO];
-  NSEvent* current = [[NSApplication sharedApplication] currentEvent];
+  NSEvent* current = [NSApp currentEvent];
   NSPoint click_point = NSMakePoint(frame.size.width / 2,
                                     frame.size.height / 2);
   NSEvent* down = [NSEvent mouseEventWithType:NSLeftMouseDown
@@ -198,6 +198,65 @@ TEST_F(TabControllerTest, UserSelection) {
   EXPECT_TRUE([target selected]);
 
   [[controller view] removeFromSuperview];
+}
+
+TEST_F(TabControllerTest, IconCapacity) {
+  NSWindow* window = cocoa_helper_.window();
+  scoped_nsobject<TabController> controller([[TabController alloc] init]);
+  [[window contentView] addSubview:[controller view]];
+  int cap = [controller iconCapacity];
+  EXPECT_GE(cap, 1);
+
+  NSRect frame = [[controller view] frame];
+  frame.size.width += 500;
+  [[controller view] setFrame:frame];
+  int newcap = [controller iconCapacity];
+  EXPECT_GT(newcap, cap);
+}
+
+TEST_F(TabControllerTest, ShouldShowIcon) {
+  NSWindow* window = cocoa_helper_.window();
+  scoped_nsobject<TabController> controller([[TabController alloc] init]);
+  [[window contentView] addSubview:[controller view]];
+  int cap = [controller iconCapacity];
+  EXPECT_GT(cap, 0);
+
+  // Tab is minimum width, both icon and close box should be hidden.
+  NSRect frame = [[controller view] frame];
+  frame.size.width = [TabController minTabWidth];
+  [[controller view] setFrame:frame];
+  EXPECT_FALSE([controller shouldShowIcon]);
+  EXPECT_FALSE([controller shouldShowCloseButton]);
+
+  // Setting the icon when tab is at min width should not show icon (bug 18359).
+  scoped_nsobject<NSView> newIcon(
+      [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)]);
+  [controller setIconView:newIcon.get()];
+  EXPECT_TRUE([newIcon isHidden]);
+
+  // Tab is at selected minimum width. Since it's selected, the close box
+  // should be visible.
+  [controller setSelected:YES];
+  frame = [[controller view] frame];
+  frame.size.width = [TabController minSelectedTabWidth];
+  [[controller view] setFrame:frame];
+  EXPECT_FALSE([controller shouldShowIcon]);
+  EXPECT_TRUE([newIcon isHidden]);
+  EXPECT_TRUE([controller shouldShowCloseButton]);
+
+  // Test expanding the tab to max width and ensure the icon and close box
+  // get put back, even when de-selected.
+  frame.size.width = [TabController maxTabWidth];
+  [[controller view] setFrame:frame];
+  EXPECT_TRUE([controller shouldShowIcon]);
+  EXPECT_FALSE([newIcon isHidden]);
+  EXPECT_TRUE([controller shouldShowCloseButton]);
+  [controller setSelected:NO];
+  EXPECT_TRUE([controller shouldShowIcon]);
+  EXPECT_TRUE([controller shouldShowCloseButton]);
+
+  cap = [controller iconCapacity];
+  EXPECT_GT(cap, 0);
 }
 
 }  // namespace

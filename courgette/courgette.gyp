@@ -6,9 +6,6 @@
   'variables': {
     'chromium_code': 1,
   },
-  'includes': [
-    '../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'courgette_lib',
@@ -92,7 +89,19 @@
       'dependencies': [
         'courgette_lib',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
         '../testing/gtest.gyp:gtest',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd"', {
+          'dependencies': [
+            # Workaround for gyp bug 69.
+            # Needed to handle the #include chain:
+            #   base/test_suite.h
+            #   gtk/gtk.h
+            '../build/linux/system.gyp:gtk',
+          ],
+        }],
       ],
     },
    {
@@ -105,8 +114,26 @@
       'dependencies': [
         'courgette_lib',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
         '../testing/gtest.gyp:gtest',
+      ],
+      'conditions': [
+        [ 'OS == "linux" or OS == "freebsd"', {
+          'dependencies': [
+            # Workaround for gyp bug 69.
+            # Needed to handle the #include chain:
+            #   base/test_suite.h
+            #   gtk/gtk.h
+            '../build/linux/system.gyp:gtk',
+          ],
+        }],
       ],
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

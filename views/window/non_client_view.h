@@ -46,6 +46,11 @@ class NonClientFrameView : public View {
   // which is a child window and must always provide its own frame.
   virtual bool AlwaysUseCustomFrame() const { return false; }
 
+  // Like AlwaysUseCustomFrame, returns true if this FrameView should always use
+  // the native frame, regardless of theme settings. An example is popup/app
+  // windows, which we do not ever want to show themed.
+  virtual bool AlwaysUseNativeFrame() const { return false; }
+
   virtual gfx::Rect GetWindowBoundsForClientBounds(
       const gfx::Rect& client_bounds) const = 0;
   virtual gfx::Point GetSystemMenuPoint() const = 0;
@@ -99,7 +104,7 @@ class NonClientFrameView : public View {
 //  +- views::Window ------------------------------------+
 //  | +- views::RootView ------------------------------+ |
 //  | | +- views::NonClientView ---------------------+ | |
-//  | | | +- views::NonClientView subclass      ---+ | | |
+//  | | | +- views::NonClientFrameView subclas  ---+ | | |
 //  | | | |                                        | | | |
 //  | | | | << all painting and event receiving >> | | | |
 //  | | | | << of the non-client areas of a     >> | | | |
@@ -194,10 +199,9 @@ class NonClientView : public View {
   virtual gfx::Size GetPreferredSize();
   virtual gfx::Size GetMinimumSize();
   virtual void Layout();
-
-  // Call if the nonclientview is in an app or popup and we are in Vista, to
-  // force usage of glass frame.
-  void ForceAeroGlassFrame();
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleName(std::wstring* name);
+  virtual void SetAccessibleName(const std::wstring& name);
 
  protected:
   // NonClientView, View overrides:
@@ -218,9 +222,8 @@ class NonClientView : public View {
   // dynamically as the system settings change.
   scoped_ptr<NonClientFrameView> frame_view_;
 
-  // True if the nonclientview is in an app or popup and we are in Vista. Used
-  // to force usage of glass frame.
-  bool force_aero_glass_frame_;
+  // The accessible name of this view.
+  std::wstring accessible_name_;
 
   DISALLOW_COPY_AND_ASSIGN(NonClientView);
 };

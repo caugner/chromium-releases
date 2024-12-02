@@ -8,20 +8,24 @@
 #include <map>
 #include <string>
 
-#include "webkit/glue/webdevtoolsagent_delegate.h"
+#include "base/basictypes.h"
+#include "webkit/api/public/WebDevToolsAgentClient.h"
 
 namespace IPC {
 class Message;
 }
 
-class RenderView;
+namespace WebKit {
 class WebDevToolsAgent;
+}
+
+class RenderView;
 
 // DevToolsAgent belongs to the inspectable RenderView and provides Glue's
 // agents with the communication capabilities. All messages from/to Glue's
 // agents infrastructure are flowing through this comminucation agent.
 // There is a corresponding DevToolsClient object on the client side.
-class DevToolsAgent : public WebDevToolsAgentDelegate {
+class DevToolsAgent : public WebKit::WebDevToolsAgentClient {
  public:
   DevToolsAgent(int routing_id, RenderView* view);
   virtual ~DevToolsAgent();
@@ -31,19 +35,21 @@ class DevToolsAgent : public WebDevToolsAgentDelegate {
   // IPC message interceptor. Called on the Render thread.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
-  // WebDevToolsAgentDelegate implementation
-  virtual void SendMessageToClient(const std::string& class_name,
-                                   const std::string& method_name,
-                                   const std::string& raw_msg);
-  virtual int GetHostId();
-  virtual void ForceRepaint();
+  // WebDevToolsAgentClient implementation
+  virtual void sendMessageToFrontend(const WebKit::WebString& class_name,
+                                     const WebKit::WebString& method_name,
+                                     const WebKit::WebString& param1,
+                                     const WebKit::WebString& param2,
+                                     const WebKit::WebString& param3);
+  virtual int hostIdentifier();
+  virtual void forceRepaint();
 
   // Returns agent instance for its host id.
   static DevToolsAgent* FromHostId(int host_id);
 
   RenderView* render_view() { return view_; }
 
-  WebDevToolsAgent* GetWebAgent();
+  WebKit::WebDevToolsAgent* GetWebAgent();
 
  private:
   friend class DevToolsAgentFilter;
@@ -52,8 +58,11 @@ class DevToolsAgent : public WebDevToolsAgentDelegate {
   void OnDetach();
   void OnRpcMessage(const std::string& class_name,
                     const std::string& method_name,
-                    const std::string& raw_msg);
+                    const std::string& param1,
+                    const std::string& param2,
+                    const std::string& param3);
   void OnInspectElement(int x, int y);
+  void OnSetApuAgentEnabled(bool enabled);
 
   static std::map<int, DevToolsAgent*> agent_for_routing_id_;
 

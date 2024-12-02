@@ -11,7 +11,9 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/memory_purger.h"
 #include "chrome/browser/views/browser_dialogs.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "grit/chromium_strings.h"
@@ -32,13 +34,6 @@
 // The task manager window default size.
 static const int kDefaultWidth = 460;
 static const int kDefaultHeight = 270;
-
-// An id for the most important column, made sufficiently large so as not to
-// collide with anything else.
-static const int64 kNuthMagicNumber = 1737350766;
-static const int kBitMask = 0x7FFFFFFF;
-static const int kGoatsTeleportedColumn =
-    (94024 * kNuthMagicNumber) & kBitMask;
 
 namespace {
 
@@ -115,8 +110,28 @@ std::wstring TaskManagerTableModel::GetText(int row, int col_id) {
         return std::wstring();
       return model_->GetResourceProcessId(row);
 
-    case kGoatsTeleportedColumn:  // Goats Teleported!
+    case IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN:  // Goats Teleported!
       return model_->GetResourceGoatsTeleported(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return std::wstring();
+      return model_->GetResourceWebCoreImageCacheSize(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return std::wstring();
+      return model_->GetResourceWebCoreScriptsCacheSize(row);
+
+    case IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return std::wstring();
+      return model_->GetResourceWebCoreCSSCacheSize(row);
+
+    case IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN:
+      if (!model_->IsResourceFirstInGroup(row))
+        return std::wstring();
+      return model_->GetResourceSqliteMemoryUsed(row);
 
     default:
       return model_->GetResourceStatsValue(row, col_id);
@@ -184,7 +199,7 @@ class TaskManagerView : public views::View,
                                     views::View* child);
 
   // ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender);
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
 
   // views::DialogDelegate
   virtual bool CanResize() const;
@@ -233,6 +248,8 @@ class TaskManagerView : public views::View,
   // Restores saved always on top state from a previous session.
   bool GetSavedAlwaysOnTopState(bool* always_on_top) const;
 
+  views::NativeButton* purge_memory_button_;
+  bool purge_memory_button_in_purge_mode_;
   views::NativeButton* kill_button_;
   views::Link* about_memory_link_;
   views::GroupTableView* tab_table_;
@@ -264,7 +281,9 @@ TaskManagerView* TaskManagerView::instance_ = NULL;
 
 
 TaskManagerView::TaskManagerView()
-    : task_manager_(TaskManager::GetInstance()),
+    : purge_memory_button_(NULL),
+      purge_memory_button_in_purge_mode_(true),
+      task_manager_(TaskManager::GetInstance()),
       model_(TaskManager::GetInstance()->model()),
       is_always_on_top_(false) {
   Init();
@@ -299,6 +318,18 @@ void TaskManagerView::Init() {
   columns_.push_back(TableColumn(IDS_TASK_MANAGER_PROCESS_ID_COLUMN,
                                  TableColumn::RIGHT, -1, 0));
   columns_.back().sortable = true;
+  columns_.push_back(TableColumn(IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
+                                 TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
+  columns_.push_back(TableColumn(IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN,
+                                 TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
+  columns_.push_back(TableColumn(IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN,
+                                 TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
+  columns_.push_back(TableColumn(IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN,
+                                 TableColumn::RIGHT, -1, 0));
+  columns_.back().sortable = true;
 
   tab_table_ = new views::GroupTableView(table_model_.get(), columns_,
                                          views::ICON_AND_TEXT, false, true,
@@ -308,18 +339,29 @@ void TaskManagerView::Init() {
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_PROCESS_ID_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_SHARED_MEM_COLUMN, false);
   tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_PRIVATE_MEM_COLUMN, false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_WEBCORE_IMAGE_CACHE_COLUMN,
+                                  false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_WEBCORE_SCRIPTS_CACHE_COLUMN,
+                                  false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_WEBCORE_CSS_CACHE_COLUMN,
+                                  false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_SQLITE_MEMORY_USED_COLUMN,
+                                  false);
+  tab_table_->SetColumnVisibility(IDS_TASK_MANAGER_GOATS_TELEPORTED_COLUMN,
+                                  false);
 
   UpdateStatsCounters();
-  TableColumn col(kGoatsTeleportedColumn, L"Goats Teleported",
-                  TableColumn::RIGHT, -1, 0);
-  col.sortable = true;
-  columns_.push_back(col);
-  tab_table_->AddColumn(col);
   tab_table_->SetObserver(this);
+  tab_table_->SetContextMenuController(this);
   SetContextMenuController(this);
+  // If we're running with --purge-memory-button, add a "Purge memory" button.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kPurgeMemoryButton))
+    purge_memory_button_ = new views::NativeButton(this, L"Purge memory");
   kill_button_ = new views::NativeButton(
       this, l10n_util::GetString(IDS_TASK_MANAGER_KILL));
-  kill_button_->AddAccelerator(views::Accelerator('E', false, false, false));
+  kill_button_->AddAccelerator(views::Accelerator(base::VKEY_E,
+                                                  false, false, false));
   kill_button_->SetAccessibleKeyboardShortcut(L"E");
   about_memory_link_ = new views::Link(
       l10n_util::GetString(IDS_TASK_MANAGER_ABOUT_MEMORY_LINK));
@@ -362,10 +404,14 @@ void TaskManagerView::ViewHierarchyChanged(bool is_add,
   if (child == this) {
     if (is_add) {
       parent->AddChildView(about_memory_link_);
+      if (purge_memory_button_)
+        parent->AddChildView(purge_memory_button_);
       parent->AddChildView(kill_button_);
       AddChildView(tab_table_);
     } else {
       parent->RemoveChildView(kill_button_);
+      if (purge_memory_button_)
+        parent->RemoveChildView(purge_memory_button_);
       parent->RemoveChildView(about_memory_link_);
     }
   }
@@ -392,6 +438,13 @@ void TaskManagerView::Layout() {
                           y_buttons,
                           prefered_width,
                           prefered_height);
+
+  if (purge_memory_button_) {
+    size = purge_memory_button_->GetPreferredSize();
+    purge_memory_button_->SetBounds(
+        kill_button_->x() - size.width() - kUnrelatedControlHorizontalSpacing,
+        y_buttons, size.width(), size.height());
+  }
 
   size = about_memory_link_->GetPreferredSize();
   int link_prefered_width = size.width();
@@ -425,11 +478,22 @@ void TaskManagerView::Show() {
 }
 
 // ButtonListener implementation.
-void TaskManagerView::ButtonPressed(views::Button* sender) {
-  DCHECK(sender == kill_button_);
-  for (views::TableSelectionIterator iter  = tab_table_->SelectionBegin();
-       iter != tab_table_->SelectionEnd(); ++iter) {
-    task_manager_->KillProcess(*iter);
+void TaskManagerView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  if (purge_memory_button_ && (sender == purge_memory_button_)) {
+    if (purge_memory_button_in_purge_mode_) {
+      MemoryPurger::GetSingleton()->OnSuspend();
+      purge_memory_button_->SetLabel(L"Reset purger");
+    } else {
+      MemoryPurger::GetSingleton()->OnResume();
+      purge_memory_button_->SetLabel(L"Purge Memory");
+    }
+    purge_memory_button_in_purge_mode_ = !purge_memory_button_in_purge_mode_;
+  } else {
+    DCHECK_EQ(sender, kill_button_);
+    for (views::TableSelectionIterator iter  = tab_table_->SelectionBegin();
+         iter != tab_table_->SelectionEnd(); ++iter)
+      task_manager_->KillProcess(*iter);
   }
 }
 
@@ -519,27 +583,14 @@ void TaskManagerView::OnDoubleClick() {
 }
 
 void TaskManagerView::OnKeyDown(unsigned short virtual_keycode) {
-  if (virtual_keycode == VK_RETURN)
+  if (virtual_keycode == base::VKEY_RETURN)
     ActivateFocusedTab();
 }
 
 // views::LinkController implementation
 void TaskManagerView::LinkActivated(views::Link* source, int event_flags) {
   DCHECK(source == about_memory_link_);
-  Browser* browser = BrowserList::GetLastActive();
-  DCHECK(browser);
-  browser->OpenURL(GURL("about:memory"), GURL(), NEW_FOREGROUND_TAB,
-                   PageTransition::LINK);
-  // In case the browser window is minimzed, show it. If this is an application
-  // or popup, we can only have one tab, hence we need to process this in a
-  // tabbed browser window. Currently, |browser| is pointing to the application,
-  // popup window. Therefore, we have to retrieve the last active tab again,
-  // since a new window has been used.
-  if (browser->type() & Browser::TYPE_APP_POPUP) {
-    browser = BrowserList::GetLastActive();
-    DCHECK(browser);
-  }
-  browser->window()->Show();
+  task_manager_->OpenAboutMemory();
 }
 
 void TaskManagerView::ShowContextMenu(views::View* source, int x, int y,

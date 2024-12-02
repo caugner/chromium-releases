@@ -5,9 +5,10 @@
 #ifndef CHROME_BROWSER_BOOKMARKS_BOOKMARK_UTILS_H_
 #define CHROME_BROWSER_BOOKMARKS_BOOKMARK_UTILS_H_
 
+#include <string>
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/history/snippet.h"
@@ -15,9 +16,11 @@
 
 class BookmarkModel;
 class BookmarkNode;
+class Browser;
 class PageNavigator;
 class PrefService;
 class Profile;
+class TabContents;
 
 namespace views {
 class DropTargetEvent;
@@ -73,14 +76,14 @@ void CloneDragData(BookmarkModel* model,
 // |navigator| is used to open the URLs. If |navigator| is NULL the last
 // tabbed browser with the profile |profile| is used. If there is no browser
 // with the specified profile a new one is created.
-void OpenAll(gfx::NativeView parent,
+void OpenAll(gfx::NativeWindow parent,
              Profile* profile,
              PageNavigator* navigator,
              const std::vector<const BookmarkNode*>& nodes,
              WindowOpenDisposition initial_disposition);
 
 // Convenience for opening a single BookmarkNode.
-void OpenAll(gfx::NativeView parent,
+void OpenAll(gfx::NativeWindow parent,
              Profile* profile,
              PageNavigator* navigator,
              const BookmarkNode* node,
@@ -102,6 +105,10 @@ void PasteFromClipboard(BookmarkModel* model,
 
 // Returns true if the user can copy from the pasteboard.
 bool CanPasteFromClipboard(const BookmarkNode* node);
+
+// Returns a name for the given URL. Used for drags into bookmark areas when
+// the source doesn't specify a title.
+std::string GetNameForURL(const GURL& url);
 
 // Returns a vector containing up to |max_count| of the most recently modified
 // groups. This never returns an empty vector.
@@ -148,7 +155,7 @@ bool DoesBookmarkContainText(const BookmarkNode* node,
 const BookmarkNode* ApplyEditsWithNoGroupChange(
     BookmarkModel* model,
     const BookmarkNode* parent,
-    const BookmarkNode* node,
+    const BookmarkEditor::EditDetails& details,
     const std::wstring& new_title,
     const GURL& new_url,
     BookmarkEditor::Handler* handler);
@@ -160,7 +167,7 @@ const BookmarkNode* ApplyEditsWithNoGroupChange(
 const BookmarkNode* ApplyEditsWithPossibleGroupChange(
     BookmarkModel* model,
     const BookmarkNode* new_parent,
-    const BookmarkNode* node,
+    const BookmarkEditor::EditDetails& details,
     const std::wstring& new_title,
     const GURL& new_url,
     BookmarkEditor::Handler* handler);
@@ -174,6 +181,16 @@ void RegisterPrefs(PrefService* prefs);
 
 // Register user prefs for BookmarkBar, BookmarkView, ...
 void RegisterUserPrefs(PrefService* prefs);
+
+// Fills in the URL and title for a bookmark of |tab_contents|.
+void GetURLAndTitleToBookmark(TabContents* tab_contents,
+                              GURL* url,
+                              std::wstring* title);
+
+// Returns, by reference in |urls|, the url and title pairs for each open
+// tab in browser.
+void GetURLsForOpenTabs(Browser* browser,
+                        std::vector<std::pair<GURL, std::wstring> >* urls);
 
 // Number of bookmarks we'll open before prompting the user to see if they
 // really want to open all.

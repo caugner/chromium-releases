@@ -19,11 +19,12 @@
 import subprocess
 import sys
 import os
-import os.path
 
-third_party = os.path.join('..', '..', '..', 'third_party')
+script_dir = os.path.join(os.path.dirname(__file__))
+third_party = os.path.normpath(
+  os.path.join(script_dir, '..', '..', 'third_party'))
 pythonpath = os.pathsep.join([os.path.join(third_party, 'gflags', 'python'),
-                              os.path.join(third_party, 'ply', 'files')])
+                              os.path.join(third_party, 'ply')])
 
 orig_pythonpath = os.environ.get('PYTHONPATH')
 if orig_pythonpath:
@@ -31,6 +32,6 @@ if orig_pythonpath:
 
 os.environ['PYTHONPATH'] = pythonpath
 
-nixysa = os.path.join(third_party, 'nixysa', 'files', 'codegen.py')
+nixysa = os.path.join(third_party, 'nixysa', 'codegen.py')
 status = subprocess.call([sys.executable, nixysa] + sys.argv[1:])
 sys.exit(status)

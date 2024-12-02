@@ -1,42 +1,45 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_PROXY_PROXY_SERVICE_H_
 #define NET_PROXY_PROXY_SERVICE_H_
 
-#include <deque>
 #include <string>
+#include <vector>
 
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/thread.h"
 #include "base/waitable_event.h"
 #include "net/base/completion_callback.h"
 #include "net/proxy/proxy_server.h"
 #include "net/proxy/proxy_info.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class GURL;
+class MessageLoop;
 class URLRequestContext;
 
 namespace net {
 
-class ProxyScriptFetcher;
+class InitProxyResolver;
+class LoadLog;
 class ProxyConfigService;
 class ProxyResolver;
+class ProxyScriptFetcher;
 
 // This class can be used to resolve the proxy server to use when loading a
 // HTTP(S) URL.  It uses the given ProxyResolver to handle the actual proxy
-// resolution.  See ProxyResolverWinHttp for example.
-class ProxyService {
+// resolution.  See ProxyResolverV8 for example.
+class ProxyService : public base::RefCountedThreadSafe<ProxyService> {
  public:
   // The instance takes ownership of |config_service| and |resolver|.
-  ProxyService(ProxyConfigService* config_service,
-               ProxyResolver* resolver);
+  ProxyService(ProxyConfigService* config_service, ProxyResolver* resolver);
 
   ~ProxyService();
 
   // Used internally to handle PAC queries.
+  // TODO(eroman): consider naming this simply "Request".
   class PacRequest;
 
   // Returns ERR_IO_PENDING if the proxy information could not be provided
@@ -50,17 +53,19 @@ class ProxyService {
   // callback is still pending. NULL can be passed for |pac_request| if
   // the caller will not need to cancel the request.
   //
-  // We use the three possible proxy access types in the following order, and
-  // we only use one of them (no falling back to other access types if the
-  // chosen one doesn't work).
-  //   1.  named proxy
+  // We use the three possible proxy access types in the following order,
+  // doing fallback if one doesn't work.  See "init_proxy_resolver.h"
+  // for the specifics.
+  //   1.  WPAD auto-detection
   //   2.  PAC URL
-  //   3.  WPAD auto-detection
+  //   3.  named proxy
   //
+  // Profiling information for the request is saved to |load_log| if non-NULL.
   int ResolveProxy(const GURL& url,
                    ProxyInfo* results,
                    CompletionCallback* callback,
-                   PacRequest** pac_request);
+                   PacRequest** pac_request,
+                   LoadLog* load_log);
 
   // This method is called after a failure to connect or resolve a host name.
   // It gives the proxy service an opportunity to reconsider the proxy to use.
@@ -73,10 +78,12 @@ class ProxyService {
   //
   // Returns ERR_FAILED if there is not another proxy config to try.
   //
+  // Profiling information for the request is saved to |load_log| if non-NULL.
   int ReconsiderProxyAfterError(const GURL& url,
                                 ProxyInfo* results,
                                 CompletionCallback* callback,
-                                PacRequest** pac_request);
+                                PacRequest** pac_request,
+                                LoadLog* load_log);
 
   // Call this method with a non-null |pac_request| to cancel the PAC request.
   void CancelPacRequest(PacRequest* pac_request);
@@ -93,6 +100,26 @@ class ProxyService {
   // |new_proxy_config_service|.
   void ResetConfigService(ProxyConfigService* new_proxy_config_service);
 
+  // Tells the resolver to purge any memory it does not need.
+  void PurgeMemory();
+
+  // Returns the log for the most recent WPAD + PAC initialization.
+  // (This shows how much time was spent downloading and parsing the
+  // PAC scripts for the current configuration).
+  LoadLog* init_proxy_resolver_log() const {
+    return init_proxy_resolver_log_;
+  }
+
+  // Returns true if we have called UpdateConfig() at least once.
+  bool config_has_been_initialized() const {
+    return config_.id() != ProxyConfig::INVALID_ID;
+  }
+
+  // Returns the last configuration fetched from ProxyConfigService.
+  const ProxyConfig& config() {
+    return config_;
+  }
+
   // Creates a proxy service using the specified settings. If |pc| is NULL then
   // the system's default proxy settings will be used (on Windows this will
   // use IE's settings).
@@ -103,8 +130,9 @@ class ProxyService {
   // script needs to be fetched.
   // |io_loop| points to the IO thread's message loop. It is only used
   // when pc is NULL. If both pc and io_loop are NULL, then monitoring
-  // of gconf setting changes will be disabled in
-  // ProxyConfigServiceLinux.
+  // of proxy setting changes will be disabled in ProxyConfigServiceLinux.
+  // |file_loop| points to the file thread's message loop. It is used
+  // to read any files necessary to get proxy settings.
   // ##########################################################################
   // # See the warnings in net/proxy/proxy_resolver_v8.h describing the
   // # multi-threading model. In order for this to be safe to use, *ALL* the
@@ -114,7 +142,7 @@ class ProxyService {
       const ProxyConfig* pc,
       bool use_v8_resolver,
       URLRequestContext* url_request_context,
-      MessageLoop* io_loop);
+      MessageLoop* io_loop, MessageLoop* file_loop);
 
   // Convenience method that creates a proxy service using the
   // specified fixed settings. |pc| must not be NULL.
@@ -125,27 +153,27 @@ class ProxyService {
   static ProxyService* CreateNull();
 
  private:
+  FRIEND_TEST(ProxyServiceTest, IsLocalName);
+  FRIEND_TEST(ProxyServiceTest, UpdateConfigAfterFailedAutodetect);
+  FRIEND_TEST(ProxyServiceTest, UpdateConfigFromPACToDirect);
   friend class PacRequest;
+  // TODO(eroman): change this to a std::set. Note that this requires updating
+  // some tests in proxy_service_unittest.cc such as:
+  //   ProxyServiceTest.InitialPACScriptDownload
+  // which expects requests to finish in the order they were added.
+  typedef std::vector<scoped_refptr<PacRequest> > PendingRequests;
 
   // Creates a config service appropriate for this platform that fetches the
   // system proxy settings.
   static ProxyConfigService* CreateSystemProxyConfigService(
-      MessageLoop* io_loop);
+      MessageLoop* io_loop, MessageLoop* file_loop);
 
   // Creates a proxy resolver appropriate for this platform that doesn't rely
   // on V8.
   static ProxyResolver* CreateNonV8ProxyResolver();
 
-  ProxyResolver* resolver() { return resolver_.get(); }
-  base::Thread* pac_thread() { return pac_thread_.get(); }
-
   // Identifies the proxy configuration.
   ProxyConfig::ID config_id() const { return config_.id(); }
-
-  // Returns true if we have called UpdateConfig() at least once.
-  bool config_has_been_initialized() const {
-    return config_.id() != ProxyConfig::INVALID_ID;
-  }
 
   // Checks to see if the proxy configuration changed, and then updates config_
   // to reference the new configuration.
@@ -157,20 +185,20 @@ class ProxyService {
   // Tries to update the configuration if it hasn't been checked in a while.
   void UpdateConfigIfOld();
 
-  // Returns true if this ProxyService is downloading a PAC script on behalf
-  // of ProxyResolverWithoutFetch. Resolve requests will be frozen until
-  // the fetch has completed.
-  bool IsFetchingPacScript() const {
-    return in_progress_fetch_config_id_ != ProxyConfig::INVALID_ID;
+  // Returns true if the proxy resolver is being initialized for PAC
+  // (downloading PAC script(s) + testing).
+  // Resolve requests will be frozen until the initialization has completed.
+  bool IsInitializingProxyResolver() const {
+    return init_proxy_resolver_.get() != NULL;
   }
 
-  // Callback for when the PAC script has finished downloading.
-  void OnScriptFetchCompletion(int result);
+  // Callback for when the proxy resolver has been initialized with a
+  // PAC script.
+  void OnInitProxyResolverComplete(int result);
 
   // Returns ERR_IO_PENDING if the request cannot be completed synchronously.
   // Otherwise it fills |result| with the proxy information for |url|.
   // Completing synchronously means we don't need to query ProxyResolver.
-  // (ProxyResolver runs on PAC thread.)
   int TryToCompleteSynchronously(const GURL& url, ProxyInfo* result);
 
   // Set |result| with the proxy to use for |url|, based on |rules|.
@@ -178,17 +206,18 @@ class ProxyService {
                        const ProxyConfig::ProxyRules& rules,
                        ProxyInfo* result);
 
-  // Starts the PAC thread if it isn't already running.
-  void InitPacThread();
+  // Cancel all of the requests sent to the ProxyResolver. These will be
+  // restarted when calling ResumeAllPendingRequests().
+  void SuspendAllPendingRequests();
 
-  // Starts the next request from |pending_requests_| is possible.
-  // |recent_req| is the request that just got added, or NULL.
-  void ProcessPendingRequests(PacRequest* recent_req);
+  // Sends all the unstarted pending requests off to the resolver.
+  void ResumeAllPendingRequests();
 
-  // Removes the front entry of the requests queue. |expected_req| is our
-  // expectation of what the front of the request queue is; it is only used by
-  // DCHECK for verification purposes.
-  void RemoveFrontOfRequestQueue(PacRequest* expected_req);
+  // Returns true if |pending_requests_| contains |req|.
+  bool ContainsPendingRequest(PacRequest* req);
+
+  // Removes |req| from the list of pending requests.
+  void RemovePendingRequest(PacRequest* req);
 
   // Called to indicate that a PacRequest completed.  The |config_id| parameter
   // indicates the proxy configuration that was queried.  |result_code| is OK
@@ -197,14 +226,22 @@ class ProxyService {
   void DidCompletePacRequest(int config_id, int result_code);
 
   // Returns true if the URL passed in should not go through the proxy server.
-  // 1. If the bypass proxy list contains the string <local> and the URL
-  //    passed in is a local URL, i.e. a URL without a DOT (.)
+  // 1. If the proxy settings say to bypass local names, and |IsLocalName(url)|.
   // 2. The URL matches one of the entities in the proxy bypass list.
   bool ShouldBypassProxyForURL(const GURL& url);
 
+  // Returns true if |url| is to an intranet site (using non-FQDN as the
+  // heuristic).
+  static bool IsLocalName(const GURL& url);
+
+  // Helper to download the PAC script (wpad + custom) and apply fallback rules.
+  scoped_ptr<InitProxyResolver> init_proxy_resolver_;
+
+  // Log from the *last* time |init_proxy_resolver_.Init()| was called, or NULL.
+  scoped_refptr<LoadLog> init_proxy_resolver_log_;
+
   scoped_ptr<ProxyConfigService> config_service_;
   scoped_ptr<ProxyResolver> resolver_;
-  scoped_ptr<base::Thread> pac_thread_;
 
   // We store the proxy config and a counter (ID) that is incremented each time
   // the config changes.
@@ -216,38 +253,25 @@ class ProxyService {
   // Indicates that the configuration is bad and should be ignored.
   bool config_is_bad_;
 
+  // Indicates whether the ProxyResolver should be sent requests.
+  bool should_use_proxy_resolver_;
+
   // The time when the proxy configuration was last read from the system.
   base::TimeTicks config_last_update_time_;
 
   // Map of the known bad proxies and the information about the retry time.
   ProxyRetryInfoMap proxy_retry_info_;
 
-  // FIFO queue of pending/inprogress requests.
-  typedef std::deque<scoped_refptr<PacRequest> > PendingRequestsQueue;
-  PendingRequestsQueue pending_requests_;
+  // Set of pending/inprogress requests.
+  PendingRequests pending_requests_;
 
   // The fetcher to use when downloading PAC scripts for the ProxyResolver.
   // This dependency can be NULL if our ProxyResolver has no need for
   // external PAC script fetching.
   scoped_ptr<ProxyScriptFetcher> proxy_script_fetcher_;
 
-  // Callback for when |proxy_script_fetcher_| is done.
-  CompletionCallbackImpl<ProxyService> proxy_script_fetcher_callback_;
-
-  // The ID of the configuration for which we last downloaded a PAC script.
-  // If no PAC script has been fetched yet, will be ProxyConfig::INVALID_ID.
-  ProxyConfig::ID fetched_pac_config_id_;
-
-  // The error corresponding with |fetched_pac_config_id_|, or OK.
-  int fetched_pac_error_;
-
-  // The ID of the configuration for which we are currently downloading the
-  // PAC script. If no fetch is in progress, will be ProxyConfig::INVALID_ID.
-  ProxyConfig::ID in_progress_fetch_config_id_;
-
-  // The results of the current in progress fetch, or empty string.
-  std::string in_progress_fetch_bytes_;
-
+  // Callback for when |init_proxy_resolver_| is done.
+  CompletionCallbackImpl<ProxyService> init_proxy_resolver_callback_;
   DISALLOW_COPY_AND_ASSIGN(ProxyService);
 };
 
@@ -258,12 +282,13 @@ class SyncProxyServiceHelper
   SyncProxyServiceHelper(MessageLoop* io_message_loop,
                          ProxyService* proxy_service);
 
-  int ResolveProxy(const GURL& url, ProxyInfo* proxy_info);
-  int ReconsiderProxyAfterError(const GURL& url, ProxyInfo* proxy_info);
+  int ResolveProxy(const GURL& url, ProxyInfo* proxy_info, LoadLog* load_log);
+  int ReconsiderProxyAfterError(const GURL& url,
+                                ProxyInfo* proxy_info, LoadLog* load_log);
 
  private:
-  void StartAsyncResolve(const GURL& url);
-  void StartAsyncReconsider(const GURL& url);
+  void StartAsyncResolve(const GURL& url, LoadLog* load_log);
+  void StartAsyncReconsider(const GURL& url, LoadLog* load_log);
 
   void OnCompletion(int result);
 

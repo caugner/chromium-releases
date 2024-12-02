@@ -7,10 +7,9 @@
 
 #include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
-#include "base/gfx/native_widget_types.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "views/controls/menu/chrome_menu.h"
 
 class Browser;
 class PageNavigator;
@@ -57,7 +56,7 @@ class BookmarkContextMenuController : public BookmarkModelObserver {
   // |selection| is the nodes the context menu operates on and may be empty.
   // |configuration| determines which items to show.
   BookmarkContextMenuController(
-      gfx::NativeView parent_window,
+      gfx::NativeWindow parent_window,
       BookmarkContextMenuControllerDelegate* delegate,
       Profile* profile,
       PageNavigator* navigator,
@@ -114,8 +113,7 @@ class BookmarkContextMenuController : public BookmarkModelObserver {
   // parent_ is returned.
   const BookmarkNode* GetParentForNewNodes() const;
 
-  // TODO(beng): change to gfx::NativeWindow
-  gfx::NativeView parent_window_;
+  gfx::NativeWindow parent_window_;
   BookmarkContextMenuControllerDelegate* delegate_;
   Profile* profile_;
   PageNavigator* navigator_;

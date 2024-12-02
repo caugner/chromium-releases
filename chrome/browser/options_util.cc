@@ -6,6 +6,7 @@
 
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
@@ -23,6 +24,19 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kCookieBehavior,
     prefs::kDefaultCharset,
     prefs::kDnsPrefetchingEnabled,
+#if defined(OS_LINUX)
+    prefs::kCertRevocationCheckingEnabled,
+    prefs::kSSL2Enabled,
+    prefs::kSSL3Enabled,
+    prefs::kTLS1Enabled,
+#endif
+#if defined(OS_CHROMEOS)
+    prefs::kTimeZone,
+    prefs::kTapToClickEnabled,
+    prefs::kVertEdgeScrollEnabled,
+    prefs::kTouchpadSpeedFactor,
+    prefs::kTouchpadSensitivity,
+#endif
     prefs::kDownloadDefaultDirectory,
     prefs::kDownloadExtensionsToOpen,
     prefs::kEnableSpellCheck,
@@ -48,6 +62,7 @@ void OptionsUtil::ResetToDefaults(Profile* profile) {
     prefs::kWebKitSansSerifFontFamily,
     prefs::kWebKitSerifFontFamily,
   };
+  profile->GetDownloadManager()->ResetAutoOpenFiles();
   for (size_t i = 0; i < arraysize(kUserPrefs); ++i)
     prefs->ClearPref(kUserPrefs[i]);
 

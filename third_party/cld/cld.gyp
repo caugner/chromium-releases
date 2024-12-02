@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'conditions': [
     ['OS=="win"', {
       'targets': [
@@ -78,7 +75,6 @@
             'bar/toolbar/cld/i18n/languages/public/languages.h',
             'base/casts.h',
             'base/commandlineflags.h',
-            'base/stl_decl.h',
             'base/global_strip_options.h',
             'base/logging.h',
             'base/macros.h',
@@ -103,3 +99,9 @@
     ],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

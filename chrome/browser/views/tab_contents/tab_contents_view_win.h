@@ -34,14 +34,13 @@ class TabContentsViewWin : public TabContentsView,
 
   // TabContentsView implementation --------------------------------------------
 
-  virtual void CreateView();
+  virtual void CreateView(const gfx::Size& initial_size);
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host);
   virtual gfx::NativeView GetNativeView() const;
   virtual gfx::NativeView GetContentNativeView() const;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
   virtual void GetContainerBounds(gfx::Rect* out) const;
-  virtual void OnContentsDestroy();
   virtual void SetPageTitle(const std::wstring& title);
   virtual void OnTabCrashed();
   virtual void SizeContents(const gfx::Size& size);
@@ -54,8 +53,9 @@ class TabContentsViewWin : public TabContentsView,
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask operations);
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);

@@ -19,7 +19,6 @@
 #include "net/url_request/url_request_new_ftp_job.h"
 #endif
 #include "net/url_request/url_request_http_job.h"
-#include "net/url_request/url_request_view_cache_job.h"
 
 // The built-in set of protocol factories
 namespace {
@@ -41,7 +40,6 @@ static const SchemeToFactory kBuiltinFactories[] = {
   { "ftp", URLRequestNewFtpJob::Factory },
 #endif
   { "about", URLRequestAboutJob::Factory },
-  { "view-cache", URLRequestViewCacheJob::Factory },
 };
 
 URLRequestJobManager::URLRequestJobManager() {
@@ -101,6 +99,7 @@ URLRequestJob* URLRequestJobManager::CreateJob(URLRequest* request) const {
   // If we reached here, then it means that a registered protocol factory
   // wasn't interested in handling the URL.  That is fairly unexpected, and we
   // don't know have a specific error to report here :-(
+  LOG(WARNING) << "Failed to map: " << request->url().spec();
   return new URLRequestErrorJob(request, net::ERR_FAILED);
 }
 

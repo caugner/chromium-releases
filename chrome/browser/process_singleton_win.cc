@@ -51,16 +51,16 @@ ProcessSingleton::~ProcessSingleton() {
   }
 }
 
-bool ProcessSingleton::NotifyOtherProcess() {
+ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
   if (!remote_window_)
-    return false;
+    return PROCESS_NONE;
 
   // Found another window, send our command line to it
   // format is "START\0<<<current directory>>>\0<<<commandline>>>".
   std::wstring to_send(L"START\0", 6);  // want the NULL in the string.
   std::wstring cur_dir;
   if (!PathService::Get(base::DIR_CURRENT, &cur_dir))
-    return false;
+    return PROCESS_NONE;
   to_send.append(cur_dir);
   to_send.append(L"\0", 1);  // Null separator.
   to_send.append(GetCommandLineW());
@@ -73,13 +73,11 @@ bool ProcessSingleton::NotifyOtherProcess() {
   // It is possible that the process owning this window may have died by now.
   if (!thread_id || !process_id) {
     remote_window_ = NULL;
-    return false;
+    return PROCESS_NONE;
   }
 
   AllowSetForegroundWindow(process_id);
 
-  // Gives 20 seconds timeout for the current browser process to respond.
-  const int kTimeout = 20000;
   COPYDATASTRUCT cds;
   cds.dwData = 0;
   cds.cbData = static_cast<DWORD>((to_send.length() + 1) * sizeof(wchar_t));
@@ -90,20 +88,20 @@ bool ProcessSingleton::NotifyOtherProcess() {
                          NULL,
                          reinterpret_cast<LPARAM>(&cds),
                          SMTO_ABORTIFHUNG,
-                         kTimeout,
+                         kTimeoutInSeconds * 1000,
                          &result)) {
     // It is possible that the process owning this window may have died by now.
     if (!result) {
       remote_window_ = NULL;
-      return false;
+      return PROCESS_NONE;
     }
-    return true;
+    return PROCESS_NOTIFIED;
   }
 
   // It is possible that the process owning this window may have died by now.
   if (!IsWindow(remote_window_)) {
     remote_window_ = NULL;
-    return false;
+    return PROCESS_NONE;
   }
 
   // The window is hung. Scan for every window to find a visible one.
@@ -119,14 +117,14 @@ bool ProcessSingleton::NotifyOtherProcess() {
     if (IDYES != win_util::MessageBox(NULL, text, caption,
                                       MB_YESNO | MB_ICONSTOP | MB_TOPMOST)) {
       // The user denied. Quit silently.
-      return true;
+      return PROCESS_NOTIFIED;
     }
   }
 
   // Time to take action. Kill the browser process.
   base::KillProcessById(process_id, ResultCodes::HUNG, true);
   remote_window_ = NULL;
-  return false;
+  return PROCESS_NONE;
 }
 
 // For windows, there is no need to call Create() since the call is made in
@@ -147,16 +145,20 @@ void ProcessSingleton::Create() {
   ATOM clazz = RegisterClassEx(&wc);
   DCHECK(clazz);
 
-  std::wstring user_data_dir;
+  FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
 
   // Set the window's title to the path of our user data directory so other
   // Chrome instances can decide if they should forward to us or not.
-  window_ = CreateWindow(chrome::kMessageWindowClass, user_data_dir.c_str(),
+  window_ = CreateWindow(chrome::kMessageWindowClass,
+                         user_data_dir.value().c_str(),
                          0, 0, 0, 0, 0, HWND_MESSAGE, 0, hinst, 0);
   DCHECK(window_);
 
   win_util::SetWindowUserData(window_, this);
+}
+
+void ProcessSingleton::Cleanup() {
 }
 
 LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {

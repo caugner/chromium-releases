@@ -9,19 +9,20 @@
 #include <string>
 #include <vector>
 
+#include "app/gfx/color_utils.h"
 #include "app/resource_bundle.h"
 #include "app/theme_provider.h"
 #include "base/basictypes.h"
+#include "base/lock.h"
 #include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
-#include "skia/ext/skia_utils.h"
 
 class Extension;
 class Profile;
 class DictionaryValue;
+class PrefService;
 
-class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
-                             public NonThreadSafe,
+class BrowserThemeProvider : public NonThreadSafe,
                              public ThemeProvider {
  public:
   // Public constants used in BrowserThemeProvider and its subclasses:
@@ -93,12 +94,12 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   static const SkColor kDefaultColorControlBackground;
   static const SkColor kDefaultColorButtonBackground;
 
-  static const skia::HSL kDefaultTintButtons;
-  static const skia::HSL kDefaultTintFrame;
-  static const skia::HSL kDefaultTintFrameInactive;
-  static const skia::HSL kDefaultTintFrameIncognito;
-  static const skia::HSL kDefaultTintFrameIncognitoInactive;
-  static const skia::HSL kDefaultTintBackgroundTab;
+  static const color_utils::HSL kDefaultTintButtons;
+  static const color_utils::HSL kDefaultTintFrame;
+  static const color_utils::HSL kDefaultTintFrameInactive;
+  static const color_utils::HSL kDefaultTintFrameIncognito;
+  static const color_utils::HSL kDefaultTintFrameIncognitoInactive;
+  static const color_utils::HSL kDefaultTintBackgroundTab;
 
   static const char* kDefaultThemeID;
 
@@ -147,7 +148,7 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   } AlignmentMasks;
 
   // Background tiling choices.
-  enum {
+  typedef enum {
     NO_REPEAT = 0,
     REPEAT_X = 1,
     REPEAT_Y = 2,
@@ -156,19 +157,19 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
 
   // ThemeProvider implementation.
   virtual void Init(Profile* profile);
-  virtual SkBitmap* GetBitmapNamed(int id);
-  virtual SkColor GetColor(int id);
-  virtual bool GetDisplayProperty(int id, int* result);
-  virtual bool ShouldUseNativeFrame();
-  virtual bool HasCustomImage(int id);
-  virtual bool GetRawData(int id, std::vector<unsigned char>* raw_data);
-#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
-  virtual GdkPixbuf* GetPixbufNamed(int id);
-  virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id);
+  virtual SkBitmap* GetBitmapNamed(int id) const;
+  virtual SkColor GetColor(int id) const;
+  virtual bool GetDisplayProperty(int id, int* result) const;
+  virtual bool ShouldUseNativeFrame() const;
+  virtual bool HasCustomImage(int id) const;
+  virtual RefCountedMemory* GetRawData(int id) const;
+#if defined(OS_LINUX)
+  virtual GdkPixbuf* GetPixbufNamed(int id) const;
+  virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const;
 #elif defined(OS_MACOSX)
-  virtual NSImage* GetNSImageNamed(int id);
-  virtual NSColor* GetNSColor(int id);
-  virtual NSColor* GetNSColorTint(int id);
+  virtual NSImage* GetNSImageNamed(int id) const;
+  virtual NSColor* GetNSColor(int id) const;
+  virtual NSColor* GetNSColorTint(int id) const;
 #endif
 
   // Set the current theme to the theme defined in |extension|.
@@ -181,13 +182,13 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   // theme is the default theme.
   virtual void SetNativeTheme() { UseDefaultTheme(); }
 
-  // Reads the image data from the theme file into the specified vector. Returns
-  // true on success.
-  bool ReadThemeFileData(int id, std::vector<unsigned char>* raw_data);
-
   // Gets the id of the last installed theme. (The theme may have been further
   // locally customized.)
-  std::string GetThemeID();
+  std::string GetThemeID() const;
+
+  // Reads the image data from the theme file into the specified vector. Returns
+  // true on success.
+  RefCountedMemory* ReadThemeFileData(int id) const;
 
   // Convert a bitfield alignment into a string like "top left". Public so that
   // it can be used to generate CSS values. Takes a bitfield of AlignmentMasks.
@@ -195,21 +196,38 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
 
   // Parse alignments from something like "top left" into a bitfield of
   // AlignmentMasks
-  static int StringToAlignment(const std::string &alignment);
+  static int StringToAlignment(const std::string& alignment);
 
   // Convert a tiling value into a string like "no-repeat". Public
   // so that it can be used to generate CSS values. Takes a Tiling.
   static std::string TilingToString(int tiling);
 
   // Parse tiling values from something like "no-repeat" into a Tiling value.
-  static int StringToTiling(const std::string &tiling);
+  static int StringToTiling(const std::string& tiling);
+
+  // Lock on write to themed_image_cache_ in UI thread; lock on all cache
+  // access in File thread. This allows the File thread and UI thread to
+  // both read themed images at the same time, while preventing simultaneous
+  // File thread read and UI thread write.
+  static Lock themed_image_cache_lock_;
+
+  // Save the images to be written to disk, mapping file path to id.
+  typedef std::map<FilePath, int> ImagesDiskCache;
+
+  // Cached images. We cache all retrieved and generated bitmaps and keep
+  // track of the pointers. We own these and will delete them when we're done
+  // using them.
+  typedef std::map<int, SkBitmap*> ImageCache;
 
  protected:
   // Sets an individual color value.
   void SetColor(const char* id, const SkColor& color);
 
   // Sets an individual tint value.
-  void SetTint(const char* id, const skia::HSL& tint);
+  void SetTint(const char* id, const color_utils::HSL& tint);
+
+  // Get the specified tint - |id| is one of the TINT_* enum values.
+  color_utils::HSL GetTint(int id) const;
 
   // Generate any frame colors that weren't specified.
   void GenerateFrameColors();
@@ -217,11 +235,11 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   // Generate any frame images that weren't specified. The resulting images
   // will be stored in our cache and written to disk.  If images have already
   // been generated and cached, load them from disk.
-  void GenerateFrameImages();
+  void GenerateFrameImages() const;
 
   // Generate any tab images that weren't specified. The resulting images
   // will be stored in our cache.
-  void GenerateTabImages();
+  void GenerateTabImages() const;
 
   // Clears all the override fields and saves the dictionary.
   void ClearAllThemeData();
@@ -234,38 +252,48 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
 
   // Loads a bitmap from the theme, which may be tinted or
   // otherwise modified, or an application default.
-  virtual SkBitmap* LoadThemeBitmap(int id);
+  virtual SkBitmap* LoadThemeBitmap(int id) const;
 
   // Save the modified bitmap at image_cache_[id].
-  virtual void SaveThemeBitmap(std::string resource_name, int id);
+  virtual void SaveThemeBitmap(std::string resource_name, int id) const;
+
+  // Clears the platform-specific caches. Do not call directly; it's called
+  // from ClearCaches().
+  virtual void FreePlatformCaches();
+
+  // The implementation of GenerateTabBackgroundBitmap(). That function also
+  // must be locked and touches caches; this function only deals with image
+  // generation.
+  SkBitmap* GenerateTabBackgroundBitmapImpl(int id) const;
 
   Profile* profile() { return profile_; }
+
+  // Subclasses may need us to not use the on-disk image cache. The GTK
+  // interface needs to generate some images itself.
+  void force_process_images() { process_images_ = true; }
 
  private:
   typedef std::map<const int, std::string> ImageMap;
   typedef std::map<const std::string, SkColor> ColorMap;
-  typedef std::map<const std::string, skia::HSL> TintMap;
+  typedef std::map<const std::string, color_utils::HSL> TintMap;
   typedef std::map<const std::string, int> DisplayPropertyMap;
-  typedef std::map<const int, std::vector<unsigned char> > RawDataMap;
+  typedef std::map<const int, scoped_refptr<RefCountedMemory> > RawDataMap;
   typedef std::map<const int, std::string> ResourceNameMap;
 
   // Returns the string key for the given tint |id| TINT_* enum value.
-  const std::string GetTintKey(int id);
+  const std::string GetTintKey(int id) const;
 
   // Returns the default tint for the given tint |id| TINT_* enum value.
-  skia::HSL GetDefaultTint(int id);
+  color_utils::HSL GetDefaultTint(int id) const;
 
   // Returns the string key for the given color |id| COLOR_* enum value.
-  const std::string GetColorKey(int id);
+  const std::string GetColorKey(int id) const;
 
   // Returns the default color for the given color |id| COLOR_* enum value.
-  SkColor GetDefaultColor(int id);
-
-  // Get the specified tint - |id| is one of the TINT_* enum values.
-  skia::HSL GetTint(int id);
+  SkColor GetDefaultColor(int id) const;
 
   // Tint |bitmap| with the tint specified by |hsl_id|
-  SkBitmap TintBitmap(const SkBitmap& bitmap, int hsl_id);
+  SkBitmap TintBitmap(const SkBitmap& bitmap, int hsl_id) const;
 
   // The following load data from specified dictionaries (either from
   // preferences or from an extension manifest) and update our theme
@@ -273,8 +301,8 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   // Allow any ResourceBundle image to be overridden. |images| should
   // contain keys defined in ThemeResourceMap, and values as paths to
   // the images on-disk.
-  void SetImageData(DictionaryValue* images,
-                    FilePath images_path);
+  void SetImageData(DictionaryValue* images, FilePath images_path);
+
   // Set our theme colors. The keys of |colors| are any of the kColor*
   // constants, and the values are a three-item list containing 8-bit
   // RGB values.
@@ -290,17 +318,17 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   void SetDisplayPropertyData(DictionaryValue* display_properties);
 
   // Create any images that aren't pregenerated (e.g. background tab images).
-  SkBitmap* GenerateBitmap(int id);
+  SkBitmap* GenerateTabBackgroundBitmap(int id) const;
 
   // Save our data - when saving images we need the original dictionary
   // from the extension because it contains the text ids that we want to save.
-  void SaveImageData(DictionaryValue* images);
-  void SaveColorData();
-  void SaveTintData();
-  void SaveDisplayPropertyData();
+  void SaveImageData(DictionaryValue* images) const;
+  void SaveColorData() const;
+  void SaveTintData() const;
+  void SaveDisplayPropertyData() const;
 
   // Save the paths of data we have written to disk in prefs.
-  void SaveCachedImageData();
+  void SaveCachedImageData() const;
 
   // Save the id of the last theme installed.
   void SaveThemeID(const std::string& id);
@@ -308,39 +336,39 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   // Frees generated images and clears the image cache.
   void ClearCaches();
 
-  // Clears the platform-specific caches. Do not call directly; it's called
-  // from ClearCaches().
-  void FreePlatformCaches();
+  // Remove preference values for themes that are no longer in use.
+  void RemoveUnusedThemes();
 
   // Encode image at image_cache_[id] as PNG and write to disk.
-  bool WriteImagesToDisk();
+  void WriteImagesToDisk() const;
 
   // Do we have a custom frame image or custom tints?
-  bool ShouldTintFrames();
+  bool ShouldTintFrames() const;
 
-#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
+#if defined(OS_LINUX)
   // Loads an image and flips it horizontally if |rtl_enabled| is true.
-  GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled);
+  GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled) const;
 #endif
 
-  // Cached images. We cache all retrieved and generated bitmaps and keep
-  // track of the pointers. We own these and will delete them when we're done
-  // using them.
-  typedef std::map<int, SkBitmap*> ImageCache;
-  ImageCache image_cache_;
-#if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
+  mutable ImageCache image_cache_;
+
+  // Keep images generated for theme cache in their own place, so we can lock
+  // them on WRITE from UI thread and READ from file thread.  Read from UI
+  // thread will be allowed unlocked, because no other thread has write
+  // access to the cache.
+  mutable ImageCache themed_image_cache_;
+
+#if defined(OS_LINUX)
   typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
-  GdkPixbufMap gdk_pixbufs_;
+  mutable GdkPixbufMap gdk_pixbufs_;
 #elif defined(OS_MACOSX)
   typedef std::map<int, NSImage*> NSImageMap;
-  NSImageMap nsimage_cache_;
+  mutable NSImageMap nsimage_cache_;
   typedef std::map<int, NSColor*> NSColorMap;
-  NSColorMap nscolor_cache_;
+  mutable NSColorMap nscolor_cache_;
 #endif
 
-  // Save the images to be written to disk, mapping file path to id.
-  typedef std::map<FilePath, int> ImagesDiskCache;
-  ImagesDiskCache images_disk_cache_;
+  mutable ImagesDiskCache images_disk_cache_;
 
   ResourceBundle& rb_;
   Profile* profile_;
@@ -348,7 +376,7 @@ class BrowserThemeProvider : public base::RefCounted<BrowserThemeProvider>,
   ImageMap images_;
   ColorMap colors_;
   TintMap tints_;
-  RawDataMap raw_data_;
+  mutable RawDataMap raw_data_;
   DisplayPropertyMap display_properties_;
 
   // Reverse of theme_resources_map, so we can cache images properly.

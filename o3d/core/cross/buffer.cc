@@ -32,9 +32,9 @@
 
 // This file contains the definitions of Buffer, VertexBuffer and IndexBuffer.
 
-#include "core/cross/precompile.h"
 #include "core/cross/buffer.h"
 #include "core/cross/client_info.h"
+#include "core/cross/pointer_utils.h"
 #include "core/cross/renderer.h"
 #include "core/cross/features.h"
 #include "core/cross/error.h"
@@ -100,11 +100,11 @@ static FieldCreator g_creators[] = {
 Buffer::Buffer(ServiceLocator* service_locator)
     : NamedObject(service_locator),
       features_(service_locator->GetService<Features>()),
-      access_mode_(NONE),
       field_change_count_(0),
       total_components_(0),
       stride_(0),
       num_elements_(0),
+      access_mode_(NONE),
       lock_count_(0) {
 }
 
@@ -159,6 +159,13 @@ bool Buffer::AllocateElements(unsigned num_elements) {
   }
 
   size_t size_in_bytes = num_elements * stride_;
+  // Check for size_t overflow.
+  if (size_in_bytes / stride_ != num_elements) {
+    O3D_ERROR(service_locator())
+        << "Attempt to allocate too many elements for the current set of "
+        << "fields on buffer.";
+    return false;
+  }
 
   if (size_in_bytes == 0) {
     O3D_ERROR(service_locator())
@@ -197,6 +204,13 @@ bool Buffer::ReshuffleBuffer(unsigned int new_stride, Field* field_to_remove) {
   }
   if (num_elements_) {
     size_t size_in_bytes = num_elements_ * new_stride;
+    // Check for size_t overflow.
+    if (size_in_bytes / new_stride != num_elements_) {
+      O3D_ERROR(service_locator())
+          << "Attempt to allocate too many elements for the current set of "
+          << "fields on buffer.";
+      return false;
+    }
     std::vector<uint8> temp(size_in_bytes);
 
     // Copy old fields into new buffer.
@@ -474,7 +488,7 @@ bool Buffer::Set(o3d::RawData *raw_data,
     // Lock before reading in all the fields to avoid locking/unlocking
     // for each field which would be slower
     o3d::BufferLockHelper helper(this);
-    void *buffer_data = helper.GetData(o3d::Buffer::WRITE_ONLY);
+    helper.GetData(o3d::Buffer::WRITE_ONLY);
 
     // Read each field
     for (int32 ff = 0; ff < num_fields; ++ff) {

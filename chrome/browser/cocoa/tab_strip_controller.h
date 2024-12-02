@@ -10,10 +10,13 @@
 #include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
 #import "chrome/browser/cocoa/tab_controller_target.h"
+#import "third_party/GTM/AppKit/GTMWindowSheetController.h"
 
 @class TabView;
 @class TabStripView;
 
+class Browser;
+class ConstrainedWindowMac;
 class TabStripModelObserverBridge;
 class TabStripModel;
 class TabContents;
@@ -30,14 +33,17 @@ class ToolbarModel;
 // the single child of the contentView is swapped around to hold the contents
 // (toolbar and all) representing that tab.
 
-@interface TabStripController : NSObject <TabControllerTarget> {
+@interface TabStripController :
+  NSObject<TabControllerTarget,
+           GTMWindowSheetControllerDelegate> {
  @private
   TabContents* currentTab_;   // weak, tab for which we're showing state
-  TabStripView* tabView_;  // weak
+  scoped_nsobject<TabStripView> tabView_;  // strong
   NSView* switchView_;  // weak
   scoped_nsobject<NSView> dragBlockingView_;  // avoid bad window server drags
   NSButton* newTabButton_;  // weak, obtained from the nib.
   scoped_ptr<TabStripModelObserverBridge> bridge_;
+  Browser* browser_;  // weak
   TabStripModel* tabModel_;  // weak
   // access to the TabContentsControllers (which own the parent view
   // for the toolbar and associated tab contents) given an index. This needs
@@ -49,7 +55,7 @@ class ToolbarModel;
   scoped_nsobject<NSMutableArray> tabArray_;
 
   // These values are only used during a drag, and override tab positioning.
-  TabView* placeholderTab_; // weak. Tab being dragged
+  TabView* placeholderTab_;  // weak. Tab being dragged
   NSRect placeholderFrame_;  // Frame to use
   CGFloat placeholderStretchiness_; // Vertical force shown by streching tab.
   // Frame targets for all the current views.
@@ -57,6 +63,29 @@ class ToolbarModel;
   // aren't coalesced, so we store frames to avoid redundant calls.
   scoped_nsobject<NSMutableDictionary> targetFrames_;
   NSRect newTabTargetFrame_;
+  // If YES, do not show the new tab button during layout.
+  BOOL forceNewTabButtonHidden_;
+  // YES if we've successfully completed the initial layout. When this is
+  // NO, we probably don't want to do any animation because we're just coming
+  // into being.
+  BOOL initialLayoutComplete_;
+
+  // Width available for resizing the tabs (doesn't include the new tab
+  // button). Used to restrict the available width when closing many tabs at
+  // once to prevent them from resizing to fit the full width. If the entire
+  // width should be used, this will have a value of |kUseFullAvailableWidth|.
+  float availableResizeWidth_;
+  // A tracking area that's the size of the tab strip used to be notified
+  // when the mouse moves in the tab strip
+  scoped_nsobject<NSTrackingArea> trackingArea_;
+  TabView* hoveredTab_;  // weak. Tab that the mouse is hovering over
+
+  // Array of subviews which are permanent (and which should never be removed),
+  // such as the new-tab button, but *not* the tabs themselves.
+  scoped_nsobject<NSMutableArray> permanentSubviews_;
+
+  // Manages per-tab sheets.
+  scoped_nsobject<GTMWindowSheetController> sheetController_;
 }
 
 // Initialize the controller with a view and browser that contains
@@ -66,10 +95,10 @@ class ToolbarModel;
 // you have retained them.
 - (id)initWithView:(TabStripView*)view
         switchView:(NSView*)switchView
-             model:(TabStripModel*)model;
+           browser:(Browser*)browser;
 
 // Return the view for the currently selected tab.
-- (NSView *)selectedTabView;
+- (NSView*)selectedTabView;
 
 // Set the frame of the selected tab, also updates the internal frame dict.
 - (void)setFrameOfSelectedTab:(NSRect)frame;
@@ -95,11 +124,34 @@ class ToolbarModel;
                           frame:(NSRect)frame
                   yStretchiness:(CGFloat)yStretchiness;
 
-// Force the tabs to rearrange themselves to reflect the current model
+// Returns whether or not |tab| can still be fully seen in the tab strip or if
+// its current position would cause it be obscured by things such as the edge
+// of the window or the window decorations. Returns YES only if the entire tab
+// is visible.
+- (BOOL)isTabFullyVisible:(TabView*)tab;
+
+// Show or hide the new tab button. The button is hidden immediately, but
+// waits until the next call to |-layoutTabs| to show it again.
+- (void)showNewTabButton:(BOOL)show;
+
+// Force the tabs to rearrange themselves to reflect the current model.
 - (void)layoutTabs;
+
+// Are we in rapid (tab) closure mode? I.e., is a full layout deferred (while
+// the user closes tabs)? Needed to overcome missing clicks during rapid tab
+// closure.
+- (BOOL)inRapidClosureMode;
 
 // Default height for tabs.
 + (CGFloat)defaultTabHeight;
+
+// Returns the (lazily created) window sheet controller of this window. Used
+// for the per-tab sheets.
+- (GTMWindowSheetController*)sheetController;
+
+- (void)attachConstrainedWindow:(ConstrainedWindowMac*)window;
+- (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
+
 @end
 
 // Notification sent when the number of tabs changes. The object will be this

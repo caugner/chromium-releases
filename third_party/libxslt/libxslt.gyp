@@ -5,15 +5,12 @@
 {
   'variables': {
     'conditions': [
-      ['OS=="linux"', {'os_include': 'linux'}],
+      ['OS=="linux" or OS=="freebsd"', {'os_include': 'linux'}],
       ['OS=="mac"', {'os_include': 'mac'}],
       ['OS=="win"', {'os_include': 'win32'}],
     ],
     'use_system_libxslt%': 0,
   },
-  'includes': [
-    '../../build/common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'libxslt',
@@ -22,12 +19,15 @@
           'type': 'settings',
           'direct_dependent_settings': {
             'cflags': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --cflags libxslt)',
+              '<!@(pkg-config --cflags libxslt)',
             ],
           },
           'link_settings': {
+            'ldflags': [
+              '<!@(pkg-config --libs-only-L --libs-only-other libxslt)',
+            ],
             'libraries': [
-              '<!@(python ../../build/linux/pkg_config_wrapper.py --libs libxslt)',
+              '<!@(pkg-config --libs-only-l libxslt)',
             ],
           },
         }, { # else: OS != "linux" or ! use_system_libxslt
@@ -107,3 +107,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

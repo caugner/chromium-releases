@@ -41,9 +41,24 @@
 #include <iostream>
 #include <fstream>
 
+#include "core/cross/renderer.h"
 #include "plugin/cross/config.h"
 #include "plugin/cross/plugin_metrics.h"
 #include "plugin_mac.h"
+
+@interface BundleReader : NSObject {
+}
+
+- (BOOL)boolValueForKey:(NSString*)key;
+@end
+
+@implementation BundleReader
+
+- (BOOL) boolValueForKey:(NSString*)key {
+  NSBundle *bundle = [NSBundle bundleForClass:[self class]]; 
+  return [[bundle objectForInfoDictionaryKey:key] boolValue];
+}
+@end
 
 namespace o3d {
 
@@ -160,32 +175,45 @@ GPUInfo softwareRenderList[] = {
   {0x8086, 0x2a02},  // Intel GMA X3100  Macbook
   {0x8086, 0x27a2}   // Intel GMA 950    Mac Mini
 };
-
+  
+static bool BundleFlagForcesSoftwareRenderer() {
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  BundleReader *bundle = [[[BundleReader alloc] init] autorelease];
+  BOOL result = [bundle boolValueForKey:@"O3DForceSoftwareRenderer"];
+  [pool release];
+  return result != NO;
+}
+  
 bool UseSoftwareRenderer() {
   static bool use_software_renderer = false;
   static bool is_initialized = false;
 
   if (!is_initialized) {
-    int vendorID;
-    int deviceID;
-    GetVideoCardInfo(kCGDirectMainDisplay,
-                     &vendorID,
-                     &deviceID,
-                     NULL);
+    if (BundleFlagForcesSoftwareRenderer()) {
+      use_software_renderer = true;
+    } else {    
+      int vendorID;
+      int deviceID;
+      GetVideoCardInfo(kCGDirectMainDisplay,
+                       &vendorID,
+                       &deviceID,
+                       NULL);
 
-    use_software_renderer = false;
-    for (int i = 0; i < arraysize(softwareRenderList); ++i) {
-      GPUInfo &softwareRenderInfo = softwareRenderList[i];
-      if (vendorID == softwareRenderInfo.vendorID
-        && deviceID == softwareRenderInfo.deviceID) {
-        use_software_renderer = true;
-        break;
+      use_software_renderer = false;
+      int list_count = arraysize(softwareRenderList);
+      for (int i = 0; i < list_count; ++i) {
+        GPUInfo &softwareRenderInfo = softwareRenderList[i];
+        if (vendorID == softwareRenderInfo.vendorID
+          && deviceID == softwareRenderInfo.deviceID) {
+          use_software_renderer = true;
+          break;
+        }
       }
     }
     is_initialized = true;
   }
 
-  return use_software_renderer;
+  return use_software_renderer || Renderer::IsForceSoftwareRenderer();
 }
 
 static bool GetVideoCardMetrics(CGDirectDisplayID displayID) {

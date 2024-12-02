@@ -31,9 +31,10 @@
 #ifndef WebWorkerClient_h
 #define WebWorkerClient_h
 
-#include "WebCommon.h"
+#include "WebMessagePortChannel.h"
 
 namespace WebKit {
+    class WebNotificationPresenter;
     class WebString;
     class WebWorker;
 
@@ -42,7 +43,9 @@ namespace WebKit {
     // the Worker object, unless noted.
     class WebWorkerClient {
     public:
-        virtual void postMessageToWorkerObject(const WebString&) = 0;
+        virtual void postMessageToWorkerObject(
+            const WebString&,
+            const WebMessagePortChannelArray&) = 0;
 
         virtual void postExceptionToWorkerObject(
             const WebString& errorString, int lineNumber,
@@ -62,8 +65,15 @@ namespace WebKit {
 
         virtual void workerContextDestroyed() = 0;
 
+        // Returns the notification presenter for this worker context.  Pointer
+        // is owned by the object implementing WebWorkerClient.
+        virtual WebNotificationPresenter* notificationPresenter() = 0;
+
         // This can be called on any thread to create a nested worker.
-        virtual WebKit::WebWorker* createWorker(WebKit::WebWorkerClient* client) = 0;
+        virtual WebWorker* createWorker(WebWorkerClient* client) = 0;
+
+    protected:
+        ~WebWorkerClient() { }
     };
 
 } // namespace WebKit

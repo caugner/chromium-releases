@@ -19,6 +19,8 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_file.h"
+#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
@@ -46,12 +48,6 @@
 #include "app/win_util.h"
 #include "base/registry.h"
 #include "base/win_util.h"
-#endif
-
-#if !defined(OS_MACOSX)
-// Used for initializing the list of dangerous extensions. We don't support it
-// yet on mac.
-#include "chrome/browser/download/download_util.h"
 #endif
 
 #if defined(OS_LINUX)
@@ -114,20 +110,6 @@ static bool DownloadPathIsDangerous(const FilePath& download_path) {
   return (download_path == desktop_dir);
 }
 
-// Helper to determine if a download is a Chrome extension. We should be able to
-// just use the mime type, but even our own servers are not setup to serve the
-// right headers yet, so we have a short-term file extension heuristic, too.
-static bool IsChromeExtension(const FilePath& path,
-                              const std::string& mime_type) {
-  // If the server says it is an extension, it is definitely an extension.
-  if (mime_type == Extension::kMimeType)
-    return true;
-
-  // Otherwise, it is an extension if it has the right, err, extension.
-  return path.Extension().size() > 1 &&
-         path.Extension().substr(1) == chrome::kExtensionFileExtension;
-}
-
 // DownloadItem implementation -------------------------------------------------
 
 // Constructor for reading from the history service.
@@ -168,7 +150,8 @@ DownloadItem::DownloadItem(int32 download_id,
                            int64 download_size,
                            int render_process_id,
                            int request_id,
-                           bool is_dangerous)
+                           bool is_dangerous,
+                           bool save_as)
     : id_(download_id),
       full_path_(path),
       path_uniquifier_(path_uniquifier),
@@ -188,7 +171,8 @@ DownloadItem::DownloadItem(int32 download_id,
       auto_opened_(false),
       original_name_(original_name),
       render_process_id_(render_process_id),
-      request_id_(request_id) {
+      request_id_(request_id),
+      save_as_(save_as) {
   Init(true /* start progress timer */);
 }
 
@@ -461,7 +445,8 @@ void DownloadManager::GetDownloads(Observer* observer,
     download_copy.reserve(downloads_.size());
     for (DownloadMap::iterator it = downloads_.begin();
          it != downloads_.end(); ++it) {
-      download_copy.push_back(it->second);
+      if (it->second->db_handle() > kUninitializedHandle)
+        download_copy.push_back(it->second);
     }
 
     // We retain ownership of the DownloadItems.
@@ -530,10 +515,8 @@ bool DownloadManager::Init(Profile* profile) {
   file_loop_->PostTask(FROM_HERE, NewRunnableFunction(
       CreateDirectoryPtr, download_path()));
 
-#if defined(OS_WIN) || defined(OS_LINUX)
   // We use this to determine possibly dangerous downloads.
   download_util::InitializeExeTypes(&exe_types_);
-#endif
 
   // We store any file extension that should be opened automatically at
   // download completion in this pref.
@@ -573,8 +556,13 @@ void DownloadManager::StartDownload(DownloadCreateInfo* info) {
   // Freeze the user's preference for showing a Save As dialog.  We're going to
   // bounce around a bunch of threads and we don't want to worry about race
   // conditions where the user changes this pref out from under us.
-  if (*prompt_for_download_)
-    info->save_as = true;
+  if (*prompt_for_download_) {
+    // But never obey the preference for extension installation. Note that we
+    // only care here about the case where an extension is installed, not when
+    // one is downloaded with "save as...".
+    if (!IsExtensionInstall(info))
+      info->save_as = true;
+  }
 
   // Determine the proper path for a download, by choosing either the default
   // download directory, or prompting the user.
@@ -592,7 +580,7 @@ void DownloadManager::StartDownload(DownloadCreateInfo* info) {
     // b) They are an extension that is not from the gallery
     if (IsDangerous(info->suggested_path.BaseName()))
       info->is_dangerous = true;
-    else if (IsChromeExtension(info->suggested_path, info->mime_type) &&
+    else if (IsExtensionInstall(info) &&
              !ExtensionsService::IsDownloadFromGallery(info->url,
                                                        info->referrer_url)) {
       info->is_dangerous = true;
@@ -654,7 +642,7 @@ void DownloadManager::CheckIfSuggestedPathExists(DownloadCreateInfo* info) {
     // Create an empty file at the suggested path so that we don't allocate the
     // same "non-existant" path to multiple downloads.
     // See: http://code.google.com/p/chromium/issues/detail?id=3662
-    file_util::WriteFile(info->suggested_path.ToWStringHack(), "", 0);
+    file_util::WriteFile(info->suggested_path, "", 0);
   }
 
   // Now we return to the UI thread.
@@ -673,8 +661,8 @@ void DownloadManager::OnPathExistenceAvailable(DownloadCreateInfo* info) {
     if (!select_file_dialog_.get())
       select_file_dialog_ = SelectFileDialog::Create(this);
 
-    TabContents* contents = tab_util::GetTabContentsByID(
-        info->render_process_id, info->render_view_id);
+    TabContents* contents = tab_util::GetTabContentsByID(info->child_id,
+                                                         info->render_view_id);
     SelectFileDialog::FileTypeInfo file_type_info;
     file_type_info.extensions.resize(1);
     file_type_info.extensions[0].push_back(info->suggested_path.Extension());
@@ -711,9 +699,10 @@ void DownloadManager::ContinueStartDownload(DownloadCreateInfo* info,
                                 info->original_name,
                                 info->start_time,
                                 info->total_bytes,
-                                info->render_process_id,
+                                info->child_id,
                                 info->request_id,
-                                info->is_dangerous);
+                                info->is_dangerous,
+                                info->save_as);
     download->set_manager(this);
     in_progress_[info->download_id] = download;
   } else {
@@ -739,12 +728,14 @@ void DownloadManager::ContinueStartDownload(DownloadCreateInfo* info,
 
   download->Rename(target_path);
 
-  if (profile_->IsOffTheRecord()) {
-    // Fake a db handle for incognito mode, since nothing is actually stored in
-    // the database in this mode. We have to make sure that these handles don't
-    // collide with normal db handles, so we use a negative value. Eventually,
-    // they could overlap, but you'd have to do enough downloading that your ISP
-    // would likely stab you in the neck first. YMMV.
+  // Do not store the download in the history database for a few special cases:
+  // - incognito mode (that is the point of this mode)
+  // - extensions (users don't think of extension installation as 'downloading')
+  // We have to make sure that these handles don't collide with normal db
+  // handles, so we use a negative value. Eventually, they could overlap, but
+  // you'd have to do enough downloading that your ISP would likely stab you in
+  // the neck first. YMMV.
+  if (profile_->IsOffTheRecord() || IsExtensionInstall(download)) {
     static int64 fake_db_handle = kUninitializedHandle - 1;
     OnCreateDownloadEntryComplete(*info, fake_db_handle--);
   } else {
@@ -872,7 +863,7 @@ void DownloadManager::ContinueDownloadFinished(DownloadItem* download) {
     extension = extension.substr(1);
 
   // Handle chrome extensions explicitly and skip the shell execute.
-  if (IsChromeExtension(download->full_path(), download->mime_type())) {
+  if (IsExtensionInstall(download)) {
     OpenChromeExtension(download->full_path(), download->url(),
                         download->referrer_url());
     download->set_auto_opened(true);
@@ -968,8 +959,6 @@ void DownloadManager::DownloadCancelled(int32 download_id) {
     return;
   DownloadItem* download = it->second;
 
-  CancelDownloadRequest(download->render_process_id(), download->request_id());
-
   // Clean up will happen when the history system create callback runs if we
   // don't have a valid db_handle yet.
   if (download->db_handle() != kUninitializedHandle) {
@@ -977,12 +966,23 @@ void DownloadManager::DownloadCancelled(int32 download_id) {
     UpdateHistoryForDownload(download);
   }
 
+  DownloadCancelledInternal(download_id,
+                            download->render_process_id(),
+                            download->request_id());
+}
+
+void DownloadManager::DownloadCancelledInternal(int download_id,
+                                                int render_process_id,
+                                                int request_id) {
+  // Cancel the network request.
+  CancelDownloadRequest(render_process_id, request_id);
+
   // Tell the file manager to cancel the download.
-  file_manager_->RemoveDownload(download->id(), this);  // On the UI thread
+  file_manager_->RemoveDownload(download_id, this);  // On the UI thread
   file_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &DownloadFileManager::CancelDownload,
-                        download->id()));
+                        download_id));
 }
 
 void DownloadManager::PauseDownload(int32 download_id, bool pause) {
@@ -1122,7 +1122,7 @@ void DownloadManager::DownloadUrl(const GURL& url,
   request_context_->set_referrer_charset(referrer_charset);
   file_manager_->DownloadUrl(url,
                              referrer,
-                             tab_contents->process()->pid(),
+                             tab_contents->process()->id(),
                              tab_contents->render_view_host()->routing_id(),
                              request_context_.get());
 }
@@ -1191,11 +1191,14 @@ void DownloadManager::GenerateExtension(
     //         application/x-javascript.
     // 4. New extension is not ".tar" for .gz files. For misconfigured web
     //    servers, i.e. bug 5772.
+    // 5. The original extension is not ".tgz" & the new extension is not "gz".
     FilePath::StringType append_extension;
     if (net::GetPreferredExtensionForMimeType(mime_type, &append_extension)) {
       if (append_extension != FILE_PATH_LITERAL("txt") &&
           append_extension != extension &&
           !IsExecutable(append_extension) &&
+          !(append_extension == FILE_PATH_LITERAL("gz") &&
+            extension == FILE_PATH_LITERAL("tgz")) &&
           (append_extension != FILE_PATH_LITERAL("tar") ||
            extension != FILE_PATH_LITERAL("gz"))) {
         extension += FILE_PATH_LITERAL(".");
@@ -1232,17 +1235,23 @@ void DownloadManager::RemoveObserver(Observer* observer) {
 // user interface.
 void DownloadManager::ShowDownloadInShell(const DownloadItem* download) {
   DCHECK(file_manager_);
+  DCHECK(MessageLoop::current() == ui_loop_);
+#if defined(OS_MACOSX)
+  // Mac needs to run this operation on the UI thread.
+  platform_util::ShowItemInFolder(download->full_path());
+#else
   file_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &DownloadFileManager::OnShowDownloadInShell,
                         FilePath(download->full_path())));
+#endif
 }
 
 void DownloadManager::OpenDownload(const DownloadItem* download,
                                    gfx::NativeView parent_window) {
   // Open Chrome extensions with ExtensionsService. For everything else do shell
   // execute.
-  if (IsChromeExtension(download->full_path(), download->mime_type())) {
+  if (IsExtensionInstall(download)) {
     OpenChromeExtension(download->full_path(), download->url(),
                         download->referrer_url());
   } else {
@@ -1265,6 +1274,7 @@ void DownloadManager::OpenChromeExtension(const FilePath& full_path,
                         Extension::INTERNAL,
                         "",  // no expected id
                         true,  // please delete crx on completion
+                        true,  // privilege increase allowed
                         g_browser_process->file_thread()->message_loop(),
                         service,
                         new ExtensionInstallUI(profile_));
@@ -1274,10 +1284,16 @@ void DownloadManager::OpenChromeExtension(const FilePath& full_path,
 void DownloadManager::OpenDownloadInShell(const DownloadItem* download,
                                           gfx::NativeView parent_window) {
   DCHECK(file_manager_);
+  DCHECK(MessageLoop::current() == ui_loop_);
+#if defined(OS_MACOSX)
+  // Mac OS X requires opening downloads on the UI thread.
+  platform_util::OpenItem(download->full_path());
+#else
   file_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(file_manager_,
                         &DownloadFileManager::OnOpenDownloadInShell,
                         download->full_path(), download->url(), parent_window));
+#endif
 }
 
 void DownloadManager::OpenFilesOfExtension(
@@ -1332,21 +1348,16 @@ bool DownloadManager::IsExecutableMimeType(const std::string& mime_type) {
 }
 
 bool DownloadManager::IsExecutable(const FilePath::StringType& extension) {
-#if defined(OS_MACOSX)
-  // We don't have dangerous download support on mac yet.
-  return false;
-#else
   if (!IsStringASCII(extension))
     return false;
 #if defined(OS_WIN)
   std::string ascii_extension = WideToASCII(extension);
-#elif defined(OS_LINUX)
+#elif defined(OS_POSIX)
   std::string ascii_extension = extension;
 #endif
   StringToLowerASCII(&ascii_extension);
 
   return exe_types_.find(ascii_extension) != exe_types_.end();
-#endif  // !defined(OS_MACOSX)
 }
 
 void DownloadManager::ResetAutoOpenFiles() {
@@ -1392,9 +1403,9 @@ void DownloadManager::FileSelectionCanceled(void* params) {
   // The user didn't pick a place to save the file, so need to cancel the
   // download that's already in progress to the temporary location.
   DownloadCreateInfo* info = reinterpret_cast<DownloadCreateInfo*>(params);
-  file_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(file_manager_, &DownloadFileManager::CancelDownload,
-                        info->download_id));
+  DownloadCancelledInternal(info->download_id,
+                            info->child_id,
+                            info->request_id);
 }
 
 void DownloadManager::DeleteDownload(const FilePath& path) {
@@ -1440,9 +1451,15 @@ void DownloadManager::GenerateSafeFilename(const std::string& mime_type,
       *file_name = file_name->Append(leaf_name);
     }
   }
-#elif defined(OS_POSIX)
-  NOTIMPLEMENTED();
 #endif
+}
+
+bool DownloadManager::IsExtensionInstall(const DownloadItem* item) {
+  return item->mime_type() == Extension::kMimeType && !item->save_as();
+}
+
+bool DownloadManager::IsExtensionInstall(const DownloadCreateInfo* info) {
+  return info->mime_type == Extension::kMimeType && !info->save_as;
 }
 
 // Operations posted to us from the history service ----------------------------
@@ -1518,8 +1535,8 @@ void DownloadManager::ShowDownloadInBrowser(const DownloadCreateInfo& info,
   // The 'contents' may no longer exist if the user closed the tab before we get
   // this start completion event. If it does, tell the origin TabContents to
   // display its download shelf.
-  TabContents* contents =
-      tab_util::GetTabContentsByID(info.render_process_id, info.render_view_id);
+  TabContents* contents = tab_util::GetTabContentsByID(info.child_id,
+                                                       info.render_view_id);
 
   // If the contents no longer exists, we start the download in the last active
   // browser. This is not ideal but better than fully hiding the download from

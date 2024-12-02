@@ -11,6 +11,7 @@
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_video_decoder.h"
 #include "media/filters/null_audio_renderer.h"
+#include "skia/ext/platform_canvas.h"
 #include "webkit/api/public/WebRect.h"
 #include "webkit/api/public/WebSize.h"
 #include "webkit/api/public/WebURL.h"
@@ -122,6 +123,11 @@ void WebMediaPlayerImpl::Proxy::PipelineErrorCallback() {
       &WebMediaPlayerImpl::Proxy::PipelineErrorTask));
 }
 
+void WebMediaPlayerImpl::Proxy::NetworkEventCallback() {
+  render_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
+      &WebMediaPlayerImpl::Proxy::NetworkEventTask));
+}
+
 void WebMediaPlayerImpl::Proxy::RepaintTask() {
   DCHECK(MessageLoop::current() == render_loop_);
   {
@@ -162,6 +168,13 @@ void WebMediaPlayerImpl::Proxy::PipelineErrorTask() {
   }
 }
 
+void WebMediaPlayerImpl::Proxy::NetworkEventTask() {
+  DCHECK(MessageLoop::current() == render_loop_);
+  if (webmediaplayer_) {
+    webmediaplayer_->OnNetworkEvent();
+  }
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // WebMediaPlayerImpl implementation
 
@@ -198,6 +211,8 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(WebKit::WebMediaPlayerClient* client,
       &WebMediaPlayerImpl::Proxy::PipelineEndedCallback));
   pipeline_->SetPipelineErrorCallback(NewCallback(proxy_.get(),
       &WebMediaPlayerImpl::Proxy::PipelineErrorCallback));
+  pipeline_->SetNetworkEventCallback(NewCallback(proxy_.get(),
+      &WebMediaPlayerImpl::Proxy::NetworkEventCallback));
 
   // Add in the default filter factories.
   filter_factory_->AddFactory(media::FFmpegDemuxer::CreateFilterFactory());
@@ -368,7 +383,7 @@ bool WebMediaPlayerImpl::seeking() const {
 
   if (ready_state_ == WebKit::WebMediaPlayer::HaveNothing)
     return false;
-  
+
   return ready_state_ == WebKit::WebMediaPlayer::HaveMetadata;
 }
 
@@ -391,10 +406,10 @@ int WebMediaPlayerImpl::dataRate() const {
   return 0;
 }
 
-float WebMediaPlayerImpl::maxTimeBuffered() const {
+const WebKit::WebTimeRanges& WebMediaPlayerImpl::buffered() const {
   DCHECK(MessageLoop::current() == main_loop_);
 
-  return static_cast<float>(pipeline_->GetBufferedTime().InSecondsF());
+  return buffered_;
 }
 
 float WebMediaPlayerImpl::maxTimeSeekable() const {
@@ -433,7 +448,44 @@ void WebMediaPlayerImpl::paint(WebCanvas* canvas,
   DCHECK(MessageLoop::current() == main_loop_);
   DCHECK(proxy_);
 
+#if WEBKIT_USING_SKIA
   proxy_->Paint(canvas, rect);
+#elif WEBKIT_USING_CG
+  // If there is no preexisting platform canvas, or if the size has
+  // changed, recreate the canvas.  This is to avoid recreating the bitmap
+  // buffer over and over for each frame of video.
+  if (!skia_canvas_.get() ||
+      skia_canvas_->getDevice()->width() != rect.width ||
+      skia_canvas_->getDevice()->height() != rect.height) {
+    skia_canvas_.reset(new skia::PlatformCanvas(rect.width, rect.height, true));
+  }
+
+  // Draw to our temporary skia canvas.
+  gfx::Rect normalized_rect(rect.width, rect.height);
+  proxy_->Paint(skia_canvas_.get(), normalized_rect);
+
+  // The mac coordinate system is flipped vertical from the normal skia
+  // coordinates.  During painting of the frame, flip the coordinates
+  // system and, for simplicity, also translate the clip rectangle to
+  // start at 0,0.
+  CGContextSaveGState(canvas);
+  CGContextTranslateCTM(canvas, rect.x, rect.height + rect.y);
+  CGContextScaleCTM(canvas, 1.0, -1.0);
+
+  // We need a local variable CGRect version for DrawToContext.
+  CGRect normalized_cgrect =
+      CGRectMake(normalized_rect.x(), normalized_rect.y(),
+                 normalized_rect.width(), normalized_rect.height());
+
+  // Copy the frame rendered to our temporary skia canvas onto the passed in
+  // canvas.
+  skia_canvas_->getTopPlatformDevice().DrawToContext(canvas, 0, 0,
+                                                     &normalized_cgrect);
+
+  CGContextRestoreGState(canvas);
+#else
+  NOTIMPLEMENTED() << "We only support rendering to skia or CG";
+#endif
 }
 
 bool WebMediaPlayerImpl::hasSingleSecurityOrigin() const {
@@ -466,6 +518,13 @@ void WebMediaPlayerImpl::Repaint() {
 void WebMediaPlayerImpl::OnPipelineInitialize() {
   DCHECK(MessageLoop::current() == main_loop_);
   if (pipeline_->GetError() == media::PIPELINE_OK) {
+    // Only keep one time range starting from 0.
+    WebKit::WebTimeRanges new_buffered(static_cast<size_t>(1));
+    new_buffered[0].start = 0.0f;
+    new_buffered[0].end =
+        static_cast<float>(pipeline_->GetDuration().InSecondsF());
+    buffered_.swap(new_buffered);
+
     // Since we have initialized the pipeline, say we have everything.
     // TODO(hclam): change this to report the correct status.
     SetReadyState(WebKit::WebMediaPlayer::HaveMetadata);
@@ -536,6 +595,16 @@ void WebMediaPlayerImpl::OnPipelineError() {
 
   // Repaint to trigger UI update.
   Repaint();
+}
+
+void WebMediaPlayerImpl::OnNetworkEvent() {
+  DCHECK(MessageLoop::current() == main_loop_);
+  if (pipeline_->GetError() == media::PIPELINE_OK) {
+    if (pipeline_->IsNetworkActive())
+      SetNetworkState(WebKit::WebMediaPlayer::Loading);
+    else
+      SetNetworkState(WebKit::WebMediaPlayer::Idle);
+  }
 }
 
 void WebMediaPlayerImpl::SetNetworkState(

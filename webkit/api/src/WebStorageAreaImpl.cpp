@@ -47,35 +47,14 @@ WebStorageAreaImpl::~WebStorageAreaImpl()
 {
 }
 
-void WebStorageAreaImpl::lock(bool& invalidateCache, size_t& bytesLeftInQuota)
-{
-    // FIXME: Enable locking.  http://crbug.com/16877
-    invalidateCache = false;
-    // FIXME: Enable quota support.  http://crbug.com/16876
-    bytesLeftInQuota = 0;
-}
-
-void WebStorageAreaImpl::unlock()
-{
-    // FIXME: Enable locking.  http://crbug.com/16877
-}
-
 unsigned WebStorageAreaImpl::length()
 {
     return m_storageArea->length();
 }
 
-WebString WebStorageAreaImpl::key(unsigned index, bool& keyException)
+WebString WebStorageAreaImpl::key(unsigned index)
 {
-    int exceptionCode = 0;
-    WebString value = m_storageArea->key(index, exceptionCode);
-    if (exceptionCode != 0) {
-        ASSERT(exceptionCode == WebCore::INDEX_SIZE_ERR);
-        keyException = true;
-    } else {
-        keyException = false;
-    }
-    return value;
+    return m_storageArea->key(index);
 }
 
 WebString WebStorageAreaImpl::getItem(const WebString& key)

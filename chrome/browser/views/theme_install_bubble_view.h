@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef CHROME_BROWSER_VIEWS_THEME_INSTALL_BUBBLE_VIEW_H_
+#define CHROME_BROWSER_VIEWS_THEME_INSTALL_BUBBLE_VIEW_H_
+
 #include "app/gfx/canvas.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_registrar.h"
@@ -9,22 +12,22 @@
 #include "views/controls/label.h"
 #include "views/widget/widget_win.h"
 
-// ThemeInstallBubbleView launches a "loading..." bubble in the center of the
-// currently active browser window when an extension or theme is loaded.  If
-// an extension is being applied, the bubble goes away immediately.  If a theme
-// is being applied, it disappears when the theme has been loaded.  The purpose
-// of this bubble is to warn the user that the browser may be unresponsive
-// while the theme is being installed.
+// ThemeInstallBubbleView is a view that provides a "Loading..." bubble in the
+// center of a browser window for use when an extension or theme is loaded.
+// (The Browser class only calls it to install itself into the currently active
+// browser window.)  If an extension is being applied, the bubble goes away
+// immediately.  If a theme is being applied, it disappears when the theme has
+// been loaded.  The purpose of this bubble is to warn the user that the browser
+// may be unresponsive while the theme is being installed.
 //
 // Edge case: note that if one installs a theme in one window and then switches
-// rapidly to another window to install a theme there as well (in the short
-// time between install begin and theme caching seizing the UI thread), the
-// loading bubble will only appear over the first window.
+// rapidly to another window to install a theme there as well (in the short time
+// between install begin and theme caching seizing the UI thread), the loading
+// bubble will only appear over the first window, as there is only ever one
+// instance of the bubble.
 class ThemeInstallBubbleView : public NotificationObserver,
                                public views::Label {
  public:
-  explicit ThemeInstallBubbleView(TabContents* tab_contents);
-
   ~ThemeInstallBubbleView();
 
   // NotificationObserver
@@ -36,8 +39,7 @@ class ThemeInstallBubbleView : public NotificationObserver,
   static void Show(TabContents* tab_contents);
 
  private:
-  // The roundedness of the edges of our bubble.
-  static const int kBubbleCornerRadius = 4;
+  explicit ThemeInstallBubbleView(TabContents* tab_contents);
 
   // The content area at the start of the animation.
   gfx::Rect tab_contents_bounds_;
@@ -64,4 +66,6 @@ class ThemeInstallBubbleView : public NotificationObserver,
 
   DISALLOW_COPY_AND_ASSIGN(ThemeInstallBubbleView);
 };
+
+#endif  // CHROME_BROWSER_VIEWS_THEME_INSTALL_BUBBLE_VIEW_H_
 

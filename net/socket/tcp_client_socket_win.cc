@@ -6,7 +6,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/field_trial.h"  // for SlowStart trial
 #include "base/memory_debug.h"
+#include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/trace_event.h"
@@ -76,6 +78,15 @@ int MapWinsockError(DWORD err) {
   }
 }
 
+int MapConnectError(DWORD err) {
+  switch (err) {
+    case WSAETIMEDOUT:
+      return ERR_CONNECTION_TIMED_OUT;
+    default:
+      return MapWinsockError(err);
+  }
+}
+
 }  // namespace
 
 //-----------------------------------------------------------------------------
@@ -108,6 +119,19 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
   WSABUF write_buffer_;
   scoped_refptr<IOBuffer> read_iobuffer_;
   scoped_refptr<IOBuffer> write_iobuffer_;
+
+  // Throttle the read size based on our current slow start state.
+  // Returns the throttled read size.
+  int ThrottleReadSize(int size) {
+    if (!use_slow_start_throttle_)
+      return size;
+
+    if (slow_start_throttle_ < kMaxSlowStartThrottle) {
+      size = std::min(size, slow_start_throttle_);
+      slow_start_throttle_ *= 2;
+    }
+    return size;
+  }
 
  private:
   class ReadDelegate : public base::ObjectWatcher::Delegate {
@@ -147,16 +171,38 @@ class TCPClientSocketWin::Core : public base::RefCounted<Core> {
   // |write_watcher_| watches for events from Write();
   base::ObjectWatcher write_watcher_;
 
+  // When doing reads from the socket, we try to mirror TCP's slow start.
+  // We do this because otherwise the async IO subsystem artifically delays
+  // returning data to the application.
+  static const int kInitialSlowStartThrottle = 1 * 1024;
+  static const int kMaxSlowStartThrottle = 32 * kInitialSlowStartThrottle;
+  int slow_start_throttle_;
+
+  static bool use_slow_start_throttle_;
+  static bool trial_initialized_;
+
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
+
+bool TCPClientSocketWin::Core::use_slow_start_throttle_ = false;
+bool TCPClientSocketWin::Core::trial_initialized_ = false;
 
 TCPClientSocketWin::Core::Core(
     TCPClientSocketWin* socket)
     : socket_(socket),
       ALLOW_THIS_IN_INITIALIZER_LIST(reader_(this)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(writer_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(writer_(this)),
+      slow_start_throttle_(kInitialSlowStartThrottle) {
   memset(&read_overlapped_, 0, sizeof(read_overlapped_));
   memset(&write_overlapped_, 0, sizeof(write_overlapped_));
+
+  // Initialize the AsyncSlowStart FieldTrial.
+  if (!trial_initialized_) {
+    trial_initialized_ = true;
+    FieldTrial* trial = FieldTrialList::Find("AsyncSlowStart");
+    if (trial && trial->group_name() == "_AsyncSlowStart")
+      use_slow_start_throttle_ = true;
+  }
 }
 
 TCPClientSocketWin::Core::~Core() {
@@ -230,6 +276,9 @@ int TCPClientSocketWin::Connect(CompletionCallback* callback) {
   if (socket_ != INVALID_SOCKET)
     return OK;
 
+  static StatsCounter connects("tcp.connect");
+  connects.Increment();
+
   TRACE_EVENT_BEGIN("socket.connect", this, "");
   const struct addrinfo* ai = current_ai_;
   DCHECK(ai);
@@ -270,7 +319,7 @@ int TCPClientSocketWin::Connect(CompletionCallback* callback) {
     DWORD err = WSAGetLastError();
     if (err != WSAEWOULDBLOCK) {
       LOG(ERROR) << "connect failed: " << err;
-      return MapWinsockError(err);
+      return MapConnectError(err);
     }
   }
 
@@ -357,6 +406,8 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
   DCHECK(!read_callback_);
   DCHECK(!core_->read_iobuffer_);
 
+  buf_len = core_->ThrottleReadSize(buf_len);
+
   core_->read_buffer_.len = buf_len;
   core_->read_buffer_.buf = buf->data();
 
@@ -377,6 +428,8 @@ int TCPClientSocketWin::Read(IOBuffer* buf,
       // false error reports.
       // See bug 5297.
       base::MemoryDebug::MarkAsInitialized(core_->read_buffer_.buf, num);
+      static StatsCounter read_bytes("tcp.read_bytes");
+      read_bytes.Add(num);
       return static_cast<int>(num);
     }
   } else {
@@ -400,6 +453,9 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
   DCHECK_GT(buf_len, 0);
   DCHECK(!core_->write_iobuffer_);
 
+  static StatsCounter reads("tcp.writes");
+  reads.Increment();
+
   core_->write_buffer_.len = buf_len;
   core_->write_buffer_.buf = buf->data();
 
@@ -413,6 +469,8 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
   if (rv == 0) {
     if (ResetEventIfSignaled(core_->write_overlapped_.hEvent)) {
       TRACE_EVENT_END("socket.write", this, StringPrintf("%d bytes", num));
+      static StatsCounter write_bytes("tcp.write_bytes");
+      write_bytes.Add(num);
       return static_cast<int>(num);
     }
   } else {
@@ -425,6 +483,20 @@ int TCPClientSocketWin::Write(IOBuffer* buf,
   write_callback_ = callback;
   core_->write_iobuffer_ = buf;
   return ERR_IO_PENDING;
+}
+
+bool TCPClientSocketWin::SetReceiveBufferSize(int32 size) {
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+                      reinterpret_cast<const char*>(&size), sizeof(size));
+  DCHECK(!rv) << "Could not set socket receive buffer size: " << GetLastError();
+  return rv == 0;
+}
+
+bool TCPClientSocketWin::SetSendBufferSize(int32 size) {
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
+                      reinterpret_cast<const char*>(&size), sizeof(size));
+  DCHECK(!rv) << "Could not set socket send buffer size: " << GetLastError();
+  return rv == 0;
 }
 
 int TCPClientSocketWin::CreateSocket(const struct addrinfo* ai) {
@@ -450,15 +522,9 @@ int TCPClientSocketWin::CreateSocket(const struct addrinfo* ai) {
   base::SysInfo::OperatingSystemVersionNumbers(&major_version, &minor_version,
     &fix_version);
   if (major_version < 6) {
-    const int kSocketBufferSize = 64 * 1024;
-    int rv = setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
-        reinterpret_cast<const char*>(&kSocketBufferSize),
-        sizeof(kSocketBufferSize));
-    DCHECK(!rv) << "Could not set socket send buffer size";
-    rv = setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
-        reinterpret_cast<const char*>(&kSocketBufferSize),
-        sizeof(kSocketBufferSize));
-    DCHECK(!rv) << "Could not set socket receive buffer size";
+    const int32 kSocketBufferSize = 64 * 1024;
+    SetReceiveBufferSize(kSocketBufferSize);
+    SetSendBufferSize(kSocketBufferSize);
   }
 
   // Disable Nagle.
@@ -495,6 +561,9 @@ void TCPClientSocketWin::DoReadCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(read_callback_);
 
+  static StatsCounter read_bytes("tcp.read_bytes");
+  read_bytes.Add(rv);
+
   // since Run may result in Read being called, clear read_callback_ up front.
   CompletionCallback* c = read_callback_;
   read_callback_ = NULL;
@@ -504,6 +573,9 @@ void TCPClientSocketWin::DoReadCallback(int rv) {
 void TCPClientSocketWin::DoWriteCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(write_callback_);
+
+  static StatsCounter write_bytes("tcp.write_bytes");
+  write_bytes.Add(rv);
 
   // since Run may result in Write being called, clear write_callback_ up front.
   CompletionCallback* c = write_callback_;
@@ -539,7 +611,7 @@ void TCPClientSocketWin::DidCompleteConnect() {
       current_ai_ = next;
       result = Connect(read_callback_);
     } else {
-      result = MapWinsockError(error_code);
+      result = MapConnectError(error_code);
     }
   } else {
     NOTREACHED();

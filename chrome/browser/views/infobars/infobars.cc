@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,10 +28,17 @@ static const int kVerticalPadding = 3;
 static const int kHorizontalPadding = 3;
 static const int kIconLabelSpacing = 5;
 static const int kButtonSpacing = 5;
-static const int kWordSpacing = 2;
 
-static const SkColor kBackgroundColorTop = SkColorSetRGB(255, 242, 183);
-static const SkColor kBackgroundColorBottom = SkColorSetRGB(250, 230, 145);
+static const SkColor kInfoBackgroundColorTop = SkColorSetRGB(170, 214, 112);
+static const SkColor kInfoBackgroundColorBottom = SkColorSetRGB(146, 205, 114);
+
+static const SkColor kWarningBackgroundColorTop = SkColorSetRGB(255, 242, 183);
+static const SkColor kWarningBackgroundColorBottom =
+    SkColorSetRGB(250, 230, 145);
+
+static const SkColor kErrorBackgroundColorTop = kWarningBackgroundColorTop;
+static const SkColor kErrorBackgroundColorBottom =
+    kWarningBackgroundColorBottom;
 
 static const int kSeparatorLineHeight = 1;
 
@@ -57,10 +64,29 @@ int OffsetY(views::View* parent, const gfx::Size prefsize) {
 
 class InfoBarBackground : public views::Background {
  public:
-  InfoBarBackground() {
+  InfoBarBackground(InfoBarDelegate::Type infobar_type) {
+    SkColor top_color;
+    SkColor bottom_color;
+    switch (infobar_type) {
+      case InfoBarDelegate::INFO_TYPE:
+        top_color = kInfoBackgroundColorTop;
+        bottom_color = kInfoBackgroundColorBottom;
+        break;
+      case InfoBarDelegate::WARNING_TYPE:
+        top_color = kWarningBackgroundColorTop;
+        bottom_color = kWarningBackgroundColorBottom;
+        break;
+      case InfoBarDelegate::ERROR_TYPE:
+        top_color = kErrorBackgroundColorTop;
+        bottom_color = kErrorBackgroundColorBottom;
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
     gradient_background_.reset(
-        views::Background::CreateVerticalGradientBackground(
-            kBackgroundColorTop, kBackgroundColorBottom));
+        views::Background::CreateVerticalGradientBackground(top_color,
+                                                            bottom_color));
   }
 
   // Overridden from views::View:
@@ -90,7 +116,7 @@ InfoBar::InfoBar(InfoBarDelegate* delegate)
   // We delete ourselves when we're removed from the view hierarchy.
   SetParentOwned(false);
 
-  set_background(new InfoBarBackground);
+  set_background(new InfoBarBackground(delegate->GetInfoBarType()));
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
@@ -171,9 +197,12 @@ void InfoBar::RemoveInfoBar() const {
 
 // InfoBar, views::ButtonListener implementation: ------------------
 
-void InfoBar::ButtonPressed(views::Button* sender) {
-  if (sender == close_button_)
+void InfoBar::ButtonPressed(views::Button* sender, const views::Event& event) {
+  if (sender == close_button_) {
+    if (delegate_)
+      delegate_->InfoBarDismissed();
     RemoveInfoBar();
+  }
 }
 
 // InfoBar, AnimationDelegate implementation: ----------------------------------
@@ -241,6 +270,7 @@ AlertInfoBar::AlertInfoBar(AlertInfoBarDelegate* delegate)
   label_ = new views::Label(
       delegate->GetMessageText(),
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
+  label_->SetColor(SK_ColorBLACK);
   label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(label_);
 
@@ -303,6 +333,8 @@ LinkInfoBar::LinkInfoBar(LinkInfoBarDelegate* delegate)
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   label_1_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
   label_2_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  label_1_->SetColor(SK_ColorBLACK);
+  label_2_->SetColor(SK_ColorBLACK);
   label_1_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   label_2_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   AddChildView(label_1_);
@@ -313,6 +345,7 @@ LinkInfoBar::LinkInfoBar(LinkInfoBarDelegate* delegate)
   link_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
   link_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   link_->SetController(this);
+  link_->MakeReadableOverBackgroundColor(background()->get_color());
   AddChildView(link_);
 }
 
@@ -356,7 +389,7 @@ void LinkInfoBar::Layout() {
   bool has_second_label = !label_2_->GetText().empty();
   if (has_second_label) {
     // Embed the link in the text string between the two labels.
-    link_->SetBounds(label_1_->bounds().right() + kWordSpacing,
+    link_->SetBounds(label_1_->bounds().right(),
                      OffsetY(this, link_ps), link_ps.width(), link_ps.height());
   } else {
     // Right-align the link toward the edge of the InfoBar.
@@ -367,7 +400,7 @@ void LinkInfoBar::Layout() {
   // Layout the right label (we do this regardless of whether or not it has
   // text).
   gfx::Size label_2_ps = label_2_->GetPreferredSize();
-  label_2_->SetBounds(link_->bounds().right() + kWordSpacing,
+  label_2_->SetBounds(link_->bounds().right(),
                       OffsetY(this, label_2_ps), label_2_ps.width(),
                       label_2_ps.height());
 }
@@ -438,8 +471,9 @@ void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
 
 // ConfirmInfoBar, views::ButtonListener implementation: ---------------
 
-void ConfirmInfoBar::ButtonPressed(views::Button* sender) {
-  InfoBar::ButtonPressed(sender);
+void ConfirmInfoBar::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  InfoBar::ButtonPressed(sender, event);
   if (sender == ok_button_) {
     if (GetDelegate()->Accept())
       RemoveInfoBar();

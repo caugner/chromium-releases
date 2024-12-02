@@ -32,24 +32,21 @@ class FilePath;
 class Blacklist {
  public:
   // Filter attributes (more to come):
-  static const unsigned int kBlockAll = 1;
-  static const unsigned int kDontSendCookies = 1 << 1;
-  static const unsigned int kDontStoreCookies = 1 << 2;
-  static const unsigned int kDontPersistCookies = 1 << 3;
-  static const unsigned int kDontSendReferrer = 1 << 4;
-  static const unsigned int kDontSendUserAgent = 1 << 5;
-  static const unsigned int kBlockByType = 1 << 6;
-  static const unsigned int kBlockUnsecure = 1 << 7;
+  static const unsigned int kBlockAll;
+  static const unsigned int kDontSendCookies;
+  static const unsigned int kDontStoreCookies;
+  static const unsigned int kDontPersistCookies;
+  static const unsigned int kDontSendReferrer;
+  static const unsigned int kDontSendUserAgent;
+  static const unsigned int kBlockByType;
+  static const unsigned int kBlockUnsecure;
 
   // Aggregate filter types:
-  static const unsigned int kBlockRequest = kBlockAll | kBlockUnsecure;
-  static const unsigned int kBlockResponse = kBlockByType;
-  static const unsigned int kModifySentHeaders =
-      kDontSendCookies | kDontSendUserAgent | kDontSendReferrer;
-  static const unsigned int kModifyReceivedHeaders =
-      kDontPersistCookies | kDontStoreCookies;
-  static const unsigned int kFilterByHeaders = kModifyReceivedHeaders |
-      kBlockByType;
+  static const unsigned int kBlockRequest;
+  static const unsigned int kBlockResponse;
+  static const unsigned int kModifySentHeaders;
+  static const unsigned int kModifyReceivedHeaders;
+  static const unsigned int kFilterByHeaders;
 
   // Key used to access data attached to URLRequest objects.
   static const void* const kRequestDataKey;
@@ -161,6 +158,9 @@ class Blacklist {
   // caller.
   Match* findMatch(const GURL&) const;
 
+  // Returns true if the blacklist object is in good health.
+  bool is_good() const { return is_good_; }
+
   // Helper to remove cookies from a header.
   static std::string StripCookies(const std::string&);
 
@@ -175,6 +175,8 @@ class Blacklist {
 
   std::vector<Entry*> blacklist_;
   std::vector<Provider*> providers_;
+
+  bool is_good_;  // True if the blacklist was read successfully.
 
   FRIEND_TEST(BlacklistTest, Generic);
   FRIEND_TEST(BlacklistTest, PatternMatch);

@@ -23,15 +23,17 @@
 #include "grit/webkit_resources.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebPoint.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/webframe.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
+using WebKit::WebPoint;
 using WebKit::WebWidget;
 
 namespace {
@@ -43,17 +45,113 @@ const FcChar8* FilePathAsFcChar(const FilePath& path) {
 }
 
 // Data resources on linux.  This is a pointer to the mmapped resources file.
-static base::DataPack* g_resource_data_pack = NULL;
+base::DataPack* g_resource_data_pack = NULL;
 
 // Used to keep track of the temporary ahem file we extract to disk.
-static FilePath* g_ahem_path = NULL;
+FilePath* g_ahem_path = NULL;
 
-}
-
-static void TerminationSignalHandler(int signatl) {
+void TerminationSignalHandler(int signatl) {
   TestShell::ShutdownTestShell();
   exit(0);
 }
+
+// GTK callbacks ------------------------------------------------------
+
+// Callback for when the main window is destroyed.
+gboolean MainWindowDestroyed(GtkWindow* window, TestShell* shell) {
+  TestShell::RemoveWindowFromList(window);
+
+  if (TestShell::windowList()->empty() || shell->is_modal()) {
+    MessageLoop::current()->PostTask(FROM_HERE,
+                                     new MessageLoop::QuitTask());
+  }
+
+  delete shell;
+
+  return FALSE;  // Don't stop this message.
+}
+
+gboolean MainWindowLostFocus(GtkWidget* widget, GdkEventFocus* event,
+                             TestShell* shell) {
+  shell->ClosePopup();
+  return FALSE;
+}
+
+// Callback for when you click the back button.
+void BackButtonClicked(GtkButton* button, TestShell* shell) {
+  shell->GoBackOrForward(-1);
+}
+
+// Callback for when you click the forward button.
+void ForwardButtonClicked(GtkButton* button, TestShell* shell) {
+  shell->GoBackOrForward(1);
+}
+
+// Callback for when you click the stop button.
+void StopButtonClicked(GtkButton* button, TestShell* shell) {
+  shell->webView()->mainFrame()->stopLoading();
+}
+
+// Callback for when you click the reload button.
+void ReloadButtonClicked(GtkButton* button, TestShell* shell) {
+  shell->Reload();
+}
+
+// Callback for when you press enter in the URL box.
+void URLEntryActivate(GtkEntry* entry, TestShell* shell) {
+  const gchar* url = gtk_entry_get_text(entry);
+  shell->LoadURL(GURL(url));
+}
+
+// Callback for Debug > Dump body text... menu item.
+gboolean DumpBodyTextActivated(GtkWidget* widget, TestShell* shell) {
+  shell->DumpDocumentText();
+  return FALSE;  // Don't stop this message.
+}
+
+// Callback for Debug > Dump render tree... menu item.
+gboolean DumpRenderTreeActivated(GtkWidget* widget, TestShell* shell) {
+  shell->DumpRenderTree();
+  return FALSE;  // Don't stop this message.
+}
+
+// Callback for Debug > Show web inspector... menu item.
+gboolean ShowWebInspectorActivated(GtkWidget* widget, TestShell* shell) {
+  shell->webView()->inspectElementAt(WebPoint());
+  return FALSE;  // Don't stop this message.
+}
+
+// GTK utility functions ----------------------------------------------
+
+GtkWidget* AddMenuEntry(GtkWidget* menu_widget, const char* text,
+                        GCallback callback, TestShell* shell) {
+  GtkWidget* entry = gtk_menu_item_new_with_label(text);
+  g_signal_connect(G_OBJECT(entry), "activate", callback, shell);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu_widget), entry);
+  return entry;
+}
+
+GtkWidget* CreateMenu(GtkWidget* menu_bar, const char* text) {
+  GtkWidget* menu_widget = gtk_menu_new();
+  GtkWidget* menu_header = gtk_menu_item_new_with_label(text);
+  gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_header), menu_widget);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), menu_header);
+  return menu_widget;
+}
+
+GtkWidget* CreateMenuBar(TestShell* shell) {
+  GtkWidget* menu_bar = gtk_menu_bar_new();
+  GtkWidget* debug_menu = CreateMenu(menu_bar, "Debug");
+  AddMenuEntry(debug_menu, "Dump body text...",
+               G_CALLBACK(DumpBodyTextActivated), shell);
+  AddMenuEntry(debug_menu, "Dump render tree...",
+               G_CALLBACK(DumpRenderTreeActivated), shell);
+  AddMenuEntry(debug_menu, "Show web inspector...",
+               G_CALLBACK(ShowWebInspectorActivated), shell);
+  return menu_bar;
+}
+
+}  // namespace
 
 // static
 void TestShell::InitializeTestShell(bool layout_test_mode) {
@@ -86,13 +184,13 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
 
   // fontconfig only knows how to load font config configs from a file name, so
   // we write to a temp file.
-  StringPiece font_config_xml;
+  base::StringPiece font_config_xml;
   g_resource_data_pack->Get(IDR_LINUX_FONT_CONFIG, &font_config_xml);
   FilePath fontconfig_path;
-  if (!file_util::CreateTemporaryFileName(&fontconfig_path)) {
+  if (!file_util::CreateTemporaryFile(&fontconfig_path)) {
     LOG(FATAL) << "failed to create temp font config file";
   }
-  if (-1 == file_util::WriteFile(fontconfig_path.ToWStringHack(),
+  if (-1 == file_util::WriteFile(fontconfig_path,
                                  font_config_xml.data(),
                                  font_config_xml.length())) {
     LOG(FATAL) << "failed to write temp font config file";
@@ -139,6 +237,9 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
     "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
     "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
+    "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_ta.ttf",
+    "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf",
+    "/usr/share/fonts/truetype/ttf-indic-fonts-core/MuktiNarrow.ttf",
   };
   for (size_t i = 0; i < arraysize(fonts); ++i) {
     if (access(fonts[i], R_OK)) {
@@ -172,13 +273,13 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
   }
 
   // Also load the layout-test-specific "Ahem" font.
-  StringPiece ahem_font;
+  base::StringPiece ahem_font;
   g_resource_data_pack->Get(IDR_AHEM_FONT, &ahem_font);
   g_ahem_path = new FilePath;
-  if (!file_util::CreateTemporaryFileName(g_ahem_path)) {
+  if (!file_util::CreateTemporaryFile(g_ahem_path)) {
     LOG(FATAL) << "failed to create temp ahem font";
   }
-  if (-1 == file_util::WriteFile(g_ahem_path->ToWStringHack(), ahem_font.data(),
+  if (-1 == file_util::WriteFile(*g_ahem_path, ahem_font.data(),
                                  ahem_font.length())) {
     LOG(FATAL) << "failed to write temp ahem font";
   }
@@ -206,115 +307,21 @@ void TestShell::PlatformShutdown() {
 }
 
 void TestShell::PlatformCleanUp() {
-  // The GTK widgets will be destroyed, which will free the associated
-  // objects.  So we don't need the scoped_ptr to free the webViewHost.
-  m_webViewHost.release();
-}
-
-namespace {
-
-// GTK callbacks ------------------------------------------------------
-
-// Callback for when the main window is destroyed.
-gboolean MainWindowDestroyed(GtkWindow* window, TestShell* shell) {
-
-  TestShell::RemoveWindowFromList(window);
-
-  if (TestShell::windowList()->empty() || shell->is_modal()) {
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     new MessageLoop::QuitTask());
+  if (m_mainWnd) {
+    // Disconnect our MainWindowDestroyed handler so that we don't go through
+    // the shutdown process more than once.
+    g_signal_handlers_disconnect_by_func(m_mainWnd,
+        reinterpret_cast<gpointer>(MainWindowDestroyed), this);
+    gtk_widget_destroy(GTK_WIDGET(m_mainWnd));
   }
-
-  delete shell;
-
-  return FALSE;  // Don't stop this message.
 }
 
-gboolean MainWindowLostFocus(GtkWidget* widget, GdkEventFocus* event,
-                             TestShell* shell) {
-  shell->ClosePopup();
-  return FALSE;
-}
-
-// Callback for when you click the back button.
-void BackButtonClicked(GtkButton* button, TestShell* shell) {
-  shell->GoBackOrForward(-1);
-}
-
-// Callback for when you click the forward button.
-void ForwardButtonClicked(GtkButton* button, TestShell* shell) {
-  shell->GoBackOrForward(1);
-}
-
-// Callback for when you click the stop button.
-void StopButtonClicked(GtkButton* button, TestShell* shell) {
-  shell->webView()->StopLoading();
-}
-
-// Callback for when you click the reload button.
-void ReloadButtonClicked(GtkButton* button, TestShell* shell) {
-  shell->Reload();
-}
-
-// Callback for when you press enter in the URL box.
-void URLEntryActivate(GtkEntry* entry, TestShell* shell) {
-  const gchar* url = gtk_entry_get_text(entry);
-  shell->LoadURL(UTF8ToWide(url).c_str());
-}
-
-// Callback for Debug > Dump body text... menu item.
-gboolean DumpBodyTextActivated(GtkWidget* widget, TestShell* shell) {
-  shell->DumpDocumentText();
-  return FALSE;  // Don't stop this message.
-}
-
-// Callback for Debug > Dump render tree... menu item.
-gboolean DumpRenderTreeActivated(GtkWidget* widget, TestShell* shell) {
-  shell->DumpRenderTree();
-  return FALSE;  // Don't stop this message.
-}
-
-// Callback for Debug > Show web inspector... menu item.
-gboolean ShowWebInspectorActivated(GtkWidget* widget, TestShell* shell) {
-  shell->webView()->InspectElement(0, 0);
-  return FALSE;  // Don't stop this message.
-}
-
-// GTK utility functions ----------------------------------------------
-
-GtkWidget* AddMenuEntry(GtkWidget* menu_widget, const char* text,
-                        GCallback callback, TestShell* shell) {
-  GtkWidget* entry = gtk_menu_item_new_with_label(text);
-  g_signal_connect(G_OBJECT(entry), "activate", callback, shell);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu_widget), entry);
-  return entry;
-}
-
-GtkWidget* CreateMenu(GtkWidget* menu_bar, const char* text) {
-  GtkWidget* menu_widget = gtk_menu_new();
-  GtkWidget* menu_header = gtk_menu_item_new_with_label(text);
-  gtk_menu_item_set_submenu(GTK_MENU_ITEM(menu_header), menu_widget);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu_bar), menu_header);
-  return menu_widget;
-}
-
-GtkWidget* CreateMenuBar(TestShell* shell) {
-  GtkWidget* menu_bar = gtk_menu_bar_new();
-  GtkWidget* debug_menu = CreateMenu(menu_bar, "Debug");
-  AddMenuEntry(debug_menu, "Dump body text...",
-               G_CALLBACK(DumpBodyTextActivated), shell);
-  AddMenuEntry(debug_menu, "Dump render tree...",
-               G_CALLBACK(DumpRenderTreeActivated), shell);
-  AddMenuEntry(debug_menu, "Show web inspector...",
-               G_CALLBACK(ShowWebInspectorActivated), shell);
-  return menu_bar;
-}
-
-}
-
-bool TestShell::Initialize(const std::wstring& startingURL) {
+bool TestShell::Initialize(const GURL& starting_url) {
   m_mainWnd = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
   gtk_window_set_title(m_mainWnd, "Test Shell");
+  // Null out m_mainWnd when it is destroyed so we don't destroy it twice.
+  g_signal_connect(G_OBJECT(m_mainWnd), "destroy",
+                   G_CALLBACK(gtk_widget_destroyed), &m_mainWnd);
   g_signal_connect(G_OBJECT(m_mainWnd), "destroy",
                    G_CALLBACK(MainWindowDestroyed), this);
   g_signal_connect(G_OBJECT(m_mainWnd), "focus-out-event",
@@ -354,7 +361,7 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
   m_editWnd = gtk_entry_new();
   g_signal_connect(G_OBJECT(m_editWnd), "activate",
                    G_CALLBACK(URLEntryActivate), this);
-  gtk_entry_set_text(GTK_ENTRY(m_editWnd), WideToUTF8(startingURL).c_str());
+  gtk_entry_set_text(GTK_ENTRY(m_editWnd), starting_url.spec().c_str());
 
   GtkToolItem* tool_item = gtk_tool_item_new();
   gtk_container_add(GTK_CONTAINER(tool_item), m_editWnd);
@@ -362,22 +369,18 @@ bool TestShell::Initialize(const std::wstring& startingURL) {
   gtk_toolbar_insert(GTK_TOOLBAR(toolbar), tool_item, -1 /* append */);
 
   gtk_box_pack_start(GTK_BOX(vbox), toolbar, FALSE, FALSE, 0);
-  m_webViewHost.reset(WebViewHost::Create(vbox, delegate_, *TestShell::web_prefs_));
-
-  // Enables output of "EDDITING DELEGATE: " debugging lines in the layout test
-  // output.
-  webView()->SetUseEditorDelegate(true);
+  m_webViewHost.reset(
+      WebViewHost::Create(vbox, delegate_.get(), *TestShell::web_prefs_));
 
   gtk_container_add(GTK_CONTAINER(m_mainWnd), vbox);
   gtk_widget_show_all(GTK_WIDGET(m_mainWnd));
 
   // LoadURL will do a resize, so make sure we don't call LoadURL
   // until we've completed all of our GTK setup.
-  if (!startingURL.empty())
-    LoadURL(startingURL.c_str());
+  if (starting_url.is_valid())
+    LoadURL(starting_url);
 
-  bool bIsSVGTest = startingURL.find(L"W3C-SVG-1.1") != std::wstring::npos;
-  if (bIsSVGTest)
+  if (IsSVGTestURL(starting_url))
     SizeToSVG();
   else
     SizeToDefault();
@@ -437,7 +440,7 @@ void TestShell::WaitTestFinished() {
 
   // Install an alarm signal handler that will kill us if we time out.
   signal(SIGALRM, AlarmHandler);
-  alarm(GetLayoutTestTimeoutInSeconds());
+  alarm(GetLayoutTestTimeoutForWatchDog() / 1000);
 
   // TestFinished() will post a quit message to break this loop when the page
   // finishes loading.
@@ -466,10 +469,10 @@ void TestShell::DestroyWindow(gfx::NativeWindow windowHandle) {
   gtk_widget_destroy(GTK_WIDGET(windowHandle));
 }
 
-WebWidget* TestShell::CreatePopupWidget(WebView* webview) {
+WebWidget* TestShell::CreatePopupWidget() {
   GtkWidget* popupwindow = gtk_window_new(GTK_WINDOW_POPUP);
   GtkWidget* vbox = gtk_vbox_new(FALSE, 0);
-  WebWidgetHost* host = WebWidgetHost::Create(vbox, popup_delegate_);
+  WebWidgetHost* host = WebWidgetHost::Create(vbox, popup_delegate_.get());
   gtk_container_add(GTK_CONTAINER(popupwindow), vbox);
   m_popupHost = host;
 
@@ -532,13 +535,13 @@ void TestShell::ResizeSubViews() {
   shell->m_focusedWidgetHost = NULL;
 
   // Make sure the previous load is stopped.
-  shell->webView()->StopLoading();
+  shell->webView()->mainFrame()->stopLoading();
   shell->navigation_controller()->Reset();
 
   // Clean up state between test runs.
   webkit_glue::ResetBeforeTestRun(shell->webView());
   ResetWebPreferences();
-  shell->webView()->SetPreferences(*web_prefs_);
+  web_prefs_->Apply(shell->webView());
 
   // TODO(agl): Maybe make the window hidden in the future. Window does this
   // by positioning it off the screen but the GTK function to do this is
@@ -553,8 +556,7 @@ void TestShell::ResizeSubViews() {
   shell->test_is_preparing_ = true;
 
   shell->set_test_params(&params);
-  std::wstring wstr = UTF8ToWide(params.test_url.c_str());
-  shell->LoadURL(wstr.c_str());
+  shell->LoadURL(GURL(params.test_url));
 
   shell->test_is_preparing_ = false;
   shell->WaitTestFinished();
@@ -563,36 +565,21 @@ void TestShell::ResizeSubViews() {
   return true;
 }
 
-void TestShell::LoadURLForFrame(const wchar_t* url,
-                                const wchar_t* frame_name) {
-  if (!url)
+void TestShell::LoadURLForFrame(const GURL& url,
+                                const std::wstring& frame_name) {
+  if (!url.is_valid())
     return;
 
-  bool bIsSVGTest = wcsstr(url, L"W3C-SVG-1.1") > 0;
-
-  if (bIsSVGTest)
+  if (IsSVGTestURL(url)) {
     SizeToSVG();
-  else {
+  } else {
     // only resize back to the default when running tests
     if (layout_test_mode())
       SizeToDefault();
   }
 
-  std::wstring frame_string;
-  if (frame_name)
-    frame_string = frame_name;
-
-  std::wstring path(url);
-  GURL gurl;
-  // PathExists will reject any string with no leading '/'
-  // as well as empty strings.
-  if (file_util::AbsolutePath(&path))
-    gurl = net::FilePathToFileURL(FilePath::FromWStringHack(path));
-  else
-    gurl = GURL(WideToUTF8(url));
-
-  navigation_controller_->LoadEntry(new TestNavigationEntry(
-    -1, gurl, std::wstring(), frame_string));
+  navigation_controller_->LoadEntry(
+      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
 }
 
 // TODO(agl): PromptForSaveFile should use FilePath
@@ -628,8 +615,8 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
   std::string new_url(url);
   if (url.compare(0, kPrefixLen, kPrefix, kPrefixLen) == 0) {
     FilePath replace_path;
-    PathService::Get(base::DIR_EXE, &replace_path);
-    replace_path = replace_path.DirName().DirName().Append(
+    PathService::Get(base::DIR_SOURCE_ROOT, &replace_path);
+    replace_path = replace_path.Append(
         "webkit/data/layout_tests/LayoutTests/");
     new_url = std::string("file://") + replace_path.value() +
         url.substr(kPrefixLen);
@@ -648,8 +635,8 @@ void TestShell::ShowStartupDebuggingDialog() {
 }
 
 // static
-StringPiece TestShell::NetResourceProvider(int key) {
-  StringPiece res;
+base::StringPiece TestShell::NetResourceProvider(int key) {
+  base::StringPiece res;
   g_resource_data_pack->Get(key, &res);
   return res;
 }
@@ -659,7 +646,7 @@ StringPiece TestShell::NetResourceProvider(int key) {
 namespace webkit_glue {
 
 string16 GetLocalizedString(int message_id) {
-  StringPiece res;
+  base::StringPiece res;
   if (!g_resource_data_pack->Get(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;
   }
@@ -668,7 +655,7 @@ string16 GetLocalizedString(int message_id) {
                   res.length() / 2);
 }
 
-StringPiece GetDataResource(int resource_id) {
+base::StringPiece GetDataResource(int resource_id) {
   switch (resource_id) {
     case IDR_FEED_PREVIEW:
       // It is necessary to return a feed preview template that contains
@@ -687,8 +674,8 @@ StringPiece GetDataResource(int resource_id) {
   return TestShell::NetResourceProvider(resource_id);
 }
 
-bool GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  return NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
+void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
+  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 }  // namespace webkit_glue

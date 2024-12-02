@@ -12,6 +12,8 @@
 
 class RenderViewContextMenuWin;
 class SadTabView;
+class TabContentsDragSource;
+class WebDragDestGtk;
 namespace views {
 class NativeViewHost;
 }
@@ -30,14 +32,13 @@ class TabContentsViewGtk : public TabContentsView,
 
   // TabContentsView implementation --------------------------------------------
 
-  virtual void CreateView();
+  virtual void CreateView(const gfx::Size& initial_size);
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host);
   virtual gfx::NativeView GetNativeView() const;
   virtual gfx::NativeView GetContentNativeView() const;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
   virtual void GetContainerBounds(gfx::Rect* out) const;
-  virtual void OnContentsDestroy();
   virtual void SetPageTitle(const std::wstring& title);
   virtual void OnTabCrashed();
   virtual void SizeContents(const gfx::Size& size);
@@ -48,8 +49,9 @@ class TabContentsViewGtk : public TabContentsView,
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask ops_allowed);
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
@@ -58,7 +60,9 @@ class TabContentsViewGtk : public TabContentsView,
   // Signal handlers -----------------------------------------------------------
 
   // Overridden from views::WidgetGtk:
+  virtual gboolean OnButtonPress(GtkWidget* widget, GdkEventButton* event);
   virtual void OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation);
+  virtual void OnPaint(GtkWidget* widget, GdkEventExpose* event);
 
   // Handles notifying the TabContents and other operations when the window was
   // shown or hidden.
@@ -78,8 +82,24 @@ class TabContentsViewGtk : public TabContentsView,
   // Whether to ignore the next CHAR keyboard event.
   bool ignore_next_char_event_;
 
+  // The id used in the ViewStorage to store the last focused view.
+  int last_focused_view_storage_id_;
+
   // The context menu. Callbacks are asynchronous so we need to keep it around.
   scoped_ptr<RenderViewContextMenuWin> context_menu_;
+
+  // Handles drags from this TabContentsView.
+  scoped_ptr<TabContentsDragSource> drag_source_;
+
+  // The event for the last mouse down we handled. We need this for drags.
+  GdkEventButton last_mouse_down_;
+
+  // The helper object that handles drag destination related interactions with
+  // GTK.
+  scoped_ptr<WebDragDestGtk> drag_dest_;
+
+  // Current size. See comment in WidgetGtk as to why this is cached.
+  gfx::Size size_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewGtk);
 };

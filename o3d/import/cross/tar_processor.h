@@ -47,6 +47,7 @@
 #define O3D_IMPORT_CROSS_TAR_PROCESSOR_H_
 
 #include "base/basictypes.h"
+#include "core/cross/types.h"
 #include "import/cross/memory_stream.h"
 #include "import/cross/archive_processor.h"
 
@@ -58,13 +59,16 @@ class TarProcessor : public StreamProcessor {
   explicit TarProcessor(ArchiveCallbackClient *callback_client)
       : callback_client_(callback_client),
         header_bytes_read_(0),
+        getting_filename_(false),
         file_bytes_to_read_(0) {}
 
   virtual ~TarProcessor() {}
 
   // Call to "push" bytes to be processed - the appropriate callback will get
   // called when we have enough data
-  virtual int ProcessBytes(MemoryReadStream *stream, size_t n);
+  virtual Status ProcessBytes(MemoryReadStream *stream, size_t n);
+
+  virtual void Close(bool success);
 
  private:
   enum {TAR_HEADER_SIZE = 512};
@@ -72,7 +76,9 @@ class TarProcessor : public StreamProcessor {
 
   ArchiveCallbackClient  *callback_client_;
   size_t                  header_bytes_read_;
-  char                   header_[TAR_HEADER_SIZE];
+  char                    header_[TAR_HEADER_SIZE];
+  bool                    getting_filename_;
+  String                  file_name_;
 
   // Initialized to total number of file bytes,
   // including zero padding up to block size

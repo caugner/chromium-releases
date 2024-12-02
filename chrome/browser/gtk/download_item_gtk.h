@@ -11,6 +11,7 @@
 
 #include "app/animation.h"
 #include "base/scoped_ptr.h"
+#include "base/time.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/common/notification_observer.h"
@@ -52,10 +53,11 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // ownership of |icon_bitmap|.
   void OnLoadIconComplete(IconManager::Handle handle, SkBitmap* icon_bitmap);
 
+  // Returns the DownloadItem model object belonging to this item.
+  DownloadItem* get_download();
+
  private:
   friend class DownloadShelfContextMenuGtk;
-
-  DownloadItem* get_download();
 
   // Returns true IFF the download is dangerous and unconfirmed.
   bool IsDangerous();
@@ -80,9 +82,16 @@ class DownloadItemGtk : public DownloadItem::Observer,
   void UpdateStatusLabel(GtkWidget* status_label,
                          const std::string& status_text);
 
+  // Sets the components of the danger warning.
+  void UpdateDangerWarning();
+
   static void InitNineBoxes();
 
-  // Used for the download item's body and menu button.
+  // Draws everything in GTK rendering mode.
+  static gboolean OnHboxExpose(GtkWidget* widget, GdkEventExpose* e,
+                               DownloadItemGtk* download_item);
+
+  // Used for the download item's body and menu button in chrome theme mode.
   static gboolean OnExpose(GtkWidget* widget, GdkEventExpose* e,
                            DownloadItemGtk* download_item);
 
@@ -101,6 +110,11 @@ class DownloadItemGtk : public DownloadItem::Observer,
   static void OnShelfResized(GtkWidget *widget,
                              GtkAllocation *allocation,
                              DownloadItemGtk* item);
+
+  static void OnDragDataGet(GtkWidget* widget, GdkDragContext* context,
+                            GtkSelectionData* selection_data,
+                            guint target_type, guint time,
+                            DownloadItemGtk* item);
 
   // Dangerous download related. -----------------------------------------------
   static gboolean OnDangerousPromptExpose(GtkWidget* widget,
@@ -145,6 +159,10 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // The widget that creates a dropdown menu when pressed.
   GtkWidget* menu_button_;
 
+  // A gtk arrow pointing downward displayed in |menu_button_|. Only displayed
+  // in GTK mode.
+  GtkWidget* arrow_;
+
   // Whether the menu is currently showing for |menu_button_|. Affects how we
   // draw the button.
   bool menu_showing_;
@@ -172,6 +190,8 @@ class DownloadItemGtk : public DownloadItem::Observer,
 
   // The dangerous download dialog. This will be null for safe downloads.
   GtkWidget* dangerous_prompt_;
+  GtkWidget* dangerous_image_;
+  GtkWidget* dangerous_label_;
 
   // An hbox for holding components of the dangerous download dialog.
   GtkWidget* dangerous_hbox_;
@@ -190,7 +210,13 @@ class DownloadItemGtk : public DownloadItem::Observer,
   // The file icon for the download. May be null.
   SkBitmap* icon_;
 
+  // The last download file path for which we requested an icon.
+  FilePath icon_filepath_;
+
   NotificationRegistrar registrar_;
+
+  // The time at which we were insantiated.
+  base::Time creation_time_;
 
   // For canceling an in progress icon request.
   CancelableRequestConsumerT<int, 0> icon_consumer_;

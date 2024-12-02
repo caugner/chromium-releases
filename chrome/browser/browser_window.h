@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_BROWSER_WINDOW_H_
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 
 class Browser;
@@ -21,6 +21,7 @@ class TabContents;
 class TabContentsContainer;
 class TemplateURL;
 class ToolbarView;
+struct NativeWebKeyboardEvent;
 
 namespace gfx {
 class Rect;
@@ -30,7 +31,7 @@ class Rect;
 // BrowserWindow interface
 //  An interface implemented by the "view" of the Browser window.
 //
-// NOTE: All getters except GetTabStrip() may return NULL.
+// NOTE: All getters may return NULL.
 class BrowserWindow {
  public:
   // Show the window, or activates it if it's already visible.
@@ -75,9 +76,20 @@ class BrowserWindow {
   //             BrowserView.
   virtual void SelectedTabToolbarSizeChanged(bool is_animating) = 0;
 
+  // Notification for the Extension Shelf changing its size.
+  virtual void SelectedTabExtensionShelfSizeChanged() = 0;
+
   // Inform the frame that the selected tab favicon or title has changed. Some
   // frames may need to refresh their title bar.
   virtual void UpdateTitleBar() = 0;
+
+  // Invoked when the visibility of the bookmark bar or extension shelf changes.
+  // NOTE: this is NOT sent when the user toggles the visibility of one of
+  // these shelves, but rather when the user transitions from a page that forces
+  // the shelves to be visibile to one that doesn't have them visible (or
+  // vice-versa).
+  // TODO(sky): see about routing visibility pref changing through here too.
+  virtual void ShelfVisibilityChanged() = 0;
 
   // Inform the frame that the dev tools window for the selected tab has
   // changed.
@@ -94,10 +106,9 @@ class BrowserWindow {
   // Sets the starred state for the current tab.
   virtual void SetStarredState(bool is_starred) = 0;
 
-  // TODO(beng): RENAME (GetRestoredBounds)
   // Returns the nonmaximized bounds of the frame (even if the frame is
   // currently maximized or minimized) in terms of the screen coordinates.
-  virtual gfx::Rect GetNormalBounds() const = 0;
+  virtual gfx::Rect GetRestoredBounds() const = 0;
 
   // TODO(beng): REMOVE?
   // Returns true if the frame is maximized (aka zoomed).
@@ -148,6 +159,9 @@ class BrowserWindow {
   // Shows or hides the bookmark bar depending on its current visibility.
   virtual void ToggleBookmarkBar() = 0;
 
+  // Shows or hides the extension shelf depending on its current visibility.
+  virtual void ToggleExtensionShelf() = 0;
+
   // Shows the About Chrome dialog box.
   virtual void ShowAboutChromeDialog() = 0;
 
@@ -187,6 +201,15 @@ class BrowserWindow {
 
   // Shows the New Profile dialog box.
   virtual void ShowNewProfileDialog() = 0;
+
+  // Shows the repost form confirmation dialog box.
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) = 0;
+
+  // Shows a dialog to the user that the history is too new.
+  virtual void ShowHistoryTooNewDialog() = 0;
+
+  // Show the bubble that indicates to the user that a theme is being installed.
+  virtual void ShowThemeInstallBubble() = 0;
 
   // Shows the confirmation dialog box warning that the browser is closing with
   // in-progress downloads.
@@ -229,6 +252,16 @@ class BrowserWindow {
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history) = 0;
+
+  // Shows the page menu (for accessibility).
+  virtual void ShowPageMenu() = 0;
+
+  // Shows the app menu (for accessibility).
+  virtual void ShowAppMenu() = 0;
+
+  // Returns the id of the keyboard accelerator associated with the given
+  // keyboard event if one exists, otherwise -1.
+  virtual int GetCommandId(const NativeWebKeyboardEvent& event) = 0;
 
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);

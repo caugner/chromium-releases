@@ -30,16 +30,23 @@ import urllib
 import webbrowser
 import zipfile
 
-import google.path_utils
-
 from layout_package import path_utils
-from layout_package import platform_utils_linux
-from layout_package import platform_utils_mac
-from layout_package import platform_utils_win
 from layout_package import test_expectations
+from test_types import image_diff
+from test_types import text_diff
 
 BASELINE_SUFFIXES = ['.txt', '.png', '.checksum']
-
+REBASELINE_PLATFORM_ORDER = ['mac', 'win', 'win-xp', 'linux']
+ARCHIVE_DIR_NAME_DICT = {'win': 'webkit-rel',
+                         'win-vista': 'webkit-dbg-vista',
+                         'win-xp': 'webkit-rel',
+                         'mac': 'webkit-rel-mac5',
+                         'linux': 'webkit-rel-linux',
+                         'win-canary': 'webkit-rel-webkit-org',
+                         'win-vista-canary': 'webkit-dbg-vista',
+                         'win-xp-canary': 'webkit-rel-webkit-org',
+                         'mac-canary': 'webkit-rel-mac-webkit-org',
+                         'linux-canary': 'webkit-rel-linux-webkit-org'}
 
 def RunShell(command, print_output=False):
   """Executes a command and returns the output.
@@ -162,6 +169,7 @@ class Rebaseliner(object):
     self._test_expectations = test_expectations.TestExpectations(None,
                                                                  self._file_dir,
                                                                  platform,
+                                                                 False,
                                                                  False)
 
   def Run(self, backup):
@@ -252,6 +260,24 @@ class Rebaseliner(object):
     logging.info('Latest revision: "%s"', revisions[len(revisions) - 1])
     return revisions[len(revisions) - 1]
 
+  def _GetArchiveDirName(self, platform, webkit_canary):
+    """Get name of the layout test archive directory.
+
+    Returns:
+      Directory name or
+      None on failure
+    """
+
+    if webkit_canary:
+      platform += '-canary'
+
+    if platform in ARCHIVE_DIR_NAME_DICT:
+      return ARCHIVE_DIR_NAME_DICT[platform]
+    else:
+      logging.error('Cannot find platform key %s in archive directory name '
+                    'dictionary', platform)
+      return None
+
   def _GetArchiveUrl(self):
     """Generate the url to download latest layout test archive.
 
@@ -260,14 +286,14 @@ class Rebaseliner(object):
       None on failure
     """
 
-    platform_name = self._options.buildbot_platform_dir_basename
-    if self._platform == 'mac':
-      platform_name += '-mac5'
-    elif self._platform == 'linux':
-      platform_name += '-linux'
-    logging.debug('Buildbot platform dir name: "%s"', platform_name)
+    dir_name = self._GetArchiveDirName(self._platform,
+                                       self._options.webkit_canary)
+    if not dir_name:
+      return None
 
-    url_base = '%s/%s/' % (self._options.archive_url, platform_name)
+    logging.debug('Buildbot platform dir name: "%s"', dir_name)
+
+    url_base = '%s/%s/' % (self._options.archive_url, dir_name)
     latest_revision = self._GetLatestRevision(url_base)
     if latest_revision is None or latest_revision <= 0:
       return None
@@ -294,18 +320,6 @@ class Rebaseliner(object):
     logging.info('Archive downloaded and saved to file: "%s"', fn)
     return fn
 
-  def _GetPlatformNewResultsDir(self):
-    """Get the dir name to extract new baselines for the given platform."""
-
-    if self._platform == 'win':
-      return platform_utils_win.PlatformUtility(None).PlatformNewResultsDir()
-    elif self._platform == 'mac':
-      return platform_utils_mac.PlatformUtility(None).PlatformNewResultsDir()
-    elif self._platform == 'linux':
-      return platform_utils_linux.PlatformUtility(None).PlatformNewResultsDir()
-
-    return None
-
   def _ExtractAndAddNewBaselines(self, archive_file):
     """Extract new baselines from archive and add them to SVN repository.
 
@@ -324,13 +338,8 @@ class Rebaseliner(object):
     for name in zip_namelist:
       logging.debug('  ' + name)
 
-    platform_dir = self._GetPlatformNewResultsDir()
-    if not platform_dir:
-      logging.error('Invalid platform new results dir, platform: "%s"',
-                    self._platform)
-      return None
-
-    logging.debug('Platform new results dir: "%s"', platform_dir)
+    platform = path_utils.PlatformName(self._platform)
+    logging.debug('Platform dir: "%s"', platform)
 
     test_no = 1
     self._rebaselined_tests = []
@@ -354,20 +363,27 @@ class Rebaseliner(object):
 
         expected_filename = '%s-expected%s' % (test_basename, suffix)
         expected_fullpath = os.path.join(
-            path_utils.ChromiumPlatformResultsEnclosingDir(),
-            platform_dir,
-            expected_filename)
+            path_utils.ChromiumBaselinePath(platform), expected_filename)
         expected_fullpath = os.path.normpath(expected_fullpath)
         logging.debug('  Expected file full path: "%s"', expected_fullpath)
 
         data = zip_file.read(archive_test_name)
 
         # Create the new baseline directory if it doesn't already exist.
-        google.path_utils.MaybeMakeDirectory(os.path.dirname(expected_fullpath))
+        path_utils.MaybeMakeDirectory(os.path.dirname(expected_fullpath))
 
         f = open(expected_fullpath, 'wb')
         f.write(data)
         f.close()
+
+        # TODO(victorw): for now, the rebaselining tool checks whether
+        # or not THIS baseline is duplicate and should be skipped.
+        # We could improve the tool to check all baselines in upper and lower
+        # levels and remove all duplicated baselines.
+        if self._IsDupBaseline(expected_fullpath, test, suffix, self._platform):
+          # Clean up the duplicate baseline.
+          self._DeleteBaseline(expected_fullpath)
+          continue
 
         if not self._SvnAdd(expected_fullpath):
           svn_error = True
@@ -389,6 +405,82 @@ class Rebaseliner(object):
     os.remove(archive_file)
 
     return self._rebaselined_tests
+
+  def _IsDupBaseline(self, baseline_path, test, suffix, platform):
+    """Check whether a baseline is duplicate and can fallback to same
+       baseline for another platform. For example, if a test has same baseline
+       on linux and windows, then we only store windows baseline and linux
+       baseline will fallback to the windows version.
+
+    Args:
+      expected_filename: baseline expectation file name.
+      test: test name.
+      suffix: file suffix of the expected results, including dot; e.g. '.txt'
+              or '.png'.
+      platform: baseline platform 'mac', 'win' or 'linux'.
+
+    Returns:
+      True if the baseline is unnecessary.
+      False otherwise.
+    """
+    test_filepath = os.path.join(path_utils.LayoutTestsDir(), test)
+    all_baselines = path_utils.ExpectedBaseline(test_filepath,
+                                                suffix,
+                                                platform,
+                                                True)
+    for (fallback_dir, fallback_file) in all_baselines:
+      if fallback_dir and fallback_file:
+        fallback_fullpath = os.path.normpath(
+            os.path.join(fallback_dir, fallback_file))
+        if fallback_fullpath.lower() != baseline_path.lower():
+          if not self._DiffBaselines(baseline_path, fallback_fullpath):
+            logging.info('  Found same baseline at %s', fallback_fullpath)
+            return True
+          else:
+            return False
+
+    return False
+
+  def _DiffBaselines(self, file1, file2):
+    """Check whether two baselines are different.
+
+    Args:
+      file1, file2: full paths of the baselines to compare.
+
+    Returns:
+      True if two files are different or have different extensions.
+      False otherwise.
+    """
+
+    ext1 = os.path.splitext(file1)[1].upper()
+    ext2 = os.path.splitext(file2)[1].upper()
+    if ext1 != ext2:
+      logging.warn('Files to compare have different ext. File1: %s; File2: %s',
+                   file1, file2)
+      return True
+
+    if ext1 == '.PNG':
+      return image_diff.ImageDiff(self._platform, '').DiffFiles(file1,
+                                                                file2)
+    else:
+      return text_diff.TestTextDiff(self._platform, '').DiffFiles(file1,
+                                                                  file2)
+
+  def _DeleteBaseline(self, filename):
+    """Remove the file from SVN repository and delete it from disk.
+
+    Args:
+      filename: full path of the file to delete.
+    """
+
+    if not filename:
+      return
+
+    parent_dir, basename = os.path.split(filename)
+    original_dir = os.getcwd()
+    os.chdir(parent_dir)
+    status_output = RunShell(['svn', 'delete', '--force', basename], False)
+    os.chdir(original_dir)
 
   def _UpdateRebaselinedTestsInFile(self, backup):
     """Update the rebaselined tests in test expectations file.
@@ -421,22 +513,33 @@ class Rebaseliner(object):
     if not filename:
       return False
 
-    status_output = RunShell(['svn', 'status', filename], False)
+    parent_dir, basename = os.path.split(filename)
+    if parent_dir == filename:
+      logging.info("No svn checkout found. Assuming it's a git repo and not "
+                   "adding")
+      return True
+
+    original_dir = os.getcwd()
+    os.chdir(parent_dir)
+    status_output = RunShell(['svn', 'status', basename], False)
+    os.chdir(original_dir)
     output = status_output.upper()
     if output.startswith('A') or output.startswith('M'):
       logging.info('  File already added to SVN: "%s"', filename)
       return True
 
     if output.find('IS NOT A WORKING COPY') >= 0:
-      parent_dir = os.path.split(filename)[0]
       logging.info('  File is not a working copy, add its parent: "%s"',
                    parent_dir)
       return self._SvnAdd(parent_dir)
 
-    add_output = RunShell(['svn', 'add', filename], True)
+    os.chdir(parent_dir)
+    add_output = RunShell(['svn', 'add', basename], True)
+    os.chdir(original_dir)
     output = add_output.upper().rstrip()
-    if output.startswith('A') and output.find(filename.upper()) >= 0:
+    if output.startswith('A') and output.find(basename.upper()) >= 0:
       logging.info('  Added new file: "%s"', filename)
+      self._SvnPropSet(filename)
       return True
 
     if (not status_output) and (add_output.upper().find(
@@ -448,6 +551,32 @@ class Rebaseliner(object):
     logging.warn('  Svn status output: "%s"', status_output)
     logging.warn('  Svn add output: "%s"', add_output)
     return False
+
+  def _SvnPropSet(self, filename):
+    """Set the baseline property
+
+    Args:
+      filename: full path of the file to add.
+
+    Returns:
+      True if the file already exists in SVN or is sucessfully added to SVN.
+      False otherwise.
+    """
+    ext = os.path.splitext(filename)[1].upper()
+    if ext != '.TXT' and ext != '.PNG' and ext != '.CHECKSUM':
+      return
+
+    parent_dir, basename = os.path.split(filename)
+    original_dir = os.getcwd()
+    os.chdir(parent_dir)
+    if ext == '.PNG':
+      cmd = [ 'svn', 'pset', 'svn:mime-type', 'image/png', basename ]
+    else:
+      cmd = [ 'svn', 'pset', 'svn:eol-style', 'LF', basename ]
+
+    logging.debug('  Set svn prop: %s', ' '.join(cmd))
+    RunShell(cmd, False)
+    os.chdir(original_dir)
 
   def _CreateHtmlBaselineFiles(self, baseline_fullpath):
     """Create baseline files (old, new and diff) in html directory.
@@ -492,7 +621,26 @@ class Rebaseliner(object):
 
     # Get the diff between old and new baselines and save to the html directory.
     if baseline_filename.upper().endswith('.TXT'):
-      output = RunShell(['svn', 'diff', baseline_fullpath])
+      # If the user specified a custom diff command in their svn config file,
+      # then it'll be used when we do svn diff, which we don't want to happen
+      # since we want the unified diff.  Using --diff-cmd=diff doesn't always
+      # work, since they can have another diff executable in their path that
+      # gives different line endings.  So we use a bogus temp directory as the
+      # config directory, which gets around these problems.
+      if sys.platform.startswith("win"):
+        parent_dir = tempfile.gettempdir()
+      else:
+        parent_dir = sys.path[0]  # tempdir is not secure.
+      bogus_dir = os.path.join(parent_dir, "temp_svn_config")
+      logging.debug('  Html: temp config dir: "%s".', bogus_dir)
+      if not os.path.exists(bogus_dir):
+        os.mkdir(bogus_dir)
+        delete_bogus_dir = True
+      else:
+        delete_bogus_dir = False
+
+      output = RunShell(["svn", "diff", "--config-dir", bogus_dir,
+                         baseline_fullpath])
       if output:
         diff_file = GetResultFileFullpath(self._options.html_directory,
                                           baseline_filename,
@@ -504,6 +652,9 @@ class Rebaseliner(object):
         logging.info('  Html: created baseline diff file: "%s".',
                      diff_file)
 
+      if delete_bogus_dir:
+        shutil.rmtree(bogus_dir, True)
+        logging.debug('  Html: removed temp config dir: "%s".', bogus_dir)
 
 class HtmlGenerator(object):
   """Class to generate rebaselining result comparison html."""
@@ -714,7 +865,7 @@ def main():
                            help='include debug-level logging.')
 
   option_parser.add_option('-p', '--platforms',
-                           default='win,mac,linux',
+                           default='mac,win,win-xp,linux',
                            help=('Comma delimited list of platforms that need '
                                  'rebaselining.'))
 
@@ -728,10 +879,11 @@ def main():
                            default='layout-test-results',
                            help='Layout test result archive name.')
 
-  option_parser.add_option('-n', '--buildbot_platform_dir_basename',
-                           default='webkit-rel',
-                           help=('Base name of buildbot platform directory '
-                                 'that stores the layout test results.'))
+  option_parser.add_option('-w', '--webkit_canary',
+                           action='store_true',
+                           default=False,
+                           help=('If True, pull baselines from webkit.org '
+                                 'canary bot.'))
 
   option_parser.add_option('-b', '--backup',
                            action='store_true',
@@ -778,6 +930,20 @@ def main():
     logging.error('Invalid "platforms" option. --platforms must be specified '
                   'in order to rebaseline.')
     sys.exit(1)
+  platforms = [p.strip().lower() for p in options.platforms.split(',')]
+  for platform in platforms:
+    if not platform in REBASELINE_PLATFORM_ORDER:
+      logging.error('Invalid platform: "%s"' % (platform))
+      sys.exit(1)
+
+  # Adjust the platform order so rebaseline tool is running at the order of
+  # 'mac', 'win' and 'linux'. This is in same order with layout test baseline
+  # search paths. It simplifies how the rebaseline tool detects duplicate
+  # baselines. Check _IsDupBaseline method for details.
+  rebaseline_platforms = []
+  for platform in REBASELINE_PLATFORM_ORDER:
+    if platform in platforms:
+      rebaseline_platforms.append(platform)
 
   if not options.no_html_results:
     options.html_directory = SetupHtmlDirectory(options.html_directory,
@@ -785,8 +951,7 @@ def main():
 
   rebaselining_tests = set()
   backup = options.backup
-  platforms = [p.strip().lower() for p in options.platforms.split(',')]
-  for platform in platforms:
+  for platform in rebaseline_platforms:
     rebaseliner = Rebaseliner(platform, options)
 
     logging.info('')
@@ -803,7 +968,9 @@ def main():
   if not options.no_html_results:
     logging.info('')
     LogDashedString('Rebaselining result comparison started', None)
-    html_generator = HtmlGenerator(options, platforms, rebaselining_tests)
+    html_generator = HtmlGenerator(options,
+                                   rebaseline_platforms,
+                                   rebaselining_tests)
     html_generator.GenerateHtml()
     html_generator.ShowHtml()
     LogDashedString('Rebaselining result comparison done', None)

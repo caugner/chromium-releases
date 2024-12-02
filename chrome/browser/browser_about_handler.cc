@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "app/resource_bundle.h"
 #include "base/file_version_info.h"
 #include "base/histogram.h"
+#include "base/i18n/number_formatting.h"
+#include "base/path_service.h"
 #include "base/platform_thread.h"
 #include "base/stats_table.h"
 #include "base/string_piece.h"
@@ -22,8 +24,13 @@
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/net/dns_global.h"
+#include "chrome/browser/profile.h"
+#include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/sync/auth_error_state.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/histogram_synchronizer.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
@@ -44,26 +51,45 @@
 #if defined(OS_WIN)
 #include "chrome/browser/views/about_ipc_dialog.h"
 #include "chrome/browser/views/about_network_dialog.h"
+#elif defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/chromeos_version_loader.h"
+#elif defined(OS_MACOSX)
+#include "chrome/browser/cocoa/about_ipc_dialog.h"
+#endif
+
+#if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/tcmalloc/src/google/malloc_extension.h"
+#endif
+
+#if defined(BROWSER_SYNC)
+using sync_api::SyncManager;
 #endif
 
 using base::Time;
 using base::TimeDelta;
 
+#if defined(USE_TCMALLOC)
+// Glue between the callback task and the method in the singleton.
+void AboutTcmallocRendererCallback(base::ProcessId pid, std::string output) {
+  Singleton<AboutTcmallocOutputs>::get()->RendererCallback(pid, output);
+}
+#endif
+
 namespace {
 
 // The paths used for the about pages.
-const char kCachePath[] = "cache";
 const char kDnsPath[] = "dns";
 const char kHistogramsPath[] = "histograms";
 const char kObjectsPath[] = "objects";
 const char kMemoryRedirectPath[] = "memory-redirect";
 const char kMemoryPath[] = "memory";
+const char kTcmallocPath[] = "tcmalloc";
 const char kPluginsPath[] = "plugins";
 const char kStatsPath[] = "stats";
 const char kVersionPath[] = "version";
 const char kCreditsPath[] = "credits";
 const char kTermsPath[] = "terms";
-const char kLinuxSplash[] = "linux-splash";
+const char kSyncPath[] = "sync";
 
 // Points to the singleton AboutSource object, if any.
 ChromeURLDataManager::DataSource* about_source = NULL;
@@ -116,13 +142,42 @@ class AboutMemoryHandler : public MemoryDetails {
   void BindProcessMetrics(DictionaryValue* data,
                           ProcessMemoryInformation* info);
   void AppendProcess(ListValue* child_data, ProcessMemoryInformation* info);
-  void FinishAboutMemory();
 
-  AboutSource* source_;
+  scoped_refptr<AboutSource> source_;
   int request_id_;
 
   DISALLOW_COPY_AND_ASSIGN(AboutMemoryHandler);
 };
+
+#if defined(OS_CHROMEOS)
+// ChromeOSAboutVersionHandler is responsible for loading the Chrome OS
+// version.
+// ChromeOSAboutVersionHandler handles deleting itself once the version has
+// been obtained and AboutSource notified.
+class ChromeOSAboutVersionHandler {
+ public:
+  ChromeOSAboutVersionHandler(AboutSource* source, int request_id);
+
+  // Callback from ChromeOSVersionLoader giving the version.
+  void OnVersion(ChromeOSVersionLoader::Handle handle,
+                 std::string version);
+
+ private:
+  // Where the results are fed to.
+  scoped_refptr<AboutSource> source_;
+
+  // ID identifying the request.
+  int request_id_;
+
+  // Handles asynchronously loading the version.
+  ChromeOSVersionLoader loader_;
+
+  // Used to request the version.
+  CancelableRequestConsumer consumer_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeOSAboutVersionHandler);
+};
+#endif
 
 // Individual about handlers ---------------------------------------------------
 
@@ -140,6 +195,49 @@ std::string AboutDns() {
   return data;
 }
 
+#if defined(USE_TCMALLOC)
+std::string AboutTcmalloc(const std::string& query) {
+  std::string data;
+  AboutTcmallocOutputsType* outputs =
+      Singleton<AboutTcmallocOutputs>::get()->outputs();
+
+  // Display any stats for which we sent off requests the last time.
+  data.append("<html><head><title>About tcmalloc</title></head><body>\n");
+  data.append("<p>Stats as of last page load;");
+  data.append("reload to get stats as of this page load.</p>\n");
+  data.append("<table width=\"100%\">\n");
+  for (AboutTcmallocOutputsType::const_iterator oit = outputs->begin();
+       oit != outputs->end();
+       oit++) {
+    data.append("<tr><td bgcolor=\"yellow\">");
+    data.append(oit->first);
+    data.append("</td></tr>\n");
+    data.append("<tr><td><pre>\n");
+    data.append(oit->second);
+    data.append("</pre></td></tr>\n");
+  }
+  data.append("</table>\n");
+  data.append("</body></html>\n");
+
+  // Reset our collector singleton.
+  outputs->clear();
+
+  // Populate the collector with stats from the local browser process
+  // and send off requests to all the renderer processes.
+  char buffer[1024 * 32];
+  MallocExtension::instance()->GetStats(buffer, sizeof(buffer));
+  std::string browser("Browser");
+  Singleton<AboutTcmallocOutputs>::get()->SetOutput(browser, buffer);
+  RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
+  while (!it.IsAtEnd()) {
+    it.GetCurrentValue()->Send(new ViewMsg_GetRendererTcmalloc);
+    it.Advance();
+  }
+
+  return data;
+}
+#endif
+
 std::string AboutHistograms(const std::string& query) {
   TimeDelta wait_time = TimeDelta::FromMilliseconds(10000);
 
@@ -151,23 +249,6 @@ std::string AboutHistograms(const std::string& query) {
   std::string data;
   StatisticsRecorder::WriteHTMLGraph(query, &data);
   return data;
-}
-
-std::string AboutLinuxSplash() {
-  int resource_id = IDR_LINUX_SPLASH_HTML_CHROMIUM;
-  scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
-  if (version_info == NULL) {
-    DLOG(ERROR) << "Unable to create FileVersionInfo object";
-  } else {
-    if (version_info->is_official_build()) {
-      resource_id = IDR_LINUX_SPLASH_HTML_CHROME;
-    }
-  }
-  static const std::string linux_splash_html =
-      ResourceBundle::GetSharedInstance().GetDataResource(resource_id);
-
-  return linux_splash_html;
 }
 
 void AboutMemory(AboutSource* source, int request_id) {
@@ -205,7 +286,7 @@ std::string AboutPlugins() {
   localized_strings.SetString(L"enabled_no",
       l10n_util::GetString(IDS_ABOUT_PLUGINS_ENABLED_NO));
 
-  static const StringPiece plugins_html(
+  static const base::StringPiece plugins_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_PLUGINS_HTML));
 
@@ -306,7 +387,7 @@ std::string AboutStats() {
   }
 
   // Get about_stats.html
-  static const StringPiece stats_html(
+  static const base::StringPiece stats_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_STATS_HTML));
 
@@ -334,10 +415,8 @@ std::string AboutTerms() {
   return terms_html;
 }
 
-std::string AboutVersion() {
-  // Strings used in the JsTemplate file.
-  DictionaryValue localized_strings;
-  localized_strings.SetString(L"title",
+std::string AboutVersion(DictionaryValue* localized_strings) {
+  localized_strings->SetString(L"title",
       l10n_util::GetString(IDS_ABOUT_VERSION_TITLE));
   scoped_ptr<FileVersionInfo> version_info(
       FileVersionInfo::CreateFileVersionInfoForCurrentModule());
@@ -356,34 +435,132 @@ std::string AboutVersion() {
   std::wstring js_engine = L"JavaScriptCore";
 #endif
 
-  localized_strings.SetString(L"name",
+  localized_strings->SetString(L"name",
       l10n_util::GetString(IDS_PRODUCT_NAME));
-  localized_strings.SetString(L"version", version_info->file_version());
-  localized_strings.SetString(L"js_engine", js_engine);
-  localized_strings.SetString(L"js_version", js_version);
-  localized_strings.SetString(L"webkit_version", webkit_version);
-  localized_strings.SetString(L"company",
+  localized_strings->SetString(L"version", version_info->file_version());
+  localized_strings->SetString(L"js_engine", js_engine);
+  localized_strings->SetString(L"js_version", js_version);
+  localized_strings->SetString(L"webkit_version", webkit_version);
+  localized_strings->SetString(L"company",
       l10n_util::GetString(IDS_ABOUT_VERSION_COMPANY_NAME));
-  localized_strings.SetString(L"copyright",
+  localized_strings->SetString(L"copyright",
       l10n_util::GetString(IDS_ABOUT_VERSION_COPYRIGHT));
-  localized_strings.SetString(L"cl", version_info->last_change());
+  localized_strings->SetString(L"cl", version_info->last_change());
   if (version_info->is_official_build()) {
-    localized_strings.SetString(L"official",
+    localized_strings->SetString(L"official",
       l10n_util::GetString(IDS_ABOUT_VERSION_OFFICIAL));
   } else {
-    localized_strings.SetString(L"official",
+    localized_strings->SetString(L"official",
       l10n_util::GetString(IDS_ABOUT_VERSION_UNOFFICIAL));
   }
-  localized_strings.SetString(L"useragent",
+  localized_strings->SetString(L"useragent",
       UTF8ToWide(webkit_glue::GetUserAgent(GURL())));
 
-  static const StringPiece version_html(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
+  static const std::string version_html(
+      ResourceBundle::GetSharedInstance().GetDataResource(
           IDR_ABOUT_VERSION_HTML));
 
-  return jstemplate_builder::GetI18nTemplateHtml(
-      version_html, &localized_strings);
+  std::string output = version_html;
+  jstemplate_builder::AppendJsonHtml(localized_strings, &output);
+  jstemplate_builder::AppendI18nTemplateSourceHtml(&output);
+  jstemplate_builder::AppendI18nTemplateProcessHtml(&output);
+  jstemplate_builder::AppendJsTemplateSourceHtml(&output);
+  jstemplate_builder::AppendJsTemplateProcessHtml("t", &output);
+  return output;
 }
+
+#if defined(BROWSER_SYNC)
+static void AddBoolSyncDetail(ListValue* details, const std::wstring& stat_name,
+                              bool stat_value) {
+  DictionaryValue* val = new DictionaryValue;
+  val->SetString(L"stat_name", stat_name);
+  val->SetBoolean(L"stat_value", stat_value);
+  details->Append(val);
+}
+
+static void AddIntSyncDetail(ListValue* details, const std::wstring& stat_name,
+                             int64 stat_value) {
+  DictionaryValue* val = new DictionaryValue;
+  val->SetString(L"stat_name", stat_name);
+  val->SetString(L"stat_value", UTF16ToWide(base::FormatNumber(stat_value)));
+  details->Append(val);
+}
+
+static std::wstring MakeSyncAuthErrorText(AuthErrorState state) {
+  switch (state) {
+    case AUTH_ERROR_INVALID_GAIA_CREDENTIALS:
+      return L"INVALID_GAIA_CREDENTIALS";
+    case AUTH_ERROR_USER_NOT_SIGNED_UP:
+      return L"USER_NOT_SIGNED_UP";
+    case AUTH_ERROR_CONNECTION_FAILED:
+      return L"CONNECTION_FAILED";
+    default:
+      return std::wstring();
+  }
+}
+
+std::string AboutSync() {
+  FilePath user_data_dir;
+  if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+    return std::string();
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+  ProfileSyncService* service = profile->GetProfileSyncService();
+
+  DictionaryValue strings;
+  if (!service || !service->HasSyncSetupCompleted()) {
+    strings.SetString(L"summary", L"SYNC DISABLED");
+  } else {
+    SyncManager::Status full_status(service->QueryDetailedSyncStatus());
+
+    strings.SetString(L"summary",
+        ProfileSyncService::BuildSyncStatusSummaryText(
+            full_status.summary));
+
+    strings.Set(L"authenticated",
+        new FundamentalValue(full_status.authenticated));
+    strings.SetString(L"auth_problem",
+        MakeSyncAuthErrorText(service->GetAuthErrorState()));
+
+    strings.SetString(L"time_since_sync", service->GetLastSyncedTimeString());
+
+    ListValue* details = new ListValue();
+    strings.Set(L"details", details);
+    AddBoolSyncDetail(details, L"Server Up", full_status.server_up);
+    AddBoolSyncDetail(details, L"Server Reachable",
+                      full_status.server_reachable);
+    AddBoolSyncDetail(details, L"Server Broken", full_status.server_broken);
+    AddBoolSyncDetail(details, L"Notifications Enabled",
+                      full_status.notifications_enabled);
+    AddIntSyncDetail(details, L"Notifications Received",
+                     full_status.notifications_received);
+    AddIntSyncDetail(details, L"Notifications Sent",
+                     full_status.notifications_sent);
+    AddIntSyncDetail(details, L"Unsynced Count", full_status.unsynced_count);
+    AddIntSyncDetail(details, L"Conflicting Count",
+                     full_status.conflicting_count);
+    AddBoolSyncDetail(details, L"Syncing", full_status.syncing);
+    AddBoolSyncDetail(details, L"Initial Sync Ended",
+                      full_status.initial_sync_ended);
+    AddBoolSyncDetail(details, L"Syncer Stuck", full_status.syncer_stuck);
+    AddIntSyncDetail(details, L"Updates Available",
+                     full_status.updates_available);
+    AddIntSyncDetail(details, L"Updates Received",
+                     full_status.updates_received);
+    AddBoolSyncDetail(details, L"Disk Full", full_status.disk_full);
+    AddBoolSyncDetail(details, L"Invalid Store", full_status.invalid_store);
+    AddIntSyncDetail(details, L"Max Consecutive Errors",
+                     full_status.max_consecutive_errors);
+  }
+
+  static const base::StringPiece sync_html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+      IDR_ABOUT_SYNC_HTML));
+
+  return jstemplate_builder::GetTemplateHtml(
+      sync_html, &strings , "t" /* template root node id */);
+}
+#endif  // defined(BROWSER_SYNC)
 
 // AboutSource -----------------------------------------------------------------
 
@@ -430,18 +607,27 @@ void AboutSource::StartDataRequest(const std::string& path_raw,
     response = AboutPlugins();
   } else if (path == kStatsPath) {
     response = AboutStats();
+#if defined(USE_TCMALLOC)
+  } else if (path == kTcmallocPath) {
+    response = AboutTcmalloc(info);
+#endif
   } else if (path == kVersionPath || path.empty()) {
-    response = AboutVersion();
+#if defined(OS_CHROMEOS)
+    new ChromeOSAboutVersionHandler(this, request_id);
+    return;
+#else
+    DictionaryValue value;
+    response = AboutVersion(&value);
+#endif
   } else if (path == kCreditsPath) {
     response = AboutCredits();
   } else if (path == kTermsPath) {
     response = AboutTerms();
-  }
-#if defined(OS_LINUX)
-  else if (path == kLinuxSplash) {
-    response = AboutLinuxSplash();
-  }
+  } else if (path == kSyncPath) {
+#if defined(BROWSER_SYNC)
+    response = AboutSync();
 #endif
+  }
 
   FinishDataRequest(response, request_id);
 }
@@ -510,17 +696,17 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   ListValue* browsers = new ListValue();
   root.Set(L"browsers", browsers);
 
-  ProcessData* browser_processes = processes();
+  const std::vector<ProcessData>& browser_processes = processes();
 
   // Aggregate per-process data into browser summary data.
   std::wstring log_string;
-  for (int index = 0; index < MemoryDetails::MAX_BROWSERS; index++) {
+  for (size_t index = 0; index < browser_processes.size(); index++) {
     if (browser_processes[index].processes.size() == 0)
       continue;
 
     // Sum the information for the processes within this browser.
     ProcessMemoryInformation aggregate;
-    ProcessMemoryInformationList::iterator iterator;
+    ProcessMemoryInformationList::const_iterator iterator;
     iterator = browser_processes[index].processes.begin();
     aggregate.pid = iterator->pid;
     aggregate.version = iterator->version;
@@ -572,7 +758,7 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   }
 
   // Get about_memory.html
-  static const StringPiece memory_html(
+  static const base::StringPiece memory_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_ABOUT_MEMORY_HTML));
 
@@ -580,15 +766,59 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   std::string template_html = jstemplate_builder::GetTemplateHtml(
       memory_html, &root, "t" /* template root node id */);
 
-  AboutSource* src = static_cast<AboutSource*>(source_);
-  src->FinishDataRequest(template_html, request_id_);
+  source_->FinishDataRequest(template_html, request_id_);
+}
+
+#if defined(OS_CHROMEOS)
+// ChromeOSAboutVersionHandler  -----------------------------------------------
+
+ChromeOSAboutVersionHandler::ChromeOSAboutVersionHandler(AboutSource* source,
+                                                         int request_id)
+    : source_(source),
+      request_id_(request_id) {
+  loader_.GetVersion(&consumer_,
+      NewCallback(this, &ChromeOSAboutVersionHandler::OnVersion));
+}
+
+void ChromeOSAboutVersionHandler::OnVersion(
+    ChromeOSVersionLoader::Handle handle,
+    std::string version) {
+  DictionaryValue localized_strings;
+  localized_strings.SetString(L"os_name",
+                              l10n_util::GetString(IDS_PRODUCT_OS_NAME));
+  localized_strings.SetString(L"os_version", UTF8ToWide(version));
+  localized_strings.SetBoolean(L"is_chrome_os", true);
+  source_->FinishDataRequest(AboutVersion(&localized_strings), request_id_);
+
+  // CancelableRequestProvider isn't happy when it's deleted and servicing a
+  // task, so we delay the deletion.
+  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+}
+
+#endif
+
+// Returns true if |url|'s spec starts with |about_specifier|, and is
+// terminated by the start of a path.
+bool StartsWithAboutSpecifier(const GURL& url, const char* about_specifier) {
+  return StartsWithASCII(url.spec(), about_specifier, true) &&
+         (url.spec().size() == strlen(about_specifier) ||
+          url.spec()[strlen(about_specifier)] == '/');
+}
+
+// Transforms a URL of the form "about:foo/XXX" to <url_prefix> + "XXX".
+GURL RemapAboutURL(const std::string& url_prefix, const GURL& url) {
+  std::string path;
+  size_t split = url.spec().find('/');
+  if (split != std::string::npos)
+    path = url.spec().substr(split + 1);
+  return GURL(url_prefix + path);
 }
 
 }  // namespace
 
 // -----------------------------------------------------------------------------
 
-bool WillHandleBrowserAboutURL(GURL* url) {
+bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
   // We only handle about: schemes.
   if (!url->SchemeIs(chrome::kAboutScheme))
     return false;
@@ -599,10 +829,16 @@ bool WillHandleBrowserAboutURL(GURL* url) {
   if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutBlankURL))
     return false;
 
-  // Handle rewriting view-cache URLs. This allows us to load about:cache.
-  if (LowerCaseEqualsASCII(url->spec(), chrome::kAboutCacheURL)) {
-    // Create an mapping from about:cache to the view-cache: internal URL.
-    *url = GURL(std::string(chrome::kViewCacheScheme) + ":");
+  // Rewrite about:cache/* URLs to chrome://net-internals/view-cache/*
+  if (StartsWithAboutSpecifier(*url, chrome::kAboutCacheURL)) {
+    *url = RemapAboutURL(chrome::kNetworkViewCacheURL + std::string("/"),
+                         *url);
+    return true;
+  }
+
+  // Rewrite about:net-internals/* URLs to chrome://net-internals/*
+  if (StartsWithAboutSpecifier(*url, chrome::kAboutNetInternalsURL)) {
+    *url = RemapAboutURL(chrome::kNetworkViewInternalsURL, *url);
     return true;
   }
 
@@ -649,14 +885,17 @@ bool WillHandleBrowserAboutURL(GURL* url) {
 bool HandleNonNavigationAboutURL(const GURL& url) {
   // About:network and IPC and currently buggy, so we disable it for official
   // builds.
-#if defined(OS_WIN) && !defined(OFFICIAL_BUILD)
+#if !defined(OFFICIAL_BUILD)
+
+#if defined(OS_WIN)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUINetworkURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
     AboutNetworkDialog::RunDialog();
     return true;
   }
+#endif
 
-#ifdef IPC_MESSAGE_LOG_ENABLED
+#if !defined(OS_LINUX) && defined(IPC_MESSAGE_LOG_ENABLED)
   if (LowerCaseEqualsASCII(url.spec(), chrome::kChromeUIIPCURL)) {
     // Run the dialog. This will re-use the existing one if it's already up.
     AboutIPCDialog::RunDialog();
@@ -664,8 +903,7 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
   }
 #endif
 
-#else
-  // TODO(port) Implement this.
-#endif
+#endif  // OFFICIAL_BUILD
+
   return false;
 }

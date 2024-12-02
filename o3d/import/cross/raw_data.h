@@ -46,8 +46,6 @@
 #include "core/cross/param.h"
 #include "core/cross/types.h"
 
-class FilePath;
-
 namespace o3d {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -63,6 +61,11 @@ class RawData : public ParamObject {
   static RawData::Ref CreateFromFile(ServiceLocator* service_locator,
                                      const String &uri,
                                      const String& filename);
+
+  // Creates a RawData object, taking as input a string containing a
+  // data URL.
+  static RawData::Ref CreateFromDataURL(ServiceLocator* service_locator,
+                                        const String& data_url);
 
   virtual ~RawData();
 
@@ -111,6 +114,10 @@ class RawData : public ParamObject {
           size_t length);
 
   bool SetFromFile(const String& filename);
+
+  // Decodes data from a data URL and stores that data in this
+  // RawData object. Returns false on error, true otherwise
+  bool SetFromDataURL(const String& data_url);
 
   friend class IClassManager;
   friend class Pack;

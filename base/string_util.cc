@@ -94,24 +94,53 @@ bool StringToNumber(const typename StringToNumberTraits::string_type& input,
          traits::valid_func(input);
 }
 
-class StringToLongTraits {
+static int strtoi(const char *nptr, char **endptr, int base) {
+  long res = strtol(nptr, endptr, base);
+#if __LP64__
+  // Long is 64-bits, we have to handle under/overflow ourselves.
+  if (res > kint32max) {
+    res = kint32max;
+    errno = ERANGE;
+  } else if (res < kint32min) {
+    res = kint32min;
+    errno = ERANGE;
+  }
+#endif
+  return static_cast<int>(res);
+}
+
+static unsigned int strtoui(const char *nptr, char **endptr, int base) {
+  unsigned long res = strtoul(nptr, endptr, base);
+#if __LP64__
+  // Long is 64-bits, we have to handle under/overflow ourselves.  Test to see
+  // if the result can fit into 32-bits (as signed or unsigned).
+  if (static_cast<int>(static_cast<long>(res)) != static_cast<long>(res) &&
+      static_cast<unsigned int>(res) != res) {
+    res = kuint32max;
+    errno = ERANGE;
+  }
+#endif
+  return static_cast<unsigned int>(res);
+}
+
+class StringToIntTraits {
  public:
   typedef std::string string_type;
-  typedef long value_type;
+  typedef int value_type;
   static const int kBase = 10;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
-    return strtol(str, endptr, kBase);
+    return strtoi(str, endptr, kBase);
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !isspace(str[0]);
   }
 };
 
-class String16ToLongTraits {
+class String16ToIntTraits {
  public:
   typedef string16 string_type;
-  typedef long value_type;
+  typedef int value_type;
   static const int kBase = 10;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
@@ -120,7 +149,7 @@ class String16ToLongTraits {
 #elif defined(WCHAR_T_IS_UTF32)
     std::string ascii_string = UTF16ToASCII(string16(str));
     char* ascii_end = NULL;
-    value_type ret = strtol(ascii_string.c_str(), &ascii_end, kBase);
+    value_type ret = strtoi(ascii_string.c_str(), &ascii_end, kBase);
     if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
       *endptr =
           const_cast<string_type::value_type*>(str) + ascii_string.length();
@@ -179,24 +208,24 @@ class String16ToInt64Traits {
 // For the HexString variants, use the unsigned variants like strtoul for
 // convert_func so that input like "0x80000000" doesn't result in an overflow.
 
-class HexStringToLongTraits {
+class HexStringToIntTraits {
  public:
   typedef std::string string_type;
-  typedef long value_type;
+  typedef int value_type;
   static const int kBase = 16;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
-    return strtoul(str, endptr, kBase);
+    return strtoui(str, endptr, kBase);
   }
   static inline bool valid_func(const string_type& str) {
     return !str.empty() && !isspace(str[0]);
   }
 };
 
-class HexString16ToLongTraits {
+class HexString16ToIntTraits {
  public:
   typedef string16 string_type;
-  typedef long value_type;
+  typedef int value_type;
   static const int kBase = 16;
   static inline value_type convert_func(const string_type::value_type* str,
                                         string_type::value_type** endptr) {
@@ -205,7 +234,7 @@ class HexString16ToLongTraits {
 #elif defined(WCHAR_T_IS_UTF32)
     std::string ascii_string = UTF16ToASCII(string16(str));
     char* ascii_end = NULL;
-    value_type ret = strtoul(ascii_string.c_str(), &ascii_end, kBase);
+    value_type ret = strtoui(ascii_string.c_str(), &ascii_end, kBase);
     if (ascii_string.c_str() + ascii_string.length() == ascii_end) {
       *endptr =
           const_cast<string_type::value_type*>(str) + ascii_string.length();
@@ -315,35 +344,41 @@ const string16& EmptyString16() {
   return Singleton<EmptyStrings>::get()->s16;
 }
 
-const wchar_t kWhitespaceWide[] = {
-  0x0009,  // <control-0009> to <control-000D>
-  0x000A,
-  0x000B,
-  0x000C,
-  0x000D,
-  0x0020,  // Space
-  0x0085,  // <control-0085>
-  0x00A0,  // No-Break Space
-  0x1680,  // Ogham Space Mark
-  0x180E,  // Mongolian Vowel Separator
-  0x2000,  // En Quad to Hair Space
-  0x2001,
-  0x2002,
-  0x2003,
-  0x2004,
-  0x2005,
-  0x2006,
-  0x2007,
-  0x2008,
-  0x2009,
-  0x200A,
-  0x200C,  // Zero Width Non-Joiner
-  0x2028,  // Line Separator
-  0x2029,  // Paragraph Separator
-  0x202F,  // Narrow No-Break Space
-  0x205F,  // Medium Mathematical Space
-  0x3000,  // Ideographic Space
+#define WHITESPACE_UNICODE \
+  0x0009, /* <control-0009> to <control-000D> */ \
+  0x000A,                                        \
+  0x000B,                                        \
+  0x000C,                                        \
+  0x000D,                                        \
+  0x0020, /* Space */                            \
+  0x0085, /* <control-0085> */                   \
+  0x00A0, /* No-Break Space */                   \
+  0x1680, /* Ogham Space Mark */                 \
+  0x180E, /* Mongolian Vowel Separator */        \
+  0x2000, /* En Quad to Hair Space */            \
+  0x2001,                                        \
+  0x2002,                                        \
+  0x2003,                                        \
+  0x2004,                                        \
+  0x2005,                                        \
+  0x2006,                                        \
+  0x2007,                                        \
+  0x2008,                                        \
+  0x2009,                                        \
+  0x200A,                                        \
+  0x200C, /* Zero Width Non-Joiner */            \
+  0x2028, /* Line Separator */                   \
+  0x2029, /* Paragraph Separator */              \
+  0x202F, /* Narrow No-Break Space */            \
+  0x205F, /* Medium Mathematical Space */        \
+  0x3000, /* Ideographic Space */                \
   0
+
+const wchar_t kWhitespaceWide[] = {
+  WHITESPACE_UNICODE
+};
+const char16 kWhitespaceUTF16[] = {
+  WHITESPACE_UNICODE
 };
 const char kWhitespaceASCII[] = {
   0x09,    // <control-0009> to <control-000D>
@@ -354,7 +389,6 @@ const char kWhitespaceASCII[] = {
   0x20,    // Space
   0
 };
-const char* const kCodepageUTF8 = "UTF-8";
 
 template<typename STR>
 TrimPositions TrimStringT(const STR& input,
@@ -394,6 +428,14 @@ bool TrimString(const std::wstring& input,
   return TrimStringT(input, trim_chars, TRIM_ALL, output) != TRIM_NONE;
 }
 
+#if !defined(WCHAR_T_IS_UTF16)
+bool TrimString(const string16& input,
+                const char16 trim_chars[],
+                string16* output) {
+  return TrimStringT(input, trim_chars, TRIM_ALL, output) != TRIM_NONE;
+}
+#endif
+
 bool TrimString(const std::string& input,
                 const char trim_chars[],
                 std::string* output) {
@@ -405,6 +447,14 @@ TrimPositions TrimWhitespace(const std::wstring& input,
                              std::wstring* output) {
   return TrimStringT(input, kWhitespaceWide, positions, output);
 }
+
+#if !defined(WCHAR_T_IS_UTF16)
+TrimPositions TrimWhitespace(const string16& input,
+                             TrimPositions positions,
+                             string16* output) {
+  return TrimStringT(input, kWhitespaceUTF16, positions, output);
+}
+#endif
 
 TrimPositions TrimWhitespaceASCII(const std::string& input,
                                   TrimPositions positions,
@@ -467,28 +517,35 @@ std::wstring CollapseWhitespace(const std::wstring& text,
   return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
 }
 
+#if !defined(WCHAR_T_IS_UTF16)
+string16 CollapseWhitespace(const string16& text,
+                            bool trim_sequences_with_line_breaks) {
+  return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
+}
+#endif
+
 std::string CollapseWhitespaceASCII(const std::string& text,
                                     bool trim_sequences_with_line_breaks) {
   return CollapseWhitespaceT(text, trim_sequences_with_line_breaks);
 }
 
 std::string WideToASCII(const std::wstring& wide) {
-  DCHECK(IsStringASCII(wide));
+  DCHECK(IsStringASCII(wide)) << wide;
   return std::string(wide.begin(), wide.end());
 }
 
-std::wstring ASCIIToWide(const StringPiece& ascii) {
-  DCHECK(IsStringASCII(ascii));
+std::wstring ASCIIToWide(const base::StringPiece& ascii) {
+  DCHECK(IsStringASCII(ascii)) << ascii;
   return std::wstring(ascii.begin(), ascii.end());
 }
 
 std::string UTF16ToASCII(const string16& utf16) {
-  DCHECK(IsStringASCII(utf16));
+  DCHECK(IsStringASCII(utf16)) << utf16;
   return std::string(utf16.begin(), utf16.end());
 }
 
-string16 ASCIIToUTF16(const StringPiece& ascii) {
-  DCHECK(IsStringASCII(ascii));
+string16 ASCIIToUTF16(const base::StringPiece& ascii) {
+  DCHECK(IsStringASCII(ascii)) << ascii;
   return string16(ascii.begin(), ascii.end());
 }
 
@@ -534,7 +591,7 @@ bool IsStringASCII(const string16& str) {
 }
 #endif
 
-bool IsStringASCII(const StringPiece& str) {
+bool IsStringASCII(const base::StringPiece& str) {
   return DoIsStringASCII(str);
 }
 
@@ -694,6 +751,12 @@ bool LowerCaseEqualsASCII(const std::wstring& a, const char* b) {
   return DoLowerCaseEqualsASCII(a.begin(), a.end(), b);
 }
 
+#if !defined(WCHAR_T_IS_UTF16)
+bool LowerCaseEqualsASCII(const string16& a, const char* b) {
+  return DoLowerCaseEqualsASCII(a.begin(), a.end(), b);
+}
+#endif
+
 bool LowerCaseEqualsASCII(std::string::const_iterator a_begin,
                           std::string::const_iterator a_end,
                           const char* b) {
@@ -705,18 +768,36 @@ bool LowerCaseEqualsASCII(std::wstring::const_iterator a_begin,
                           const char* b) {
   return DoLowerCaseEqualsASCII(a_begin, a_end, b);
 }
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool LowerCaseEqualsASCII(string16::const_iterator a_begin,
+                          string16::const_iterator a_end,
+                          const char* b) {
+  return DoLowerCaseEqualsASCII(a_begin, a_end, b);
+}
+#endif
+
 bool LowerCaseEqualsASCII(const char* a_begin,
                           const char* a_end,
                           const char* b) {
   return DoLowerCaseEqualsASCII(a_begin, a_end, b);
 }
+
 bool LowerCaseEqualsASCII(const wchar_t* a_begin,
                           const wchar_t* a_end,
                           const char* b) {
   return DoLowerCaseEqualsASCII(a_begin, a_end, b);
 }
 
-bool EqualsASCII(const string16& a, const StringPiece& b) {
+#if !defined(WCHAR_T_IS_UTF16)
+bool LowerCaseEqualsASCII(const char16* a_begin,
+                          const char16* a_end,
+                          const char* b) {
+  return DoLowerCaseEqualsASCII(a_begin, a_end, b);
+}
+#endif
+
+bool EqualsASCII(const string16& a, const base::StringPiece& b) {
   if (a.length() != b.length())
     return false;
   return std::equal(b.begin(), b.end(), a.begin());
@@ -731,24 +812,34 @@ bool StartsWithASCII(const std::string& str,
     return base::strncasecmp(str.c_str(), search.c_str(), search.length()) == 0;
 }
 
-bool StartsWith(const std::wstring& str,
-                const std::wstring& search,
-                bool case_sensitive) {
+template <typename STR>
+bool StartsWithT(const STR& str, const STR& search, bool case_sensitive) {
   if (case_sensitive)
     return str.compare(0, search.length(), search) == 0;
   else {
     if (search.size() > str.size())
       return false;
     return std::equal(search.begin(), search.end(), str.begin(),
-                      CaseInsensitiveCompare<wchar_t>());
+                      CaseInsensitiveCompare<typename STR::value_type>());
   }
 }
 
-bool EndsWith(const std::wstring& str,
-              const std::wstring& search,
-              bool case_sensitive) {
-  std::wstring::size_type str_length = str.length();
-  std::wstring::size_type search_length = search.length();
+bool StartsWith(const std::wstring& str, const std::wstring& search,
+                bool case_sensitive) {
+  return StartsWithT(str, search, case_sensitive);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool StartsWith(const string16& str, const string16& search,
+                bool case_sensitive) {
+  return StartsWithT(str, search, case_sensitive);
+}
+#endif
+
+template <typename STR>
+bool EndsWithT(const STR& str, const STR& search, bool case_sensitive) {
+  typename STR::size_type str_length = str.length();
+  typename STR::size_type search_length = search.length();
   if (search_length > str_length)
     return false;
   if (case_sensitive) {
@@ -756,9 +847,21 @@ bool EndsWith(const std::wstring& str,
   } else {
     return std::equal(search.begin(), search.end(),
                       str.begin() + (str_length - search_length),
-                      CaseInsensitiveCompare<wchar_t>());
+                      CaseInsensitiveCompare<typename STR::value_type>());
   }
 }
+
+bool EndsWith(const std::wstring& str, const std::wstring& search,
+              bool case_sensitive) {
+  return EndsWithT(str, search, case_sensitive);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+bool EndsWith(const string16& str, const string16& search,
+              bool case_sensitive) {
+  return EndsWithT(str, search, case_sensitive);
+}
+#endif
 
 DataUnits GetByteDisplayUnits(int64 bytes) {
   // The byte thresholds at which we display amounts.  A byte count is displayed
@@ -930,14 +1033,14 @@ static void StringAppendVT(StringType* dst,
   // and StringUtilTest.StringPrintfBounds.
   typename StringType::value_type stack_buf[1024];
 
-  va_list backup_ap;
-  base::va_copy(backup_ap, ap);
+  va_list ap_copy;
+  GG_VA_COPY(ap_copy, ap);
 
 #if !defined(OS_WIN)
   errno = 0;
 #endif
-  int result = vsnprintfT(stack_buf, arraysize(stack_buf), format, backup_ap);
-  va_end(backup_ap);
+  int result = vsnprintfT(stack_buf, arraysize(stack_buf), format, ap_copy);
+  va_end(ap_copy);
 
   if (result >= 0 && result < static_cast<int>(arraysize(stack_buf))) {
     // It fit.
@@ -977,11 +1080,11 @@ static void StringAppendVT(StringType* dst,
 
     std::vector<typename StringType::value_type> mem_buf(mem_length);
 
-    // Restore the va_list before we use it again.
-    base::va_copy(backup_ap, ap);
-
-    result = vsnprintfT(&mem_buf[0], mem_length, format, ap);
-    va_end(backup_ap);
+    // NOTE: You can only use a va_list once.  Since we're in a while loop, we
+    // need to make a new copy each time so we don't use up the original.
+    GG_VA_COPY(ap_copy, ap);
+    result = vsnprintfT(&mem_buf[0], mem_length, format, ap_copy);
+    va_end(ap_copy);
 
     if ((result >= 0) && (result < mem_length)) {
       // It fit.
@@ -1198,6 +1301,14 @@ void SplitString(const std::wstring& str,
   SplitStringT(str, s, true, r);
 }
 
+#if !defined(WCHAR_T_IS_UTF16)
+void SplitString(const string16& str,
+                 char16 s,
+                 std::vector<string16>* r) {
+  SplitStringT(str, s, true, r);
+}
+#endif
+
 void SplitString(const std::string& str,
                  char s,
                  std::vector<std::string>* r) {
@@ -1209,6 +1320,14 @@ void SplitStringDontTrim(const std::wstring& str,
                          std::vector<std::wstring>* r) {
   SplitStringT(str, s, false, r);
 }
+
+#if !defined(WCHAR_T_IS_UTF16)
+void SplitStringDontTrim(const string16& str,
+                         char16 s,
+                         std::vector<string16>* r) {
+  SplitStringT(str, s, false, r);
+}
+#endif
 
 void SplitStringDontTrim(const std::string& str,
                          char s,
@@ -1237,12 +1356,18 @@ std::string JoinString(const std::vector<std::string>& parts, char sep) {
   return JoinStringT(parts, sep);
 }
 
+#if !defined(WCHAR_T_IS_UTF16)
+string16 JoinString(const std::vector<string16>& parts, char sep) {
+  return JoinStringT(parts, sep);
+}
+#endif
+
 std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t sep) {
   return JoinStringT(parts, sep);
 }
 
-void SplitStringAlongWhitespace(const std::wstring& str,
-                                std::vector<std::wstring>* result) {
+template<typename STR>
+void SplitStringAlongWhitespaceT(const STR& str, std::vector<STR>* result) {
   const size_t length = str.length();
   if (!length)
     return;
@@ -1281,24 +1406,42 @@ void SplitStringAlongWhitespace(const std::wstring& str,
   }
 }
 
-string16 ReplaceStringPlaceholders(const string16& format_string,
-                                   const std::vector<string16>& subst,
-                                   std::vector<size_t>* offsets) {
+void SplitStringAlongWhitespace(const std::wstring& str,
+                                std::vector<std::wstring>* result) {
+  SplitStringAlongWhitespaceT(str, result);
+}
+
+#if !defined(WCHAR_T_IS_UTF16)
+void SplitStringAlongWhitespace(const string16& str,
+                                std::vector<string16>* result) {
+  SplitStringAlongWhitespaceT(str, result);
+}
+#endif
+
+void SplitStringAlongWhitespace(const std::string& str,
+                                std::vector<std::string>* result) {
+  SplitStringAlongWhitespaceT(str, result);
+}
+
+template<class StringType>
+StringType DoReplaceStringPlaceholders(const StringType& format_string,
+                                       const std::vector<StringType>& subst,
+                                       std::vector<size_t>* offsets) {
   int substitutions = subst.size();
   DCHECK(substitutions < 10);
 
   int sub_length = 0;
-  for (std::vector<string16>::const_iterator iter = subst.begin();
+  for (typename std::vector<StringType>::const_iterator iter = subst.begin();
        iter != subst.end();
        ++iter) {
     sub_length += (*iter).length();
   }
 
-  string16 formatted;
+  StringType formatted;
   formatted.reserve(format_string.length() + sub_length);
 
   std::vector<ReplacementOffset> r_offsets;
-  for (string16::const_iterator i = format_string.begin();
+  for (typename StringType::const_iterator i = format_string.begin();
        i != format_string.end(); ++i) {
     if ('$' == *i) {
       if (i + 1 != format_string.end()) {
@@ -1331,6 +1474,18 @@ string16 ReplaceStringPlaceholders(const string16& format_string,
     }
   }
   return formatted;
+}
+
+string16 ReplaceStringPlaceholders(const string16& format_string,
+                                   const std::vector<string16>& subst,
+                                   std::vector<size_t>* offsets) {
+  return DoReplaceStringPlaceholders(format_string, subst, offsets);
+}
+
+std::string ReplaceStringPlaceholders(const std::string& format_string,
+                                      const std::vector<std::string>& subst,
+                                      std::vector<size_t>* offsets) {
+  return DoReplaceStringPlaceholders(format_string, subst, offsets);
 }
 
 string16 ReplaceStringPlaceholders(const string16& format_string,
@@ -1456,21 +1611,12 @@ bool MatchPattern(const std::string& eval, const std::string& pattern) {
   return MatchPatternT(eval.c_str(), pattern.c_str());
 }
 
-// For the various *ToInt conversions, there are no *ToIntTraits classes to use
-// because there's no such thing as strtoi.  Use *ToLongTraits through a cast
-// instead, requiring that long and int are compatible and equal-width.  They
-// are on our target platforms.
-
 bool StringToInt(const std::string& input, int* output) {
-  COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_strtol_to_int);
-  return StringToNumber<StringToLongTraits>(input,
-                                            reinterpret_cast<long*>(output));
+  return StringToNumber<StringToIntTraits>(input, output);
 }
 
 bool StringToInt(const string16& input, int* output) {
-  COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_wcstol_to_int);
-  return StringToNumber<String16ToLongTraits>(input,
-                                              reinterpret_cast<long*>(output));
+  return StringToNumber<String16ToIntTraits>(input, output);
 }
 
 bool StringToInt64(const std::string& input, int64* output) {
@@ -1482,15 +1628,11 @@ bool StringToInt64(const string16& input, int64* output) {
 }
 
 bool HexStringToInt(const std::string& input, int* output) {
-  COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_strtol_to_int);
-  return StringToNumber<HexStringToLongTraits>(input,
-                                               reinterpret_cast<long*>(output));
+  return StringToNumber<HexStringToIntTraits>(input, output);
 }
 
 bool HexStringToInt(const string16& input, int* output) {
-  COMPILE_ASSERT(sizeof(int) == sizeof(long), cannot_wcstol_to_int);
-  return StringToNumber<HexString16ToLongTraits>(
-      input, reinterpret_cast<long*>(output));
+  return StringToNumber<HexString16ToIntTraits>(input, output);
 }
 
 namespace {

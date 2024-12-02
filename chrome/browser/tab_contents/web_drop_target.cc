@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include "chrome/browser/tab_contents/web_drop_target.h"
 
+#include "app/clipboard/clipboard_util_win.h"
 #include "app/os_exchange_data.h"
-#include "base/clipboard_util.h"
+#include "app/os_exchange_data_provider_win.h"
 #include "base/gfx/point.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -16,6 +17,8 @@
 #include "net/base/net_util.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/window_open_disposition.h"
+
+using WebKit::WebDragOperationCopy;
 
 namespace {
 
@@ -104,7 +107,7 @@ DWORD WebDropTarget::OnDragEnter(IDataObject* data_object,
   WebDropData::PopulateWebDropData(data_object, &drop_data);
 
   if (drop_data.url.is_empty())
-    OSExchangeData::GetPlainTextURL(data_object, &drop_data.url);
+    OSExchangeDataProviderWin::GetPlainTextURL(data_object, &drop_data.url);
 
   is_drop_target_ = true;
 
@@ -112,7 +115,8 @@ DWORD WebDropTarget::OnDragEnter(IDataObject* data_object,
   ScreenToClient(GetHWND(), &client_pt);
   tab_contents_->render_view_host()->DragTargetDragEnter(drop_data,
       gfx::Point(client_pt.x, client_pt.y),
-      gfx::Point(cursor_position.x, cursor_position.y));
+      gfx::Point(cursor_position.x, cursor_position.y),
+      WebDragOperationCopy);  // FIXME(snej): Send actual operation
 
   // We lie here and always return a DROPEFFECT because we don't want to
   // wait for the IPC call to return.
@@ -134,7 +138,8 @@ DWORD WebDropTarget::OnDragOver(IDataObject* data_object,
   ScreenToClient(GetHWND(), &client_pt);
   tab_contents_->render_view_host()->DragTargetDragOver(
       gfx::Point(client_pt.x, client_pt.y),
-      gfx::Point(cursor_position.x, cursor_position.y));
+      gfx::Point(cursor_position.x, cursor_position.y),
+      WebDragOperationCopy);  // FIXME(snej): Send actual operation
 
   if (!is_drop_target_)
     return DROPEFFECT_NONE;

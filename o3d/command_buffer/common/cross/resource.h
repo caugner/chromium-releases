@@ -33,8 +33,8 @@
 // This file contains definitions for resource flags, enums, and helper
 // functions.
 
-#ifndef O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H__
-#define O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H__
+#ifndef O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H_
+#define O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H_
 
 #include <algorithm>
 #include "base/basictypes.h"
@@ -46,24 +46,26 @@ namespace o3d {
 namespace command_buffer {
 
 // A resource ID, key to the resource maps.
-typedef unsigned int ResourceID;
+typedef uint32 ResourceId;
 // Invalid resource ID.
-static const ResourceID kInvalidResource = 0xffffffffU;
+static const ResourceId kInvalidResource = 0xffffffffU;
 
 namespace vertex_buffer {
 // Vertex buffer flags.
 enum Flags {
-  DYNAMIC = 0x01,  // This vertex buffer is dynamic and is expected to have
-                   // its data updated often.
+  kNone = 0x00,
+  kDynamic = 0x01,  // This vertex buffer is dynamic and is expected to have
+                    // its data updated often.
 };
 }  // namespace vertex_buffer
 
 namespace index_buffer {
 // Index buffer flags.
 enum Flags {
-  DYNAMIC = 0x01,  // This index buffer is dynamic and is expected to have
-                   // its data updated often.
-  INDEX_32BIT = 0x02,  // Indices contained in this index buffer are 32 bits
+  kNone = 0x00,
+  kDynamic = 0x01,  // This index buffer is dynamic and is expected to have
+                    // its data updated often.
+  kIndex32Bit = 0x02,  // Indices contained in this index buffer are 32 bits
                        // (unsigned int) instead of 16 bit (unsigned short).
 };
 }  // namespace index_buffer
@@ -71,39 +73,40 @@ enum Flags {
 namespace vertex_struct {
 // Semantics for input data.
 enum Semantic {
-  POSITION,
-  NORMAL,
-  COLOR,
-  TEX_COORD,
-  NUM_SEMANTICS
+  kUnknownSemantic = -1,
+  kPosition = 0,
+  kNormal,
+  kColor,
+  kTexCoord,
+  kNumSemantics
 };
 
 // Input data types.
 enum Type {
-  FLOAT1,
-  FLOAT2,
-  FLOAT3,
-  FLOAT4,
-  UCHAR4N,
-  NUM_TYPES
+  kFloat1,
+  kFloat2,
+  kFloat3,
+  kFloat4,
+  kUChar4N,
+  kNumTypes
 };
 }  // namespace vertex_struct
 
 namespace effect_param {
 enum DataType {
-  UNKNOWN,  // A parameter exists in the effect, but the type is not
+  kUnknown,  // A parameter exists in the effect, but the type is not
   // representable (e.g. MATRIX3x4).
-  FLOAT1,
-  FLOAT2,
-  FLOAT3,
-  FLOAT4,
-  MATRIX4,
-  INT,
-  BOOL,
-  SAMPLER,
-  TEXTURE,
-  NUM_TYPES,
-  MAKE_32_BIT = 0x7fffffff,
+  kFloat1,
+  kFloat2,
+  kFloat3,
+  kFloat4,
+  kMatrix4,
+  kInt,
+  kBool,
+  kSampler,
+  kTexture,
+  kNumTypes,
+  kMake32Bit = 0x7fffffff,
 };
 COMPILE_ASSERT(sizeof(DataType) == 4, DataType_should_be_32_bits);
 
@@ -129,6 +132,8 @@ struct Desc {
                            // the terminating nul character. Will always be
                            // set even if the semantic doesn't fit into the
                            // buffer.
+  Uint32 num_elements;     // the number of entries if the parameter is an array
+                           // 0 otherwise.
   DataType data_type;      // the data type of the parameter.
   Uint32 data_size;        // the size of the parameter data, in bytes.
 };
@@ -136,6 +141,12 @@ struct Desc {
 
 namespace effect_stream {
 struct Desc {
+  Desc()
+    : semantic(vertex_struct::kUnknownSemantic),
+      semantic_index(0) {}
+  Desc(Uint32 semantic, Uint32 semantic_index)
+    : semantic(semantic),
+      semantic_index(semantic_index) {}
   Uint32 semantic;         // the semantic type
   Uint32 semantic_index;
 };
@@ -144,34 +155,38 @@ struct Desc {
 namespace texture {
 // Texture flags.
 enum Flags {
-  DYNAMIC = 0x01,  // This texture is dynamic and is expected to have
-                   // its data updated often.
+  kNone = 0x00,
+  kDynamic = 0x01,  // This texture is dynamic and is expected to have
+                    // its data updated often.
 };
 
 // Texel formats.
 enum Format {
-  XRGB8,
-  ARGB8,
-  ABGR16F,
-  DXT1,
-  NUM_FORMATS
+  kUnknown,
+  kXRGB8,
+  kARGB8,
+  kABGR16F,
+  kR32F,
+  kABGR32F,
+  kDXT1
 };
 
 // Texture type.
 enum Type {
-  TEXTURE_2D,
-  TEXTURE_3D,
-  TEXTURE_CUBE,
+  kTexture2d,
+  kTexture3d,
+  kTextureCube,
 };
 
 // Cube map face.
 enum Face {
-  FACE_POSITIVE_X,
-  FACE_NEGATIVE_X,
-  FACE_POSITIVE_Y,
-  FACE_NEGATIVE_Y,
-  FACE_POSITIVE_Z,
-  FACE_NEGATIVE_Z,
+  kFacePositiveX,
+  kFaceNegativeX,
+  kFacePositiveY,
+  kFaceNegativeY,
+  kFacePositiveZ,
+  kFaceNegativeZ,
+  kFaceNone = kFacePositiveX,  // For non-cube maps.
 };
 
 // Gets the number of bytes per block for a given texture format. For most
@@ -186,31 +201,31 @@ unsigned int GetBlockSizeY(Format format);
 // Gets the dimension of a mipmap level given the dimension of the base
 // level. Every mipmap level is half the size of the previous level, rounding
 // down.
-static unsigned int GetMipMapDimension(unsigned int base,
+inline unsigned int GetMipMapDimension(unsigned int base,
                                        unsigned int level) {
-  DCHECK_GT(base, 0);
+  DCHECK_GT(base, 0U);
   return std::max(1U, base >> level);
 }
 }  // namespace texture
 
 namespace sampler {
 enum AddressingMode {
-  WRAP,
-  MIRROR_REPEAT,
-  CLAMP_TO_EDGE,
-  CLAMP_TO_BORDER,
-  NUM_ADDRESSING_MODE
+  kWrap,
+  kMirrorRepeat,
+  kClampToEdge,
+  kClampToBorder,
+  kNumAddressingMode
 };
 
 enum FilteringMode {
-  NONE,
-  POINT,
-  LINEAR,
-  NUM_FILTERING_MODE
+  kNone,
+  kPoint,
+  kLinear,
+  kNumFilteringMode
 };
 }  // namespace sampler
 
 }  // namespace command_buffer
 }  // namespace o3d
 
-#endif  // O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H__
+#endif  // O3D_COMMAND_BUFFER_COMMON_CROSS_RESOURCE_H_

@@ -9,8 +9,8 @@
 #include <algorithm>
 
 #include "app/gfx/canvas_paint.h"
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
-#include "base/gfx/gtk_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -60,7 +60,13 @@ DraggedTabGtk::DraggedTabGtk(TabContents* datasource,
   g_signal_connect(G_OBJECT(container_), "expose-event",
                    G_CALLBACK(OnExposeEvent), this);
   gtk_widget_add_events(container_, GDK_STRUCTURE_MASK);
-  gtk_container_add(GTK_CONTAINER(container_), renderer_->widget());
+
+  // We contain the tab renderer in a GtkFixed in order to maintain the
+  // requested size.  Otherwise, the widget will fill the entire window and
+  // cause a crash when rendering because the bounds don't match our images.
+  fixed_ = gtk_fixed_new();
+  gtk_fixed_put(GTK_FIXED(fixed_), renderer_->widget(), 0, 0);
+  gtk_container_add(GTK_CONTAINER(container_), fixed_);
   gtk_widget_show_all(container_);
 }
 
@@ -257,8 +263,9 @@ void DraggedTabGtk::SetContainerShapeMask(GdkPixbuf* pixbuf) {
     // border).
     cairo_identity_matrix(cairo_context);
     cairo_set_source_rgba(cairo_context, 1.0f, 1.0f, 1.0f, 1.0f);
-    int tab_height = kScalingFactor * gdk_pixbuf_get_height(pixbuf) -
-                     kDragFrameBorderSize;
+    int tab_height = static_cast<int>(kScalingFactor *
+                                      gdk_pixbuf_get_height(pixbuf) -
+                                      kDragFrameBorderSize);
     cairo_rectangle(cairo_context,
                     0, tab_height,
                     size.width(), size.height() - tab_height);
@@ -289,8 +296,10 @@ gboolean DraggedTabGtk::OnExposeEvent(GtkWidget* widget,
   }
 
   // Only used when not attached.
-  int tab_height = kScalingFactor * gdk_pixbuf_get_height(pixbuf);
-  int tab_width = kScalingFactor * gdk_pixbuf_get_width(pixbuf);
+  int tab_height = static_cast<int>(kScalingFactor *
+                                    gdk_pixbuf_get_height(pixbuf));
+  int tab_width = static_cast<int>(kScalingFactor *
+                                   gdk_pixbuf_get_width(pixbuf));
 
   // Draw the render area.
   if (dragged_tab->backing_store_ && !dragged_tab->attached_) {

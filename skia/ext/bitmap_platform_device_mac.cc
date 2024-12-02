@@ -6,6 +6,7 @@
 
 #include <time.h>
 
+#include "base/mac_util.h"
 #include "base/ref_counted.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkMatrix.h"
@@ -45,8 +46,6 @@ bool Constrain(int available_size, int* position, int *size) {
 }
 
 static CGContextRef CGContextForData(void* data, int width, int height) {
-  CGColorSpaceRef color_space =
-      CGColorSpaceCreateWithName(kCGColorSpaceGenericRGB);
 #define HAS_ARGB_SHIFTS(a, r, g, b) \
             (SK_A32_SHIFT == (a) && SK_R32_SHIFT == (r) \
              && SK_G32_SHIFT == (g) && SK_B32_SHIFT == (b))
@@ -55,7 +54,7 @@ static CGContextRef CGContextForData(void* data, int width, int height) {
   // recommends these flags for improved CG performance.
   CGContextRef context =
       CGBitmapContextCreate(data, width, height, 8, width * 4,
-                            color_space,
+                            mac_util::GetSystemColorSpace(),
                             kCGImageAlphaPremultipliedFirst |
                                 kCGBitmapByteOrder32Host);
 #else
@@ -63,7 +62,6 @@ static CGContextRef CGContextForData(void* data, int width, int height) {
        image memory layout match.
 #endif
 #undef HAS_ARGB_SHIFTS
-  CGColorSpaceRelease(color_space);
 
   if (!context)
     return NULL;
@@ -300,16 +298,15 @@ void BitmapPlatformDevice::DrawToContext(CGContextRef context, int x, int y,
   // anything to trigger copy on write
   CGImageRef image = CGBitmapContextCreateImage(data_->bitmap_context_);
   CGRect bounds;
+  bounds.origin.x = x;
+  bounds.origin.y = y;
   if (src_rect) {
-    bounds = *src_rect;
-    bounds.origin.x = x;
-    bounds.origin.y = y;
+    bounds.size.width = src_rect->size.width;
+    bounds.size.height = src_rect->size.height;
     CGImageRef sub_image = CGImageCreateWithImageInRect(image, *src_rect);
     CGContextDrawImage(context, bounds, sub_image);
     CGImageRelease(sub_image);
   } else {
-    bounds.origin.x = 0;
-    bounds.origin.y = 0;
     bounds.size.width = width();
     bounds.size.height = height();
     CGContextDrawImage(context, bounds, image);

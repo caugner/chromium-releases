@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 #include <shobjidl.h>
 
 #include "app/gfx/canvas.h"
+#include "app/gfx/gdi_util.h"
 #include "app/os_exchange_data.h"
-#include "base/gfx/gdi_util.h"
+#include "app/os_exchange_data_provider_win.h"
 
 namespace drag_utils {
 
@@ -69,10 +70,9 @@ void SetDragImageOnDataObject(const gfx::Canvas& canvas,
   HBITMAP bitmap = CreateBitmapFromCanvas(canvas, width, height);
 
   // Attach 'bitmap' to the data_object.
-  SetDragImageOnDataObject(bitmap, width, height,
-                           cursor_x_offset,
-                           cursor_y_offset,
-                           data_object);
+  SetDragImageOnDataObject(
+      bitmap, width, height, cursor_x_offset, cursor_y_offset,
+      OSExchangeDataProviderWin::GetIDataObject(*data_object));
 }
 
 } // namespace drag_utils

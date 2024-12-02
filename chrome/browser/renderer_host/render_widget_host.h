@@ -6,13 +6,14 @@
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_H_
 
 #include <queue>
-#include <vector>
 
+#include "app/gfx/native_widget_types.h"
 #include "base/process.h"
-#include "base/gfx/native_widget_types.h"
 #include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "base/timer.h"
+#include "chrome/common/edit_command.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/property_bag.h"
 #include "ipc/ipc_channel.h"
@@ -171,7 +172,7 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   virtual void Shutdown();
 
   // Manual RTTI FTW. We are not hosting a web page.
-  virtual bool IsRenderView() { return false; }
+  virtual bool IsRenderView() const { return false; }
 
   // IPC::Channel::Listener
   virtual void OnMessageReceived(const IPC::Message& msg);
@@ -245,6 +246,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
   virtual void ForwardEditCommand(const std::string& name,
                                   const std::string& value);
+  virtual void ForwardEditCommandsForNextKeyEvent(
+      const EditCommands& edit_commands);
 
   // Update the text direction of the focused input element and notify it to a
   // renderer process.
@@ -328,6 +331,18 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // And to also expose it to the RenderWidgetHostView.
   virtual gfx::Rect GetRootWindowResizerRect() const;
 
+  // Makes an IPC call to toggle the spelling panel.
+  void ToggleSpellPanel(bool is_currently_visible);
+
+  // Makes an IPC call to tell webkit to replace the currently selected word.
+  void Replace(const string16& word);
+
+  // Makes an IPC call to tell webkit to advance to the next misspelling.
+  void AdvanceToNextMisspelling();
+
+  // Sets the active state (i.e., control tints).
+  virtual void SetActive(bool active);
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(
@@ -341,6 +356,12 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Retrieves an id the renderer can use to refer to its view.
   // This is used for various IPC messages, including plugins.
   gfx::NativeViewId GetNativeViewId();
+
+  // Called when an InputEvent is received to check if the event should be sent
+  // to the renderer or not.
+  virtual bool ShouldSendToRenderer(const NativeWebKeyboardEvent& event) {
+    return true;
+  }
 
   // Called when we an InputEvent was not processed by the renderer. This is
   // overridden by RenderView to send upwards to its delegate.
@@ -391,14 +412,15 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgInputEventAck(const IPC::Message& message);
   void OnMsgFocus();
   void OnMsgBlur();
+  virtual void OnMsgFocusedNodeChanged();
+
   void OnMsgSetCursor(const WebCursor& cursor);
   // Using int instead of ViewHostMsg_ImeControl for control's type to avoid
   // having to bring in render_messages.h in a header file.
   void OnMsgImeUpdateStatus(int control, const gfx::Rect& caret_rect);
 #if defined(OS_LINUX)
-  void OnMsgCreatePluginContainer(base::ProcessId pid,
-                                  gfx::PluginWindowHandle* container);
-  void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle container);
+  void OnMsgCreatePluginContainer(gfx::PluginWindowHandle id);
+  void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
 #elif defined(OS_MACOSX)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
   void OnMsgGetScreenInfo(gfx::NativeViewId view,
@@ -457,6 +479,13 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // The current size of the RenderWidget.
   gfx::Size current_size_;
+
+  // The size we last sent as requested size to the renderer. |current_size_|
+  // is only updated once the resize message has been ack'd. This on the other
+  // hand is updated when the resize message is sent. This is very similar to
+  // |resize_ack_pending_|, but the latter is not set if the new size has width
+  // or height zero, which is why we need this too.
+  gfx::Size in_flight_size_;
 
   // True if a mouse move event was sent to the render view and we are waiting
   // for a corresponding ViewHostMsg_HandleInputEvent_ACK message.

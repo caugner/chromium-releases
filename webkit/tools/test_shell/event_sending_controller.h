@@ -19,15 +19,16 @@
 #include "build/build_config.h"
 #include "base/gfx/point.h"
 #include "base/task.h"
+#include "webkit/api/public/WebDragOperation.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/glue/cpp_bound_class.h"
 
 class TestShell;
-class WebView;
 
 namespace WebKit {
 class WebDragData;
-class WebMouseEvent;
+class WebView;
+struct WebPoint;
 }
 
 class EventSendingController : public CppBoundClass {
@@ -40,7 +41,9 @@ class EventSendingController : public CppBoundClass {
   void Reset();
 
   // Simulate drag&drop system call.
-  static void DoDragDrop(const WebKit::WebDragData& drag_data);
+  static void DoDragDrop(const WebKit::WebPoint &event_pos,
+                         const WebKit::WebDragData& drag_data,
+                         WebKit::WebDragOperationsMask operations_mask);
 
   // JS callback methods.
   void mouseDown(const CppArgumentList& args, CppVariant* result);
@@ -55,13 +58,14 @@ class EventSendingController : public CppBoundClass {
   void zoomPageOut(const CppArgumentList& args, CppVariant* result);
   void scheduleAsynchronousClick(const CppArgumentList& args,
                                  CppVariant* result);
+  void beginDragWithFiles(const CppArgumentList& args, CppVariant* result);
+  CppVariant dragMode;
 
   // Unimplemented stubs
   void contextClick(const CppArgumentList& args, CppVariant* result);
   void enableDOMUIEventLogging(const CppArgumentList& args, CppVariant* result);
   void fireKeyboardEventsToElement(const CppArgumentList& args, CppVariant* result);
   void clearKillRing(const CppArgumentList& args, CppVariant* result);
-  CppVariant dragMode;
 
   // Properties used in layout tests.
 #if defined(OS_WIN)
@@ -77,7 +81,7 @@ class EventSendingController : public CppBoundClass {
 
  private:
   // Returns the test shell's webview.
-  static WebView* webview();
+  static WebKit::WebView* webview();
 
   // Returns true if dragMode is true.
   bool drag_mode() { return dragMode.isBool() && dragMode.ToBoolean(); }
@@ -86,6 +90,7 @@ class EventSendingController : public CppBoundClass {
   // handling purposes.  These methods dispatch the event.
   static void DoMouseMove(const WebKit::WebMouseEvent& e);
   static void DoMouseUp(const WebKit::WebMouseEvent& e);
+  static void DoLeapForward(int milliseconds);
   static void ReplaySavedEvents();
 
   // Helper to return the button type given a button code
@@ -99,6 +104,8 @@ class EventSendingController : public CppBoundClass {
   // Returns true if the key_code passed in needs a shift key modifier to
   // be passed into the generated event.
   bool NeedsShiftModifier(int key_code);
+
+  void UpdateClickCountForButton(WebKit::WebMouseEvent::Button button_type);
 
   ScopedRunnableMethodFactory<EventSendingController> method_factory_;
 
@@ -114,7 +121,7 @@ class EventSendingController : public CppBoundClass {
   // The last button number passed to mouseDown and mouseUp.
   // Used to determine whether the click count continues to
   // increment or not.
-  static int last_button_number_;
+  static WebKit::WebMouseEvent::Button last_button_type_;
 };
 
 #endif  // WEBKIT_TOOLS_TEST_SHELL_EVENT_SENDING_CONTROLLER_H_

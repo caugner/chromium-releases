@@ -17,14 +17,14 @@ using base::TimeDelta;
 
 namespace {
 
-std::wstring BuildCachePath(const std::wstring& name) {
+FilePath BuildCachePath(const std::string& name) {
   FilePath path;
   PathService::Get(base::DIR_TEMP, &path);  // Ignore return value;
-  path = path.Append(FilePath::FromWStringHack(name));
+  path = path.AppendASCII(name);
   if (!file_util::PathExists(path))
     file_util::CreateDirectory(path);
 
-  return path.ToWStringHack();
+  return path;
 }
 
 }  // namespace.
@@ -54,17 +54,16 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls) {
     buffer[0] = 'g';
 }
 
-std::wstring GetCachePath() {
-  return BuildCachePath(L"cache_test");
+FilePath GetCacheFilePath() {
+  return BuildCachePath("cache_test");
 }
 
-bool CreateCacheTestFile(const wchar_t* name) {
-  using namespace disk_cache;
+bool CreateCacheTestFile(const FilePath& name) {
   int flags = base::PLATFORM_FILE_CREATE_ALWAYS |
               base::PLATFORM_FILE_READ |
               base::PLATFORM_FILE_WRITE;
 
-  scoped_refptr<File> file(new File(
+  scoped_refptr<disk_cache::File> file(new disk_cache::File(
       base::CreatePlatformFile(name, flags, NULL)));
   if (!file->IsValid())
     return false;
@@ -73,30 +72,31 @@ bool CreateCacheTestFile(const wchar_t* name) {
   return true;
 }
 
-bool DeleteCache(const wchar_t* path) {
+bool DeleteCache(const FilePath& path) {
   disk_cache::DeleteCache(path, false);
   return true;
 }
 
-bool CheckCacheIntegrity(const std::wstring& path, bool new_eviction) {
+bool CheckCacheIntegrity(const FilePath& path, bool new_eviction) {
   scoped_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(path));
   if (!cache.get())
     return false;
   if (new_eviction)
     cache->SetNewEviction();
+  cache->SetFlags(disk_cache::kNoRandom);
   if (!cache->Init())
     return false;
   return cache->SelfCheck() >= 0;
 }
 
-ScopedTestCache::ScopedTestCache() : path_(GetCachePath()) {
-  bool result = DeleteCache(path_.c_str());
+ScopedTestCache::ScopedTestCache() : path_(GetCacheFilePath()) {
+  bool result = DeleteCache(path_);
   DCHECK(result);
 }
 
-ScopedTestCache::ScopedTestCache(const std::wstring& name)
+ScopedTestCache::ScopedTestCache(const std::string& name)
     : path_(BuildCachePath(name)) {
-  bool result = DeleteCache(path_.c_str());
+  bool result = DeleteCache(path_);
   DCHECK(result);
 }
 

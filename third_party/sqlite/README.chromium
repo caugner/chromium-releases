@@ -1,75 +1,104 @@
-Instructions for importing a new release of sqlite from sqlite.org.
+Instructions for importing a new release of SQLite from sqlite.org.
+
+Note: our current base version is 3.6.18.
 
 First, you need to be on Linux.
 
-Find the release you want at:
-  http://www.sqlite.org/cvstrac/timeline
+# Determine the versions of the release you want and the release we currently
+# have. (See the VERSION file to determine which release we currently have.)
+# You may wish to consult http://www.sqlite.org/changes.html to find out what
+# changes have been made in each release.
+# Note - this is just an example. Always refer to the version above for our
+# real current version.
+# Set some variables to remember the versions, e.g.:
+BASE=3.6.18
+LATEST=3.6.22
 
-Search for "Milestone", and find the appropriate release.  Click
-through, and snag the "Date" for use in DATE line below.
-Unfortunately, the actual displayed date string on that page will not
-work, you have to make it YYYY/MM/DD.  [TODO(shess) Determine if the
-fact that sqlite.org thinks it's running under UTC is relevant.]
+# Get to the src/third_party directory in your Chromium client:
+cd src/third_party
 
-DATE='2007/01/24 09:54:56'
+# Download the .tar.gz files for the releases:
+# (If the URL changes you might need to find the new one.)
+wget http://www.sqlite.org/sqlite-$BASE.tar.gz
+wget http://www.sqlite.org/sqlite-$LATEST.tar.gz
 
-# Get to the third_party/sqlite directory in your Chromium client.
-cd ../third_party/sqlite
+# Extract the vanilla current and desired versions:
+tar xzf sqlite-$BASE.tar.gz
+tar xzf sqlite-$LATEST.tar.gz
 
-# Run the super awesome automatic merge tool (requires kdiff3).
-# NOTE(shess): The following (which runs google_generate_preprocessed.sh) will
-# produce different output on grhat versus goobuntu; I've been running it on
-# goobuntu.
-./google_update_sqlite.sh "$DATE"
+# Use kdiff3 to merge the changes:
+kdiff3 -m sqlite-$BASE sqlite-$LATEST sqlite
 
 # Resolve any conflicts.  Figure out if we've got everything we should
 # have (see below), or if we can omit any changes we no longer need.
 
-# TODO(shess) If we don't want the CVS dirs.
-# find sqlite_vendor -name CVS -execdir rm -rf {} + -prune
+# Change to the sqlite directory:
+cd sqlite
+
+# Run the google_generate_preprocessed.sh script:
+./google_generate_preprocessed.sh
 
 # Find a sucker.  Send review.
 # TODO(shess) Describe an appropriate comment style.  Seems like it
-# should include the DATE line, and the sqlite version number.
-
-
---------------------------------------------
-
-Why all this convolution?  The problem being solved is that we want to
-harvest changes from the sqlite CVS tree, and merge them with any
-local changes we make.  In CVS, you would do this using a "vendor
-import", which is essentially a branch dedictated to the vendor
-version which is merged with local changes.
-
-third_party/sqlite_vendor/... is the CVS checkout for a particular
-build from sqlite.org.  third_party/sqlite_google/... is the local
-version, with our local modifications.  So we update the sqlite_vendor
-tree, then use perforce to downintegrate changes into our
-locally-modified tree.  The downintegrate will call out any
-conflicting changes, but will otherwise just merge things together.
-Basically, sqlite_vendor is a gateway between CVS and perforce.
-
-Scott Hess <shess@google.com>, April 9, 2007.
+# should at least include the SQLite version number.
 
 --------------------------------------------
 
-How to run the SQLite tests for the Gears version of SQLite on Linux.
+For reference, all of our local patches are also kept as .patch files in the
+sqlite directory. Here is a list of the patches, in the order they should be
+applied to a vanilla SQLite (of the version we currently have) to get, in
+principle, exactly what is checked in:
 
-cd ../third_party/sqlite_google/
+misc.patch
+preload-cache.patch
+safe-tolower.patch
+sqlite-poison.patch
+fts2.patch
+
+So, e.g. you could do this to apply all our patches to vanilla SQLite:
+
+cd sqlite-$LATEST
+patch -p0 < ../sqlite/misc.patch
+patch -p0 < ../sqlite/preload-cache.patch
+patch -p0 < ../sqlite/safe-tolower.patch
+patch -p0 < ../sqlite/sqlite-poison.patch
+patch -p0 < ../sqlite/fts2.patch
+
+This will only be the case if all changes we make also update the corresponding
+patch files. Therefore please remember to do that whenever you make a change!
+
+Descriptions of the changes we've made can be found at the bottom of this file.
+
+--------------------------------------------
+
+How to run the SQLite tests for the Chromium version of SQLite on Linux.
+
+Prerequisties: On my corp Ubuntu 8.04 workstation, I needed to install the
+following packages:
+sudo apt-get install tcl8.4-dev libicu-dev
+
+cd src/third_party/sqlite
 mkdir build
 cd build
 make -f ../Makefile.linux-gcc testfixture
 make -f ../Makefile.linux-gcc test > /tmp/test.log
 egrep -v 'Ok$' /tmp/test.log
-# When run on a locally-mounted disk, my output ends with:
+# For an ideal test run, you would see:
 # 0 errors out of 57887 tests
+# However, the current situation on my corp Linux Ubuntu 8.04 machine, with
+# test run on a locally mounted directory, is the failure of:
+# "rollback-2.3", "tkt3457-1.4"
+# I do not know why, but it is not related to our fts2.c changes -- I backed
+# them out to check.
 
-Scott Hess <shess@google.com>, December 11, 2007
+Chris Evans <cevans@google.com>, Oct 1, 2009
 
 --------------------------------------------
 
-As of July 20, 2009, these are our changes from sqlite_vendor:
+As of Oct 1, 2009, these are our changes from sqlite_vendor:
 
+ - A large number of fts2 robustness fixes against corrupt data in its metadata
+   tables.
  - fts2.c disables fts2_tokenizer().
  - sqlite3Poison() in src/btree.c.
  - BEGIN defaults to BEGIN IMMEDIATE in parse.y.
@@ -79,9 +108,14 @@ As of July 20, 2009, these are our changes from sqlite_vendor:
  - src/os_symbian.cc.
  - Modifications to Makefile.linux-gcc and main.mk for compiling
    SQLite tests.
- - Compile warning fixed in func.c (check if this is still needed)
- - Fixed a typo bug in fts2_icu.c: "strlen(nInput)" (filed upstream as
-   http://www.sqlite.org/cvstrac/tktview?tn=3543)
+ - Compile warning (cast to void* for sqlite3_free) fixed in func.c.
+ - Avoid using tolower() in fts code which causes problem in some locales, see:
+   safe-tolower.patch
+   http://crbug.com/15261
+   http://www.sqlite.org/src/tktview/991789d9f3136a0460dc83a33e815c1aa9757c26
+ - Check that the third argument to memset() is nonzero in expr.c to avoid
+   a linker warning when the compiler can optimize it to a constant zero
+   (e.g. see http://www.sqlite.org/cvstrac/tktview?tn=3765,39)
 
 Changes from Chrome:
  - I marked all changes I made with "evanm", so you can find them with
@@ -102,7 +136,11 @@ Changes from Chrome:
  - Added a new function sqlite3Preload we use to prime the database cache. It
    allows much faster performance by reading the file in one contiguous
    operation rather than bringing it in organically, which involves a lot of
-   seeking.
+   seeking. This change also required sqlite3PcacheGetCachesize to be compiled
+   even outside SQLITE_TEST.
  - Added a new function chromium_sqlite3_initialize_win_sqlite3_file()
    at the end of os_win.c. It allows the Windows-specific Chromium VFS
    to reuse most of the win32 SQLite VFS.
+ - Added a new function initUnixFile() and made fillInUnixFile()
+   non-static in os_unix.c. It allows the Linux-specific Chromium VFS
+   to reuse most of the unix SQLite VFS.

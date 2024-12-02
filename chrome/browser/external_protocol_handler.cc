@@ -6,11 +6,6 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include <windows.h>
-#include <shellapi.h>
-#endif
-
 #include <set>
 
 #include "base/logging.h"
@@ -19,19 +14,16 @@
 #include "base/thread.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process_impl.h"
+#include "chrome/common/platform_util.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 
-#if defined(OS_WIN)
-#include "base/registry.h"
-#include "chrome/browser/views/external_protocol_dialog.h"
-#elif defined(OS_MACOSX)
-#include <ApplicationServices/ApplicationServices.h>
-#include "base/scoped_cftyperef.h"
-#include "base/sys_string_conversions.h"
-#endif
+// Whether we accept requests for launching external protocols. This is set to
+// false every time an external protocol is requested, and set back to true on
+// each user gesture. This variable should only be accessed from the UI thread.
+static bool g_accept_requests = true;
 
 // static
 void ExternalProtocolHandler::PrepopulateDictionary(DictionaryValue* win_pref) {
@@ -86,6 +78,10 @@ void ExternalProtocolHandler::PrepopulateDictionary(DictionaryValue* win_pref) {
 // static
 ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
     const std::wstring& scheme) {
+  // If we are being carpet bombed, block the request.
+  if (!g_accept_requests)
+    return BLOCK;
+
   if (scheme.length() == 1) {
     // We have a URL that looks something like:
     //   C:/WINDOWS/system32/notepad.exe
@@ -94,7 +90,7 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
   }
 
   // Check the stored prefs.
-  // TODO(pkasting): http://b/119651 This kind of thing should go in the
+  // TODO(pkasting): http://b/1119651 This kind of thing should go in the
   // preferences on the profile, not in the local state.
   PrefService* pref = g_browser_process->local_state();
   if (pref) {  // May be NULL during testing.
@@ -114,10 +110,30 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
 }
 
 // static
+void ExternalProtocolHandler::SetBlockState(const std::wstring& scheme,
+                                            BlockState state) {
+  // Set in the stored prefs.
+  // TODO(pkasting): http://b/1119651 This kind of thing should go in the
+  // preferences on the profile, not in the local state.
+  PrefService* pref = g_browser_process->local_state();
+  if (pref) {  // May be NULL during testing.
+    DictionaryValue* win_pref =
+        pref->GetMutableDictionary(prefs::kExcludedSchemes);
+    CHECK(win_pref);
+
+    if (state == UNKNOWN)
+      win_pref->Remove(scheme, NULL);
+    else
+      win_pref->SetBoolean(scheme, state == BLOCK ? true : false);
+  }
+}
+
+// static
 void ExternalProtocolHandler::LaunchUrl(const GURL& url,
                                         int render_process_host_id,
                                         int tab_contents_id) {
-#if !defined(OS_LINUX)
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+
   // Escape the input scheme to be sure that the command does not
   // have parameters unexpected by the external program.
   std::string escaped_url_string = EscapeExternalHandlerValue(url.spec());
@@ -126,112 +142,49 @@ void ExternalProtocolHandler::LaunchUrl(const GURL& url,
   if (block_state == BLOCK)
     return;
 
-#if defined(OS_WIN)
-  if (block_state == UNKNOWN) {
-    std::wstring command = ExternalProtocolDialog::GetApplicationForProtocol(
-                               escaped_url);
-    if (command.empty()) {
-      // ShellExecute won't do anything. Don't bother warning the user.
-      return;
-    }
+  g_accept_requests = false;
 
+  if (block_state == UNKNOWN) {
+#if defined(OS_WIN) || defined(TOOLKIT_GTK) || defined(OS_MACOSX)
     // Ask the user if they want to allow the protocol. This will call
     // LaunchUrlWithoutSecurityCheck if the user decides to accept the protocol.
-    ExternalProtocolDialog::RunExternalProtocolDialog(escaped_url,
-                                                      command,
-                                                      render_process_host_id,
-                                                      tab_contents_id);
+    RunExternalProtocolDialog(escaped_url,
+                              render_process_host_id,
+                              tab_contents_id);
+#endif
+    // For now, allow only whitelisted protocols to fire on Linux/Views.
+    // See http://crbug.com/23853 .
     return;
   }
-#else
-  // For now, allow only whitelisted protocols to fire.
-  // TODO(port): implement dialog for Mac
-  if (block_state == UNKNOWN)
-    return;
-#endif
 
-  // Put this work on the file thread since ShellExecute may block for a
-  // significant amount of time.
+  LaunchUrlWithoutSecurityCheck(escaped_url);
+}
+
+// static
+void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(const GURL& url) {
+#if defined(OS_MACOSX)
+  // This must run on the UI thread on OS X.
+  platform_util::OpenExternal(url);
+#else
+  // Otherwise put this work on the file thread. On Windows ShellExecute may
+  // block for a significant amount of time, and it shouldn't hurt on Linux.
   MessageLoop* loop = g_browser_process->file_thread()->message_loop();
   if (loop == NULL) {
     return;
   }
 
-  // Otherwise the protocol is white-listed, so go ahead and launch.
   loop->PostTask(FROM_HERE,
-      NewRunnableFunction(
-          &ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck,
-          escaped_url));
-#else
-  // TODO(port): Implement launching external handler.
-  NOTIMPLEMENTED();
-#endif
-}
-
-// static
-void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(const GURL& url) {
-#if defined(OS_WIN)
-  // Quote the input scheme to be sure that the command does not have
-  // parameters unexpected by the external program. This url should already
-  // have been escaped.
-  std::string escaped_url = url.spec();
-  escaped_url.insert(0, "\"");
-  escaped_url += "\"";
-
-  // According to Mozilla in uriloader/exthandler/win/nsOSHelperAppService.cpp:
-  // "Some versions of windows (Win2k before SP3, Win XP before SP1) crash in
-  // ShellExecute on long URLs (bug 161357 on bugzilla.mozilla.org). IE 5 and 6
-  // support URLS of 2083 chars in length, 2K is safe."
-  const size_t kMaxUrlLength = 2048;
-  if (escaped_url.length() > kMaxUrlLength) {
-    NOTREACHED();
-    return;
-  }
-
-  RegKey key;
-  std::wstring registry_path = ASCIIToWide(url.scheme()) +
-                               L"\\shell\\open\\command";
-  key.Open(HKEY_CLASSES_ROOT, registry_path.c_str());
-  if (key.Valid()) {
-    DWORD size = 0;
-    key.ReadValue(NULL, NULL, &size);
-    if (size <= 2) {
-      // ShellExecute crashes the process when the command is empty.
-      // We check for "2" because it always returns the trailing NULL.
-      // TODO(nsylvain): we should also add a dialog to warn on errors. See
-      // bug 1136923.
-      return;
-    }
-  }
-
-  if (reinterpret_cast<ULONG_PTR>(ShellExecuteA(NULL, "open",
-                                                escaped_url.c_str(), NULL, NULL,
-                                                SW_SHOWNORMAL)) <= 32) {
-    // We fail to execute the call. We could display a message to the user.
-    // TODO(nsylvain): we should also add a dialog to warn on errors. See
-    // bug 1136923.
-    return;
-  }
-#elif defined(OS_MACOSX)
-  scoped_cftyperef<CFStringRef> string_ref(
-      base::SysUTF8ToCFStringRef(url.spec()));
-  if (!string_ref)
-    return;
-
-  scoped_cftyperef<CFURLRef> url_ref(CFURLCreateWithString(kCFAllocatorDefault,
-                                                           string_ref,
-                                                           NULL));
-  if (!url_ref)
-    return;
-
-  LSOpenCFURLRef(url_ref, NULL);
-#elif defined(OS_LINUX)
-  // TODO(port): Implement launching external handler.
-  NOTIMPLEMENTED();
+      NewRunnableFunction(&platform_util::OpenExternal, url));
 #endif
 }
 
 // static
 void ExternalProtocolHandler::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterDictionaryPref(prefs::kExcludedSchemes);
+}
+
+// static
+void ExternalProtocolHandler::OnUserGesture() {
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  g_accept_requests = true;
 }

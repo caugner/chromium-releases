@@ -15,15 +15,13 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/third_party/xdg_mime/xdgmime.h"
 
 namespace {
-
-// Toggles whether we can handle SVG icons. See http://crbug.com/12272
-const bool kEnableSVG = false;
 
 class IconTheme;
 
@@ -37,7 +35,7 @@ class MimeUtilConstants {
   std::map<FilePath, int>* icon_dirs_;
 
   // Store icon formats.
-  std::vector<std::string>* icon_formats_;
+  std::vector<std::string> icon_formats_;
 
   // Store loaded icon_theme.
   std::map<std::string, IconTheme*>* icon_themes_;
@@ -49,13 +47,21 @@ class MimeUtilConstants {
 
   time_t last_check_time_;
 
+  // This is set by DetectGtkTheme(). We cache it so that we can access the
+  // theme name from threads that aren't allowed to call
+  // gtk_settings_get_default().
+  std::string gtk_theme_name_;
+
  private:
   MimeUtilConstants()
       : kUpdateInterval(5),
         icon_dirs_(NULL),
-        icon_formats_(NULL),
         icon_themes_(NULL),
         last_check_time_(0) {
+    icon_formats_.push_back(".png");
+    icon_formats_.push_back(".svg");
+    icon_formats_.push_back(".xpm");
+
     for (size_t i = 0; i < kDefaultThemeNum; ++i)
       default_themes_[i] = NULL;
   }
@@ -227,7 +233,7 @@ FilePath IconTheme::GetIconPathUnderSubdir(const std::string& icon_name,
   FilePath icon_path;
   std::list<FilePath>::iterator dir_iter;
   std::vector<std::string>* icon_formats =
-      Singleton<MimeUtilConstants>::get()->icon_formats_;
+      &Singleton<MimeUtilConstants>::get()->icon_formats_;
   for (dir_iter = dirs_.begin(); dir_iter != dirs_.end(); ++dir_iter) {
     for (size_t i = 0; i < icon_formats->size(); ++i) {
       icon_path = dir_iter->Append(subdir);
@@ -386,19 +392,6 @@ void AddXDGDataDir(const FilePath& dir) {
   TryAddIconDir(dir.Append("pixmaps"));
 }
 
-// Enable or disable SVG support.
-void EnableSvgIcon(bool enable) {
-  std::vector<std::string>* icon_formats =
-      Singleton<MimeUtilConstants>::get()->icon_formats_;
-  icon_formats->clear();
-  icon_formats->push_back(".png");
-  if (enable) {
-    icon_formats->push_back(".svg");
-    icon_formats->push_back(".svgz");
-  }
-  icon_formats->push_back(".xpm");
-}
-
 // Add all the xdg icon directories.
 void InitIconDir() {
   Singleton<MimeUtilConstants>::get()->icon_dirs_->clear();
@@ -445,8 +438,6 @@ void EnsureUpdated() {
   if (constants->last_check_time_ == 0) {
     constants->icon_dirs_ = new std::map<FilePath, int>;
     constants->icon_themes_ = new std::map<std::string, IconTheme*>;
-    constants->icon_formats_ = new std::vector<std::string>;
-    EnableSvgIcon(kEnableSVG);
     InitIconDir();
     constants->last_check_time_ = now;
   } else {
@@ -463,7 +454,7 @@ FilePath LookupFallbackIcon(const std::string& icon_name) {
   MimeUtilConstants* constants = Singleton<MimeUtilConstants>::get();
   std::map<FilePath, int>::iterator iter;
   std::map<FilePath, int>* icon_dirs = constants->icon_dirs_;
-  std::vector<std::string>* icon_formats = constants->icon_formats_;
+  std::vector<std::string>* icon_formats = &constants->icon_formats_;
   for (iter = icon_dirs->begin(); iter != icon_dirs->end(); ++iter) {
     for (size_t i = 0; i < icon_formats->size(); ++i) {
       icon = iter->first.Append(icon_name + (*icon_formats)[i]);
@@ -504,13 +495,9 @@ void InitDefaultThemes() {
     default_themes[2] = IconTheme::LoadTheme(kde_fallback_theme);
   } else {
     // Assume it's Gnome and use GTK to figure out the theme.
-    gchar* gtk_theme_name;
-    g_object_get(gtk_settings_get_default(),
-                 "gtk-icon-theme-name",
-                 &gtk_theme_name, NULL);
-    default_themes[1] = IconTheme::LoadTheme(gtk_theme_name);
+    default_themes[1] = IconTheme::LoadTheme(
+        Singleton<MimeUtilConstants>::get()->gtk_theme_name_);
     default_themes[2] = IconTheme::LoadTheme("gnome");
-    g_free(gtk_theme_name);
   }
   // hicolor needs to be last per icon theme spec.
   default_themes[3] = IconTheme::LoadTheme("hicolor");
@@ -548,7 +535,6 @@ FilePath LookupIconInDefaultTheme(const std::string& icon_name, int size) {
 
 MimeUtilConstants::~MimeUtilConstants() {
   delete icon_dirs_;
-  delete icon_formats_;
   delete icon_themes_;
   for (size_t i = 0; i < kDefaultThemeNum; i++)
     delete default_themes_[i];
@@ -564,6 +550,24 @@ std::string GetFileMimeType(const FilePath& filepath) {
 
 std::string GetDataMimeType(const std::string& data) {
   return xdg_mime_get_mime_type_for_data(data.data(), data.length(), NULL);
+}
+
+void DetectGtkTheme() {
+  // If the theme name is already loaded, do nothing. Chrome doesn't respond
+  // to changes in the system theme, so we never need to set this more than
+  // once.
+  if (!Singleton<MimeUtilConstants>::get()->gtk_theme_name_.empty())
+    return;
+
+  // We should only be called on the UI thread.
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+
+  gchar* gtk_theme_name;
+  g_object_get(gtk_settings_get_default(),
+               "gtk-icon-theme-name",
+               &gtk_theme_name, NULL);
+  Singleton<MimeUtilConstants>::get()->gtk_theme_name_.assign(gtk_theme_name);
+  g_free(gtk_theme_name);
 }
 
 FilePath GetMimeIcon(const std::string& mime_type, size_t size) {

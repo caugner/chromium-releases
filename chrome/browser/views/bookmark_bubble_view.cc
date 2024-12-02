@@ -1,12 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/bookmark_bubble_view.h"
 
 #include "app/gfx/canvas.h"
+#include "app/gfx/color_utils.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/keyboard_codes.h"
+#include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -17,9 +20,11 @@
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "views/event.h"
 #include "views/standard_layout.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/textfield/textfield.h"
+#include "views/focus/focus_manager.h"
 
 using views::Combobox;
 using views::ColumnSet;
@@ -28,9 +33,6 @@ using views::Label;
 using views::Link;
 using views::NativeButton;
 using views::View;
-
-// Color of the title.
-static const SkColor kTitleColor = SkColorSetRGB(6, 45, 117);
 
 // Padding between "Title:" and the actual title.
 static const int kTitlePadding = 4;
@@ -105,14 +107,13 @@ BookmarkBubbleView::RecentlyUsedFoldersModel::RecentlyUsedFoldersModel(
       find(nodes_.begin(), nodes_.end(), node->GetParent()) - nodes_.begin());
 }
 
-int BookmarkBubbleView::RecentlyUsedFoldersModel::GetItemCount(
-    Combobox* source) {
+int BookmarkBubbleView::RecentlyUsedFoldersModel::GetItemCount() {
   return static_cast<int>(nodes_.size() + 1);
 }
 
 std::wstring BookmarkBubbleView::RecentlyUsedFoldersModel::GetItemAt(
-    Combobox* source, int index) {
-  if (index == nodes_.size())
+    int index) {
+  if (index == static_cast<int>(nodes_.size()))
     return l10n_util::GetString(IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
   return nodes_[index]->GetTitle();
 }
@@ -183,7 +184,7 @@ void BookmarkBubbleView::DidChangeBounds(const gfx::Rect& previous,
 void BookmarkBubbleView::BubbleShown() {
   DCHECK(GetWidget());
   GetFocusManager()->RegisterAccelerator(
-      views::Accelerator(VK_RETURN, false, false, false), this);
+      views::Accelerator(base::VKEY_RETURN, false, false, false), this);
 
   title_tf_->RequestFocus();
   title_tf_->SelectAll();
@@ -191,13 +192,20 @@ void BookmarkBubbleView::BubbleShown() {
 
 bool BookmarkBubbleView::AcceleratorPressed(
     const views::Accelerator& accelerator) {
-  if (accelerator.GetKeyCode() != VK_RETURN)
+  if (accelerator.GetKeyCode() != base::VKEY_RETURN)
     return false;
+
   if (edit_button_->HasFocus())
-    ButtonPressed(edit_button_);
+    HandleButtonPressed(edit_button_);
   else
-    ButtonPressed(close_button_);
+    HandleButtonPressed(close_button_);
   return true;
+}
+
+void BookmarkBubbleView::ViewHierarchyChanged(bool is_add, View* parent,
+                                              View* child) {
+  if (is_add && child == this)
+    Init();
 }
 
 BookmarkBubbleView::BookmarkBubbleView(InfoBubbleDelegate* delegate,
@@ -213,13 +221,18 @@ BookmarkBubbleView::BookmarkBubbleView(InfoBubbleDelegate* delegate,
           profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url)),
       remove_bookmark_(false),
       apply_edits_(true) {
-  Init();
 }
 
 void BookmarkBubbleView::Init() {
-  if (!kCloseImage) {
+  static SkColor kTitleColor;
+  static bool initialized = false;
+  if (!initialized) {
+    kTitleColor = color_utils::GetReadableColor(SkColorSetRGB(6, 45, 117),
+                                                InfoBubble::kBackgroundColor);
     kCloseImage = ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_INFO_BUBBLE_CLOSE);
+
+    initialized = true;
   }
 
   remove_link_ = new Link(l10n_util::GetString(
@@ -284,7 +297,7 @@ void BookmarkBubbleView::Init() {
   layout->AddView(
       new Label(l10n_util::GetString(IDS_BOOMARK_BUBBLE_TITLE_TEXT)));
   title_tf_ = new views::Textfield();
-  title_tf_->SetText(GetTitle());
+  title_tf_->SetText(WideToUTF16(GetTitle()));
   layout->AddView(title_tf_);
 
   layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
@@ -311,15 +324,9 @@ std::wstring BookmarkBubbleView::GetTitle() {
   return std::wstring();
 }
 
-void BookmarkBubbleView::ButtonPressed(views::Button* sender) {
-  if (sender == edit_button_) {
-    UserMetrics::RecordAction(L"BookmarkBubble_Edit", profile_);
-    ShowEditor();
-  } else {
-    DCHECK(sender == close_button_);
-    Close();
-  }
-  // WARNING: we've most likely been deleted when CloseWindow returns.
+void BookmarkBubbleView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
+  HandleButtonPressed(sender);
 }
 
 void BookmarkBubbleView::LinkActivated(Link* source, int event_flags) {
@@ -336,7 +343,7 @@ void BookmarkBubbleView::LinkActivated(Link* source, int event_flags) {
 void BookmarkBubbleView::ItemChanged(Combobox* combobox,
                                      int prev_index,
                                      int new_index) {
-  if (new_index + 1 == parent_model_.GetItemCount(parent_combobox_)) {
+  if (new_index + 1 == parent_model_.GetItemCount()) {
     UserMetrics::RecordAction(L"BookmarkBubble_EditFromCombobox", profile_);
 
     ShowEditor();
@@ -372,6 +379,17 @@ void BookmarkBubbleView::Close() {
   static_cast<InfoBubble*>(GetWidget())->Close();
 }
 
+void BookmarkBubbleView::HandleButtonPressed(views::Button* sender) {
+  if (sender == edit_button_) {
+    UserMetrics::RecordAction(L"BookmarkBubble_Edit", profile_);
+    ShowEditor();
+  } else {
+    DCHECK(sender == close_button_);
+    Close();
+  }
+  // WARNING: we've most likely been deleted when CloseWindow returns.
+}
+
 void BookmarkBubbleView::ShowEditor() {
   const BookmarkNode* node =
       profile_->GetBookmarkModel()->GetMostRecentlyAddedNodeForURL(url_);
@@ -379,6 +397,7 @@ void BookmarkBubbleView::ShowEditor() {
   // Commit any edits now.
   ApplyEdits();
 
+#if defined(OS_WIN)
   // Parent the editor to our root ancestor (not the root we're in, as that
   // is the info bubble and will close shortly).
   HWND parent = GetAncestor(GetWidget()->GetNativeView(), GA_ROOTOWNER);
@@ -391,13 +410,18 @@ void BookmarkBubbleView::ShowEditor() {
   // status changes. That way, when the editor closes, activation is properly
   // restored to the browser.
   ShowWindow(GetWidget()->GetNativeView(), SW_HIDE);
+#else
+  gfx::NativeWindow parent = GTK_WINDOW(
+      static_cast<views::WidgetGtk*>(GetWidget())->GetTransientParent());
+#endif
 
   // Even though we just hid the window, we need to invoke Close to schedule
   // the delete and all that.
   Close();
 
   if (node) {
-    BookmarkEditor::Show(parent, profile_, NULL, node,
+    BookmarkEditor::Show(parent, profile_, NULL,
+                         BookmarkEditor::EditDetails(node),
                          BookmarkEditor::SHOW_TREE, NULL);
   }
 }
@@ -409,7 +433,7 @@ void BookmarkBubbleView::ApplyEdits() {
   BookmarkModel* model = profile_->GetBookmarkModel();
   const BookmarkNode* node = model->GetMostRecentlyAddedNodeForURL(url_);
   if (node) {
-    const std::wstring new_title = title_tf_->text();
+    const std::wstring new_title = UTF16ToWide(title_tf_->text());
     if (new_title != node->GetTitle()) {
       model->SetTitle(node, new_title);
       UserMetrics::RecordAction(L"BookmarkBubble_ChangeTitleInBubble",
@@ -417,7 +441,7 @@ void BookmarkBubbleView::ApplyEdits() {
     }
     // Last index means 'Choose another folder...'
     if (parent_combobox_->selected_item() <
-        parent_model_.GetItemCount(parent_combobox_) - 1) {
+        parent_model_.GetItemCount() - 1) {
       const BookmarkNode* new_parent =
           parent_model_.GetNodeAt(parent_combobox_->selected_item());
       if (new_parent != node->GetParent()) {

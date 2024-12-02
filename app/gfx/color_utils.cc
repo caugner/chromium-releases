@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
+
+#include <algorithm>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -19,159 +21,178 @@
 
 namespace color_utils {
 
-// These transformations are based on the equations in:
-// http://en.wikipedia.org/wiki/Lab_color
-// http://en.wikipedia.org/wiki/SRGB_color_space#Specification_of_the_transformation
-// See also:
-// http://www.brucelindbloom.com/index.html?ColorCalculator.html
+// Helper functions -----------------------------------------------------------
 
-static const double kCIEConversionAlpha = 0.055;
-static const double kCIEConversionGamma = 2.2;
-static const double kE = 0.008856;
-static const double kK = 903.3;
+namespace {
 
-static double CIEConvertNonLinear(uint8 color_component) {
-  double color_component_d = static_cast<double>(color_component) / 255.0;
-  if (color_component_d > 0.04045) {
-    double base = (color_component_d + kCIEConversionAlpha) /
-                      (1 + kCIEConversionAlpha);
-    return pow(base, kCIEConversionGamma);
+double calcHue(double temp1, double temp2, double hue) {
+  if (hue < 0.0)
+    ++hue;
+  else if (hue > 1.0)
+    --hue;
+
+  if (hue * 6.0 < 1.0)
+    return temp1 + (temp2 - temp1) * hue * 6.0;
+  if (hue * 2.0 < 1.0)
+    return temp2;
+  if (hue * 3.0 < 2.0)
+    return temp1 + (temp2 - temp1) * (2.0 / 3.0 - hue) * 6.0;
+
+  return temp1;
+}
+
+int GetLumaForColor(SkColor* color) {
+  int luma = static_cast<int>((0.3 * SkColorGetR(*color)) +
+                              (0.59 * SkColorGetG(*color)) +
+                              (0.11 * SkColorGetB(*color)));
+  return std::max(std::min(luma, 255), 0);
+}
+
+// Next three functions' formulas from:
+// http://www.w3.org/TR/WCAG20/#relativeluminancedef
+// http://www.w3.org/TR/WCAG20/#contrast-ratiodef
+
+double ConvertSRGB(double eight_bit_component) {
+  const double component = eight_bit_component / 255.0;
+  return (component <= 0.03928) ?
+      (component / 12.92) : pow((component + 0.055) / 1.055, 2.4);
+}
+
+SkColor LumaInvertColor(const SkColor& color) {
+  HSL hsl;
+  SkColorToHSL(color, &hsl);
+  hsl.l = 1.0 - hsl.l;
+  return HSLToSkColor(hsl, 255);
+}
+
+double RelativeLuminance(SkColor color) {
+  return (0.2126 * ConvertSRGB(SkColorGetR(color))) +
+      (0.7152 * ConvertSRGB(SkColorGetG(color))) +
+      (0.0722 * ConvertSRGB(SkColorGetB(color))) + 0.05;
+}
+
+double ContrastRatio(double foreground_luminance, double background_luminance) {
+  // NOTE: Only pass in numbers obtained from RelativeLuminance(), since those
+  // are guaranteed to be > 0 and thus not cause a divide-by-zero error here.
+  return (foreground_luminance > background_luminance) ?
+      (foreground_luminance / background_luminance) :
+      (background_luminance / foreground_luminance);
+}
+
+}  // namespace
+
+// ----------------------------------------------------------------------------
+
+void SkColorToHSL(SkColor c, HSL* hsl) {
+  double r = static_cast<double>(SkColorGetR(c)) / 255.0;
+  double g = static_cast<double>(SkColorGetG(c)) / 255.0;
+  double b = static_cast<double>(SkColorGetB(c)) / 255.0;
+  double vmax = std::max(std::max(r, g), b);
+  double vmin = std::min(std::min(r, g), b);
+  double delta = vmax - vmin;
+  hsl->l = (vmax + vmin) / 2;
+  if (delta) {
+    double dr = (((vmax - r) / 6.0) + (delta / 2.0)) / delta;
+    double dg = (((vmax - g) / 6.0) + (delta / 2.0)) / delta;
+    double db = (((vmax - b) / 6.0) + (delta / 2.0)) / delta;
+    if (r == vmax)
+      hsl->h = db - dg;
+    else if (g == vmax)
+      hsl->h = (1.0 / 3.0) + dr - db;
+    else  // (b == vmax)
+      hsl->h = (2.0 / 3.0) + dg - dr;
+
+    if (hsl->h < 0.0)
+      ++hsl->h;
+    else if (hsl->h > 1.0)
+      --hsl->h;
+
+    hsl->s = delta / ((hsl->l < 0.5) ? (vmax + vmin) : (2 - vmax - vmin));
   } else {
-    return color_component_d / 12.92;
+    hsl->h = hsl->s = 0;
   }
 }
 
-// Note: this works only for sRGB.
-void SkColorToCIEXYZ(SkColor c, CIE_XYZ* xyz) {
-  uint8 r = SkColorGetR(c);
-  uint8 g = SkColorGetG(c);
-  uint8 b = SkColorGetB(c);
+SkColor HSLToSkColor(const HSL& hsl, SkAlpha alpha) {
+  double hue = hsl.h;
+  double saturation = hsl.s;
+  double lightness = hsl.l;
 
-  xyz->X =
-    0.4124 * CIEConvertNonLinear(r) +
-    0.3576 * CIEConvertNonLinear(g) +
-    0.1805 * CIEConvertNonLinear(b);
-  xyz->Y =
-    0.2126 * CIEConvertNonLinear(r) +
-    0.7152 * CIEConvertNonLinear(g) +
-    0.0722 * CIEConvertNonLinear(g);
-  xyz->Z =
-    0.0193 * CIEConvertNonLinear(r) +
-    0.1192 * CIEConvertNonLinear(g) +
-    0.9505 * CIEConvertNonLinear(b);
-}
+  // If there's no color, we don't care about hue and can do everything based
+  // on brightness.
+  if (!saturation) {
+    uint8 light;
 
-static double LabConvertNonLinear(double value) {
-  if (value > 0.008856) {
-    double goat = pow(value, static_cast<double>(1) / 3);
-    return goat;
+    if (lightness < 0)
+      light = 0;
+    else if (lightness >= 1.0)
+      light = 255;
+    else
+      light = SkDoubleToFixed(lightness) >> 8;
+
+    return SkColorSetARGB(alpha, light, light, light);
   }
-  return (kK * value + 16) / 116;
+
+  double temp2 = (lightness < 0.5) ?
+      (lightness * (1.0 + saturation)) :
+      (lightness + saturation - (lightness * saturation));
+  double temp1 = 2.0 * lightness - temp2;
+  return SkColorSetARGB(alpha,
+      static_cast<int>(calcHue(temp1, temp2, hue + 1.0 / 3.0) * 255),
+      static_cast<int>(calcHue(temp1, temp2, hue) * 255),
+      static_cast<int>(calcHue(temp1, temp2, hue - 1.0 / 3.0) * 255));
 }
 
-void CIEXYZToLabColor(const CIE_XYZ& xyz, LabColor* lab) {
-  CIE_XYZ white_xyz;
-  SkColorToCIEXYZ(SkColorSetRGB(255, 255, 255), &white_xyz);
-  double fx = LabConvertNonLinear(xyz.X / white_xyz.X);
-  double fy = LabConvertNonLinear(xyz.Y / white_xyz.Y);
-  double fz = LabConvertNonLinear(xyz.Z / white_xyz.Z);
-  lab->L = static_cast<int>(116 * fy) - 16;
-  lab->a = static_cast<int>(500 * (fx - fy));
-  lab->b = static_cast<int>(200 * (fy - fz));
-}
+SkColor HSLShift(SkColor color, const HSL& shift) {
+  HSL hsl;
+  int alpha = SkColorGetA(color);
+  SkColorToHSL(color, &hsl);
 
-static uint8 sRGBColorComponentFromLinearComponent(double component) {
-  double result;
-  if (component <= 0.0031308) {
-    result = 12.92 * component;
+  // Replace the hue with the tint's hue.
+  if (shift.h >= 0)
+    hsl.h = shift.h;
+
+  // Change the saturation.
+  if (shift.s >= 0) {
+    if (shift.s <= 0.5)
+      hsl.s *= shift.s * 2.0;
+    else
+      hsl.s += (1.0 - hsl.s) * ((shift.s - 0.5) * 2.0);
+  }
+
+  SkColor result = HSLToSkColor(hsl, alpha);
+
+  if (shift.l < 0)
+    return result;
+
+  // Lightness shifts in the style of popular image editors aren't
+  // actually represented in HSL - the L value does have some effect
+  // on saturation.
+  double r = static_cast<double>(SkColorGetR(result));
+  double g = static_cast<double>(SkColorGetG(result));
+  double b = static_cast<double>(SkColorGetB(result));
+  if (shift.l <= 0.5) {
+    r *= (shift.l * 2.0);
+    g *= (shift.l * 2.0);
+    b *= (shift.l * 2.0);
   } else {
-    result = (1 + kCIEConversionAlpha) *
-                 pow(component, (static_cast<double>(1) / 2.4)) -
-                 kCIEConversionAlpha;
+    r += (255.0 - r) * ((shift.l - 0.5) * 2.0);
+    g += (255.0 - g) * ((shift.l - 0.5) * 2.0);
+    b += (255.0 - b) * ((shift.l - 0.5) * 2.0);
   }
-  return std::min(static_cast<uint8>(255), static_cast<uint8>(result * 255));
+  return SkColorSetARGB(alpha,
+                        static_cast<int>(r),
+                        static_cast<int>(g),
+                        static_cast<int>(b));
 }
-
-SkColor CIEXYZToSkColor(SkAlpha alpha, const CIE_XYZ& xyz) {
-  double r_linear = 3.2410 * xyz.X - 1.5374 * xyz.Y - 0.4986 * xyz.Z;
-  double g_linear = -0.9692 * xyz.X + 1.8760 * xyz.Y + 0.0416 * xyz.Z;
-  double b_linear = 0.0556 * xyz.X - 0.2040 * xyz.Y + 1.0570 * xyz.Z;
-  uint8 r = sRGBColorComponentFromLinearComponent(r_linear);
-  uint8 g = sRGBColorComponentFromLinearComponent(g_linear);
-  uint8 b = sRGBColorComponentFromLinearComponent(b_linear);
-  return SkColorSetARGB(alpha, r, g, b);
-}
-
-static double gen_yr(const LabColor& lab) {
-  if (lab.L > (kE * kK))
-    return pow((lab.L + 16.0) / 116, 3.0);
-  return static_cast<double>(lab.L) / kK;
-}
-
-static double fy(const LabColor& lab) {
-  double yr = gen_yr(lab);
-  if (yr > kE)
-    return (lab.L + 16.0) / 116;
-  return (kK * yr + 16.0) / 116;
-}
-
-static double fx(const LabColor& lab) {
-  return (static_cast<double>(lab.a) / 500) + fy(lab);
-}
-
-static double gen_xr(const LabColor& lab) {
-  double x = fx(lab);
-  double x_cubed = pow(x, 3.0);
-  if (x_cubed > kE)
-    return x_cubed;
-  return (116.0 * x - 16.0) / kK;
-}
-
-static double fz(const LabColor& lab) {
-  return fy(lab) - (static_cast<double>(lab.b) / 200);
-}
-
-static double gen_zr(const LabColor& lab) {
-  double z = fz(lab);
-  double z_cubed = pow(z, 3.0);
-  if (z_cubed > kE)
-    return z_cubed;
-  return (116.0 * z - 16.0) / kK;
-}
-
-void LabColorToCIEXYZ(const LabColor& lab, CIE_XYZ* xyz) {
-  CIE_XYZ result;
-
-  CIE_XYZ white_xyz;
-  SkColorToCIEXYZ(SkColorSetRGB(255, 255, 255), &white_xyz);
-
-  result.X = gen_xr(lab) * white_xyz.X;
-  result.Y = gen_yr(lab) * white_xyz.Y;
-  result.Z = gen_zr(lab) * white_xyz.Z;
-
-  *xyz = result;
-}
-
-void SkColorToLabColor(SkColor c, LabColor* lab) {
-  CIE_XYZ xyz;
-  SkColorToCIEXYZ(c, &xyz);
-  CIEXYZToLabColor(xyz, lab);
-}
-
-SkColor LabColorToSkColor(const LabColor& lab, SkAlpha alpha) {
-  CIE_XYZ xyz;
-  LabColorToCIEXYZ(lab, &xyz);
-  return CIEXYZToSkColor(alpha, xyz);
-}
-
-static const int kCloseToBoundary = 64;
-static const int kAverageBoundary = 15;
 
 bool IsColorCloseToTransparent(SkAlpha alpha) {
+  const int kCloseToBoundary = 64;
   return alpha < kCloseToBoundary;
 }
 
 bool IsColorCloseToGrey(int r, int g, int b) {
+  const int kAverageBoundary = 15;
   int average = (r + g + b) / 3;
   return (abs(r - average) < kAverageBoundary) &&
          (abs(g - average) < kAverageBoundary) &&
@@ -209,30 +230,9 @@ SkColor GetAverageColorOfFavicon(SkBitmap* favicon, SkAlpha alpha) {
     ++color_count;
   }
 
-  SkColor result;
-  if (color_count > 0) {
-    result = SkColorSetARGB(alpha,
-                            r / color_count,
-                            g / color_count,
-                            b / color_count);
-  } else {
-    result = SkColorSetARGB(alpha, 0, 0, 0);
-  }
-  return result;
-}
-
-inline int GetLumaForColor(SkColor* color) {
-  int r = SkColorGetR(*color);
-  int g = SkColorGetG(*color);
-  int b = SkColorGetB(*color);
-
-  int luma = static_cast<int>(0.3*r + 0.59*g + 0.11*b);
-  if (luma < 0)
-    luma = 0;
-  else if (luma > 255)
-    luma = 255;
-
-  return luma;
+  return color_count ?
+      SkColorSetARGB(alpha, r / color_count, g / color_count, b / color_count) :
+      SkColorSetARGB(alpha, 0, 0, 0);
 }
 
 void BuildLumaHistogram(SkBitmap* bitmap, int histogram[256]) {
@@ -244,62 +244,40 @@ void BuildLumaHistogram(SkBitmap* bitmap, int histogram[256]) {
   int pixel_height = bitmap->height();
   for (int y = 0; y < pixel_height; ++y) {
     SkColor* current_color = static_cast<uint32_t*>(bitmap->getAddr32(0, y));
-    for (int x = 0; x < pixel_width; ++x, ++current_color) {
+    for (int x = 0; x < pixel_width; ++x, ++current_color)
       histogram[GetLumaForColor(current_color)]++;
-    }
   }
 }
 
 SkColor AlphaBlend(SkColor foreground, SkColor background, SkAlpha alpha) {
   if (alpha == 0)
     return background;
-  else if (alpha == 0xFF)
+  if (alpha == 255)
     return foreground;
-
   return SkColorSetRGB(
     ((SkColorGetR(foreground) * alpha) +
-     (SkColorGetR(background) * (0xFF - alpha))) / 0xFF,
+     (SkColorGetR(background) * (255 - alpha))) / 255,
     ((SkColorGetG(foreground) * alpha) +
-     (SkColorGetG(background) * (0xFF - alpha))) / 0xFF,
+     (SkColorGetG(background) * (255 - alpha))) / 255,
     ((SkColorGetB(foreground) * alpha) +
-     (SkColorGetB(background) * (0xFF - alpha))) / 0xFF);
+     (SkColorGetB(background) * (255 - alpha))) / 255);
 }
 
-// Next three functions' formulas from:
-// http://www.w3.org/TR/WCAG20/#relativeluminancedef
-// http://www.w3.org/TR/WCAG20/#contrast-ratiodef
-static double ConvertSRGB(double eight_bit_component) {
-  const double component = eight_bit_component / 255.0;
-  return (component <= 0.03928) ?
-      (component / 12.92) : pow((component + 0.055) / 1.055, 2.4);
-}
-
-static double RelativeLuminance(SkColor color) {
-  return (0.2126 * ConvertSRGB(SkColorGetR(color))) +
-      (0.7152 * ConvertSRGB(SkColorGetG(color))) +
-      (0.0722 * ConvertSRGB(SkColorGetB(color)));
-}
-
-static double ContrastRatio(SkColor color1, SkColor color2) {
-  const double l1 = RelativeLuminance(color1) + 0.05;
-  const double l2 = RelativeLuminance(color2) + 0.05;
-  return (l1 > l2) ? (l1 / l2) : (l2 / l1);
-}
-
-SkColor PickMoreReadableColor(SkColor foreground1,
-                              SkColor foreground2,
-                              SkColor background) {
-  return (ContrastRatio(foreground1, background) >=
-      ContrastRatio(foreground2, background)) ? foreground1 : foreground2;
+SkColor GetReadableColor(SkColor foreground, SkColor background) {
+  const SkColor foreground2 = LumaInvertColor(foreground);
+  const double background_luminance = RelativeLuminance(background);
+  return (ContrastRatio(RelativeLuminance(foreground), background_luminance) >=
+          ContrastRatio(RelativeLuminance(foreground2), background_luminance)) ?
+      foreground : foreground2;
 }
 
 SkColor GetSysSkColor(int which) {
 #if defined(OS_WIN)
-  return skia::COLORREFToSkColor(::GetSysColor(which));
+  return skia::COLORREFToSkColor(GetSysColor(which));
 #else
   NOTIMPLEMENTED();
   return SK_ColorLTGRAY;
 #endif
 }
 
-} // namespace color_utils
+}  // namespace color_utils

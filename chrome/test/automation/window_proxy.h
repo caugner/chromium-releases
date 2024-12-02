@@ -13,6 +13,7 @@
 
 #include <string>
 
+#include "base/keyboard_codes.h"
 #include "base/string16.h"
 #include "base/thread.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
@@ -21,6 +22,7 @@ class BrowserProxy;
 class WindowProxy;
 
 namespace gfx {
+  class Point;
   class Rect;
 }
 
@@ -35,29 +37,21 @@ class WindowProxy : public AutomationResourceProxy {
               int handle)
     : AutomationResourceProxy(tracker, sender, handle) {}
 
-#if defined(OS_WIN)
-  // TODO(port): Use portable replacements for windowsisms.
-
-  // Gets the outermost HWND that corresponds to the given window.
-  // Returns true if the call was successful.
-  bool GetHWND(HWND* handle) const;
-
   // Simulates a click at the OS level. |click| is in the window's coordinates
   // and |flags| specifies which buttons are pressed (as defined in
   // chrome/views/event.h).  Note that this is equivalent to the user moving
   // the mouse and pressing the button.  So if there is a window on top of this
   // window, the top window is clicked.
-  bool SimulateOSClick(const POINT& click, int flags);
-#endif  // defined(OS_WIN)
+  bool SimulateOSClick(const gfx::Point& click, int flags);
 
   // Get the title of the top level window.
   bool GetWindowTitle(string16* text);
 
-  // Simulates a key press at the OS level. |key| is the key pressed  and
-  // |flags| specifies which modifiers keys are also pressed (as defined in
-  // chrome/views/event.h).  Note that this actually sends the event to the
-  // window that has focus.
-  bool SimulateOSKeyPress(wchar_t key, int flags);
+  // Simulates a key press at the OS level. |key| is the virtual key code of the
+  // key pressed and |flags| specifies which modifiers keys are also pressed (as
+  // defined in chrome/views/event.h).  Note that this actually sends the event
+  // to the window that has focus.
+  bool SimulateOSKeyPress(base::KeyboardCode key, int flags);
 
   // Shows/hides the window and as a result makes it active/inactive.
   // Returns true if the call was successful.
@@ -71,6 +65,9 @@ class WindowProxy : public AutomationResourceProxy {
   // Returns true if the call was successful.
   bool Activate();
 
+  // Sets |maximized| to true if this window is maximized.
+  bool IsMaximized(bool* maximized);
+
   // Gets the bounds (in window coordinates) that correspond to the view with
   // the given ID in this window.  Returns true if bounds could be obtained.
   // If |screen_coordinates| is true, the bounds are returned in the coordinates
@@ -82,6 +79,10 @@ class WindowProxy : public AutomationResourceProxy {
   bool GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
                                 bool screen_coordinates, uint32 timeout_ms,
                                 bool* is_timeout);
+
+  // Gets the position and size of the window. Returns true if setting the
+  // bounds was successful.
+  bool GetBounds(gfx::Rect* bounds);
 
   // Sets the position and size of the window. Returns true if setting the
   // bounds was successful.

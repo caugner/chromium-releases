@@ -4,7 +4,7 @@
 
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 
-#include "base/clipboard.h"
+#include "app/clipboard/clipboard.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "net/base/escape.h"
@@ -16,7 +16,7 @@
 using WebKit::WebString;
 using WebKit::WebURL;
 
-bool MockWebClipboardImpl::isFormatAvailable(Format format) {
+bool MockWebClipboardImpl::isFormatAvailable(Format format, Buffer buffer) {
   switch (format) {
     case FormatHTML:
       return !m_htmlText.isEmpty();
@@ -28,14 +28,30 @@ bool MockWebClipboardImpl::isFormatAvailable(Format format) {
       NOTREACHED();
       return false;
   }
+
+  switch (buffer) {
+    case BufferStandard:
+      break;
+    case BufferSelection:
+#if defined(OS_LINUX)
+      break;
+#endif
+    default:
+      NOTREACHED();
+      return false;
+  }
+
   return true;
 }
 
-WebKit::WebString MockWebClipboardImpl::readPlainText() {
+WebKit::WebString MockWebClipboardImpl::readPlainText(
+    WebKit::WebClipboard::Buffer buffer) {
   return m_plainText;
 }
 
-WebKit::WebString MockWebClipboardImpl::readHTML(WebKit::WebURL* url) {
+// TODO(wtc): set output argument *url.
+WebKit::WebString MockWebClipboardImpl::readHTML(
+    WebKit::WebClipboard::Buffer buffer, WebKit::WebURL* url) {
   return m_htmlText;
 }
 
@@ -47,18 +63,24 @@ void MockWebClipboardImpl::writeHTML(
   m_writeSmartPaste = writeSmartPaste;
 }
 
+void MockWebClipboardImpl::writePlainText(const WebKit::WebString& plain_text) {
+  m_htmlText = WebKit::WebString();
+  m_plainText = plain_text;
+  m_writeSmartPaste = false;
+}
+
 void MockWebClipboardImpl::writeURL(
     const WebKit::WebURL& url, const WebKit::WebString& title) {
-  m_htmlText = UTF8ToUTF16(
+  m_htmlText = WebString::fromUTF8(
       webkit_glue::WebClipboardImpl::URLToMarkup(url, title));
-  m_plainText = UTF8ToUTF16(url.spec());
+  m_plainText = url.spec().utf16();
   m_writeSmartPaste = false;
 }
 
 void MockWebClipboardImpl::writeImage(const WebKit::WebImage& image,
     const WebKit::WebURL& url, const WebKit::WebString& title) {
   if (!image.isNull()) {
-    m_htmlText = UTF8ToUTF16(
+    m_htmlText = WebString::fromUTF8(
         webkit_glue::WebClipboardImpl::URLToImageMarkup(url, title));
     m_plainText = m_htmlText;
     m_writeSmartPaste = false;

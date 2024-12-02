@@ -2,57 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import <Cocoa/Cocoa.h>
-
+#include "base/scoped_nsobject.h"
 #import "chrome/browser/cocoa/bookmark_bar_view.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
-class BookmarkBarViewTest : public testing::Test {
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
+namespace {
+
+class BookmarkBarViewTest : public PlatformTest {
+ public:
+  CocoaTestHelper cocoa_helper_;
+  scoped_nsobject<BookmarkBarView> view_;
 };
 
-// Make sure we only get a menu from a right-click.  Not left-click or keyDown.
-TEST_F(BookmarkBarViewTest, TestMenu) {
-  scoped_nsobject<BookmarkBarView> view([[BookmarkBarView alloc]
-                                          initWithFrame:NSMakeRect(0,0,10,10)]);
-  EXPECT_TRUE(view.get());
-
-  // Not loaded from a nib so we must set it explicitly
-  scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"spork"]);
-  [view setContextMenu:menu.get()];
-
-  EXPECT_TRUE([view menuForEvent:[NSEvent mouseEventWithType:NSRightMouseDown
-                                                    location:NSMakePoint(0,0)
-                                               modifierFlags:0
-                                                   timestamp:0
-                                                windowNumber:0
-                                                     context:nil
-                                                 eventNumber:0
-                                                  clickCount:0
-                                                    pressure:0.0]]);
-  EXPECT_FALSE([view menuForEvent:[NSEvent mouseEventWithType:NSLeftMouseDown
-                                                     location:NSMakePoint(0,0)
-                                                modifierFlags:0
-                                                    timestamp:0
-                                                 windowNumber:0
-                                                      context:nil
-                                                  eventNumber:0
-                                                   clickCount:0
-                                                     pressure:0.0]]);
-  EXPECT_FALSE([view menuForEvent:[NSEvent keyEventWithType:NSKeyDown
-                                                   location:NSMakePoint(0,0)
-                                              modifierFlags:0
-                                                  timestamp:0
-                                               windowNumber:0
-                                                    context:nil
-                                                 characters:@"x"
-                                charactersIgnoringModifiers:@"x"
-                                                  isARepeat:NO
-                                                    keyCode:7]]);
-
-  [view setContextMenu:nil];
+// This class only needs to do one thing: prevent mouse down events from moving
+// the parent window around.
+TEST_F(BookmarkBarViewTest, CanDragWindow) {
+  view_.reset([[BookmarkBarView alloc] init]);
+  EXPECT_FALSE([view_.get() mouseDownCanMoveWindow]);
 }
 
-
-
+}  // namespace

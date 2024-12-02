@@ -13,6 +13,7 @@
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl.
 
 #include "app/gfx/font.h"
+#include "base/scoped_comptr_win.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
@@ -68,7 +69,7 @@ class AutocompleteEditViewWin
                           Profile* profile,
                           CommandUpdater* command_updater,
                           bool popup_window_mode,
-                          AutocompletePopupPositioner* popup_positioner);
+                          const BubblePositioner* bubble_positioner);
   ~AutocompleteEditViewWin();
 
   views::View* parent_view() const { return parent_view_; }
@@ -109,6 +110,8 @@ class AutocompleteEditViewWin
   virtual void UpdatePopup();
   virtual void ClosePopup();
 
+  virtual void SetFocus();
+
   virtual void OnTemporaryTextMaybeChanged(const std::wstring& display_text,
                                            bool save_original_selection);
   virtual bool OnInlineAutocompleteTextMaybeChanged(
@@ -116,6 +119,7 @@ class AutocompleteEditViewWin
   virtual void OnRevertTemporaryText();
   virtual void OnBeforePossibleChange();
   virtual bool OnAfterPossibleChange();
+  virtual gfx::NativeView GetNativeView() const;
 
   // Exposes custom IAccessible implementation to the overall MSAA hierarchy.
   IAccessible* GetIAccessible();
@@ -473,14 +477,14 @@ class AutocompleteEditViewWin
   ToolbarModel::SecurityLevel scheme_security_level_;
 
   // This interface is useful for accessing the CRichEditCtrl at a low level.
-  mutable CComQIPtr<ITextDocument> text_object_model_;
+  mutable ScopedComPtr<ITextDocument> text_object_model_;
 
   // This contains the scheme char start and stop indexes that should be
   // striken-out when displaying an insecure scheme.
   url_parse::Component insecure_scheme_component_;
 
   // Instance of accessibility information and handling.
-  mutable CComPtr<IAccessible> autocomplete_accessibility_;
+  mutable ScopedComPtr<IAccessible> autocomplete_accessibility_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditViewWin);
 };

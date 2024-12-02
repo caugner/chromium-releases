@@ -10,15 +10,18 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
-#if defined(OS_WIN)
-#include "chrome/browser/views/autocomplete/autocomplete_popup_win.h"
-#endif
 #include "views/view.h"
 #include "webkit/glue/window_open_disposition.h"
 
+#if defined(OS_WIN)
+#include "chrome/browser/views/autocomplete/autocomplete_popup_win.h"
+#else
+#include "chrome/browser/views/autocomplete/autocomplete_popup_gtk.h"
+#endif
+
 class AutocompleteEditModel;
 class AutocompleteEditViewWin;
-class AutocompletePopupWin;
+class BubbleBorder;
 class Profile;
 
 // An interface implemented by an object that provides data to populate
@@ -27,6 +30,9 @@ class AutocompleteResultViewModel {
  public:
   // Returns true if the index is selected.
   virtual bool IsSelectedIndex(size_t index) const = 0;
+
+  // Returns true if the index is hovered.
+  virtual bool IsHoveredIndex(size_t index) const = 0;
 
   // Called when the line at the specified index should be opened with the
   // provided disposition.
@@ -46,10 +52,10 @@ class AutocompletePopupContentsView : public views::View,
                                       public AnimationDelegate {
  public:
   AutocompletePopupContentsView(const gfx::Font& font,
-                                AutocompleteEditViewWin* edit_view,
+                                AutocompleteEditView* edit_view,
                                 AutocompleteEditModel* edit_model,
                                 Profile* profile,
-                                AutocompletePopupPositioner* popup_positioner);
+                                const BubblePositioner* bubble_positioner);
   virtual ~AutocompletePopupContentsView() {}
 
   // Returns the bounds the popup should be shown at. This is the display bounds
@@ -60,12 +66,12 @@ class AutocompletePopupContentsView : public views::View,
   virtual bool IsOpen() const;
   virtual void InvalidateLine(size_t line);
   virtual void UpdatePopupAppearance();
-  virtual void OnHoverEnabledOrDisabled(bool disabled);
   virtual void PaintUpdatesNow();
   virtual AutocompletePopupModel* GetModel();
 
   // Overridden from AutocompleteResultViewModel:
   virtual bool IsSelectedIndex(size_t index) const;
+  virtual bool IsHoveredIndex(size_t index) const;
   virtual void OpenIndex(size_t index, WindowOpenDisposition disposition);
   virtual void SetHoveredLine(size_t index);
   virtual void SetSelectedLine(size_t index, bool revert_to_default);
@@ -81,10 +87,6 @@ class AutocompletePopupContentsView : public views::View,
   virtual void Layout();
 
  private:
-#if defined(OS_WIN)
-  typedef AutocompletePopupWin AutocompletePopupClass;
-#endif
-
   // Returns true if the model has a match at the specified index.
   bool HasMatchAt(size_t index) const;
 
@@ -101,17 +103,24 @@ class AutocompletePopupContentsView : public views::View,
   // Makes the contents of the canvas slightly transparent.
   void MakeCanvasTransparent(gfx::Canvas* canvas);
 
+#if defined(OS_WIN)
   // The popup that contains this view.
-  scoped_ptr<AutocompletePopupClass> popup_;
+  scoped_ptr<AutocompletePopupWin> popup_;
+#else
+  scoped_ptr<AutocompletePopupGtk> popup_;
+#endif
 
   // The provider of our result set.
   scoped_ptr<AutocompletePopupModel> model_;
 
   // The edit view that invokes us.
-  AutocompleteEditViewWin* edit_view_;
+  AutocompleteEditView* edit_view_;
 
   // An object that tells the popup how to position itself.
-  AutocompletePopupPositioner* popup_positioner_;
+  const BubblePositioner* bubble_positioner_;
+
+  // Our border, which can compute our desired bounds.
+  const BubbleBorder* bubble_border_;
 
   // The font that we should use for result rows. This is based on the font used
   // by the edit that created us.

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -78,6 +78,12 @@ class BrowserList {
   // the session. use_post should only be false when invoked from end session.
   static void CloseAllBrowsers(bool use_post);
 
+  // Closes all browsers and exits.  This is equivalent to
+  // CloseAllBrowsers(true) on platforms where the application exits when no
+  // more windows are remaining.  On other platforms (the Mac), this will
+  // additionally exit the application.
+  static void CloseAllBrowsersAndExit();
+
   // Begins shutdown of the application when the Windows session is ending.
   static void WindowsSessionEnding();
 
@@ -139,7 +145,7 @@ class TabContents;
 // browser windows or tabs while iterating may cause incorrect behavior.
 //
 // Example:
-//   for (TabContentsIterator iterator; !iterator.done(); iterator++) {
+//   for (TabContentsIterator iterator; !iterator.done(); ++iterator) {
 //     TabContents* cur = *iterator;
 //     -or-
 //     iterator->operationOnTabContents();

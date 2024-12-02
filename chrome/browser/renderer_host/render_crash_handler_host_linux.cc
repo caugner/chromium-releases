@@ -10,15 +10,18 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #include <string>
 #include <vector>
 
 #include "base/eintr_wrapper.h"
+#include "base/file_path.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "breakpad/linux/exception_handler.h"
@@ -26,6 +29,7 @@
 #include "breakpad/linux/minidump_writer.h"
 #include "chrome/app/breakpad_linux.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/common/chrome_paths.h"
 
 // expected prefix of the target of the /proc/self/fd/%d link for a socket
 static const char kSocketLinkPrefix[] = "socket:[";
@@ -147,15 +151,21 @@ static bool FindProcessHoldingSocket(pid_t* pid_out, uint64_t socket_inode) {
 // end of the processes lifetime, which is greater in span then the lifetime of
 // the IO message loop.
 template<> struct RunnableMethodTraits<RenderCrashHandlerHostLinux> {
-  static void RetainCallee(RenderCrashHandlerHostLinux*) { }
-  static void ReleaseCallee(RenderCrashHandlerHostLinux*) { }
+  void RetainCallee(RenderCrashHandlerHostLinux*) { }
+  void ReleaseCallee(RenderCrashHandlerHostLinux*) { }
 };
 
 RenderCrashHandlerHostLinux::RenderCrashHandlerHostLinux()
     : renderer_socket_(-1),
       browser_socket_(-1) {
   int fds[2];
-  CHECK(socketpair(AF_UNIX, SOCK_DGRAM, 0, fds) == 0);
+  // We use SOCK_SEQPACKET rather than SOCK_DGRAM to prevent the renderer from
+  // sending datagrams to other sockets on the system. The sandbox may prevent
+  // the renderer from calling socket() to create new sockets, but it'll still
+  // inherit some sockets. With PF_UNIX+SOCK_DGRAM, it can call sendmsg to send
+  // a datagram to any (abstract) socket on the same system. With
+  // SOCK_SEQPACKET, this is prevented.
+  CHECK(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds) == 0);
   static const int on = 1;
 
   // Enable passcred on the server end of the socket
@@ -303,9 +313,16 @@ void RenderCrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
     return;
   }
 
+  bool upload = true;
+  FilePath dumps_path("/tmp");
+  if (getenv("CHROME_HEADLESS")) {
+    upload = false;
+    PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path);
+  }
   const uint64 rand = base::RandUint64();
   const std::string minidump_filename =
-      StringPrintf("/tmp/chromium-renderer-minidump-%016" PRIx64 ".dmp", rand);
+      StringPrintf("%s/chromium-renderer-minidump-%016" PRIx64 ".dmp",
+                   dumps_path.value().c_str(), rand);
   if (!google_breakpad::WriteMinidump(minidump_filename.c_str(),
                                       crashing_pid, crash_context,
                                       kCrashContextSize)) {
@@ -324,6 +341,9 @@ void RenderCrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
   HANDLE_EINTR(sendmsg(signal_fd, &msg, MSG_DONTWAIT | MSG_NOSIGNAL));
   HANDLE_EINTR(close(signal_fd));
 
+  // Sanitize the string data a bit more
+  guid[kGuidSize] = crash_url[kMaxActiveURLSize] = distro[kDistroSize] = 0;
+
   BreakpadInfo info;
   info.filename = minidump_filename.c_str();
   info.process_type = "renderer";
@@ -334,7 +354,8 @@ void RenderCrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
   info.guid_length = strlen(guid);
   info.distro = distro;
   info.distro_length = strlen(distro);
-  UploadCrashDump(info);
+  info.upload = upload;
+  HandleCrashDump(info);
 }
 
 void RenderCrashHandlerHostLinux::WillDestroyCurrentMessageLoop() {

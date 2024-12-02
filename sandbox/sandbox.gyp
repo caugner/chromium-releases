@@ -3,32 +3,76 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../build/common.gypi',
-  ],
   'conditions': [
-    [ 'OS=="linux"', {
+    [ 'OS=="linux" and selinux==0', {
       'targets': [
         {
           'target_name': 'chrome_sandbox',
           'type': 'executable',
-          'conditions': [
-            ['linux_suid_sandbox_restrictions=="User"',
-              {
-                'defines': [ 'CHROME_DEVEL_SANDBOX' ],
-              },
-            ],
-          ],
-          'defines': [
-            'LINUX_SANDBOX_CHROME_PATH="<(linux_sandbox_chrome_path)"',
-          ],
           'sources': [
-            'linux/suid/sandbox.cc',
+            'linux/suid/sandbox.c',
           ],
           'include_dirs': [
             '..',
           ],
-        }
+        },
+        {
+          'target_name': 'sandbox',
+          'type': '<(library)',
+          'dependencies': [
+            '../base/base.gyp:base',
+          ],
+          'conditions': [
+            ['target_arch!="arm"', {
+              'sources': [
+                'linux/seccomp/access.cc',
+                'linux/seccomp/clone.cc',
+                'linux/seccomp/exit.cc',
+                'linux/seccomp/debug.cc',
+                'linux/seccomp/getpid.cc',
+                'linux/seccomp/gettid.cc',
+                'linux/seccomp/ioctl.cc',
+                'linux/seccomp/ipc.cc',
+                'linux/seccomp/library.cc',
+                'linux/seccomp/library.h',
+                'linux/seccomp/linux_syscall_support.h',
+                'linux/seccomp/madvise.cc',
+                'linux/seccomp/maps.cc',
+                'linux/seccomp/maps.h',
+                'linux/seccomp/mmap.cc',
+                'linux/seccomp/mprotect.cc',
+                'linux/seccomp/munmap.cc',
+                'linux/seccomp/mutex.h',
+                'linux/seccomp/open.cc',
+                'linux/seccomp/sandbox.cc',
+                'linux/seccomp/sandbox.h',
+                'linux/seccomp/sandbox_impl.h',
+                'linux/seccomp/securemem.cc',
+                'linux/seccomp/securemem.h',
+                'linux/seccomp/socketcall.cc',
+                'linux/seccomp/stat.cc',
+                'linux/seccomp/syscall.cc',
+                'linux/seccomp/syscall.h',
+                'linux/seccomp/syscall_table.c',
+                'linux/seccomp/syscall_table.h',
+                'linux/seccomp/tls.h',
+                'linux/seccomp/trusted_process.cc',
+                'linux/seccomp/trusted_thread.cc',
+                'linux/seccomp/x86_decode.cc',
+                'linux/seccomp/x86_decode.h',
+              ],
+            },
+          ],
+        ]},
+      ],
+    }],
+    [ 'OS=="linux" and selinux==1', {
+      # GYP requires that each file have at least one target defined.
+      'targets': [
+        {
+          'target_name': 'sandbox',
+          'type': 'settings',
+        },
       ],
     }],
     [ 'OS=="win"', {
@@ -62,8 +106,6 @@
             'src/interception_agent.cc',
             'src/interception_agent.h',
             'src/interception_internal.h',
-            'src/pe_image.cc',
-            'src/pe_image.h',
             'src/resolver.cc',
             'src/resolver.h',
             'src/service_resolver.cc',
@@ -160,10 +202,6 @@
             'src/win_utils.h',
             'src/window.h',
             'src/window.cc',
-
-            # Precompiled headers.
-            'src/stdafx.cc',
-            'src/stdafx.h',
           ],
           'include_dirs': [
             '..',
@@ -177,12 +215,6 @@
               ],
             },
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'src/stdafx.h',
-              'msvs_precompiled_source': 'src/stdafx.cc',
-            },
-          },
           'direct_dependent_settings': {
             'include_dirs': [
               'src',
@@ -212,17 +244,7 @@
             'src/registry_policy_test.cc',
             'src/sync_policy_test.cc',
             'src/unload_dll_test.cc',
-
-            # Precompiled headers.
-            'tests/integration_tests/stdafx.cc',
-            'tests/integration_tests/stdafx.h',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tests/integration_tests/stdafx.h',
-              'msvs_precompiled_source': 'tests/integration_tests/stdafx.cc',
-            },
-          },
         },
         {
           'target_name': 'sbox_validation_tests',
@@ -238,17 +260,7 @@
             'tests/validation_tests/commands.cc',
             'tests/validation_tests/commands.h',
             'tests/validation_tests/suite.cc',
-
-            # Precompiled headers.
-            'tests/validation_tests/stdafx.cc',
-            'tests/validation_tests/stdafx.h',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tests/validation_tests/stdafx.h',
-              'msvs_precompiled_source': 'tests/validation_tests/stdafx.cc',
-            },
-          },
         },
         {
           'target_name': 'sbox_unittests',
@@ -260,7 +272,6 @@
           'sources': [
             'tests/unit_tests/unit_tests.cc',
             'src/interception_unittest.cc',
-            'src/pe_image_unittest.cc',
             'src/service_resolver_unittest.cc',
             'src/restricted_token_unittest.cc',
             'src/job_unittest.cc',
@@ -270,17 +281,7 @@
             'src/policy_opcodes_unittest.cc',
             'src/ipc_unittest.cc',
             'src/threadpool_unittest.cc',
-
-            # Precompiled headers.
-            'tests/unit_tests/stdafx.cc',
-            'tests/unit_tests/stdafx.h',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'tests/unit_tests/stdafx.h',
-              'msvs_precompiled_source': 'tests/unit_tests/stdafx.cc',
-            },
-          },
         },
         {
           'target_name': 'sandbox_poc',
@@ -297,10 +298,6 @@
             'sandbox_poc/sandbox.h',
             'sandbox_poc/sandbox.ico',
             'sandbox_poc/sandbox.rc',
-
-            # Precompiled headers.
-            'sandbox_poc/stdafx.cc',
-            'sandbox_poc/stdafx.h',
           ],
           'link_settings': {
             'libraries': [
@@ -310,12 +307,6 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'SubSystem': '2',         # Set /SUBSYSTEM:WINDOWS
-            },
-          },
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'sandbox_poc/stdafx.h',
-              'msvs_precompiled_source': 'sandbox_poc/stdafx.cc',
             },
           },
         },
@@ -333,10 +324,6 @@
             'sandbox_poc/pocdll/registry.cc',
             'sandbox_poc/pocdll/spyware.cc',
             'sandbox_poc/pocdll/utils.h',
-
-            # Precompiled headers.
-            'sandbox_poc/pocdll/stdafx.cc',
-            'sandbox_poc/pocdll/stdafx.h',
           ],
           'defines': [
             'POCDLL_EXPORTS',
@@ -344,14 +331,14 @@
           'include_dirs': [
             '..',
           ],
-          'configurations': {
-            'Debug': {
-              'msvs_precompiled_header': 'sandbox_poc/pocdll/stdafx.h',
-              'msvs_precompiled_source': 'sandbox_poc/pocdll/stdafx.cc',
-            },
-          },
         },
       ],
     }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

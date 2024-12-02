@@ -40,9 +40,9 @@
 
 namespace WebKit {
 
-WebStorageNamespace* WebStorageNamespace::createLocalStorageNamespace(const WebString& path)
+WebStorageNamespace* WebStorageNamespace::createLocalStorageNamespace(const WebString& path, unsigned quota)
 {
-    return new WebStorageNamespaceImpl(WebCore::StorageNamespaceImpl::localStorageNamespace(path));
+    return new WebStorageNamespaceImpl(WebCore::StorageNamespaceImpl::localStorageNamespace(path, quota));
 }
 
 WebStorageNamespace* WebStorageNamespace::createSessionStorageNamespace()

@@ -3,9 +3,6 @@
 # found in the LICENSE file.
 
 {
-  'includes': [
-    '../build/common.gypi',
-  ],
   'target_defaults': {
     'sources/': [
       ['exclude', '/win/'],
@@ -75,12 +72,14 @@
       'dependencies': [
         'ipc',
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
         '../testing/gtest.gyp:gtest',
       ],
       'include_dirs': [
         '..'
       ],
       'sources': [
+        'file_descriptor_set_posix_unittest.cc',
         'ipc_fuzzing_tests.cc',
         'ipc_message_unittest.cc',
         'ipc_send_fds_test.cc',
@@ -105,3 +104,9 @@
     },
   ]
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

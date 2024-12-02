@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_PAGE_INFO_MODEL_H
-#define CHROME_BROWSER_PAGE_INFO_MODEL_H
+#ifndef CHROME_BROWSER_PAGE_INFO_MODEL_H_
+#define CHROME_BROWSER_PAGE_INFO_MODEL_H_
 
-#include <string>
 #include <vector>
 
+#include "base/string16.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
@@ -37,9 +37,9 @@ class PageInfoModel {
 
   struct SectionInfo {
     SectionInfo(bool state,
-                std::wstring title,
-                std::wstring head_line,
-                std::wstring description)
+                const string16& title,
+                const string16& head_line,
+                const string16& description)
         : state(state),
           title(title),
           head_line(head_line),
@@ -50,13 +50,13 @@ class PageInfoModel {
                  // unverified identity over HTTPS).
 
     // The title of the section.
-    std::wstring title;
+    string16 title;
 
     // A single line describing the section, optional.
-    std::wstring head_line;
+    string16 head_line;
 
     // The full description of what this section is.
-    std::wstring description;
+    string16 description;
   };
 
   PageInfoModel(Profile* profile,
@@ -87,4 +87,4 @@ class PageInfoModel {
   DISALLOW_COPY_AND_ASSIGN(PageInfoModel);
 };
 
-#endif  // CHROME_BROWSER_PAGE_INFO_MODEL_H
+#endif  // CHROME_BROWSER_PAGE_INFO_MODEL_H_

@@ -7,20 +7,41 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/message_loop.h"
-#include "chrome/app/breakpad_linux.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/process_singleton.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/gtk_util.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/common/platform_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
 #include "grit/locale_settings.h"
 
+#if defined(USE_LINUX_BREAKPAD)
+#include "chrome/app/breakpad_linux.h"
+#endif
+
 // static
-bool FirstRunDialog::Show(Profile* profile) {
+bool FirstRunDialog::Show(Profile* profile,
+                          ProcessSingleton* process_singleton) {
   int response = -1;
-  new FirstRunDialog(profile, response);
+  // Object deletes itself.
+  FirstRunDialog* first_run = new FirstRunDialog(profile, response);
+
+  // Prevent further launches of Chrome until First Run UI is done.
+  process_singleton->Lock(GTK_WINDOW(first_run->dialog_));
+
+  // TODO(port): it should be sufficient to just run the dialog:
+  // int response = gtk_dialog_run(GTK_DIALOG(dialog));
+  // but that spins a nested message loop and hoses us.  :(
+  // http://code.google.com/p/chromium/issues/detail?id=12552
+  // Instead, run a loop and extract the response manually.
+  g_signal_connect(G_OBJECT(first_run->dialog_), "response",
+                   G_CALLBACK(HandleOnResponseDialog), first_run);
+  gtk_widget_show_all(first_run->dialog_);
+  MessageLoop::current()->Run();
+
+  process_singleton->Unlock();
   return (response == GTK_RESPONSE_ACCEPT);
 }
 
@@ -32,12 +53,16 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
       l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_TITLE).c_str(),
       NULL,  // No parent
       (GtkDialogFlags) (GTK_DIALOG_MODAL | GTK_DIALOG_NO_SEPARATOR),
-      l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_OK).c_str(),
-      GTK_RESPONSE_ACCEPT,
-      l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_CANCEL).c_str(),
+      GTK_STOCK_QUIT,
       GTK_RESPONSE_REJECT,
       NULL);
+  gtk_util::AddButtonToDialog(dialog_,
+      l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_OK).c_str(),
+      GTK_STOCK_APPLY, GTK_RESPONSE_ACCEPT);
+
   gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
+
+  gtk_widget_realize(dialog_);
   int width, height;
   gtk_util::GetWidgetSizeFromResources(dialog_,
                                        IDS_FIRSTRUN_DIALOG_WIDTH_CHARS,
@@ -53,29 +78,27 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
   GtkWidget* vbox = gtk_vbox_new(FALSE, 12);
 
 #if defined(GOOGLE_CHROME_BUILD)
-  // TODO(port): remove this warning before beta release when we have all the
-  // privacy features working.
-  GtkWidget* privacy_label = gtk_label_new(
-      "This version of Google Chrome for Linux is not appropriate for "
-      "general consumer use.  Certain privacy features are unavailable "
-      "at this time as described in our privacy policy at");
-  gtk_misc_set_alignment(GTK_MISC(privacy_label), 0, 0);
-  gtk_label_set_line_wrap(GTK_LABEL(privacy_label), TRUE);
-  gtk_box_pack_start(GTK_BOX(vbox), privacy_label, FALSE, FALSE, 0);
-
-  GtkWidget* url_label = gtk_label_new(NULL);
-  gtk_label_set_markup(GTK_LABEL(url_label),
-      "<tt>http://www.google.com/chrome/intl/en/privacy_linux.html</tt>");
-  // Set selectable to allow copy and paste.
-  gtk_label_set_selectable(GTK_LABEL(url_label), TRUE);
-  gtk_box_pack_start(GTK_BOX(vbox), url_label, FALSE, FALSE, 0);
-
-  report_crashes_ = gtk_check_button_new();
   GtkWidget* check_label = gtk_label_new(
       l10n_util::GetStringUTF8(IDS_OPTIONS_ENABLE_LOGGING).c_str());
   gtk_label_set_line_wrap(GTK_LABEL(check_label), TRUE);
+
+  GtkWidget* learn_more_link = gtk_chrome_link_button_new(
+      l10n_util::GetStringUTF8(IDS_LEARN_MORE).c_str());
+  // Stick it in an hbox so it doesn't expand to the whole width.
+  GtkWidget* learn_more_hbox = gtk_hbox_new(FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(learn_more_hbox),
+                     gtk_util::IndentWidget(learn_more_link),
+                     FALSE, FALSE, 0);
+  g_signal_connect(learn_more_link, "clicked",
+                   G_CALLBACK(OnLearnMoreLinkClicked), this);
+
+  report_crashes_ = gtk_check_button_new();
   gtk_container_add(GTK_CONTAINER(report_crashes_), check_label);
-  gtk_box_pack_start(GTK_BOX(vbox), report_crashes_, FALSE, FALSE, 0);
+
+  GtkWidget* report_vbox = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
+  gtk_box_pack_start(GTK_BOX(report_vbox), report_crashes_, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(report_vbox), learn_more_hbox, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(vbox), report_vbox, FALSE, FALSE, 0);
 #endif
 
   make_default_ = gtk_check_button_new_with_label(
@@ -110,16 +133,6 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
   }
 
   gtk_box_pack_start(GTK_BOX(content_area), vbox, FALSE, FALSE, 0);
-
-  // TODO(port): it should be sufficient to just run the dialog:
-  // int response = gtk_dialog_run(GTK_DIALOG(dialog));
-  // but that spins a nested message loop and hoses us.  :(
-  // http://code.google.com/p/chromium/issues/detail?id=12552
-  // Instead, run a loop and extract the response manually.
-  g_signal_connect(G_OBJECT(dialog_), "response",
-                   G_CALLBACK(HandleOnResponseDialog), this);
-  gtk_widget_show_all(dialog_);
-  MessageLoop::current()->Run();
 }
 
 void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
@@ -134,14 +147,11 @@ void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
     // Check if user has opted into reporting.
     if (report_crashes_ &&
         gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(report_crashes_))) {
+#if defined(USE_LINUX_BREAKPAD)
       if (GoogleUpdateSettings::SetCollectStatsConsent(true)) {
-        PrefService* local_state = g_browser_process->local_state();
-        if (local_state)
-          local_state->SetBoolean(prefs::kMetricsReportingEnabled, true);
-        else
-          NOTREACHED();
         InitCrashReporter();
       }
+#endif
     } else {
       GoogleUpdateSettings::SetCollectStatsConsent(false);
     }
@@ -167,6 +177,13 @@ void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
     FirstRunDone();
 }
 
+// static
+void FirstRunDialog::OnLearnMoreLinkClicked(GtkButton *button,
+                                            FirstRunDialog* first_run) {
+  platform_util::OpenExternal(GURL(
+      l10n_util::GetStringUTF8(IDS_LEARN_MORE_REPORTING_URL)));
+}
+
 void FirstRunDialog::FirstRunDone() {
   // Set preference to show first run bubble and welcome page.
   FirstRun::SetShowFirstRunBubblePref();
@@ -174,4 +191,5 @@ void FirstRunDialog::FirstRunDone() {
 
   gtk_widget_destroy(dialog_);
   MessageLoop::current()->Quit();
+  delete this;
 }

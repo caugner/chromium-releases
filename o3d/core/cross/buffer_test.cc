@@ -36,6 +36,7 @@
 #include "tests/common/win/testing_common.h"
 #include "core/cross/error_status.h"
 #include "core/cross/buffer.h"
+#include "core/cross/pack.h"
 #include "import/cross/memory_buffer.h"
 #include "import/cross/memory_stream.h"
 #include "import/cross/raw_data.h"
@@ -112,10 +113,10 @@ TEST_F(BufferTest, TestBasic) {
   const FieldRefArray& fields = buffer->fields();
   // Verify initial state.
   ASSERT_TRUE(buffer->IsA(Buffer::GetApparentClass()));
-  EXPECT_EQ(buffer->num_elements(), 0);
-  EXPECT_EQ(fields.size(), 0);
-  EXPECT_EQ(buffer->stride(), 0);
-  EXPECT_EQ(buffer->GetSizeInBytes(), 0);
+  EXPECT_EQ(buffer->num_elements(), 0U);
+  EXPECT_EQ(fields.size(), 0U);
+  EXPECT_EQ(buffer->stride(), 0U);
+  EXPECT_EQ(buffer->GetSizeInBytes(), 0U);
 }
 
 // Test create fields and putting something in
@@ -140,12 +141,12 @@ TEST_F(BufferTest, CreateFields) {
   Field::Ref field_1 = Field::Ref(buffer->CreateField(
       FloatField::GetApparentClass(),
       kNumComponents1));
-  EXPECT_EQ(fields.size(), 1);
+  EXPECT_EQ(fields.size(), 1U);
   EXPECT_EQ(field_1, fields[0].Get());
-  EXPECT_EQ(field_1->offset(), 0);
+  EXPECT_EQ(field_1->offset(), 0U);
   EXPECT_EQ(buffer->stride(), kSize1);
   EXPECT_EQ(buffer->total_components(), kNumComponents1);
-  EXPECT_EQ(buffer->GetSizeInBytes(), 0);
+  EXPECT_EQ(buffer->GetSizeInBytes(), 0U);
   EXPECT_TRUE(ChangeCountChanged(&change_count, buffer));
 
   // Allocate some elements.
@@ -258,10 +259,10 @@ TEST_F(BufferTest, ReshuffleFields) {
   Field::Ref field_2 = Field::Ref(buffer->CreateField(
         FloatField::GetApparentClass(),
         kNumComponents2));
-  EXPECT_EQ(fields.size(), 2);
+  EXPECT_EQ(fields.size(), 2U);
   EXPECT_EQ(field_1, fields[0].Get());
   EXPECT_EQ(field_2, fields[1].Get());
-  EXPECT_EQ(field_1->offset(), 0);
+  EXPECT_EQ(field_1->offset(), 0U);
   EXPECT_EQ(field_2->offset(), kSize1);
   EXPECT_EQ(buffer->stride(), kSize1 + kSize2);
   EXPECT_EQ(buffer->total_components(), kNumComponents1 + kNumComponents2);
@@ -290,9 +291,9 @@ TEST_F(BufferTest, ReshuffleFields) {
   // Check deleting a field
   buffer->RemoveField(field_1);
   EXPECT_TRUE(field_1->buffer() == NULL);
-  EXPECT_EQ(fields.size(), 1);
+  EXPECT_EQ(fields.size(), 1U);
   EXPECT_EQ(field_2, fields[0].Get());
-  EXPECT_EQ(field_2->offset(), 0);
+  EXPECT_EQ(field_2->offset(), 0U);
   EXPECT_EQ(buffer->stride(), kSize2);
   EXPECT_EQ(buffer->total_components(), kNumComponents2);
   EXPECT_EQ(buffer->GetSizeInBytes(), kSize2 * kNumElements);
@@ -477,7 +478,7 @@ TEST_F(BufferTest, TestVertexBufferFromRawData) {
   stream.WriteLittleEndianInt32(kNumElements);
 
   // Make note of stream position at end of header
-  size_t data_start_position = stream.GetStreamPosition();
+  stream.GetStreamPosition();
 
   // Write out the data for each field
 
@@ -541,7 +542,7 @@ TEST_F(BufferTest, TestVertexBufferFromRawData) {
   // Check that the field that was originally created to verify that setting
   // the buffer from raw data would remove any existing fields was in fact
   // removed.
-  EXPECT_EQ(3, buffer->fields().size());
+  EXPECT_EQ(3U, buffer->fields().size());
 
   float buffer_float_data[kNumElements * 3];
   uint32 buffer_int_data[kNumElements * 2];

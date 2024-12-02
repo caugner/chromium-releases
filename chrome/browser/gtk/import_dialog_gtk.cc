@@ -25,8 +25,8 @@ void ImportDialogGtk::ImportComplete() {
   delete this;
 }
 
-ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile) :
-    parent_(parent), profile_(profile), importer_host_(new ImporterHost()) {
+ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile)
+    : parent_(parent), profile_(profile), importer_host_(new ImporterHost()) {
   // Build the dialog.
   dialog_ = gtk_dialog_new_with_buttons(
       l10n_util::GetStringUTF8(IDS_IMPORT_SETTINGS_TITLE).c_str(),
@@ -39,9 +39,11 @@ ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile) :
 
   // Add import button separately as we might need to disable it, if
   // no supported browsers found.
-  GtkWidget* import_button = gtk_dialog_add_button(GTK_DIALOG(dialog_),
+  GtkWidget* import_button = gtk_util::AddButtonToDialog(dialog_,
       l10n_util::GetStringUTF8(IDS_IMPORT_COMMIT).c_str(),
-      GTK_RESPONSE_ACCEPT);
+      GTK_STOCK_APPLY, GTK_RESPONSE_ACCEPT);
+  GTK_WIDGET_SET_FLAGS(import_button, GTK_CAN_DEFAULT);
+  gtk_dialog_set_default_response(GTK_DIALOG(dialog_), GTK_RESPONSE_ACCEPT);
 
   // TODO(rahulk): find how to set size properly so that the dialog
   // box width is at least enough to display full title.
@@ -98,6 +100,7 @@ ImportDialogGtk::ImportDialogGtk(GtkWindow* parent, Profile* profile) :
       gtk_combo_box_append_text(GTK_COMBO_BOX(combo_),
                                 WideToUTF8(profile).c_str());
     }
+    gtk_widget_grab_focus(import_button);
   } else {
     gtk_combo_box_append_text(GTK_COMBO_BOX(combo_),
         l10n_util::GetStringUTF8(IDS_IMPORT_NO_PROFILE_FOUND).c_str());

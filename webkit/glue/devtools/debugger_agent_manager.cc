@@ -11,6 +11,7 @@
 #undef LOG
 
 #include "base/string_util.h"
+#include "webkit/api/public/WebDevToolsAgent.h"
 #include "webkit/glue/devtools/debugger_agent_impl.h"
 #include "webkit/glue/devtools/debugger_agent_manager.h"
 #include "webkit/glue/webdevtoolsagent_impl.h"
@@ -20,6 +21,8 @@
 #include "v8/include/v8-debug.h"
 #endif
 
+using WebKit::WebDevToolsAgent;
+
 WebDevToolsAgent::MessageLoopDispatchHandler
     DebuggerAgentManager::message_loop_dispatch_handler_ = NULL;
 
@@ -28,6 +31,12 @@ bool DebuggerAgentManager::in_host_dispatch_handler_ = false;
 
 // static
 DebuggerAgentManager::DeferrersMap DebuggerAgentManager::page_deferrers_;
+
+// static
+bool DebuggerAgentManager::in_utility_context_ = false;
+
+// static
+bool DebuggerAgentManager::debug_break_delayed_ = false;
 
 namespace {
 
@@ -136,12 +145,11 @@ void DebuggerAgentManager::DebugDetach(DebuggerAgentImpl* debugger_agent) {
     }
   } else {
     // Remove all breakpoints set by the agent.
-    std::wstring clear_breakpoint_group_cmd(StringPrintf(
-        L"{\"seq\":1,\"type\":\"request\",\"command\":\"clearbreakpointgroup\","
-            L"\"arguments\":{\"groupId\":%d}}",
-        host_id));
-    SendCommandToV8(WideToUTF16(clear_breakpoint_group_cmd),
-                    new CallerIdWrapper());
+    String clear_breakpoint_group_cmd = String::format(
+        "{\"seq\":1,\"type\":\"request\",\"command\":\"clearbreakpointgroup\","
+            "\"arguments\":{\"groupId\":%d}}",
+        host_id);
+    SendCommandToV8(clear_breakpoint_group_cmd, new CallerIdWrapper());
 
     if (is_on_breakpoint) {
       // Force continue if detach happened in nessted message loop while
@@ -157,15 +165,19 @@ void DebuggerAgentManager::DebugBreak(DebuggerAgentImpl* debugger_agent) {
 #if USE(V8)
   DCHECK(DebuggerAgentForHostId(debugger_agent->webdevtools_agent()->host_id())
              == debugger_agent);
-  v8::Debug::DebugBreak();
+  if (in_utility_context_) {
+    debug_break_delayed_ = true;
+  } else {
+    v8::Debug::DebugBreak();
+  }
 #endif
 }
 
 // static
 void DebuggerAgentManager::OnV8DebugMessage(const v8::Debug::Message& message) {
   v8::HandleScope scope;
-  v8::String::Utf8Value value(message.GetJSON());
-  std::string out(*value, value.length());
+  v8::String::Value value(message.GetJSON());
+  String out(reinterpret_cast<const UChar*>(*value), value.length());
 
   // If caller_data is not NULL the message is a response to a debugger command.
   if (v8::Debug::ClientData* caller_data = message.GetClientData()) {
@@ -201,14 +213,22 @@ void DebuggerAgentManager::OnV8DebugMessage(const v8::Debug::Message& message) {
     return;
   }
 
-  // If the context is from one of the inpected tabs or injected extension
-  // scripts it must have host_id in the data field.
-  int host_id = WebCore::V8Proxy::contextDebugId(context);
-  if (host_id != -1) {
-    DebuggerAgentImpl* agent = DebuggerAgentForHostId(host_id);
-    if (agent) {
-      agent->DebuggerOutput(out);
-      return;
+  if (in_utility_context_ && message.GetEvent() == v8::Break) {
+    // This may happen when two tabs are being debugged in the same process.
+    // Suppose that first debugger is pauesed on an exception. It will run
+    // nested MessageLoop which may process Break request from the second
+    // debugger.
+    debug_break_delayed_ = true;
+  } else {
+    // If the context is from one of the inpected tabs or injected extension
+    // scripts it must have host_id in the data field.
+    int host_id = WebCore::V8Proxy::contextDebugId(context);
+    if (host_id != -1) {
+      DebuggerAgentImpl* agent = DebuggerAgentForHostId(host_id);
+      if (agent) {
+        agent->DebuggerOutput(out);
+        return;
+      }
     }
   }
 
@@ -221,9 +241,9 @@ void DebuggerAgentManager::OnV8DebugMessage(const v8::Debug::Message& message) {
 
 // static
 void DebuggerAgentManager::ExecuteDebuggerCommand(
-    const std::string& command,
+    const String& command,
     int caller_id) {
-  SendCommandToV8(UTF8ToUTF16(command), new CallerIdWrapper(caller_id));
+  SendCommandToV8(command, new CallerIdWrapper(caller_id));
 }
 
 // static
@@ -257,19 +277,19 @@ void DebuggerAgentManager::OnNavigate() {
 }
 
 // static
-void DebuggerAgentManager::SendCommandToV8(const string16& cmd,
+void DebuggerAgentManager::SendCommandToV8(const String& cmd,
                                            v8::Debug::ClientData* data) {
 #if USE(V8)
-  v8::Debug::SendCommand(reinterpret_cast<const uint16_t*>(cmd.data()),
+  v8::Debug::SendCommand(reinterpret_cast<const uint16_t*>(cmd.characters()),
                          cmd.length(),
                          data);
 #endif
 }
 
 void DebuggerAgentManager::SendContinueCommandToV8() {
-  std::wstring continue_cmd(
-      L"{\"seq\":1,\"type\":\"request\",\"command\":\"continue\"}");
-  SendCommandToV8(WideToUTF16(continue_cmd), new CallerIdWrapper());
+  String continue_cmd(
+      "{\"seq\":1,\"type\":\"request\",\"command\":\"continue\"}");
+  SendCommandToV8(continue_cmd, new CallerIdWrapper());
 }
 
 // static

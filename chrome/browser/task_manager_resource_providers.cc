@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@
 #include "base/process_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "base/thread.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_list.h"
@@ -34,6 +35,8 @@
 #include "chrome/common/child_process_host.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/render_messages.h"
+#include "chrome/common/sqlite_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
@@ -43,11 +46,17 @@
 
 TaskManagerTabContentsResource::TaskManagerTabContentsResource(
     TabContents* tab_contents)
-    : tab_contents_(tab_contents) {
+    : tab_contents_(tab_contents),
+      pending_stats_update_(false) {
   // We cache the process as when the TabContents is closed the process
   // becomes NULL and the TaskManager still needs it.
   process_ = tab_contents_->process()->process().handle();
   pid_ = base::GetProcId(process_);
+  stats_.images.size = 0;
+  stats_.cssStyleSheets.size = 0;
+  stats_.scripts.size = 0;
+  stats_.xslStyleSheets.size = 0;
+  stats_.fonts.size = 0;
 }
 
 TaskManagerTabContentsResource::~TaskManagerTabContentsResource() {
@@ -75,6 +84,24 @@ std::wstring TaskManagerTabContentsResource::GetTitle() const {
   }
 
   return l10n_util::GetStringF(IDS_TASK_MANAGER_TAB_PREFIX, tab_title);
+}
+
+void TaskManagerTabContentsResource::Refresh() {
+  if (!pending_stats_update_) {
+    tab_contents_->render_view_host()->Send(new ViewMsg_GetCacheResourceStats);
+    pending_stats_update_ = true;
+  }
+}
+
+WebKit::WebCache::ResourceTypeStats
+    TaskManagerTabContentsResource::GetWebCoreCacheStats() const {
+  return stats_;
+}
+
+void TaskManagerTabContentsResource::NotifyResourceTypeStats(
+    const WebKit::WebCache::ResourceTypeStats& stats) {
+  stats_ = stats;
+  pending_stats_update_ = false;
 }
 
 SkBitmap TaskManagerTabContentsResource::GetIcon() const {
@@ -139,7 +166,7 @@ void TaskManagerTabContentsResourceProvider::StartUpdating() {
   updating_ = true;
 
   // Add all the existing TabContents.
-  for (TabContentsIterator iterator; !iterator.done(); iterator++)
+  for (TabContentsIterator iterator; !iterator.done(); ++iterator)
     Add(*iterator);
 
   // Then we register for notifications to get new tabs.
@@ -270,7 +297,7 @@ TaskManagerChildProcessResource::TaskManagerChildProcessResource(
       network_usage_support_(false) {
   // We cache the process id because it's not cheap to calculate, and it won't
   // be available when we get the plugin disconnected notification.
-  pid_ = child_proc.GetProcessId();
+  pid_ = child_proc.id();
   if (!default_icon_) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
@@ -675,6 +702,10 @@ SkBitmap TaskManagerBrowserProcessResource::GetIcon() const {
   return *default_icon_;
 }
 
+size_t TaskManagerBrowserProcessResource::SqliteMemoryUsedBytes() const {
+  return static_cast<size_t>(sqlite3_memory_used());
+}
+
 base::ProcessHandle TaskManagerBrowserProcessResource::GetProcess() const {
   return base::GetCurrentProcessHandle();  // process_;
 }
@@ -685,7 +716,8 @@ base::ProcessHandle TaskManagerBrowserProcessResource::GetProcess() const {
 
 TaskManagerBrowserProcessResourceProvider::
     TaskManagerBrowserProcessResourceProvider(TaskManager* task_manager)
-    : task_manager_(task_manager) {
+    : updating_(false),
+      task_manager_(task_manager) {
 }
 
 TaskManagerBrowserProcessResourceProvider::

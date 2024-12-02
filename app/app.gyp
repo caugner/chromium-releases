@@ -4,11 +4,10 @@
 
 {
   'variables': {
+    # TODO: remove this helper when we have loops in GYP
+    'apply_locales_cmd': ['python', '../chrome/tools/build/apply_locales.py',],
     'chromium_code': 1,
   },
-  'includes': [
-    '../build/common.gypi',
-  ],
   'target_defaults': {
     'sources/': [
       ['exclude', '/(cocoa|gtk|win)/'],
@@ -45,11 +44,15 @@
         'app_resources',
         'app_strings',
         '../base/base.gyp:base',
-        '../base/base.gyp:base_gfx',
+        '../base/base.gyp:base_i18n',
         '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        '../third_party/libjpeg/libjpeg.gyp:libjpeg',
+        '../third_party/libpng/libpng.gyp:libpng',
+        '../third_party/sqlite/sqlite.gyp:sqlite',
+        '../third_party/zlib/zlib.gyp:zlib',
       ],
       'include_dirs': [
         '..',
@@ -59,41 +62,81 @@
         # All .cc, .h, and .mm files under app/ except for tests.
         'animation.cc',
         'animation.h',
+        'active_window_watcher_x.cc',
+        'active_window_watcher_x.h',
         'app_paths.h',
         'app_paths.cc',
         'app_switches.h',
         'app_switches.cc',
-        'drag_drop_types.cc',
+        'clipboard/clipboard.cc',
+        'clipboard/clipboard.h',
+        'clipboard/clipboard_linux.cc',
+        'clipboard/clipboard_mac.mm',
+        'clipboard/clipboard_util_win.cc',
+        'clipboard/clipboard_util_win.h',
+        'clipboard/clipboard_win.cc',
+        'clipboard/scoped_clipboard_writer.cc',
+        'clipboard/scoped_clipboard_writer.h',
+        'combobox_model.h',
+        'drag_drop_types_gtk.cc',
+        'drag_drop_types_win.cc',
         'drag_drop_types.h',
+        'gfx/blit.cc',
+        'gfx/blit.h',
         'gfx/canvas.cc',
         'gfx/canvas.h',
         'gfx/canvas_linux.cc',
         'gfx/canvas_mac.mm',
         'gfx/canvas_win.cc',
+        'gfx/codec/jpeg_codec.cc',
+        'gfx/codec/jpeg_codec.h',
+        'gfx/codec/png_codec.cc',
+        'gfx/codec/png_codec.h',
+        'gfx/color_utils.cc',
+        'gfx/color_utils.h',
+        'gfx/favicon_size.h',
         'gfx/font.h',
         'gfx/font_gtk.cc',
         'gfx/font_mac.mm',
         'gfx/font_skia.cc',
+        'gfx/font_util.h',
+        'gfx/font_util.cc',
         'gfx/font_win.cc',
-        'gfx/color_utils.cc',
-        'gfx/color_utils.h',
-        'gfx/favicon_size.h',
+        'gfx/gdi_util.cc',
+        'gfx/gdi_util.h',
+        'gfx/gtk_util.cc',
+        'gfx/gtk_util.h',
         'gfx/icon_util.cc',
         'gfx/icon_util.h',
         'gfx/insets.h',
+        'gfx/native_widget_types.h',
+        'gfx/native_widget_types_gtk.cc',
+        'gfx/native_theme_win.cc',
+        'gfx/native_theme_win.h',
+        'gfx/gtk_native_view_id_manager.cc',
+        'gfx/gtk_native_view_id_manager.h',
         'gfx/path_gtk.cc',
         'gfx/path_win.cc',
         'gfx/path.h',
+        'gfx/skbitmap_operations.cc',
+        'gfx/skbitmap_operations.h',
         'gfx/text_elider.cc',
         'gfx/text_elider.h',
+        'gtk_dnd_util.cc',
+        'gtk_dnd_util.h',
         'l10n_util.cc',
         'l10n_util.h',
+        'l10n_util_mac.h',
+        'l10n_util_mac.mm',
         'l10n_util_posix.cc',
         'l10n_util_win.cc',
         'l10n_util_win.h',
         'message_box_flags.h',
-        'os_exchange_data_win.cc',
-        'os_exchange_data_gtk.cc',
+        'os_exchange_data_provider_gtk.cc',
+        'os_exchange_data_provider_gtk.h',
+        'os_exchange_data_provider_win.cc',
+        'os_exchange_data_provider_win.h',
+        'os_exchange_data.cc',
         'os_exchange_data.h',
         'resource_bundle.cc',
         'resource_bundle.h',
@@ -102,13 +145,26 @@
         'resource_bundle_mac.mm',
         'slide_animation.cc',
         'slide_animation.h',
+        'sql/connection.cc',
+        'sql/connection.h',
+        'sql/meta_table.cc',
+        'sql/meta_table.h',
+        'sql/statement.cc',
+        'sql/statement.h',
+        'sql/transaction.cc',
+        'sql/transaction.h',
+        'table_model.cc',
+        'table_model.h',
+        'table_model_observer.h',
         'theme_provider.cc',
         'theme_provider.h',
         'throb_animation.cc',
         'throb_animation.h',
-        'table_model.cc',
-        'table_model.h',
-        'table_model_observer.h',
+        'tree_model.h',
+        'tree_node_iterator.h',
+        'tree_node_model.h',
+        'win/window_impl.cc',
+        'win/window_impl.h',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -123,6 +179,26 @@
             '../build/linux/system.gyp:fontconfig',
             '../build/linux/system.gyp:gtk',
           ],
+          'conditions': [
+            ['toolkit_views==0 and chromeos==0', {
+              # Note: because of gyp predence rules this has to be defined as
+              # 'sources/' rather than 'sources!'.
+              'sources/': [
+                ['exclude', '^os_exchange_data.cc'],
+                ['exclude', '^os_exchange_data.h'],
+                ['exclude', '^os_exchange_data_provider_gtk.cc'],
+                ['exclude', '^os_exchange_data_provider_gtk.h'],
+                ['exclude', '^drag_drop_types_gtk.cc'],
+              ],
+            }],
+            ['toolkit_views==1 or chromeos==1', {
+              # Note: because of gyp predence rules this has to be defined as
+              # 'sources/' rather than 'sources!'.
+              'sources/': [
+                ['include', '^os_exchange_data.cc'],
+              ],
+            }],
+          ],
         }],
         ['OS=="win"', {
           'sources': [
@@ -132,21 +208,24 @@
         }],
         ['OS!="win"', {
           'sources!': [
-            'drag_drop_types.cc',
             'drag_drop_types.h',
+            'gfx/gdi_util.cc',
+            'gfx/gdi_util.h',
             'gfx/icon_util.cc',
             'gfx/icon_util.h',
+            'gfx/native_theme_win.cc',
+            'gfx/native_theme_win.h',
             'os_exchange_data.cc',
+            'win/window_impl.cc',
+            'win/window_impl.h',
           ],
-          'conditions': [
-            ['toolkit_views==0', {
-              # Note: because of gyp predence rules this has to be defined as
-              # 'sources/' rather than 'sources!'.
-              'sources/': [
-                ['exclude', '^os_exchange_data_gtk.cc'],
-                ['exclude', '^os_exchange_data.h'],
-              ],
-            }],
+        }],
+        ['OS!="linux"', {
+          'sources!': [
+            'gfx/gtk_util.cc',
+            'gfx/gtk_util.h',
+            'gtk_dnd_util.cc',
+            'gtk_dnd_util.h',
           ],
         }],
       ],
@@ -161,36 +240,49 @@
         '../net/net.gyp:net_test_support',
         '../skia/skia.gyp:skia',
         '../testing/gtest.gyp:gtest',
-        '../third_party/icu38/icu38.gyp:icui18n',
-        '../third_party/icu38/icu38.gyp:icuuc',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        '../third_party/libjpeg/libjpeg.gyp:libjpeg',
+        '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/libxml/libxml.gyp:libxml',
+        '../third_party/zlib/zlib.gyp:zlib',
       ],
       'sources': [
         'animation_unittest.cc',
+        'clipboard/clipboard_unittest.cc',
+        'gfx/codec/jpeg_codec_unittest.cc',
+        'gfx/codec/png_codec_unittest.cc',
+        'gfx/color_utils_unittest.cc',
         'gfx/font_unittest.cc',
         'gfx/icon_util_unittest.cc',
+        'gfx/native_theme_win_unittest.cc',
+        'gfx/skbitmap_operations_unittest.cc',
         'gfx/text_elider_unittest.cc',
+        'l10n_util_mac_unittest.mm',
         'l10n_util_unittest.cc',
         'os_exchange_data_win_unittest.cc',
         'run_all_unittests.cc',
         'test_suite.h',
+        'sql/connection_unittest.cc',
+        'sql/statement_unittest.cc',
+        'sql/transaction_unittest.cc',
         'tree_node_iterator_unittest.cc',
-        'win_util_unittest.cc',      
+        'win_util_unittest.cc',
       ],
       'include_dirs': [
         '..',
       ],
       'conditions': [
         ['OS=="linux"', {
-          # TODO: Move these dependencies to platform-neutral once these
-          # projects are generated by GYP.
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+            '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
           ],
         }],
         ['OS!="win"', {
           'sources!': [
             'gfx/icon_util_unittest.cc',
+            'gfx/native_theme_win_unittest.cc',
             'os_exchange_data_win_unittest.cc',
             'win_util_unittest.cc',
           ],
@@ -213,11 +305,17 @@
           },
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/app/grit/<(RULE_INPUT_ROOT).h',
-            '<(SHARED_INTERMEDIATE_DIR)/app/<(RULE_INPUT_ROOT)_en-US.pak',
+            # TODO: remove this helper when we have loops in GYP
+            '>!@(<(apply_locales_cmd) \'<(SHARED_INTERMEDIATE_DIR)/app/<(RULE_INPUT_ROOT)_ZZLOCALE.pak\' <(locales))',
           ],
           'action': ['python', '<@(_inputs)', '-i', '<(RULE_INPUT_PATH)',
             'build', '-o', '<(grit_out_dir)'],
           'message': 'Generating resources from <(RULE_INPUT_PATH)',
+          'conditions': [
+            ['use_titlecase_in_grd_files==1', {
+              'action': ['-D', 'use_titlecase'],
+            }],
+          ],
         },
       ],
       'sources': [
@@ -272,6 +370,57 @@
           'dependencies': ['../build/win/system.gyp:cygwin'],
         }],
       ],
-    },    
+    },
+    {
+      'target_name': 'app_id',
+      'type': 'none',
+      'msvs_guid': '83100055-172B-49EA-B422-B1A92B627D37',
+      'conditions': [
+        ['OS=="win"', 
+          {
+            'actions': [
+              {
+                'action_name': 'appid',
+                'variables': {
+                  'appid_py': '../chrome/tools/build/appid.py',
+                },
+                'conditions': [
+                  [ 'branding=="Chrome"', {
+                    'variables': {
+                      'appid_value': '<(google_update_appid)',
+                    },
+                  }, { # else 
+                    'variables': {
+                      'appid_value': '',
+                    },
+                  }],
+                ],
+                'inputs': [
+                  '<(appid_py)',
+                ],
+                'outputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/chrome/appid.h',
+                  'tools/build/_always_run_appid_py.marker',
+                ],
+                'action': [
+                  'python',
+                  '<(appid_py)',
+                  '-a', '<(appid_value)',
+                  '-o', '<(SHARED_INTERMEDIATE_DIR)/chrome/appid.h',
+                ],
+                'process_outputs_as_sources': 1,
+                'message': 'Generating appid information in <(SHARED_INTERMEDIATE_DIR)/chrome/appid.h'
+              },
+            ],
+          },
+        ],
+      ],
+    },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

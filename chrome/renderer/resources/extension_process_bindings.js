@@ -2,22 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// -----------------------------------------------------------------------------
-// NOTE: If you change this file you need to touch renderer_resources.grd to
-// have your change take effect.
-// -----------------------------------------------------------------------------
-
 // This script contains privileged chrome extension related javascript APIs.
 // It is loaded by pages whose URL has the chrome-extension protocol.
 
 var chrome = chrome || {};
 (function() {
+  native function GetExtensionAPIDefinition();
   native function StartRequest();
-  native function GetCurrentPageActions();
-  native function GetViews();
+  native function GetCurrentPageActions(extensionId);
+  native function GetExtensionViews();
   native function GetChromeHidden();
   native function GetNextRequestId();
   native function OpenChannelToTab();
+  native function GetRenderViewId();
+  native function GetL10nMessage();
+  native function SetExtensionActionIcon();
 
   if (!chrome)
     chrome = {};
@@ -25,13 +24,15 @@ var chrome = chrome || {};
   var chromeHidden = GetChromeHidden();
 
   // Validate arguments.
-  function validate(args, schemas) {
+  chromeHidden.validationTypes = [];
+  chromeHidden.validate = function(args, schemas) {
     if (args.length > schemas.length)
       throw new Error("Too many arguments.");
 
     for (var i = 0; i < schemas.length; i++) {
       if (i in args && args[i] !== null && args[i] !== undefined) {
-        var validator = new chrome.JSONSchemaValidator();
+        var validator = new chromeHidden.JSONSchemaValidator();
+        validator.addTypes(chromeHidden.validationTypes);
         validator.validate(args[i], schemas[i]);
         if (validator.errors.length == 0)
           continue;
@@ -56,499 +57,339 @@ var chrome = chrome || {};
   }
 
   // Callback handling.
-  var callbacks = [];
+  var requests = [];
   chromeHidden.handleResponse = function(requestId, name,
                                          success, response, error) {
     try {
-      if (!success) {
-        if (!error)
+      var request = requests[requestId];
+      if (success) {
+        delete chrome.extension.lastError;
+      } else {
+        if (!error) {
           error = "Unknown error."
+        }
         console.error("Error during " + name + ": " + error);
-        return;
+        chrome.extension.lastError = {
+          "message": error
+        };
       }
 
-      if (callbacks[requestId]) {
+      if (request.callback) {
+        // Callbacks currently only support one callback argument.
+        var callbackArgs = response ? [JSON.parse(response)] : [];
+
+        // Validate callback in debug only -- and only when the
+        // caller has provided a callback. Implementations of api
+        // calls my not return data if they observe the caller
+        // has not provided a callback.
+        if (chromeHidden.validateCallbacks && !error) {
+          try {
+            if (!request.callbackSchema.parameters) {
+              throw "No callback schemas defined";
+            }
+
+            if (request.callbackSchema.parameters.length > 1) {
+              throw "Callbacks may only define one parameter";
+            }
+
+            chromeHidden.validate(callbackArgs,
+                request.callbackSchema.parameters);
+          } catch (exception) {
+            return "Callback validation error during " + name + " -- " +
+                   exception;
+          }
+        }
+
         if (response) {
-          callbacks[requestId](JSON.parse(response));
+          request.callback(callbackArgs[0]);
         } else {
-          callbacks[requestId]();
+          request.callback();
         }
       }
     } finally {
-      delete callbacks[requestId];
+      delete requests[requestId];
+      delete chrome.extension.lastError;
     }
   };
+
+  chromeHidden.setViewType = function(type) {
+    var modeClass = "chrome-" + type;
+    var className = document.documentElement.className;
+    if (className && className.length) {
+      var classes = className.split(" ");
+      var new_classes = [];
+      classes.forEach(function(cls) {
+        if (cls.indexOf("chrome-") != 0) {
+          new_classes.push(cls);
+        }
+      });
+      new_classes.push(modeClass);
+      document.documentElement.className = new_classes.join(" ");
+    } else {
+      document.documentElement.className = modeClass;
+    }
+  };
+
+  function prepareRequest(args, argSchemas) {
+    var request = {};
+    var argCount = args.length;
+
+    // Look for callback param.
+    if (argSchemas.length > 0 &&
+        args.length == argSchemas.length &&
+        argSchemas[argSchemas.length - 1].type == "function") {
+      request.callback = args[argSchemas.length - 1];
+      request.callbackSchema = argSchemas[argSchemas.length - 1];
+      --argCount;
+    }
+
+    // Calls with one argument expect singular argument. Calls with multiple
+    // expect a list.
+    if (argCount == 1) {
+      request.args = args[0];
+    }
+    if (argCount > 1) {
+      request.args = [];
+      for (var k = 0; k < argCount; k++) {
+        request.args[k] = args[k];
+      }
+    }
+
+    return request;
+  }
 
   // Send an API request and optionally register a callback.
-  function sendRequest(functionName, args, callback) {
+  function sendRequest(functionName, args, argSchemas) {
+    var request = prepareRequest(args, argSchemas);
     // JSON.stringify doesn't support a root object which is undefined.
-    if (args === undefined)
-      args = null;
-    var sargs = JSON.stringify(args);
+    if (request.args === undefined)
+      request.args = null;
+    var sargs = JSON.stringify(request.args);
     var requestId = GetNextRequestId();
-    var hasCallback = false;
-    if (callback) {
-      hasCallback = true;
-      callbacks[requestId] = callback;
-    }
-    StartRequest(functionName, sargs, requestId, hasCallback);
+    requests[requestId] = request;
+    return StartRequest(functionName, sargs, requestId,
+                        request.callback ? true : false);
   }
 
-  //----------------------------------------------------------------------------
-
-  // Windows.
-  chrome.windows = {};
-
-  chrome.windows.get = function(windowId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.get", windowId, callback);
-  };
-
-  chrome.windows.get.params = [
-    chrome.types.pInt,
-    chrome.types.fun
-  ];
-
-  chrome.windows.getCurrent = function(callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.getCurrent", null, callback);
-  };
-
-  chrome.windows.getCurrent.params = [
-    chrome.types.fun
-  ];
-
-  chrome.windows.getLastFocused = function(callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.getLastFocused", null, callback);
-  };
-
-  chrome.windows.getLastFocused.params = [
-    chrome.types.fun
-  ];
-
-  chrome.windows.getAll = function(populate, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.getAll", populate, callback);
-  };
-
-  chrome.windows.getAll.params = [
-    chrome.types.optBool,
-    chrome.types.fun
-  ];
-
-  chrome.windows.create = function(createData, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.create", createData, callback);
-  };
-  chrome.windows.create.params = [
-    {
-      type: "object",
-      properties: {
-        url: chrome.types.optStr,
-        left: chrome.types.optInt,
-        top: chrome.types.optInt,
-        width: chrome.types.optPInt,
-        height: chrome.types.optPInt
-      },
-      optional: true
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.windows.update = function(windowId, updateData, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.update", [windowId, updateData], callback);
-  };
-  chrome.windows.update.params = [
-    chrome.types.pInt,
-    {
-      type: "object",
-      properties: {
-        left: chrome.types.optInt,
-        top: chrome.types.optInt,
-        width: chrome.types.optPInt,
-        height: chrome.types.optPInt
-      },
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.windows.remove = function(windowId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("windows.remove", windowId, callback);
-  };
-
-  chrome.windows.remove.params = [
-    chrome.types.pInt,
-    chrome.types.optFun
-  ];
-
-  // sends (windowId).
-  // *WILL* be followed by tab-attached AND then tab-selection-changed.
-  chrome.windows.onCreated = new chrome.Event("windows.onCreated");
-
-  // sends (windowId).
-  // *WILL* be preceded by sequences of tab-removed AND then
-  // tab-selection-changed -- one for each tab that was contained in the window
-  // that closed
-  chrome.windows.onRemoved = new chrome.Event("windows.onRemoved");
-
-  // sends (windowId).
-  chrome.windows.onFocusChanged =
-        new chrome.Event("windows.onFocusChanged");
-
-  //----------------------------------------------------------------------------
-
-  // Tabs
-  chrome.tabs = {};
-
-  chrome.tabs.get = function(tabId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.get", tabId, callback);
-  };
-
-  chrome.tabs.get.params = [
-    chrome.types.pInt,
-    chrome.types.fun
-  ];
-
-  chrome.tabs.getSelected = function(windowId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.getSelected", windowId, callback);
-  };
-
-  chrome.tabs.getSelected.params = [
-    chrome.types.optPInt,
-    chrome.types.fun
-  ];
-
-  chrome.tabs.getAllInWindow = function(windowId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.getAllInWindow", windowId, callback);
-  };
-
-  chrome.tabs.getAllInWindow.params = [
-    chrome.types.optPInt,
-    chrome.types.fun
-  ];
-
-  chrome.tabs.create = function(tab, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.create", tab, callback);
-  };
-
-  chrome.tabs.create.params = [
-    {
-      type: "object",
-      properties: {
-        windowId: chrome.types.optPInt,
-        index: chrome.types.optPInt,
-        url: chrome.types.optStr,
-        selected: chrome.types.optBool
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.tabs.update = function(tabId, updates, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.update", [tabId, updates], callback);
-  };
-
-  chrome.tabs.update.params = [
-    chrome.types.pInt,
-    {
-      type: "object",
-      properties: {
-        url: chrome.types.optStr,
-        selected: chrome.types.optBool
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.tabs.move = function(tabId, moveProps, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.move", [tabId, moveProps], callback);
-  };
-
-  chrome.tabs.move.params = [
-    chrome.types.pInt,
-    {
-      type: "object",
-      properties: {
-        windowId: chrome.types.optPInt,
-        index: chrome.types.pInt
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.tabs.remove = function(tabId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.remove", tabId, callback);
-  };
-
-  chrome.tabs.remove.params = [
-    chrome.types.pInt,
-    chrome.types.optFun
-  ];
-
-  chrome.tabs.detectLanguage = function(tabId, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("tabs.detectLanguage", tabId, callback);
-  };
-
-  chrome.tabs.detectLanguage.params = [
-    chrome.types.optPInt,
-    chrome.types.optFun
-  ];
-
-  chrome.tabs.connect = function(tabId, opt_name) {
-    validate(arguments, arguments.callee.params);
-    var portId = OpenChannelToTab(tabId, chrome.extension.id_, opt_name || "");
-    return chromeHidden.Port.createPort(portId, opt_name);
-  };
-
-  chrome.tabs.connect.params = [
-    chrome.types.pInt,
-    chrome.types.optStr
-  ];
-
-  // Sends ({Tab}).
-  // Will *NOT* be followed by tab-attached - it is implied.
-  // *MAY* be followed by tab-selection-changed.
-  chrome.tabs.onCreated = new chrome.Event("tabs.onCreated");
-
-  // Sends (tabId, {ChangedProps}).
-  chrome.tabs.onUpdated = new chrome.Event("tabs.onUpdated");
-
-  // Sends (tabId, {windowId, fromIndex, toIndex}).
-  // Tabs can only "move" within a window.
-  chrome.tabs.onMoved = new chrome.Event("tabs.onMoved");
-
-  // Sends (tabId, {windowId}).
-  chrome.tabs.onSelectionChanged =
-       new chrome.Event("tabs.onSelectionChanged");
-
-  // Sends (tabId, {newWindowId, newPosition}).
-  // *MAY* be followed by tab-selection-changed.
-  chrome.tabs.onAttached = new chrome.Event("tabs.onAttached");
-
-  // Sends (tabId, {oldWindowId, oldPosition}).
-  // *WILL* be followed by tab-selection-changed.
-  chrome.tabs.onDetached = new chrome.Event("tabs.onDetached");
-
-  // Sends (tabId).
-  // *WILL* be followed by tab-selection-changed.
-  // Will *NOT* be followed or preceded by tab-detached.
-  chrome.tabs.onRemoved = new chrome.Event("tabs.onRemoved");
-
-  //----------------------------------------------------------------------------
-
-  // PageActions.
-  chrome.pageActions = {};
-
-  chrome.pageActions.enableForTab = function(pageActionId, action) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("pageActions.enableForTab", [pageActionId, action]);
+  // Send a special API request that is not JSON stringifiable, and optionally
+  // register a callback.
+  function sendCustomRequest(nativeFunction, functionName, args, argSchemas) {
+    var request = prepareRequest(args, argSchemas);
+    var requestId = GetNextRequestId();
+    requests[requestId] = request;
+    return nativeFunction(functionName, request.args, requestId,
+                          request.callback ? true : false);
   }
 
-  chrome.pageActions.enableForTab.params = [
-    chrome.types.str,
-    {
-      type: "object",
-      properties: {
-        tabId: chrome.types.pInt,
-        url: chrome.types.str,
-        title: chrome.types.optStr,
-        iconId: chrome.types.optPInt,
-      },
-      optional: false
-    }
-  ];
-
-  chrome.pageActions.disableForTab = function(pageActionId, action) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("pageActions.disableForTab", [pageActionId, action]);
+  function bind(obj, func) {
+    return function() {
+      return func.apply(obj, arguments);
+    };
   }
 
-  chrome.pageActions.disableForTab.params = [
-    chrome.types.str,
-    {
-      type: "object",
-      properties: {
-        tabId: chrome.types.pInt,
-        url: chrome.types.str
-      },
-      optional: false
-    }
-  ];
+  // --- Setup additional api's not currently handled in common/extensions/api
 
   // Page action events send (pageActionId, {tabId, tabUrl}).
   function setupPageActionEvents(extensionId) {
-    var pageActions = GetCurrentPageActions();
-    var eventName = "";
+    var pageActions = GetCurrentPageActions(extensionId);
+    var eventName = "pageAction/" + extensionId;
+    // TODO(EXTENSIONS_DEPRECATED): only one page action
     for (var i = 0; i < pageActions.length; ++i) {
-      eventName = extensionId + "/" + pageActions[i];
       // Setup events for each extension_id/page_action_id string we find.
       chrome.pageActions[pageActions[i]] = new chrome.Event(eventName);
     }
+    chrome.pageAction = chrome.pageAction || {};
+    chrome.pageAction.onClicked = new chrome.Event(eventName);
   }
 
-  //----------------------------------------------------------------------------
-  // Bookmarks
-  chrome.bookmarks = {};
+  // Browser action events send {windowpId}.
+  function setupBrowserActionEvent(extensionId) {
+    var eventName = "browserAction/" + extensionId;
+    chrome.browserAction = chrome.browserAction || {};
+    chrome.browserAction.onClicked = new chrome.Event(eventName);
+  }
 
-  chrome.bookmarks.get = function(ids, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.get", ids, callback);
-  };
-
-  chrome.bookmarks.get.params = [
-    chrome.types.singleOrListOf(chrome.types.pInt),
-    chrome.types.fun
-  ];
-
-  chrome.bookmarks.getChildren = function(id, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.getChildren", id, callback);
-  };
-
-  chrome.bookmarks.getChildren.params = [
-    chrome.types.pInt,
-    chrome.types.fun
-  ];
-
-  chrome.bookmarks.getTree = function(callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.getTree", null, callback);
-  };
-
-  // TODO(erikkay): allow it to take an optional id as a starting point
-  // BUG=13727
-  chrome.bookmarks.getTree.params = [
-    chrome.types.fun
-  ];
-
-  chrome.bookmarks.search = function(query, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.search", query, callback);
-  };
-
-  chrome.bookmarks.search.params = [
-    chrome.types.str,
-    chrome.types.fun
-  ];
-
-  chrome.bookmarks.remove = function(id, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.remove", [id, false], callback);
-  };
-
-  chrome.bookmarks.remove.params = [
-    chrome.types.singleOrListOf(chrome.types.pInt),
-    chrome.types.optFun
-  ];
-
-  chrome.bookmarks.removeTree = function(id, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.removeTree", [id, true], callback);
-  };
-
-  chrome.bookmarks.removeTree.params = [
-    chrome.types.pInt,
-    chrome.types.optFun
-  ];
-
-  chrome.bookmarks.create = function(bookmark, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.create", bookmark, callback);
-  };
-
-  chrome.bookmarks.create.params = [
-    {
-      type: "object",
-      properties: {
-        parentId: chrome.types.optPInt,
-        index: chrome.types.optPInt,
-        title: chrome.types.optStr,
-        url: chrome.types.optStr,
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.bookmarks.move = function(id, destination, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.move", [id, destination], callback);
-  };
-
-  chrome.bookmarks.move.params = [
-    chrome.types.pInt,
-    {
-      type: "object",
-      properties: {
-        parentId: chrome.types.optPInt,
-        index: chrome.types.optPInt
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  chrome.bookmarks.update = function(id, changes, callback) {
-    validate(arguments, arguments.callee.params);
-    sendRequest("bookmarks.update", [id, changes], callback);
-  };
-
-  chrome.bookmarks.update.params = [
-    chrome.types.pInt,
-    {
-      type: "object",
-      properties: {
-        title: chrome.types.optStr
-      }
-    },
-    chrome.types.optFun
-  ];
-
-  // bookmark events
-
-  // Sends (id, {title, url, parentId, index, dateAdded, dateGroupModified})
-  // date values are milliseconds since the UTC epoch.
-  chrome.bookmarks.onAdded = new chrome.Event("bookmarks.onAdded");
-
-  // Sends (id, {parentId, index})
-  chrome.bookmarks.onRemoved = new chrome.Event("bookmarks.onRemoved");
-
-  // Sends (id, object) where object has list of properties that have changed.
-  // Currently, this only ever includes 'title'.
-  chrome.bookmarks.onChanged = new chrome.Event("bookmarks.onChanged");
-
-  // Sends (id, {parentId, index, oldParentId, oldIndex})
-  chrome.bookmarks.onMoved = new chrome.Event("bookmarks.onMoved");
-
-  // Sends (id, [childrenIds])
-  chrome.bookmarks.onChildrenReordered =
-      new chrome.Event("bookmarks.onChildrenReordered");
-
-
-  //----------------------------------------------------------------------------
-
-  // Self.
-  chrome.self = chrome.self || {};
+  function setupToolstripEvents(renderViewId) {
+    chrome.toolstrip = chrome.toolstrip || {};
+    chrome.toolstrip.onExpanded =
+        new chrome.Event("toolstrip.onExpanded." + renderViewId);
+    chrome.toolstrip.onCollapsed =
+        new chrome.Event("toolstrip.onCollapsed." + renderViewId);
+  }
 
   chromeHidden.onLoad.addListener(function (extensionId) {
-    chrome.extension = new chrome.Extension(extensionId);
-    // TODO(mpcomplete): self.onConnect is deprecated.  Remove it at 1.0.
-    // http://code.google.com/p/chromium/issues/detail?id=16356
-    chrome.self.onConnect = chrome.extension.onConnect;
+    chrome.initExtension(extensionId);
 
+    // |apiFunctions| is a hash of name -> object that stores the
+    // name & definition of the apiFunction. Custom handling of api functions
+    // is implemented by adding a "handleRequest" function to the object.
+    var apiFunctions = {};
+
+    // Read api definitions and setup api functions in the chrome namespace.
+    // TODO(rafaelw): Consider defining a json schema for an api definition
+    //   and validating either here, in a unit_test or both.
+    // TODO(rafaelw): Handle synchronous functions.
+    // TOOD(rafaelw): Consider providing some convenient override points
+    //   for api functions that wish to insert themselves into the call.
+    var apiDefinitions = JSON.parse(GetExtensionAPIDefinition());
+
+    apiDefinitions.forEach(function(apiDef) {
+      chrome[apiDef.namespace] = chrome[apiDef.namespace] || {};
+      var module = chrome[apiDef.namespace];
+
+      // Add types to global validationTypes
+      if (apiDef.types) {
+        apiDef.types.forEach(function(t) {
+          chromeHidden.validationTypes.push(t);
+        });
+      }
+
+      // Setup Functions.
+      if (apiDef.functions) {
+        apiDef.functions.forEach(function(functionDef) {
+          // Module functions may have been defined earlier by hand. Don't
+          // clobber them.
+          if (module[functionDef.name])
+            return;
+
+          var apiFunction = {};
+          apiFunction.definition = functionDef;
+          apiFunction.name = apiDef.namespace + "." + functionDef.name;;
+          apiFunctions[apiFunction.name] = apiFunction;
+
+          module[functionDef.name] = bind(apiFunction, function() {
+            chromeHidden.validate(arguments, this.definition.parameters);
+
+            if (this.handleRequest)
+              return this.handleRequest.apply(this, arguments);
+            else
+              return sendRequest(this.name, arguments,
+                  this.definition.parameters);
+          });
+        });
+      }
+
+      // Setup Events
+      if (apiDef.events) {
+        apiDef.events.forEach(function(eventDef) {
+          // Module events may have been defined earlier by hand. Don't clobber
+          // them.
+          if (module[eventDef.name])
+            return;
+
+          var eventName = apiDef.namespace + "." + eventDef.name;
+          module[eventDef.name] = new chrome.Event(eventName,
+              eventDef.parameters);
+        });
+      }
+    });
+
+    apiFunctions["tabs.connect"].handleRequest = function(tabId, connectInfo) {
+      var name = "";
+      if (connectInfo) {
+        name = connectInfo.name || name;
+      }
+      var portId = OpenChannelToTab(
+          tabId, chromeHidden.extensionId, name);
+      return chromeHidden.Port.createPort(portId, name);
+    }
+
+    apiFunctions["extension.getViews"].handleRequest = function() {
+      return GetExtensionViews(-1, "ALL");
+    }
+
+    apiFunctions["extension.getBackgroundPage"].handleRequest = function() {
+      return GetExtensionViews(-1, "BACKGROUND")[0] || null;
+    }
+
+    apiFunctions["extension.getToolstrips"].handleRequest =
+        function(windowId) {
+      if (typeof(windowId) == "undefined")
+        windowId = -1;
+      return GetExtensionViews(windowId, "TOOLSTRIP");
+    }
+
+    apiFunctions["extension.getTabContentses"].handleRequest =
+        function(windowId) {
+      if (typeof(windowId) == "undefined")
+        windowId = -1;
+      return GetExtensionViews(windowId, "TAB");
+    }
+
+    apiFunctions["devtools.getTabEvents"].handleRequest = function(tabId) {
+      var tabIdProxy = {};
+      var functions = ["onPageEvent", "onTabClose"];
+      functions.forEach(function(name) {
+        // Event disambiguation is handled by name munging.  See
+        // chrome/browser/extensions/extension_devtools_events.h for the C++
+        // equivalent of this logic.
+        tabIdProxy[name] = new chrome.Event("devtools." + tabId + "." + name);
+      });
+      return tabIdProxy;
+    }
+
+    apiFunctions["i18n.getMessage"].handleRequest =
+        function(message_name, placeholders) {
+      return GetL10nMessage(message_name, placeholders);
+    }
+
+    var canvas_context;
+    function setIconCommon(details, name, parameters) {
+      if ("iconIndex" in details) {
+        sendRequest(name, [details], parameters);
+      } else if ("imageData" in details) {
+        // Verify that this at least looks like an ImageData element.
+        // Unfortunately, we cannot use instanceof because the ImageData
+        // constructor is not public.
+        //
+        // We do this manually instead of using JSONSchema to avoid having these
+        // properties show up in the doc.
+        if (!("width" in details.imageData) ||
+            !("height" in details.imageData) ||
+            !("data" in details.imageData)) {
+          throw new Error(
+              "The imageData property must contain an ImageData object.");
+        }
+        sendCustomRequest(SetExtensionActionIcon, name, [details], parameters);
+      } else if ("path" in details) {
+        if (!canvas_context) {
+          var canvas = document.createElement("canvas");
+          canvas.width = 19;
+          canvas.height = 19;
+          canvas_context = canvas.getContext('2d');
+        }
+
+        var img = new Image();
+        var self = this;
+        img.onerror = function() {
+          console.error("Could not load browser action icon '" + details.path +
+                        "'.");
+        }
+        img.onload = function() {
+          canvas_context.clearRect(0, 0, canvas.width, canvas.height);
+          canvas_context.drawImage(img, 0, 0, canvas.width, canvas.height);
+          delete details.path;
+          details.imageData = canvas_context.getImageData(0, 0, canvas.width,
+                                                          canvas.height);
+          sendCustomRequest(SetExtensionActionIcon, name, [details], parameters);
+        }
+        img.src = details.path;
+      } else {
+        throw new Error(
+            "Either the path or imageData property must be specified.");
+      }
+    }
+
+    apiFunctions["browserAction.setIcon"].handleRequest = function(details) {
+      setIconCommon(details, this.name, this.definition.parameters);
+    };
+
+    apiFunctions["pageAction.setIcon"].handleRequest = function(details) {
+      setIconCommon(details, this.name, this.definition.parameters);
+    };
+
+    setupBrowserActionEvent(extensionId);
     setupPageActionEvents(extensionId);
+    setupToolstripEvents(GetRenderViewId());
   });
-
-  chrome.self.getViews = function() {
-    return GetViews();
-  }
 })();

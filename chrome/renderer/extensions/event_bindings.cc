@@ -10,22 +10,27 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/js_only_v8_extensions.h"
+#include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/renderer_resources.h"
 #include "webkit/api/public/WebDataSource.h"
+#include "webkit/api/public/WebFrame.h"
 #include "webkit/api/public/WebURLRequest.h"
-#include "webkit/glue/webframe.h"
 
 using bindings_utils::CallFunctionInContext;
 using bindings_utils::ContextInfo;
 using bindings_utils::ContextList;
 using bindings_utils::GetContexts;
+using bindings_utils::GetInfoForCurrentContext;
 using bindings_utils::GetStringResource;
 using bindings_utils::ExtensionBase;
 using bindings_utils::GetPendingRequestMap;
 using bindings_utils::PendingRequestMap;
+using WebKit::WebFrame;
+
+static void ContextWeakReferenceCallback(v8::Persistent<v8::Value> context,
+                                         void*);
 
 namespace {
 
@@ -76,9 +81,23 @@ class ExtensionImpl : public ExtensionBase {
 
     if (args[0]->IsString()) {
       std::string event_name(*v8::String::AsciiValue(args[0]));
-      if (EventIncrementListenerCount(event_name) == 1) {
+      bool has_permission =
+          ExtensionProcessBindings::CurrentContextHasPermission(event_name);
+
+      // Increment the count even if the caller doesn't have permission, so that
+      // refcounts stay balanced.
+      if (EventIncrementListenerCount(event_name) == 1 && has_permission) {
         EventBindings::GetRenderThread()->Send(
             new ViewHostMsg_ExtensionAddListener(event_name));
+      }
+
+      ContextInfo* current_context_info = GetInfoForCurrentContext();
+      if (++current_context_info->num_connected_events == 1)
+        current_context_info->context.ClearWeak();
+
+      if (!has_permission) {
+        return ExtensionProcessBindings::ThrowPermissionDeniedException(
+            event_name);
       }
     }
 
@@ -96,6 +115,13 @@ class ExtensionImpl : public ExtensionBase {
         EventBindings::GetRenderThread()->Send(
           new ViewHostMsg_ExtensionRemoveListener(event_name));
       }
+
+      ContextInfo* current_context_info = GetInfoForCurrentContext();
+      if (current_context_info &&
+          --current_context_info->num_connected_events == 0) {
+        current_context_info->context.MakeWeak(NULL,
+            &ContextWeakReferenceCallback);
+      }
     }
 
     return v8::Undefined();
@@ -107,8 +133,9 @@ class ExtensionImpl : public ExtensionBase {
 const char* EventBindings::kName = "chrome/EventBindings";
 
 v8::Extension* EventBindings::Get() {
+  static v8::Extension* extension = new ExtensionImpl();
   bindings_registered = true;
-  return new ExtensionImpl();
+  return extension;
 }
 
 // static
@@ -122,12 +149,23 @@ RenderThreadBase* EventBindings::GetRenderThread() {
   return render_thread ? render_thread : RenderThread::current();
 }
 
-static void HandleContextDestroyed(ContextList::iterator context_iter,
-                                   bool callUnload) {
+static void DeferredUnload(v8::Persistent<v8::Context> context) {
+  v8::HandleScope handle_scope;
+  CallFunctionInContext(context, "dispatchOnUnload", 0, NULL);
+  context.Dispose();
+  context.Clear();
+}
+
+static void UnregisterContext(ContextList::iterator context_iter, bool in_gc) {
   // Notify the bindings that they're going away.
-  if (callUnload) {
-    CallFunctionInContext((*context_iter)->context, "dispatchOnUnload", 0,
-                          NULL);
+  if (in_gc) {
+    // We shouldn't call back into javascript during a garbage collect.  Do it
+    // later.  We'll hang onto the context until this DeferredUnload is called.
+    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableFunction(
+        DeferredUnload, (*context_iter)->context));
+  } else {
+    CallFunctionInContext((*context_iter)->context, "dispatchOnUnload",
+                          0, NULL);
   }
 
   // Remove all pending requests for this context.
@@ -142,22 +180,16 @@ static void HandleContextDestroyed(ContextList::iterator context_iter,
     }
   }
 
-  // Unload any content script contexts for this frame.
-  for (ContextList::iterator it = GetContexts().begin();
-       it != GetContexts().end(); ) {
-    ContextList::iterator current = it++;
-    if ((*current)->parent_context == (*context_iter)->context)
-      HandleContextDestroyed(current, callUnload);
+  if (!(*context_iter)->parent_context.IsEmpty()) {
+    (*context_iter)->parent_context.Dispose();
+    (*context_iter)->parent_context.Clear();
   }
 
   // Remove it from our registered contexts.
   (*context_iter)->context.ClearWeak();
-  (*context_iter)->context.Dispose();
-  (*context_iter)->context.Clear();
-
-  if (!(*context_iter)->parent_context.IsEmpty()) {
-    (*context_iter)->parent_context.Dispose();
-    (*context_iter)->parent_context.Clear();
+  if (!in_gc) {
+    (*context_iter)->context.Dispose();
+    (*context_iter)->context.Clear();
   }
 
   GetContexts().erase(context_iter);
@@ -165,10 +197,11 @@ static void HandleContextDestroyed(ContextList::iterator context_iter,
 
 static void ContextWeakReferenceCallback(v8::Persistent<v8::Value> context,
                                          void*) {
+  // This should only get called for content script contexts.
   for (ContextList::iterator it = GetContexts().begin();
        it != GetContexts().end(); ++it) {
     if ((*it)->context == context) {
-      HandleContextDestroyed(it, false);
+      UnregisterContext(it, true);
       return;
     }
   }
@@ -182,17 +215,16 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
 
   v8::HandleScope handle_scope;
   ContextList& contexts = GetContexts();
-  v8::Local<v8::Context> frame_context = frame->GetScriptContext();
+  v8::Local<v8::Context> frame_context = frame->mainWorldScriptContext();
   v8::Local<v8::Context> context = v8::Context::GetCurrent();
   DCHECK(!context.IsEmpty());
   DCHECK(bindings_utils::FindContext(context) == contexts.end());
 
-  // Figure out the URL for the toplevel frame.  If the top frame is loading,
-  // use its provisional URL, since we get this notification before commit.
-  WebFrame* main_frame = frame->GetView()->GetMainFrame();
-  WebKit::WebDataSource* ds = main_frame->GetProvisionalDataSource();
+  // Figure out the frame's URL.  If the frame is loading, use its provisional
+  // URL, since we get this notification before commit.
+  WebKit::WebDataSource* ds = frame->provisionalDataSource();
   if (!ds)
-    ds = main_frame->GetDataSource();
+    ds = frame->dataSource();
   GURL url = ds->request().url();
   std::string extension_id;
   if (url.SchemeIs(chrome::kExtensionScheme)) {
@@ -221,8 +253,8 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
   }
 
   RenderView* render_view = NULL;
-  if (frame->GetView() && frame->GetView()->GetDelegate())
-    render_view = static_cast<RenderView*>(frame->GetView()->GetDelegate());
+  if (frame->view())
+    render_view = RenderView::FromWebView(frame->view());
 
   contexts.push_back(linked_ptr<ContextInfo>(
       new ContextInfo(persistent_context, extension_id, parent_context,
@@ -239,12 +271,21 @@ void EventBindings::HandleContextDestroyed(WebFrame* frame) {
     return;
 
   v8::HandleScope handle_scope;
-  v8::Local<v8::Context> context = frame->GetScriptContext();
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
   DCHECK(!context.IsEmpty());
 
   ContextList::iterator context_iter = bindings_utils::FindContext(context);
   if (context_iter != GetContexts().end())
-    ::HandleContextDestroyed(context_iter, true);
+    UnregisterContext(context_iter, false);
+
+  // Unload any content script contexts for this frame.  Note that the frame
+  // itself might not be registered, but can still be a parent context.
+  for (ContextList::iterator it = GetContexts().begin();
+       it != GetContexts().end(); ) {
+    ContextList::iterator current = it++;
+    if ((*current)->parent_context == context)
+      UnregisterContext(current, false);
+  }
 }
 
 // static
@@ -255,6 +296,17 @@ void EventBindings::CallFunction(const std::string& function_name,
        it != GetContexts().end(); ++it) {
     if (render_view && render_view != (*it)->render_view)
       continue;
-    CallFunctionInContext((*it)->context, function_name, argc, argv);
+    v8::Handle<v8::Value> retval = CallFunctionInContext((*it)->context,
+        function_name, argc, argv);
+    // In debug, the js will validate the event parameters and return a
+    // string if a validation error has occured.
+    // TODO(rafaelw): Consider only doing this check if function_name ==
+    // "Event.dispatchJSON".
+#ifdef _DEBUG
+    if (!retval.IsEmpty() && !retval->IsUndefined()) {
+      std::string error = *v8::String::AsciiValue(retval);
+      DCHECK(false) << error;
+    }
+#endif
   }
 }

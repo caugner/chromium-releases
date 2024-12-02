@@ -21,7 +21,8 @@ class ConstrainedWindowGtk;
 class GtkThemeProperties;
 class RenderViewContextMenuGtk;
 class SadTabGtk;
-class WebDragDest;
+class TabContentsDragSource;
+class WebDragDestGtk;
 typedef struct _GtkFloatingContainer GtkFloatingContainer;
 
 class TabContentsViewGtk : public TabContentsView,
@@ -45,15 +46,15 @@ class TabContentsViewGtk : public TabContentsView,
 
   // TabContentsView implementation --------------------------------------------
 
-  virtual void CreateView();
+  virtual void CreateView(const gfx::Size& initial_size);
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host);
 
   virtual gfx::NativeView GetNativeView() const;
   virtual gfx::NativeView GetContentNativeView() const;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
+  virtual void InitRendererPrefs(RendererPreferences* prefs);
   virtual void GetContainerBounds(gfx::Rect* out) const;
-  virtual void OnContentsDestroy();
   virtual void SetPageTitle(const std::wstring& title);
   virtual void OnTabCrashed();
   virtual void SizeContents(const gfx::Size& size);
@@ -64,8 +65,9 @@ class TabContentsViewGtk : public TabContentsView,
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
-  virtual void StartDragging(const WebDropData& drop_data);
-  virtual void UpdateDragCursor(bool is_drop_target);
+  virtual void StartDragging(const WebDropData& drop_data,
+                             WebKit::WebDragOperationsMask allowed_ops);
+  virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
@@ -83,8 +85,7 @@ class TabContentsViewGtk : public TabContentsView,
   // should be taken that the correct one is hidden/shown.
   void InsertIntoContentArea(GtkWidget* widget);
 
-  // Tell webkit the drag is over.
-  void DragEnded();
+  void CancelDragIfAny();
 
   // We keep track of the timestamp of the latest mousedown event.
   static gboolean OnMouseDown(GtkWidget* widget,
@@ -98,13 +99,6 @@ class TabContentsViewGtk : public TabContentsView,
   static void OnSetFloatingPosition(
       GtkFloatingContainer* floating_container, GtkAllocation* allocation,
       TabContentsViewGtk* tab_contents_view);
-
-  // Webkit DnD.
-  static void OnDragEnd(GtkWidget* widget, GdkDragContext* drag_context,
-                        TabContentsViewGtk* tab_contents_view);
-  static void OnDragDataGet(GtkWidget* drag_widget,
-    GdkDragContext* context, GtkSelectionData* selection_data,
-    guint target_type, guint time, TabContentsViewGtk* view);
 
   // Contains |fixed_| as its GtkBin member and a possible floating widget from
   // |popup_view_|.
@@ -137,14 +131,16 @@ class TabContentsViewGtk : public TabContentsView,
   // objects in this vector are owned by the TabContents, not the view.
   std::vector<ConstrainedWindowGtk*> constrained_windows_;
 
-  // The drop data for the current drag (for drags that originate in the render
-  // view).
-  scoped_ptr<WebDropData> drop_data_;
-  // The mime type for the file contents of the current drag (if any).
-  GdkAtom drag_file_mime_type_;
   // The helper object that handles drag destination related interactions with
   // GTK.
-  scoped_ptr<WebDragDest> drag_dest_;
+  scoped_ptr<WebDragDestGtk> drag_dest_;
+
+  // Object responsible for handling drags from the page for us.
+  scoped_ptr<TabContentsDragSource> drag_source_;
+
+  // The size we want the tab contents view to be.  We keep this in a separate
+  // variable because resizing in GTK+ is async.
+  gfx::Size requested_size_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewGtk);
 };

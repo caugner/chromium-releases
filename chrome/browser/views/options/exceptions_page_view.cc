@@ -85,7 +85,8 @@ void ExceptionsPageView::OnSelectionChanged() {
   remove_button_.SetEnabled(has_selection);
 }
 
-void ExceptionsPageView::ButtonPressed(views::Button* sender) {
+void ExceptionsPageView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   // Close will result in our destruction.
   if (sender == &remove_all_button_) {
     table_model_.ForgetAndRemoveAllSignons();
@@ -96,7 +97,6 @@ void ExceptionsPageView::ButtonPressed(views::Button* sender) {
   // select only).
   views::TableSelectionIterator iter = table_view_->SelectionBegin();
   int row = *iter;
-  PasswordForm* selected = table_model_.GetPasswordFormAt(row);
   DCHECK(++iter == table_view_->SelectionEnd());
 
   if (sender == &remove_button_) {

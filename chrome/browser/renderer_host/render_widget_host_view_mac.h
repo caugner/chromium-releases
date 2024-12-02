@@ -29,9 +29,10 @@ class RWHVMEditCommandHelper;
 // but that means that the view needs to own the delegate and will dispose of it
 // when it's removed from the view system.
 
-@interface RenderWidgetHostViewCocoa : BaseView <RenderWidgetHostViewMacOwner> {
+@interface RenderWidgetHostViewCocoa
+    : BaseView <RenderWidgetHostViewMacOwner, NSTextInput, NSChangeSpelling> {
  @private
-  RenderWidgetHostViewMac* renderWidgetHostView_;
+  RenderWidgetHostViewMac* renderWidgetHostView_;  // Owned by us.
   BOOL canBeKeyView_;
   BOOL closeOnDeactivate_;
   scoped_ptr<RWHVMEditCommandHelper> editCommand_helper_;
@@ -41,12 +42,18 @@ class RWHVMEditCommandHelper;
   void *trackingRectUserData_;
   NSTrackingRectTag lastToolTipTag_;
   NSString* toolTip_;
+
+  BOOL ignoreKeyEvents_;
 }
 
 - (void)setCanBeKeyView:(BOOL)can;
 - (void)setCloseOnDeactivate:(BOOL)b;
 - (void)setToolTipAtMousePoint:(NSString *)string;
 
+// When a keyboard event comes back from the renderer, we redispatch it. This
+// makes sure we ignore it if we should receive it during redispatch, instead
+// of sending it to the renderer again.
+- (void)setIgnoreKeyEvents:(BOOL)ignorekeyEvents;
 @end
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -83,7 +90,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SetSize(const gfx::Size& size);
   virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
-      const std::vector<WebPluginGeometry>& plugin_window_moves);
+      const std::vector<webkit_glue::WebPluginGeometry>& moves);
   virtual void Focus();
   virtual void Blur();
   virtual bool HasFocus();
@@ -105,6 +112,8 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
                                   const std::vector<WebMenuItem>& items);
   virtual gfx::Rect GetWindowRect();
   virtual gfx::Rect GetRootWindowRect();
+  virtual void SetActive(bool active);
+  virtual void SetBackground(const SkBitmap& background);
 
   void KillSelf();
 
@@ -128,6 +137,49 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // not having anything to paint (empty backing store from renderer). This
   // value returns true for is_null() if we are not recording whiteout times.
   base::TimeTicks whiteout_start_time_;
+
+  // Variables used by our implementaion of the NSTextInput protocol.
+  // An input method of Mac calls the methods of this protocol not only to
+  // notify an application of its status, but also to retrieve the status of
+  // the application. That is, an application cannot control an input method
+  // directly.
+  // This object keeps the status of a composition of the renderer and returns
+  // it when an input method asks for it.
+  // We need to implement Objective-C methods for the NSTextInput protocol. On
+  // the other hand, we need to implement a C++ method for an IPC-message
+  // handler which receives input-method events from the renderer.
+  // To avoid fragmentation of variables used by our input-method
+  // implementation, we define all variables as public member variables of
+  // this C++ class so both the C++ methods and the Objective-C methods can
+  // access them.
+
+  // Represents the input-method attributes supported by this object.
+  NSArray* im_attributes_;
+
+  // Represents whether or not an input method is composing a text.
+  bool im_composing_;
+
+  // Represents the range of the composition string (i.e. a text being
+  // composed by an input method), and the range of the selected text of the
+  // composition string.
+  // TODO(hbono): need to save the composition string itself for the
+  // attributedSubstringFromRange method?
+  NSRange im_marked_range_;
+  NSRange im_selected_range_;
+
+  // Represents the state of modifier keys.
+  // An input method doesn't notify the state of modifier keys. On the other
+  // hand, the state of modifier keys are required by Char events because they
+  // are dispatched to onkeypress() event handlers of JavaScript.
+  // To create a Char event in NSTextInput methods, we save the latest state
+  // of modifier keys when we receive it.
+  int im_modifiers_;
+
+  // Represents the cursor position in this view coordinate.
+  // The renderer sends the cursor position through an IPC message.
+  // We save the latest cursor position here and return it when an input
+  // methods needs it.
+  NSRect im_caret_rect_;
 
  private:
   // Updates the display cursor to the current cursor if the cursor is over this

@@ -4,23 +4,32 @@
 
 #include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 
+// If this gets included after the gtk headers, then a bunch of compiler
+// errors happen because of a "#define Status int" in Xlib.h, which interacts
+// badly with URLRequestStatus::Status.
+#include "chrome/common/render_messages.h"
+
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 #include <gdk/gdkx.h>
 #include <cairo/cairo.h>
 
-#include "base/gfx/gtk_util.h"
+#include <algorithm>
+#include <string>
+
+#include "app/gfx/gtk_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "chrome/browser/plugin_process_host.h"
+#include "chrome/common/gtk_util.h"
 #include "chrome/common/native_web_keyboard_event.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/x11_util.h"
 #include "chrome/browser/renderer_host/backing_store.h"
+#include "chrome/browser/renderer_host/gtk_im_context_wrapper.h"
+#include "chrome/browser/renderer_host/gtk_key_bindings_handler.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "webkit/api/public/gtk/WebInputEventFactory.h"
 #include "webkit/glue/webcursor_gtk_data.h"
@@ -36,6 +45,7 @@ class RenderWidgetHostViewGtkWidget {
  public:
   static GtkWidget* CreateNewWidget(RenderWidgetHostViewGtk* host_view) {
     GtkWidget* widget = gtk_fixed_new();
+    gtk_widget_set_name(widget, "chrome-render-widget-host-view");
     gtk_fixed_set_has_window(GTK_FIXED(widget), TRUE);
     gtk_widget_set_double_buffered(widget, FALSE);
     gtk_widget_set_redraw_on_allocate(widget, FALSE);
@@ -78,23 +88,14 @@ class RenderWidgetHostViewGtkWidget {
     g_signal_connect_after(widget, "scroll-event",
                            G_CALLBACK(MouseScrollEvent), host_view);
 
-    // Create a GtkIMContext instance and attach its signal handlers.
-    host_view->im_context_ = gtk_im_multicontext_new();
-    g_signal_connect(host_view->im_context_, "preedit_start",
-                     G_CALLBACK(InputMethodPreeditStart), host_view);
-    g_signal_connect(host_view->im_context_, "preedit_end",
-                     G_CALLBACK(InputMethodPreeditEnd), host_view);
-    g_signal_connect(host_view->im_context_, "preedit_changed",
-                     G_CALLBACK(InputMethodPreeditChanged), host_view);
-    g_signal_connect(host_view->im_context_, "commit",
-                     G_CALLBACK(InputMethodCommit), host_view);
-
     return widget;
   }
 
  private:
   static gboolean SizeAllocate(GtkWidget* widget, GtkAllocation* allocation,
                                RenderWidgetHostViewGtk* host_view) {
+    host_view->requested_size_ = gfx::Size(allocation->width,
+                                           allocation->height);
     host_view->GetRenderWidgetHost()->WasResized();
     return FALSE;
   }
@@ -114,44 +115,8 @@ class RenderWidgetHostViewGtkWidget {
       // allows us to release our keyboard grab.
       host_view->host_->Shutdown();
     } else {
-      NativeWebKeyboardEvent wke(event);
-      host_view->GetRenderWidgetHost()->ForwardKeyboardEvent(wke);
-    }
-
-    // Save the current modifier-key state before dispatching this event to the
-    // GtkIMContext object so its event handlers can use this state to create
-    // Char events.
-    host_view->im_modifier_state_ = event->state;
-
-    // Dispatch this event to the GtkIMContext object.
-    // It sends a "commit" signal when it has a character to be inserted
-    // even when we use a US keyboard so that we can send a Char event
-    // (or an IME event) to the renderer in our "commit"-signal handler.
-    // We should send a KeyDown (or a KeyUp) event before dispatching this
-    // event to the GtkIMContext object (and send a Char event) so that WebKit
-    // can dispatch the JavaScript events in the following order: onkeydown(),
-    // onkeypress(), and onkeyup(). (Many JavaScript pages assume this.)
-    // TODO(hbono): we should not dispatch a key event when the input focus
-    // is in a password input?
-    if (!gtk_im_context_filter_keypress(host_view->im_context_, event)) {
-      // The GtkIMContext object cannot handle this key event.
-      // This case is caused by two reasons:
-      // 1. The given key event is a control-key event, (e.g. return, page up,
-      //    page down, tab, arrows, etc.) or;
-      // 2. The given key event is not a control-key event but printable
-      //    characters aren't assigned to the event, (e.g. alt+d, etc.)
-      // Create a Char event manually from this key event and send it to the
-      // renderer when this Char event contains a printable character which
-      // should be processed by WebKit.
-      // TODO(hbono): Windows Chrome sends a Char event with its isSystemKey
-      // value true for the above case 2. We should emulate this behavior?
-      if (event->type == GDK_KEY_PRESS &&
-          !gdk_keyval_to_unicode(event->keyval)) {
-        NativeWebKeyboardEvent wke(event);
-        wke.type = WebKit::WebInputEvent::Char;
-        if (wke.text[0])
-          host_view->GetRenderWidgetHost()->ForwardKeyboardEvent(wke);
-      }
+      // Send key event to input method.
+      host_view->im_context_->ProcessKeyEvent(event);
     }
 
     // We return TRUE because we did handle the event. If it turns out webkit
@@ -186,16 +151,12 @@ class RenderWidgetHostViewGtkWidget {
     }
 
     host_view->ShowCurrentCursor();
-    host_view->GetRenderWidgetHost()->Focus();
+    host_view->GetRenderWidgetHost()->GotFocus();
 
-    // Notify the GtkIMContext object of this focus-in event and
-    // attach this GtkIMContext object to this window.
-    // We should call gtk_im_context_set_client_window() only when this window
-    // gain (or release) the window focus because an immodule may reset its
-    // internal status when processing this function.
-    gtk_im_context_focus_in(host_view->im_context_);
-    gtk_im_context_set_client_window(host_view->im_context_,
-                                     host_view->native_view()->window);
+    // The only way to enable a GtkIMContext object is to call its focus in
+    // handler.
+    host_view->im_context_->OnFocusIn();
+
     return FALSE;
   }
 
@@ -211,10 +172,9 @@ class RenderWidgetHostViewGtkWidget {
     if (!host_view->is_showing_context_menu_)
       host_view->GetRenderWidgetHost()->Blur();
 
-    // Notify the GtkIMContext object of this focus-in event and
-    // detach this GtkIMContext object from this window.
-    gtk_im_context_focus_out(host_view->im_context_);
-    gtk_im_context_set_client_window(host_view->im_context_, NULL);
+    // Disable the GtkIMContext object.
+    host_view->im_context_->OnFocusOut();
+
     return FALSE;
   }
 
@@ -224,10 +184,14 @@ class RenderWidgetHostViewGtkWidget {
   // shown, and must rely on this signal instead.
   static void OnGrabNotify(GtkWidget* widget, gboolean was_grabbed,
                            RenderWidgetHostViewGtk* host_view) {
-    if (was_grabbed)
-      OnFocusIn(widget, NULL, host_view);
-    else
-      OnFocusOut(widget, NULL, host_view);
+    if (was_grabbed) {
+      if (host_view->was_focused_before_grab_)
+        OnFocusIn(widget, NULL, host_view);
+    } else {
+      host_view->was_focused_before_grab_ = host_view->HasFocus();
+      if (host_view->was_focused_before_grab_)
+        OnFocusOut(widget, NULL, host_view);
+    }
   }
 
   static gboolean ButtonPressReleaseEvent(
@@ -260,14 +224,15 @@ class RenderWidgetHostViewGtkWidget {
       event->x = x;
       event->y = y;
     }
-    host_view->is_popup_first_mouse_release_ = false;
-    host_view->GetRenderWidgetHost()->ForwardMouseEvent(
-        WebInputEventFactory::mouseEvent(event));
 
     // TODO(evanm): why is this necessary here but not in test shell?
     // This logic is the same as GtkButton.
     if (event->type == GDK_BUTTON_PRESS && !GTK_WIDGET_HAS_FOCUS(widget))
       gtk_widget_grab_focus(widget);
+
+    host_view->is_popup_first_mouse_release_ = false;
+    host_view->GetRenderWidgetHost()->ForwardMouseEvent(
+        WebInputEventFactory::mouseEvent(event));
 
     // Although we did handle the mouse event, we need to let other handlers
     // run (in particular the one installed by TabContentsViewGtk).
@@ -309,69 +274,6 @@ class RenderWidgetHostViewGtkWidget {
     return FALSE;
   }
 
-  static void InputMethodCommit(GtkIMContext* im_context,
-                                gchar* text,
-                                RenderWidgetHostViewGtk* host_view) {
-    const string16& im_text = UTF8ToUTF16(text);
-    if (!host_view->im_is_composing_cjk_text_ && im_text.length() == 1) {
-      // Send a Char event when we input a composed character without IMEs so
-      // that this event is to be dispatched to onkeypress() handlers,
-      // autofill, etc.
-      ForwardCharEvent(host_view, im_text[0]);
-    } else {
-      // Send an IME event.
-      // Unlike a Char event, an IME event is NOT dispatched to onkeypress()
-      // handlers or autofill.
-      host_view->GetRenderWidgetHost()->ImeConfirmComposition(im_text);
-    }
-  }
-
-  static void InputMethodPreeditStart(GtkIMContext* im_context,
-                                      RenderWidgetHostViewGtk* host_view) {
-    // Start monitoring IME events of the renderer.
-    // TODO(hbono): a renderer sends these IME events not only for sending the
-    // caret position, but also for enabling/disabling IMEs. If we need to
-    // enable/disable IMEs, we should move this code to a better place.
-    // (This signal handler is called only when an IME is enabled. So, once
-    // we disable an IME, we cannot receive any IME events from the renderer,
-    // i.e. we cannot re-enable the IME any longer.)
-    host_view->GetRenderWidgetHost()->ImeSetInputMode(true);
-    host_view->im_is_composing_cjk_text_ = true;
-  }
-
-  static void InputMethodPreeditEnd(GtkIMContext* im_context,
-                                    RenderWidgetHostViewGtk* host_view) {
-    // End monitoring IME events.
-    host_view->GetRenderWidgetHost()->ImeSetInputMode(false);
-    host_view->im_is_composing_cjk_text_ = false;
-  }
-
-  static void InputMethodPreeditChanged(GtkIMContext* im_context,
-                                        RenderWidgetHostViewGtk* host_view) {
-    // Send an IME event to update the composition node of the renderer.
-    // TODO(hbono): an IME intercepts all key events while composing a text,
-    // i.e. we cannot receive any GDK_KEY_PRESS (or GDK_KEY_UP) events.
-    // Should we send pseudo KeyDown (and KeyUp) events to emulate Windows?
-    gchar* preedit_text = NULL;
-    gint cursor_position = 0;
-    gtk_im_context_get_preedit_string(im_context, &preedit_text, NULL,
-                                      &cursor_position);
-    host_view->GetRenderWidgetHost()->ImeSetComposition(
-        UTF8ToUTF16(preedit_text), cursor_position, -1, -1);
-    g_free(preedit_text);
-  }
-
-  static void ForwardCharEvent(RenderWidgetHostViewGtk* host_view,
-                               wchar_t im_character) {
-    if (!im_character)
-      return;
-
-    NativeWebKeyboardEvent char_event(im_character,
-                                      host_view->im_modifier_state_,
-                                      base::Time::Now().ToDoubleT());
-    host_view->GetRenderWidgetHost()->ForwardKeyboardEvent(char_event);
-  }
-
   DISALLOW_IMPLICIT_CONSTRUCTORS(RenderWidgetHostViewGtkWidget);
 };
 
@@ -390,20 +292,20 @@ RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
       parent_host_view_(NULL),
       parent_(NULL),
       is_popup_first_mouse_release_(true),
-      im_context_(NULL),
-      im_is_composing_cjk_text_(false),
-      im_modifier_state_(0) {
+      was_focused_before_grab_(false) {
   host_->set_view(this);
 }
 
 RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
-  if (im_context_)
-    g_object_unref(im_context_);
   view_.Destroy();
 }
 
 void RenderWidgetHostViewGtk::InitAsChild() {
   view_.Own(RenderWidgetHostViewGtkWidget::CreateNewWidget(this));
+  // |im_context_| must be created after creating |view_| widget.
+  im_context_.reset(new GtkIMContextWrapper(this));
+  // |key_bindings_handler_| must be created after creating |view_| widget.
+  key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
   plugin_container_manager_.set_host_widget(view_.get());
   gtk_widget_show(view_.get());
 }
@@ -414,6 +316,10 @@ void RenderWidgetHostViewGtk::InitAsPopup(
   parent_ = parent_host_view->GetNativeView();
   GtkWidget* popup = gtk_window_new(GTK_WINDOW_POPUP);
   view_.Own(RenderWidgetHostViewGtkWidget::CreateNewWidget(this));
+  // |im_context_| must be created after creating |view_| widget.
+  im_context_.reset(new GtkIMContextWrapper(this));
+  // |key_bindings_handler_| must be created after creating |view_| widget.
+  key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
   plugin_container_manager_.set_host_widget(view_.get());
   gtk_container_add(GTK_CONTAINER(popup), view_.get());
 
@@ -421,8 +327,13 @@ void RenderWidgetHostViewGtk::InitAsPopup(
   // and webkit will manage our destruction.
   if (activatable()) {
     // Grab all input for the app. If a click lands outside the bounds of the
-    // popup, WebKit will notice and destroy us.
+    // popup, WebKit will notice and destroy us. Before doing this we need
+    // to ensure that the the popup is added to the browser's window group,
+    // to allow for the grabs to work correctly.
+    gtk_window_group_add_window(gtk_window_get_group(
+        GTK_WINDOW(gtk_widget_get_toplevel(parent_))), GTK_WINDOW(popup));
     gtk_grab_add(view_.get());
+
     // Now grab all of X's input.
     gdk_pointer_grab(
         parent_->window,
@@ -477,23 +388,22 @@ void RenderWidgetHostViewGtk::WasHidden() {
 
 void RenderWidgetHostViewGtk::SetSize(const gfx::Size& size) {
   // This is called when webkit has sent us a Move message.
-  // If we are a popup, we want to handle this.
-  // TODO(estade): are there other situations where we want to respect the
-  // request?
-#if !defined(TOOLKIT_VIEWS)
+  int width = std::min(size.width(), kMaxWindowWidth);
+  int height = std::min(size.height(), kMaxWindowHeight);
   if (parent_) {
-#else
-  // TOOLKIT_VIEWS' resize logic flow matches windows. When the container widget
-  // is resized, it calls RWH::WasSized, which sizes this widget using SetSize.
-  // TODO(estade): figure out if the logic flow here can be normalized across
-  //               platforms
+    // We're a popup, honor the size request.
+    gtk_widget_set_size_request(view_.get(), width, height);
+  } else {
+#if defined(TOOLKIT_VIEWS)
+    // TOOLKIT_VIEWS' resize logic flow matches windows. so we go ahead and
+    // size the widget.  In GTK+, the size of the widget is determined by it's
+    // children.
+    gtk_widget_set_size_request(view_.get(), width, height);
 #endif
-    gtk_widget_set_size_request(view_.get(),
-                                std::min(size.width(), kMaxWindowWidth),
-                                std::min(size.height(), kMaxWindowHeight));
-#if !defined(TOOLKIT_VIEWS)
+
+    requested_size_ = gfx::Size(width, height);
+    host_->WasResized();
   }
-#endif
 }
 
 gfx::NativeView RenderWidgetHostViewGtk::GetNativeView() {
@@ -501,9 +411,9 @@ gfx::NativeView RenderWidgetHostViewGtk::GetNativeView() {
 }
 
 void RenderWidgetHostViewGtk::MovePluginWindows(
-    const std::vector<WebPluginGeometry>& plugin_window_moves) {
-  for (size_t i = 0; i < plugin_window_moves.size(); ++i) {
-    plugin_container_manager_.MovePluginContainer(plugin_window_moves[i]);
+    const std::vector<webkit_glue::WebPluginGeometry>& moves) {
+  for (size_t i = 0; i < moves.size(); ++i) {
+    plugin_container_manager_.MovePluginContainer(moves[i]);
   }
 }
 
@@ -535,7 +445,9 @@ void RenderWidgetHostViewGtk::Hide() {
 
 gfx::Rect RenderWidgetHostViewGtk::GetViewBounds() const {
   GtkAllocation* alloc = &view_.get()->allocation;
-  return gfx::Rect(alloc->x, alloc->y, alloc->width, alloc->height);
+  return gfx::Rect(alloc->x, alloc->y,
+                   requested_size_.width(),
+                   requested_size_.height());
 }
 
 void RenderWidgetHostViewGtk::UpdateCursor(const WebCursor& cursor) {
@@ -559,28 +471,8 @@ void RenderWidgetHostViewGtk::SetIsLoading(bool is_loading) {
 
 void RenderWidgetHostViewGtk::IMEUpdateStatus(int control,
                                               const gfx::Rect& caret_rect) {
-  // The renderer has updated its IME status.
-  // Control the GtkIMContext object according to this status.
-  if (!im_context_)
-    return;
-
-  if (control == IME_DISABLE) {
-    // TODO(hbono): this code just resets the GtkIMContext object.
-    // Should we prevent sending key events to the GtkIMContext object
-    // (or unref it) when we disable IMEs?
-    gtk_im_context_reset(im_context_);
-    gtk_im_context_set_cursor_location(im_context_, NULL);
-  } else {
-    // TODO(hbono): we should finish (not reset) an ongoing composition
-    // when |control| is IME_COMPLETE_COMPOSITION.
-
-    // Updates the position of the IME candidate window.
-    // The position sent from the renderer is a relative one, so we need to
-    // attach the GtkIMContext object to this window before changing the
-    // position.
-    GdkRectangle cursor_rect(caret_rect.ToGdkRectangle());
-    gtk_im_context_set_cursor_location(im_context_, &cursor_rect);
-  }
+  im_context_->UpdateStatus(control, caret_rect);
+  key_bindings_handler_->set_enabled(control != IME_DISABLE);
 }
 
 void RenderWidgetHostViewGtk::DidPaintRect(const gfx::Rect& rect) {
@@ -627,6 +519,9 @@ void RenderWidgetHostViewGtk::Destroy() {
   // See http://www.crbug.com/11847 for details.
   gtk_widget_destroy(view_.get());
 
+  // The RenderWidgetHost's destruction led here, so don't call it.
+  host_ = NULL;
+
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
@@ -643,11 +538,6 @@ void RenderWidgetHostViewGtk::SelectionChanged(const std::string& text) {
   gtk_clipboard_set_text(x_clipboard, text.c_str(), text.length());
 }
 
-void RenderWidgetHostViewGtk::PasteFromSelectionClipboard() {
-  GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
-  gtk_clipboard_request_text(x_clipboard, ReceivedSelectionText, this);
-}
-
 void RenderWidgetHostViewGtk::ShowingContextMenu(bool showing) {
   is_showing_context_menu_ = showing;
 }
@@ -657,6 +547,11 @@ BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
   return new BackingStore(host_, size,
                           x11_util::GetVisualFromGtkWidget(view_.get()),
                           gtk_widget_get_visual(view_.get())->depth);
+}
+
+void RenderWidgetHostViewGtk::SetBackground(const SkBitmap& background) {
+  RenderWidgetHostView::SetBackground(background);
+  host_->Send(new ViewMsg_SetBackground(host_->routing_id(), background));
 }
 
 void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
@@ -680,9 +575,20 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
       backing_store->ShowRect(
           paint_rect, x11_util::GetX11WindowFromGtkWidget(view_.get()));
     }
+    if (!whiteout_start_time_.is_null()) {
+      base::TimeDelta whiteout_duration = base::TimeTicks::Now() -
+          whiteout_start_time_;
+      UMA_HISTOGRAM_TIMES("MPArch.RWHH_WhiteoutDuration", whiteout_duration);
+
+      // Reset the start time to 0 so that we start recording again the next
+      // time the backing store is NULL...
+      whiteout_start_time_ = base::TimeTicks();
+    }
   } else {
     if (window)
       gdk_window_clear(window);
+    if (whiteout_start_time_.is_null())
+      whiteout_start_time_ = base::TimeTicks::Now();
   }
 }
 
@@ -720,7 +626,7 @@ void RenderWidgetHostViewGtk::ShowCurrentCursor() {
       break;
 
     default:
-      gdk_cursor = gdk_cursor_new(current_cursor_.GetCursorType());
+      gdk_cursor = gtk_util::GetCursor(current_cursor_.GetCursorType());
   }
   gdk_window_set_cursor(view_.get()->window, gdk_cursor);
   // The window now owns the cursor.
@@ -728,42 +634,24 @@ void RenderWidgetHostViewGtk::ShowCurrentCursor() {
     gdk_cursor_unref(gdk_cursor);
 }
 
-void RenderWidgetHostViewGtk::ReceivedSelectionText(GtkClipboard* clipboard,
-    const gchar* text, gpointer userdata) {
-  // If there's nothing to paste (|text| is NULL), do nothing.
-  if (!text)
-    return;
-  RenderWidgetHostViewGtk* host_view =
-      reinterpret_cast<RenderWidgetHostViewGtk*>(userdata);
-  host_view->host_->Send(new ViewMsg_InsertText(host_view->host_->routing_id(),
-                                                UTF8ToUTF16(text)));
-}
-
-gfx::PluginWindowHandle RenderWidgetHostViewGtk::CreatePluginContainer(
-    base::ProcessId plugin_process_id) {
-  gfx::PluginWindowHandle handle =
-      plugin_container_manager_.CreatePluginContainer();
-  plugin_pid_map_.insert(std::make_pair(plugin_process_id, handle));
-  return handle;
+void RenderWidgetHostViewGtk::CreatePluginContainer(
+    gfx::PluginWindowHandle id) {
+  plugin_container_manager_.CreatePluginContainer(id);
 }
 
 void RenderWidgetHostViewGtk::DestroyPluginContainer(
-    gfx::PluginWindowHandle container) {
-  plugin_container_manager_.DestroyPluginContainer(container);
-
-  for (PluginPidMap::iterator i = plugin_pid_map_.begin();
-       i != plugin_pid_map_.end(); ++i) {
-    if (i->second == container) {
-      plugin_pid_map_.erase(i);
-      break;
-    }
-  }
+    gfx::PluginWindowHandle id) {
+  plugin_container_manager_.DestroyPluginContainer(id);
 }
 
-void RenderWidgetHostViewGtk::PluginProcessCrashed(base::ProcessId pid) {
-  for (PluginPidMap::iterator i = plugin_pid_map_.find(pid);
-       i != plugin_pid_map_.end() && i->first == pid; ++i) {
-    plugin_container_manager_.DestroyPluginContainer(i->second);
+void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
+    const NativeWebKeyboardEvent& event) {
+  if (!host_)
+    return;
+
+  EditCommands edit_commands;
+  if (key_bindings_handler_->Match(event, &edit_commands)) {
+    host_->ForwardEditCommandsForNextKeyEvent(edit_commands);
   }
-  plugin_pid_map_.erase(pid);
+  host_->ForwardKeyboardEvent(event);
 }

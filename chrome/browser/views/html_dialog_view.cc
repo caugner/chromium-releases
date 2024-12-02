@@ -4,6 +4,7 @@
 
 #include "chrome/browser/views/html_dialog_view.h"
 
+#include "base/keyboard_codes.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "views/widget/root_view.h"
@@ -12,7 +13,7 @@
 
 namespace browser {
 
-// Declared in browser_dialogs.h so that others don't need to depend on our .h. 
+// Declared in browser_dialogs.h so that others don't need to depend on our .h.
 void ShowHtmlDialogView(gfx::NativeWindow parent, Browser* browser,
                         HtmlDialogUIDelegate* delegate) {
   HtmlDialogView* html_view = new HtmlDialogView(browser, delegate);
@@ -43,8 +44,16 @@ HtmlDialogView::~HtmlDialogView() {
 
 gfx::Size HtmlDialogView::GetPreferredSize() {
   gfx::Size out;
-  delegate_->GetDialogSize(&out);
+  if (delegate_)
+    delegate_->GetDialogSize(&out);
   return out;
+}
+
+bool HtmlDialogView::AcceleratorPressed(const views::Accelerator& accelerator) {
+  // Pressing ESC closes the dialog.
+  DCHECK_EQ(base::VKEY_ESCAPE, accelerator.GetKeyCode());
+  OnDialogClosed(std::string());
+  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -55,11 +64,17 @@ bool HtmlDialogView::CanResize() const {
 }
 
 bool HtmlDialogView::IsModal() const {
-  return delegate_->IsDialogModal();
+  if (delegate_)
+    return delegate_->IsDialogModal();
+  else
+    return false;
 }
 
 std::wstring HtmlDialogView::GetWindowTitle() const {
-  return delegate_->GetDialogTitle();
+  if (delegate_)
+    return delegate_->GetDialogTitle();
+  else
+    return std::wstring();
 }
 
 void HtmlDialogView::WindowClosing() {
@@ -90,25 +105,34 @@ std::wstring HtmlDialogView::GetDialogTitle() const {
 }
 
 GURL HtmlDialogView::GetDialogContentURL() const {
-  return delegate_->GetDialogContentURL();
+  if (delegate_)
+    return delegate_->GetDialogContentURL();
+  else
+    return GURL();
 }
 
 void HtmlDialogView::GetDOMMessageHandlers(
     std::vector<DOMMessageHandler*>* handlers) const {
-  delegate_->GetDOMMessageHandlers(handlers);
+  if (delegate_)
+    delegate_->GetDOMMessageHandlers(handlers);
 }
 
 void HtmlDialogView::GetDialogSize(gfx::Size* size) const {
-  delegate_->GetDialogSize(size);
+  if (delegate_)
+    delegate_->GetDialogSize(size);
 }
 
 std::string HtmlDialogView::GetDialogArgs() const {
-  return delegate_->GetDialogArgs();
+  if (delegate_)
+    return delegate_->GetDialogArgs();
+  else
+    return std::string();
 }
 
 void HtmlDialogView::OnDialogClosed(const std::string& json_retval) {
-  delegate_->OnDialogClosed(json_retval);
+  HtmlDialogUIDelegate* dialog_delegate = delegate_;
   delegate_ = NULL;  // We will not communicate further with the delegate.
+  dialog_delegate->OnDialogClosed(json_retval);
   window()->Close();
 }
 
@@ -199,6 +223,9 @@ void HtmlDialogView::InitDialog() {
   // the comment above HtmlDialogUI in its header file for why.
   HtmlDialogUI::GetPropertyAccessor().SetProperty(tab_contents_->property_bag(),
                                                   this);
+
+  // Pressing the ESC key will close the dialog.
+  AddAccelerator(views::Accelerator(base::VKEY_ESCAPE, false, false, false));
 
   DOMView::LoadURL(delegate_->GetDialogContentURL());
 }

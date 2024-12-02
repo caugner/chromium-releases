@@ -39,9 +39,12 @@
 #include "WebKit.h"
 #include "WebKitClient.h"
 #include "WebMimeRegistry.h"
+#include "WebPluginContainerImpl.h"
 #include "WebPluginListBuilderImpl.h"
 #include "WebString.h"
 #include "WebURL.h"
+#include "Worker.h"
+#include "WorkerContextProxy.h"
 
 #if PLATFORM(WIN_OS)
 #include "WebRect.h"
@@ -70,32 +73,29 @@ namespace WebCore {
 
 // Clipboard ------------------------------------------------------------------
 
-COMPILE_ASSERT(
-    int(PasteboardPrivate::HTMLFormat) == int(WebClipboard::FormatHTML),
-    FormatHTML);
-COMPILE_ASSERT(
-    int(PasteboardPrivate::BookmarkFormat) == int(WebClipboard::FormatBookmark),
-    FormatBookmark);
-COMPILE_ASSERT(
-    int(PasteboardPrivate::WebSmartPasteFormat) == int(WebClipboard::FormatSmartPaste),
-    FormatSmartPaste);
-
 bool ChromiumBridge::clipboardIsFormatAvailable(
-    PasteboardPrivate::ClipboardFormat format)
+    PasteboardPrivate::ClipboardFormat format,
+    PasteboardPrivate::ClipboardBuffer buffer)
 {
     return webKitClient()->clipboard()->isFormatAvailable(
-        static_cast<WebClipboard::Format>(format));
+        static_cast<WebClipboard::Format>(format),
+        static_cast<WebClipboard::Buffer>(buffer));
 }
 
-String ChromiumBridge::clipboardReadPlainText()
+String ChromiumBridge::clipboardReadPlainText(
+    PasteboardPrivate::ClipboardBuffer buffer)
 {
-    return webKitClient()->clipboard()->readPlainText();
+    return webKitClient()->clipboard()->readPlainText(
+        static_cast<WebClipboard::Buffer>(buffer));
 }
 
-void ChromiumBridge::clipboardReadHTML(String* htmlText, KURL* sourceURL)
+void ChromiumBridge::clipboardReadHTML(
+    PasteboardPrivate::ClipboardBuffer buffer,
+    String* htmlText, KURL* sourceURL)
 {
     WebURL url;
-    *htmlText = webKitClient()->clipboard()->readHTML(&url);
+    *htmlText = webKitClient()->clipboard()->readHTML(
+        static_cast<WebClipboard::Buffer>(buffer), &url);
     *sourceURL = url;
 }
 
@@ -106,6 +106,11 @@ void ChromiumBridge::clipboardWriteSelection(const String& htmlText,
 {
     webKitClient()->clipboard()->writeHTML(
         htmlText, sourceURL, plainText, writeSmartPaste);
+}
+
+void ChromiumBridge::clipboardWritePlainText(const String& plainText)
+{
+    webKitClient()->clipboard()->writePlainText(plainText);
 }
 
 void ChromiumBridge::clipboardWriteURL(const KURL& url, const String& title)
@@ -150,9 +155,59 @@ void ChromiumBridge::prefetchDNS(const String& hostname)
 
 // File ------------------------------------------------------------------------
 
+bool ChromiumBridge::fileExists(const String& path)
+{
+    return webKitClient()->fileExists(path);
+}
+
+bool ChromiumBridge::deleteFile(const String& path)
+{
+    return webKitClient()->deleteFile(path);
+}
+
+bool ChromiumBridge::deleteEmptyDirectory(const String& path)
+{
+    return webKitClient()->deleteEmptyDirectory(path);
+}
+
 bool ChromiumBridge::getFileSize(const String& path, long long& result)
 {
-  return webKitClient()->getFileSize(path, result);
+    return webKitClient()->getFileSize(path, result);
+}
+
+bool ChromiumBridge::getFileModificationTime(const String& path, time_t& result)
+{
+    return webKitClient()->getFileModificationTime(path, result);
+}
+
+String ChromiumBridge::directoryName(const String& path)
+{
+    return webKitClient()->directoryName(path);
+}
+
+String ChromiumBridge::pathByAppendingComponent(const String& path, const String& component)
+{
+    return webKitClient()->pathByAppendingComponent(path, component);
+}
+
+bool ChromiumBridge::makeAllDirectories(const String& path)
+{
+  return webKitClient()->makeAllDirectories(path);
+}
+
+String ChromiumBridge::getAbsolutePath(const String& path)
+{
+    return webKitClient()->getAbsolutePath(path);
+}
+
+bool ChromiumBridge::isDirectory(const String& path)
+{
+    return webKitClient()->isDirectory(path);
+}
+
+KURL ChromiumBridge::filePathToURL(const String& path)
+{
+    return webKitClient()->filePathToURL(path);
 }
 
 // Font -----------------------------------------------------------------------
@@ -173,8 +228,37 @@ String ChromiumBridge::getFontFamilyForCharacters(const UChar* characters, size_
 {
     if (webKitClient()->sandboxSupport())
         return webKitClient()->sandboxSupport()->getFontFamilyForCharacters(characters, numCharacters);
-    else
-        return WebFontInfo::familyForChars(characters, numCharacters);
+    else {
+        WebCString family = WebFontInfo::familyForChars(characters, numCharacters);
+        if (family.data())
+            return WebString::fromUTF8(family.data());
+        else
+            return WebString();
+    }
+}
+#endif
+
+// HTML5 DB -------------------------------------------------------------------
+
+#if ENABLE(DATABASE)
+PlatformFileHandle ChromiumBridge::databaseOpenFile(const String& fileName, int desiredFlags, PlatformFileHandle* dirHandle)
+{
+  return webKitClient()->databaseOpenFile(WebString(fileName), desiredFlags, dirHandle);
+}
+
+int ChromiumBridge::databaseDeleteFile(const String& fileName, bool syncDir)
+{
+    return webKitClient()->databaseDeleteFile(WebString(fileName), syncDir);
+}
+
+long ChromiumBridge::databaseGetFileAttributes(const String& fileName)
+{
+    return webKitClient()->databaseGetFileAttributes(WebString(fileName));
+}
+
+long long ChromiumBridge::databaseGetFileSize(const String& fileName)
+{
+    return webKitClient()->databaseGetFileSize(WebString(fileName));
 }
 #endif
 
@@ -236,6 +320,19 @@ bool ChromiumBridge::plugins(bool refresh, Vector<PluginInfo*>* results)
     return true;  // FIXME: There is no need for this function to return a value.
 }
 
+NPObject* ChromiumBridge::pluginScriptableObject(Widget* widget)
+{
+    if (!widget)
+        return NULL;
+
+    ASSERT(!widget->isFrameView());
+
+    // NOTE:  We have to trust that the widget passed to us here is a
+    // WebPluginContainerImpl.  There isn't a way to dynamically verify it,
+    // since the derived class (Widget) has no identifier.
+    return static_cast<WebPluginContainerImpl*>(widget)->scriptableObject();
+}
+
 // Resources ------------------------------------------------------------------
 
 PassRefPtr<Image> ChromiumBridge::loadPlatformImageResource(const char* name)
@@ -247,6 +344,13 @@ PassRefPtr<Image> ChromiumBridge::loadPlatformImageResource(const char* name)
     RefPtr<Image> image = BitmapImage::create();
     image->setData(resource, true);
     return image;
+}
+
+// Sandbox --------------------------------------------------------------------
+
+bool ChromiumBridge::sandboxEnabled()
+{
+    return webKitClient()->sandboxEnabled();
 }
 
 // SharedTimers ---------------------------------------------------------------
@@ -423,37 +527,63 @@ bool ChromiumBridge::isLinkVisited(WebCore::LinkHash visitedLinkHash)
     return webKitClient()->isLinkVisited(visitedLinkHash);
 }
 
-// HTML5 DB -------------------------------------------------------------------
+// These are temporary methoeds that the WebKit layer can use to call to the
+// Glue layer. Once the Glue layer moves entirely into the WebKit layer, these
+// methods will be deleted.
 
-#if ENABLE(DATABASE)
-PlatformFileHandle ChromiumBridge::databaseOpenFile(const String& fileName,
-                                                    int desiredFlags)
+String ChromiumBridge::uiResourceProtocol()
 {
-    // FIXME: un-stub when the code on the browser process side is submitted
-    //return webKitClient()->databaseOpenFile(WebString(fileName), desiredFlags);
-    return invalidPlatformFileHandle;
+    return webKitClient()->uiResourceProtocol();
 }
 
-bool ChromiumBridge::databaseDeleteFile(const String& fileName)
+void ChromiumBridge::notifyJSOutOfMemory(WebCore::Frame* frame)
 {
-    // FIXME: un-stub when the code on the browser process side is submitted
-    //return webKitClient()->databaseDeleteFile(WebString(fileName));
-    return false;
+    return webKitClient()->notifyJSOutOfMemory(frame);
 }
 
-long ChromiumBridge::databaseGetFileAttributes(const String& fileName)
+int ChromiumBridge::screenDepth(Widget* widget)
 {
-    // FIXME: un-stub when the code on the browser process side is submitted
-    //return webKitClient()->databaseGetFileAttributes(WebString(fileName));
-    return 0L;
+    return webKitClient()->screenDepth(widget);
 }
 
-long long ChromiumBridge::databaseGetFileSize(const String& fileName)
+int ChromiumBridge::screenDepthPerComponent(Widget* widget)
 {
-    // FIXME: un-stub when the code on the browser process side is submitted
-    //return webKitClient()->databaseGetFileSize(WebString(fileName));
-    return 0LL;
+    return webKitClient()->screenDepthPerComponent(widget);
 }
-#endif
+
+bool ChromiumBridge::screenIsMonochrome(Widget* widget)
+{
+    return webKitClient()->screenIsMonochrome(widget);
+}
+
+IntRect ChromiumBridge::screenRect(Widget* widget)
+{
+    return webKitClient()->screenRect(widget);
+}
+
+IntRect ChromiumBridge::screenAvailableRect(Widget* widget)
+{
+    return webKitClient()->screenAvailableRect(widget);
+}
+
+bool ChromiumBridge::popupsAllowed(NPP npp)
+{
+    return webKitClient()->popupsAllowed(npp);
+}
+
+void ChromiumBridge::widgetSetCursor(Widget* widget, const Cursor& cursor)
+{
+    return webKitClient()->widgetSetCursor(widget, cursor);
+}
+
+void ChromiumBridge::widgetSetFocus(Widget* widget)
+{
+    return webKitClient()->widgetSetFocus(widget);
+}
+
+WorkerContextProxy* WorkerContextProxy::create(Worker* worker)
+{
+    return webKitClient()->createWorkerContextProxy(worker);
+}
 
 } // namespace WebCore

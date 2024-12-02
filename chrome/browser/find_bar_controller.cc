@@ -4,11 +4,15 @@
 
 #include "chrome/browser/find_bar_controller.h"
 
+#include "app/l10n_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+
+// The minimum space between the FindInPage window and the search result.
+static const int kMinFindWndDistanceFromSelection = 5;
 
 FindBarController::FindBarController(FindBar* find_bar)
     : find_bar_(find_bar),
@@ -71,6 +75,7 @@ void FindBarController::ChangeTabContents(TabContents* contents) {
   registrar_.Add(this, NotificationType::NAV_ENTRY_COMMITTED,
                  Source<NavigationController>(&tab_contents_->controller()));
 
+#if !defined(OS_MACOSX)
   // Find out what we should show in the find text box. Usually, this will be
   // the last search in this tab, but if no search has been issued in this tab
   // we use the last search string (from any tab).
@@ -84,6 +89,11 @@ void FindBarController::ChangeTabContents(TabContents* contents) {
   // _first_ since the FindBarView checks its emptiness to see if it should
   // clear the result count display when there's nothing in the box.
   find_bar_->SetFindText(find_string);
+#else
+  // Having a per-tab find_string is not compatible with OS X's find pasteboard,
+  // so we always have the same find text in all find bars. This is done through
+  // the find pasteboard mechanism, so don't set the text here.
+#endif
 
   if (tab_contents_->find_ui_active()) {
     // A tab with a visible find bar just got selected and we need to show the
@@ -93,17 +103,13 @@ void FindBarController::ChangeTabContents(TabContents* contents) {
     // reason.
     gfx::Rect new_pos = find_bar_->GetDialogPosition(gfx::Rect());
     find_bar_->SetDialogPosition(new_pos, false);
-
-    // Only modify focus and selection if Find is active, otherwise the Find
-    // Bar will interfere with user input.
-    find_bar_->SetFocusAndSelection();
   }
 
   UpdateFindBarForCurrentResult();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// FindBarWin, NotificationObserver implementation:
+// FindBarHost, NotificationObserver implementation:
 
 void FindBarController::Observe(NotificationType type,
                                 const NotificationSource& source,
@@ -140,6 +146,46 @@ void FindBarController::Observe(NotificationType type,
       }
     }
   }
+}
+
+// static
+gfx::Rect FindBarController::GetLocationForFindbarView(
+    gfx::Rect view_location,
+    const gfx::Rect& dialog_bounds,
+    const gfx::Rect& avoid_overlapping_rect) {
+  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+    int boundary = dialog_bounds.width() - view_location.width();
+    view_location.set_x(std::min(view_location.x(), boundary));
+  } else {
+    view_location.set_x(std::max(view_location.x(), dialog_bounds.x()));
+  }
+
+  gfx::Rect new_pos = view_location;
+
+  // If the selection rectangle intersects the current position on screen then
+  // we try to move our dialog to the left (right for RTL) of the selection
+  // rectangle.
+  if (!avoid_overlapping_rect.IsEmpty() &&
+      avoid_overlapping_rect.Intersects(new_pos)) {
+    if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+      new_pos.set_x(avoid_overlapping_rect.x() +
+                    avoid_overlapping_rect.width() +
+                    (2 * kMinFindWndDistanceFromSelection));
+
+      // If we moved it off-screen to the right, we won't move it at all.
+      if (new_pos.x() + new_pos.width() > dialog_bounds.width())
+        new_pos = view_location;  // Reset.
+    } else {
+      new_pos.set_x(avoid_overlapping_rect.x() - new_pos.width() -
+        kMinFindWndDistanceFromSelection);
+
+      // If we moved it off-screen to the left, we won't move it at all.
+      if (new_pos.x() < 0)
+        new_pos = view_location;  // Reset.
+    }
+  }
+
+  return new_pos;
 }
 
 void FindBarController::UpdateFindBarForCurrentResult() {

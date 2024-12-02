@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,23 @@
 
 #include "app/l10n_util.h"
 #include "base/basictypes.h"
-#include "base/gfx/png_encoder.h"
+#include "base/i18n/time_formatting.h"
 #include "base/string_piece.h"
 #include "base/thread.h"
-#include "base/time_format.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/fileicon_source.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
-#if defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS) || defined(OS_MACOSX)
 // TODO(port): re-enable when download_util is ported
 #include "chrome/browser/download/download_util.h"
 #else
@@ -87,6 +87,8 @@ void DownloadsDOMHandler::RegisterMessages() {
       NewCallback(this, &DownloadsDOMHandler::HandlePause));
   dom_ui_->RegisterMessageCallback("resume",
       NewCallback(this, &DownloadsDOMHandler::HandlePause));
+  dom_ui_->RegisterMessageCallback("remove",
+      NewCallback(this, &DownloadsDOMHandler::HandleRemove));
   dom_ui_->RegisterMessageCallback("cancel",
       NewCallback(this, &DownloadsDOMHandler::HandleCancel));
   dom_ui_->RegisterMessageCallback("clearAll",
@@ -167,7 +169,8 @@ void DownloadsDOMHandler::HandleDrag(const Value* value) {
   if (file) {
     IconManager* im = g_browser_process->icon_manager();
     SkBitmap* icon = im->LookupIcon(file->full_path(), IconLoader::NORMAL);
-    download_util::DragDownload(file, icon);
+    gfx::NativeView view = dom_ui_->tab_contents()->GetNativeView();
+    download_util::DragDownload(file, icon, view);
   }
 }
 
@@ -195,6 +198,12 @@ void DownloadsDOMHandler::HandlePause(const Value* value) {
     file->TogglePause();
 }
 
+void DownloadsDOMHandler::HandleRemove(const Value* value) {
+  DownloadItem* file = GetDownloadByValue(value);
+  if (file)
+    file->Remove(false);
+}
+
 void DownloadsDOMHandler::HandleCancel(const Value* value) {
   DownloadItem* file = GetDownloadByValue(value);
   if (file)
@@ -214,7 +223,7 @@ void DownloadsDOMHandler::SendCurrentDownloads() {
     int index = static_cast<int>(it - download_items_.begin());
     if (index > kMaxDownloads)
       break;
-    results_value.Append(CreateDownloadItemValue(*it,index));
+    results_value.Append(CreateDownloadItemValue(*it, index));
   }
 
   dom_ui_->CallJavascriptFunction(L"downloadsList", results_value);

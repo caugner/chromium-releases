@@ -5,132 +5,23 @@
     'lastchange_path': '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
     # 'branding_dir' is set in the 'conditions' section at the bottom.
   },
-  'includes': [
-    '../../build/common.gypi',
-  ],
-  'targets': [
-    {
-      'target_name': 'installer_util',
-      'conditions': [
-        ['OS=="linux"', {
-          'type': 'none',
-          # Add these files to the build output so the build archives will be
-          # "hermetic" for packaging. This is only for branding="Chrome" since
-          # we only create packages for official builds.
-          'conditions': [
-            ['branding=="Chrome"', {
-              'variables': {
-                'lib32_dir': '<!(if uname -m | egrep -q "x86_64"; then echo lib32; else echo lib; fi)',
-              },
-              'copies': [
-                # Copy tools for generating packages from the build archive.
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/',
-                  'files': [
-                    'linux/internal/build_from_archive.sh',
-                  ]
-                },
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/debian/',
-                  'files': [
-                    'linux/internal/debian/build.sh',
-                    'linux/internal/debian/changelog.template',
-                    'linux/internal/debian/control.template',
-                    'linux/internal/debian/postinst',
-                    'linux/internal/debian/postrm',
-                    'linux/internal/debian/prerm',
-                  ]
-                },
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/rpm/',
-                  'files': [
-                    'linux/internal/rpm/build.sh',
-                    'linux/internal/rpm/chrome.spec.template',
-                  ]
-                },
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/common/',
-                  'files': [
-                    'linux/internal/common/apt.include',
-                    'linux/internal/common/desktop.template',
-                    'linux/internal/common/default-app.template',
-                    'linux/internal/common/default-app-patch.template',
-                    'linux/internal/common/google-chrome/google-chrome.info',
-                    'linux/internal/common/installer.include',
-                    'linux/internal/common/postinst.include',
-                    'linux/internal/common/prerm.include',
-                    'linux/internal/common/repo.cron',
-                    'linux/internal/common/updater',
-                    'linux/internal/common/wrapper',
-                  ]
-                },
-                # System libs needed for 64-bit package building.
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/lib32/',
-                  'files': [
-                    '/usr/<(lib32_dir)/libsqlite3.so.0',
-                    '/usr/<(lib32_dir)/libsqlite3.so.0.8.6',
-                    '/usr/<(lib32_dir)/libnspr4.so.0d',
-                    '/usr/<(lib32_dir)/libplds4.so.0d',
-                    '/usr/<(lib32_dir)/libplc4.so.0d',
-                    '/usr/<(lib32_dir)/libssl3.so.1d',
-                    '/usr/<(lib32_dir)/libnss3.so.1d',
-                    '/usr/<(lib32_dir)/libsmime3.so.1d',
-                    '/usr/<(lib32_dir)/libnssutil3.so.1d',
-                    '/usr/<(lib32_dir)/nss/libfreebl3.so',
-                    '/usr/<(lib32_dir)/nss/libsoftokn3.chk',
-                    '/usr/<(lib32_dir)/nss/libsoftokn3.so',
-                    '/usr/<(lib32_dir)/nss/libnssckbi.so',
-                    '/usr/<(lib32_dir)/nss/libnssdbm3.so',
-                    '/usr/<(lib32_dir)/nss/libfreebl3.chk',
-                  ],
-                },
-                # Additional theme resources needed for package building.
-                {
-                  'destination': '<(PRODUCT_DIR)/installer/theme/',
-                  'files': [
-                    '<(branding_dir)/product_logo_16.png',
-                    '<(branding_dir)/product_logo_32.png',
-                    '<(branding_dir)/product_logo_48.png',
-                    '<(branding_dir)/product_logo_256.png',
-                    '<(branding_dir)/BRANDING',
-                  ],
-                },
-              ],
-              'actions': [
-                {
-                  'action_name': 'save_build_info',
-                  'inputs': [
-                    '<(branding_dir)/BRANDING',
-                    '<(version_path)',
-                    '<(lastchange_path)',
-                  ],
-                  'outputs': [
-                    '<(PRODUCT_DIR)/installer/version.txt',
-                  ],
-                  # Just output the default version info variables.
-                  'action': [
-                    'python', '<(version_py)',
-                    '-f', '<(branding_dir)/BRANDING',
-                    '-f', '<(version_path)',
-                    '-f', '<(lastchange_path)',
-                    '-o', '<@(_outputs)'
-                  ],
-                },
-              ],
-            }],
-          ],
-        }],
-        ['OS=="win"', {
+  'conditions': [
+    ['OS=="win"', {
+      'targets': [
+        {
+          'target_name': 'installer_util',
           'type': '<(library)',
           'msvs_guid': 'EFBB1436-A63F-4CD8-9E99-B89226E782EC',
           'dependencies': [
+            '../../app/app.gyp:app_id',
             'installer_util_strings',
-            '../chrome.gyp:common',
+            '../chrome.gyp:common_constants',
             '../chrome.gyp:chrome_resources',
             '../chrome.gyp:chrome_strings',
-            '../../third_party/icu38/icu38.gyp:icui18n',
-            '../../third_party/icu38/icu38.gyp:icuuc',
+            '../../courgette/courgette.gyp:courgette_lib',
+            '../../third_party/bspatch/bspatch.gyp:bspatch',
+            '../../third_party/icu/icu.gyp:icui18n',
+            '../../third_party/icu/icu.gyp:icuuc',
             '../../third_party/libxml/libxml.gyp:libxml',
             '../../third_party/lzma_sdk/lzma_sdk.gyp:lzma_sdk',
           ],
@@ -140,6 +31,8 @@
           'sources': [
             'util/browser_distribution.cc',
             'util/browser_distribution.h',
+            'util/chrome_frame_distribution.cc',
+            'util/chrome_frame_distribution.h',
             'util/compat_checks.cc',
             'util/compat_checks.h',
             'util/copy_tree_work_item.cc',
@@ -148,6 +41,8 @@
             'util/create_dir_work_item.h',
             'util/create_reg_key_work_item.cc',
             'util/create_reg_key_work_item.h',
+            'util/delete_after_reboot_helper.cc',
+            'util/delete_after_reboot_helper.h',
             'util/delete_reg_value_work_item.cc',
             'util/delete_reg_value_work_item.h',
             'util/delete_tree_work_item.cc',
@@ -188,16 +83,8 @@
             'util/work_item.h',
             'util/work_item_list.cc',
             'util/work_item_list.h',
-            '../common/json_value_serializer.cc',
-            '../common/pref_names.cc',
           ],
-        }],
-      ],
-    },
-  ],
-  'conditions': [
-    ['OS=="win"', {
-      'targets': [
+        },
         {
           'target_name': 'gcapi_dll',
           'type': 'loadable_module',
@@ -253,6 +140,7 @@
             'installer_util',
             'installer_util_strings',
             '../../base/base.gyp:base',
+            '../../base/base.gyp:base_i18n',
             '../../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -261,20 +149,24 @@
           'sources': [
             'setup/compat_checks_unittest.cc',
             'setup/setup_constants.cc',
+            'util/browser_distribution_unittest.cc',
             'util/copy_tree_work_item_unittest.cc',
             'util/create_dir_work_item_unittest.cc',
             'util/create_reg_key_work_item_unittest.cc',
+            'util/delete_after_reboot_helper_unittest.cc',
             'util/delete_reg_value_work_item_unittest.cc',
             'util/delete_tree_work_item_unittest.cc',
             'util/google_chrome_distribution_unittest.cc',
             'util/helper_unittest.cc',
             'util/installer_util_unittests.rc',
             'util/installer_util_unittests_resource.h',
+            'util/lzma_util_unittest.cc',
+            'util/master_preferences_unittest.cc',
             'util/move_tree_work_item_unittest.cc',
             'util/run_all_unittests.cc',
             'util/set_reg_value_work_item_unittest.cc',
-            'util/shell_util_unittest.cc',
             'util/work_item_list_unittest.cc',
+            'util/version_unittest.cc',
           ],
           'msvs_settings': {
             'VCManifestTool': {
@@ -284,38 +176,34 @@
         },
         {
           'target_name': 'installer_util_strings',
-          'type': 'dummy_executable',
           'msvs_guid': '0026A376-C4F1-4575-A1BA-578C69F07013',
-          'actions': [
+          'type': 'none',
+          'rules': [
             {
-              # TODO(sgk):  Clean this up so that we pass in the
-              # file names to the script instead of having it hard-code
-              # matching path names internally.
-              'action_name': 'installer_util_strings',
+              'rule_name': 'installer_util_strings',
+              'extension': 'grd',
               'inputs': [
-                'util/prebuild/create_string_rc.py',
-                '../app/generated_resources.grd',
+                '<(RULE_INPUT_PATH)',
               ],
               'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
+                # Don't use <(RULE_INPUT_ROOT) to create the output file
+                # name, because the base name of the input
+                # (generated_resources.grd) doesn't match the generated file
+                # (installer_util_strings.h).
                 '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.h',
               ],
-              'action': [
-                # The create_string_rc.py script requires the checked-in
-                # python.exe that has google modules installed, and
-                # a PYTHONPATH pointing to grit so it can import FP.
-                # TODO:  clean this up
-                'set PYTHONPATH=../../tools/grit/grit/extern', '&&',
-                '../../third_party/python_24/python.exe',
-                'util/prebuild/create_string_rc.py',
-                '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings'
-              ],
-              'msvs_cygwin_shell': 0,
+              'action': ['python',
+                         'util/prebuild/create_string_rc.py',
+                         '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings'],
+              'message': 'Generating resources from <(RULE_INPUT_PATH)',
             },
+          ],
+          'sources': [
+            '../app/generated_resources.grd',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
-               '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',
+              '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',
             ],
           },
         },
@@ -326,18 +214,20 @@
           'dependencies': [
             'installer_util',
             '../../base/base.gyp:base',
+            '../../base/base.gyp:base_i18n',
             '../../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
             '../..',
           ],
           'sources': [
-            'setup/setup_constants.cc',
-            'util/run_all_unittests.cc',
+            '../test/mini_installer_test/run_all_unittests.cc',
             '../test/mini_installer_test/chrome_mini_installer.cc',
             '../test/mini_installer_test/chrome_mini_installer.h',
             '../test/mini_installer_test/mini_installer_test_constants.cc',
             '../test/mini_installer_test/mini_installer_test_constants.h',
+            '../test/mini_installer_test/mini_installer_test_util.cc',
+            '../test/mini_installer_test/mini_installer_test_util.h',
             '../test/mini_installer_test/test.cc',
           ],
           'msvs_settings': {
@@ -354,9 +244,8 @@
             'installer_util',
             'installer_util_strings',
             '../../build/util/build_util.gyp:lastchange',
+            '../../build/util/support/support.gyp:*',
             '../../build/win/system.gyp:cygwin',
-            '../../courgette/courgette.gyp:courgette_lib',
-            '../../third_party/bspatch/bspatch.gyp:bspatch',
           ],
           'include_dirs': [
             '../..',
@@ -444,14 +333,19 @@
               ],
             },
           ],
-          # TODO(mark):  <(branding_dir) should be defined by the
-          # global condition block at the bottom of the file, but
-          # this doesn't work due to the following issue:
-          #
-          #   http://code.google.com/p/gyp/issues/detail?id=22
-          #
-          # Remove this block once the above issue is fixed.
           'conditions': [
+            ['chrome_frame_define==1', {
+              'dependencies': [
+                '../../chrome_frame/chrome_frame.gyp:npchrome_tab',
+              ],
+            }],
+            # TODO(mark):  <(branding_dir) should be defined by the
+            # global condition block at the bottom of the file, but
+            # this doesn't work due to the following issue:
+            #
+            #   http://code.google.com/p/gyp/issues/detail?id=22
+            #
+            # Remove this block once the above issue is fixed.
             [ 'branding == "Chrome"', {
               'variables': {
                  'branding_dir': '../app/theme/google_chrome',
@@ -470,6 +364,7 @@
           'dependencies': [
             'installer_util',
             '../../base/base.gyp:base',
+            '../../base/base.gyp:base_i18n',
             '../../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -479,6 +374,247 @@
             'setup/run_all_unittests.cc',
             'setup/setup_util.cc',
             'setup/setup_util_unittest.cc',
+          ],
+        },
+      ],
+    }],
+    ['OS=="linux" and branding=="Chrome"', {
+      # Always google_chrome since this only applies to branding==Chrome.
+      'variables': {
+         'branding_dir': '../app/theme/google_chrome',
+      },
+      'targets': [
+        {
+          'target_name': 'installer_util',
+          'type': 'none',
+          # Add these files to the build output so the build archives will be
+          # "hermetic" for packaging. This is only for branding="Chrome" since
+          # we only create packages for official builds.
+          'copies': [
+            # Copy tools for generating packages from the build archive.
+            {
+              'destination': '<(PRODUCT_DIR)/installer/',
+              'files': [
+                'linux/internal/build_from_archive.sh',
+              ]
+            },
+            {
+              'destination': '<(PRODUCT_DIR)/installer/debian/',
+              'files': [
+                'linux/internal/debian/build.sh',
+                'linux/internal/debian/changelog.template',
+                'linux/internal/debian/control.template',
+                'linux/internal/debian/postinst',
+                'linux/internal/debian/postrm',
+                'linux/internal/debian/prerm',
+              ]
+            },
+            {
+              'destination': '<(PRODUCT_DIR)/installer/rpm/',
+              'files': [
+                'linux/internal/rpm/build.sh',
+                'linux/internal/rpm/chrome.spec.template',
+              ]
+            },
+            {
+              'destination': '<(PRODUCT_DIR)/installer/common/',
+              'files': [
+                'linux/internal/common/apt.include',
+                'linux/internal/common/default-app.template',
+                'linux/internal/common/default-app-block.template',
+                'linux/internal/common/desktop.template',
+                'linux/internal/common/google-chrome/google-chrome.info',
+                'linux/internal/common/installer.include',
+                'linux/internal/common/postinst.include',
+                'linux/internal/common/prerm.include',
+                'linux/internal/common/repo.cron',
+                'linux/internal/common/rpm.include',
+                'linux/internal/common/rpmrepo.cron',
+                'linux/internal/common/updater',
+                'linux/internal/common/wrapper',
+              ]
+            },
+            # Additional theme resources needed for package building.
+            {
+              'destination': '<(PRODUCT_DIR)/installer/theme/',
+              'files': [
+                '<(branding_dir)/product_logo_16.png',
+                '<(branding_dir)/product_logo_32.png',
+                '<(branding_dir)/product_logo_48.png',
+                '<(branding_dir)/product_logo_256.png',
+                '<(branding_dir)/BRANDING',
+              ],
+            },
+          ],
+          'actions': [
+            {
+              'action_name': 'save_build_info',
+              'inputs': [
+                '<(branding_dir)/BRANDING',
+                '<(version_path)',
+                '<(lastchange_path)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/installer/version.txt',
+              ],
+              # Just output the default version info variables.
+              'action': [
+                'python', '<(version_py)',
+                '-f', '<(branding_dir)/BRANDING',
+                '-f', '<(version_path)',
+                '-f', '<(lastchange_path)',
+                '-o', '<@(_outputs)'
+              ],
+            },
+          ],
+        },
+        {
+          'target_name': 'linux_packages',
+          'suppress_wildcard': 1,
+          'type': 'none',
+          'dependencies': [
+            '../chrome.gyp:chrome',
+          ],
+          'variables': {
+            'version' : '<!(python <(version_py) -f ../../chrome/VERSION -t "@MAJOR@.@MINOR@.@BUILD@.@PATCH@")',
+            'revision' : '<!(python ../../build/util/lastchange.py | cut -d "=" -f 2)',
+            'input_files': [
+              # TODO(mmoss) Any convenient way to get all the relevant build
+              # files? (e.g. all locales, resources, etc.)
+              '<(PRODUCT_DIR)/chrome',
+              '<(PRODUCT_DIR)/chrome.pak',
+              '<(PRODUCT_DIR)/chrome_sandbox',
+              '<(PRODUCT_DIR)/libavcodec.so.52',
+              '<(PRODUCT_DIR)/libavformat.so.52',
+              '<(PRODUCT_DIR)/libavutil.so.50',
+              '<(PRODUCT_DIR)/xdg-settings',
+              '<(PRODUCT_DIR)/locales/en-US.pak',
+              '<(PRODUCT_DIR)/themes/default.pak',
+            ],
+            'flock_bash': ['flock', '--', '/tmp/linux_package_lock', 'bash'],
+            'deb_build': '<(PRODUCT_DIR)/installer/debian/build.sh',
+            'rpm_build': '<(PRODUCT_DIR)/installer/rpm/build.sh',
+            'deb_cmd': ['<@(flock_bash)', '<(deb_build)', '-o' '<(PRODUCT_DIR)',
+                        '-b', '<(PRODUCT_DIR)', '-a', '<(target_arch)'],
+            'rpm_cmd': ['<@(flock_bash)', '<(rpm_build)', '-o' '<(PRODUCT_DIR)',
+                        '-b', '<(PRODUCT_DIR)', '-a', '<(target_arch)'],
+            'conditions': [
+              ['target_arch=="ia32"', {
+                'deb_arch': 'i386',
+                'rpm_arch': 'i386',
+              }],
+              ['target_arch=="x64"', {
+                'deb_arch': 'amd64',
+                'rpm_arch': 'x86_64',
+              }],
+            ],
+          },
+          'actions': [
+            # TODO(mmoss) gyp looping construct would be handy here ...
+            # These deb_packages* and rpm_packages* actions are the same except
+            # for the 'channel' variable.
+            {
+              'variables': {
+                'channel': 'unstable',
+              },
+              'action_name': 'deb_packages_<(channel)',
+              'process_outputs_as_sources': 1,
+              'inputs': [
+                '<(deb_build)',
+                '<@(input_files)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+              ],
+              'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
+            },
+            {
+              'variables': {
+                'channel': 'beta',
+              },
+              'action_name': 'deb_packages_<(channel)',
+              'process_outputs_as_sources': 1,
+              'inputs': [
+                '<(deb_build)',
+                '<@(input_files)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+              ],
+              'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
+            },
+            {
+              'variables': {
+                'channel': 'stable',
+              },
+              'action_name': 'deb_packages_<(channel)',
+              'process_outputs_as_sources': 1,
+              'inputs': [
+                '<(deb_build)',
+                '<@(input_files)',
+              ],
+              'outputs': [
+                '<(PRODUCT_DIR)/google-chrome-<(channel)_<(version)-r<(revision)_<(deb_arch).deb',
+              ],
+              'action': [ '<@(deb_cmd)', '-c', '<(channel)', ],
+            },
+          ],
+          'conditions': [
+            ['chromeos==0 and toolkit_views==0', {
+              'actions': [
+                {
+                  'variables': {
+                    'channel': 'unstable',
+                  },
+                  'action_name': 'rpm_packages_<(channel)',
+                  'process_outputs_as_sources': 1,
+                  'inputs': [
+                    '<(rpm_build)',
+                    '<(PRODUCT_DIR)/installer/rpm/chrome.spec.template',
+                    '<@(input_files)',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                  ],
+                  'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
+                },
+                {
+                  'variables': {
+                    'channel': 'beta',
+                  },
+                  'action_name': 'rpm_packages_<(channel)',
+                  'process_outputs_as_sources': 1,
+                  'inputs': [
+                    '<(rpm_build)',
+                    '<(PRODUCT_DIR)/installer/rpm/chrome.spec.template',
+                    '<@(input_files)',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                  ],
+                  'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
+                },
+                {
+                  'variables': {
+                    'channel': 'stable',
+                  },
+                  'action_name': 'rpm_packages_<(channel)',
+                  'process_outputs_as_sources': 1,
+                  'inputs': [
+                    '<(rpm_build)',
+                    '<(PRODUCT_DIR)/installer/rpm/chrome.spec.template',
+                    '<@(input_files)',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/google-chrome-<(channel)-<(version)-<(revision).<(rpm_arch).rpm',
+                  ],
+                  'action': [ '<@(rpm_cmd)', '-c', '<(channel)', ],
+                },
+              ],
+            }],
+            ['target_arch=="x64"', {
+              # TODO(mmoss) 64-bit RPMs not ready yet.
+            }],
           ],
         },
       ],
@@ -494,3 +630,9 @@
     }],
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

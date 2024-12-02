@@ -12,25 +12,27 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
-#include "base/scoped_vector.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "base/version.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/net/url_fetcher.h"
+#include "chrome/common/extensions/update_manifest.h"
 #include "googleurl/src/gurl.h"
 
 class Extension;
 class ExtensionUpdaterTest;
 class MessageLoop;
 class ExtensionUpdaterFileHandler;
+class PrefService;
 
 // A class for doing auto-updates of installed Extensions. Used like this:
 //
 // ExtensionUpdater* updater = new ExtensionUpdater(my_extensions_service,
+//                                                  pref_service,
 //                                                  update_frequency_secs,
-//                                                  file_io_loop);
+//                                                  file_io_loop,
+//                                                  io_loop);
 // updater.Start();
 // ....
 // updater.Stop();
@@ -42,70 +44,61 @@ class ExtensionUpdater
   // extensions and installing updated ones. The |frequency_seconds| parameter
   // controls how often update checks are scheduled.
   ExtensionUpdater(ExtensionUpdateService* service,
+                   PrefService* prefs,
                    int frequency_seconds,
-                   MessageLoop* file_io_loop);
+                   MessageLoop* file_io_loop,
+                   MessageLoop* io_loop);
 
   virtual ~ExtensionUpdater();
 
-  // Starts the updater running, with the first check scheduled for
-  // |frequency_seconds| from now. Eventually ExtensionUpdater will persist the
-  // time the last check happened, and do the first check |frequency_seconds_|
-  // from then (potentially adding a short wait if the browser just started).
-  // (http://crbug.com/12545).
+  // Starts the updater running.
   void Start();
 
   // Stops the updater running, cancelling any outstanding update manifest and
   // crx downloads. Does not cancel any in-progress installs.
   void Stop();
 
+  // Starts an update check right now, instead of waiting for the next regularly
+  // scheduled check.
+  void CheckNow();
+
+  // Set blacklist checks on or off.
+  void set_blacklist_checks_enabled(bool enabled) {
+    blacklist_checks_enabled_ = enabled;
+  }
+
  private:
   friend class ExtensionUpdaterTest;
   friend class ExtensionUpdaterFileHandler;
-  class ParseHelper;
+  friend class SafeManifestParser;
 
-  // An update manifest looks like this:
-  //
-  // <?xml version='1.0' encoding='UTF-8'?>
-  // <gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
-  //  <app appid='12345'>
-  //   <updatecheck codebase='http://example.com/extension_1.2.3.4.crx'
-  //                version='1.2.3.4' prodversionmin='2.0.143.0' />
-  //  </app>
-  // </gupdate>
-  //
-  // The "appid" attribute of the <app> tag refers to the unique id of the
-  // extension. The "codebase" attribute of the <updatecheck> tag is the url to
-  // fetch the updated crx file, and the "prodversionmin" attribute refers to
-  // the minimum version of the chrome browser that the update applies to.
 
-  // The result of parsing one <app> tag in an xml update check manifest.
-  struct ParseResult {
-    std::string extension_id;
-    scoped_ptr<Version> version;
-    scoped_ptr<Version> browser_min_version;
-    GURL crx_url;
-  };
-
-  // We need to keep track of the extension id associated with a url when
-  // doing a fetch.
+  // We need to keep track of some information associated with a url
+  // when doing a fetch.
   struct ExtensionFetch {
     std::string id;
     GURL url;
-    ExtensionFetch() : id(""), url() {}
-    ExtensionFetch(std::string i, GURL u) : id(i), url(u) {}
+    std::string package_hash;
+    std::string version;
+    ExtensionFetch() : id(""), url(), package_hash(""), version("") {}
+    ExtensionFetch(const std::string& i, const GURL& u,
+      const std::string& h, const std::string& v)
+      : id(i), url(u), package_hash(h), version(v) {}
   };
 
   // These are needed for unit testing, to help identify the correct mock
   // URLFetcher objects.
   static const int kManifestFetcherId = 1;
-  static const int kExtensionFetcherId = 1;
+  static const int kExtensionFetcherId = 2;
 
-  // Constants for the update manifest.
-  static const char* kExpectedGupdateProtocol;
-  static const char* kExpectedGupdateXmlns;
+  static const char* kBlacklistUpdateUrl;
+  static const char* kBlacklistAppID;
 
   // Does common work from constructors.
   void Init();
+
+  // Computes when to schedule the first update check.
+  base::TimeDelta DetermineFirstCheckDelay();
 
   // URLFetcher::Delegate interface.
   virtual void OnURLFetchComplete(const URLFetcher* source,
@@ -132,6 +125,16 @@ class ExtensionUpdater
   // Callback for when ExtensionsService::Install is finished.
   void OnExtensionInstallFinished(const FilePath& path, Extension* extension);
 
+  // Verifies downloaded blacklist. Based on the blacklist, calls extension
+  // service to unload blacklisted extensions and update pref.
+  void ProcessBlacklist(const std::string& data);
+
+  // Sets the timer to call TimerFired after roughly |target_delay| from now.
+  // To help spread load evenly on servers, this method adds some random
+  // jitter. It also saves the scheduled time so it can be reloaded on
+  // browser restart.
+  void ScheduleNextCheck(const base::TimeDelta& target_delay);
+
   // BaseTimer::ReceiverMethod callback.
   void TimerFired();
 
@@ -139,18 +142,23 @@ class ExtensionUpdater
   void StartUpdateCheck(const GURL& url);
 
   // Begins (or queues up) download of an updated extension.
-  void FetchUpdatedExtension(const std::string& id, GURL url);
+  void FetchUpdatedExtension(const std::string& id, const GURL& url,
+    const std::string& hash, const std::string& version);
 
-  typedef std::vector<ParseResult*> ParseResultList;
+  // Once a manifest is parsed, this starts fetches of any relevant crx files.
+  void HandleManifestResults(const UpdateManifest::ResultList& results);
+
+  // Determines the version of an existing extension.
+  // Returns true on success and false on failures.
+  bool GetExistingVersion(const std::string& id, std::string* version);
 
   // Given a list of potential updates, returns the indices of the ones that are
   // applicable (are actually a new version, etc.) in |result|.
-  std::vector<int> DetermineUpdates(const ParseResultList& possible_updates);
+  std::vector<int> DetermineUpdates(
+      const std::vector<UpdateManifest::Result>& possible_updates);
 
-  // Parses an update manifest xml string into ParseResult data. On success, it
-  // inserts new ParseResult items into |result| and returns true. On failure,
-  // it returns false and puts nothing into |result|.
-  static bool Parse(const std::string& manifest_xml, ParseResultList* result);
+  // Creates a blacklist update url.
+  static GURL GetBlacklistUpdateUrl(const std::wstring& version);
 
   // Outstanding url fetch requests for manifests and updates.
   scoped_ptr<URLFetcher> manifest_fetcher_;
@@ -167,13 +175,19 @@ class ExtensionUpdater
   // Pointer back to the service that owns this ExtensionUpdater.
   ExtensionUpdateService* service_;
 
-  base::RepeatingTimer<ExtensionUpdater> timer_;
+  base::OneShotTimer<ExtensionUpdater> timer_;
   int frequency_seconds_;
 
   // The MessageLoop where we should do file I/O.
   MessageLoop* file_io_loop_;
 
+  // The IO loop for IPC.
+  MessageLoop* io_loop_;
+
+  PrefService* prefs_;
+
   scoped_refptr<ExtensionUpdaterFileHandler> file_handler_;
+  bool blacklist_checks_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUpdater);
 };

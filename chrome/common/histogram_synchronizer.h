@@ -5,23 +5,17 @@
 #ifndef CHROME_COMMON_HISTOGRAM_SYNCHRONIZER_H_
 #define CHROME_COMMON_HISTOGRAM_SYNCHRONIZER_H_
 
-#include <list>
-#include <map>
-#include <set>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/condition_variable.h"
 #include "base/lock.h"
-#include "base/message_loop.h"
-#include "base/process.h"
 #include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/task.h"
 #include "base/time.h"
 
 class MessageLoop;
+class Task;
 
 class HistogramSynchronizer : public
     base::RefCountedThreadSafe<HistogramSynchronizer> {
@@ -75,10 +69,13 @@ class HistogramSynchronizer : public
   // Calls the callback task, if there is a callback_task.
   void CallCallbackTaskAndResetData();
 
-  // Method to get a new sequence number to be sent to renderers from broswer
-  // process.
-  int GetNextAvaibleSequenceNumber(RendererHistogramRequester requster,
-                                   size_t renderer_histograms_requested);
+  // Gets a new sequence number to be sent to renderers from broswer process.
+  // This will also reset the current pending renderers for the given type.
+  int GetNextAvaibleSequenceNumber(RendererHistogramRequester requster);
+
+  // Increments the count of the renderers we're waiting for for the request
+  // of the given type.
+  void IncrementPendingRenderers(RendererHistogramRequester requester);
 
   // For use ONLY in a DCHECK. This method initializes io_message_loop_ in its
   // first call and then compares io_message_loop_ with MessageLoop::current()
@@ -142,7 +139,7 @@ class HistogramSynchronizer : public
   // from the UI thread (for UMA uploads), or for about:histograms.
   static HistogramSynchronizer* histogram_synchronizer_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(HistogramSynchronizer);
+  DISALLOW_COPY_AND_ASSIGN(HistogramSynchronizer);
 };
 
 #endif  // CHROME_COMMON_HISTOGRAM_SYNCHRONIZER_H_

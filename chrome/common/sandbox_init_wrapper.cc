@@ -19,7 +19,7 @@ void SandboxInitWrapper::SetServices(sandbox::SandboxInterfaceInfo* info) {
 #endif
 
 void SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
-                                           const std::wstring& process_type) {
+                                           const std::string& process_type) {
 #if defined(OS_WIN)
   if (!target_services_)
     return;
@@ -27,6 +27,7 @@ void SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
   if (!command_line.HasSwitch(switches::kNoSandbox)) {
     if ((process_type == switches::kRendererProcess) ||
         (process_type == switches::kWorkerProcess) ||
+        (process_type == switches::kNaClProcess) ||
         (process_type == switches::kUtilityProcess) ||
         (process_type == switches::kPluginProcess &&
          command_line.HasSwitch(switches::kSafePlugins))) {

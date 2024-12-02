@@ -78,6 +78,11 @@ void WebURLRequest::assign(const WebURLRequest& r)
         assign(r.m_private ? new WebURLRequestPrivateImpl(r.m_private) : 0);
 }
 
+bool WebURLRequest::isNull() const
+{
+    return !m_private || m_private->m_resourceRequest->isNull();
+}
+
 WebURL WebURLRequest::url() const
 {
     return m_private->m_resourceRequest->url();
@@ -100,12 +105,12 @@ void WebURLRequest::setFirstPartyForCookies(const WebURL& firstPartyForCookies)
 
 bool WebURLRequest::allowCookies() const
 {
-    return m_private->m_resourceRequest->allowHTTPCookies();
+    return m_private->m_resourceRequest->allowCookies();
 }
 
 void WebURLRequest::setAllowCookies(bool allowCookies)
 {
-    m_private->m_resourceRequest->setAllowHTTPCookies(allowCookies);
+    m_private->m_resourceRequest->setAllowCookies(allowCookies);
 }
 
 bool WebURLRequest::allowStoredCredentials() const
@@ -142,31 +147,31 @@ void WebURLRequest::setHTTPMethod(const WebString& httpMethod)
 
 WebString WebURLRequest::httpHeaderField(const WebString& name) const
 {
-    return m_private->m_resourceRequest->httpHeaderField(String(name));
+    return m_private->m_resourceRequest->httpHeaderField(name);
 }
 
 void WebURLRequest::setHTTPHeaderField(const WebString& name, const WebString& value)
 {
-    m_private->m_resourceRequest->setHTTPHeaderField(String(name), value);
+    m_private->m_resourceRequest->setHTTPHeaderField(name, value);
 }
 
 void WebURLRequest::addHTTPHeaderField(const WebString& name, const WebString& value)
 {
-    m_private->m_resourceRequest->addHTTPHeaderField(String(name), value);
+    m_private->m_resourceRequest->addHTTPHeaderField(name, value);
 }
 
 void WebURLRequest::clearHTTPHeaderField(const WebString& name)
 {
     // FIXME: Add a clearHTTPHeaderField method to ResourceRequest.
     const HTTPHeaderMap& map = m_private->m_resourceRequest->httpHeaderFields();
-    const_cast<HTTPHeaderMap*>(&map)->remove(String(name));
+    const_cast<HTTPHeaderMap*>(&map)->remove(name);
 }
 
 void WebURLRequest::visitHTTPHeaderFields(WebHTTPHeaderVisitor* visitor) const
 {
     const HTTPHeaderMap& map = m_private->m_resourceRequest->httpHeaderFields();
     for (HTTPHeaderMap::const_iterator it = map.begin(); it != map.end(); ++it)
-        visitor->visitHeader(String(it->first), it->second);
+        visitor->visitHeader(it->first, it->second);
 }
 
 WebHTTPBody WebURLRequest::httpBody() const
@@ -220,14 +225,14 @@ void WebURLRequest::setRequestorProcessID(int requestorProcessID)
     m_private->m_resourceRequest->setRequestorProcessID(requestorProcessID);
 }
 
-int WebURLRequest::appCacheContextID() const
+int WebURLRequest::appCacheHostID() const
 {
-    return m_private->m_resourceRequest->appCacheContextID();
+    return m_private->m_resourceRequest->appCacheHostID();
 }
 
-void WebURLRequest::setAppCacheContextID(int appCacheContextID)
+void WebURLRequest::setAppCacheHostID(int appCacheHostID)
 {
-    m_private->m_resourceRequest->setAppCacheContextID(appCacheContextID);
+    m_private->m_resourceRequest->setAppCacheHostID(appCacheHostID);
 }
 
 ResourceRequest& WebURLRequest::toMutableResourceRequest()

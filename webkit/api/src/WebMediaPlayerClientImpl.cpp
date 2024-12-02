@@ -7,7 +7,7 @@
 
 #if ENABLE(VIDEO)
 
-#include "TemporaryGlue.h"
+#include "TimeRanges.h"
 #include "WebCanvas.h"
 #include "WebCString.h"
 #include "WebKit.h"
@@ -27,7 +27,11 @@
 #include "KURL.h"
 #include "MediaPlayer.h"
 #include "NotImplemented.h"
+#include <wtf/Assertions.h>
+
+#if WEBKIT_USING_SKIA
 #include "PlatformContextSkia.h"
+#endif
 
 using namespace WebCore;
 
@@ -112,9 +116,9 @@ void WebMediaPlayerClientImpl::load(const String& url)
 {
     Frame* frame = static_cast<HTMLMediaElement*>(
         m_mediaPlayer->mediaPlayerClient())->document()->frame();
-    m_webMediaPlayer.set(TemporaryGlue::createWebMediaPlayer(this, frame));
+    m_webMediaPlayer.set(webKitClient()->createWebMediaPlayer(this, frame));
     if (m_webMediaPlayer.get())
-        m_webMediaPlayer->load(KURL(url));
+        m_webMediaPlayer->load(KURL(ParsedURLString, url));
 }
 
 void WebMediaPlayerClientImpl::cancelLoad()
@@ -230,24 +234,6 @@ void WebMediaPlayerClientImpl::setVolume(float volume)
 
 MediaPlayer::NetworkState WebMediaPlayerClientImpl::networkState() const
 {
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Empty) == int(MediaPlayer::Empty), Empty);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Idle) == int(MediaPlayer::Idle), Idle);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Loading) == int(MediaPlayer::Loading), Loading);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Loaded) == int(MediaPlayer::Loaded), Loaded);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::FormatError) == int(MediaPlayer::FormatError),
-        FormatError);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::NetworkError) == int(MediaPlayer::NetworkError),
-        NetworkError);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::DecodeError) == int(MediaPlayer::DecodeError),
-        DecodeError);
-
     if (m_webMediaPlayer.get())
         return static_cast<MediaPlayer::NetworkState>(m_webMediaPlayer->networkState());
     return MediaPlayer::Empty;
@@ -255,22 +241,6 @@ MediaPlayer::NetworkState WebMediaPlayerClientImpl::networkState() const
 
 MediaPlayer::ReadyState WebMediaPlayerClientImpl::readyState() const
 {
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::HaveNothing) == int(MediaPlayer::HaveNothing),
-        HaveNothing);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::HaveMetadata) == int(MediaPlayer::HaveMetadata),
-        HaveMetadata);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::HaveCurrentData) == int(MediaPlayer::HaveCurrentData),
-        HaveCurrentData);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::HaveFutureData) == int(MediaPlayer::HaveFutureData),
-        HaveFutureData);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::HaveEnoughData) == int(MediaPlayer::HaveEnoughData),
-        HaveEnoughData);
-
     if (m_webMediaPlayer.get())
         return static_cast<MediaPlayer::ReadyState>(m_webMediaPlayer->readyState());
     return MediaPlayer::HaveNothing;
@@ -283,11 +253,18 @@ float WebMediaPlayerClientImpl::maxTimeSeekable() const
     return 0.0f;
 }
 
-float WebMediaPlayerClientImpl::maxTimeBuffered() const
+WTF::PassRefPtr<WebCore::TimeRanges> WebMediaPlayerClientImpl::buffered() const
 {
-    if (m_webMediaPlayer.get())
-        return m_webMediaPlayer->maxTimeBuffered();
-    return 0.0f;
+    if (m_webMediaPlayer.get()) {
+        const WebTimeRanges& webRanges = m_webMediaPlayer->buffered();
+
+        // FIXME: Save the time ranges in a member variable and update it when needed.
+        WTF::RefPtr<TimeRanges> ranges = TimeRanges::create();
+        for (size_t i = 0; i < webRanges.size(); ++i)
+            ranges->add(webRanges[i].start, webRanges[i].end);
+        return ranges.release();
+    }
+    return TimeRanges::create();
 }
 
 int WebMediaPlayerClientImpl::dataRate() const
@@ -333,32 +310,7 @@ void WebMediaPlayerClientImpl::paint(GraphicsContext* context, const IntRect& re
 #if WEBKIT_USING_SKIA
         m_webMediaPlayer->paint(context->platformContext()->canvas(), rect);
 #elif WEBKIT_USING_CG
-        // If there is no preexisting platform canvas, or if the size has
-        // changed, recreate the canvas.  This is to avoid recreating the bitmap
-        // buffer over and over for each frame of video.
-        if (!m_webCanvas ||
-            m_webCanvas->getDevice()->width() != rect.width() ||
-            m_webCanvas->getDevice()->height() != rect.height()) {
-            m_webCanvas.set(new WebCanvas(rect.width(), rect.height(), true));
-        }
-
-        IntRect normalized_rect(0, 0, rect.width(), rect.height());
-        m_webMediaPlayer->paint(m_webCanvas.get(), normalized_rect);
-
-        // The mac coordinate system is flipped vertical from the normal skia
-        // coordinates.  During painting of the frame, flip the coordinates
-        // system and, for simplicity, also translate the clip rectangle to
-        // start at 0,0.
-        CGContext* cgContext = context->platformContext();
-        CGContextSaveGState(cgContext);
-        CGContextTranslateCTM(cgContext, rect.x(), rect.height() + rect.y());
-        CGContextScaleCTM(cgContext, 1.0, -1.0);
-        CGRect normalized_cgrect = normalized_rect;  // For DrawToContext.
-
-        m_webCanvas->getTopPlatformDevice().DrawToContext(
-            context->platformContext(), 0, 0, &normalized_cgrect);
-
-        CGContextRestoreGState(cgContext);
+        m_webMediaPlayer->paint(context->platformContext(), rect);
 #else
         notImplemented();
 #endif
@@ -380,19 +332,6 @@ bool WebMediaPlayerClientImpl::hasSingleSecurityOrigin() const
 
 MediaPlayer::MovieLoadType WebMediaPlayerClientImpl::movieLoadType() const
 {
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Unknown) == int(MediaPlayer::Unknown),
-        Unknown);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::Download) == int(MediaPlayer::Download),
-        Download);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::StoredStream) == int(MediaPlayer::StoredStream),
-        StoredStream);
-    COMPILE_ASSERT(
-        int(WebMediaPlayer::LiveStream) == int(MediaPlayer::LiveStream),
-        LiveStream);
-
     if (m_webMediaPlayer.get())
         return static_cast<MediaPlayer::MovieLoadType>(
             m_webMediaPlayer->movieLoadType());
@@ -419,15 +358,16 @@ MediaPlayer::SupportsType WebMediaPlayerClientImpl::supportsType(const String& t
         webKitClient()->mimeRegistry()->supportsMediaMIMEType(type, codecs);
 
     switch (supportsType) {
+    default:
+        ASSERT_NOT_REACHED();
     case WebMimeRegistry::IsNotSupported:
-          return MediaPlayer::IsNotSupported;
+        return MediaPlayer::IsNotSupported;
     case WebMimeRegistry::IsSupported:
-          return MediaPlayer::IsSupported;
+        return MediaPlayer::IsSupported;
     case WebMimeRegistry::MayBeSupported:
-          return MediaPlayer::MayBeSupported;
+        return MediaPlayer::MayBeSupported;
     }
-
-	return MediaPlayer::IsNotSupported;
+    return MediaPlayer::IsNotSupported;
 }
 
 WebMediaPlayerClientImpl::WebMediaPlayerClientImpl()

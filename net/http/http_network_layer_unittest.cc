@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "net/base/mock_host_resolver.h"
+#include "net/base/ssl_config_service_defaults.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_transaction_unittest.h"
 #include "net/proxy/proxy_service.h"
@@ -14,29 +15,38 @@ class HttpNetworkLayerTest : public PlatformTest {
 };
 
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
-  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
   net::HttpNetworkLayer factory(
-      NULL, new net::MockHostResolver, proxy_service.get());
+      NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
+      new net::SSLConfigServiceDefaults);
 
-  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
+  scoped_ptr<net::HttpTransaction> trans;
+  int rv = factory.CreateTransaction(&trans);
+  EXPECT_EQ(net::OK, rv);
+  EXPECT_TRUE(trans.get() != NULL);
 }
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
-  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
   net::HttpNetworkLayer factory(
-      NULL, new net::MockHostResolver, proxy_service.get());
+      NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
+      new net::SSLConfigServiceDefaults);
 
-  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
+  scoped_ptr<net::HttpTransaction> trans;
+  int rv = factory.CreateTransaction(&trans);
+  EXPECT_EQ(net::OK, rv);
+
   trans.reset();
 
   factory.Suspend(true);
 
-  trans.reset(factory.CreateTransaction());
+  rv = factory.CreateTransaction(&trans);
+  EXPECT_EQ(net::ERR_NETWORK_IO_SUSPENDED, rv);
+
   ASSERT_TRUE(trans == NULL);
 
   factory.Suspend(false);
 
-  trans.reset(factory.CreateTransaction());
+  rv = factory.CreateTransaction(&trans);
+  EXPECT_EQ(net::OK, rv);
 }
 
 TEST_F(HttpNetworkLayerTest, GET) {
@@ -55,13 +65,15 @@ TEST_F(HttpNetworkLayerTest, GET) {
   net::StaticMockSocket data(data_reads, data_writes);
   mock_socket_factory.AddMockSocket(&data);
 
-  scoped_ptr<net::ProxyService> proxy_service(net::ProxyService::CreateNull());
   net::HttpNetworkLayer factory(&mock_socket_factory, new net::MockHostResolver,
-                                proxy_service.get());
+                                net::ProxyService::CreateNull(),
+                                new net::SSLConfigServiceDefaults);
 
   TestCompletionCallback callback;
 
-  scoped_ptr<net::HttpTransaction> trans(factory.CreateTransaction());
+  scoped_ptr<net::HttpTransaction> trans;
+  int rv = factory.CreateTransaction(&trans);
+  EXPECT_EQ(net::OK, rv);
 
   net::HttpRequestInfo request_info;
   request_info.url = GURL("http://www.google.com/");
@@ -69,7 +81,7 @@ TEST_F(HttpNetworkLayerTest, GET) {
   request_info.user_agent = "Foo/1.0";
   request_info.load_flags = net::LOAD_NORMAL;
 
-  int rv = trans->Start(&request_info, &callback);
+  rv = trans->Start(&request_info, &callback, NULL);
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::OK, rv);

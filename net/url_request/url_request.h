@@ -9,11 +9,14 @@
 #include <string>
 #include <vector>
 
+#include "base/leak_tracker.h"
+#include "base/linked_list.h"
 #include "base/linked_ptr.h"
 #include "base/logging.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/load_log.h"
 #include "net/base/load_states.h"
 #include "net/http/http_response_info.h"
 #include "net/url_request/url_request_status.h"
@@ -200,6 +203,8 @@ class URLRequest {
     virtual void OnReadCompleted(URLRequest* request, int bytes_read) = 0;
   };
 
+  class InstanceTracker;
+
   // Initialize an URL request.
   URLRequest(const GURL& url, Delegate* delegate);
 
@@ -212,8 +217,8 @@ class URLRequest {
   // Multiple user data values can be stored under different keys.
   // This request will TAKE OWNERSHIP of the given data pointer, and will
   // delete the object if it is changed or the request is destroyed.
-  UserData* GetUserData(void* key) const;
-  void SetUserData(void* key, UserData* data);
+  UserData* GetUserData(const void* key) const;
+  void SetUserData(const void* key, UserData* data);
 
   // Registers a new protocol handler for the given scheme. If the scheme is
   // already handled, this will overwrite the given factory. To delete the
@@ -268,6 +273,8 @@ class URLRequest {
   // may only be changed before Start() is called.
   const std::string& referrer() const { return referrer_; }
   void set_referrer(const std::string& referrer);
+  // Returns the referrer header with potential username and password removed.
+  GURL GetSanitizedReferrer() const;
 
   // The delegate of the request.  This value may be changed at any time,
   // and it is permissible for it to be null.
@@ -339,13 +346,13 @@ class URLRequest {
   void GetAllResponseHeaders(std::string* headers);
 
   // The time at which the returned response was requested.  For cached
-  // responses, this may be a time well in the past.
+  // responses, this is the last time the cache entry was validated.
   const base::Time& request_time() const {
     return response_info_.request_time;
   }
 
   // The time at which the returned response was generated.  For cached
-  // responses, this may be a time well in the past.
+  // responses, this is the last time the cache entry was validated.
   const base::Time& response_time() const {
     return response_info_.response_time;
   }
@@ -381,15 +388,12 @@ class URLRequest {
   // called.  For non-HTTP requests, this method returns -1.
   int GetResponseCode();
 
+  // Get the HTTP response info in its entirety.
+  const net::HttpResponseInfo& response_info() const { return response_info_; }
+
   // Access the net::LOAD_* flags modifying this request (see load_flags.h).
   int load_flags() const { return load_flags_; }
   void set_load_flags(int flags) { load_flags_ = flags; }
-
-  // Accessors to the pid of the process this request originated from.
-  int origin_pid() const { return origin_pid_; }
-  void set_origin_pid(int proc_id) {
-    origin_pid_ = proc_id;
-  }
 
   // Returns true if the request is "pending" (i.e., if Start() has been called,
   // and the response has not yet been called).
@@ -484,6 +488,8 @@ class URLRequest {
   URLRequestContext* context();
   void set_context(URLRequestContext* context);
 
+  net::LoadLog* load_log() { return load_log_; }
+
   // Returns the expected content size if available
   int64 GetExpectedContentSize() const;
 
@@ -494,6 +500,10 @@ class URLRequest {
     DCHECK_GE(priority, 0);
     priority_ = priority;
   }
+
+#ifdef UNIT_TEST
+  URLRequestJob* job() { return job_; }
+#endif
 
  protected:
   // Allow the URLRequestJob class to control the is_pending() flag.
@@ -520,6 +530,19 @@ class URLRequest {
  private:
   friend class URLRequestJob;
 
+  // Helper class to make URLRequest insertable into a base::LinkedList,
+  // without making the public interface expose base::LinkNode.
+  class InstanceTrackerNode : public base::LinkNode<InstanceTrackerNode> {
+   public:
+    InstanceTrackerNode(URLRequest* url_request);
+    ~InstanceTrackerNode();
+
+    URLRequest* url_request() const { return url_request_; }
+
+   private:
+    URLRequest* url_request_;
+  };
+
   void StartJob(URLRequestJob* job);
 
   // Restarting involves replacing the current job with a new one such as what
@@ -540,8 +563,13 @@ class URLRequest {
   // Origin).
   static std::string StripPostSpecificHeaders(const std::string& headers);
 
-  // Contextual information used for this request (can be NULL).
+  // Contextual information used for this request (can be NULL). This contains
+  // most of the dependencies which are shared between requests (disk cache,
+  // cookie store, socket poool, etc.)
   scoped_refptr<URLRequestContext> context_;
+
+  // Tracks the time spent in various load states throughout this request.
+  scoped_refptr<net::LoadLog> load_log_;
 
   scoped_refptr<URLRequestJob> job_;
   scoped_refptr<net::UploadData> upload_;
@@ -553,10 +581,6 @@ class URLRequest {
   std::string extra_request_headers_;
   int load_flags_;  // Flags indicating the request type for the load;
                     // expected values are LOAD_* enums above.
-
-  // The pid of the process that initiated this request.  Initialized to the id
-  // of the current process.
-  int origin_pid_;
 
   Delegate* delegate_;
 
@@ -574,7 +598,7 @@ class URLRequest {
   bool is_pending_;
 
   // Externally-defined data accessible by key
-  typedef std::map<void*, linked_ptr<UserData> > UserDataMap;
+  typedef std::map<const void*, linked_ptr<UserData> > UserDataMap;
   UserDataMap user_data_;
 
   // Whether to enable performance profiling on the job serving this request.
@@ -592,32 +616,64 @@ class URLRequest {
   // this to determine which URLRequest to allocate sockets to first.
   int priority_;
 
+  InstanceTrackerNode instance_tracker_node_;
+  base::LeakTracker<URLRequest> leak_tracker_;
+
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };
 
-//-----------------------------------------------------------------------------
-// To help ensure that all requests are cleaned up properly, we keep static
-// counters of live objects.  TODO(darin): Move this leak checking stuff into
-// a common place and generalize it so it can be used everywhere (Bug 566229).
+// ----------------------------------------------------------------------
+// Singleton to track all of the live instances of URLRequest, and
+// keep a circular queue of the LoadLogs for recently deceased requests.
+//
+class URLRequest::InstanceTracker {
+ public:
+  struct RecentRequestInfo {
+    GURL original_url;
+    scoped_refptr<net::LoadLog> load_log;
+  };
 
-#ifndef NDEBUG
+  typedef std::vector<RecentRequestInfo> RecentRequestInfoList;
 
-struct URLRequestMetrics {
-  int object_count;
-  URLRequestMetrics() : object_count(0) {}
-  ~URLRequestMetrics();
+  // The maximum number of entries for |graveyard_|.
+  static const size_t kMaxGraveyardSize;
+
+  // The maximum size of URLs to stuff into RecentRequestInfo.
+  static const size_t kMaxGraveyardURLSize;
+
+  ~InstanceTracker();
+
+  // Returns the singleton instance of InstanceTracker.
+  static InstanceTracker* Get();
+
+  // Returns a list of URLRequests that are alive.
+  std::vector<URLRequest*> GetLiveRequests();
+
+  // Clears the circular buffer of RecentRequestInfos.
+  void ClearRecentlyDeceased();
+
+  // Returns a list of recently completed URLRequests.
+  const RecentRequestInfoList GetRecentlyDeceased();
+
+ private:
+  friend class URLRequest;
+  friend struct DefaultSingletonTraits<InstanceTracker>;
+
+  InstanceTracker();
+
+  void Add(InstanceTrackerNode* node);
+  void Remove(InstanceTrackerNode* node);
+
+  // Copy the goodies out of |url_request| that we want to show the
+  // user later on the about:net-internal page.
+  static const RecentRequestInfo ExtractInfo(URLRequest* url_request);
+
+  void InsertIntoGraveyard(const RecentRequestInfo& info);
+
+  base::LinkedList<InstanceTrackerNode> live_instances_;
+
+  size_t next_graveyard_index_;
+  RecentRequestInfoList graveyard_;
 };
-
-extern URLRequestMetrics url_request_metrics;
-
-#define URLREQUEST_COUNT_CTOR() url_request_metrics.object_count++
-#define URLREQUEST_COUNT_DTOR() url_request_metrics.object_count--
-
-#else  // disable leak checking in release builds...
-
-#define URLREQUEST_COUNT_CTOR()
-#define URLREQUEST_COUNT_DTOR()
-
-#endif  // #ifndef NDEBUG
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_H_

@@ -4,27 +4,28 @@
 
 #include "chrome/browser/browser_theme_provider.h"
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
-#include "base/gfx/gtk_util.h"
 #include "base/logging.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 
-GdkPixbuf* BrowserThemeProvider::GetPixbufNamed(int id) {
+GdkPixbuf* BrowserThemeProvider::GetPixbufNamed(int id) const {
   return GetPixbufImpl(id, false);
 }
 
-GdkPixbuf* BrowserThemeProvider::GetRTLEnabledPixbufNamed(int id) {
+GdkPixbuf* BrowserThemeProvider::GetRTLEnabledPixbufNamed(int id) const {
   return GetPixbufImpl(id, true);
 }
 
-GdkPixbuf* BrowserThemeProvider::GetPixbufImpl(int id, bool rtl_enabled) {
+GdkPixbuf* BrowserThemeProvider::GetPixbufImpl(int id, bool rtl_enabled) const {
   DCHECK(CalledOnValidThread());
   // Use the negative |resource_id| for the key for BIDI-aware images.
   int key = rtl_enabled ? -id : id;
 
   // Check to see if we already have the pixbuf in the cache.
-  GdkPixbufMap::const_iterator found = gdk_pixbufs_.find(key);
-  if (found != gdk_pixbufs_.end())
-    return found->second;
+  GdkPixbufMap::const_iterator pixbufs_iter = gdk_pixbufs_.find(key);
+  if (pixbufs_iter != gdk_pixbufs_.end())
+    return pixbufs_iter->second;
 
   SkBitmap* bitmap = GetBitmapNamed(id);
   GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bitmap);

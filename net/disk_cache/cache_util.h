@@ -9,21 +9,20 @@
 
 #include "base/basictypes.h"
 
+class FilePath;
+
 namespace disk_cache {
 
 // Moves the cache files from the given path to another location.
 // Returns true if successful, false otherwise.
-bool MoveCache(const std::wstring& from_path, const std::wstring& to_path);
+bool MoveCache(const FilePath& from_path, const FilePath& to_path);
 
 // Deletes the cache files stored on |path|, and optionally also attempts to
 // delete the folder itself.
-void DeleteCache(const std::wstring& path, bool remove_folder);
+void DeleteCache(const FilePath& path, bool remove_folder);
 
 // Deletes a cache file.
-bool DeleteCacheFile(const std::wstring& name);
-
-// Blocks until |num_pending_io| IO operations complete.
-void WaitForPendingIO(int* num_pending_io);
+bool DeleteCacheFile(const FilePath& name);
 
 }  // namespace disk_cache
 

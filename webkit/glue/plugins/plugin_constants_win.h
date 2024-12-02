@@ -7,19 +7,7 @@
 
 // Used by the plugins_test when testing the older WMP plugin to force the new
 // plugin to not get loaded.
-#define kUseOldWMPPluginSwitch L"use-old-wmp"
-// Used for testing the ActiveX shim. By default it's off. If this flag is
-// specified we will use the native ActiveX shim.
-#define kNoNativeActiveXShimSwitch L"no-activex"
-// Internal file name for the ActiveX shim, used as a unique identifier.
-#define kActiveXShimFileName L"activex-shim"
-// Internal file name for the ActiveX shim, registered as the Windows Media
-// Player. Some sites walk the plugin list and look for specifically-named
-// plugins, so we must oblige them with a very specific name. See
-// http://codereview.chromium.org/7234 .
-#define kActiveXShimFileNameForMediaPlayer \
-    L"Microsoft\xAE Windows Media Player Firefox Plugin"
-
+#define kUseOldWMPPluginSwitch "use-old-wmp"
 
 // The window class name for a plugin window.
 #define kNativeWindowClassName L"NativeWindowClass"
@@ -35,5 +23,15 @@
 
 // The name of the registry key which NPAPI plugins update on installation.
 #define kRegistryMozillaPlugins L"SOFTWARE\\MozillaPlugins"
+
+#define kMozillaActiveXPlugin L"npmozax.dll"
+#define kNewWMPPlugin L"np-mswmp.dll"
+#define kOldWMPPlugin L"npdsplay.dll"
+#define kYahooApplicationStatePlugin L"npystate.dll"
+#define kWanWangProtocolHandlerPlugin L"npww.dll"
+#define kFlashPlugin L"npswf32.dll"
+#define kAcrobatReaderPlugin L"nppdf32.dll"
+#define kRealPlayerPlugin L"nppl3260.dll"
+#define kSilverlightPlugin L"npctrl.dll"
 
 #endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H_

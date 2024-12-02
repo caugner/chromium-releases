@@ -21,6 +21,7 @@
 #include "webkit/api/public/WebRect.h"
 #include "webkit/api/public/WebScreenInfo.h"
 #include "webkit/api/public/WebSize.h"
+#include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_POSIX)
 #include "third_party/skia/include/core/SkPixelRef.h"
@@ -45,7 +46,7 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread, bool activatable)
       webwidget_(NULL),
       opener_id_(MSG_ROUTING_NONE),
       render_thread_(render_thread),
-      host_window_(NULL),
+      host_window_(0),
       current_paint_buf_(NULL),
       current_scroll_buf_(NULL),
       next_paint_flags_(0),
@@ -54,6 +55,7 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread, bool activatable)
       is_hidden_(false),
       needs_repainting_on_restore_(false),
       has_focus_(false),
+      handling_input_event_(false),
       closing_(false),
       ime_is_active_(false),
       ime_control_enable_ime_(true),
@@ -178,8 +180,10 @@ void RenderWidget::OnClose() {
   closing_ = true;
 
   // Browser correspondence is no longer needed at this point.
-  if (routing_id_ != MSG_ROUTING_NONE)
+  if (routing_id_ != MSG_ROUTING_NONE) {
     render_thread_->RemoveRoute(routing_id_);
+    SetHidden(false);
+  }
 
   // If there is a Send call on the stack, then it could be dangerous to close
   // now.  Post a task that only gets invoked when there are no nested message
@@ -201,7 +205,7 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
   resizer_rect_ = resizer_rect;
 
   // TODO(darin): We should not need to reset this here.
-  is_hidden_ = false;
+  SetHidden(false);
   needs_repainting_on_restore_ = false;
 
   // We shouldn't be asked to resize to our current size.
@@ -230,7 +234,7 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
 
 void RenderWidget::OnWasHidden() {
   // Go into a mode where we stop generating paint and scrolling events.
-  is_hidden_ = true;
+  SetHidden(true);
 }
 
 void RenderWidget::OnWasRestored(bool needs_repainting) {
@@ -239,7 +243,7 @@ void RenderWidget::OnWasRestored(bool needs_repainting) {
     return;
 
   // See OnWasHidden
-  is_hidden_ = false;
+  SetHidden(false);
 
   if (!needs_repainting && !needs_repainting_on_restore_)
     return;
@@ -267,7 +271,7 @@ void RenderWidget::OnPaintRectAck() {
   DidPaint();
 
   // Continue painting if necessary...
-  DoDeferredPaint();
+  CallDoDeferredPaint();
 }
 
 void RenderWidget::OnRequestMoveAck() {
@@ -284,7 +288,16 @@ void RenderWidget::OnScrollRectAck() {
   }
 
   // Continue scrolling if necessary...
+  CallDoDeferredScroll();
+}
+
+void RenderWidget::CallDoDeferredScroll() {
   DoDeferredScroll();
+
+  if (pending_input_event_ack_.get()) {
+    Send(pending_input_event_ack_.get());
+    pending_input_event_ack_.release();
+  }
 }
 
 void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
@@ -292,8 +305,11 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
 
   const char* data;
   int data_length;
-  if (!message.ReadData(&iter, &data, &data_length))
+  handling_input_event_ = true;
+  if (!message.ReadData(&iter, &data, &data_length)) {
+    handling_input_event_ = false;
     return;
+  }
 
   const WebInputEvent* input_event =
       reinterpret_cast<const WebInputEvent*>(data);
@@ -305,7 +321,21 @@ void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
   response->WriteInt(input_event->type);
   response->WriteBool(processed);
 
-  Send(response);
+  if (input_event->type == WebInputEvent::MouseMove &&
+      (!paint_rect_.IsEmpty() || !scroll_rect_.IsEmpty())) {
+    // We want to rate limit the input events in this case, so we'll wait for
+    // painting to finish before ACKing this message.
+    pending_input_event_ack_.reset(response);
+  } else {
+    Send(response);
+  }
+
+  handling_input_event_ = false;
+
+  WebInputEvent::Type type = input_event->type;
+  if (type == WebInputEvent::RawKeyDown || type == WebInputEvent::KeyDown ||
+      type == WebInputEvent::KeyUp || type == WebInputEvent::Char)
+    DidHandleKeyEvent();
 }
 
 void RenderWidget::OnMouseCaptureLost() {
@@ -351,10 +381,19 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
     canvas->drawPaint(paint);
   }
 
-  webwidget_->paint(canvas, rect);
+  webwidget_->paint(webkit_glue::ToWebCanvas(canvas), rect);
 
   // Flush to underlying bitmap.  TODO(darin): is this needed?
   canvas->getTopPlatformDevice().accessBitmap(false);
+}
+
+void RenderWidget::CallDoDeferredPaint() {
+  DoDeferredPaint();
+
+  if (pending_input_event_ack_.get()) {
+    Send(pending_input_event_ack_.get());
+    pending_input_event_ack_.release();
+  }
 }
 
 void RenderWidget::DoDeferredPaint() {
@@ -525,7 +564,7 @@ void RenderWidget::didInvalidateRect(const WebRect& rect) {
   // 2) Allows us to collect more damage rects before painting to help coalesce
   //    the work that we will need to do.
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidget::DoDeferredPaint));
+      this, &RenderWidget::CallDoDeferredPaint));
 }
 
 void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
@@ -568,7 +607,7 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
 
   // Perform scrolling asynchronously since we need to call WebView::Paint
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &RenderWidget::DoDeferredScroll));
+      this, &RenderWidget::CallDoDeferredScroll));
 }
 
 void RenderWidget::didChangeCursor(const WebCursorInfo& cursor_info) {
@@ -611,6 +650,12 @@ void RenderWidget::show(WebNavigationPolicy) {
 }
 
 void RenderWidget::didFocus() {
+  // Note that didFocus() is invoked everytime a new node is focused in the
+  // page.  It could be expected that it would be called only when the widget
+  // gets the focus.  If the current behavior was to change in WebKit for the
+  // expected one, the following notification would not work anymore.
+  Send(new ViewHostMsg_FocusedNodeChanged(routing_id_));
+
   // Prevent the widget from stealing the focus if it does not have focus
   // already.  We do this by explicitely setting the focus to false again.
   // We only let the browser focus the renderer.
@@ -730,6 +775,18 @@ void RenderWidget::OnSetTextDirection(WebTextDirection direction) {
   webwidget_->setTextDirection(direction);
 }
 
+void RenderWidget::SetHidden(bool hidden) {
+  if (is_hidden_ == hidden)
+    return;
+
+  // The status has changed.  Tell the RenderThread about it.
+  is_hidden_ = hidden;
+  if (is_hidden_)
+    render_thread_->WidgetHidden();
+  else
+    render_thread_->WidgetRestored();
+}
+
 void RenderWidget::SetBackground(const SkBitmap& background) {
   background_ = background;
   // Generate a full repaint.
@@ -833,15 +890,30 @@ WebScreenInfo RenderWidget::screenInfo() {
   return results;
 }
 
-void RenderWidget::SchedulePluginMove(const WebPluginGeometry& move) {
+void RenderWidget::SchedulePluginMove(
+    const webkit_glue::WebPluginGeometry& move) {
   size_t i = 0;
   for (; i < plugin_window_moves_.size(); ++i) {
     if (plugin_window_moves_[i].window == move.window) {
-      plugin_window_moves_[i] = move;
+      if (move.rects_valid) {
+        plugin_window_moves_[i] = move;
+      } else {
+        plugin_window_moves_[i].visible = move.visible;
+      }
       break;
     }
   }
 
   if (i == plugin_window_moves_.size())
     plugin_window_moves_.push_back(move);
+}
+
+void RenderWidget::CleanupWindowInPluginMoves(gfx::PluginWindowHandle window) {
+  for (WebPluginGeometryVector::iterator i = plugin_window_moves_.begin();
+       i != plugin_window_moves_.end(); ++i) {
+    if (i->window == window) {
+      plugin_window_moves_.erase(i);
+      break;
+    }
+  }
 }

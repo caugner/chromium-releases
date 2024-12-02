@@ -5,17 +5,18 @@
 #ifndef CHROME_BROWSER_TAB_CONTENTS_NAVIGATION_ENTRY_H_
 #define CHROME_BROWSER_TAB_CONTENTS_NAVIGATION_ENTRY_H_
 
+#include <string>
+
 #include "base/basictypes.h"
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
-#include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/security_style.h"
 #include "chrome/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
-#include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class NavigationController;
+class SiteInstance;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -179,8 +180,7 @@ class NavigationEntry {
                   const GURL& referrer,
                   const string16& title,
                   PageTransition::Type transition_type);
-  ~NavigationEntry() {
-  }
+  ~NavigationEntry();
 
   // Page-related stuff --------------------------------------------------------
 
@@ -202,9 +202,7 @@ class NavigationEntry {
   // Note that the SiteInstance should usually not be changed after it is set,
   // but this may happen if the NavigationEntry was cloned and needs to use a
   // different SiteInstance.
-  void set_site_instance(SiteInstance* site_instance) {
-    site_instance_ = site_instance;
-  }
+  void set_site_instance(SiteInstance* site_instance);
   SiteInstance* site_instance() const {
     return site_instance_;
   }
@@ -219,7 +217,7 @@ class NavigationEntry {
   }
 
   // The actual URL of the page. For some about pages, this may be a scary
-  // data: URL or something like that. Use display_url() below for showing to
+  // data: URL or something like that. Use virtual_url() below for showing to
   // the user.
   void set_url(const GURL& url) {
     url_ = url;
@@ -237,22 +235,22 @@ class NavigationEntry {
     return referrer_;
   }
 
-  // The display URL, when nonempty, will override the actual URL of the page
+  // The virtual URL, when nonempty, will override the actual URL of the page
   // when we display it to the user. This allows us to have nice and friendly
   // URLs that the user sees for things like about: URLs, but actually feed
   // the renderer a data URL that results in the content loading.
   //
-  // display_url() will return the URL to display to the user in all cases, so
+  // virtual_url() will return the URL to display to the user in all cases, so
   // if there is no overridden display URL, it will return the actual one.
-  void set_display_url(const GURL& url) {
-    display_url_ = (url == url_) ? GURL() : url;
+  void set_virtual_url(const GURL& url) {
+    virtual_url_ = (url == url_) ? GURL() : url;
     cached_display_title_.clear();
   }
-  bool has_display_url() const {
-    return !display_url_.is_empty();
+  bool has_virtual_url() const {
+    return !virtual_url_.is_empty();
   }
-  const GURL& display_url() const {
-    return display_url_.is_empty() ? url_ : display_url_;
+  const GURL& virtual_url() const {
+    return virtual_url_.is_empty() ? url_ : virtual_url_;
   }
 
   // The title as set by the page. This will be empty if there is no title set.
@@ -385,7 +383,7 @@ class NavigationEntry {
   PageType page_type_;
   GURL url_;
   GURL referrer_;
-  GURL display_url_;
+  GURL virtual_url_;
   string16 title_;
   FaviconStatus favicon_;
   std::string content_state_;
@@ -398,7 +396,7 @@ class NavigationEntry {
 
   // This is a cached version of the result of GetTitleForDisplay. It prevents
   // us from having to do URL formatting on the URL evey time the title is
-  // displayed. When the URL, display URL, or title is set, this should be
+  // displayed. When the URL, virtual URL, or title is set, this should be
   // cleared to force a refresh.
   string16 cached_display_title_;
 

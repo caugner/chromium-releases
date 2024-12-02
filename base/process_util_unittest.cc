@@ -27,6 +27,11 @@
 namespace base {
 
 class ProcessUtilTest : public MultiProcessTest {
+#if defined(OS_POSIX)
+ public:
+  // Spawn a child process that counts how many file descriptors are open.
+  int CountOpenFDsInChild();
+#endif
 };
 
 MULTIPROCESS_TEST_MAIN(SimpleChildProcess) {
@@ -36,7 +41,7 @@ MULTIPROCESS_TEST_MAIN(SimpleChildProcess) {
 TEST_F(ProcessUtilTest, SpawnChild) {
   ProcessHandle handle = this->SpawnChild(L"SimpleChildProcess");
 
-  ASSERT_NE(static_cast<ProcessHandle>(NULL), handle);
+  ASSERT_NE(base::kNullProcessHandle, handle);
   EXPECT_TRUE(WaitForSingleProcess(handle, 5000));
   base::CloseProcessHandle(handle);
 }
@@ -57,7 +62,7 @@ MULTIPROCESS_TEST_MAIN(SlowChildProcess) {
 TEST_F(ProcessUtilTest, KillSlowChild) {
   remove("SlowChildProcess.die");
   ProcessHandle handle = this->SpawnChild(L"SlowChildProcess");
-  ASSERT_NE(static_cast<ProcessHandle>(NULL), handle);
+  ASSERT_NE(base::kNullProcessHandle, handle);
   FILE *fp = fopen("SlowChildProcess.die", "w");
   fclose(fp);
   EXPECT_TRUE(base::WaitForSingleProcess(handle, 5000));
@@ -194,19 +199,10 @@ MULTIPROCESS_TEST_MAIN(ProcessUtilsLeakFDChildProcess) {
   for (int i = STDERR_FILENO + 1; i < max_files; i++) {
     if (i != kChildPipe) {
       if (HANDLE_EINTR(close(i)) != -1) {
-        LOG(WARNING) << "Leaked FD " << i;
         num_open_files += 1;
       }
     }
   }
-
-  // InitLogging always opens a file at startup.
-  int expected_num_open_fds = 1;
-#if defined(OS_LINUX)
-  // On Linux, '/etc/localtime' is opened before the test's main() enters.
-  expected_num_open_fds += 1;
-#endif  // defined(OS_LINUX)
-  num_open_files -= expected_num_open_fds;
 
   int written = HANDLE_EINTR(write(write_pipe, &num_open_files,
                                    sizeof(num_open_files)));
@@ -216,13 +212,34 @@ MULTIPROCESS_TEST_MAIN(ProcessUtilsLeakFDChildProcess) {
   return 0;
 }
 
-TEST_F(ProcessUtilTest, FDRemapping) {
-  // Open some files to check they don't get leaked to the child process.
+int ProcessUtilTest::CountOpenFDsInChild() {
   int fds[2];
   if (pipe(fds) < 0)
     NOTREACHED();
-  int pipe_read_fd = fds[0];
-  int pipe_write_fd = fds[1];
+
+  file_handle_mapping_vector fd_mapping_vec;
+  fd_mapping_vec.push_back(std::pair<int,int>(fds[1], kChildPipe));
+  ProcessHandle handle = this->SpawnChild(L"ProcessUtilsLeakFDChildProcess",
+                                          fd_mapping_vec,
+                                          false);
+  CHECK(handle);
+  HANDLE_EINTR(close(fds[1]));
+
+  // Read number of open files in client process from pipe;
+  int num_open_files = -1;
+  ssize_t bytes_read =
+      HANDLE_EINTR(read(fds[0], &num_open_files, sizeof(num_open_files)));
+  CHECK(bytes_read == static_cast<ssize_t>(sizeof(num_open_files)));
+
+  CHECK(WaitForSingleProcess(handle, 1000));
+  base::CloseProcessHandle(handle);
+  HANDLE_EINTR(close(fds[0]));
+
+  return num_open_files;
+}
+
+TEST_F(ProcessUtilTest, FDRemapping) {
+  int fds_before = CountOpenFDsInChild();
 
   // open some dummy fds to make sure they don't propogate over to the
   // child process.
@@ -230,26 +247,10 @@ TEST_F(ProcessUtilTest, FDRemapping) {
   int sockets[2];
   socketpair(AF_UNIX, SOCK_STREAM, 0, sockets);
 
-  file_handle_mapping_vector fd_mapping_vec;
-  fd_mapping_vec.push_back(std::pair<int,int>(pipe_write_fd, kChildPipe));
-  ProcessHandle handle = this->SpawnChild(L"ProcessUtilsLeakFDChildProcess",
-                                          fd_mapping_vec,
-                                          false);
-  ASSERT_NE(static_cast<ProcessHandle>(NULL), handle);
-  HANDLE_EINTR(close(pipe_write_fd));
+  int fds_after = CountOpenFDsInChild();
 
-  // Read number of open files in client process from pipe;
-  int num_open_files = -1;
-  ssize_t bytes_read =
-      HANDLE_EINTR(read(pipe_read_fd, &num_open_files, sizeof(num_open_files)));
-  ASSERT_EQ(bytes_read, static_cast<ssize_t>(sizeof(num_open_files)));
+  ASSERT_EQ(fds_after, fds_before);
 
-  // Make sure 0 fds are leaked to the client.
-  ASSERT_EQ(0, num_open_files);
-
-  EXPECT_TRUE(WaitForSingleProcess(handle, 1000));
-  base::CloseProcessHandle(handle);
-  HANDLE_EINTR(close(fds[0]));
   HANDLE_EINTR(close(sockets[0]));
   HANDLE_EINTR(close(sockets[1]));
   HANDLE_EINTR(close(dev_null));
@@ -274,6 +275,26 @@ TEST_F(ProcessUtilTest, GetAppOutput) {
 TEST_F(ProcessUtilTest, GetParentProcessId) {
   base::ProcessId ppid = GetParentProcessId(GetCurrentProcId());
   EXPECT_EQ(ppid, getppid());
+}
+
+TEST_F(ProcessUtilTest, ParseProcStatCPU) {
+  // /proc/self/stat for a process running "top".
+  const char kTopStat[] = "960 (top) S 16230 960 16230 34818 960 "
+      "4202496 471 0 0 0 "
+      "12 16 0 0 "  // <- These are the goods.
+      "20 0 1 0 121946157 15077376 314 18446744073709551615 4194304 "
+      "4246868 140733983044336 18446744073709551615 140244213071219 "
+      "0 0 0 138047495 0 0 0 17 1 0 0 0 0 0";
+  EXPECT_EQ(12 + 16, ParseProcStatCPU(kTopStat));
+
+  // cat /proc/self/stat on a random other machine I have.
+  const char kSelfStat[] = "5364 (cat) R 5354 5364 5354 34819 5364 "
+      "0 142 0 0 0 "
+      "0 0 0 0 "  // <- No CPU, apparently.
+      "16 0 1 0 1676099790 2957312 114 4294967295 134512640 134528148 "
+      "3221224832 3221224344 3086339742 0 0 0 0 0 0 0 17 0 0 0";
+
+  EXPECT_EQ(0, ParseProcStatCPU(kSelfStat));
 }
 #endif
 

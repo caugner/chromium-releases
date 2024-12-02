@@ -12,7 +12,14 @@
 
 class Profile;
 class TabContents;
-struct MediaPlayerAction;
+
+namespace gfx {
+class Point;
+}
+
+namespace WebKit {
+struct WebMediaPlayerAction;
+}
 
 class RenderViewContextMenu {
  public:
@@ -26,7 +33,7 @@ class RenderViewContextMenu {
   void Init();
 
  protected:
-  void InitMenu(ContextNodeType node, ContextMenuMediaParams media_params);
+  void InitMenu();
 
   // Functions to be implemented by platform-specific subclasses ---------------
 
@@ -58,15 +65,11 @@ class RenderViewContextMenu {
   // Finish creating the submenu and attach it to the main menu.
   virtual void FinishSubMenu() = 0;
 
-  // For Linux, we want to know when we have written a URL to the clipboard.
-  // Most platforms won't care.
-  virtual void DidWriteURLToClipboard(const std::string& url) { };
-
   // Delegate functions --------------------------------------------------------
 
   bool IsItemCommandEnabled(int id) const;
   bool ItemIsChecked(int id) const;
-  void ExecuteItemCommand(int id);
+  virtual void ExecuteItemCommand(int id);
 
  protected:
   ContextMenuParams params_;
@@ -77,9 +80,9 @@ class RenderViewContextMenu {
   void AppendDeveloperItems();
   void AppendLinkItems();
   void AppendImageItems();
-  void AppendAudioItems(ContextMenuMediaParams media_params);
-  void AppendVideoItems(ContextMenuMediaParams media_params);
-  void AppendMediaItems(ContextMenuMediaParams media_params);
+  void AppendAudioItems();
+  void AppendVideoItems();
+  void AppendMediaItems();
   void AppendPageItems();
   void AppendFrameItems();
   void AppendCopyItem();
@@ -99,10 +102,10 @@ class RenderViewContextMenu {
   void Inspect(int x, int y);
 
   // Writes the specified text/url to the system clipboard
-  void WriteTextToClipboard(const string16& text);
   void WriteURLToClipboard(const GURL& url);
 
-  void MediaPlayerActionAt(int x, int y, const MediaPlayerAction& action);
+  void MediaPlayerActionAt(const gfx::Point& location,
+                           const WebKit::WebMediaPlayerAction& action);
 
   bool IsDevCommandEnabled(int id) const;
 

@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/url_constants.h"
+#include <stdlib.h>
 
-// TODO(port): Remove this header when last ifdef is removed from this file.
-#include "build/build_config.h"
+#include "chrome/common/url_constants.h"
 
 namespace chrome {
 
@@ -23,17 +22,28 @@ const char kJavaScriptScheme[] = "javascript";
 const char kMailToScheme[] = "mailto";
 const char kPrintScheme[] = "print";
 const char kUserScriptScheme[] = "chrome-user-script";
-const char kViewCacheScheme[] = "view-cache";
 const char kViewSourceScheme[] = "view-source";
 
 const char kStandardSchemeSeparator[] = "://";
 
+const char* kSavableSchemes[] = {
+  kHttpScheme,
+  kHttpsScheme,
+  kFileScheme,
+  kFtpScheme,
+  kExtensionScheme,
+  NULL
+};
+
 const char kAboutBlankURL[] = "about:blank";
 const char kAboutCacheURL[] = "about:cache";
+const char kAboutNetInternalsURL[] = "about:net-internals";
 const char kAboutCrashURL[] = "about:crash";
+const char kAboutCreditsURL[] = "about:credits";
 const char kAboutHangURL[] = "about:hang";
 const char kAboutMemoryURL[] = "about:memory";
 const char kAboutShorthangURL[] = "about:shorthang";
+const char kAboutTermsURL[] = "about:terms";
 
 // Use an obfuscated URL to make this nondiscoverable, we only want this
 // to be used for testing.
@@ -57,5 +67,15 @@ const char kChromeUIInspectorHost[] = "inspector";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIThumbnailPath[] = "thumb";
 const char kChromeUIThemePath[] = "theme";
+
+const char kSyncResourcesHost[] = "syncresources";
+const char kSyncGaiaLoginPath[] = "gaialogin";
+const char kSyncMergeAndSyncPath[] = "mergeandsync";
+const char kSyncThrobberPath[] = "throbber.png";
+const char kSyncSetupFlowPath[] = "setup";
+const char kSyncSetupDonePath[] = "setupdone";
+
+const char kNetworkViewInternalsURL[] = "chrome://net-internals/";
+const char kNetworkViewCacheURL[] = "chrome://net-internals/view-cache";
 
 }  // namespace chrome

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -152,7 +152,7 @@ class SafeBrowsingService
   void ChunkInserted();
 
   // Notification from the database when it's done loading its bloom filter.
-  void DatabaseLoadComplete(bool database_error);
+  void DatabaseLoadComplete();
 
   // Preference handling.
   static void RegisterPrefs(PrefService* prefs);
@@ -169,9 +169,7 @@ class SafeBrowsingService
   // PowerObserver notifications
   // We defer SafeBrowsing work for a short duration when the computer comes
   // out of a suspend state to avoid thrashing the disk.
-  void OnPowerStateChange(base::SystemMonitor*) {};
-  void OnSuspend(base::SystemMonitor*);
-  void OnResume(base::SystemMonitor*);
+  void OnResume();
 
   // Report any pages that contain malware sub-resources to the SafeBrowsing
   // service.

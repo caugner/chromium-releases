@@ -46,11 +46,13 @@ class ClientSocketPool : public base::RefCounted<ClientSocketPool> {
   // If ERR_IO_PENDING is returned, then the callback will be used to notify the
   // client of completion.
   //
+  // Profiling information for the request is saved to |load_log| if non-NULL.
   virtual int RequestSocket(const std::string& group_name,
-                            const HostResolver::RequestInfo& resolve_info,
+                            const void* params,
                             int priority,
                             ClientSocketHandle* handle,
-                            CompletionCallback* callback) = 0;
+                            CompletionCallback* callback,
+                            LoadLog* load_log) = 0;
 
   // Called to cancel a RequestSocket call that returned ERR_IO_PENDING.  The
   // same handle parameter must be passed to this method as was passed to the
@@ -88,6 +90,22 @@ class ClientSocketPool : public base::RefCounted<ClientSocketPool> {
 
   DISALLOW_COPY_AND_ASSIGN(ClientSocketPool);
 };
+
+// Declaration, but no definition.  ClientSocketPool subclasses should indicate
+// valid SocketParams via the REGISTER_SOCKET_PARAMS_FOR_POOL macro below, which
+// will provide a definition of CheckIsValidSocketParamsForPool for the
+// ClientSocketPool subtype and SocketParams pair.  Trying to use a SocketParams
+// type that has not been registered with the corresponding ClientSocketPool
+// subtype will result in a link time error stating that
+// CheckIsValidSocketParamsForPool with those template parameters is undefined.
+template <typename PoolType, typename SocketParams>
+void CheckIsValidSocketParamsForPool();
+
+// Provides an empty definition for CheckIsValidSocketParamsForPool() which
+// should be optimized out by the compiler.
+#define REGISTER_SOCKET_PARAMS_FOR_POOL(pool_type, socket_params)         \
+template<>                                                                \
+inline void CheckIsValidSocketParamsForPool<pool_type, socket_params>() {}
 
 }  // namespace net
 

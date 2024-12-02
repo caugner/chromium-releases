@@ -12,6 +12,28 @@ goog.provide('devtools.InspectorControllerImpl');
 devtools.InspectorControllerImpl = function() {
   devtools.InspectorController.call(this);
   this.frame_element_id_ = 1;
+
+  this.installInspectorControllerDelegate_('clearMessages');
+  this.installInspectorControllerDelegate_('copyNode');
+  this.installInspectorControllerDelegate_('deleteCookie');
+  this.installInspectorControllerDelegate_('disableResourceTracking');
+  this.installInspectorControllerDelegate_('disableTimeline');
+  this.installInspectorControllerDelegate_('enableResourceTracking');
+  this.installInspectorControllerDelegate_('enableTimeline');
+  this.installInspectorControllerDelegate_('getChildNodes');
+  this.installInspectorControllerDelegate_('getCookies');
+  this.installInspectorControllerDelegate_('getDatabaseTableNames');
+  this.installInspectorControllerDelegate_('getDOMStorageEntries');
+  this.installInspectorControllerDelegate_('getEventListenersForNode');
+  this.installInspectorControllerDelegate_('highlightDOMNode');
+  this.installInspectorControllerDelegate_('hideDOMNodeHighlight');
+  this.installInspectorControllerDelegate_('releaseWrapperObjectGroup');
+  this.installInspectorControllerDelegate_('removeAttribute');
+  this.installInspectorControllerDelegate_('setAttribute');
+  this.installInspectorControllerDelegate_('setSetting');
+  this.installInspectorControllerDelegate_('setTextNodeValue');
+  this.installInspectorControllerDelegate_('setting');
+  this.installInspectorControllerDelegate_('storeLastActivePanel');
 };
 goog.inherits(devtools.InspectorControllerImpl,
     devtools.InspectorController);
@@ -52,26 +74,8 @@ devtools.InspectorControllerImpl.prototype.detach = function() {
 /**
  * {@inheritDoc}.
  */
-devtools.InspectorControllerImpl.prototype.storeLastActivePanel = function(panel) {
-  RemoteToolsAgent.ExecuteUtilityFunction(
-      devtools.Callback.wrap(undefined),
-      'InspectorController', JSON.stringify(['storeLastActivePanel', panel]));
-};
-
-
-/**
- * {@inheritDoc}.
- */
-devtools.InspectorControllerImpl.prototype.clearMessages = function() {
-  RemoteToolsAgent.ClearConsoleMessages();
-};
-
-
-/**
- * {@inheritDoc}.
- */
 devtools.InspectorControllerImpl.prototype.hiddenPanels = function() {
-  return 'databases';
+  return DevToolsHost.hiddenPanels();
 };
 
 
@@ -95,6 +99,23 @@ devtools.InspectorControllerImpl.prototype.toggleNodeSearch = function() {
 /**
  * {@inheritDoc}.
  */
+devtools.InspectorControllerImpl.prototype.localizedStringsURL =
+    function(opt_prefix) {
+  // l10n is turned off in test mode because delayed loading of strings
+  // causes test failures.
+  if (false) {
+    var locale = DevToolsHost.getApplicationLocale();
+    locale = locale.replace('_', '-');
+    return 'l10n/localizedStrings_' + locale + '.js';
+  } else {
+    return undefined;
+  }
+};
+
+
+/**
+ * {@inheritDoc}.
+ */
 devtools.InspectorControllerImpl.prototype.addSourceToFrame =
     function(mimeType, source, element) {
   return DevToolsHost.addSourceToFrame(mimeType, source, element);
@@ -110,24 +131,18 @@ devtools.InspectorControllerImpl.prototype.addResourceSourceToFrame =
   if (!resource) {
     return;
   }
-  DevToolsHost.addResourceSourceToFrame(identifier, resource.mimeType, element);
-};
 
+  // Temporary fix for http://crbug/23260.
+  var mimeType = resource.mimeType;
+  if (!mimeType && resource.url) {
+    if (resource.url.search('\.js$') != -1) {
+      mimeType = 'application/x-javascript';
+    } else if (resource.url.search('\.html$') != -1) {
+      mimeType = 'text/html';
+    }
+  }
 
-/**
- * {@inheritDoc}.
- */
-devtools.InspectorControllerImpl.prototype.hideDOMNodeHighlight = function() {
-  RemoteToolsAgent.HideDOMNodeHighlight();
-};
-
-
-/**
- * {@inheritDoc}.
- */
-devtools.InspectorControllerImpl.prototype.highlightDOMNode =
-    function(hoveredNode) {
-  RemoteToolsAgent.HighlightDOMNode(hoveredNode.id_);
+  DevToolsHost.addResourceSourceToFrame(identifier, mimeType, element);
 };
 
 
@@ -135,25 +150,7 @@ devtools.InspectorControllerImpl.prototype.highlightDOMNode =
  * {@inheritDoc}.
  */
 devtools.InspectorControllerImpl.prototype.inspectedWindow = function() {
-  return devtools.tools.getDomAgent().getWindow();
-};
-
-
-/**
- * {@inheritDoc}.
- */
-devtools.InspectorControllerImpl.prototype.enableResourceTracking =
-    function(always) {
-  devtools.tools.setResourceTrackingEnabled(true, always);
-}
-
-
-/**
- * {@inheritDoc}.
- */
-devtools.InspectorControllerImpl.prototype.disableResourceTracking =
-    function(always) {
-  devtools.tools.setResourceTrackingEnabled(false, always);
+  return null;
 };
 
 
@@ -165,14 +162,9 @@ devtools.InspectorControllerImpl.prototype.debuggerEnabled = function() {
 };
 
 
-devtools.InspectorControllerImpl.prototype.currentCallFrame = function() {
-  return devtools.tools.getDebuggerAgent().getCurrentCallFrame();
-};
-
-
 devtools.InspectorControllerImpl.prototype.addBreakpoint = function(
-    sourceID, line) {
-  devtools.tools.getDebuggerAgent().addBreakpoint(sourceID, line);
+    sourceID, line, condition) {
+  devtools.tools.getDebuggerAgent().addBreakpoint(sourceID, line, condition);
 };
 
 
@@ -181,6 +173,11 @@ devtools.InspectorControllerImpl.prototype.removeBreakpoint = function(
   devtools.tools.getDebuggerAgent().removeBreakpoint(sourceID, line);
 };
 
+devtools.InspectorControllerImpl.prototype.updateBreakpoint = function(
+    sourceID, line, condition) {
+  devtools.tools.getDebuggerAgent().updateBreakpoint(
+      sourceID, line, condition);
+};
 
 devtools.InspectorControllerImpl.prototype.pauseInDebugger = function() {
   devtools.tools.getDebuggerAgent().pauseExecution();
@@ -231,7 +228,8 @@ devtools.InspectorControllerImpl.prototype.setPauseOnExceptions = function(
  * @override
  */
 devtools.InspectorControllerImpl.prototype.startProfiling = function() {
-  devtools.tools.getDebuggerAgent().startProfiling();
+  devtools.tools.getDebuggerAgent().startProfiling(
+      devtools.DebuggerAgent.ProfilerModules.PROFILER_MODULE_CPU);
 };
 
 
@@ -239,8 +237,60 @@ devtools.InspectorControllerImpl.prototype.startProfiling = function() {
  * @override
  */
 devtools.InspectorControllerImpl.prototype.stopProfiling = function() {
-  devtools.tools.getDebuggerAgent().stopProfiling();
+  devtools.tools.getDebuggerAgent().stopProfiling(
+      devtools.DebuggerAgent.ProfilerModules.PROFILER_MODULE_CPU);
 };
 
 
-var InspectorController = new devtools.InspectorControllerImpl();
+/**
+ * @override
+ */
+devtools.InspectorControllerImpl.prototype.takeHeapSnapshot = function() {
+  devtools.tools.getDebuggerAgent().startProfiling(
+      devtools.DebuggerAgent.ProfilerModules.PROFILER_MODULE_HEAP_SNAPSHOT
+      | devtools.DebuggerAgent.ProfilerModules.PROFILER_MODULE_HEAP_STATS
+      | devtools.DebuggerAgent.ProfilerModules.PROFILER_MODULE_JS_CONSTRUCTORS);
+};
+
+
+/**
+ * @override
+ */
+devtools.InspectorControllerImpl.prototype.dispatchOnInjectedScript = function(
+    callId, methodName, argsString, async) {
+  var callback = function(result, isException) {
+    WebInspector.didDispatchOnInjectedScript(callId, result, isException);
+  };
+  RemoteToolsAgent.DispatchOnInjectedScript(
+      WebInspector.Callback.wrap(callback),
+      async ? methodName + "_async" : methodName,
+      argsString);
+};
+
+
+/**
+ * Installs delegating handler into the inspector controller.
+ * @param {string} methodName Method to install delegating handler for.
+ */
+devtools.InspectorControllerImpl.prototype.installInspectorControllerDelegate_
+    = function(methodName) {
+  this[methodName] = goog.bind(this.callInspectorController_, this,
+      methodName);
+};
+
+
+/**
+ * Bound function with the installInjectedScriptDelegate_ actual
+ * implementation.
+ */
+devtools.InspectorControllerImpl.prototype.callInspectorController_ =
+    function(methodName, var_arg) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  RemoteToolsAgent.DispatchOnInspectorController(
+      WebInspector.Callback.wrap(function(){}),
+      methodName,
+      JSON.stringify(args));
+};
+
+
+InspectorController = new devtools.InspectorControllerImpl();

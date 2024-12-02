@@ -51,7 +51,9 @@ static const char* const kSbMalwareReportUrl =
     "http://safebrowsing.clients.google.com/safebrowsing/report?evts=malblhit"
     "&evtd=%s&evtr=%s&evhr=%s&client=%s&appver=%s";
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(CHROME_FRAME_BUILD)
+static const char* const kSbClientName = "googlechromeframe";
+#elif defined(GOOGLE_CHROME_BUILD)
 static const char* const kSbClientName = "googlechrome";
 #else
 static const char* const kSbClientName = "chromium";
@@ -225,7 +227,7 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
           HandleReKey();
       }
     } else if (response_code >= 300) {
-      HandleGetHashError();
+      HandleGetHashError(Time::Now());
       SB_DLOG(INFO) << "SafeBrowsing GetHash request for: " << source->url()
                     << ", failed with error: " << response_code;
     }
@@ -653,9 +655,9 @@ void SafeBrowsingProtocolManager::HandleReKey() {
   IssueKeyRequest();
 }
 
-void SafeBrowsingProtocolManager::HandleGetHashError() {
+void SafeBrowsingProtocolManager::HandleGetHashError(const Time& now) {
   int next = GetNextBackOffTime(&gethash_error_count_, &gethash_back_off_mult_);
-  next_gethash_time_ = Time::Now() + TimeDelta::FromSeconds(next);
+  next_gethash_time_ = now + TimeDelta::FromSeconds(next);
 }
 
 void SafeBrowsingProtocolManager::UpdateFinished(bool success) {

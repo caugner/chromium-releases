@@ -39,37 +39,26 @@ void DeleteFiles(const wchar_t* path, const wchar_t* search_name) {
 
 namespace disk_cache {
 
-// Implemented in file_win.cc.
-MessageLoopForIO::IOHandler* GetFileIOHandler();
-
-bool MoveCache(const std::wstring& from_path, const std::wstring& to_path) {
+bool MoveCache(const FilePath& from_path, const FilePath& to_path) {
   // I don't want to use the shell version of move because if something goes
   // wrong, that version will attempt to move file by file and fail at the end.
-  if (!MoveFileEx(from_path.c_str(), to_path.c_str(), 0)) {
+  if (!MoveFileEx(from_path.value().c_str(), to_path.value().c_str(), 0)) {
     LOG(ERROR) << "Unable to move the cache: " << GetLastError();
     return false;
   }
   return true;
 }
 
-void DeleteCache(const std::wstring& path, bool remove_folder) {
-  DeleteFiles(path.c_str(), L"*");
+void DeleteCache(const FilePath& path, bool remove_folder) {
+  DeleteFiles(path.value().c_str(), L"*");
   if (remove_folder)
-    RemoveDirectory(path.c_str());
+    RemoveDirectory(path.value().c_str());
 }
 
-bool DeleteCacheFile(const std::wstring& name) {
+bool DeleteCacheFile(const FilePath& name) {
   // We do a simple delete, without ever falling back to SHFileOperation, as the
   // version from base does.
-  return DeleteFile(name.c_str()) ? true : false;
-}
-
-void WaitForPendingIO(int* num_pending_io) {
-  while (*num_pending_io) {
-    // Asynchronous IO operations may be in flight and the completion may end
-    // up calling us back so let's wait for them.
-    MessageLoopForIO::current()->WaitForIOCompletion(100, GetFileIOHandler());
-  }
+  return DeleteFile(name.value().c_str()) ? true : false;
 }
 
 }  // namespace disk_cache

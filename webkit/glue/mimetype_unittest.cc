@@ -10,17 +10,20 @@
 
 #include "base/string_util.h"
 #include "net/url_request/url_request_unittest.h"
+#include "webkit/api/public/WebFrame.h"
+#include "webkit/api/public/WebView.h"
 #include "webkit/glue/unittest_test_server.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webview.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
+
+using WebKit::WebFrame;
 
 namespace {
 
 class MimeTypeTests : public TestShellTest {
  public:
   void LoadURL(const GURL& url) {
-    test_shell_->LoadURL(UTF8ToWide(url.spec()).c_str());
+    test_shell_->LoadURL(url);
     test_shell_->WaitTestFinished();
   }
 
@@ -28,7 +31,7 @@ class MimeTypeTests : public TestShellTest {
     std::string path("contenttype?");
     GURL url = server_->TestServerPage(path + mimetype);
     LoadURL(url);
-    WebFrame* frame = test_shell_->webView()->GetMainFrame();
+    WebFrame* frame = test_shell_->webView()->mainFrame();
     EXPECT_EQ(expected, webkit_glue::DumpDocumentText(frame));
   }
 
@@ -81,7 +84,7 @@ TEST_F(MimeTypeTests, MimeTypeTests) {
   };
   for (size_t i = 0; i < arraysize(not_text); ++i) {
     CheckMimeType(not_text[i], L"");
-    test_shell_->webView()->StopLoading();
+    test_shell_->webView()->mainFrame()->stopLoading();
   }
 
   // TODO(tc): make sure other mime types properly go to download (e.g.,

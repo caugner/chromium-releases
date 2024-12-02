@@ -57,6 +57,9 @@ gfx::Size Checkbox::GetPreferredSize() {
     return gfx::Size();
 
   gfx::Size prefsize = native_wrapper_->GetView()->GetPreferredSize();
+  if (native_wrapper_->UsesNativeLabel())
+    return prefsize;
+
   prefsize.set_width(
       prefsize.width() + kCheckboxLabelSpacing +
           kLabelFocusPaddingHorizontal * 2);
@@ -72,16 +75,24 @@ void Checkbox::Layout() {
   if (!native_wrapper_)
     return;
 
-  gfx::Size checkmark_prefsize = native_wrapper_->GetView()->GetPreferredSize();
-  int label_x = checkmark_prefsize.width() + kCheckboxLabelSpacing +
-      kLabelFocusPaddingHorizontal;
-  label_->SetBounds(
-      label_x, 0, std::max(0, width() - label_x - kLabelFocusPaddingHorizontal),
-      height());
-  int first_line_height = label_->GetFont().height();
-  native_wrapper_->GetView()->SetBounds(
-      0, ((first_line_height - checkmark_prefsize.height()) / 2),
-      checkmark_prefsize.width(), checkmark_prefsize.height());
+  if (native_wrapper_->UsesNativeLabel()) {
+    label_->SetBounds(0, 0, 0, 0);
+    label_->SetVisible(false);
+    native_wrapper_->GetView()->SetBounds(0, 0, width(), height());
+  } else {
+    gfx::Size checkmark_prefsize =
+        native_wrapper_->GetView()->GetPreferredSize();
+    int label_x = checkmark_prefsize.width() + kCheckboxLabelSpacing +
+        kLabelFocusPaddingHorizontal;
+    label_->SetBounds(
+        label_x, 0, std::max(0, width() - label_x -
+            kLabelFocusPaddingHorizontal),
+        height());
+    int first_line_height = label_->GetFont().height();
+    native_wrapper_->GetView()->SetBounds(
+        0, ((first_line_height - checkmark_prefsize.height()) / 2),
+        checkmark_prefsize.width(), checkmark_prefsize.height());
+  }
   native_wrapper_->GetView()->Layout();
 }
 
@@ -142,14 +153,22 @@ std::string Checkbox::GetClassName() const {
 ////////////////////////////////////////////////////////////////////////////////
 // Checkbox, NativeButton overrides:
 
-void Checkbox::CreateWrapper() {
-  native_wrapper_ = NativeButtonWrapper::CreateCheckboxWrapper(this);
-  native_wrapper_->UpdateLabel();
-  native_wrapper_->UpdateChecked();
+NativeButtonWrapper* Checkbox::CreateWrapper() {
+  NativeButtonWrapper* native_wrapper =
+      NativeButtonWrapper::CreateCheckboxWrapper(this);
+  native_wrapper->UpdateLabel();
+  native_wrapper->UpdateChecked();
+  return native_wrapper;
 }
 
 void Checkbox::InitBorder() {
   // No border, so we do nothing.
+}
+
+void Checkbox::SetLabel(const std::wstring& label) {
+  NativeButton::SetLabel(label);
+  if (!native_wrapper_->UsesNativeLabel())
+    label_->SetText(label);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -165,7 +184,8 @@ bool Checkbox::HitTestLabel(const MouseEvent& e) {
 // Checkbox, private:
 
 void Checkbox::Init(const std::wstring& label_text) {
-  set_minimum_size(gfx::Size(0, 0));
+  // Checkboxs don't need to enforce a minimum size.
+  set_ignore_minimum_size(true);
   label_ = new Label(label_text);
   label_->set_has_focus_border(true);
   label_->SetHorizontalAlignment(Label::ALIGN_LEFT);

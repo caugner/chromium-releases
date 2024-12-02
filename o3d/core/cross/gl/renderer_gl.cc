@@ -34,7 +34,6 @@
 // implements the abstract Renderer API using OpenGL and the Cg
 // Runtime.
 
-#include "core/cross/precompile.h"
 
 #include "core/cross/gl/renderer_gl.h"
 
@@ -175,8 +174,8 @@ GLenum ConvertStencilOp(State::StencilOperation stencil_func) {
 // Returns true upon success.
 // Note:  This routine assumes that a frambuffer object is presently bound
 // to the context.
-bool InstallFramebufferObjects(RenderSurface* surface,
-                               RenderDepthStencilSurface* surface_depth) {
+bool InstallFramebufferObjects(const RenderSurface* surface,
+                               const RenderDepthStencilSurface* surface_depth) {
 #ifdef _DEBUG
   GLint bound_framebuffer;
   ::glGetIntegerv(GL_FRAMEBUFFER_BINDING_EXT, &bound_framebuffer);
@@ -200,7 +199,8 @@ bool InstallFramebufferObjects(RenderSurface* surface,
                                  0);
 
   if (surface) {
-    RenderSurfaceGL *gl_surface = down_cast<RenderSurfaceGL*>(surface);
+    const RenderSurfaceGL *gl_surface =
+        down_cast<const RenderSurfaceGL*>(surface);
     Texture *texture = gl_surface->texture();
     if (texture->IsA(Texture2D::GetApparentClass())) {
       ::glFramebufferTexture2DEXT(
@@ -221,8 +221,8 @@ bool InstallFramebufferObjects(RenderSurface* surface,
 
   if (surface_depth) {
     // Bind both the depth and stencil attachments.
-    RenderDepthStencilSurfaceGL* gl_surface =
-        down_cast<RenderDepthStencilSurfaceGL*>(surface_depth);
+    const RenderDepthStencilSurfaceGL* gl_surface =
+        down_cast<const RenderDepthStencilSurfaceGL*>(surface_depth);
     ::glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT,
                                    GL_DEPTH_ATTACHMENT_EXT,
                                    GL_RENDERBUFFER_EXT,
@@ -492,6 +492,7 @@ class ColorWriteEnableHandler : public TypedStateHandler<ParamInteger> {
                   (mask & 0x2) != 0,
                   (mask & 0x4) != 0,
                   (mask & 0x8) != 0);
+    renderer->SetWriteMask(mask);
   }
 };
 
@@ -528,19 +529,19 @@ RendererGL* RendererGL::CreateDefault(ServiceLocator* service_locator) {
 RendererGL::RendererGL(ServiceLocator* service_locator)
     : Renderer(service_locator),
       semantic_manager_(service_locator),
-#ifdef OS_MACOSX
-      mac_agl_context_(0),
-      mac_cgl_context_(0),
-#endif
 #ifdef OS_WIN
       gl_context_(NULL),
 #endif
+      fullscreen_(0),
 #ifdef OS_LINUX
       display_(NULL),
       window_(0),
       context_(0),
 #endif
-      fullscreen_(0),
+#ifdef OS_MACOSX
+      mac_agl_context_(0),
+      mac_cgl_context_(0),
+#endif
       render_surface_framebuffer_(0),
       cg_context_(NULL),
       alpha_function_ref_changed_(true),
@@ -650,8 +651,6 @@ RendererGL::RendererGL(ServiceLocator* service_locator)
                   new BlendEquationHandler(&blend_equation_[ALPHA]));
 }
 
-RendererGL *RendererGL::current_renderer_ = NULL;
-
 RendererGL::~RendererGL() {
   Destroy();
 }
@@ -692,14 +691,14 @@ Renderer::InitStatus RendererGL::InitCommonGL() {
     return GPU_NOT_UP_TO_SPEC;
   }
 
-  supports_npot_ = GLEW_ARB_texture_non_power_of_two;
+  SetSupportsNPOT(GLEW_ARB_texture_non_power_of_two != 0);
 
 #ifdef OS_MACOSX
   // The Radeon X1600 says it supports NPOT, but in most situations it doesn't.
-  if (supports_npot_ &&
+  if (supports_npot() &&
       !strcmp("ATI Radeon X1600 OpenGL Engine",
               reinterpret_cast<const char*>(::glGetString(GL_RENDERER))))
-    supports_npot_ = false;
+    SetSupportsNPOT(false);
 #endif
 
   // Check for necessary extensions
@@ -1100,7 +1099,6 @@ void RendererGL::Destroy() {
   DestroyCommonGL();
   if (display_) {
     ::glXMakeCurrent(display_, 0, 0);
-    current_renderer_ = NULL;
     if (context_) {
       ::glXDestroyContext(display_, context_);
       context_ = 0;
@@ -1115,18 +1113,15 @@ void RendererGL::Destroy() {
 bool RendererGL::MakeCurrent() {
 #ifdef OS_WIN
   if (!device_context_ || !gl_context_) return false;
-  bool result = ::wglMakeCurrent(device_context_, gl_context_);
-  if (result) current_renderer_ = this;
+  bool result = ::wglMakeCurrent(device_context_, gl_context_) != 0;
   return result;
 #endif
 #ifdef OS_MACOSX
   if (mac_cgl_context_ != NULL) {
     ::CGLSetCurrentContext(mac_cgl_context_);
-    current_renderer_ = this;
     return true;
   } else if (mac_agl_context_ != NULL) {
     ::aglSetCurrentContext(mac_agl_context_);
-    current_renderer_ = this;
     return true;
   } else {
     return false;
@@ -1135,7 +1130,6 @@ bool RendererGL::MakeCurrent() {
 #ifdef OS_LINUX
   if (context_ != NULL) {
     bool result = ::glXMakeCurrent(display_, window_, context_) == True;
-    if (result) current_renderer_ = this;
     return result;
   } else {
     return false;
@@ -1143,14 +1137,13 @@ bool RendererGL::MakeCurrent() {
 #endif
 }
 
-void RendererGL::Clear(const Float4 &color,
-                       bool color_flag,
-                       float depth,
-                       bool depth_flag,
-                       int stencil,
-                       bool stencil_flag) {
+void RendererGL::PlatformSpecificClear(const Float4 &color,
+                                       bool color_flag,
+                                       float depth,
+                                       bool depth_flag,
+                                       int stencil,
+                                       bool stencil_flag) {
   MakeCurrentLazy();
-  SetChangedStates();
   ::glClearColor(color[0], color[1], color[2], color[3]);
   ::glClearDepth(depth);
   ::glClearStencil(stencil);
@@ -1159,7 +1152,6 @@ void RendererGL::Clear(const Float4 &color,
             (depth_flag   ? GL_DEPTH_BUFFER_BIT   : 0) |
             (stencil_flag ? GL_STENCIL_BUFFER_BIT : 0));
   CHECK_GL_ERROR();
-  set_need_to_render(false);
 }
 
 // Updates the helper constant used for the D3D -> GL remapping.
@@ -1196,15 +1188,15 @@ void RendererGL::SetViewportInPixels(int left,
                                      float max_z) {
   MakeCurrentLazy();
   int vieport_top =
-      RenderSurfaceActive() ? top : render_height() - top - height;
+      RenderSurfaceActive() ? top : display_height() - top - height;
   ::glViewport(left, vieport_top, width, height);
-  UpdateHelperConstant(width, height);
+  UpdateHelperConstant(static_cast<float>(width), static_cast<float>(height));
 
   // If it's the full client area turn off scissor test for speed.
   if (left == 0 &&
       top == 0 &&
-      width == render_width() &&
-      height == render_height()) {
+      width == display_width() &&
+      height == display_height()) {
     ::glDisable(GL_SCISSOR_TEST);
   } else {
     ::glScissor(left, vieport_top, width, height);
@@ -1220,31 +1212,73 @@ void RendererGL::Resize(int width, int height) {
   CHECK_GL_ERROR();
 }
 
-bool RendererGL::SetFullscreen(bool fullscreen,
-                               const DisplayWindow& display,
-                               int mode_id) {
-  if (fullscreen != fullscreen_) {
-    fullscreen_ = fullscreen;
+bool RendererGL::GoFullscreen(const DisplayWindow& display,
+                              int mode_id) {
+#ifdef OS_LINUX
+  // This actually just switches the GLX context to the new window. The real
+  // work is in main_linux.cc.
+  const DisplayWindowLinux &display_platform =
+      static_cast<const DisplayWindowLinux&>(display);
+  display_ = display_platform.display();
+  window_ = display_platform.window();
+  if (!MakeCurrent()) {
+    return false;
   }
+#endif
+  fullscreen_ = true;
   return true;
 }
 
-bool RendererGL::StartRendering() {
+bool RendererGL::CancelFullscreen(const DisplayWindow& display,
+                                  int width, int height) {
+#ifdef OS_LINUX
+  // This actually just switches the GLX context to the old window. The real
+  // work is in main_linux.cc.
+  const DisplayWindowLinux &display_platform =
+      static_cast<const DisplayWindowLinux&>(display);
+  display_ = display_platform.display();
+  window_ = display_platform.window();
+  if (!MakeCurrent()) {
+    return false;
+  }
+#endif
+  fullscreen_ = false;
+  return true;
+}
+
+void RendererGL::GetDisplayModes(std::vector<DisplayMode> *modes) {
+#ifdef OS_MACOSX
+  // Mac is supposed to call a different function in plugin_mac.mm instead.
+  DLOG(FATAL) << "Not supposed to be called";
+#endif
+  // On all other platforms this is unimplemented. Linux only supports
+  // DISPLAY_MODE_DEFAULT for now.
+  modes->clear();
+}
+
+bool RendererGL::GetDisplayMode(int id, DisplayMode *mode) {
+#ifdef OS_MACOSX
+  // Mac is supposed to call a different function in plugin_mac.mm instead.
+  DLOG(FATAL) << "Not supposed to be called";
+  return false;
+#elif defined(OS_LINUX)
+  if (id == DISPLAY_MODE_DEFAULT) {
+    // Don't need to know any of this on Linux.
+    mode->Set(0, 0, 0, id);
+    return true;
+  } else {
+    // There are no other valid ids until we implement GetDisplayModes() and
+    // mode switching.
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool RendererGL::PlatformSpecificStartRendering() {
   DLOG_FIRST_N(INFO, 10) << "RendererGL StartRendering";
   MakeCurrentLazy();
-  ++render_frame_count_;
-  transforms_culled_ = 0;
-  transforms_processed_ = 0;
-  draw_elements_culled_ = 0;
-  draw_elements_processed_ = 0;
-  draw_elements_rendered_ = 0;
-  primitives_rendered_ = 0;
-
-  // Clear the client if we need to.
-  if (clear_client_) {
-    clear_client_ = false;
-    Clear(Float4(0.5f, 0.5f, 0.5f, 1.0f), true, 1.0f, true, 0, true);
-  }
 
   // Currently always returns true.
   // Should be modified if current behavior changes.
@@ -1255,14 +1289,10 @@ bool RendererGL::StartRendering() {
 // Clears the color, depth and stncil buffers and prepares GL for rendering
 // the frame.
 // Returns true on success.
-bool RendererGL::BeginDraw() {
+bool RendererGL::PlatformSpecificBeginDraw() {
   DLOG_FIRST_N(INFO, 10) << "RendererGL BeginDraw";
-  set_need_to_render(true);
 
   MakeCurrentLazy();
-
-  // Reset the viewport.
-  SetViewport(Float4(0.0f, 0.0f, 1.0f, 1.0f), Float2(0.0f, 1.0f));
 
   // Currently always returns true.
   // Should be modified if current behavior changes.
@@ -1270,28 +1300,11 @@ bool RendererGL::BeginDraw() {
   return true;
 }
 
-// Asks the primitive to draw itself.
-void RendererGL::RenderElement(Element* element,
-                               DrawElement* draw_element,
-                               Material* material,
-                               ParamObject* override,
-                               ParamCache* param_cache) {
-  DCHECK(IsCurrent());
-  DLOG_FIRST_N(INFO, 10) << "RendererGL RenderElement";
-  ++draw_elements_rendered_;
-  State *current_state = material ? material->state() : NULL;
-  PushRenderStates(current_state);
-  SetChangedStates();
-  element->Render(this, draw_element, material, override, param_cache);
-  PopRenderStates();
-  CHECK_GL_ERROR();
-}
-
 // Assign the surface arguments to the renderer, and update the stack
 // of pushed surfaces.
 void RendererGL::SetRenderSurfacesPlatformSpecific(
-    RenderSurface* surface,
-    RenderDepthStencilSurface* surface_depth) {
+    const RenderSurface* surface,
+    const RenderDepthStencilSurface* surface_depth) {
   // TODO:  This routine re-uses a single global framebuffer object for
   // all RenderSurface rendering.  Because of the validation checks performed
   // at attachment-change time, it may be more performant to create a pool
@@ -1318,23 +1331,22 @@ void RendererGL::SetBackBufferPlatformSpecific() {
 }
 
 // Executes a post rendering step
-void RendererGL::EndDraw() {
+void RendererGL::PlatformSpecificEndDraw() {
   DLOG_FIRST_N(INFO, 10) << "RendererGL EndDraw";
   DCHECK(IsCurrent());
-  SetChangedStates();
-  set_need_to_render(false);
 }
 
 // Swaps the buffers.
-void RendererGL::FinishRendering() {
-  if (need_to_render())
-    return;
-
-  DLOG_FIRST_N(INFO, 10) << "RendererGL Present";
+void RendererGL::PlatformSpecificFinishRendering() {
+  DLOG_FIRST_N(INFO, 10) << "RendererGL FinishRendering";
   DCHECK(IsCurrent());
-  SetChangedStates();
   ::glFlush();
   CHECK_GL_ERROR();
+}
+
+void RendererGL::PlatformSpecificPresent() {
+  DLOG_FIRST_N(INFO, 10) << "RendererGL Present";
+  DCHECK(IsCurrent());
 #ifdef OS_WIN
   ::SwapBuffers(device_context_);
 #endif
@@ -1399,7 +1411,8 @@ void RendererGL::SetStencilStates(GLenum face,
   CHECK_GL_ERROR();
 }
 
-void RendererGL::SetChangedStates() {
+void RendererGL::ApplyDirtyStates() {
+  MakeCurrentLazy();
   DCHECK(IsCurrent());
   // Set blend settings.
   if (alpha_blend_settings_changed_) {
@@ -1493,28 +1506,6 @@ ParamCache* RendererGL::CreatePlatformSpecificParamCache() {
 }
 
 
-// Attempts to create a Texture with the given bitmap, automatically
-// determining whether the to create a 2D texture, cube texture, etc. If
-// creation fails the method returns NULL.
-// Parameters:
-//  bitmap: The bitmap specifying the dimensions, format and content of the
-//          new texture. The created texture takes ownership of the bitmap
-//          data.
-// Returns:
-//  A ref-counted pointer to the texture or NULL if it did not load.
-Texture::Ref RendererGL::CreatePlatformSpecificTextureFromBitmap(
-    Bitmap* bitmap) {
-  if (bitmap->is_cubemap()) {
-    return Texture::Ref(TextureCUBEGL::Create(service_locator(),
-                                              bitmap,
-                                              false));
-  } else {
-    return Texture::Ref(Texture2DGL::Create(service_locator(),
-                                            bitmap,
-                                            false));
-  }
-}
-
 Texture2D::Ref RendererGL::CreatePlatformSpecificTexture2D(
     int width,
     int height,
@@ -1523,13 +1514,11 @@ Texture2D::Ref RendererGL::CreatePlatformSpecificTexture2D(
     bool enable_render_surfaces) {
   DLOG(INFO) << "RendererGL CreateTexture2D";
   MakeCurrentLazy();
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(width);
-  bitmap->set_height(height);
-  bitmap->set_num_mipmaps(levels);
   return Texture2D::Ref(Texture2DGL::Create(service_locator(),
-                                            bitmap,
+                                            format,
+                                            levels,
+                                            width,
+                                            height,
                                             enable_render_surfaces));
 }
 
@@ -1540,14 +1529,10 @@ TextureCUBE::Ref RendererGL::CreatePlatformSpecificTextureCUBE(
     bool enable_render_surfaces) {
   DLOG(INFO) << "RendererGL CreateTextureCUBE";
   MakeCurrentLazy();
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->set_format(format);
-  bitmap->set_width(edge_length);
-  bitmap->set_height(edge_length);
-  bitmap->set_num_mipmaps(levels);
-  bitmap->set_is_cubemap(true);
   return TextureCUBE::Ref(TextureCUBEGL::Create(service_locator(),
-                                                bitmap,
+                                                format,
+                                                levels,
+                                                edge_length,
                                                 enable_render_surfaces));
 }
 
@@ -1558,32 +1543,6 @@ RenderDepthStencilSurface::Ref RendererGL::CreateDepthStencilSurface(
       new RenderDepthStencilSurfaceGL(service_locator(),
                                       width,
                                       height));
-}
-
-// Saves a png screenshot 'file_name.png'.
-// Returns true on success and false on failure.
-bool RendererGL::SaveScreen(const String& file_name) {
-#ifdef TESTING
-  MakeCurrentLazy();
-  Bitmap::Ref bitmap = Bitmap::Ref(new Bitmap(service_locator()));
-  bitmap->Allocate(Texture::ARGB8, width(), height(), 1, false);
-  
-  // Note: glReadPixels captures the alpha component of the frame buffer as well
-  // as the color components, the browser usually ignores the alpha channel when
-  // drawing to the screen, so unless the alpha is 1, the png image generated
-  // might exhibit suprise translucency.
-  ::glReadPixels(0, 0, width(), height(), GL_BGRA, GL_UNSIGNED_BYTE,
-                 bitmap->image_data());
-  bool result = bitmap->SaveToPNGFile((file_name + ".png").c_str());
-  if (!result) {
-    O3D_ERROR(service_locator())
-        << "Failed to save screen into " << file_name;
-  }
-  return result;
-#else
-  // Not a test build, always return false.
-  return false;
-#endif
 }
 
 const int* RendererGL::GetRGBAUByteNSwizzleTable() {

@@ -362,7 +362,7 @@ void AboutIPCDialog::Layout() {
   if (!message_list_.m_hWnd) {
     HWND parent_window = GetRootView()->GetWidget()->GetNativeView();
 
-    CRect rect(0, 0, 10, 10);
+    RECT rect = {0, 0, 10, 10};
     HWND list_hwnd = message_list_.Create(parent_window,
         rect, NULL, WS_CHILD | WS_VISIBLE | LVS_SORTASCENDING);
     message_list_.SetViewType(LVS_REPORT);
@@ -431,16 +431,17 @@ bool AboutIPCDialog::CanResize() const {
   return true;
 }
 
-void AboutIPCDialog::ButtonPressed(views::Button* button) {
+void AboutIPCDialog::ButtonPressed(
+    views::Button* button, const views::Event& event) {
   if (button == track_toggle_) {
     if (tracking_) {
       track_toggle_->SetText(kStartTrackingLabel);
       tracking_ = false;
-      IPC::Logging::current()->Disable();
+      g_browser_process->SetIPCLoggingEnabled(false);
     } else {
       track_toggle_->SetText(kStopTrackingLabel);
       tracking_ = true;
-      IPC::Logging::current()->Enable();
+      g_browser_process->SetIPCLoggingEnabled(true);
     }
     track_toggle_->SchedulePaint();
   } else if (button == clear_button_) {

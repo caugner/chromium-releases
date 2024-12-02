@@ -35,7 +35,7 @@
 #include "WebSize.h"
 
 #include "Image.h"
-#include "ImageSourceSkia.h"
+#include "ImageSource.h"
 #include "NativeImageSkia.h"
 #include "SharedBuffer.h"
 #include <wtf/OwnPtr.h>
@@ -47,16 +47,39 @@ namespace WebKit {
 
 WebImage WebImage::fromData(const WebData& data, const WebSize& desiredSize)
 {
-    ImageSourceSkia source;
-    source.setData(PassRefPtr<SharedBuffer>(data).get(), true, desiredSize);
+    ImageSource source;
+    source.setData(PassRefPtr<SharedBuffer>(data).get(), true);
     if (!source.isSizeAvailable())
         return WebImage();
 
-    OwnPtr<NativeImageSkia> frame0(source.createFrameAtIndex(0));
-    if (!frame0.get())
+    // Frames are arranged by decreasing size, then decreasing bit depth.
+    // Pick the frame closest to |desiredSize|'s area without being smaller,
+    // which has the highest bit depth.
+    const size_t frameCount = source.frameCount();
+    size_t index = 0;  // Default to first frame if none are large enough.
+    int frameAreaAtIndex = 0;
+    for (size_t i = 0; i < frameCount; ++i) {
+        const IntSize frameSize = source.frameSizeAtIndex(i);
+        if (WebSize(frameSize) == desiredSize) {
+            index = i;
+            break;  // Perfect match.
+        }
+
+        const int frameArea = frameSize.width() * frameSize.height();
+        if (frameArea < (desiredSize.width * desiredSize.height))
+            break;  // No more frames that are large enough.
+
+        if ((i == 0) || (frameArea < frameAreaAtIndex)) {
+            index = i;  // Closer to desired area than previous best match.
+            frameAreaAtIndex = frameArea;
+        }
+    }
+
+    OwnPtr<NativeImageSkia> frame(source.createFrameAtIndex(index));
+    if (!frame.get())
         return WebImage();
 
-    return WebImage(*frame0);
+    return WebImage(*frame);
 }
 
 void WebImage::reset()

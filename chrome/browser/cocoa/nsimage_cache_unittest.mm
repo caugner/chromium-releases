@@ -6,20 +6,24 @@
 
 #include "base/file_path.h"
 #include "base/mac_util.h"
+#include "base/nsimage_cache_mac.h"
 #include "base/path_service.h"
-#include "chrome/browser/cocoa/nsimage_cache.h"
-#include "chrome/common/mac_app_names.h"
+#include "chrome/common/chrome_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
+
+// This tests nsimage_cache, which lives in base/.  The unit test is in
+// chrome/ because it depends on having a built-up Chrome present.
 
 namespace {
 
-class NSImageCacheTest : public testing::Test {
+class NSImageCacheTest : public PlatformTest {
  public:
   NSImageCacheTest() {
-    // Look in the Chromium app bundle for resources.
+    // Look in the framework bundle for resources.
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
-    path = path.AppendASCII(MAC_BROWSER_APP_NAME);
+    path = path.Append(chrome::kFrameworkName);
     mac_util::SetOverrideAppBundlePath(path);
   }
   virtual ~NSImageCacheTest() {
@@ -50,6 +54,16 @@ TEST_F(NSImageCacheTest, LookupFoundAndClear) {
   nsimage_cache::Clear();
   EXPECT_NE(first, nsimage_cache::ImageNamed(@"back_Template.pdf"))
       << "how'd we get the same image after a cache clear?";
+}
+
+TEST_F(NSImageCacheTest, AutoTemplating) {
+  NSImage *templateImage = nsimage_cache::ImageNamed(@"back_Template.pdf");
+  EXPECT_TRUE([templateImage isTemplate] == YES)
+      << "Image ending in 'Template' should be marked as being a template";
+  NSImage *nonTemplateImage = nsimage_cache::ImageNamed(@"aliasCursor.png");
+  EXPECT_FALSE([nonTemplateImage isTemplate] == YES)
+      << "Image not ending in 'Template' should not be marked as being a "
+         "template";
 }
 
 }  // namespace

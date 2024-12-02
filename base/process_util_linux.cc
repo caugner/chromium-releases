@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <string>
 
-#include "base/eintr_wrapper.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/string_tokenizer.h"
@@ -84,77 +86,6 @@ FilePath GetProcessExecutablePath(ProcessHandle process) {
     return FilePath();
   }
   return FilePath(std::string(exename, len));
-}
-
-bool LaunchApp(const std::vector<std::string>& argv,
-               const environment_vector& environ,
-               const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle) {
-  pid_t pid = fork();
-  if (pid < 0)
-    return false;
-
-  if (pid == 0) {
-    // Child process
-    InjectiveMultimap fd_shuffle;
-    for (file_handle_mapping_vector::const_iterator
-        it = fds_to_remap.begin(); it != fds_to_remap.end(); ++it) {
-      fd_shuffle.push_back(InjectionArc(it->first, it->second, false));
-    }
-
-    for (environment_vector::const_iterator it = environ.begin();
-         it != environ.end(); ++it) {
-      if (it->first) {
-        if (it->second) {
-          setenv(it->first, it->second, 1);
-        } else {
-          unsetenv(it->first);
-        }
-      }
-    }
-
-    if (!ShuffleFileDescriptors(fd_shuffle))
-      exit(127);
-
-    // If we are using the SUID sandbox, it sets a magic environment variable
-    // ("SBX_D"), so we remove that variable from the environment here on the
-    // off chance that it's already set.
-    unsetenv("SBX_D");
-
-    CloseSuperfluousFds(fd_shuffle);
-
-    scoped_array<char*> argv_cstr(new char*[argv.size() + 1]);
-    for (size_t i = 0; i < argv.size(); i++)
-      argv_cstr[i] = const_cast<char*>(argv[i].c_str());
-    argv_cstr[argv.size()] = NULL;
-    execvp(argv_cstr[0], argv_cstr.get());
-    LOG(ERROR) << "LaunchApp: exec failed!, argv_cstr[0] " << argv_cstr[0]
-        << ", errno " << errno;
-    exit(127);
-  } else {
-    // Parent process
-    if (wait)
-      HANDLE_EINTR(waitpid(pid, 0, 0));
-
-    if (process_handle)
-      *process_handle = pid;
-  }
-
-  return true;
-}
-
-bool LaunchApp(const std::vector<std::string>& argv,
-               const file_handle_mapping_vector& fds_to_remap,
-               bool wait, ProcessHandle* process_handle) {
-  base::environment_vector no_env;
-  return LaunchApp(argv, no_env, fds_to_remap, wait, process_handle);
-}
-
-bool LaunchApp(const CommandLine& cl,
-               bool wait, bool start_hidden,
-               ProcessHandle* process_handle) {
-  file_handle_mapping_vector no_files;
-  return LaunchApp(cl.argv(), no_files, wait, process_handle);
 }
 
 NamedProcessIterator::NamedProcessIterator(const std::wstring& executable_name,
@@ -282,8 +213,13 @@ size_t ProcessMetrics::GetPagefileUsage() const {
   return 0;
 }
 
+// On linux, we return the high water mark of vsize.
 size_t ProcessMetrics::GetPeakPagefileUsage() const {
-  // http://crbug.com/16251
+  std::vector<std::string> proc_stats;
+  GetProcStats(process_, &proc_stats);
+  const size_t kVmPeak = 21;
+  if (proc_stats.size() > kVmPeak)
+    return static_cast<size_t>(StringToInt(proc_stats[kVmPeak]));
   return 0;
 }
 
@@ -299,19 +235,68 @@ size_t ProcessMetrics::GetWorkingSetSize() const {
   return 0;
 }
 
+// On linux, we return the high water mark of RSS.
 size_t ProcessMetrics::GetPeakWorkingSetSize() const {
-  // http://crbug.com/16251
+  std::vector<std::string> proc_stats;
+  GetProcStats(process_, &proc_stats);
+  const size_t kVmHwm = 23;
+  if (proc_stats.size() > kVmHwm) {
+    size_t num_pages = static_cast<size_t>(StringToInt(proc_stats[kVmHwm]));
+    return num_pages * getpagesize();
+  }
   return 0;
 }
 
 size_t ProcessMetrics::GetPrivateBytes() const {
-  // http://crbug.com/16251
-  return 0;
+  WorkingSetKBytes ws_usage;
+  GetWorkingSetKBytes(&ws_usage);
+  return ws_usage.priv << 10;
 }
 
+// Private and Shared working set sizes are obtained from /proc/<pid>/smaps,
+// as in http://www.pixelbeat.org/scripts/ps_mem.py
 bool ProcessMetrics::GetWorkingSetKBytes(WorkingSetKBytes* ws_usage) const {
-  // http://crbug.com/16251
-  return false;
+  FilePath stat_file =
+    FilePath("/proc").Append(IntToString(process_)).Append("smaps");
+  std::string smaps;
+  int private_kb = 0;
+  int pss_kb = 0;
+  bool have_pss = false;
+  if (!file_util::ReadFileToString(stat_file, &smaps))
+    return false;
+
+  StringTokenizer tokenizer(smaps, ":\n");
+  ParsingState state = KEY_NAME;
+  std::string last_key_name;
+  while (tokenizer.GetNext()) {
+    switch (state) {
+      case KEY_NAME:
+        last_key_name = tokenizer.token();
+        state = KEY_VALUE;
+        break;
+      case KEY_VALUE:
+        if (last_key_name.empty()) {
+          NOTREACHED();
+          return false;
+        }
+        if (StartsWithASCII(last_key_name, "Private_", 1)) {
+          private_kb += StringToInt(tokenizer.token());
+        } else if (StartsWithASCII(last_key_name, "Pss", 1)) {
+          have_pss = true;
+          pss_kb += StringToInt(tokenizer.token());
+        }
+        state = KEY_NAME;
+        break;
+    }
+  }
+  ws_usage->priv = private_kb;
+  // Sharable is not calculated, as it does not provide interesting data.
+  ws_usage->shareable = 0;
+
+  ws_usage->shared = 0;
+  if (have_pss)
+    ws_usage->shared = pss_kb;
+  return true;
 }
 
 // To have /proc/self/io file you must enable CONFIG_TASK_IO_ACCOUNTING
@@ -352,6 +337,99 @@ bool ProcessMetrics::GetIOCounters(IoCounters* io_counters) const {
     }
   }
   return true;
+}
+
+
+// Exposed for testing.
+int ParseProcStatCPU(const std::string& input) {
+  // /proc/<pid>/stat contains the process name in parens.  In case the
+  // process name itself contains parens, skip past them.
+  std::string::size_type rparen = input.rfind(')');
+  if (rparen == std::string::npos)
+    return -1;
+
+  // From here, we expect a bunch of space-separated fields, where the
+  // 0-indexed 11th and 12th are utime and stime.  On two different machines
+  // I found 42 and 39 fields, so let's just expect the ones we need.
+  std::vector<std::string> fields;
+  SplitString(input.substr(rparen + 2), ' ', &fields);
+  if (fields.size() < 13)
+    return -1;  // Output not in the format we expect.
+
+  return StringToInt(fields[11]) + StringToInt(fields[12]);
+}
+
+// Get the total CPU of a single process.  Return value is number of jiffies
+// on success or -1 on error.
+static int GetProcessCPU(pid_t pid) {
+  // Use /proc/<pid>/task to find all threads and parse their /stat file.
+  FilePath path = FilePath(StringPrintf("/proc/%d/task/", pid));
+
+  DIR* dir = opendir(path.value().c_str());
+  if (!dir) {
+    PLOG(ERROR) << "opendir(" << path.value() << ")";
+    return -1;
+  }
+
+  int total_cpu = 0;
+  while (struct dirent* ent = readdir(dir)) {
+    if (ent->d_name[0] == '.')
+      continue;
+
+    FilePath stat_path = path.AppendASCII(ent->d_name).AppendASCII("stat");
+    std::string stat;
+    if (file_util::ReadFileToString(stat_path, &stat)) {
+      int cpu = ParseProcStatCPU(stat);
+      if (cpu > 0)
+        total_cpu += cpu;
+    }
+  }
+  closedir(dir);
+
+  return total_cpu;
+}
+
+int ProcessMetrics::GetCPUUsage() {
+  // This queries the /proc-specific scaling factor which is
+  // conceptually the system hertz.  To dump this value on another
+  // system, try
+  //   od -t dL /proc/self/auxv
+  // and look for the number after 17 in the output; mine is
+  //   0000040          17         100           3   134512692
+  // which means the answer is 100.
+  // It may be the case that this value is always 100.
+  static const int kHertz = sysconf(_SC_CLK_TCK);
+
+  struct timeval now;
+  int retval = gettimeofday(&now, NULL);
+  if (retval)
+    return 0;
+  int64 time = TimeValToMicroseconds(now);
+
+  if (last_time_ == 0) {
+    // First call, just set the last values.
+    last_time_ = time;
+    last_cpu_ = GetProcessCPU(process_);
+    return 0;
+  }
+
+  int64 time_delta = time - last_time_;
+  DCHECK(time_delta != 0);
+  if (time_delta == 0)
+    return 0;
+
+  int cpu = GetProcessCPU(process_);
+
+  // We have the number of jiffies in the time period.  Convert to percentage.
+  // Note this means we will go *over* 100 in the case where multiple threads
+  // are together adding to more than one CPU's worth.
+  int percentage = 100 * (cpu - last_cpu_) /
+      (kHertz * TimeDelta::FromMicroseconds(time_delta).InSecondsF());
+
+  last_time_ = time;
+  last_cpu_ = cpu;
+
+  return percentage;
 }
 
 }  // namespace base

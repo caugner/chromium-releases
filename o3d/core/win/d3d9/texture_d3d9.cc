@@ -82,78 +82,84 @@ static D3DCUBEMAP_FACES DX9CubeFace(TextureCUBE::CubeFace face) {
   return D3DCUBEMAP_FACE_FORCE_DWORD;
 }
 
-// Constructs an Direct3D texture object.  Out variable return the status of
+// Constructs an Direct3D texture object.  Out variable returns the status of
 // the constructed texture including if resize to POT is required, and the
 // actual mip dimensions used.
 HRESULT CreateTexture2DD3D9(RendererD3D9* renderer,
-                            Bitmap* bitmap,
+                            Texture::Format format,
+                            int levels,
+                            int width,
+                            int height,
                             bool enable_render_surfaces,
                             bool* resize_to_pot,
                             unsigned int* mip_width,
                             unsigned int* mip_height,
                             IDirect3DTexture9** d3d_texture) {
   IDirect3DDevice9 *d3d_device = renderer->d3d_device();
-  *resize_to_pot = !renderer->supports_npot() && !bitmap->IsPOT();
-  *mip_width = bitmap->width();
-  *mip_height = bitmap->height();
+  *resize_to_pot = !renderer->supports_npot() && !image::IsPOT(width, height);
+  *mip_width = width;
+  *mip_height = height;
 
   if (*resize_to_pot) {
-    *mip_width = Bitmap::GetPOTSize(*mip_width);
-    *mip_height = Bitmap::GetPOTSize(*mip_height);
+    *mip_width = image::ComputePOTSize(*mip_width);
+    *mip_height = image::ComputePOTSize(*mip_height);
   }
 
   DWORD usage = (enable_render_surfaces) ? D3DUSAGE_RENDERTARGET : 0;
   D3DPOOL pool = (enable_render_surfaces) ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED;
-  D3DFORMAT format = DX9Format(bitmap->format());
+  D3DFORMAT d3d_format = DX9Format(format);
 
   HRESULT tex_result = d3d_device->CreateTexture(*mip_width,
                                                  *mip_height,
-                                                 bitmap->num_mipmaps(),
+                                                 levels,
                                                  usage,
-                                                 format,
+                                                 d3d_format,
                                                  pool,
                                                  d3d_texture,
                                                  NULL);
   if (!HR(tex_result)) {
     DLOG(ERROR) << "2D texture creation failed with the following parameters: "
                 << "(" << *mip_width << " x " << *mip_height << ") x "
-                << bitmap->num_mipmaps() << "; format = " << format;
+                << levels << "; format = " << format;
   }
   return tex_result;
 }
 
-// Constructs an Direct3D cube texture object.  Out variable return the
+// Constructs an Direct3D cube texture object.  Out variable returns the
 // status of the constructed texture including if resize to POT is required,
 // and the actual mip edge length used.
 HRESULT CreateTextureCUBED3D9(RendererD3D9* renderer,
-                              Bitmap* bitmap,
+                              int edge_length,
+                              Texture::Format format,
+                              int levels,
                               bool enable_render_surfaces,
                               bool* resize_to_pot,
                               unsigned int* edge_width,
                               IDirect3DCubeTexture9** d3d_texture) {
   IDirect3DDevice9 *d3d_device = renderer->d3d_device();
-  *resize_to_pot = !renderer->supports_npot() && !bitmap->IsPOT();
-  *edge_width = bitmap->width();
+  *resize_to_pot = !renderer->supports_npot() &&
+                   !image::IsPOT(edge_length, edge_length);
+  *edge_width = edge_length;
   if (*resize_to_pot) {
-    *edge_width = Bitmap::GetPOTSize(*edge_width);
+    *edge_width = image::ComputePOTSize(*edge_width);
   }
 
   DWORD usage = (enable_render_surfaces) ? D3DUSAGE_RENDERTARGET : 0;
   D3DPOOL pool = (enable_render_surfaces) ? D3DPOOL_DEFAULT : D3DPOOL_MANAGED;
-  D3DFORMAT format = DX9Format(bitmap->format());
+  D3DFORMAT d3d_format = DX9Format(format);
 
   HRESULT tex_result = d3d_device->CreateCubeTexture(*edge_width,
-                                                     bitmap->num_mipmaps(),
+                                                     levels,
                                                      usage,
-                                                     format,
+                                                     d3d_format,
                                                      pool,
                                                      d3d_texture,
                                                      NULL);
   if (!HR(tex_result)) {
     DLOG(ERROR) << "CUBE texture creation failed with the following "
                 << "parameters: "
-                << "(" << edge_width << " x " << edge_width << ") x "
-                << bitmap->num_mipmaps() << "; format = " << format;
+                << "(" << *edge_width << " x " << *edge_width << ") x "
+                << levels << "; format = " << format;
   }
 
   return tex_result;
@@ -169,21 +175,26 @@ class CubeFaceSurfaceConstructor : public SurfaceConstructor {
   CubeFaceSurfaceConstructor(TextureCUBED3D9 *texture,
                              TextureCUBE::CubeFace face,
                              int mip_level)
-      : cube_texture_(texture),
+      : cube_texture_(texture->GetWeakPointer()),
         face_(face),
         mip_level_(mip_level) {
   }
 
   virtual HRESULT ConstructSurface(IDirect3DSurface9** surface) {
+    TextureCUBED3D9* texture =
+        down_cast<TextureCUBED3D9*>(cube_texture_.Get());
+    if (!texture) {
+      return E_FAIL;
+    }
     IDirect3DCubeTexture9* d3d_cube_texture =
-        static_cast<IDirect3DCubeTexture9*>(cube_texture_->GetTextureHandle());
+        static_cast<IDirect3DCubeTexture9*>(texture->GetTextureHandle());
     return d3d_cube_texture->GetCubeMapSurface(DX9CubeFace(face_),
                                                mip_level_,
                                                surface);
   }
 
  private:
-  TextureCUBED3D9::Ref cube_texture_;
+  Texture::WeakPointerType cube_texture_;
   TextureCUBE::CubeFace face_;
   int mip_level_;
   DISALLOW_COPY_AND_ASSIGN(CubeFaceSurfaceConstructor);
@@ -197,38 +208,155 @@ class CubeFaceSurfaceConstructor : public SurfaceConstructor {
 class TextureSurfaceConstructor : public SurfaceConstructor {
  public:
   TextureSurfaceConstructor(Texture2DD3D9* texture, int mip_level)
-      : texture_(texture),
+      : texture_(texture->GetWeakPointer()),
         mip_level_(mip_level) {
   }
 
   virtual HRESULT ConstructSurface(IDirect3DSurface9** surface) {
+    Texture2DD3D9* texture = down_cast<Texture2DD3D9*>(texture_.Get());
+    if (!texture) {
+      return E_FAIL;
+    }
     IDirect3DTexture9* d3d_texture =
-        static_cast<IDirect3DTexture9*>(texture_->GetTextureHandle());
+        static_cast<IDirect3DTexture9*>(texture->GetTextureHandle());
     return d3d_texture->GetSurfaceLevel(mip_level_, surface);
   }
 
  private:
-  Texture2DD3D9::Ref texture_;
+  Texture::WeakPointerType texture_;
   int mip_level_;
   DISALLOW_COPY_AND_ASSIGN(TextureSurfaceConstructor);
 };
+
+void SetTextureRectUncompressed(Texture::Format format,
+                                const uint8* src,
+                                int src_pitch,
+                                unsigned src_width,
+                                unsigned src_height,
+                                uint8* dst,
+                                int dst_pitch) {
+  size_t bytes_per_line = image::ComputePitch(format, src_width);
+  for (unsigned yy = 0; yy < src_height; ++yy) {
+    memcpy(dst, src, bytes_per_line);
+    src += src_pitch;
+    dst += dst_pitch;
+  }
+}
+
+void SetTextureRectCompressed(Texture::Format format,
+                              const uint8* src,
+                              unsigned src_width,
+                              unsigned src_height,
+                              uint8* dst,
+                              int dst_pitch) {
+  unsigned blocks_across = (src_width + 3) / 4;
+  unsigned blocks_down = (src_height + 3) / 4;
+  unsigned bytes_per_block = format == Texture::DXT1 ? 8 : 16;
+  unsigned bytes_per_row = bytes_per_block * blocks_across;
+  for (unsigned yy = 0; yy < blocks_down; ++yy) {
+    memcpy(dst, src, bytes_per_row);
+    src += bytes_per_row;
+    dst += dst_pitch;
+  }
+}
+
+void SetTextureRect(
+    ServiceLocator* service_locator,
+    IDirect3DTexture9* d3d_texture,
+    Texture::Format format,
+    int level,
+    unsigned dst_left,
+    unsigned dst_top,
+    unsigned src_width,
+    unsigned src_height,
+    const void* src_data,
+    int src_pitch) {
+  DCHECK(src_data);
+  bool compressed = Texture::IsCompressedFormat(format);
+
+  RECT rect = {dst_left, dst_top, dst_left + src_width, dst_top + src_height};
+  D3DLOCKED_RECT out_rect = {0};
+
+  if (!HR(d3d_texture->LockRect(
+      level, &out_rect, compressed ? NULL : &rect, 0))) {
+    O3D_ERROR(service_locator) << "Failed to Lock Texture2D (D3D9)";
+    return;
+  }
+
+  const uint8* src = static_cast<const uint8*>(src_data);
+  uint8* dst = static_cast<uint8*>(out_rect.pBits);
+  if (!compressed) {
+    SetTextureRectUncompressed(format, src, src_pitch, src_width, src_height,
+                               dst, out_rect.Pitch);
+  } else {
+    SetTextureRectCompressed(
+        format, src, src_width, src_height, dst, out_rect.Pitch);
+  }
+  if (!HR(d3d_texture->UnlockRect(level))) {
+    O3D_ERROR(service_locator) << "Failed to Unlock Texture2D (D3D9)";
+    return;
+  }
+}
+
+void SetTextureFaceRect(
+    ServiceLocator* service_locator,
+    IDirect3DCubeTexture9* d3d_texture,
+    Texture::Format format,
+    TextureCUBE::CubeFace face,
+    int level,
+    unsigned dst_left,
+    unsigned dst_top,
+    unsigned src_width,
+    unsigned src_height,
+    const void* src_data,
+    int src_pitch) {
+  DCHECK(src_data);
+  bool compressed = Texture::IsCompressedFormat(format);
+
+  RECT rect = {dst_left, dst_top, dst_left + src_width, dst_top + src_height};
+  D3DLOCKED_RECT out_rect = {0};
+
+  D3DCUBEMAP_FACES d3d_face = DX9CubeFace(face);
+
+  if (!HR(d3d_texture->LockRect(
+      d3d_face, level, &out_rect, compressed ? NULL : &rect, 0))) {
+    O3D_ERROR(service_locator) << "Failed to Lock TextureCUBE (D3D9)";
+    return;
+  }
+
+  const uint8* src = static_cast<const uint8*>(src_data);
+  uint8* dst = static_cast<uint8*>(out_rect.pBits);
+  if (!compressed) {
+    SetTextureRectUncompressed(format, src, src_pitch, src_width, src_height,
+                               dst, out_rect.Pitch);
+  } else {
+    SetTextureRectCompressed(
+        format, src, src_width, src_height, dst, out_rect.Pitch);
+  }
+  if (!HR(d3d_texture->UnlockRect(d3d_face, level))) {
+    O3D_ERROR(service_locator) << "Failed to Unlock TextureCUBE (D3D9)";
+    return;
+  }
+}
 
 }  // unnamed namespace
 
 // Constructs a 2D texture object from the given (existing) D3D 2D texture.
 Texture2DD3D9::Texture2DD3D9(ServiceLocator* service_locator,
                              IDirect3DTexture9* tex,
-                             const Bitmap &bitmap,
+                             Texture::Format format,
+                             int levels,
+                             int width,
+                             int height,
                              bool resize_to_pot,
                              bool enable_render_surfaces)
     : Texture2D(service_locator,
-                bitmap.width(),
-                bitmap.height(),
-                bitmap.format(),
-                bitmap.num_mipmaps(),
-                bitmap.CheckAlphaIsOne(),
-                resize_to_pot,
+                width,
+                height,
+                format,
+                levels,
                 enable_render_surfaces),
+      resize_to_pot_(resize_to_pot),
       d3d_texture_(tex),
       backing_bitmap_(Bitmap::Ref(new Bitmap(service_locator))) {
   DCHECK(tex);
@@ -239,16 +367,21 @@ Texture2DD3D9::Texture2DD3D9(ServiceLocator* service_locator,
 // returns it.  This is the safe way to create a Texture2DD3D9 object that
 // contains a valid D3D9 texture.
 Texture2DD3D9* Texture2DD3D9::Create(ServiceLocator* service_locator,
-                                     Bitmap* bitmap,
+                                     Texture::Format format,
+                                     int levels,
+                                     int width,
+                                     int height,
                                      RendererD3D9* renderer,
                                      bool enable_render_surfaces) {
-  DCHECK_NE(bitmap->format(), Texture::UNKNOWN_FORMAT);
-  DCHECK(!bitmap->is_cubemap());
+  DCHECK_NE(format, Texture::UNKNOWN_FORMAT);
   CComPtr<IDirect3DTexture9> d3d_texture;
   bool resize_to_pot;
   unsigned int mip_width, mip_height;
   if (!HR(CreateTexture2DD3D9(renderer,
-                              bitmap,
+                              format,
+                              levels,
+                              width,
+                              height,
                               enable_render_surfaces,
                               &resize_to_pot,
                               &mip_width,
@@ -260,28 +393,34 @@ Texture2DD3D9* Texture2DD3D9::Create(ServiceLocator* service_locator,
 
   Texture2DD3D9 *texture = new Texture2DD3D9(service_locator,
                                              d3d_texture,
-                                             *bitmap,
+                                             format,
+                                             levels,
+                                             width,
+                                             height,
                                              resize_to_pot,
                                              enable_render_surfaces);
 
-  texture->backing_bitmap_->SetFrom(bitmap);
-  if (texture->backing_bitmap_->image_data()) {
-    for (unsigned int i = 0; i < bitmap->num_mipmaps(); ++i) {
-      if (!texture->UpdateBackedMipLevel(i)) {
-        DLOG(ERROR) << "Failed to upload bitmap to texture.";
-        delete texture;
-        return NULL;
+  if (resize_to_pot) {
+    texture->backing_bitmap_->Allocate(format, width, height, levels,
+                                       Bitmap::IMAGE);
+  }
+
+  // Clear the texture.
+  // This is platform specific because some platforms, (command-buffers),
+  // will guarantee the textures are cleared so we don't have to.
+  {
+    size_t row_size = image::ComputeMipChainSize(width, 1, format, 1);
+    scoped_array<uint8> zero(new uint8[row_size]);
+    memset(zero.get(), 0, row_size);
+    for (int level = 0; level < levels; ++level) {
+      if (enable_render_surfaces) {
+        texture->GetRenderSurface(level);
+      } else if (!texture->IsCompressed()) {
+        texture->SetRect(level, 0, 0,
+                         image::ComputeMipDimension(level, width),
+                         image::ComputeMipDimension(level, height),
+                         zero.get(), 0);
       }
-      mip_width = std::max(1U, mip_width >> 1);
-      mip_height = std::max(1U, mip_height >> 1);
-    }
-    if (!resize_to_pot)
-      texture->backing_bitmap_->FreeData();
-  } else {
-    if (resize_to_pot) {
-      texture->backing_bitmap_->AllocateData();
-      memset(texture->backing_bitmap_->image_data(), 0,
-             texture->backing_bitmap_->GetTotalSize());
     }
   }
 
@@ -293,7 +432,7 @@ Texture2DD3D9::~Texture2DD3D9() {
   d3d_texture_ = NULL;
 }
 
-bool Texture2DD3D9::UpdateBackedMipLevel(unsigned int level) {
+void Texture2DD3D9::UpdateBackedMipLevel(unsigned int level) {
   DCHECK_LT(level, static_cast<unsigned int>(levels()));
   DCHECK(backing_bitmap_->image_data());
   DCHECK_EQ(backing_bitmap_->width(), width());
@@ -301,49 +440,52 @@ bool Texture2DD3D9::UpdateBackedMipLevel(unsigned int level) {
   DCHECK_EQ(backing_bitmap_->format(), format());
   DCHECK_EQ(backing_bitmap_->num_mipmaps(), levels());
 
-  unsigned int mip_width = std::max(1, width() >> level);
-  unsigned int mip_height = std::max(1, height() >> level);
+  unsigned int mip_width = image::ComputeMipDimension(level, width());
+  unsigned int mip_height = image::ComputeMipDimension(level, height());
   unsigned int rect_width = mip_width;
   unsigned int rect_height = mip_height;
-  if (resize_to_pot_) {
-    rect_width = std::max(1U, Bitmap::GetPOTSize(width()) >> level);
-    rect_height = std::max(1U, Bitmap::GetPOTSize(height()) >> level);
-  }
+  rect_width = std::max(1U, image::ComputePOTSize(width()) >> level);
+  rect_height = std::max(1U, image::ComputePOTSize(height()) >> level);
 
   RECT rect = {0, 0, rect_width, rect_height};
-  D3DLOCKED_RECT out_rect;
-  out_rect.pBits = 0;
+  D3DLOCKED_RECT out_rect = {0};
 
   if (!HR(d3d_texture_->LockRect(level, &out_rect, &rect, 0))) {
-    DLOG(ERROR) << "Failed to lock texture level " << level << ".";
-    return false;
+    O3D_ERROR(service_locator())
+        << "Failed to lock texture level " << level << ".";
+    return;
   }
 
   DCHECK(out_rect.pBits);
-  // TODO: check that the returned pitch is what we expect.
+  uint8* dst = static_cast<uint8*>(out_rect.pBits);
 
-  const unsigned char *mip_data =
-      backing_bitmap_->GetMipData(level, TextureCUBE::FACE_POSITIVE_X);
+  const uint8 *mip_data = backing_bitmap_->GetMipData(level);
   if (resize_to_pot_) {
-    Bitmap::Scale(mip_width, mip_height, format(), mip_data,
-                  rect_width, rect_height,
-                  static_cast<unsigned char *>(out_rect.pBits));
+    image::Scale(mip_width, mip_height, format(), mip_data,
+                 rect_width, rect_height,
+                 static_cast<uint8 *>(out_rect.pBits),
+                 out_rect.Pitch);
   } else {
-    unsigned int mip_size =
-        Bitmap::GetBufferSize(mip_width, mip_height, format());
-    memcpy(out_rect.pBits, mip_data, mip_size);
+    if (!IsCompressed()) {
+      SetTextureRectUncompressed(
+          format(), mip_data,
+          image::ComputePitch(format(), mip_width),
+          mip_width, mip_height,
+          dst, out_rect.Pitch);
+    } else {
+      SetTextureRectCompressed(
+          format(), mip_data, mip_width, mip_height, dst, out_rect.Pitch);
+    }
   }
 
   if (!HR(d3d_texture_->UnlockRect(level))) {
     O3D_ERROR(service_locator())
         << "Failed to unlock texture level " << level << ".";
-    return false;
   }
-  return true;
 }
 
-RenderSurface::Ref Texture2DD3D9::GetRenderSurface(int mip_level, Pack* pack) {
-  DCHECK(pack);
+RenderSurface::Ref Texture2DD3D9::PlatformSpecificGetRenderSurface(
+    int mip_level) {
   if (!render_surfaces_enabled()) {
     O3D_ERROR(service_locator())
         << "Attempting to get RenderSurface from non-render-surface-enabled"
@@ -358,57 +500,105 @@ RenderSurface::Ref Texture2DD3D9::GetRenderSurface(int mip_level, Pack* pack) {
     return RenderSurface::Ref(NULL);
   }
 
-  RenderSurface::Ref render_surface(
+  return RenderSurface::Ref(
       new RenderSurfaceD3D9(
           service_locator(),
           width() >> mip_level,
           height() >> mip_level,
           this,
           new TextureSurfaceConstructor(this, mip_level)));
+}
 
-  if (!render_surface.IsNull()) {
-    RegisterSurface(render_surface.Get(), pack);
+void Texture2DD3D9::SetRect(int level,
+                            unsigned dst_left,
+                            unsigned dst_top,
+                            unsigned src_width,
+                            unsigned src_height,
+                            const void* src_data,
+                            int src_pitch) {
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to SetRect on non-existent level " << level
+        << " on Texture \"" << name() << "\"";
+    return;
+  }
+  if (render_surfaces_enabled()) {
+    O3D_ERROR(service_locator())
+        << "Attempting to SetRect a render-target texture: " << name();
+    return;
   }
 
-  return render_surface;
+  unsigned mip_width = image::ComputeMipDimension(level, width());
+  unsigned mip_height = image::ComputeMipDimension(level, height());
+
+  if (dst_left + src_width > mip_width ||
+      dst_top + src_height > mip_height) {
+    O3D_ERROR(service_locator())
+        << "SetRect(" << level << ", " << dst_left << ", " << dst_top << ", "
+        << src_width << ", " << src_height << ") out of range for texture << \""
+        << name() << "\"";
+    return;
+  }
+
+  bool entire_rect = dst_left == 0 && dst_top == 0 &&
+                     src_width == mip_width && src_height == mip_height;
+  bool compressed = IsCompressed();
+
+  if (compressed && !entire_rect) {
+    O3D_ERROR(service_locator())
+        << "SetRect must be full rectangle for compressed textures";
+    return;
+  }
+
+  if (resize_to_pot_) {
+    DCHECK(backing_bitmap_->image_data());
+    DCHECK(!compressed);
+    // We need to update the backing mipmap and then use that to update the
+    // texture.
+    backing_bitmap_->SetRect(
+        level, dst_left, dst_top, src_width, src_height, src_data, src_pitch);
+    UpdateBackedMipLevel(level);
+  } else {
+    SetTextureRect(service_locator(),
+                   d3d_texture_,
+                   format(),
+                   level,
+                   dst_left,
+                   dst_top,
+                   src_width,
+                   src_height,
+                   src_data,
+                   src_pitch);
+  }
 }
 
 // Locks the given mipmap level of this texture for loading from main memory,
 // and returns a pointer to the buffer.
-bool Texture2DD3D9::Lock(int level, void** texture_data) {
-  if (level >= levels() || level < 0) {
-    O3D_ERROR(service_locator())
-        << "Trying to lock inexistent level " << level << " on Texture \""
-        << name() << "\"";
-    return false;
-  }
-  if (IsLocked(level)) {
-    O3D_ERROR(service_locator())
-        << "Level " << level << " of texture \"" << name()
-        << "\" is already locked.";
-    return false;
-  }
-  if (render_surfaces_enabled()) {
-    O3D_ERROR(service_locator())
-        << "Attempting to lock a render-target texture: " << name();
-    return false;
-  }
+bool Texture2DD3D9::PlatformSpecificLock(
+    int level, void** texture_data, int* pitch, Texture::AccessMode mode) {
+  DCHECK(texture_data);
+  DCHECK(pitch);
+  DCHECK_GE(level, 0);
+  DCHECK_LT(level, levels());
+
+  unsigned int mip_width = image::ComputeMipDimension(level, width());
+  unsigned int mip_height = image::ComputeMipDimension(level, height());
+
   if (resize_to_pot_) {
     DCHECK(backing_bitmap_->image_data());
-    *texture_data = backing_bitmap_->GetMipData(level,
-                                               TextureCUBE::FACE_POSITIVE_X);
-    locked_levels_ |= 1 << level;
+    *texture_data = backing_bitmap_->GetMipData(level);
+    *pitch = image::ComputePitch(format(), mip_width);
     return true;
   } else {
-    RECT rect = {0, 0, width(), height()};
+    RECT rect = {0, 0, mip_width, mip_height};
     D3DLOCKED_RECT out_rect = {0};
 
-    if (HR(d3d_texture_->LockRect(level, &out_rect, &rect, 0))) {
+    if (HR(d3d_texture_->LockRect(level, &out_rect, &rect,
+                                  mode == kReadOnly ? D3DLOCK_READONLY : 0))) {
       *texture_data = out_rect.pBits;
-      locked_levels_ |= 1 << level;
+      *pitch = out_rect.Pitch;
       return true;
     } else {
-      O3D_ERROR(service_locator()) << "Failed to Lock Texture2D (D3D9)";
       *texture_data = NULL;
       return false;
     }
@@ -416,29 +606,16 @@ bool Texture2DD3D9::Lock(int level, void** texture_data) {
 }
 
 // Unlocks the given mipmap level of this texture.
-bool Texture2DD3D9::Unlock(int level) {
-  if (level >= levels() || level < 0) {
-    O3D_ERROR(service_locator())
-        << "Trying to unlock inexistent level " << level << " on Texture \""
-        << name() << "\"";
-    return false;
-  }
-  if (!IsLocked(level)) {
-    O3D_ERROR(service_locator())
-        << "Level " << level << " of texture \"" << name()
-        << "\" is not locked.";
-    return false;
-  }
+bool Texture2DD3D9::PlatformSpecificUnlock(int level) {
+  DCHECK_GE(level, 0);
+  DCHECK_LT(level, levels());
+
   bool result = false;
   if (resize_to_pot_) {
-    result = UpdateBackedMipLevel(level);
+    UpdateBackedMipLevel(level);
+    result = true;
   } else {
     result = HR(d3d_texture_->UnlockRect(level));
-  }
-  if (result) {
-    locked_levels_ &= ~(1 << level);
-  } else {
-    O3D_ERROR(service_locator()) << "Failed to Unlock Texture2D (D3D9)";
   }
   return result;
 }
@@ -460,7 +637,10 @@ bool Texture2DD3D9::OnResetDevice() {
     bool resize_to_pot;
     unsigned int mip_width, mip_height;
     return HR(CreateTexture2DD3D9(renderer_d3d9,
-                                  backing_bitmap_,
+                                  format(),
+                                  levels(),
+                                  width(),
+                                  height(),
                                   render_surfaces_enabled(),
                                   &resize_to_pot,
                                   &mip_width,
@@ -477,36 +657,42 @@ const Texture::RGBASwizzleIndices& Texture2DD3D9::GetABGR32FSwizzleIndices() {
 // Constructs a cube texture object from the given (existing) D3D Cube texture.
 TextureCUBED3D9::TextureCUBED3D9(ServiceLocator* service_locator,
                                  IDirect3DCubeTexture9* tex,
-                                 const Bitmap& bitmap,
+                                 int edge_length,
+                                 Texture::Format format,
+                                 int levels,
                                  bool resize_to_pot,
                                  bool enable_render_surfaces)
     : TextureCUBE(service_locator,
-                  bitmap.width(),
-                  bitmap.format(),
-                  bitmap.num_mipmaps(),
-                  bitmap.CheckAlphaIsOne(),
-                  resize_to_pot,
+                  edge_length,
+                  format,
+                  levels,
                   enable_render_surfaces),
-      d3d_cube_texture_(tex),
-      backing_bitmap_(Bitmap::Ref(new Bitmap(service_locator))) {
+      resize_to_pot_(resize_to_pot),
+      d3d_cube_texture_(tex) {
+  for (int ii = 0; ii < static_cast<int>(NUMBER_OF_FACES); ++ii) {
+    backing_bitmaps_[ii] = Bitmap::Ref(new Bitmap(service_locator));
+  }
 }
 
 // Attempts to create a D3D9 CubeTexture with the given specs.  If creation
 // fails the method returns NULL.  Otherwise, it wraps around the newly created
 // texture a TextureCUBED3D9 object and returns a pointer to it.
 TextureCUBED3D9* TextureCUBED3D9::Create(ServiceLocator* service_locator,
-                                         Bitmap *bitmap,
+                                         Texture::Format format,
+                                         int levels,
+                                         int edge_length,
                                          RendererD3D9 *renderer,
                                          bool enable_render_surfaces) {
-  DCHECK_NE(bitmap->format(), Texture::UNKNOWN_FORMAT);
-  DCHECK(bitmap->is_cubemap());
-  DCHECK_EQ(bitmap->width(), bitmap->height());
+  DCHECK_NE(format, Texture::UNKNOWN_FORMAT);
+  DCHECK_GE(levels, 1);
 
   CComPtr<IDirect3DCubeTexture9> d3d_texture;
   bool resize_to_pot;
   unsigned int edge;
   if (!HR(CreateTextureCUBED3D9(renderer,
-                                bitmap,
+                                edge_length,
+                                format,
+                                levels,
                                 enable_render_surfaces,
                                 &resize_to_pot,
                                 &edge,
@@ -517,30 +703,37 @@ TextureCUBED3D9* TextureCUBED3D9::Create(ServiceLocator* service_locator,
 
   TextureCUBED3D9 *texture = new TextureCUBED3D9(service_locator,
                                                  d3d_texture,
-                                                 *bitmap,
+                                                 edge_length,
+                                                 format,
+                                                 levels,
                                                  resize_to_pot,
                                                  enable_render_surfaces);
 
-  texture->backing_bitmap_->SetFrom(bitmap);
-  if (texture->backing_bitmap_->image_data()) {
-    for (int face = 0; face < 6; ++face) {
-      unsigned int mip_edge = edge;
-      for (unsigned int i = 0; i < bitmap->num_mipmaps(); ++i) {
-        if (!texture->UpdateBackedMipLevel(i, static_cast<CubeFace>(face))) {
-          DLOG(ERROR) << "Failed to upload bitmap to texture.";
-          delete texture;
-          return NULL;
-        }
-        mip_edge = std::max(1U, mip_edge >> 1);
-      }
+  if (resize_to_pot) {
+    for (int ii = 0; ii < static_cast<int>(NUMBER_OF_FACES); ++ii) {
+      texture->backing_bitmaps_[ii]->Allocate(
+          format, edge_length, edge_length, levels, Bitmap::IMAGE);
     }
-    if (!resize_to_pot)
-      texture->backing_bitmap_->FreeData();
-  } else {
-    if (resize_to_pot) {
-      texture->backing_bitmap_->AllocateData();
-      memset(texture->backing_bitmap_->image_data(), 0,
-             texture->backing_bitmap_->GetTotalSize());
+  }
+
+  // Clear the texture.
+  // This is platform specific because some platforms, (command-buffers), will
+  // guarantee the textures are cleared so we don't have to.
+  {
+    size_t row_size = image::ComputeMipChainSize(edge_length, 1, format, 1);
+    scoped_array<uint8> zero(new uint8[row_size]);
+    memset(zero.get(), 0, row_size);
+    for (int level = 0; level < levels; ++level) {
+      for (int face = 0; face < static_cast<int>(NUMBER_OF_FACES); ++face) {
+        if (enable_render_surfaces) {
+          texture->GetRenderSurface(static_cast<CubeFace>(face), level);
+        } else if (!texture->IsCompressed()) {
+          texture->SetRect(static_cast<CubeFace>(face),level , 0, 0,
+                           image::ComputeMipDimension(level, edge_length),
+                           image::ComputeMipDimension(level, edge_length),
+                           zero.get(), 0);
+        }
+      }
     }
   }
 
@@ -551,70 +744,67 @@ TextureCUBED3D9* TextureCUBED3D9::Create(ServiceLocator* service_locator,
 
 // Destructor releases the D3D9 texture resource.
 TextureCUBED3D9::~TextureCUBED3D9() {
-  for (unsigned int i = 0; i < 6; ++i) {
-    if (locked_levels_[i] != 0) {
-      O3D_ERROR(service_locator())
-          << "TextureCUBE \"" << name() << "\" was never unlocked before "
-          << "being destroyed.";
-      break;  // No need to report it more than once.
-    }
-  }
   d3d_cube_texture_ = NULL;
 }
 
-bool TextureCUBED3D9::UpdateBackedMipLevel(unsigned int level,
-                                           TextureCUBE::CubeFace face) {
+void TextureCUBED3D9::UpdateBackedMipLevel(TextureCUBE::CubeFace face,
+                                           unsigned int level) {
+  Bitmap* backing_bitmap = backing_bitmaps_[face].Get();
   DCHECK_LT(level, static_cast<unsigned int>(levels()));
-  DCHECK(backing_bitmap_->image_data());
-  DCHECK(backing_bitmap_->is_cubemap());
-  DCHECK_EQ(backing_bitmap_->width(), edge_length());
-  DCHECK_EQ(backing_bitmap_->height(), edge_length());
-  DCHECK_EQ(backing_bitmap_->format(), format());
-  DCHECK_EQ(backing_bitmap_->num_mipmaps(), levels());
+  DCHECK(backing_bitmap->image_data());
+  DCHECK_EQ(backing_bitmap->width(), edge_length());
+  DCHECK_EQ(backing_bitmap->height(), edge_length());
+  DCHECK_EQ(backing_bitmap->format(), format());
+  DCHECK_EQ(backing_bitmap->num_mipmaps(), levels());
 
   unsigned int mip_edge = std::max(1, edge_length() >> level);
   unsigned int rect_edge = mip_edge;
   if (resize_to_pot_) {
-    rect_edge = std::max(1U, Bitmap::GetPOTSize(edge_length()) >> level);
+    rect_edge = std::max(1U, image::ComputePOTSize(edge_length()) >> level);
   }
 
   RECT rect = {0, 0, rect_edge, rect_edge};
-  D3DLOCKED_RECT out_rect;
-  out_rect.pBits = 0;
+  D3DLOCKED_RECT out_rect = {0};
+  D3DCUBEMAP_FACES d3d_face = DX9CubeFace(face);
 
-  if (!HR(d3d_cube_texture_->LockRect(DX9CubeFace(face), level, &out_rect,
-                                      &rect, 0))) {
+  if (!HR(d3d_cube_texture_->LockRect(d3d_face, level, &out_rect, &rect, 0))) {
     O3D_ERROR(service_locator())
         << "Failed to lock texture level " << level << " face " << face << ".";
-    return false;
+    return;
   }
 
   DCHECK(out_rect.pBits);
-  // TODO: check that the returned pitch is what we expect.
+  uint8* dst = static_cast<uint8*>(out_rect.pBits);
 
-  const unsigned char *mip_data = backing_bitmap_->GetMipData(level, face);
+  const uint8 *mip_data = backing_bitmap->GetMipData(level);
   if (resize_to_pot_) {
-    Bitmap::Scale(mip_edge, mip_edge, format(), mip_data,
-                  rect_edge, rect_edge,
-                  static_cast<unsigned char *>(out_rect.pBits));
+    image::Scale(mip_edge, mip_edge, format(), mip_data,
+                 rect_edge, rect_edge,
+                 static_cast<uint8 *>(out_rect.pBits),
+                 out_rect.Pitch);
   } else {
-    unsigned int mip_size =
-        Bitmap::GetBufferSize(mip_edge, mip_edge, format());
-    memcpy(out_rect.pBits, mip_data, mip_size);
+    if (!IsCompressed()) {
+      SetTextureRectUncompressed(
+          format(), mip_data,
+          image::ComputePitch(format(), mip_edge),
+          mip_edge, mip_edge,
+          dst, out_rect.Pitch);
+    } else {
+      SetTextureRectCompressed(
+          format(), mip_data, mip_edge, mip_edge, dst, out_rect.Pitch);
+    }
   }
 
-  if (!HR(d3d_cube_texture_->UnlockRect(DX9CubeFace(face), level))) {
+  if (!HR(d3d_cube_texture_->UnlockRect(d3d_face, level))) {
     O3D_ERROR(service_locator())
         << "Failed to unlock texture level " << level << " face " << face
         << ".";
-    return false;
   }
-  return true;
 }
 
-RenderSurface::Ref TextureCUBED3D9::GetRenderSurface(CubeFace face,
-                                                     int mip_level,
-                                                     Pack* pack) {
+RenderSurface::Ref TextureCUBED3D9::PlatformSpecificGetRenderSurface(
+    TextureCUBE::CubeFace face,
+    int mip_level) {
   if (!render_surfaces_enabled()) {
     O3D_ERROR(service_locator())
         << "Attempting to get RenderSurface from non-render-surface-enabled"
@@ -630,57 +820,118 @@ RenderSurface::Ref TextureCUBED3D9::GetRenderSurface(CubeFace face,
   }
 
   int edge = edge_length() >> mip_level;
-  RenderSurface::Ref render_surface(
+  return RenderSurface::Ref(
       new RenderSurfaceD3D9(
           service_locator(),
           edge,
           edge,
           this,
           new CubeFaceSurfaceConstructor(this, face, mip_level)));
+}
 
-  if (!render_surface.IsNull()) {
-    RegisterSurface(render_surface.Get(), pack);
+void TextureCUBED3D9::SetRect(TextureCUBE::CubeFace face,
+                              int level,
+                              unsigned dst_left,
+                              unsigned dst_top,
+                              unsigned src_width,
+                              unsigned src_height,
+                              const void* src_data,
+                              int src_pitch) {
+  if (static_cast<int>(face) < 0 || static_cast<int>(face) >= NUMBER_OF_FACES) {
+    O3D_ERROR(service_locator())
+        << "Trying to SetRect invalid face " << face << " on Texture \""
+        << name() << "\"";
+    return;
+  }
+  if (level >= levels() || level < 0) {
+    O3D_ERROR(service_locator())
+        << "Trying to SetRect non-existent level " << level
+        << " on Texture \"" << name() << "\"";
+    return;
+  }
+  if (render_surfaces_enabled()) {
+    O3D_ERROR(service_locator())
+        << "Attempting to SetRect a render-target texture: " << name();
+    return;
   }
 
-  return render_surface;
+  unsigned mip_width = image::ComputeMipDimension(level, edge_length());
+  unsigned mip_height = mip_width;
+
+  if (dst_left + src_width > mip_width ||
+      dst_top + src_height > mip_height) {
+    O3D_ERROR(service_locator())
+        << "SetRect(" << level << ", " << dst_left << ", " << dst_top << ", "
+        << src_width << ", " << src_height << ") out of range for texture << \""
+        << name() << "\"";
+    return;
+  }
+
+  bool entire_rect = dst_left == 0 && dst_top == 0 &&
+                     src_width == mip_width && src_height == mip_height;
+  bool compressed = IsCompressed();
+
+  if (compressed && !entire_rect) {
+    O3D_ERROR(service_locator())
+        << "SetRect must be full rectangle for compressed textures";
+    return;
+  }
+
+  if (resize_to_pot_) {
+    Bitmap* backing_bitmap = backing_bitmaps_[face].Get();
+    DCHECK(backing_bitmap->image_data());
+    DCHECK(!compressed);
+    // We need to update the backing mipmap and then use that to update the
+    // texture.
+    backing_bitmap->SetRect(
+        level, dst_left, dst_top, src_width, src_height, src_data, src_pitch);
+    UpdateBackedMipLevel(face, level);
+  } else {
+    SetTextureFaceRect(service_locator(),
+                       d3d_cube_texture_,
+                       format(),
+                       face,
+                       level,
+                       dst_left,
+                       dst_top,
+                       src_width,
+                       src_height,
+                       src_data,
+                       src_pitch);
+  }
 }
 
 // Locks the given face and mipmap level of this texture for loading from
 // main memory, and returns a pointer to the buffer.
-bool TextureCUBED3D9::Lock(CubeFace face, int level, void** texture_data) {
-  if (level >= levels() || level < 0) {
-    O3D_ERROR(service_locator())
-        << "Trying to lock inexistent level " << level << " on Texture \""
-        << name();
-    return false;
-  }
-  if (IsLocked(level, face)) {
-    O3D_ERROR(service_locator())
-        << "Level " << level << " Face " << face << " of texture \"" << name()
-        << "\" is already locked.";
-    return false;
-  }
-  if (render_surfaces_enabled()) {
-    O3D_ERROR(service_locator())
-        << "Attempting to lock a render-target texture: " << name();
-    return false;
-  }
+bool TextureCUBED3D9::PlatformSpecificLock(
+    CubeFace face, int level, void** texture_data, int* pitch,
+    Texture::AccessMode mode) {
+  DCHECK(texture_data);
+  DCHECK(pitch);
+  DCHECK_GE(level, 0);
+  DCHECK_LT(level, levels());
+
+  unsigned int mip_width = image::ComputeMipDimension(level, edge_length());
+  unsigned int mip_height = mip_width;
+
   if (resize_to_pot_) {
-    DCHECK(backing_bitmap_->image_data());
-    *texture_data = backing_bitmap_->GetMipData(level, face);
-    locked_levels_[face] |= 1 << level;
+    Bitmap* backing_bitmap = backing_bitmaps_[face].Get();
+    DCHECK(backing_bitmap->image_data());
+    *texture_data = backing_bitmap->GetMipData(level);
+    *pitch = image::ComputePitch(format(), mip_width);
     return true;
   } else {
-    RECT rect = {0, 0, edge_length(), edge_length()};
+    RECT rect = {0, 0, mip_width, mip_height};
     D3DLOCKED_RECT out_rect = {0};
 
-    if (HR(d3d_cube_texture_->LockRect(DX9CubeFace(face), level,
-                                       &out_rect, &rect, 0))) {
+    if (HR(d3d_cube_texture_->LockRect(
+        DX9CubeFace(face), level,
+        &out_rect, &rect,
+        mode == kReadOnly ? D3DLOCK_READONLY : 0))) {
       *texture_data = out_rect.pBits;
-      locked_levels_[face] |= 1 << level;
+      *pitch = out_rect.Pitch;
       return true;
     } else {
-      O3D_ERROR(service_locator()) << "Failed to Lock Texture2D (D3D9)";
       *texture_data = NULL;
       return false;
     }
@@ -688,30 +939,15 @@ bool TextureCUBED3D9::Lock(CubeFace face, int level, void** texture_data) {
 }
 
 // Unlocks the given face and mipmap level of this texture.
-bool TextureCUBED3D9::Unlock(CubeFace face, int level) {
-  if (level >= levels() || level < 0) {
-    O3D_ERROR(service_locator())
-        << "Trying to unlock inexistent level " << level << " on Texture \""
-        << name();
-    return false;
-  }
-  if (!IsLocked(level, face)) {
-    O3D_ERROR(service_locator())
-        << "Level " << level << " of texture \"" << name()
-        << "\" is not locked.";
-    return false;
-  }
+bool TextureCUBED3D9::PlatformSpecificUnlock(CubeFace face, int level) {
+  DCHECK_GE(level, 0);
+  DCHECK_LT(level, levels());
   bool result = false;
   if (resize_to_pot_) {
-    result = UpdateBackedMipLevel(level, face);
+    UpdateBackedMipLevel(face, level);
+    result = true;
   } else {
-    result = HR(d3d_cube_texture_->UnlockRect(DX9CubeFace(face),
-                                              level));
-  }
-  if (result) {
-    locked_levels_[face] &= ~(1 << level);
-  } else {
-    O3D_ERROR(service_locator()) << "Failed to Unlock Texture2D (D3D9)";
+    result = HR(d3d_cube_texture_->UnlockRect(DX9CubeFace(face), level));
   }
   return result;
 }
@@ -733,7 +969,9 @@ bool TextureCUBED3D9::OnResetDevice() {
     bool resize_to_pot;
     unsigned int mip_edge;
     return HR(CreateTextureCUBED3D9(renderer_d3d9,
-                                    backing_bitmap_,
+                                    edge_length(),
+                                    format(),
+                                    levels(),
                                     render_surfaces_enabled(),
                                     &resize_to_pot,
                                     &mip_edge,

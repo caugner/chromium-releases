@@ -32,14 +32,14 @@
 
 // This file contains the implementation of the Canvas class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/canvas.h"
 #include "core/cross/canvas_paint.h"
 #include "core/cross/canvas_utils.h"
 #include "core/cross/client.h"
 #include "core/cross/error.h"
+#include "core/cross/features.h"
 
-#include "third_party/skia/include/core/SkPath.h"
+#include "SkPath.h"
 
 namespace o3d {
 
@@ -49,6 +49,10 @@ Canvas::Canvas(ServiceLocator* service_locator)
     : ParamObject(service_locator),
       width_(0),
       height_(0) {
+  Features* features = service_locator->GetService<Features>();
+  DCHECK(features);
+  flip_ = features->flip_textures();
+
   // Initialize a 0x0 bitmap
   sk_bitmap_.setConfig(SkBitmap::kARGB_8888_Config, 0, 0);
   sk_canvas_.setBitmapDevice(sk_bitmap_);
@@ -67,11 +71,14 @@ bool Canvas::SetSize(int width, int height) {
     return false;
   }
   sk_canvas_.setBitmapDevice(sk_bitmap_);
-  // Translate and flip our canvas to change from o3d coordinates
-  // (where the lower left is (0,0)) to skia coordinates (where the
-  // upper left is (0,0))
-  sk_canvas_.translate(0, SkIntToScalar(sk_bitmap_.height()));
-  sk_canvas_.scale(SK_Scalar1, -SK_Scalar1);
+
+  if (flip_) {
+    // Translate and flip our canvas to change from o3d coordinates
+    // (where the lower left is (0,0)) to skia coordinates (where the
+    // upper left is (0,0))
+    sk_canvas_.translate(0, SkIntToScalar(sk_bitmap_.height()));
+    sk_canvas_.scale(SK_Scalar1, -SK_Scalar1);
+  }
 
   return true;
 }
@@ -154,9 +161,8 @@ void Canvas::DrawBitmap(Texture2D* texture2d,
     return;
   }
 
-  void* texture_data;
-  Texture2DLockHelper lock_helper(texture2d, 0);
-  texture_data = lock_helper.GetData();
+  Texture2D::LockHelper lock_helper(texture2d, 0, Texture::kReadOnly);
+  uint8* texture_data = lock_helper.GetDataAs<uint8>();
   if (!texture_data) {
     return;
   }
@@ -177,7 +183,11 @@ void Canvas::DrawBitmap(Texture2D* texture2d,
   unsigned char* bitmap_data = static_cast<unsigned char*>(
       bitmap.getPixels());
 
-  memcpy(bitmap_data, texture_data, width * height * 4);
+  for (int yy = 0; yy < height; ++yy) {
+    memcpy(bitmap_data + yy * width * 4,
+           texture_data + yy * lock_helper.pitch(),
+           width * 4);
+  }
 
   if (texture2d->format() == Texture2D::XRGB8) {
     // Set the alpha to 1
@@ -202,15 +212,14 @@ void Canvas::DrawBitmap(Texture2D* texture2d,
   }
 
   // Now copy from the temporary bitmap to the canvas bitmap.
-  // Note that we scale Y by -1 to flip the image vertically.  The reason is
-  // that in O3D textures the first byte is the bottom left corner whereas
-  // in Skia the first byte is the top left of a bitmap.
   SaveMatrix();
-  Scale(1, -1);
-
+  if (flip_) {
+    Scale(1, -1);
+    bottom = -bottom;
+  }
   sk_canvas_.drawBitmap(bitmap,
                         SkFloatToScalar(left),
-                        SkFloatToScalar(-bottom),
+                        SkFloatToScalar(bottom),
                         NULL);
   RestoreMatrix();
 }
@@ -228,7 +237,7 @@ void Canvas::Translate(float dx, float dy) {
 }
 
 // Copy the contents of the local bitmap to a Texture object.
-bool Canvas::CopyToTexture(Texture2D* texture_2d) {
+bool Canvas::CopyToTexture(Texture2D* texture_2d) const {
   DCHECK(texture_2d);
 
   if (texture_2d->width() != sk_bitmap_.width() ||
@@ -242,13 +251,8 @@ bool Canvas::CopyToTexture(Texture2D* texture_2d) {
 
   int width = sk_bitmap_.width();
   int height = sk_bitmap_.height();
-  Texture2DLockHelper lock_helper_0(texture_2d, 0);
-  void* texture_data = lock_helper_0.GetData();
-  if (!texture_data) {
-    return false;
-  }
-
-  memcpy(texture_data, sk_bitmap_.getPixels(), width * height * 4);
+  texture_2d->SetRect(0, 0, 0, width, height,
+                      sk_bitmap_.getPixels(), width * 4);
 
   // Fill in all the mipmap levels of the texture by drawing scaled down
   // versions of the canvas bitmap contents.
@@ -256,21 +260,17 @@ bool Canvas::CopyToTexture(Texture2D* texture_2d) {
   int levels = texture_2d->levels();
 
   for (int i = 1; (!levels && width > 1 && height > 1) || i < levels; i++) {
-    width = width >> 1;
-    height = height >> 1;
+    width = std::max(1, width >> 1);
+    height = std::max(1, height >> 1);
     bitmap.setConfig(SkBitmap::kARGB_8888_Config, width, height);
 
-    Texture2DLockHelper lock_helper_n(texture_2d, i);
-    texture_data = lock_helper_n.GetData();
-    if (!texture_data) {
-      return false;
-    }
-
-    bitmap.setPixels(texture_data);
+    scoped_array<uint8> buffer(new uint8[width * height * 4]);
+    bitmap.setPixels(buffer.get());
     SkCanvas canvas(bitmap);
     SkScalar scaleFactor = SkScalarDiv(SK_Scalar1, SkIntToScalar(1 << i));
     canvas.scale(scaleFactor, scaleFactor);
     canvas.drawBitmap(sk_bitmap_, 0, 0);
+    texture_2d->SetRect(i, 0, 0, width, height, bitmap.getPixels(), width * 4);
   }
 
   return true;

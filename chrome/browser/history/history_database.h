@@ -1,19 +1,19 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_HISTORY_HISTORY_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_HISTORY_DATABASE_H_
 
+#include "app/sql/connection.h"
+#include "app/sql/meta_table.h"
+#include "build/build_config.h"
 #include "chrome/browser/history/download_database.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/starred_url_database.h"
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/history/visit_database.h"
 #include "chrome/browser/history/visitsegment_database.h"
-#include "chrome/browser/meta_table_helper.h"
-
-struct sqlite3;
 
 class FilePath;
 
@@ -84,7 +84,7 @@ class HistoryDatabase : public DownloadDatabase,
   void BeginTransaction();
   void CommitTransaction();
   int transaction_nesting() const {  // for debugging and assertion purposes
-    return transaction_nesting_;
+    return db_.transaction_nesting();
   }
 
   // Drops all tables except the URL, and download tables, and recreates them
@@ -110,6 +110,17 @@ class HistoryDatabase : public DownloadDatabase,
   // unused space in the file. It can be VERY SLOW.
   void Vacuum();
 
+  // Returns true if the history backend should erase the full text search
+  // and archived history files as part of version 16 -> 17 migration. The
+  // time format changed in this revision, and these files would be much slower
+  // to migrate. Since the data is less important, they should be deleted.
+  //
+  // This flag will be valid after Init() is called. It will always be false
+  // when running on Windows.
+  bool needs_version_17_migration() const {
+    return needs_version_17_migration_;
+  }
+
   // Visit table functions ----------------------------------------------------
 
   // Update the segment id of a visit. Return true on success.
@@ -130,8 +141,7 @@ class HistoryDatabase : public DownloadDatabase,
 
  private:
   // Implemented for URLDatabase.
-  virtual sqlite3* GetDB();
-  virtual SqliteStatementCache& GetStatementCache();
+  virtual sql::Connection& GetDB();
 
   // Migration -----------------------------------------------------------------
 
@@ -144,23 +154,21 @@ class HistoryDatabase : public DownloadDatabase,
   // may commit the transaction and start a new one if migration requires it.
   InitStatus EnsureCurrentVersion(const FilePath& tmp_bookmarks_path);
 
+#if !defined(OS_WIN)
+  // Converts the time epoch in the database from being 1970-based to being
+  // 1601-based which corresponds to the change in Time.internal_value_.
+  void MigrateTimeEpoch();
+#endif
+
   // ---------------------------------------------------------------------------
 
-  // How many nested transactions are pending? When this gets to 0, we commit.
-  int transaction_nesting_;
+  sql::Connection db_;
+  sql::MetaTable meta_table_;
 
-  // The database. The closer automatically closes the deletes the db and the
-  // statement cache. These must be done in a specific order, so we don't want
-  // to rely on C++'s implicit destructors for the individual objects.
-  //
-  // The close scoper will free the database and delete the statement cache in
-  // the correct order automatically when we are destroyed.
-  DBCloseScoper db_closer_;
-  sqlite3* db_;
-  SqliteStatementCache* statement_cache_;
-
-  MetaTableHelper meta_table_;
   base::Time cached_early_expiration_threshold_;
+
+  // See the getter above.
+  bool needs_version_17_migration_;
 
   DISALLOW_COPY_AND_ASSIGN(HistoryDatabase);
 };

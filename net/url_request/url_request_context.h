@@ -13,17 +13,17 @@
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "net/base/cookie_policy.h"
+#include "net/base/cookie_store.h"
 #include "net/base/host_resolver.h"
+#include "net/base/ssl_config_service.h"
+#include "net/base/strict_transport_security_state.h"
 #include "net/ftp/ftp_auth_cache.h"
+#include "net/proxy/proxy_service.h"
 
 namespace net {
-class CookieMonster;
-class ForceTLSState;
 class FtpTransactionFactory;
 class HttpTransactionFactory;
-class ProxyService;
 }
-class Blacklist;
 class URLRequest;
 
 // Subclass to provide application-specific context for URLRequest instances.
@@ -31,13 +31,10 @@ class URLRequestContext :
     public base::RefCountedThreadSafe<URLRequestContext> {
  public:
   URLRequestContext()
-      : host_resolver_(NULL),
-        proxy_service_(NULL),
-        http_transaction_factory_(NULL),
+      : http_transaction_factory_(NULL),
         ftp_transaction_factory_(NULL),
         cookie_store_(NULL),
-        force_tls_state_(NULL),
-        blacklist_(NULL) {
+        strict_transport_security_state_(NULL) {
   }
 
   net::HostResolver* host_resolver() const {
@@ -49,8 +46,13 @@ class URLRequestContext :
     return proxy_service_;
   }
 
+  // Get the ssl config service for this context.
+  net::SSLConfigService* ssl_config_service() const {
+    return ssl_config_service_;
+  }
+
   // Gets the http transaction factory for this context.
-  net::HttpTransactionFactory* http_transaction_factory() {
+  net::HttpTransactionFactory* http_transaction_factory() const {
     return http_transaction_factory_;
   }
 
@@ -60,18 +62,16 @@ class URLRequestContext :
   }
 
   // Gets the cookie store for this context.
-  net::CookieMonster* cookie_store() { return cookie_store_; }
+  net::CookieStore* cookie_store() { return cookie_store_.get(); }
 
   // Gets the cookie policy for this context.
   net::CookiePolicy* cookie_policy() { return &cookie_policy_; }
 
-  net::ForceTLSState* force_tls_state() { return force_tls_state_; }
+  net::StrictTransportSecurityState* strict_transport_security_state() {
+      return strict_transport_security_state_; }
 
   // Gets the FTP authentication cache for this context.
   net::FtpAuthCache* ftp_auth_cache() { return &ftp_auth_cache_; }
-
-  // Gets the Privacy Blacklist, if any for this context.
-  const Blacklist* blacklist() { return blacklist_; }
 
   // Gets the value of 'Accept-Charset' header field.
   const std::string& accept_charset() const { return accept_charset_; }
@@ -96,13 +96,13 @@ class URLRequestContext :
   // Called for each cookie returning for the given request. A pointer to
   // the cookie is passed so that it can be modified. Returns true if the
   // cookie was not dropped (it could still be modified though).
-  virtual bool interceptCookie(const URLRequest* request, std::string* cookie) {
+  virtual bool InterceptCookie(const URLRequest* request, std::string* cookie) {
     return true;
   }
 
   // Called before adding cookies to sent requests. Allows overriding
   // requests to block sending of cookies.
-  virtual bool allowSendingCookies(const URLRequest* request) const {
+  virtual bool AllowSendingCookies(const URLRequest* request) const {
     return true;
   }
 
@@ -114,14 +114,15 @@ class URLRequestContext :
   // The following members are expected to be initialized and owned by
   // subclasses.
   scoped_refptr<net::HostResolver> host_resolver_;
-  net::ProxyService* proxy_service_;
+  scoped_refptr<net::ProxyService> proxy_service_;
+  scoped_refptr<net::SSLConfigService> ssl_config_service_;
   net::HttpTransactionFactory* http_transaction_factory_;
   net::FtpTransactionFactory* ftp_transaction_factory_;
-  net::CookieMonster* cookie_store_;
+  scoped_refptr<net::CookieStore> cookie_store_;
   net::CookiePolicy cookie_policy_;
-  net::ForceTLSState* force_tls_state_;;
+  scoped_refptr<net::StrictTransportSecurityState>
+      strict_transport_security_state_;
   net::FtpAuthCache ftp_auth_cache_;
-  const Blacklist* blacklist_;
   std::string accept_language_;
   std::string accept_charset_;
   // The charset of the referrer where this request comes from. It's not

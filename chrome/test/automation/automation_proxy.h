@@ -8,14 +8,16 @@
 #include <string>
 
 #include "app/message_box_flags.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
+#include "chrome/test/automation/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
@@ -23,6 +25,10 @@
 class BrowserProxy;
 class TabProxy;
 class WindowProxy;
+
+namespace IPC {
+struct ExternalTabSettings;
+}
 
 // This is an interface that AutomationProxy-related objects can use to
 // access the message-sending abilities of the Proxy.
@@ -115,9 +121,12 @@ class AutomationProxy : public IPC::Channel::Listener,
   // success.
   bool WaitForAppModalDialog(int wait_timeout);
 
-  // Block the thread until one of the tabs in any window (including windows
-  // opened after the call) displays given url. Returns true on success.
-  bool WaitForURLDisplayed(GURL url, int wait_timeout);
+  // Returns true if one of the tabs in any window displays given url.
+  bool IsURLDisplayed(GURL url);
+
+  // Get the duration of the last |event_name| in the browser.  Returns
+  // false if the IPC failed to send.
+  bool GetMetricEventDuration(const std::string& event_name, int* duration_ms);
 
   // Returns the BrowserProxy for the browser window at the given index,
   // transferring ownership of the pointer to the caller.

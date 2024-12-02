@@ -4,6 +4,7 @@
 
 #import "chrome/browser/cocoa/preferences_window_controller.h"
 
+#include <algorithm>
 #include "app/l10n_util.h"
 #include "base/mac_util.h"
 #include "base/string_util.h"
@@ -13,7 +14,9 @@
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/custom_home_pages_model.h"
+#import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
 #import "chrome/browser/cocoa/search_engine_list_model.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/dns_global.h"
@@ -32,16 +35,34 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 #include "net/base/cookie_policy.h"
 
 NSString* const kUserDoneEditingPrefsNotification =
     @"kUserDoneEditingPrefsNotification";
 
 namespace {
+
 std::wstring GetNewTabUIURLString() {
   std::wstring temp = UTF8ToWide(chrome::kChromeUINewTabURL);
   return URLFixerUpper::FixupURL(temp, std::wstring());
 }
+
+// Adjusts the views origin so it will be centered if in a given width parent.
+void CenterViewForWidth(NSView* view, CGFloat width) {
+  NSRect frame = [view frame];
+  frame.origin.x = (width - NSWidth(frame)) / 2.0;
+  [view setFrame:frame];
+}
+
+// Helper to remove all but the last view from the view heirarchy.
+void RemoveAllButLastView(NSArray* views) {
+  NSArray* toRemove = [views subarrayWithRange:NSMakeRange(0, [views count]-1)];
+  for (NSView* view in toRemove) {
+    [view removeFromSuperviewWithoutNeedingDisplay];
+  }
+}
+
 }  // namespace
 
 //-------------------------------------------------------------------------
@@ -63,15 +84,18 @@ std::wstring GetNewTabUIURLString() {
 - (void)setRestoreOnStartupIndex:(NSInteger)type;
 - (void)setShowHomeButton:(BOOL)value;
 - (void)setShowPageOptionsButtons:(BOOL)value;
-- (void)setDefaultBrowser:(BOOL)value;
 - (void)setPasswordManagerEnabledIndex:(NSInteger)value;
 - (void)setFormAutofillEnabledIndex:(NSInteger)value;
+- (void)setIsUsingDefaultTheme:(BOOL)value;
 - (void)setShowAlternateErrorPages:(BOOL)value;
 - (void)setUseSuggest:(BOOL)value;
 - (void)setDnsPrefetch:(BOOL)value;
 - (void)setSafeBrowsing:(BOOL)value;
 - (void)setMetricsRecording:(BOOL)value;
 - (void)setCookieBehavior:(NSInteger)value;
+- (void)setAskForSaveLocation:(BOOL)value;
+- (void)displayPreferenceViewForToolbarItem:(NSToolbarItem*)toolbarItem
+                                    animate:(BOOL)animate;
 @end
 
 // A C++ class registered for changes in preferences. Bridges the
@@ -138,22 +162,61 @@ class PrefObserverBridge : public NotificationObserver {
     // This needs to be done before awakeFromNib: because the bindings set up
     // in the nib rely on it.
     [self registerPrefObservers];
+
+    // Use one animation so we can stop it if the user clicks quickly, and
+    // start the new animation.
+    animation_.reset([[NSViewAnimation alloc] init]);
+    // Make this the delegate so it can remove the old view at the end of the
+    // animation (once it is faded out).
+    [animation_ setDelegate:self];
+    // The default duration is 0.5s, which actually feels slow in here, so speed
+    // it up a bit.
+    [animation_ setDuration:0.2];
+    [animation_ setAnimationBlockingMode:NSAnimationNonblocking];
   }
   return self;
 }
 
 - (void)awakeFromNib {
-  // TODO(pinkerton): save/restore size based on prefs.
-  [[self window] center];
+  NSRect underTheHoodFrame = [underTheHoodView_ frame];
+
+  // Make sure the window is wide enough to fit the the widest view
+  CGFloat widest = std::max(NSWidth([basicsView_ frame]),
+                            NSWidth([personalStuffView_ frame]));
+  widest = std::max(widest, NSWidth(underTheHoodFrame));
+  NSWindow* prefsWindow = [self window];
+  NSRect frame = [prefsWindow frame];
+  frame.size.width = widest;
+  [prefsWindow setFrame:frame display:NO];
+
+  // The Under the Hood prefs is a scroller, it shouldn't get any border, so it
+  // gets resized to the as wide as the window ends up.
+  underTheHoodFrame.size.width = widest;
+  [underTheHoodView_ setFrame:underTheHoodFrame];
+  // Widen the Under the Hood content so things can rewrap
+  NSSize advancedContentSize = [advancedView_ frame].size;
+  advancedContentSize.width = [advancedScroller_ contentSize].width;
+  [advancedView_ setFrameSize:advancedContentSize];
 
   // Put the advanced view into the scroller and scroll it to the top.
   [advancedScroller_ setDocumentView:advancedView_];
-  NSInteger height = [advancedView_ bounds].size.height;
-  [advancedView_ scrollPoint:NSMakePoint(0, height)];
+  [advancedView_ scrollPoint:NSMakePoint(0, advancedContentSize.height)];
 
-  // Ensure the "basics" tab is selected regardless of what is the selected
-  // tab in the nib.
-  [tabView_ selectFirstTabViewItem:self];
+  // Adjust the view origins so they show up centered.
+  CenterViewForWidth(basicsView_, widest);
+  CenterViewForWidth(personalStuffView_, widest);
+  CenterViewForWidth(underTheHoodView_, widest);
+
+  // Ensure the "basics" is selected.
+  // TODO: change this to remember what's selected in a preference and restore
+  // it.
+
+  NSToolbarItem* firstItem = [[toolbar_ items] objectAtIndex:0];
+  [self displayPreferenceViewForToolbarItem:firstItem animate:NO];
+  [toolbar_ setSelectedItemIdentifier:[firstItem itemIdentifier]];
+
+  // TODO(pinkerton): save/restore position based on prefs.
+  [[self window] center];
 }
 
 - (void)dealloc {
@@ -161,6 +224,14 @@ class PrefObserverBridge : public NotificationObserver {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [self unregisterPrefObservers];
   [super dealloc];
+}
+
+// Xcode 3.1.x version of Interface Builder doesn't do a lot for editing
+// toolbars in XIB.  So the toolbar's delegate is set to the controller so it
+// can tell the toolbar what items are selectable.
+- (NSArray*)toolbarSelectableItemIdentifiers:(NSToolbar*)toolbar {
+  DCHECK(toolbar == toolbar_);
+  return [[toolbar_ items] valueForKey:@"itemIdentifier"];
 }
 
 // Register our interest in the preferences we're displaying so if anything
@@ -179,10 +250,11 @@ class PrefObserverBridge : public NotificationObserver {
                               observer_.get());
   // TODO(pinkerton): Register Default search.
 
-  // UserData panel
+  // Personal Stuff panel
   askSavePasswords_.Init(prefs::kPasswordManagerEnabled,
                          prefs_, observer_.get());
   formAutofill_.Init(prefs::kFormAutofillEnabled, prefs_, observer_.get());
+  currentTheme_.Init(prefs::kCurrentThemeID, prefs_, observer_.get());
 
   // Under the hood panel
   alternateErrorPages_.Init(prefs::kAlternateErrorPagesEnabled,
@@ -190,6 +262,7 @@ class PrefObserverBridge : public NotificationObserver {
   useSuggest_.Init(prefs::kSearchSuggestEnabled, prefs_, observer_.get());
   dnsPrefetch_.Init(prefs::kDnsPrefetchingEnabled, prefs_, observer_.get());
   safeBrowsing_.Init(prefs::kSafeBrowsingEnabled, prefs_, observer_.get());
+
   // During unit tests, there is no local state object, so we fall back to
   // the prefs object (where we've explicitly registered this pref so we
   // know it's there).
@@ -199,6 +272,9 @@ class PrefObserverBridge : public NotificationObserver {
   metricsRecording_.Init(prefs::kMetricsReportingEnabled,
                          local, observer_.get());
   cookieBehavior_.Init(prefs::kCookieBehavior, prefs_, observer_.get());
+  defaultDownloadLocation_.Init(prefs::kDownloadDefaultDirectory, prefs_,
+                                observer_.get());
+  askForSaveLocation_.Init(prefs::kPromptForDownload, prefs_, observer_.get());
 }
 
 // Clean up what was registered in -registerPrefObservers. We only have to
@@ -230,9 +306,7 @@ class PrefObserverBridge : public NotificationObserver {
                         context:context];
 }
 
-// Called when the user hits the escape key. Closes the window. This will
-// automatically abandon/cancel any in-progress edits in text fields, we don't
-// have to do anything special.
+// Called when the user hits the escape key. Closes the window.
 - (void)cancel:(id)sender {
   [[self window] performClose:self];
 }
@@ -540,9 +614,15 @@ enum { kHomepageNewTabPage, kHomepageURL };
   [self setSearchEngineSelectedIndex:[self searchEngineSelectedIndex]];
 }
 
+- (IBAction)manageSearchEngines:(id)sender {
+  [KeywordEditorCocoaController showKeywordEditor:profile_];
+}
+
 // Called when the user clicks the button to make Chromium the default
 // browser. Registers http and https.
 - (IBAction)makeDefaultBrowser:(id)sender {
+  [self willChangeValueForKey:@"defaultBrowser"];
+
   ShellIntegration::SetAsDefaultBrowser();
   [self recordUserAction:L"Options_SetAsDefaultBrowser"];
   // If the user made Chrome the default browser, then he/she arguably wants
@@ -550,24 +630,19 @@ enum { kHomepageNewTabPage, kHomepageURL };
   prefs_->SetBoolean(prefs::kCheckDefaultBrowser, true);
 
   // Tickle KVO so that the UI updates.
-  [self setDefaultBrowser:YES];
+  [self didChangeValueForKey:@"defaultBrowser"];
 }
 
-// A stub setter so that we can trick KVO into thinking the UI needs
-// to be updated.
-- (void)setDefaultBrowser:(BOOL)ignore {
-  // Do nothing.
-}
-
-// Returns if Chromium is the default browser.
-- (BOOL)isDefaultBrowser {
-  return ShellIntegration::IsDefaultBrowser() ? YES : NO;
+// Returns the Chromium default browser state.
+- (ShellIntegration::DefaultBrowserState)isDefaultBrowser {
+  return ShellIntegration::IsDefaultBrowser();
 }
 
 // Returns the text color of the "chromium is your default browser" text (green
 // for yes, red for no).
 - (NSColor*)defaultBrowserTextColor {
-  return [self isDefaultBrowser] ?
+  ShellIntegration::DefaultBrowserState state = [self isDefaultBrowser];
+  return (state == ShellIntegration::IS_DEFAULT_BROWSER) ?
     [NSColor colorWithCalibratedRed:0.0 green:135.0/255.0 blue:0 alpha:1.0] :
     [NSColor colorWithCalibratedRed:135.0/255.0 green:0 blue:0 alpha:1.0];
 }
@@ -575,9 +650,14 @@ enum { kHomepageNewTabPage, kHomepageURL };
 // Returns the text for the "chromium is your default browser" string dependent
 // on if Chromium actually is or not.
 - (NSString*)defaultBrowserText {
-  BOOL isDefault = [self isDefaultBrowser];
-  int stringId = isDefault ? IDS_OPTIONS_DEFAULTBROWSER_DEFAULT :
-      IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT;
+  ShellIntegration::DefaultBrowserState state = [self isDefaultBrowser];
+  int stringId;
+  if (state == ShellIntegration::IS_DEFAULT_BROWSER)
+    stringId = IDS_OPTIONS_DEFAULTBROWSER_DEFAULT;
+  else if (state == ShellIntegration::NOT_DEFAULT_BROWSER)
+    stringId = IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT;
+  else
+    stringId = IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN;
   std::wstring text =
       l10n_util::GetStringF(stringId, l10n_util::GetString(IDS_PRODUCT_NAME));
   return base::SysWideToNSString(text);
@@ -594,7 +674,7 @@ const int kDisabledIndex = 1;
 // Callback when preferences are changed. |prefName| is the name of the pref
 // that has changed. Unlike on Windows, we don't need to use this method for
 // initializing, that's handled by Cocoa Bindings.
-// Handles prefs for the "Minor Tweaks" panel.
+// Handles prefs for the "Personal Stuff" panel.
 - (void)userDataPrefChanged:(std::wstring*)prefName {
   if (*prefName == prefs::kPasswordManagerEnabled) {
     [self setPasswordManagerEnabledIndex:askSavePasswords_.GetValue() ?
@@ -603,6 +683,9 @@ const int kDisabledIndex = 1;
   if (*prefName == prefs::kFormAutofillEnabled) {
     [self setFormAutofillEnabledIndex:formAutofill_.GetValue() ?
         kEnabledIndex : kDisabledIndex];
+  }
+  if (*prefName == prefs::kCurrentThemeID) {
+    [self setIsUsingDefaultTheme:currentTheme_.GetValue().length() == 0];
   }
 }
 
@@ -632,10 +715,26 @@ const int kDisabledIndex = 1;
   [controller runModalDialog];
 }
 
-// Called to reset the theming info back to the defaults.
-- (IBAction)resetTheme:(id)sender {
+- (IBAction)resetThemeToDefault:(id)sender {
   [self recordUserAction:L"Options_ThemesReset"];
   profile_->ClearTheme();
+}
+
+- (IBAction)themesGallery:(id)sender {
+  [self recordUserAction:L"Options_ThemesGallery"];
+  Browser* browser =
+      BrowserList::FindBrowserWithType(profile_, Browser::TYPE_NORMAL);
+
+  if (!browser || !browser->GetSelectedTabContents()) {
+    browser = Browser::Create(profile_);
+    browser->OpenURL(
+        GURL(l10n_util::GetStringUTF8(IDS_THEMES_GALLERY_URL)),
+        GURL(), NEW_WINDOW, PageTransition::LINK);
+  } else {
+    browser->OpenURL(
+        GURL(l10n_util::GetStringUTF8(IDS_THEMES_GALLERY_URL)),
+        GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  }
 }
 
 - (void)setPasswordManagerEnabledIndex:(NSInteger)value {
@@ -660,6 +759,17 @@ const int kDisabledIndex = 1;
 
 - (NSInteger)formAutofillEnabledIndex {
   return formAutofill_.GetValue() ? kEnabledIndex : kDisabledIndex;
+}
+
+- (void)setIsUsingDefaultTheme:(BOOL)value {
+  if (value)
+    [self recordUserAction:L"Options_IsUsingDefaultTheme_Enable"];
+  else
+    [self recordUserAction:L"Options_IsUsingDefaultTheme_Disable"];
+}
+
+- (BOOL)isUsingDefaultTheme {
+  return currentTheme_.GetValue().length() == 0;
 }
 
 //-------------------------------------------------------------------------
@@ -689,6 +799,165 @@ const int kDisabledIndex = 1;
   else if (*prefName == prefs::kCookieBehavior) {
     [self setCookieBehavior:cookieBehavior_.GetValue()];
   }
+  else if (*prefName == prefs::kPromptForDownload) {
+    [self setAskForSaveLocation:askForSaveLocation_.GetValue() ? YES : NO];
+  }
+}
+
+// Set the new download path and notify the UI via KVO.
+- (void)downloadPathPanelDidEnd:(NSOpenPanel*)panel
+                           code:(NSInteger)returnCode
+                        context:(void*)context {
+  if (returnCode == NSOKButton) {
+    [self recordUserAction:L"Options_SetDownloadDirectory"];
+    NSURL* path = [[panel URLs] lastObject];  // We only allow 1 item.
+    [self willChangeValueForKey:@"defaultDownloadLocation"];
+    defaultDownloadLocation_.SetValue(base::SysNSStringToWide([path path]));
+    [self didChangeValueForKey:@"defaultDownloadLocation"];
+  }
+}
+
+// Bring up an open panel to allow the user to set a new downloads location.
+- (void)browseDownloadLocation:(id)sender {
+  NSOpenPanel* panel = [NSOpenPanel openPanel];
+  [panel setAllowsMultipleSelection:NO];
+  [panel setCanChooseFiles:NO];
+  [panel setCanChooseDirectories:YES];
+  NSString* path = base::SysWideToNSString(defaultDownloadLocation_.GetValue());
+  [panel beginSheetForDirectory:path
+                           file:nil
+                          types:nil
+                 modalForWindow:[self window]
+                  modalDelegate:self
+                 didEndSelector:@selector(downloadPathPanelDidEnd:code:context:)
+                    contextInfo:NULL];
+}
+
+- (IBAction)privacyLearnMore:(id)sender {
+  // We open a new browser window so the Options dialog doesn't get lost
+  // behind other windows.
+  Browser* browser = Browser::Create(profile_);
+  browser->OpenURL(GURL(l10n_util::GetStringUTF16(IDS_LEARN_MORE_PRIVACY_URL)),
+                   GURL(), NEW_WINDOW, PageTransition::LINK);
+}
+
+- (IBAction)toolbarButtonSelected:(id)sender {
+  DCHECK([sender isKindOfClass:[NSToolbarItem class]]);
+  [self displayPreferenceViewForToolbarItem:sender
+                                    animate:YES];
+}
+
+// Helper to update the window to display a preferences view for a toolbaritem.
+- (void)displayPreferenceViewForToolbarItem:(NSToolbarItem*)toolbarItem
+                                    animate:(BOOL)animate {
+  NSView* prefsView = NULL;
+  // Tags are set in the nib file.
+  switch ([toolbarItem tag]) {
+    case 0:  // Basics
+      prefsView = basicsView_;
+      break;
+    case 1:  // Personal Stuff
+      prefsView = personalStuffView_;
+      break;
+    case 2:  // Under the Hood
+      prefsView = underTheHoodView_;
+      break;
+    default:
+      NOTIMPLEMENTED();
+  }
+
+  NSWindow* prefsWindow = [self window];
+  NSView* contentView = [prefsWindow contentView];
+
+  // Normally there is only one view, but if the user clicks really quickly, the
+  // animation could still been running, and the last view is the one that was
+  // animating in.
+  NSArray* subviews = [contentView subviews];
+  NSView* currentPrefsView = nil;
+  if ([subviews count]) {
+    currentPrefsView = [subviews lastObject];
+  }
+
+  // Make sure we aren't being told to display the same thing again.
+  if (currentPrefsView == prefsView) {
+    return;
+  }
+
+  // Stop any running animation, and remove any past views that were on the way
+  // out.
+  [animation_ stopAnimation];
+  if ([subviews count]) {
+    RemoveAllButLastView(subviews);
+  }
+
+  NSRect prefsViewFrame = [prefsView frame];
+  NSRect contentViewFrame = [contentView frame];
+  if (animate) {
+    // NSViewAnimation doesn't seem to honor subview resizing as it animates the
+    // Window's frame.  So instead of trying to get the top in the right place,
+    // just set the origin where it should be at the end, and let the fade/size
+    // slide things into the right spot.
+    prefsViewFrame.origin.y = 0.0;
+  } else {
+    // The prefView is anchored to the top of its parent, so set its origin so
+    // that the top is where it should be.  When the window's frame is set, the
+    // origin will be adjusted to keep it in the right spot.
+    prefsViewFrame.origin.y =
+        NSHeight(contentViewFrame) - NSHeight(prefsViewFrame);
+  }
+  [prefsView setFrame:prefsViewFrame];
+
+  // Add the view.
+  [contentView addSubview:prefsView];
+  [prefsWindow setInitialFirstResponder:prefsView];
+
+  // Update the window title.
+  [prefsWindow setTitle:[toolbarItem label]];
+
+  // Figure out the size of the window.
+  NSRect windowFrame = [prefsWindow frame];
+  CGFloat titleToolbarHeight =
+      NSHeight(windowFrame) - NSHeight(contentViewFrame);
+  windowFrame.size.height =
+      NSHeight(prefsViewFrame) + titleToolbarHeight;
+  DCHECK_GE(NSWidth(windowFrame), NSWidth(prefsViewFrame))
+      << "Initial width set wasn't wide enough.";
+  windowFrame.origin.y = NSMaxY([prefsWindow frame]) - NSHeight(windowFrame);
+
+  // Now change the size.
+  if (animate) {
+    NSDictionary* oldViewOut =
+        [NSDictionary dictionaryWithObjectsAndKeys:
+         currentPrefsView, NSViewAnimationTargetKey,
+         NSViewAnimationFadeOutEffect, NSViewAnimationEffectKey,
+         nil];
+    NSDictionary* newViewIn =
+        [NSDictionary dictionaryWithObjectsAndKeys:
+         prefsView, NSViewAnimationTargetKey,
+         NSViewAnimationFadeInEffect, NSViewAnimationEffectKey,
+         nil];
+    NSDictionary* windowResize =
+        [NSDictionary dictionaryWithObjectsAndKeys:
+         prefsWindow, NSViewAnimationTargetKey,
+         [NSValue valueWithRect:windowFrame], NSViewAnimationEndFrameKey,
+         nil];
+    [animation_ setViewAnimations:
+        [NSArray arrayWithObjects:oldViewOut, newViewIn, windowResize, nil]];
+    [animation_ startAnimation];
+  } else {
+    [currentPrefsView removeFromSuperviewWithoutNeedingDisplay];
+    // If not animating, odds are we don't want to display either (because it
+    // is initial window setup).
+    [prefsWindow setFrame:windowFrame display:NO];
+  }
+}
+
+- (void)animationDidEnd:(NSAnimation*)animation {
+  DCHECK_EQ(animation_.get(), animation);
+  // Animation finished, remove everything but the view we just added (it will
+  // be last in the list).
+  NSArray* subviews = [[[self window] contentView] subviews];
+  RemoveAllButLastView(subviews);
 }
 
 // Returns whether the alternate error page checkbox should be checked based
@@ -822,6 +1091,25 @@ const int kDisabledIndex = 1;
   cookieBehavior_.SetValue(policy);
 }
 
+- (NSURL*)defaultDownloadLocation {
+  NSString* pathString =
+      base::SysWideToNSString(defaultDownloadLocation_.GetValue());
+  return [NSURL fileURLWithPath:pathString];
+}
+
+- (BOOL)askForSaveLocation {
+  return askForSaveLocation_.GetValue();
+}
+
+- (void)setAskForSaveLocation:(BOOL)value {
+  if (value) {
+    [self recordUserAction:L"Options_AskForSaveLocation_Enable"];
+  } else {
+    [self recordUserAction:L"Options_AskForSaveLocation_Disable"];
+  }
+  askForSaveLocation_.SetValue(value);
+}
+
 //-------------------------------------------------------------------------
 
 // Callback when preferences are changed. |prefName| is the name of the
@@ -839,12 +1127,25 @@ const int kDisabledIndex = 1;
   [self showWindow:sender];
 }
 
-// Called when the window is being closed. Send out a notification that the
-// user is done editing preferences.
+// Called when the window is being closed. Send out a notification that the user
+// is done editing preferences. Make sure there are no pending field editors
+// by clearing the first responder.
 - (void)windowWillClose:(NSNotification *)notification {
+  // Setting the first responder to the window ends any in-progress field
+  // editor. This will update the model appropriately so there's nothing left
+  // to do.
+  if (![[self window] makeFirstResponder:[self window]]) {
+    // We've hit a recalcitrant field editor, force it to go away.
+    [[self window] endEditingFor:nil];
+  }
+
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kUserDoneEditingPrefsNotification
                     object:self];
+}
+
+- (void)controlTextDidEndEditing:(NSNotification*)notification {
+  [customPagesSource_ validateURLs];
 }
 
 @end

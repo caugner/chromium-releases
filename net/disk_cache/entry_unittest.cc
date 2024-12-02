@@ -99,6 +99,16 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   ASSERT_TRUE(cache_->CreateEntry("the first key", &entry1));
   ASSERT_TRUE(NULL != entry1);
 
+  // Avoid using internal buffers for the test. We have to write something to
+  // the entry and close it so that we flush the internal buffer to disk. After
+  // that, IO operations will be really hitting the disk. We don't care about
+  // the content, so just extending the entry is enough (all extensions zero-
+  // fill any holes).
+  EXPECT_EQ(0, entry1->WriteData(0, 15 * 1024, NULL, 0, NULL, false));
+  EXPECT_EQ(0, entry1->WriteData(1, 15 * 1024, NULL, 0, NULL, false));
+  entry1->Close();
+  ASSERT_TRUE(cache_->OpenEntry("the first key", &entry1));
+
   // Let's verify that each IO goes to the right callback object.
   CallbackTest callback1(false);
   CallbackTest callback2(false);
@@ -129,7 +139,7 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   CacheTestFillBuffer(buffer2->data(), kSize2, false);
   CacheTestFillBuffer(buffer3->data(), kSize3, false);
 
-  EXPECT_EQ(0, entry1->ReadData(0, 0, buffer1, kSize1, &callback1));
+  EXPECT_EQ(0, entry1->ReadData(0, 15 * 1024, buffer1, kSize1, &callback1));
   base::strlcpy(buffer1->data(), "the data", kSize1);
   int expected = 0;
   int ret = entry1->WriteData(0, 0, buffer1, kSize1, &callback2, false);
@@ -137,7 +147,8 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  memset(buffer2->data(), 0, kSize1);
+  EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
+  memset(buffer2->data(), 0, kSize2);
   ret = entry1->ReadData(0, 0, buffer2, kSize1, &callback3);
   EXPECT_TRUE(10 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
@@ -147,12 +158,13 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   EXPECT_STREQ("the data", buffer2->data());
 
   base::strlcpy(buffer2->data(), "The really big data goes here", kSize2);
-  ret = entry1->WriteData(1, 1500, buffer2, kSize2, &callback4, false);
+  ret = entry1->WriteData(1, 1500, buffer2, kSize2, &callback4, true);
   EXPECT_TRUE(5000 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  memset(buffer3->data(), 0, kSize2);
+  EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
+  memset(buffer3->data(), 0, kSize3);
   ret = entry1->ReadData(1, 1511, buffer3, kSize2, &callback5);
   EXPECT_TRUE(4989 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
@@ -174,17 +186,17 @@ void DiskCacheEntryTest::InternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  EXPECT_EQ(0, entry1->ReadData(1, 6500, buffer2, kSize2, &callback8));
   ret = entry1->ReadData(1, 0, buffer3, kSize3, &callback9);
   EXPECT_TRUE(6500 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
-  ret = entry1->WriteData(1, 0, buffer3, 8192, &callback10, false);
+  ret = entry1->WriteData(1, 0, buffer3, 8192, &callback10, true);
   EXPECT_TRUE(8192 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
     expected++;
 
+  EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
   ret = entry1->ReadData(1, 0, buffer3, kSize3, &callback11);
   EXPECT_TRUE(8192 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
@@ -1171,10 +1183,18 @@ void DiskCacheEntryTest::DoomSparseEntry() {
   // system cache so we don't see that there is pending IO.
   MessageLoop::current()->RunAllPending();
 
-  if (memory_only_)
+  if (memory_only_) {
     EXPECT_EQ(0, cache_->GetEntryCount());
-  else
+  } else {
+    if (5 == cache_->GetEntryCount()) {
+      // Most likely we are waiting for the result of reading the sparse info
+      // (it's always async on Posix so it is easy to miss). Unfortunately we
+      // don't have any signal to watch for so we can only wait.
+      PlatformThread::Sleep(500);
+      MessageLoop::current()->RunAllPending();
+    }
     EXPECT_EQ(0, cache_->GetEntryCount());
+  }
 }
 
 TEST_F(DiskCacheEntryTest, DoomSparseEntry) {
@@ -1182,7 +1202,7 @@ TEST_F(DiskCacheEntryTest, DoomSparseEntry) {
   DoomSparseEntry();
 }
 
-TEST_F(DiskCacheEntryTest, DISABLED_MemoryOnlyDoomSparseEntry) {
+TEST_F(DiskCacheEntryTest, MemoryOnlyDoomSparseEntry) {
   SetMemoryOnlyMode();
   InitCache();
   DoomSparseEntry();
@@ -1196,12 +1216,17 @@ void DiskCacheEntryTest::PartialSparseEntry() {
   // We should be able to deal with IO that is not aligned to the block size
   // of a sparse entry, at least to write a big range without leaving holes.
   const int kSize = 4 * 1024;
+  const int kSmallSize = 128;
   scoped_refptr<net::IOBuffer> buf1 = new net::IOBuffer(kSize);
   CacheTestFillBuffer(buf1->data(), kSize, false);
 
-  // The first write is just to extend the entry.
+  // The first write is just to extend the entry. The third write occupies
+  // a 1KB block partially, it may not be written internally depending on the
+  // implementation.
   EXPECT_EQ(kSize, entry->WriteSparseData(20000, buf1, kSize, NULL));
   EXPECT_EQ(kSize, entry->WriteSparseData(500, buf1, kSize, NULL));
+  EXPECT_EQ(kSmallSize,
+            entry->WriteSparseData(1080321, buf1, kSmallSize, NULL));
   entry->Close();
   ASSERT_TRUE(cache_->OpenEntry(key, &entry));
 
@@ -1230,6 +1255,21 @@ void DiskCacheEntryTest::PartialSparseEntry() {
   EXPECT_EQ(kSize, start);
   EXPECT_EQ(3616, entry->GetAvailableRange(20 * 1024, 10000, &start));
   EXPECT_EQ(20 * 1024, start);
+
+  // 1. Query before a filled 1KB block.
+  // 2. Query within a filled 1KB block.
+  // 3. Query beyond a filled 1KB block.
+  if (memory_only_) {
+    EXPECT_EQ(3496, entry->GetAvailableRange(19400, kSize, &start));
+    EXPECT_EQ(20000, start);
+  } else {
+    EXPECT_EQ(3016, entry->GetAvailableRange(19400, kSize, &start));
+    EXPECT_EQ(20480, start);
+  }
+  EXPECT_EQ(1523, entry->GetAvailableRange(3073, kSize, &start));
+  EXPECT_EQ(3073, start);
+  EXPECT_EQ(0, entry->GetAvailableRange(4600, kSize, &start));
+  EXPECT_EQ(4600, start);
 
   // Now make another write and verify that there is no hole in between.
   EXPECT_EQ(kSize, entry->WriteSparseData(500 + kSize, buf1, kSize, NULL));
@@ -1302,4 +1342,51 @@ TEST_F(DiskCacheEntryTest, CleanupSparseEntry) {
 
   // We re-created one of the corrupt children.
   EXPECT_EQ(3, cache_->GetEntryCount());
+}
+
+TEST_F(DiskCacheEntryTest, CancelSparseIO) {
+  InitCache();
+  std::string key("the first key");
+  disk_cache::Entry* entry;
+  ASSERT_TRUE(cache_->CreateEntry(key, &entry));
+
+  const int kSize = 40 * 1024;
+  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(kSize);
+  CacheTestFillBuffer(buf->data(), kSize, false);
+
+  SimpleCallbackTest cb1, cb2, cb3, cb4;
+  int64 offset = 0;
+  for (int ret = 0; ret != net::ERR_IO_PENDING; offset += kSize * 4)
+    ret = entry->WriteSparseData(offset, buf, kSize, &cb1);
+
+  // Cannot use the entry at this point.
+  offset = 0;
+  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+            entry->GetAvailableRange(offset, kSize, &offset));
+  EXPECT_EQ(net::OK, entry->ReadyForSparseIO(&cb2));
+
+  // We cancel the pending operation, and register multiple notifications.
+  entry->CancelSparseIO();
+  EXPECT_EQ(net::ERR_IO_PENDING, entry->ReadyForSparseIO(&cb2));
+  EXPECT_EQ(net::ERR_IO_PENDING, entry->ReadyForSparseIO(&cb3));
+  entry->CancelSparseIO();  // Should be a no op at this point.
+  EXPECT_EQ(net::ERR_IO_PENDING, entry->ReadyForSparseIO(&cb4));
+
+  offset = 0;
+  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+            entry->GetAvailableRange(offset, kSize, &offset));
+  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+            entry->ReadSparseData(offset, buf, kSize, NULL));
+  EXPECT_EQ(net::ERR_CACHE_OPERATION_NOT_SUPPORTED,
+            entry->WriteSparseData(offset, buf, kSize, NULL));
+
+  // Now see if we receive all notifications.
+  EXPECT_EQ(kSize, cb1.GetResult(net::ERR_IO_PENDING));
+  EXPECT_EQ(net::OK, cb2.GetResult(net::ERR_IO_PENDING));
+  EXPECT_EQ(net::OK, cb3.GetResult(net::ERR_IO_PENDING));
+  EXPECT_EQ(net::OK, cb4.GetResult(net::ERR_IO_PENDING));
+
+  EXPECT_EQ(kSize, entry->GetAvailableRange(offset, kSize, &offset));
+  EXPECT_EQ(net::OK, entry->ReadyForSparseIO(&cb2));
+  entry->Close();
 }

@@ -15,7 +15,6 @@
 #include <string>
 
 class RenderView;
-class WebFrame;
 
 namespace bindings_utils {
 
@@ -28,6 +27,11 @@ class ExtensionBase : public v8::Extension {
                 int dep_count,
                 const char** deps)
       : v8::Extension(name, source, dep_count, deps) {}
+
+  // Note: do not call this function before or during the chromeHidden.onLoad
+  // event dispatch. The URL might not have been committed yet and might not
+  // be an extension URL.
+  static std::string ExtensionIdForCurrentContext();
 
   // Derived classes should call this at the end of their implementation in
   // order to expose common native functions, like GetChromeHidden, to the
@@ -69,12 +73,17 @@ struct ContextInfo {
   // a valid pointer, and is used for comparisons only.  Do not dereference.
   RenderView* render_view;
 
+  // A count of the number of events that are listening in this context. When
+  // this is zero, |context| will be a weak handle.
+  int num_connected_events;
+
   ContextInfo(v8::Persistent<v8::Context> context,
               const std::string& extension_id,
               v8::Persistent<v8::Context> parent_context,
               RenderView* render_view)
       : context(context), extension_id(extension_id),
-        parent_context(parent_context), render_view(render_view) {}
+        parent_context(parent_context), render_view(render_view),
+        num_connected_events(0) {}
 };
 typedef std::list< linked_ptr<ContextInfo> > ContextList;
 
@@ -86,6 +95,9 @@ ContextList GetContextsForExtension(const std::string& extension_id);
 
 // Returns the ContextInfo item that has the given context.
 ContextList::iterator FindContext(v8::Handle<v8::Context> context);
+
+// Returns the ContextInfo for the current v8 context.
+ContextInfo* GetInfoForCurrentContext();
 
 // Contains info relevant to a pending API request.
 struct PendingRequest {
@@ -107,10 +119,12 @@ RenderView* GetRenderViewForCurrentContext();
 
 // Call the named javascript function with the given arguments in a context.
 // The function name should be reachable from the chromeHidden object, and can
-// be a sub-property like "Port.dispatchOnMessage".
-void CallFunctionInContext(v8::Handle<v8::Context> context,
-                           const std::string& function_name, int argc,
-                           v8::Handle<v8::Value>* argv);
+// be a sub-property like "Port.dispatchOnMessage". Returns the result of 
+// the function call. If an exception is thrown an empty Handle will be
+// returned.
+v8::Handle<v8::Value> CallFunctionInContext(v8::Handle<v8::Context> context,
+    const std::string& function_name, int argc,
+    v8::Handle<v8::Value>* argv);
 
 }  // namespace bindings_utils
 

@@ -32,11 +32,10 @@
 
 // This file contains the declarations for Texture2DGL and TextureCUBEGL.
 
-#ifndef O3D_CORE_CROSS_GL_TEXTURE_GL_H__
-#define O3D_CORE_CROSS_GL_TEXTURE_GL_H__
+#ifndef O3D_CORE_CROSS_GL_TEXTURE_GL_H_
+#define O3D_CORE_CROSS_GL_TEXTURE_GL_H_
 
 // Precompiled header comes before everything else.
-#include "core/cross/precompile.h"
 
 // Disable compiler warning for openGL calls that require a void* to
 // be cast to a GLuint
@@ -45,11 +44,11 @@
 #pragma warning(disable : 4311)
 #endif
 
-#ifdef OS_MACOSX
-#include <OpenGL/gl.h>
-#else
-#include <GL/gl.h>
-#endif
+//#ifdef OS_MACOSX
+//#include <OpenGL/gl.h>
+//#else
+//#include <GL/gl.h>
+//#endif
 
 #include "core/cross/bitmap.h"
 #include "core/cross/texture.h"
@@ -68,20 +67,25 @@ class Texture2DGL : public Texture2D {
 
   virtual ~Texture2DGL();
 
+  // Overridden from Texture2D
+  virtual void SetRect(int level,
+                       unsigned left,
+                       unsigned top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
+
   // Creates a new Texture2DGL with the given specs. If the GL texture
   // creation fails then it returns NULL otherwise it returns a pointer to the
   // newly created Texture object.
   // The created texture takes ownership of the bitmap data.
   static Texture2DGL* Create(ServiceLocator* service_locator,
-                             Bitmap *bitmap,
+                             Texture::Format format,
+                             int levels,
+                             int width,
+                             int height,
                              bool enable_render_surfaces);
-
-  // Locks the image buffer of a given mipmap level for writing from main
-  // memory.
-  virtual bool Lock(int level, void** texture_data);
-
-  // Unlocks this texture and returns it to OpenGL control.
-  virtual bool Unlock(int level);
 
   // Returns the implementation-specific texture handle for this texture.
   void* GetTextureHandle() const {
@@ -91,17 +95,20 @@ class Texture2DGL : public Texture2D {
   // Gets the GL texture handle.
   GLuint gl_texture() const { return gl_texture_; }
 
-  // Returns a RenderSurface object associated with a mip_level of a texture.
-  // Parameters:
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(int mip_level, Pack *pack);
-
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
+
+ protected:
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificLock(
+      int level, void** texture_data, int* pitch, AccessMode mode);
+
+  // Overridden from Texture2D
+  virtual bool PlatformSpecificUnlock(int level);
+
+  // Overridden from Texture2D
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(int mip_level);
 
  private:
   // Initializes the Texture2DGL from a preexisting OpenGL texture handle
@@ -109,7 +116,10 @@ class Texture2DGL : public Texture2D {
   // The texture takes ownership of the bitmap data.
   Texture2DGL(ServiceLocator* service_locator,
               GLint texture,
-              const Bitmap &bitmap,
+              Texture::Format format,
+              int levels,
+              int width,
+              int height,
               bool resize_npot,
               bool enable_render_surfaces);
 
@@ -119,9 +129,13 @@ class Texture2DGL : public Texture2D {
 
   // Returns true if the backing bitmap has the data for the level.
   bool HasLevel(unsigned int level) const {
-    DCHECK_LT(level, levels());
+    DCHECK_LT(static_cast<int>(level), levels());
     return (has_levels_ & (1 << level)) != 0;
   }
+
+  // Whether or not this texture needs to be resized from NPOT to pot behind
+  // the scenes.
+  bool resize_to_pot_;
 
   RendererGL* renderer_;
 
@@ -135,6 +149,9 @@ class Texture2DGL : public Texture2D {
   // Bitfield that indicates mip levels that are currently stored in the
   // backing bitmap.
   unsigned int has_levels_;
+
+  // Bitfield that indicates which levels are currently locked.
+  unsigned int locked_levels_;
 };
 
 
@@ -148,15 +165,20 @@ class TextureCUBEGL : public TextureCUBE {
 
   // Create a new Cube texture from scratch.
   static TextureCUBEGL* Create(ServiceLocator* service_locator,
-                               Bitmap *bitmap,
+                               Texture::Format format,
+                               int levels,
+                               int edge_length,
                                bool enable_render_surfaces);
 
-  // Locks the image buffer of a given face and mipmap level for loading
-  // from main memory.
-  virtual bool Lock(CubeFace face, int level, void** texture_data);
-
-  // Unlocks the image buffer of a given face and mipmap level.
-  virtual bool Unlock(CubeFace face, int level);
+  // Overridden from TextureCUBE
+  virtual void SetRect(CubeFace face,
+                       int level,
+                       unsigned dst_left,
+                       unsigned dst_top,
+                       unsigned width,
+                       unsigned height,
+                       const void* src_data,
+                       int src_pitch);
 
   // Returns the implementation-specific texture handle for this texture.
   virtual void* GetTextureHandle() const {
@@ -166,27 +188,29 @@ class TextureCUBEGL : public TextureCUBE {
   // Gets the GL texture handle.
   GLuint gl_texture() const { return gl_texture_; }
 
-  // Returns a RenderSurface object associated with a given cube face and
-  // mip_level of a texture.
-  // Parameters:
-  //  face: [in] The cube face from which to extract the surface.
-  //  mip_level: [in] The mip-level of the surface to be returned.
-  //  pack: [in] The pack in which the surface will reside.
-  // Returns:
-  //  Reference to the RenderSurface object.
-  virtual RenderSurface::Ref GetRenderSurface(CubeFace face,
-                                              int level,
-                                              Pack* pack);
-
   // Gets a RGBASwizzleIndices that contains a mapping from
   // RGBA to the internal format used by the rendering API.
   virtual const RGBASwizzleIndices& GetABGR32FSwizzleIndices();
 
+ protected:
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificLock(
+      CubeFace face, int level, void** texture_data, int* pitch,
+      AccessMode mode);
+
+  // Overridden from TextureCUBE
+  virtual bool PlatformSpecificUnlock(CubeFace face, int level);
+
+  // Overridden from TextureCUBE.
+  virtual RenderSurface::Ref PlatformSpecificGetRenderSurface(CubeFace face,
+                                                              int level);
  private:
   // Creates a texture from a pre-existing GL texture object.
   TextureCUBEGL(ServiceLocator* service_locator,
                 GLint texture,
-                const Bitmap &bitmap,
+                Texture::Format format,
+                int levels,
+                int edge_length,
                 bool resize_to_pot,
                 bool enable_render_surfaces);
 
@@ -195,25 +219,31 @@ class TextureCUBEGL : public TextureCUBE {
   void UpdateBackedMipLevel(unsigned int level, CubeFace face);
 
   // Returns true if the backing bitmap has the data for the level.
-  bool HasLevel(unsigned int level, CubeFace face) const {
-    DCHECK_LT(level, levels());
+  bool HasLevel(CubeFace face, unsigned int level) const {
+    DCHECK_LT(static_cast<int>(level), levels());
     return (has_levels_[face] & (1 << level)) != 0;
   }
+
+  // Whether or not this texture needs to be resized from NPOT to pot behind
+  // the scenes.
+  bool resize_to_pot_;
 
   RendererGL* renderer_;
 
   // The handle of the OpenGL texture object.
   GLuint gl_texture_;
 
-  // A bitmap used to back the NPOT textures on POT-only hardware, and to back
-  // the pixel buffer for Lock().
-  Bitmap::Ref backing_bitmap_;
+  // Bitmaps used to back the NPOT textures on POT-only hardware.
+  Bitmap::Ref backing_bitmaps_[NUMBER_OF_FACES];
 
   // Bitfields that indicates mip levels that are currently stored in the
   // backing bitmap, one per face.
-  unsigned int has_levels_[6];
+  unsigned int has_levels_[NUMBER_OF_FACES];
+
+  // Bitfields that indicates which levels are currently locked, one per face.
+  unsigned int locked_levels_[NUMBER_OF_FACES];
 };
 
 }  // namespace o3d
 
-#endif  // O3D_CORE_CROSS_GL_TEXTURE_GL_H__
+#endif  // O3D_CORE_CROSS_GL_TEXTURE_GL_H_

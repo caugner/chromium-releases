@@ -29,7 +29,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #include <build/build_config.h>
 #ifdef OS_WIN
 #include <windows.h>
@@ -40,12 +39,12 @@
 #include <algorithm>
 #include "core/cross/renderer.h"
 #include "core/cross/client_info.h"
+#include "gpu_plugin/np_utils/np_headers.h"
 #include "plugin/cross/o3d_glue.h"
 #include "plugin/cross/config.h"
 #include "plugin/cross/stream_manager.h"
 #include "client_glue.h"
 #include "globals_glue.h"
-#include "third_party/nixysa/files/static_glue/npapi/common.h"
 
 #ifdef OS_MACOSX
 #include "plugin_mac.h"
@@ -101,6 +100,7 @@ PluginObject::PluginObject(NPP npp)
       client_info_manager_(&service_locator_),
       object_manager_(&service_locator_),
       profiler_(&service_locator_),
+      main_thread_task_poster_(&service_locator_, npp),
       fullscreen_(false),
       renderer_(NULL),
       features_(NULL),
@@ -109,10 +109,8 @@ PluginObject::PluginObject(NPP npp)
       pending_ticks_(0),
 #ifdef OS_WIN
       hWnd_(NULL),
-      fullscreen_hWnd_(NULL),
-      parent_hWnd_(NULL),
       plugin_hWnd_(NULL),
-      default_plugin_window_proc_(NULL),
+      content_hWnd_(NULL),
       got_dblclick_(false),
       painted_once_(false),
 #endif
@@ -141,8 +139,13 @@ PluginObject::PluginObject(NPP npp)
       xt_app_context_(NULL),
       xt_interval_(0),
       last_click_time_(0),
+      drawable_(0),
       gtk_container_(NULL),
+      gtk_fullscreen_container_(NULL),
+      gtk_event_source_(NULL),
+      event_handler_id_(0),
       timeout_id_(0),
+      fullscreen_pending_(false),
       draw_(true),
       in_plugin_(false),
 #endif
@@ -655,14 +658,15 @@ void PluginObject::Resize(int width, int height) {
   if (prev_width_ != width || prev_height_ != height) {
     prev_width_ = width;
     prev_height_ = height;
+
     if (renderer_ && !fullscreen_) {
       // Tell the renderer and client that our window has been resized.
       // If we're in fullscreen mode when this happens, we don't want to pass
       // the information through; the renderer will pick it up when we switch
       // back to plugin mode.
-      renderer_->Resize(width, height);
+      renderer_->Resize(prev_width_, prev_height_);
       // This is just so that the client can send an event to the user.
-      client()->SendResizeEvent(width, height, fullscreen_);
+      client()->SendResizeEvent(prev_width_, prev_height_, fullscreen_);
     }
   }
 }
@@ -717,8 +721,8 @@ void PluginObject::RedirectToFile(const char *url) {
   NPObject *global_object;
   NPN_GetValue(npp(), NPNVWindowNPObject, &global_object);
   NPString string;
-  string.utf8characters = full_cmd.get();
-  string.utf8length = strlen(string.utf8characters);
+  string.UTF8Characters = full_cmd.get();
+  string.UTF8Length = strlen(string.UTF8Characters);
   NPVariant result;
   bool temp = NPN_Evaluate(npp(), global_object, &string, &result);
   if (temp) {
@@ -742,11 +746,11 @@ void PluginObject::StorePluginProperty(HWND hWnd, PluginObject *obj) {
   if (obj->GetHWnd()) {  // Clear out the record from the old window first.
     ClearPluginProperty(obj->GetHWnd());
   }
+  obj->SetHWnd(hWnd);
   StorePluginPropertyUnsafe(hWnd, obj);
 }
 
 void PluginObject::StorePluginPropertyUnsafe(HWND hWnd, PluginObject *obj) {
-  obj->SetHWnd(hWnd);
   if (hWnd) {
     SetProp(hWnd, kWindowPropertyName, static_cast<HANDLE>(obj));
     ::DragAcceptFiles(hWnd, true);
@@ -822,52 +826,83 @@ void PluginObject::PlatformSpecificSetCursor() {
 
 #endif  // OS_LINUX
 
+namespace {
+void TickPluginObject(void* data) {
+  PluginObject* plugin_object = static_cast<PluginObject*>(data);
+
+  // Check the plugin has not been destroyed already. Chrome sometimes invokes
+  // async callbacks after destruction.
+  if (!plugin_object->client())
+    return;
+
+  // Don't allow reentrancy through asynchronous ticks. Chrome sometimes does
+  // this. It is also possible for the asyncronous call to be invoked while
+  // a message is being handled. This prevents that.
+  Client::ScopedIncrement reentrance_count(plugin_object->client());
+  if (reentrance_count.get() > 1)
+    return;
+
+  plugin_object->Tick();
+}
+}
+
 void PluginObject::AsyncTick() {
   if (pending_ticks_ >= 1)
     return;
 
-  class TickCallback : public StreamManager::FinishedCallback {
-   public:
-    explicit TickCallback(PluginObject* plugin_object)
-        : plugin_object_(plugin_object) {
-    }
-
-    virtual void Run(DownloadStream*,
-                     bool,
-                     const std::string&,
-                     const std::string&) {
-      plugin_object_->Tick();
-    }
-
-   private:
-    PluginObject* plugin_object_;
-  };
-
   ++pending_ticks_;
 
-  // Invoke Client::Tick and Client::RenderClient in a way that is asynchronous
-  // in Chrome. This avoids issues with making calls into the browser from a
-  // message handler.
-  // If NPN_PluginThreadAsyncCall worked in more browsers, it would be simpler
-  // to use that.
-  // We're calling LoadURL here with a URL that will return 0 bytes on browsers
-  // that support the "data:" protocol and fail in browsers that don't like IE.
-  // On browsers that support it, the side effect is to call the TickCallback.
-  if (!stream_manager_->LoadURL("data:,", NULL, NULL, NULL,
-                                new TickCallback(this), NP_NORMAL)) {
-    // Fallback on synchronous call if asynchronous load fails.
-    Tick();
+  // In Chrome NPN_PluginThreadAsyncCall doesn't seem to function properly.
+  // We resort to loading a data: url with zero bytes to get a tick callback
+  // asynchronously.
+  // TODO(vangelis): Remove this special path when Chrome's
+  // NPN_PluginThreadAsyncCall is fixed.
+  if (IsChrome()) {
+    class TickCallback : public StreamManager::FinishedCallback {
+     public:
+      explicit TickCallback(PluginObject* plugin_object)
+          : plugin_object_(plugin_object) {
+      }
+
+      virtual void Run(DownloadStream*,
+                       bool,
+                       const std::string&,
+                       const std::string&) {
+        plugin_object_->Tick();
+      }
+
+     private:
+      PluginObject* plugin_object_;
+    };
+
+    if (!stream_manager_->LoadURL("data:,", NULL, NULL, NULL,
+                                  new TickCallback(this), NP_NORMAL)) {
+      DLOG(ERROR) << "Chrome failed to access data url";
+      // If the async call fails then tick synchronously.
+      Tick();
+    }
+  } else {
+    // Invoke Tick asynchronously if NPN_PluginThreadAsyncCall is supported.
+    // Otherwise invoke it synchronously.
+    int plugin_major, plugin_minor, browser_major, browser_minor;
+    NPN_Version(&plugin_major, &plugin_minor, &browser_major, &browser_minor);
+    if (browser_major > 0 ||
+        browser_minor >= NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL) {
+      NPN_PluginThreadAsyncCall(npp_, TickPluginObject, this);
+    } else {
+      Tick();
+    }
   }
 }
 
 void PluginObject::Tick() {
-  client_->Tick();
-  if (renderer_ && renderer_->need_to_render()) {
-    client_->RenderClient();
-  }
-
   DCHECK(pending_ticks_ > 0);
   --pending_ticks_;
+
+  client_->Tick();
+  if (renderer_ && renderer_->need_to_render()) {
+    client_->RenderClient(true);
+  }
 }
 
 }  // namespace _o3d

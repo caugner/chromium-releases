@@ -10,7 +10,6 @@
 #include "net/url_request/url_request_status.h"
 #include "webkit/glue/media/simple_data_source.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/webappcachecontext.h"
 
 namespace {
 
@@ -144,7 +143,7 @@ void SimpleDataSource::OnCompletedRequest(const URLRequestStatus& status,
 
   // If we don't get a content length or the request has failed, report it
   // as a network error.
-  DCHECK(size_ == -1 || size_ == data_.length());
+  DCHECK(size_ == -1 || static_cast<size_t>(size_) == data_.length());
   if (size_ == -1) {
     size_ = data_.length();
   }

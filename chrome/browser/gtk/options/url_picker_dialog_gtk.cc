@@ -4,28 +4,23 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
-#include "base/gfx/gtk_util.h"
 #include "chrome/browser/gtk/options/url_picker_dialog_gtk.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/possible_url_model.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/gtk_tree.h"
 #include "chrome/common/gtk_util.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 #include "net/base/net_util.h"
 
 namespace {
-
-// Initial size for dialog.
-const int kDialogDefaultWidth = 450;
-const int kDialogDefaultHeight = 450;
-
-// Initial width of the first column.
-const int kTitleColumnInitialSize = 200;
 
 // Style for recent history label.
 const char kHistoryLabelMarkup[] = "<span weight='bold'>%s</span>";
@@ -37,35 +32,6 @@ enum {
   COL_DISPLAY_URL,
   COL_COUNT,
 };
-
-// Get the row number corresponding to |path|.
-gint GetRowNumForPath(GtkTreePath* path) {
-  gint* indices = gtk_tree_path_get_indices(path);
-  if (!indices) {
-    NOTREACHED();
-    return -1;
-  }
-  return indices[0];
-}
-
-// Get the row number corresponding to |iter|.
-gint GetRowNumForIter(GtkTreeModel* model, GtkTreeIter* iter) {
-  GtkTreePath* path = gtk_tree_model_get_path(model, iter);
-  int row = GetRowNumForPath(path);
-  gtk_tree_path_free(path);
-  return row;
-}
-
-// Get the row number in the child tree model corresponding to |sort_path| in
-// the parent tree model.
-gint GetTreeSortChildRowNumForPath(GtkTreeModel* sort_model,
-                                   GtkTreePath* sort_path) {
-  GtkTreePath *child_path = gtk_tree_model_sort_convert_path_to_child_path(
-      GTK_TREE_MODEL_SORT(sort_model), sort_path);
-  int row = GetRowNumForPath(child_path);
-  gtk_tree_path_free(child_path);
-  return row;
-}
 
 }  // anonymous namespace
 
@@ -85,8 +51,6 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
   add_button_ = gtk_dialog_add_button(GTK_DIALOG(dialog_),
                                       GTK_STOCK_ADD, GTK_RESPONSE_OK);
   gtk_dialog_set_default_response(GTK_DIALOG(dialog_), GTK_RESPONSE_OK);
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), kDialogDefaultWidth,
-                              kDialogDefaultHeight);
   gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
                       gtk_util::kContentAreaSpacing);
 
@@ -138,6 +102,8 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
   gtk_tree_sortable_set_sort_func(GTK_TREE_SORTABLE(history_list_sort_),
                                   COL_DISPLAY_URL, CompareURL, this, NULL);
   history_tree_ = gtk_tree_view_new_with_model(history_list_sort_);
+  g_object_unref(history_list_store_);
+  g_object_unref(history_list_sort_);
   gtk_container_add(GTK_CONTAINER(scroll_window), history_tree_);
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(history_tree_),
                                     TRUE);
@@ -165,7 +131,6 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
       column, l10n_util::GetStringUTF8(IDS_ASI_PAGE_COLUMN).c_str());
   gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_FIXED);
   gtk_tree_view_column_set_resizable(column, TRUE);
-  gtk_tree_view_column_set_fixed_width(column, kTitleColumnInitialSize);
   gtk_tree_view_column_set_sort_column_id(column, COL_TITLE);
 
   GtkTreeViewColumn* url_column = gtk_tree_view_column_new_with_attributes(
@@ -178,10 +143,27 @@ UrlPickerDialogGtk::UrlPickerDialogGtk(UrlPickerCallback* callback,
 
   // Loading data, showing dialog.
   url_table_model_.reset(new PossibleURLModel());
-  url_table_model_->SetObserver(this);
+  url_table_adapter_.reset(new gtk_tree::ModelAdapter(this, history_list_store_,
+                                                      url_table_model_.get()));
   url_table_model_->Reload(profile_);
 
   EnableControls();
+
+  // Set the size of the dialog.
+  gtk_widget_realize(dialog_);
+  int width = 1, height = 1;
+  gtk_util::GetWidgetSizeFromResources(
+      dialog_,
+      IDS_URLPICKER_DIALOG_WIDTH_CHARS,
+      IDS_URLPICKER_DIALOG_HEIGHT_LINES,
+      &width, &height);
+  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
+  // Set the width of the first column as well.
+  gtk_util::GetWidgetSizeFromResources(
+      dialog_,
+      IDS_URLPICKER_DIALOG_LEFT_COLUMN_WIDTH_CHARS, 0,
+      &width, NULL);
+  gtk_tree_view_column_set_fixed_width(column, width);
 
   gtk_widget_show_all(dialog_);
 
@@ -205,7 +187,7 @@ void UrlPickerDialogGtk::EnableControls() {
 }
 
 std::string UrlPickerDialogGtk::GetURLForPath(GtkTreePath* path) const {
-  gint row = GetTreeSortChildRowNumForPath(history_list_sort_, path);
+  gint row = gtk_tree::GetTreeSortChildRowNumForPath(history_list_sort_, path);
   if (row < 0) {
     NOTREACHED();
     return std::string();
@@ -233,55 +215,13 @@ void UrlPickerDialogGtk::SetColumnValues(int row, GtkTreeIter* iter) {
   g_object_unref(pixbuf);
 }
 
-void UrlPickerDialogGtk::AddNodeToList(int row) {
-  GtkTreeIter iter;
-  if (row == 0) {
-    gtk_list_store_prepend(history_list_store_, &iter);
-  } else {
-    GtkTreeIter sibling;
-    gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(history_list_store_), &sibling,
-                                  NULL, row - 1);
-    gtk_list_store_insert_after(history_list_store_, &iter, &sibling);
-  }
-
-  SetColumnValues(row, &iter);
-}
-
-void UrlPickerDialogGtk::OnModelChanged() {
-  gtk_list_store_clear(history_list_store_);
-  for (int i = 0; i < url_table_model_->RowCount(); ++i)
-    AddNodeToList(i);
-}
-
-void UrlPickerDialogGtk::OnItemsChanged(int start, int length) {
-  GtkTreeIter iter;
-  bool rv = gtk_tree_model_iter_nth_child(GTK_TREE_MODEL(history_list_store_),
-                                          &iter, NULL, start);
-  for (int i = 0; i < length; ++i) {
-    if (!rv) {
-      NOTREACHED();
-      return;
-    }
-    SetColumnValues(start + i, &iter);
-    rv = gtk_tree_model_iter_next(GTK_TREE_MODEL(history_list_store_), &iter);
-  }
-}
-
-void UrlPickerDialogGtk::OnItemsAdded(int start, int length) {
-  NOTREACHED();
-}
-
-void UrlPickerDialogGtk::OnItemsRemoved(int start, int length) {
-  NOTREACHED();
-}
-
 // static
 gint UrlPickerDialogGtk::CompareTitle(GtkTreeModel* model,
                                       GtkTreeIter* a,
                                       GtkTreeIter* b,
                                       gpointer window) {
-  int row1 = GetRowNumForIter(model, a);
-  int row2 = GetRowNumForIter(model, b);
+  int row1 = gtk_tree::GetRowNumForIter(model, a);
+  int row2 = gtk_tree::GetRowNumForIter(model, b);
   return reinterpret_cast<UrlPickerDialogGtk*>(window)->url_table_model_->
       CompareValues(row1, row2, IDS_ASI_PAGE_COLUMN);
 }
@@ -291,8 +231,8 @@ gint UrlPickerDialogGtk::CompareURL(GtkTreeModel* model,
                                     GtkTreeIter* a,
                                     GtkTreeIter* b,
                                     gpointer window) {
-  int row1 = GetRowNumForIter(model, a);
-  int row2 = GetRowNumForIter(model, b);
+  int row1 = gtk_tree::GetRowNumForIter(model, a);
+  int row2 = gtk_tree::GetRowNumForIter(model, b);
   return reinterpret_cast<UrlPickerDialogGtk*>(window)->url_table_model_->
       CompareValues(row1, row2, IDS_ASI_URL_COLUMN);
 }
@@ -308,7 +248,7 @@ void UrlPickerDialogGtk::OnHistorySelectionChanged(
     GtkTreeSelection *selection, UrlPickerDialogGtk* window) {
   GtkTreeIter iter;
   if (!gtk_tree_selection_get_selected(selection, NULL, &iter)) {
-    NOTREACHED();
+    // The user has unselected the history element, nothing to do.
     return;
   }
   GtkTreePath* path = gtk_tree_model_get_path(

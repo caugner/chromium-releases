@@ -1,4 +1,4 @@
-# Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,7 +16,6 @@ import shutil
 import subprocess
 
 from layout_package import path_utils
-from layout_package import platform_utils
 from layout_package import test_failures
 from test_types import test_type_base
 
@@ -72,13 +71,12 @@ class ImageDiff(test_type_base.TestTypeBase):
       self.FILENAME_SUFFIX_ACTUAL + '.png')
     expected_filename = self.OutputFilename(filename,
       self.FILENAME_SUFFIX_EXPECTED + '.png')
-    platform_util = platform_utils.PlatformUtility('')
 
     global _compare_available
     cmd = ''
 
     try:
-      executable = platform_util.ImageCompareExecutablePath(target)
+      executable = path_utils.ImageDiffPath(target)
       cmd = [executable, '--diff', actual_filename, expected_filename,
              diff_filename]
     except Exception, e:
@@ -93,6 +91,10 @@ class ImageDiff(test_type_base.TestTypeBase):
           _compare_available = False
         else:
           raise e
+      except ValueError:
+        # work around a race condition in Python 2.4's implementation of
+        # subprocess.Popen
+        pass
 
     global _compare_msg_printed
 
@@ -119,13 +121,9 @@ class ImageDiff(test_type_base.TestTypeBase):
       return failures
 
     # Compare hashes.
-    expected_hash_file = path_utils.ExpectedFilename(filename,
-                                                     '.checksum',
-                                                     self._platform)
+    expected_hash_file = path_utils.ExpectedFilename(filename, '.checksum')
 
-    expected_png_file = path_utils.ExpectedFilename(filename,
-                                                    '.png',
-                                                    self._platform)
+    expected_png_file = path_utils.ExpectedFilename(filename, '.png')
 
     if test_args.show_sources:
       logging.debug('Using %s' % expected_png_file)
@@ -163,3 +161,30 @@ class ImageDiff(test_type_base.TestTypeBase):
                           expected_hash, diff=False, wdiff=False)
 
     return failures
+
+  def DiffFiles(self, file1, file2):
+    """Diff two image files.
+
+    Args:
+      file1, file2: full paths of the files to compare.
+
+    Returns:
+      True if two files are different.
+      False otherwise.
+    """
+
+    try:
+      executable = path_utils.ImageDiffPath('Debug')
+    except Exception, e:
+      logging.warn('Failed to find image diff executable.')
+      return True
+
+    cmd = [ executable, file1, file2 ]
+    result = 1
+    try:
+      result = subprocess.call(cmd);
+    except OSError, e:
+      logging.warn('Failed to compare image diff: %s', e)
+      return True
+
+    return result == 1

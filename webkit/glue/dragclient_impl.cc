@@ -4,30 +4,19 @@
 
 #include "config.h"
 
-#include "base/compiler_specific.h"
-
-MSVC_PUSH_WARNING_LEVEL(0);
+#include "ChromiumDataObject.h"
 #include "ClipboardChromium.h"
-#include "DragData.h"
 #include "Frame.h"
-#include "HitTestResult.h"
-#include "Image.h"
-#include "KURL.h"
-MSVC_POP_WARNING();
 #undef LOG
 
-#include "webkit/glue/dragclient_impl.h"
-
-#include "base/logging.h"
-#include "base/string_util.h"
 #include "webkit/api/public/WebDragData.h"
-#include "webkit/glue/context_menu.h"
+#include "webkit/api/public/WebViewClient.h"
+#include "webkit/glue/dragclient_impl.h"
 #include "webkit/glue/glue_util.h"
-#include "webkit/glue/webdropdata.h"
-#include "webkit/glue/webview_delegate.h"
 #include "webkit/glue/webview_impl.h"
 
 using WebKit::WebDragData;
+using WebKit::WebPoint;
 
 void DragClientImpl::willPerformDragDestinationAction(
     WebCore::DragDestinationAction,
@@ -44,7 +33,7 @@ void DragClientImpl::willPerformDragSourceAction(
 
 WebCore::DragDestinationAction DragClientImpl::actionMaskForDrag(
     WebCore::DragData*) {
-  if (webview_->delegate()->CanAcceptLoadDrops()) {
+  if (webview_->client() && webview_->client()->acceptsLoadDrops()) {
     return WebCore::DragDestinationActionAny;
   } else {
     return static_cast<WebCore::DragDestinationAction>
@@ -71,7 +60,14 @@ void DragClientImpl::startDrag(WebCore::DragImageRef drag_image,
   WebDragData drag_data = webkit_glue::ChromiumDataObjectToWebDragData(
       static_cast<WebCore::ClipboardChromium*>(clipboard)->dataObject());
 
-  webview_->StartDragging(drag_data);
+  WebCore::DragOperation drag_operation_mask;
+  if (!clipboard->sourceOperation(drag_operation_mask))
+    drag_operation_mask = WebCore::DragOperationEvery;
+
+  webview_->StartDragging(
+      webkit_glue::IntPointToWebPoint(event_pos),
+      drag_data,
+      static_cast<WebKit::WebDragOperationsMask>(drag_operation_mask));
 }
 
 WebCore::DragImageRef DragClientImpl::createDragImageForLink(
@@ -83,5 +79,5 @@ WebCore::DragImageRef DragClientImpl::createDragImageForLink(
 }
 
 void DragClientImpl::dragControllerDestroyed() {
-  delete this;
+  // Our lifetime is bound to the WebViewImpl.
 }

@@ -5,16 +5,18 @@
 #include "chrome/common/chrome_paths.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/mac_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#endif
 
 namespace chrome {
 
@@ -58,8 +60,8 @@ bool PathProvider(int key, FilePath* result) {
       return true;
 #else
       return PathService::Get(base::DIR_EXE, result);
-#endif // defined(OS_MACOSX)
-#endif // NDEBUG
+#endif  // defined(OS_MACOSX)
+#endif  // NDEBUG
     case chrome::FILE_RESOURCE_MODULE:
       return PathService::Get(base::FILE_MODULE, result);
   }
@@ -71,9 +73,21 @@ bool PathProvider(int key, FilePath* result) {
   FilePath cur;
   switch (key) {
     case chrome::DIR_USER_DATA:
-      if (!GetDefaultUserDataDirectory(&cur))
+      if (!GetDefaultUserDataDirectory(&cur)) {
+        NOTREACHED();
+        return false;
+      }
+      create_dir = true;
+      break;
+    case chrome::DIR_USER_CACHE:
+#if defined(OS_LINUX)
+      if (!GetUserCacheDirectory(&cur))
         return false;
       create_dir = true;
+#else
+      // No concept of a separate cache directory on non-Linux systems.
+      return false;
+#endif
       break;
     case chrome::DIR_USER_DOCUMENTS:
       if (!GetUserDocumentsDirectory(&cur))
@@ -83,6 +97,8 @@ bool PathProvider(int key, FilePath* result) {
     case chrome::DIR_DEFAULT_DOWNLOADS:
       if (!GetUserDownloadsDirectory(&cur))
         return false;
+      // Do not create the download directory here, we have done it twice now
+      // and annoyed a lot of users.
       break;
     case chrome::DIR_CRASH_DUMPS:
       // The crash reports are always stored relative to the default user data
@@ -99,16 +115,15 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       break;
     case chrome::DIR_INSPECTOR:
+#if defined(OS_MACOSX)
+      cur = mac_util::MainAppBundlePath();
+      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
+#else
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-#if defined(OS_MACOSX)
-      cur = cur.DirName();
-      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
-      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
-#else
       cur = cur.Append(FILE_PATH_LITERAL("resources"));
-      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
 #endif
+      cur = cur.Append(FILE_PATH_LITERAL("inspector"));
       break;
     case chrome::DIR_APP_DICTIONARIES:
 #if defined(OS_LINUX) || defined(OS_MACOSX)
@@ -158,6 +173,14 @@ bool PathProvider(int key, FilePath* result) {
 #endif
       }
       break;
+#if defined(OS_CHROMEOS)
+    case chrome::FILE_CHROMEOS_API:
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("chromeos"));
+      cur = cur.Append(FILE_PATH_LITERAL("libcros.so"));
+      break;
+#endif
     // The following are only valid in the development environment, and
     // will fail if executed from an installed executable (because the
     // generated path won't exist).

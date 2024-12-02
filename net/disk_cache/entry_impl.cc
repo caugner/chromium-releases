@@ -29,7 +29,7 @@ class SyncCallback: public disk_cache::FileIOCallback {
  public:
   SyncCallback(disk_cache::EntryImpl* entry, net::IOBuffer* buffer,
                net::CompletionCallback* callback )
-      : entry_(entry), callback_(callback), buf_(buffer) {
+      : entry_(entry), callback_(callback), buf_(buffer), start_(Time::Now()) {
     entry->AddRef();
     entry->IncrementIoCount();
   }
@@ -41,15 +41,18 @@ class SyncCallback: public disk_cache::FileIOCallback {
   disk_cache::EntryImpl* entry_;
   net::CompletionCallback* callback_;
   scoped_refptr<net::IOBuffer> buf_;
+  Time start_;
 
   DISALLOW_EVIL_CONSTRUCTORS(SyncCallback);
 };
 
 void SyncCallback::OnFileIOComplete(int bytes_copied) {
   entry_->DecrementIoCount();
-  entry_->Release();
-  if (callback_)
+  if (callback_) {
+    entry_->ReportIOTime(disk_cache::EntryImpl::kAsyncIO, start_);
     callback_->Run(bytes_copied);
+  }
+  entry_->Release();
   delete this;
 }
 
@@ -110,12 +113,6 @@ EntryImpl::~EntryImpl() {
             entry_.Data()->data_size[index] - unreported_size_[index],
             entry_.Data()->data_size[index]);
       }
-    }
-    if (node_.HasData() && this == node_.Data()->pointer) {
-      // We have to do this after Flush because we may trigger a cache trim from
-      // there, and technically this entry should be "in use".
-      node_.Data()->pointer = NULL;
-      node_.set_modified();
     }
 
     if (!ret) {
@@ -387,6 +384,22 @@ int EntryImpl::GetAvailableRange(int64 offset, int len, int64* start) {
   return sparse_->GetAvailableRange(offset, len, start);
 }
 
+void EntryImpl::CancelSparseIO() {
+  if (!sparse_.get())
+    return;
+
+  sparse_->CancelIO();
+}
+
+int EntryImpl::ReadyForSparseIO(net::CompletionCallback* completion_callback) {
+  if (!sparse_.get())
+    return net::OK;
+
+  return sparse_->ReadyToUse(completion_callback);
+}
+
+// ------------------------------------------------------------------------
+
 uint32 EntryImpl::GetHash() {
   return entry_.Data()->hash;
 }
@@ -403,7 +416,6 @@ bool EntryImpl::CreateEntry(Addr node_address, const std::string& key,
 
   entry_store->rankings_node = node_address.value();
   node->contents = entry_.address().value();
-  node->pointer = this;
 
   entry_store->hash = hash;
   entry_store->creation_time = Time::Now().ToInternalValue();
@@ -520,12 +532,8 @@ bool EntryImpl::Update() {
   DCHECK(node_.HasData());
 
   RankingsNode* rankings = node_.Data();
-  if (rankings->pointer) {
-    // Nothing to do here, the entry was in memory.
-    DCHECK(rankings->pointer == this);
-  } else {
+  if (!rankings->dirty) {
     rankings->dirty = backend_->GetCurrentEntryId();
-    rankings->pointer = this;
     if (!node_.Store())
       return false;
   }
@@ -536,7 +544,7 @@ bool EntryImpl::IsDirty(int32 current_id) {
   DCHECK(node_.HasData());
   // We are checking if the entry is valid or not. If there is a pointer here,
   // we should not be checking the entry.
-  if (node_.Data()->pointer)
+  if (node_.Data()->dummy)
     return true;
 
   return node_.Data()->dirty && current_id != node_.Data()->dirty;
@@ -548,7 +556,7 @@ void EntryImpl::ClearDirtyFlag() {
 
 void EntryImpl::SetPointerForInvalidEntry(int32 new_id) {
   node_.Data()->dirty = new_id;
-  node_.Data()->pointer = this;
+  node_.Data()->dummy = 0;
   node_.Store();
 }
 
@@ -582,6 +590,31 @@ void EntryImpl::SetTimes(base::Time last_used, base::Time last_modified) {
   node_.Data()->last_modified = last_modified.ToInternalValue();
   node_.set_modified();
 }
+
+void EntryImpl::ReportIOTime(Operation op, const base::Time& start) {
+  int group = backend_->GetSizeGroup();
+  switch (op) {
+    case kRead:
+      CACHE_UMA(AGE_MS, "ReadTime", group, start);
+      break;
+    case kWrite:
+      CACHE_UMA(AGE_MS, "WriteTime", group, start);
+      break;
+    case kSparseRead:
+      CACHE_UMA(AGE_MS, "SparseReadTime", 0, start);
+      break;
+    case kSparseWrite:
+      CACHE_UMA(AGE_MS, "SparseWriteTime", 0, start);
+      break;
+    case kAsyncIO:
+      CACHE_UMA(AGE_MS, "AsyncIOTime", group, start);
+      break;
+    default:
+      NOTREACHED();
+  }
+}
+
+// ------------------------------------------------------------------------
 
 bool EntryImpl::CreateDataBlock(int index, int size) {
   DCHECK(index >= 0 && index < kNumStreams);
@@ -624,8 +657,8 @@ void EntryImpl::DeleteData(Addr address, int index) {
     int failure = DeleteCacheFile(backend_->GetFileName(address)) ? 0 : 1;
     CACHE_UMA(COUNTS, "DeleteFailed", 0, failure);
     if (failure)
-      LOG(ERROR) << "Failed to delete " << backend_->GetFileName(address) <<
-                    " from the cache.";
+      LOG(ERROR) << "Failed to delete " <<
+          backend_->GetFileName(address).value() << " from the cache.";
   } else {
     backend_->DeleteBlock(address, true);
   }
@@ -876,31 +909,9 @@ void EntryImpl::GetData(int index, char** buffer, Addr* address) {
   }
 }
 
-void EntryImpl::ReportIOTime(Operation op, const base::Time& start) {
-  int group = backend_->GetSizeGroup();
-  switch (op) {
-    case kRead:
-      CACHE_UMA(AGE_MS, "ReadTime", group, start);
-      break;
-    case kWrite:
-      CACHE_UMA(AGE_MS, "WriteTime", group, start);
-      break;
-    case kSparseRead:
-      CACHE_UMA(AGE_MS, "SparseReadTime", 0, start);
-      break;
-    case kSparseWrite:
-      CACHE_UMA(AGE_MS, "SparseWriteTime", 0, start);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
 void EntryImpl::Log(const char* msg) {
-  void* pointer = NULL;
   int dirty = 0;
   if (node_.HasData()) {
-    pointer = node_.Data()->pointer;
     dirty = node_.Data()->dirty;
   }
 
@@ -910,7 +921,7 @@ void EntryImpl::Log(const char* msg) {
   Trace("  data: 0x%x 0x%x 0x%x", entry_.Data()->data_addr[0],
         entry_.Data()->data_addr[1], entry_.Data()->long_key);
 
-  Trace("  doomed: %d 0x%p 0x%x", doomed_, pointer, dirty);
+  Trace("  doomed: %d 0x%x", doomed_, dirty);
 }
 
 }  // namespace disk_cache

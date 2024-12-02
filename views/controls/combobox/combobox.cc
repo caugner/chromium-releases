@@ -4,6 +4,7 @@
 
 #include "views/controls/combobox/combobox.h"
 
+#include "app/combobox_model.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/controls/combobox/native_combobox_wrapper.h"
@@ -16,7 +17,7 @@ const char Combobox::kViewClassName[] = "views/Combobox";
 ////////////////////////////////////////////////////////////////////////////////
 // Combobox, public:
 
-Combobox::Combobox(Model* model)
+Combobox::Combobox(ComboboxModel* model)
     : native_wrapper_(NULL),
       model_(model),
       listener_(NULL),
@@ -28,7 +29,7 @@ Combobox::~Combobox() {
 }
 
 void Combobox::ModelChanged() {
-  selected_item_ = std::min(0, model_->GetItemCount(this));
+  selected_item_ = std::min(0, model_->GetItemCount());
   if (native_wrapper_)
     native_wrapper_->UpdateFromModel();
 }
@@ -68,10 +69,10 @@ void Combobox::SetEnabled(bool flag) {
     native_wrapper_->UpdateEnabled();
 }
 
-// VK_ESCAPE should be handled by this view when the drop down list is active.
+// VKEY_ESCAPE should be handled by this view when the drop down list is active.
 // In other words, the list should be closed instead of the dialog.
 bool Combobox::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
-  if (e.GetCharacter() != base::VKEY_ESCAPE ||
+  if (e.GetKeyCode() != base::VKEY_ESCAPE ||
       e.IsShiftDown() || e.IsControlDown() || e.IsAltDown()) {
     return false;
   }

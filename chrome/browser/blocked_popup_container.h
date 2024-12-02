@@ -7,6 +7,8 @@
 // TabContents should use the appropriate methods on TabContents to access
 // information about blocked popups.
 
+// TODO(idanan): Rename class to BlockedContentContainer.
+
 #ifndef CHROME_BROWSER_BLOCKED_POPUP_CONTAINER_H_
 #define CHROME_BROWSER_BLOCKED_POPUP_CONTAINER_H_
 
@@ -15,8 +17,9 @@
 #include <string>
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
+#include "base/string16.h"
 #include "chrome/browser/tab_contents/constrained_window.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/notification_registrar.h"
@@ -100,12 +103,24 @@ class BlockedPopupContainer : public TabContentsDelegate,
   // Returns the number of blocked popups
   size_t GetBlockedPopupCount() const;
 
-  // Returns true if host |index| is whitelisted.  Returns false if |index| is
-  // invalid.
+  // Adds a blocked notice if one is not already there for the same host.
+  void AddBlockedNotice(const GURL& url, const string16& reason);
+
+  // Returns the hostname and reason for notice |index|.
+  void GetHostAndReasonForNotice(size_t index,
+                                 std::string* host,
+                                 string16* reason) const;
+
+  // Returns the number of blocked notices, popups don't count.
+  size_t GetBlockedNoticeCount() const;
+
+  // Returns true if host |index| is whitelisted.
+  // NOTE: Does not sanity-check; do not pass an invalid index!
   bool IsHostWhitelisted(size_t index) const;
 
   // If host |index| is currently whitelisted, un-whitelists it.  Otherwise,
   // whitelists it and opens all blocked popups from it.
+  // NOTE: Does not sanity-check; do not pass an invalid index!
   void ToggleWhitelistingForHost(size_t index);
 
   // Deletes all popups and hides the interface parts.
@@ -123,6 +138,11 @@ class BlockedPopupContainer : public TabContentsDelegate,
 
   // Returns the names of hosts showing popups.
   std::vector<std::string> GetHosts() const;
+
+  // Returns the number of popup hosts.
+  size_t GetPopupHostCount() const {
+    return popup_hosts_.size();
+  }
 
   // Deletes all local state.
   void ClearData();
@@ -179,7 +199,7 @@ class BlockedPopupContainer : public TabContentsDelegate,
   // A number larger than the internal popup count on the Renderer; meant for
   // preventing a compromised renderer from exhausting GDI memory by spawning
   // infinite windows.
-  static const size_t kImpossibleNumberOfPopups = 30;
+  static const size_t kImpossibleNumberOfPopups;
 
  protected:
   struct BlockedPopup {
@@ -200,6 +220,18 @@ class BlockedPopupContainer : public TabContentsDelegate,
 
   // string is hostname.  bool is whitelisted status.
   typedef std::map<std::string, bool> PopupHosts;
+
+  struct BlockedNotice {
+    BlockedNotice(const GURL& url, const string16& reason)
+        : url_(url), reason_(reason) {}
+
+    GURL url_;
+    string16 reason_;
+  };
+  typedef std::vector<BlockedNotice> BlockedNotices;
+
+  // Hosts with notifications showing.
+  typedef std::set<std::string> NoticeHosts;
 
   // Creates a BlockedPopupContainer, anchoring the container to the lower
   // right corner using the given BlockedPopupContainerView. Use only for
@@ -266,6 +298,12 @@ class BlockedPopupContainer : public TabContentsDelegate,
 
   // Information about all popup hosts.
   PopupHosts popup_hosts_;
+
+  // Notices for all blocked resources.
+  BlockedNotices blocked_notices_;
+
+  // Hosts which had notifications shown.
+  NoticeHosts notice_hosts_;
 
   // Our platform specific view.
   BlockedPopupContainerView* view_;

@@ -39,6 +39,7 @@ import os
 import re
 import time
 import unittest
+import base64
 import gflags
 import selenium_constants
 
@@ -59,6 +60,25 @@ def IsValidSuffix(name):
     if name.endswith(suffix):
       return True
   return False
+
+def ScreenshotNameFromTestName(name):
+  name = StripTestTypeSuffix(name)
+
+  if name.startswith("Test"):
+    # Make sure these are in order.
+    prefixes = ["TestStress", "TestSample", "Test"]
+    for prefix in prefixes:
+      if name.startswith(prefix):
+        name = name[len(prefix):]
+        break
+
+    # Lowercase the name only for custom test methods.
+    name = name.lower()
+  
+  name = name.replace("_", "-")
+  name = name.replace("/", "_")
+
+  return name 
 
 
 def StripTestTypeSuffix(name):
@@ -137,21 +157,35 @@ def TakeScreenShotAtPath(session,
   session.window_focus()
 
   # Resize window, and client area if needed.
-  resize_script = ["window.resizeTo(%d, %d)" %
-                   (selenium_constants.RESIZE_WIDTH,
-                    selenium_constants.RESIZE_HEIGHT)]
-  width_specification = session.get_eval(
-      "window.document.getElementById('o3d').style.width")
-  need_client_resize = width_specification.find("%") >= 0
-  if need_client_resize:
-    resize_script += [
-        "window.document.getElementById('o3d').style.width = '800px';",
-        "window.document.getElementById('o3d').style.height = '600px';"]
-  session.run_script("\n".join(resize_script))
+  session.run_script(
+      "(function() {\n"
+      "  var needResize = false;\n"
+      "  var divs = window.document.getElementsByTagName('div');\n"
+      "  for (var ii = 0; ii < divs.length; ++ii) {\n"
+      "    var div = divs[ii];\n"
+      "    if (div.id && div.id == 'o3d') {\n"
+      "      var widthSpec = div.style.width;\n"
+      "      if (widthSpec.indexOf('%') >= 0) {\n"
+      "        div.style.width = '800px';\n"
+      "        div.style.height = '600px';\n"
+      "        needResize = true;\n"
+      "        break;\n"
+      "      }\n"
+      "    }\n"
+      "  }\n"
+      "  window.o3d_seleniumNeedResize = needResize;\n"
+      "} ());\n")
+
+  need_client_resize = (
+      session.get_eval("window.o3d_seleniumNeedResize") == "true")
   if need_client_resize:
     session.wait_for_condition(
         "window.%s.width == 800 && window.%s.height == 600" % (client, client),
         20000)
+  else:
+    session.run_script("window.resizeTo(%d, %d)" %
+                       (selenium_constants.RESIZE_WIDTH,
+                        selenium_constants.RESIZE_HEIGHT))
 
   # Execute screenshot capture code
 
@@ -160,7 +194,8 @@ def TakeScreenShotAtPath(session,
   full_path = filename.replace("\\", "/")
 
   # Attempt to take a screenshot of the display buffer
-  eval_string = ("%s.saveScreen('%s')" % (client, full_path))
+  eval_string = ("%s.toDataURL()" % client)
+
 
   # Set Post render call back to take screenshot
   script = ["window.g_selenium_post_render = false;",
@@ -182,10 +217,13 @@ def TakeScreenShotAtPath(session,
   session.wait_for_condition("window.g_selenium_post_render", 20000)
 
   # Get result
-  success = session.get_eval("window.g_selenium_save_screen_result")
-
-  if success == u"true":
-    print "Saved screenshot %s." % full_path
+  data_url = session.get_eval("window.g_selenium_save_screen_result")
+  expected_header = "data:image/png;base64,"
+  if data_url.startswith(expected_header):
+    png = base64.b64decode(data_url[len(expected_header):])
+    file = open(full_path + ".png", 'wb')
+    file.write(png)
+    file.close()
     return True
 
   return False
@@ -194,25 +232,66 @@ def TakeScreenShotAtPath(session,
 class SeleniumTestCase(unittest.TestCase):
   """Wrapper for TestCase for selenium."""
 
-  def __init__(self, name, session, browser, test_type=None, sample_path=None,
-               options=None):
+  def __init__(self, name, browser, path_to_html, test_type=None,
+              sample_path=None, options=None):
     """Constructor for SampleTests.
 
     Args:
       name: Name of unit test.
       session: Selenium session.
       browser: Name of browser.
+      path_to_html: path to html from server root
       test_type: Type of test ("small", "medium", "large")
       sample_path: Path to test.
+      load_timeout: Time to wait for page to load (ms).
+      run_timeout: Time to wait for test to run.
       options: list of option strings.
     """
 
     unittest.TestCase.__init__(self, name)
-    self.session = session
+    self.name = name
+    self.session = None
     self.browser = browser
     self.test_type = test_type
     self.sample_path = sample_path
-    self.options = options
+    self.path_to_html = path_to_html
+    self.screenshots = []
+    self.load_timeout = 10000
+    self.run_timeout = None
+    self.client = "g_client"
+    # parse options
+    for option in options:
+      if option.startswith("screenshots"):
+        for i in range(int(GetArgument(option))):
+          self.screenshots.append("27.5")
+      elif option.startswith("screenshot"):
+        clock = GetArgument(option)
+        if clock is None:
+          clock = "27.5"
+        self.screenshots.append(clock)
+      elif option.startswith("timeout"):
+        self.load_timeout = int(GetArgument(option))
+      elif option.startswith("client"):
+        self.client = GetArgument(option)
+      elif option.startswith("run_time"):
+        self.run_timeout = int(GetArgument(option))
+    
+    if self.run_timeout is None:
+      # Estimate how long this test needs to run.    
+      time_per_screenshot = 10000
+      if browser == "*iexplore":
+        time_per_screenshot = 60000
+      self.run_timeout = 25000 + len(self.screenshots) * time_per_screenshot
+
+  def SetSession(self, session):
+    self.session = session
+
+  def GetTestTimeout(self):
+    return self.load_timeout + self.run_timeout
+
+  def GetURL(self, url):
+    """Gets a URL for the test."""
+    return self.session.browserURL + self.path_to_html + url
 
   def shortDescription(self):
     """override unittest.TestCase shortDescription for our own descriptions."""
@@ -241,33 +320,17 @@ class SeleniumTestCase(unittest.TestCase):
     g_client which is the o3d client object for that sample.  This is
     used to take a screenshot.
     """
-    screenshots = []
-    timeout = 10000
-    client = "g_client"
-
+    self.assertTrue(not self.load_timeout is None)
+    self.assertTrue(not self.client is None)
     self.assertTrue(self.test_type in ["small", "medium", "large"])
 
-    # parse options
-    for option in self.options:
-      if option.startswith("screenshot"):
-        clock = GetArgument(option)
-        if clock is None:
-          clock = "27.5"
-        screenshots.append(clock)
-      elif option.startswith("timeout"):
-        timeout = GetArgument(option)
-        self.assertTrue(not timeout is None)
-      elif option.startswith("client"):
-        client = GetArgument(option)
-        self.assertTrue(not client is None)
-
-    url = base_path + self.sample_path + ".html"
+    url = self.GetURL(base_path + self.sample_path + ".html")
 
     # load the sample.
     self.session.open(url)
 
     # wait for it to initialize.
-    self.session.wait_for_condition(ready_condition, timeout)
+    self.session.wait_for_condition(ready_condition, self.load_timeout)
 
     self.session.run_script(
         "if (window.o3d_prepForSelenium) { window.o3d_prepForSelenium(); }")
@@ -277,14 +340,15 @@ class SeleniumTestCase(unittest.TestCase):
 
     # take a screenshot.
     screenshot_id = 1
-    for clock in screenshots:
+    for clock in self.screenshots:
       # if they are animated we need to stop the animation and set the clock
       # to some time so we get a known state.
       self.session.run_script("g_timeMult = 0")
       self.session.run_script("g_clock = " + clock)
 
       # take a screenshot.
-      screenshot = self.sample_path.replace("/", "_") + str(screenshot_id)
+      screenshot = self.sample_path.replace("_", "-").replace("/", "_")
+      screenshot += str(screenshot_id)
       self.assertTrue(TakeScreenShot(self.session, self.browser,
-                                     client, screenshot))
+                                     self.client, screenshot))
       screenshot_id += 1

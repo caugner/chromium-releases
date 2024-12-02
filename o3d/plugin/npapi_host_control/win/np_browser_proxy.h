@@ -47,7 +47,7 @@
 
 #include <dispex.h>
 #include <map>
-#include "third_party/npapi/files/include/npupp.h"
+#include "third_party/npapi/include/npupp.h"
 #include "plugin/npapi_host_control/win/dispatch_proxy.h"
 #include "plugin/npapi_host_control/win/np_object_proxy.h"
 
@@ -265,6 +265,10 @@ class NPBrowserProxy {
                            NPObject *obj,
                            NPString *script,
                            NPVariant *result);
+
+  static void NPN_PluginThreadAsyncCall(NPP npp,
+                                        void (*function)(void *),
+                                        void *data);
 
   static void NPN_SetException(NPObject *obj, const NPUTF8 *message);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ static const int kCurrentVersion = 1;
 
 BookmarkCodec::BookmarkCodec()
     : ids_reassigned_(false),
-      ids_missing_(false),
+      ids_valid_(true),
       maximum_id_(0) {
 }
 
@@ -66,15 +66,17 @@ bool BookmarkCodec::Decode(BookmarkNode* bb_node,
                            BookmarkNode* other_folder_node,
                            int64* max_id,
                            const Value& value) {
+  ids_.clear();
   ids_reassigned_ = false;
-  ids_missing_ = false;
+  ids_valid_ = true;
   maximum_id_ = 0;
   stored_checksum_.clear();
   InitializeChecksum();
   bool success = DecodeHelper(bb_node, other_folder_node, value);
   FinalizeChecksum();
-  // If either the checksums differ or some IDs were missing, reassign IDs.
-  if (ids_missing_ || computed_checksum() != stored_checksum())
+  // If either the checksums differ or some IDs were missing/not unique,
+  // reassign IDs.
+  if (!ids_valid_ || computed_checksum() != stored_checksum())
     ReassignIDs(bb_node, other_folder_node);
   *max_id = maximum_id_ + 1;
   return success;
@@ -89,7 +91,7 @@ Value* BookmarkCodec::EncodeNode(const BookmarkNode* node) {
   value->SetString(kNameKey, title);
   value->SetString(kDateAddedKey,
                    Int64ToWString(node->date_added().ToInternalValue()));
-  if (node->GetType() == BookmarkNode::URL) {
+  if (node->type() == BookmarkNode::URL) {
     value->SetString(kTypeKey, kTypeURL);
     std::wstring url = UTF8ToWide(node->GetURL().possibly_invalid_spec());
     value->SetString(kURLKey, url);
@@ -153,8 +155,8 @@ bool BookmarkCodec::DecodeHelper(BookmarkNode* bb_node,
   // Need to reset the type as decoding resets the type to FOLDER. Similarly
   // we need to reset the title as the title is persisted and restored from
   // the file.
-  bb_node->SetType(BookmarkNode::BOOKMARK_BAR);
-  other_folder_node->SetType(BookmarkNode::OTHER_NODE);
+  bb_node->set_type(BookmarkNode::BOOKMARK_BAR);
+  other_folder_node->set_type(BookmarkNode::OTHER_NODE);
   bb_node->SetTitle(l10n_util::GetString(IDS_BOOMARK_BAR_FOLDER_NAME));
   other_folder_node->SetTitle(
       l10n_util::GetString(IDS_BOOMARK_BAR_OTHER_FOLDER_NAME));
@@ -180,10 +182,24 @@ bool BookmarkCodec::DecodeChildren(const ListValue& child_value_list,
 bool BookmarkCodec::DecodeNode(const DictionaryValue& value,
                                BookmarkNode* parent,
                                BookmarkNode* node) {
+  // If no |node| is specified, we'll create one and add it to the |parent|.
+  // Therefore, in that case, |parent| must be non-NULL.
+  if (!node && !parent) {
+    NOTREACHED();
+    return false;
+  }
+
   std::string id_string;
   int64 id = 0;
-  if (!value.GetString(kIdKey, &id_string) || !StringToInt64(id_string, &id))
-    ids_missing_ = true;
+  if (ids_valid_) {
+    if (!value.GetString(kIdKey, &id_string) ||
+        !StringToInt64(id_string, &id) ||
+        ids_.count(id) != 0) {
+      ids_valid_ = false;
+    } else {
+      ids_.insert(id);
+    }
+  }
 
   maximum_id_ = std::max(maximum_id_, id);
 
@@ -193,6 +209,21 @@ bool BookmarkCodec::DecodeNode(const DictionaryValue& value,
   std::wstring date_added_string;
   if (!value.GetString(kDateAddedKey, &date_added_string))
     date_added_string = Int64ToWString(Time::Now().ToInternalValue());
+  base::Time date_added = base::Time::FromInternalValue(
+      StringToInt64(WideToUTF16Hack(date_added_string)));
+#if !defined(OS_WIN)
+  // We changed the epoch for dates on Mac & Linux from 1970 to the Windows
+  // one of 1601. We assume any number we encounter from before 1970 is using
+  // the old format, so we need to add the delta to it.
+  //
+  // This code should be removed at some point:
+  // http://code.google.com/p/chromium/issues/detail?id=20264
+  if (date_added.ToInternalValue() <
+      base::Time::kWindowsEpochDeltaMicroseconds) {
+    date_added = base::Time::FromInternalValue(date_added.ToInternalValue() +
+        base::Time::kWindowsEpochDeltaMicroseconds);
+  }
+#endif
 
   std::wstring type_string;
   if (!value.GetString(kTypeKey, &type_string))
@@ -209,11 +240,11 @@ bool BookmarkCodec::DecodeNode(const DictionaryValue& value,
     if (!node)
       node = new BookmarkNode(id, GURL(WideToUTF8(url_string)));
     else
-      return false; // Node invalid.
+      return false;  // Node invalid.
 
     if (parent)
       parent->Add(parent->GetChildCount(), node);
-    node->SetType(BookmarkNode::URL);
+    node->set_type(BookmarkNode::URL);
     UpdateChecksumWithUrlNode(id_string, title, url_string);
   } else {
     std::wstring last_modified_date;
@@ -234,7 +265,7 @@ bool BookmarkCodec::DecodeNode(const DictionaryValue& value,
       node->set_id(id);
     }
 
-    node->SetType(BookmarkNode::FOLDER);
+    node->set_type(BookmarkNode::FOLDER);
     node->set_date_group_modified(Time::FromInternalValue(
         StringToInt64(WideToUTF16Hack(last_modified_date))));
 
@@ -248,8 +279,7 @@ bool BookmarkCodec::DecodeNode(const DictionaryValue& value,
   }
 
   node->SetTitle(title);
-  node->set_date_added(Time::FromInternalValue(
-      StringToInt64(WideToUTF16Hack(date_added_string))));
+  node->set_date_added(date_added);
   return true;
 }
 

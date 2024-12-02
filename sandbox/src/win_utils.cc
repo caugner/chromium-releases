@@ -197,42 +197,15 @@ bool GetPathFromHandle(HANDLE handle, std::wstring* path) {
 
 };  // namespace sandbox
 
-// The information is cached in a map. The map has to be global, so it's memory
-// is leaked, and it's ok.
+// TODO(cpu): This is not the final code we want here but we are yet
+// to understand what is going on. See bug 11789.
 void ResolveNTFunctionPtr(const char* name, void* ptr) {
-  static std::map<std::string, FARPROC>* function_map = NULL;
-  if (!function_map)
-    function_map = new std::map<std::string, FARPROC>;
-
-  static HMODULE ntdll = ::GetModuleHandle(sandbox::kNtdllName);
-
+  HMODULE ntdll = ::GetModuleHandle(sandbox::kNtdllName);
   FARPROC* function_ptr = reinterpret_cast<FARPROC*>(ptr);
-  *function_ptr = (*function_map)[name];
+  *function_ptr = ::GetProcAddress(ntdll, name);
   if (*function_ptr)
     return;
-
+  // We have data that re-trying helps.
   *function_ptr = ::GetProcAddress(ntdll, name);
-  (*function_map)[name] = *function_ptr;
-  DCHECK(*function_ptr) << "Failed to resolve NTDLL function";
-
-  if (!*function_ptr) {
-    // If we return NULL, we are going to crash. Unfortunately, this happens.
-    // See bug 11789.
-    // Maybe our module handle is not valid anymore?
-    HMODULE ntdll2 = ::GetModuleHandle(sandbox::kNtdllName);
-    *function_ptr = ::GetProcAddress(ntdll2, name);
-    (*function_map)[name] = *function_ptr;
-
-    // TODO(nsylvain): Remove this check after we are done troubleshooting.
-    CHECK(ntdll2) << "Fatal error: NTLL module is NULL";
-    CHECK(*function_ptr) << "Fatal error: Failed to resolve NTDLL function";
-
-    // If we are here, it means that getting the new module handle worked. This
-    // is not really expected. We want to receive some reports from users, so
-    // we will crash anyway.
-    // TODO(nsylvain): Remove this check after we are done troubleshooting.
-    CHECK(ntdll) << "Fatal Error: NTDLL module was NULL.";
-    CHECK(ntdll == ntdll2) << "Fatal Error: NTDLL module has been moved.";
-    CHECK(false) << "Fatal Error: GetProcAddress Inconsistency";
-  }
+  CHECK(*function_ptr);
 }

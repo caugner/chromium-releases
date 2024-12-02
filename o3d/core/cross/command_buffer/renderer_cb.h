@@ -36,10 +36,13 @@
 #define O3D_CORE_CROSS_COMMAND_BUFFER_RENDERER_CB_H_
 
 #include "core/cross/precompile.h"
+#include <vector>
 #include "core/cross/renderer.h"
-#include "command_buffer/common/cross/rpc.h"
+#include "command_buffer/common/cross/constants.h"
 #include "command_buffer/common/cross/resource.h"
 #include "command_buffer/client/cross/id_allocator.h"
+#include "gpu_plugin/command_buffer.h"
+#include "gpu_plugin/np_utils/np_object_pointer.h"
 
 namespace o3d {
 namespace command_buffer {
@@ -60,15 +63,7 @@ class RendererCB : public Renderer {
   typedef command_buffer::IdAllocator IdAllocator;
   typedef command_buffer::FencedAllocatorWrapper FencedAllocatorWrapper;
 
-  // Creates a default RendererCB.
-  // The default command buffer is 256K entries.
-  // The default transfer buffer is 16MB.
-  static RendererCB *CreateDefault(ServiceLocator* service_locator);
-  ~RendererCB();
-
-  // Initialises the renderer for use, claiming hardware resources.
-  virtual InitStatus InitPlatformSpecific(const DisplayWindow& display_window,
-                                          bool off_screen);
+  virtual ~RendererCB();
 
   // Handles the plugin resize event.
   virtual void Resize(int width, int height);
@@ -79,38 +74,38 @@ class RendererCB : public Renderer {
   // Destroy() should be called before Init() is called again.
   virtual void Destroy();
 
-  // Prepares the rendering device for subsequent draw calls.
-  virtual bool BeginDraw();
+  // Overridden from Renderer.
+  virtual bool GoFullscreen(const DisplayWindow& display,
+                            int mode_id) {
+    // TODO(gman): implement this.
+    return false;
+  }
 
-  // Clears the current buffers.
-  virtual void Clear(const Float4 &color,
-                     bool color_flag,
-                     float depth,
-                     bool depth_flag,
-                     int stencil,
-                     bool stencil_flag);
+  // Overridden from Renderer.
+  virtual bool CancelFullscreen(const DisplayWindow& display,
+                                int width, int height) {
+    // TODO(gman): implement this.
+    return false;
+  }
 
-  // Notifies the renderer that the draw calls for this frame are completed.
-  virtual void EndDraw();
+  // Tells whether we're currently displayed fullscreen or not.
+  virtual bool fullscreen() const {
+    // TODO(gman): implement this.
+    return false;
+  }
 
-  // Does any pre-rendering preparation
-  virtual bool StartRendering();
+  // Get a vector of the available fullscreen display modes.
+  // Clears *modes on error.
+  virtual void GetDisplayModes(std::vector<DisplayMode> *modes) {
+    // TODO(gman): implement this.
+  }
 
-  // Presents the results of the draw calls for this frame.
-  virtual void FinishRendering();
-
-  // Renders this Element using the parameters from override first, followed by
-  // the draw_element, followed by params on this Primitive and material.
-  // Parameters:
-  //   element: Element to draw
-  //   draw_element: DrawElement to override params with.
-  //   material: Material to render with.
-  //   override: Override to render with.
-  virtual void RenderElement(Element* element,
-                             DrawElement* draw_element,
-                             Material* material,
-                             ParamObject* override,
-                             ParamCache* param_cache);
+  // Get a single fullscreen display mode by id.
+  // Returns true on success, false on error.
+  virtual bool GetDisplayMode(int id, DisplayMode *mode) {
+    // TODO(gman): implement this.
+    return false;
+  }
 
   // Creates a StreamBank, returning a platform specific implementation class.
   virtual StreamBank::Ref CreateStreamBank();
@@ -134,16 +129,10 @@ class RendererCB : public Renderer {
   // Creates and returns a platform specific Sampler object.
   virtual Sampler::Ref CreateSampler();
 
-  // TODO: Fill this in
+  // Creates and returns a platform specific RenderDepthStencilSurface object.
   virtual RenderDepthStencilSurface::Ref CreateDepthStencilSurface(
       int width,
-      int height) {
-    return RenderDepthStencilSurface::Ref();
-  }
-
-  // Saves a png screenshot.
-  // Returns true on success and false on failure.
-  virtual bool SaveScreen(const String& file_name);
+      int height);
 
   // Gets the allocator for vertex buffer IDs.
   IdAllocator &vertex_buffer_ids() { return vertex_buffer_ids_; }
@@ -166,16 +155,17 @@ class RendererCB : public Renderer {
   // Gets the allocator for sampler IDs.
   IdAllocator &sampler_ids() { return sampler_ids_; }
 
+  // Gets the allocator for render surfaces IDs.
+  IdAllocator &render_surface_ids() { return render_surface_ids_; }
+
+  // Gets the allocator for depth stencil surfaces IDs.
+  IdAllocator &depth_surface_ids() { return depth_surface_ids_; }
+
   // Gets the command buffer helper.
   command_buffer::CommandBufferHelper *helper() const { return helper_; }
 
-  // Gets the sync interface.
-  command_buffer::BufferSyncInterface *sync_interface() const {
-    return sync_interface_;
-  }
-
   // Gets the registered ID of the transfer shared memory.
-  unsigned int transfer_shm_id() const { return transfer_shm_id_; }
+  int32 transfer_shm_id() const { return transfer_shm_id_; }
 
   // Gets the base address of the transfer shared memory.
   void *transfer_shm_address() const { return transfer_shm_address_; }
@@ -188,10 +178,34 @@ class RendererCB : public Renderer {
   // Overridden from Renderer.
   virtual const int* GetRGBAUByteNSwizzleTable();
 
+  command_buffer::parse_error::ParseError GetParseError();
+
  protected:
   // Protected so that callers are forced to call the factory method.
-  RendererCB(ServiceLocator* service_locator, unsigned int command_buffer_size,
-             unsigned int transfer_memory_size);
+  RendererCB(ServiceLocator* service_locator, int32 transfer_memory_size);
+
+  // Overridden from Renderer.
+  virtual bool PlatformSpecificBeginDraw();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificEndDraw();
+
+  // Overridden from Renderer.
+  virtual bool PlatformSpecificStartRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificFinishRendering();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificPresent();
+
+  // Overridden from Renderer.
+  virtual void PlatformSpecificClear(const Float4 &color,
+                                     bool color_flag,
+                                     float depth,
+                                     bool depth_flag,
+                                     int stencil,
+                                     bool stencil_flag);
 
   // Creates a platform specific ParamCache.
   virtual ParamCache* CreatePlatformSpecificParamCache();
@@ -209,11 +223,8 @@ class RendererCB : public Renderer {
 
   // Overridden from Renderer.
   virtual void SetRenderSurfacesPlatformSpecific(
-      RenderSurface* surface,
-      RenderDepthStencilSurface* depth_surface);
-
-  // Overridden from Renderer.
-  virtual Texture::Ref CreatePlatformSpecificTextureFromBitmap(Bitmap* bitmap);
+      const RenderSurface* surface,
+      const RenderDepthStencilSurface* depth_surface);
 
   // Overridden from Renderer.
   virtual Texture2D::Ref CreatePlatformSpecificTexture2D(
@@ -230,22 +241,27 @@ class RendererCB : public Renderer {
       int levels,
       bool enable_render_surfaces);
 
+  // Overridden from Renderer.
+  virtual void ApplyDirtyStates();
+
+ protected:
+  // Initializes the renderer for use, claiming hardware resources.
+  virtual InitStatus InitPlatformSpecific(const DisplayWindow& display_window,
+                                          bool off_screen);
+
+  // Create a shared memory object of the given size.
+  virtual gpu_plugin::NPObjectPointer<NPObject>
+      CreateSharedMemory(int32 size, NPP npp) = 0;
+
  private:
-  // Applies states that have been modified (marked dirty).
-  void ApplyDirtyStates();
-
-  // Performs cross-platform initialization.
-  void InitCommon(unsigned int width, unsigned int height);
-
-  unsigned int cmd_buffer_size_;
-  unsigned int transfer_memory_size_;
-  command_buffer::RPCShmHandle transfer_shm_;
-  unsigned int transfer_shm_id_;
+  int32 transfer_memory_size_;
+  gpu_plugin::NPObjectPointer<NPObject> transfer_shm_;
+  int32 transfer_shm_id_;
   void *transfer_shm_address_;
-  command_buffer::BufferSyncInterface *sync_interface_;
+  NPP npp_;
+  gpu_plugin::NPObjectPointer<NPObject> command_buffer_;
   command_buffer::CommandBufferHelper *helper_;
   FencedAllocatorWrapper *allocator_;
-  Win32CBServer *cb_server_;
 
   IdAllocator vertex_buffer_ids_;
   IdAllocator index_buffer_ids_;
@@ -254,12 +270,61 @@ class RendererCB : public Renderer {
   IdAllocator effect_param_ids_;
   IdAllocator texture_ids_;
   IdAllocator sampler_ids_;
-  unsigned int frame_token_;
+  IdAllocator render_surface_ids_;
+  IdAllocator depth_surface_ids_;
+  int32 frame_token_;
 
   class StateManager;
   scoped_ptr<StateManager> state_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererCB);
+};
+
+// This subclass initializes itself with a locally created in-process
+// CommandBuffer and GPUProcessor. This class will eventually go away and the
+// code in RendererCBRemote will be merged into RendererCB.
+class RendererCBLocal : public RendererCB {
+ public:
+  static gpu_plugin::NPObjectPointer<gpu_plugin::CommandBuffer>
+      CreateCommandBuffer(NPP npp, void* hwnd, int32 size);
+
+  // Creates a default RendererCBLocal.
+  static RendererCBLocal *CreateDefault(ServiceLocator* service_locator);
+
+ protected:
+  RendererCBLocal(ServiceLocator* service_locator,
+                  int32 transfer_memory_size);
+  virtual ~RendererCBLocal();
+
+  // Create a shared memory object of the given size using the system services
+  // library directly.
+  virtual gpu_plugin::NPObjectPointer<NPObject>
+      CreateSharedMemory(int32 size, NPP npp);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RendererCBLocal);
+};
+
+// This subclass initializes itself with a remotely created, potentially out-
+// of-process CommandBuffer. It requires that the browser supports the "system
+// service" to create shared memory, which is not available in the mange branch
+// of Chrome. Use RendererCBLocal for now.
+class RendererCBRemote : public RendererCB {
+ public:
+  // Creates a default RendererCBRemote.
+  static RendererCBRemote *CreateDefault(ServiceLocator* service_locator);
+
+ protected:
+  RendererCBRemote(ServiceLocator* service_locator, int32 transfer_memory_size);
+  virtual ~RendererCBRemote();
+
+  // Create a shared memory object using the browser's
+  // chromium.system.createSharedMemory method.
+  virtual gpu_plugin::NPObjectPointer<NPObject>
+      CreateSharedMemory(int32 size, NPP npp);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(RendererCBRemote);
 };
 
 }  // namespace o3d

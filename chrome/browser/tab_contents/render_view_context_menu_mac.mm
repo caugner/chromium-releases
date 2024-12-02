@@ -4,7 +4,7 @@
 
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
 
-#include "app/l10n_util.h"
+#include "app/l10n_util_mac.h"
 #include "base/compiler_specific.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/profile.h"
@@ -70,12 +70,8 @@ void RenderViewContextMenuMac::DoInit() {
 // and middle-truncate?
 NSString* RenderViewContextMenuMac::PrepareLabelForDisplay(
     const string16& label) {
-  // Strip out any "&"'s that are windows accelerators and we don't use.
-  NSMutableString* title =
-    [NSMutableString stringWithString:base::SysUTF16ToNSString(label)];
+  NSString* title = l10n_util::FixUpWindowsStyleLabel(label);
   DCHECK(title);
-  NSRange range = NSMakeRange(0, [title length]);
-  [title replaceOccurrencesOfString:@"&" withString:@"" options:0 range:range];
   return title ? title : @"";
 }
 

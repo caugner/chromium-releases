@@ -14,16 +14,7 @@ extern const wchar_t kTabIdKey[];
 extern const wchar_t kUrlKey[];
 extern const wchar_t kTitleKey[];
 extern const wchar_t kIconIdKey[];
-
-// Error messages.
-extern const char kNoExtensionError[];
-extern const char kNoTabError[];
-extern const char kNoPageActionError[];
-extern const char kUrlNotActiveError[];
-
-// Function names.
-extern const char kEnablePageActionFunction[];
-extern const char kDisablePageActionFunction[];
+extern const wchar_t kButtonKey[];
 
 };  // namespace extension_page_actions_module_constants
 

@@ -5,9 +5,9 @@
 #ifndef CHROME_TEST_UNIT_CHROME_TEST_SUITE_H_
 #define CHROME_TEST_UNIT_CHROME_TEST_SUITE_H_
 
-#include "build/build_config.h"
-
 #include <string>
+
+#include "build/build_config.h"
 
 #include "app/app_paths.h"
 #include "app/resource_bundle.h"
@@ -19,14 +19,12 @@
 #include "base/path_service.h"
 #include "base/ref_counted.h"
 #include "base/scoped_nsautorelease_pool.h"
-#include "base/test_suite.h"
+#include "base/test/test_suite.h"
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#if defined(OS_MACOSX)
-#include "chrome/common/mac_app_names.h"
-#endif
 #include "chrome/test/testing_browser_process.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
@@ -63,7 +61,9 @@ class WarningHostResolverProc : public net::HostResolverProc {
 
 class ChromeTestSuite : public TestSuite {
  public:
-  ChromeTestSuite(int argc, char** argv) : TestSuite(argc, argv) {
+  ChromeTestSuite(int argc, char** argv)
+      : TestSuite(argc, argv),
+        stats_table_(NULL) {
   }
 
  protected:
@@ -93,13 +93,13 @@ class ChromeTestSuite : public TestSuite {
       user_data_dir = user_data_dir.AppendASCII("test_user_data");
     }
     if (!user_data_dir.empty())
-      PathService::Override(chrome::DIR_USER_DATA,
-                            user_data_dir.ToWStringHack());
+      PathService::Override(chrome::DIR_USER_DATA, user_data_dir);
 
 #if defined(OS_MACOSX)
+    // Look in the framework bundle for resources.
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
-    path = path.AppendASCII(MAC_BROWSER_APP_NAME);
+    path = path.Append(chrome::kFrameworkName);
     mac_util::SetOverrideAppBundlePath(path);
 #endif
 

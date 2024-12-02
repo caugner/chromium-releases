@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/webmessageportchannel_impl.h"
 #include "chrome/common/worker_messages.h"
 #include "chrome/renderer/webworker_proxy.h"
 #include "chrome/worker/worker_thread.h"
@@ -16,29 +17,14 @@
 #include "webkit/api/public/WebURL.h"
 #include "webkit/api/public/WebWorker.h"
 
+using WebKit::WebMessagePortChannel;
+using WebKit::WebMessagePortChannelArray;
 using WebKit::WebString;
 using WebKit::WebWorker;
 using WebKit::WebWorkerClient;
 
-namespace {
-
 // How long to wait for worker to finish after it's been told to terminate.
-static const int kMaxTimeForRunawayWorkerMs = 3000;
-
-class KillProcessTask : public Task {
- public:
-  KillProcessTask(WebWorkerClientProxy* proxy) : proxy_(proxy) { }
-  void Run() {
-    // This shuts down the process cleanly from the perspective of the browser
-    // process, and avoids the crashed worker infobar from appearing to the new
-    // page.
-    proxy_->workerContextDestroyed();
-  }
- private:
-  WebWorkerClientProxy* proxy_;
-};
-
-}
+#define kMaxTimeForRunawayWorkerMs 3000
 
 static bool UrlIsNativeWorker(const GURL& url) {
   // If the renderer was not passed the switch to enable native workers,
@@ -60,7 +46,8 @@ static bool UrlIsNativeWorker(const GURL& url) {
 
 WebWorkerClientProxy::WebWorkerClientProxy(const GURL& url, int route_id)
     : url_(url),
-      route_id_(route_id) {
+      route_id_(route_id),
+      ALLOW_THIS_IN_INITIALIZER_LIST(kill_process_factory_(this)) {
   if (UrlIsNativeWorker(url)) {
     // Launch a native worker.
     impl_ = NativeWebWorkerImpl::create(this);
@@ -73,13 +60,27 @@ WebWorkerClientProxy::WebWorkerClientProxy(const GURL& url, int route_id)
 }
 
 WebWorkerClientProxy::~WebWorkerClientProxy() {
+  impl_->clientDestroyed();
   WorkerThread::current()->RemoveRoute(route_id_);
   ChildProcess::current()->ReleaseProcess();
 }
 
 void WebWorkerClientProxy::postMessageToWorkerObject(
-    const WebString& message) {
-  Send(new WorkerHostMsg_PostMessageToWorkerObject(route_id_, message));
+    const WebString& message,
+    const WebMessagePortChannelArray& channels) {
+  std::vector<int> message_port_ids(channels.size());
+  std::vector<int> routing_ids(channels.size());
+  for (size_t i = 0; i < channels.size(); ++i) {
+    WebMessagePortChannelImpl* webchannel =
+        static_cast<WebMessagePortChannelImpl*>(channels[i]);
+    message_port_ids[i] = webchannel->message_port_id();
+    webchannel->QueueMessages();
+    DCHECK(message_port_ids[i] != MSG_ROUTING_NONE);
+    routing_ids[i] = MSG_ROUTING_NONE;
+  }
+
+  Send(new WorkerMsg_PostMessage(
+      route_id_, message, message_port_ids, routing_ids));
 }
 
 void WebWorkerClientProxy::postExceptionToWorkerObject(
@@ -144,8 +145,7 @@ void WebWorkerClientProxy::OnMessageReceived(const IPC::Message& message) {
                         WebWorker::startWorkerContext)
     IPC_MESSAGE_HANDLER(WorkerMsg_TerminateWorkerContext,
                         OnTerminateWorkerContext)
-    IPC_MESSAGE_FORWARD(WorkerMsg_PostMessageToWorkerContext, impl_,
-                        WebWorker::postMessageToWorkerContext)
+    IPC_MESSAGE_HANDLER(WorkerMsg_PostMessage, OnPostMessage)
     IPC_MESSAGE_FORWARD(WorkerMsg_WorkerObjectDestroyed, impl_,
                         WebWorker::workerObjectDestroyed)
   IPC_END_MESSAGE_MAP()
@@ -163,6 +163,24 @@ void WebWorkerClientProxy::OnTerminateWorkerContext() {
     return;
   }
 
+  // This shuts down the process cleanly from the perspective of the browser
+  // process, and avoids the crashed worker infobar from appearing to the new
+  // page.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      new KillProcessTask(this), kMaxTimeForRunawayWorkerMs);
+      kill_process_factory_.NewRunnableMethod(
+          &WebWorkerClientProxy::workerContextDestroyed),
+          kMaxTimeForRunawayWorkerMs);
+}
+
+void WebWorkerClientProxy::OnPostMessage(
+    const string16& message,
+    const std::vector<int>& sent_message_port_ids,
+    const std::vector<int>& new_routing_ids) {
+  WebMessagePortChannelArray channels(sent_message_port_ids.size());
+  for (size_t i = 0; i < sent_message_port_ids.size(); i++) {
+    channels[i] = new WebMessagePortChannelImpl(
+        new_routing_ids[i], sent_message_port_ids[i]);
+  }
+
+  impl_->postMessageToWorkerContext(message, channels);
 }

@@ -32,7 +32,6 @@
 
 // This file contains the implementation for the Client class.
 
-#include "core/cross/precompile.h"
 #include "core/cross/client.h"
 #include "core/cross/draw_context.h"
 #include "core/cross/effect.h"
@@ -55,6 +54,7 @@
 #include "core/cross/profiler.h"
 #include "utils/cross/string_writer.h"
 #include "utils/cross/json_writer.h"
+#include "utils/cross/dataurl.h"
 
 #ifdef OS_WIN
 #include "core/cross/core_metrics.h"
@@ -70,20 +70,19 @@ namespace o3d {
 Client::Client(ServiceLocator* service_locator)
     : service_locator_(service_locator),
       object_manager_(service_locator),
-      profiler_(service_locator),
       error_status_(service_locator),
       draw_list_manager_(service_locator),
       counter_manager_(service_locator),
       transformation_context_(service_locator),
       semantic_manager_(service_locator),
-      rendering_(false),
-      render_tree_called_(false),
+      profiler_(service_locator),
       renderer_(service_locator),
       evaluation_counter_(service_locator),
-      event_manager_(),
-      root_(NULL),
+      render_tree_called_(false),
       render_mode_(RENDERMODE_CONTINUOUS),
+      event_manager_(),
       last_tick_time_(0),
+      root_(NULL),
 #ifdef OS_WIN
       calls_(0),
 #endif
@@ -139,6 +138,18 @@ void Client::Cleanup() {
   ClearTickCallback();
   event_manager_.ClearAll();
   counter_manager_.ClearAllCallbacks();
+
+  // Disable continuous rendering because there is nothing to render after
+  // Cleanup is called. This speeds up the the process of unloading the page.
+  // It also preserves the last rendered frame so long as it does not become
+  // invalid.
+  render_mode_ = RENDERMODE_ON_DEMAND;
+
+  // Destroy the packs here if possible. If there are a lot of objects it takes
+  // a long time and seems to make Chrome timeout if it happens in NPP_Destroy.
+  root_.Reset();
+  rendergraph_root_.Reset();
+  object_manager_->DestroyAllPacks();
 }
 
 Pack* Client::CreatePack() {
@@ -210,9 +221,8 @@ void Client::ClearLostResourcesCallback() {
   }
 }
 
-void Client::RenderClient() {
+void Client::RenderClientInner(bool present, bool send_callback) {
   ElapsedTimeTimer timer;
-  rendering_ = true;
   render_tree_called_ = false;
   total_time_to_render_ = 0.0f;
 
@@ -223,7 +233,8 @@ void Client::RenderClient() {
     counter_manager_.AdvanceRenderFrameCounters(1.0f);
 
     profiler_->ProfileStart("Render callback");
-    render_callback_manager_.Run(render_event_);
+    if (send_callback)
+      render_callback_manager_.Run(render_event_);
     profiler_->ProfileStop("Render callback");
 
     if (!render_tree_called_) {
@@ -238,12 +249,18 @@ void Client::RenderClient() {
       }
     }
 
+    renderer_->FinishRendering();
+    if (present) {
+      renderer_->Present();
+      // This has to be called before the POST render callback because
+      // the post render callback may call Client::Render.
+      renderer_->set_need_to_render(false);
+    }
+
     // Call post render callback.
     profiler_->ProfileStart("Post-render callback");
     post_render_callback_manager_.Run(render_event_);
     profiler_->ProfileStop("Post-render callback");
-
-    renderer_->FinishRendering();
 
     // Update Render stats.
     render_event_.set_elapsed_time(
@@ -281,17 +298,30 @@ void Client::RenderClient() {
     metric_render_prims_rendered.AddSample(render_event_.primitives_rendered());
 #endif  // OS_WIN
   }
-
-  rendering_ = false;
 }
 
+void Client::RenderClient(bool send_callback) {
+  if (!renderer_.IsAvailable())
+    return;
+
+  RenderClientInner(true, send_callback);
+}
 
 // Executes draw calls for all visible shapes in a subtree
 void Client::RenderTree(RenderNode *tree_root) {
-  render_tree_called_ = true;
-
   if (!renderer_.IsAvailable())
     return;
+
+  if (!renderer_->rendering()) {
+    // Render tree can not be called if we are not rendering because all calls
+    // to RenderTree must happen inside renderer->StartRendering() /
+    // renderer->FinishRendering() calls.
+    O3D_ERROR(service_locator_)
+        << "RenderTree must not be called outside of rendering.";
+    return;
+  }
+
+  render_tree_called_ = true;
 
   // Only render the shapes if BeginDraw() succeeds
   profiler_->ProfileStart("RenderTree");
@@ -388,13 +418,80 @@ void Client::InvalidateAllParameters() {
   evaluation_counter_->InvalidateAllParameters();
 }
 
-bool Client::SaveScreen(const String& file_name) {
+String Client::GetScreenshotAsDataURL()  {
+  // To take a screenshot we create a render target and render into it
+  // then get a bitmap from that.
+  int pot_width =
+      static_cast<int>(image::ComputePOTSize(renderer_->display_width()));
+  int pot_height =
+      static_cast<int>(image::ComputePOTSize(renderer_->display_height()));
+  if (pot_width == 0 || pot_height == 0) {
+    return dataurl::kEmptyDataURL;
+  }
+  Texture2D::Ref texture = renderer_->CreateTexture2D(
+      pot_width,
+      pot_height,
+      Texture::ARGB8,
+      1,
+      true);
+  if (texture.IsNull()) {
+    return dataurl::kEmptyDataURL;
+  }
+  RenderSurface::Ref surface(texture->GetRenderSurface(0));
+  if (surface.IsNull()) {
+    return dataurl::kEmptyDataURL;
+  }
+  RenderDepthStencilSurface::Ref depth(renderer_->CreateDepthStencilSurface(
+      pot_width,
+      pot_height));
+  if (depth.IsNull()) {
+    return dataurl::kEmptyDataURL;
+  }
+  surface->SetClipSize(renderer_->display_width(), renderer_->display_height());
+  depth->SetClipSize(renderer_->display_width(), renderer_->display_height());
+
+  const RenderSurface* old_render_surface_;
+  const RenderDepthStencilSurface* old_depth_surface_;
+  bool is_back_buffer;
+
+  renderer_->GetRenderSurfaces(&old_render_surface_, &old_depth_surface_,
+                               &is_back_buffer);
+  renderer_->SetRenderSurfaces(surface, depth, true);
+
+  RenderClientInner(false, true);
+
+  renderer_->SetRenderSurfaces(old_render_surface_, old_depth_surface_,
+                               is_back_buffer);
+
+  Bitmap::Ref bitmap(surface->GetBitmap());
+  if (bitmap.IsNull()) {
+    return dataurl::kEmptyDataURL;
+  } else {
+    bitmap->FlipVertically();
+    return bitmap->ToDataURL();
+  }
+}
+
+String Client::ToDataURL() {
   if (!renderer_.IsAvailable()) {
     O3D_ERROR(service_locator_) << "No Render Device Available";
-    return false;
-  } else {
-    return renderer_->SaveScreen(file_name);
+    return dataurl::kEmptyDataURL;
   }
+
+  if (renderer_->rendering()) {
+    O3D_ERROR(service_locator_)
+       << "Can not take a screenshot while rendering";
+    return dataurl::kEmptyDataURL;
+  }
+
+  if (!renderer_->StartRendering()) {
+    return dataurl::kEmptyDataURL;
+  }
+
+  String data_url(GetScreenshotAsDataURL());
+  renderer_->FinishRendering();
+
+  return data_url;
 }
 
 String Client::GetMessageQueueAddress() const {

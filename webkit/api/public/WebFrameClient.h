@@ -31,29 +31,36 @@
 #ifndef WebFrameClient_h
 #define WebFrameClient_h
 
-#error "This header file is still a work in progress; do not include!"
-
 #include "WebCommon.h"
-#include "WebNavigationGesture.h"
+#include "WebNavigationPolicy.h"
+#include "WebNavigationType.h"
 
 namespace WebKit {
+    class WebDataSource;
     class WebForm;
     class WebFrame;
     class WebMediaPlayer;
     class WebMediaPlayerClient;
+    class WebNode;
+    class WebPlugin;
+    class WebSecurityOrigin;
     class WebString;
     class WebURL;
+    class WebURLRequest;
+    class WebURLResponse;
     class WebWorker;
     class WebWorkerClient;
+    struct WebPluginParams;
+    struct WebRect;
+    struct WebSize;
+    struct WebURLError;
 
     class WebFrameClient {
     public:
         // Factory methods -----------------------------------------------------
 
         // May return null.
-        virtual WebPlugin* createPlugin(
-            WebFrame*, const WebURL& source, const WebString& mimeType,
-            const WebString& classID, WebString* actualMimeType) = 0;
+        virtual WebPlugin* createPlugin(WebFrame*, const WebPluginParams&) = 0;
 
         // May return null.
         virtual WebWorker* createWorker(WebFrame*, WebWorkerClient*) = 0;
@@ -81,8 +88,19 @@ namespace WebKit {
         // defaultPolicy should just be returned.
         virtual WebNavigationPolicy decidePolicyForNavigation(
             WebFrame*, const WebURLRequest&, WebNavigationType,
+            const WebNode& originatingNode,
             WebNavigationPolicy defaultPolicy, bool isRedirect) = 0;
 
+        // Query if the specified request can be handled.
+        virtual bool canHandleRequest(const WebURLRequest& request) = 0;
+
+        // Called if canHandledRequest() returns false.
+        virtual WebURLError cannotShowURLError(
+            const WebURLRequest& request) = 0;
+
+        // Notify that a URL cannot be handled.
+        virtual void unableToImplementPolicyWithError(
+            WebFrame*, const WebURLError&) = 0;
 
         // Navigational notifications ------------------------------------------
 
@@ -92,7 +110,8 @@ namespace WebKit {
         // A client-side redirect will occur.  This may correspond to a <META
         // refresh> or some script activity.
         virtual void willPerformClientRedirect(
-            WebFrame*, const WebURL&, double interval, double fireTime) = 0;
+            WebFrame*, const WebURL& from, const WebURL& to,
+            double interval, double fireTime) = 0;
 
         // A client-side redirect was cancelled.
         virtual void didCancelClientRedirect(WebFrame*) = 0;
@@ -105,13 +124,23 @@ namespace WebKit {
         virtual void didCreateDataSource(WebFrame*, WebDataSource*) = 0;
 
         // A new provisional load has been started.
-        virtual void didStartProvisionalLoad(WebFrame*, WebNavigationGesture) = 0;
+        virtual void didStartProvisionalLoad(WebFrame*) = 0;
 
         // The provisional load was redirected via a HTTP 3xx response.
         virtual void didReceiveServerRedirectForProvisionalLoad(WebFrame*) = 0;
 
         // The provisional load failed.
         virtual void didFailProvisionalLoad(WebFrame*, const WebURLError&) = 0;
+
+        // Notifies the client to commit data for the given frame.  The client
+        // may optionally prevent default processing by setting preventDefault
+        // to true before returning.  If default processing is prevented, then
+        // it is up to the client to manually call commitDocumentData on the
+        // WebFrame.  It is only valid to call commitDocumentData within a call
+        // to didReceiveDocumentData.  If commitDocumentData is not called,
+        // then an empty document will be loaded.
+        virtual void didReceiveDocumentData(
+            WebFrame*, const char* data, size_t length, bool& preventDefault) = 0;
 
         // The provisional datasource is now committed.  The first part of the
         // response body has been received, and the encoding of the response
@@ -158,21 +187,39 @@ namespace WebKit {
         virtual void assignIdentifierToRequest(
             WebFrame*, unsigned identifier, const WebURLRequest&) = 0;
 
-        // The request may be modified before it is sent.
+        // A request is about to be sent out, and the client may modify it.  Request
+        // is writable, and changes to the URL, for example, will change the request
+        // made.  If this request is the result of a redirect, then redirectResponse
+        // will be non-null and contain the response that triggered the redirect.
         virtual void willSendRequest(
-            WebFrame*, unsigned identifier, WebURLRequest&) = 0;
+            WebFrame*, unsigned identifier, WebURLRequest&,
+            const WebURLResponse& redirectResponse) = 0;
+
+        // Response headers have been received for the resource request given
+        // by identifier.
+        virtual void didReceiveResponse(
+            WebFrame*, unsigned identifier, const WebURLResponse&) = 0;
 
         // The resource request given by identifier succeeded.
-        virtual void didFinishLoading(
+        virtual void didFinishResourceLoad(
             WebFrame*, unsigned identifier) = 0;
 
         // The resource request given by identifier failed.
-        virtual void didFailLoading(
+        virtual void didFailResourceLoad(
             WebFrame*, unsigned identifier, const WebURLError&) = 0;
 
         // The specified request was satified from WebCore's memory cache.
         virtual void didLoadResourceFromMemoryCache(
             WebFrame*, const WebURLRequest&, const WebURLResponse&) = 0;
+
+        // This frame has displayed inactive content (such as an image) from an
+        // insecure source.  Inactive content cannot spread to other frames.
+        virtual void didDisplayInsecureContent(WebFrame*) = 0;
+
+        // The indicated security origin has run active content (such as a
+        // script) from an insecure source.  Note that the insecure content can
+        // spread to other frames in the same origin.
+        virtual void didRunInsecureContent(WebFrame*, const WebSecurityOrigin&) = 0;
 
 
         // Script notifications ------------------------------------------------
@@ -180,15 +227,44 @@ namespace WebKit {
         // Script in the page tried to allocate too much memory.
         virtual void didExhaustMemoryAvailableForScript(WebFrame*) = 0;
 
+        // Notifies that a new script context has been created for this frame.
+        // This is similar to didClearWindowObject but only called once per
+        // frame context.
+        virtual void didCreateScriptContext(WebFrame*) = 0;
+
+        // Notifies that this frame's script context has been destroyed.
+        virtual void didDestroyScriptContext(WebFrame*) = 0;
+
+        // Notifies that a garbage-collected context was created - content
+        // scripts.
+        virtual void didCreateIsolatedScriptContext(WebFrame*) = 0;
+
 
         // Geometry notifications ----------------------------------------------
 
         // The size of the content area changed.
-        virtual void didChangeContentsSize(WebFrame*) = 0;
+        virtual void didChangeContentsSize(WebFrame*, const WebSize&) = 0;
 
 
-        // FIXME need to add:
-        // find-in-page
+        // Find-in-page notifications ------------------------------------------
+
+        // Notifies how many matches have been found so far, for a given
+        // identifier.  |finalUpdate| specifies whether this is the last update
+        // (all frames have completed scoping).
+        virtual void reportFindInPageMatchCount(
+            int identifier, int count, bool finalUpdate) = 0;
+
+        // Notifies what tick-mark rect is currently selected.   The given
+        // identifier lets the client know which request this message belongs
+        // to, so that it can choose to ignore the message if it has moved on
+        // to other things.  The selection rect is expected to have coordinates
+        // relative to the top left corner of the web page area and represent
+        // where on the screen the selection rect is currently located.
+        virtual void reportFindInPageSelection(
+            int identifier, int activeMatchOrdinal, const WebRect& selection) = 0;
+
+    protected:
+        ~WebFrameClient() { }
     };
 
 } // namespace WebKit

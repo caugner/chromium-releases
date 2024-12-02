@@ -4,10 +4,11 @@
 
 #include "views/controls/combobox/native_combobox_win.h"
 
+#include "app/combobox_model.h"
 #include "app/gfx/font.h"
+#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/native_theme.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/widget/widget.h"
 
@@ -43,9 +44,9 @@ void NativeComboboxWin::UpdateFromModel() {
   gfx::Font font = ResourceBundle::GetSharedInstance().GetFont(
       ResourceBundle::BaseFont);
   int max_width = 0;
-  int num_items = combobox_->model()->GetItemCount(combobox_);
+  int num_items = combobox_->model()->GetItemCount();
   for (int i = 0; i < num_items; ++i) {
-    const std::wstring& text = combobox_->model()->GetItemAt(combobox_, i);
+    const std::wstring& text = combobox_->model()->GetItemAt(i);
 
     // Inserting the Unicode formatting characters if necessary so that the
     // text is displayed correctly in right-to-left UIs.
@@ -97,7 +98,7 @@ bool NativeComboboxWin::IsDropdownOpen() const {
   return SendMessage(native_view(), CB_GETDROPPEDSTATE, 0, 0) != 0;
 }
 
-gfx::Size NativeComboboxWin::GetPreferredSize() const {
+gfx::Size NativeComboboxWin::GetPreferredSize() {
   COMBOBOXINFO cbi = { 0 };
   cbi.cbSize = sizeof(cbi);
   // Note: Don't use CB_GETCOMBOBOXINFO since that crashes on WOW64 systems

@@ -47,6 +47,7 @@
 
 #include "google_breakpad/common/minidump_format.h"
 #include "google_breakpad/common/minidump_cpu_x86.h"
+#include "breakpad/linux/linux_syscall_support.h"
 #include "breakpad/linux/minidump_format_linux.h"
 
 #if __WORDSIZE == 64
@@ -419,7 +420,7 @@ ParseModuleStream(CrashedProcess* crashinfo, MMappedRange range) {
     CrashedProcess::Mapping mapping;
     const MDRawModule* rawmodule =
         (MDRawModule*) range.GetArrayElement(sizeof(uint32_t),
-                                             sizeof(MDRawModule), i);
+                                             MD_MODULE_SIZE, i);
     mapping.start_address = rawmodule->base_of_image;
     mapping.end_address = rawmodule->size_of_image + rawmodule->base_of_image;
 

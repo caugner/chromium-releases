@@ -8,11 +8,16 @@
 #include <string>
 #include <vector>
 
+#if defined(USE_SYSTEM_SQLITE)
+#include <sqlite3.h>
+#else
+#include "third_party/sqlite/preprocessed/sqlite3.h"
+#endif
+
 #include "base/basictypes.h"
+#include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/string_util.h"
-
-#include "third_party/sqlite/preprocessed/sqlite3.h"
 
 // forward declarations of classes defined here
 class FilePath;
@@ -21,6 +26,31 @@ class SQLNestedTransaction;
 class SQLNestedTransactionSite;
 class scoped_sqlite3_stmt_ptr;
 class SQLStatement;
+
+//------------------------------------------------------------------------------
+// Interface to be implemented by objects that can handle exceptional sqlite
+// conditions. This way client code can focus on handling normal condtions.
+//------------------------------------------------------------------------------
+class SQLErrorHandler {
+ public:
+  virtual ~SQLErrorHandler() {}
+  // Handle a sqlite error. |error| is the return code an of sqlite operation
+  // which is considered an error. This handler is free to try repair, notify
+  // someone or even break into the debugger depending on the situation.
+  virtual int HandleError(int error, sqlite3* db) = 0;
+  // Returns the last value of |error| passed to HandleError.
+  virtual int GetLastError() const = 0;
+};
+
+//------------------------------------------------------------------------------
+// The factory interface is used to create the different error handling
+// strategies for debug, release and for diagnostic mode.
+//------------------------------------------------------------------------------
+class SQLErrorHandlerFactory {
+ public:
+  virtual ~SQLErrorHandlerFactory() {}
+  virtual SQLErrorHandler* Make() = 0;
+};
 
 //------------------------------------------------------------------------------
 // A wrapper for sqlite transactions that rollsback when the wrapper
@@ -197,6 +227,25 @@ class scoped_sqlite3_stmt_ptr {
   DISALLOW_COPY_AND_ASSIGN(scoped_sqlite3_stmt_ptr);
 };
 
+//------------------------------------------------------------------------------
+// A scoped sqlite database that closes when it goes out of scope.
+//------------------------------------------------------------------------------
+
+// TODO: Use this namespace for the functions below (see TODO further down by
+// estade).
+namespace sqlite_utils {
+
+class DBClose {
+ public:
+  inline void operator()(sqlite3* x) const {
+    sqlite3_close(x);
+  }
+};
+
+typedef scoped_ptr_malloc<sqlite3, DBClose> scoped_sqlite_db_ptr;
+
+}  // namespace sqlite_utils
+
 
 //------------------------------------------------------------------------------
 // A scoped sqlite statement with convenient C++ wrappers for sqlite3 APIs.
@@ -348,5 +397,11 @@ inline bool DoesSqliteColumnExist(sqlite3* db,
 // Test whether a table has one or more rows. Returns true if the table
 // has one or more rows and false if the table is empty or doesn't exist.
 bool DoesSqliteTableHaveRow(sqlite3* db, const char* table_name);
+
+#if defined(USE_SYSTEM_SQLITE)
+// This function is a local change to sqlite3 which doesn't exist when one is
+// using the system sqlite library. Thus, we stub it out here.
+int sqlite3Preload(sqlite3* db);
+#endif
 
 #endif  // CHROME_COMMON_SQLITEUTILS_H_

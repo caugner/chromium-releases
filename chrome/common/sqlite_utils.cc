@@ -4,9 +4,84 @@
 
 #include "chrome/common/sqlite_utils.h"
 
+#include <list>
+
+#include "base/at_exit.h"
 #include "base/file_path.h"
+#include "base/lock.h"
 #include "base/logging.h"
+#include "base/singleton.h"
+#include "base/stl_util-inl.h"
 #include "base/string16.h"
+
+// The vanilla error handler implements the common fucntionality for all the
+// error handlers. Specialized error handlers are expected to only override
+// the Handler() function.
+class VanillaSQLErrorHandler : public SQLErrorHandler {
+ public:
+  VanillaSQLErrorHandler() : error_(SQLITE_OK) {
+  }
+  virtual int GetLastError() const {
+    return error_;
+  }
+ protected:
+  int error_;
+};
+
+class DebugSQLErrorHandler: public VanillaSQLErrorHandler {
+ public:
+  virtual int HandleError(int error, sqlite3* db) {
+    error_ = error;
+    NOTREACHED() << "sqlite error " << error
+                 << " db " << static_cast<void*>(db);
+    return error;
+  }
+};
+
+class ReleaseSQLErrorHandler : public VanillaSQLErrorHandler {
+ public:
+  virtual int HandleError(int error, sqlite3* db) {
+    error_ = error;
+    // Used to have a CHECK here. Got lots of crashes.
+    return error;
+  }
+};
+
+// The default error handler factory is also in charge of managing the
+// lifetime of the error objects. This object is multi-thread safe.
+class DefaultSQLErrorHandlerFactory : public SQLErrorHandlerFactory {
+ public:
+  ~DefaultSQLErrorHandlerFactory() {
+    STLDeleteContainerPointers(errors_.begin(), errors_.end());
+  }
+
+  virtual SQLErrorHandler* Make() {
+    SQLErrorHandler* handler;
+#ifndef NDEBUG
+    handler = new DebugSQLErrorHandler;
+#else
+    handler = new ReleaseSQLErrorHandler;
+#endif  // NDEBUG
+    AddHandler(handler);
+    return handler;
+  }
+
+ private:
+  void AddHandler(SQLErrorHandler* handler) {
+    AutoLock lock(lock_);
+    errors_.push_back(handler);
+  }
+
+  typedef std::list<SQLErrorHandler*> ErrorList;
+  ErrorList errors_;
+  Lock lock_;
+};
+
+SQLErrorHandlerFactory* GetErrorHandlerFactory() {
+  // TODO(cpu): Testing needs to override the error handler.
+  // Destruction of DefaultSQLErrorHandlerFactory handled by at_exit manager.
+  return Singleton<DefaultSQLErrorHandlerFactory>::get();
+}
 
 int OpenSqliteDb(const FilePath& filepath, sqlite3** database) {
 #if defined(OS_WIN)
@@ -201,14 +276,20 @@ int SQLStatement::prepare(sqlite3* db, const char* sql, int sql_len) {
   DCHECK(!stmt_);
   int rv = sqlite3_prepare_v2(db, sql, sql_len, &stmt_, NULL);
   if (rv != SQLITE_OK) {
-    DLOG(ERROR) << "SQLStatement.prepare_v2 failed: " << sqlite3_errmsg(db);
+   SQLErrorHandler* error_handler = GetErrorHandlerFactory()->Make();
+   return error_handler->HandleError(rv, db_handle());
   }
   return rv;
 }
 
 int SQLStatement::step() {
   DCHECK(stmt_);
-  return sqlite3_step(stmt_);
+  int status = sqlite3_step(stmt_);
+  if ((status == SQLITE_ROW) || (status == SQLITE_DONE))
+    return status;
+  // We got a problem.
+  SQLErrorHandler* error_handler = GetErrorHandlerFactory()->Make();
+  return error_handler->HandleError(status, db_handle());
 }
 
 int SQLStatement::reset() {
@@ -407,3 +488,11 @@ std::wstring SQLStatement::column_wstring(int index) {
   column_wstring(index, &wstr);
   return wstr;
 }
+
+#if defined(USE_SYSTEM_SQLITE)
+// This function is a local change to sqlite3 which doesn't exist when one is
+// using the system sqlite library. Thus, we stub it out here.
+int sqlite3Preload(sqlite3* db) {
+  return 0;
+}
+#endif

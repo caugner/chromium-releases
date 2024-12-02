@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 //
 // See render_message* for information about the multi-pass include of headers.
 
-#ifndef CHROME_COMMON_PLUGIN_MESSAGES_H__
-#define CHROME_COMMON_PLUGIN_MESSAGES_H__
+#ifndef CHROME_COMMON_PLUGIN_MESSAGES_H_
+#define CHROME_COMMON_PLUGIN_MESSAGES_H_
 
 #include <string>
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/gfx/rect.h"
 #include "base/basictypes.h"
 #include "chrome/common/common_param_traits.h"
@@ -21,6 +21,7 @@
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "webkit/api/public/WebBindings.h"
 #include "webkit/api/public/WebInputEvent.h"
 #include "webkit/glue/npruntime_util.h"
 
@@ -36,9 +37,6 @@ struct PluginMsg_Init_Params {
   GURL page_url;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_values;
-#if defined(OS_WIN)
-  HANDLE modal_dialog_event;
-#endif
   bool load_manually;
 };
 
@@ -56,7 +54,7 @@ struct PluginHostMsg_URLRequest_Params {
 
 struct PluginMsg_URLRequestReply_Params {
   int resource_id;
-  std::string url;
+  GURL url;
   bool notify_needed;
   intptr_t notify_data;
   intptr_t stream;
@@ -101,6 +99,13 @@ struct NPVariant_Param {
   intptr_t npobject_pointer;
 };
 
+struct PluginMsg_UpdateGeometry_Param {
+  gfx::Rect window_rect;
+  gfx::Rect clip_rect;
+  TransportDIB::Handle windowless_buffer;
+  TransportDIB::Handle background_buffer;
+};
+
 
 namespace IPC {
 
@@ -115,9 +120,6 @@ struct ParamTraits<PluginMsg_Init_Params> {
     DCHECK(p.arg_names.size() == p.arg_values.size());
     WriteParam(m, p.arg_names);
     WriteParam(m, p.arg_values);
-#if defined(OS_WIN)
-    WriteParam(m, p.modal_dialog_event);
-#endif
     WriteParam(m, p.load_manually);
   }
   static bool Read(const Message* m, void** iter, param_type* p) {
@@ -126,9 +128,6 @@ struct ParamTraits<PluginMsg_Init_Params> {
            ReadParam(m, iter, &p->page_url) &&
            ReadParam(m, iter, &p->arg_names) &&
            ReadParam(m, iter, &p->arg_values) &&
-#if defined(OS_WIN)
-           ReadParam(m, iter, &p->modal_dialog_event) &&
-#endif
            ReadParam(m, iter, &p->load_manually);
   }
   static void Log(const param_type& p, std::wstring* l) {
@@ -143,10 +142,6 @@ struct ParamTraits<PluginMsg_Init_Params> {
     l->append(L", ");
     LogParam(p.arg_values, l);
     l->append(L", ");
-#if defined(OS_WIN)
-    LogParam(p.modal_dialog_event, l);
-    l->append(L", ");
-#endif
     LogParam(p.load_manually, l);
     l->append(L")");
   }
@@ -321,12 +316,13 @@ struct ParamTraits<NPIdentifier_Param> {
     return webkit_glue::DeserializeNPIdentifier(*m, iter, &r->identifier);
   }
   static void Log(const param_type& p, std::wstring* l) {
-    if (NPN_IdentifierIsString(p.identifier)) {
-      NPUTF8* str = NPN_UTF8FromIdentifier(p.identifier);
+    if (WebKit::WebBindings::identifierIsString(p.identifier)) {
+      NPUTF8* str = WebKit::WebBindings::utf8FromIdentifier(p.identifier);
       l->append(UTF8ToWide(str));
       NPN_MemFree(str);
     } else {
-      l->append(IntToWString(NPN_IntFromIdentifier(p.identifier)));
+      l->append(IntToWString(
+          WebKit::WebBindings::intFromIdentifier(p.identifier)));
     }
   }
 };
@@ -405,10 +401,43 @@ struct ParamTraits<NPVariant_Param> {
   }
 };
 
+// For windowless plugins, windowless_buffer
+// contains a buffer that the plugin draws into.  background_buffer is used
+// for transparent windowless plugins, and holds the background of the plugin
+// rectangle.
+template <>
+struct ParamTraits<PluginMsg_UpdateGeometry_Param> {
+  typedef PluginMsg_UpdateGeometry_Param param_type;
+  static void Write(Message* m, const param_type& p) {
+    WriteParam(m, p.window_rect);
+    WriteParam(m, p.clip_rect);
+    WriteParam(m, p.windowless_buffer);
+    WriteParam(m, p.background_buffer);
+  }
+  static bool Read(const Message* m, void** iter, param_type* r) {
+    return
+      ReadParam(m, iter, &r->window_rect) &&
+      ReadParam(m, iter, &r->clip_rect) &&
+      ReadParam(m, iter, &r->windowless_buffer) &&
+      ReadParam(m, iter, &r->background_buffer);
+  }
+  static void Log(const param_type& p, std::wstring* l) {
+    l->append(L"(");
+    LogParam(p.window_rect, l);
+    l->append(L", ");
+    LogParam(p.clip_rect, l);
+    l->append(L", ");
+    LogParam(p.windowless_buffer, l);
+    l->append(L", ");
+    LogParam(p.background_buffer, l);
+    l->append(L")");
+  }
+};
+
 }  // namespace IPC
 
 
 #define MESSAGES_INTERNAL_FILE "chrome/common/plugin_messages_internal.h"
 #include "ipc/ipc_message_macros.h"
 
-#endif  // CHROME_COMMON_PLUGIN_MESSAGES_H__
+#endif  // CHROME_COMMON_PLUGIN_MESSAGES_H_

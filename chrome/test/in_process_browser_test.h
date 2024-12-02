@@ -5,6 +5,7 @@
 #ifndef CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 
+#include "net/base/mock_host_resolver.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,6 +45,7 @@ class InProcessBrowserTest : public testing::Test {
   // We do this so we can be used in a Task.
   void AddRef() {}
   void Release() {}
+  static bool ImplementsThreadSafeReferenceCounting() { return false; }
 
   // Configures everything for an in process browser test, then invokes
   // BrowserMain. BrowserMain ends up invoking RunTestOnMainThreadLoop.
@@ -52,6 +54,10 @@ class InProcessBrowserTest : public testing::Test {
   // Restores state configured in SetUp.
   virtual void TearDown();
 
+  // This method is used to decide if user data dir
+  // needs to be deleted or not.
+  virtual bool ShouldDeleteProfile() { return true; }
+
  protected:
   // Returns the browser created by CreateBrowser.
   Browser* browser() const { return browser_; }
@@ -59,17 +65,25 @@ class InProcessBrowserTest : public testing::Test {
   // Override this rather than TestBody.
   virtual void RunTestOnMainThread() = 0;
 
+  // We need these special methods because InProcessBrowserTest::SetUp is the
+  // bottom of the stack that winds up calling your test method, so it is not
+  // always an option to do what you want by overriding it and calling the
+  // superclass version.
+  //
+  // Override this for things you would normally override SetUp for. It will be
+  // called before your individual test fixture method is run, but after most
+  // of the overhead initialization has occured.
+  virtual void SetUpInProcessBrowserTestFixture() {}
+
+  // Override this for things you would normally override TearDown for.
+  virtual void TearDownInProcessBrowserTestFixture() {}
+
   // Override this to add command line flags specific to your test.
   virtual void SetUpCommandLine(CommandLine* command_line) {}
 
   // Override this to add any custom cleanup code that needs to be done on the
   // main thread before the browser is torn down.
   virtual void CleanUpOnMainThread() {}
-
-  // Allows subclasses to configure the host resolver procedure. By default
-  // this blocks requests to google.com as Chrome pings that on startup and we
-  // don't want to do that during testing.
-  virtual void ConfigureHostResolverProc(net::RuleBasedHostResolverProc* proc);
 
   // Invoked when a test is not finishing in a timely manner.
   void TimedOut();
@@ -85,6 +99,12 @@ class InProcessBrowserTest : public testing::Test {
   //
   // This is invoked from Setup.
   virtual Browser* CreateBrowser(Profile* profile);
+
+  // Returns the host resolver being used for the tests. Subclasses might want
+  // to configure it inside tests.
+  net::RuleBasedHostResolverProc* host_resolver() {
+    return host_resolver_.get();
+  }
 
   // Sets some test states (see below for comments).  Call this in your test
   // constructor.
@@ -124,8 +144,16 @@ class InProcessBrowserTest : public testing::Test {
   // Initial timeout value in ms.
   int initial_timeout_;
 
+  // Host resolver to use during the test.
+  scoped_refptr<net::RuleBasedHostResolverProc> host_resolver_;
+
   DISALLOW_COPY_AND_ASSIGN(InProcessBrowserTest);
 };
+
+// We only want to use IN_PROC_BROWSER_TEST in binaries which will properly
+// isolate each test case. Otherwise hard-to-debug, possibly intermittent
+// crashes caused by carrying state in singletons are very likely.
+#if defined(ALLOW_IN_PROC_BROWSER_TEST)
 
 #define IN_PROC_BROWSER_TEST_(test_case_name, test_name, parent_class,\
                               parent_id)\
@@ -155,5 +183,7 @@ void GTEST_TEST_CLASS_NAME_(test_case_name, test_name)::RunTestOnMainThread()
 #define IN_PROC_BROWSER_TEST_F(test_fixture, test_name)\
   IN_PROC_BROWSER_TEST_(test_fixture, test_name, test_fixture,\
                     ::testing::internal::GetTypeId<test_fixture>())
+
+#endif  // defined(ALLOW_IN_PROC_BROWSER_TEST)
 
 #endif  // CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_

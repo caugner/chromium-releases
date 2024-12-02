@@ -15,6 +15,13 @@
 @synthesize tabStripView = tabStripView_;
 @synthesize tabContentArea = tabContentArea_;
 
+- (id)initWithWindow:(NSWindow*)window {
+  if ((self = [super initWithWindow:window]) != nil) {
+    lockedTabs_.reset([[NSMutableSet alloc] initWithCapacity:10]);
+  }
+  return self;
+}
+
 - (void)windowDidLoad {
   if ([self isNormalWindow]) {
     // Place the tab bar above the content box and add it to the view hierarchy
@@ -35,8 +42,14 @@
 
 - (void)removeOverlay {
   [self setUseOverlay:NO];
+  if (closeDeferred_) {
+    // See comment in BrowserWindowCocoa::Close() about orderOut:.
+    [[self window] orderOut:self];
+    [[self window] performClose:self];  // Autoreleases the controller.
+  }
 }
 
+// TODO(pinkerton): Nobody calls this, can we remove it?
 - (void)removeOverlayAfterDelay:(NSTimeInterval)delay {
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:@selector(removeOverlay)
@@ -50,20 +63,22 @@
   [self setUseOverlay:YES];
 }
 
-- (NSArray*)viewsToMoveToOverlay {
-  return [NSArray arrayWithObjects:[self tabStripView],
-            [self tabContentArea], nil];
-}
-
 // if |useOverlay| is true, we're moving views into the overlay's content
 // area. If false, we're moving out of the overlay back into the window's
 // content.
 - (void)moveViewsBetweenWindowAndOverlay:(BOOL)useOverlay {
-  NSView* moveTo = useOverlay ?
-      [overlayWindow_ contentView] : [cachedContentView_ superview];
-  NSArray* viewsToMove = [self viewsToMoveToOverlay];
-  for (NSView* view in viewsToMove)
-    [moveTo addSubview:view];
+  if (useOverlay) {
+    [[[overlayWindow_ contentView] superview] addSubview:[self tabStripView]];
+    // Add the original window's content view as a subview of the overlay
+    // window's content view.  We cannot simply use setContentView: here because
+    // the overlay window has a different content size (due to it being
+    // borderless).
+    [[overlayWindow_ contentView] addSubview:cachedContentView_];
+  } else {
+    [[[[self window] contentView] superview] addSubview:[self tabStripView]];
+    [[self window] setContentView:cachedContentView_];
+    [[[[self window] contentView] superview] updateTrackingAreas];
+  }
 }
 
 // If |useOverlay| is YES, creates a new overlay window and puts the tab strip
@@ -75,9 +90,10 @@
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:@selector(removeOverlay)
                                              object:nil];
+  NSWindow* window = [self window];
   if (useOverlay && !overlayWindow_) {
     DCHECK(!cachedContentView_);
-    overlayWindow_ = [[NSPanel alloc] initWithContentRect:[[self window] frame]
+    overlayWindow_ = [[NSPanel alloc] initWithContentRect:[window frame]
                                                 styleMask:NSBorderlessWindowMask
                                                   backing:NSBackingStoreBuffered
                                                     defer:YES];
@@ -85,23 +101,23 @@
     [overlayWindow_ setBackgroundColor:[NSColor clearColor]];
     [overlayWindow_ setOpaque:NO];
     [overlayWindow_ setDelegate:self];
-    NSView *contentView = [overlayWindow_ contentView];
-    [contentView addSubview:[self tabStripView]];
-    cachedContentView_ = [[self window] contentView];
+    cachedContentView_ = [window contentView];
     [self moveViewsBetweenWindowAndOverlay:useOverlay];
-    [[self window] addChildWindow:overlayWindow_ ordered:NSWindowAbove];
+    [window addChildWindow:overlayWindow_ ordered:NSWindowAbove];
     [overlayWindow_ orderFront:nil];
   } else if (!useOverlay && overlayWindow_) {
     DCHECK(cachedContentView_);
-    [[self window] setContentView:cachedContentView_];
+    [window setContentView:cachedContentView_];
     [self moveViewsBetweenWindowAndOverlay:useOverlay];
-    [[self window] makeFirstResponder:cachedContentView_];
-    [[self window] display];
-    [[self window] removeChildWindow:overlayWindow_];
+    [window makeFirstResponder:cachedContentView_];
+    [window display];
+    [window removeChildWindow:overlayWindow_];
     [overlayWindow_ orderOut:nil];
     [overlayWindow_ release];
     overlayWindow_ = nil;
     cachedContentView_ = nil;
+  } else {
+    NOTREACHED();
   }
 }
 
@@ -120,7 +136,7 @@
   NOTIMPLEMENTED();
 }
 
-- (NSView *)selectedTabView {
+- (NSView*)selectedTabView {
   NOTIMPLEMENTED();
   return nil;
 }
@@ -139,11 +155,19 @@
 - (void)insertPlaceholderForTab:(TabView*)tab
                           frame:(NSRect)frame
                   yStretchiness:(CGFloat)yStretchiness {
-  // subclass must implement
-  NOTIMPLEMENTED();
+  [self showNewTabButton:NO];
 }
 
 - (void)removePlaceholder {
+  [self showNewTabButton:YES];
+}
+
+- (BOOL)isTabFullyVisible:(TabView*)tab {
+  // Subclasses should implement this, but it's not necessary.
+  return YES;
+}
+
+- (void)showNewTabButton:(BOOL)show {
   // subclass must implement
   NOTIMPLEMENTED();
 }
@@ -169,6 +193,24 @@
   // subclass must implement
   NOTIMPLEMENTED();
   return YES;
+}
+
+- (BOOL)isTabDraggable:(NSView*)tabView {
+  return ![lockedTabs_ containsObject:tabView];
+}
+
+- (void)setTab:(NSView*)tabView isDraggable:(BOOL)draggable {
+  if (draggable)
+    [lockedTabs_ removeObject:tabView];
+  else
+    [lockedTabs_ addObject:tabView];
+}
+
+// Tell the window that it needs to call performClose: as soon as the current
+// drag is complete. This prevents a window (and its overlay) from going away
+// during a drag.
+- (void)deferPerformClose {
+  closeDeferred_ = YES;
 }
 
 @end

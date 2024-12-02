@@ -16,6 +16,8 @@ class MessageLoop;
 namespace net {
 
 class AddressList;
+class HostCache;
+class LoadLog;
 
 // This class represents the task of resolving hostnames (or IP address
 // literal) to an AddressList object.
@@ -92,8 +94,6 @@ class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
   // Opaque type used to cancel a request.
   typedef void* RequestHandle;
 
-  HostResolver() {}
-
   // If any completion callbacks are pending when the resolver is destroyed,
   // the host resolutions are cancelled, and the completion callbacks will not
   // be called.
@@ -111,8 +111,13 @@ class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
   // result code will be passed to the completion callback. If |req| is
   // non-NULL, then |*req| will be filled with a handle to the async request.
   // This handle is not valid after the request has completed.
-  virtual int Resolve(const RequestInfo& info, AddressList* addresses,
-                      CompletionCallback* callback, RequestHandle* out_req) = 0;
+  //
+  // Profiling information for the request is saved to |load_log| if non-NULL.
+  virtual int Resolve(const RequestInfo& info,
+                      AddressList* addresses,
+                      CompletionCallback* callback,
+                      RequestHandle* out_req,
+                      LoadLog* load_log) = 0;
 
   // Cancels the specified request. |req| is the handle returned by Resolve().
   // After a request is cancelled, its completion callback will not be called.
@@ -126,9 +131,17 @@ class HostResolver : public base::RefCountedThreadSafe<HostResolver> {
   // Unregisters an observer previously added by AddObserver().
   virtual void RemoveObserver(Observer* observer) = 0;
 
-  // TODO(eroman): temp hack for http://crbug.com/15513
+  // Returns the host cache, or NULL if this implementation does not use
+  // a HostCache.
+  virtual HostCache* GetHostCache() = 0;
+
+  // TODO(eroman): temp hack for http://crbug.com/18373
   virtual void Shutdown() = 0;
 
+ protected:
+  HostResolver() { }
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(HostResolver);
 };
 
@@ -147,7 +160,9 @@ class SingleRequestHostResolver {
   // Resolves the given hostname (or IP address literal), filling out the
   // |addresses| object upon success. See HostResolver::Resolve() for details.
   int Resolve(const HostResolver::RequestInfo& info,
-              AddressList* addresses, CompletionCallback* callback);
+              AddressList* addresses,
+              CompletionCallback* callback,
+              LoadLog* load_log);
 
  private:
   // Callback for when the request to |resolver_| completes, so we dispatch

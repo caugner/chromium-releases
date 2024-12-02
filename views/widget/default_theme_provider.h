@@ -5,6 +5,8 @@
 #ifndef VIEWS_DEFAULT_THEME_PROVIDER_H_
 #define VIEWS_DEFAULT_THEME_PROVIDER_H_
 
+#include <vector>
+
 #include "app/theme_provider.h"
 #include "base/basictypes.h"
 
@@ -19,15 +21,16 @@ class DefaultThemeProvider : public ThemeProvider {
   virtual ~DefaultThemeProvider() { };
 
   // Overridden from ThemeProvider.
-  virtual void Init(Profile* profile);
-  virtual SkBitmap* GetBitmapNamed(int id);
-  virtual SkColor GetColor(int id);
-  virtual bool GetDisplayProperty(int id, int* result);
-  virtual bool ShouldUseNativeFrame();
-  virtual bool HasCustomImage(int id);
-  virtual bool GetRawData(int id, std::vector<unsigned char>* raw_data) {
-    return false;
+  virtual void Init(Profile* profile) { }
+  virtual SkBitmap* GetBitmapNamed(int id) const;
+  virtual SkColor GetColor(int id) const {
+    // Return debugging-blue.
+    return 0xff0000ff;
   }
+  virtual bool GetDisplayProperty(int id, int* result) const { return false; }
+  virtual bool ShouldUseNativeFrame() const;
+  virtual bool HasCustomImage(int id) const { return false; }
+  virtual RefCountedMemory* GetRawData(int id) const { return NULL; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DefaultThemeProvider);

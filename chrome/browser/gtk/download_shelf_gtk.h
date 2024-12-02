@@ -9,9 +9,10 @@
 
 #include <vector>
 
-#include "base/gfx/native_widget_types.h"
+#include "app/gfx/native_widget_types.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/gtk/slide_animator_gtk.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
@@ -24,7 +25,8 @@ class GtkThemeProvider;
 class SlideAnimatorGtk;
 
 class DownloadShelfGtk : public DownloadShelf,
-                         public NotificationObserver {
+                         public NotificationObserver,
+                         public SlideAnimatorGtk::Delegate {
  public:
   explicit DownloadShelfGtk(Browser* browser, gfx::NativeView view);
 
@@ -37,6 +39,9 @@ class DownloadShelfGtk : public DownloadShelf,
   virtual void Show();
   virtual void Close();
   virtual Browser* browser() const { return browser_; }
+
+  // SlideAnimatorGtk::Delegate implementation.
+  virtual void Closed();
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -70,6 +75,9 @@ class DownloadShelfGtk : public DownloadShelf,
   // |shelf_| is the second highest level widget. See the constructor
   // for an explanation of the widget layout.
   OwnedWidgetGtk shelf_;
+
+  // Top level event box which draws the one pixel border.
+  GtkWidget* top_border_;
 
   // A GtkEventBox which we color.
   GtkWidget* padding_bg_;

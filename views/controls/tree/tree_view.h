@@ -12,6 +12,7 @@
 
 #include "app/tree_model.h"
 #include "base/basictypes.h"
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "views/controls/native_control.h"
 
@@ -159,9 +160,9 @@ class TreeView : public NativeControl, TreeModelObserver {
   // We pay attention to key down for two reasons: to circumvent VK_ENTER from
   // toggling the expaned state when processes_enter_ is false, and to have F2
   // start editting.
-  virtual bool OnKeyDown(int virtual_key_code);
+  virtual bool OnKeyDown(base::KeyboardCode virtual_key_code);
 
-  virtual void OnContextMenu(const WTL::CPoint& location);
+  virtual void OnContextMenu(const POINT& location);
 
   // Returns the TreeModelNode for |tree_item|.
   TreeModelNode* GetNodeForTreeItem(HTREEITEM tree_item);

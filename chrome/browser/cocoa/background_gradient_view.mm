@@ -5,7 +5,7 @@
 #include "chrome/browser/cocoa/background_gradient_view.h"
 
 #define kToolbarTopOffset 12
-#define kToolbarMaxHeight 128
+#define kToolbarMaxHeight 100
 
 @implementation BackgroundGradientView
 @synthesize showsDivider = showsDivider_;
@@ -27,40 +27,31 @@
   [self setNeedsDisplay:YES];
 }
 
-// The offset of this pattern to make it line up with the top of the window.
-- (NSPoint)patternPhase {
-  NSPoint phase = NSZeroPoint;
-  phase.y += NSHeight([[self window] frame]) - kToolbarTopOffset;
-  return phase;
-}
-
-- (void)drawRect:(NSRect)rect {
+- (void)drawBackground {
   BOOL isKey = [[self window] isKeyWindow];
-
-  GTMTheme *theme = [self gtm_theme];
-
-  NSImage *backgroundImage = [theme backgroundImageForStyle:GTMThemeStyleToolBar
-                                               state:GTMThemeStateActiveWindow];
+  GTMTheme* theme = [self gtm_theme];
+  NSImage* backgroundImage =
+      [theme backgroundImageForStyle:GTMThemeStyleToolBar
+                               state:GTMThemeStateActiveWindow];
   if (backgroundImage) {
-    NSPoint phase = [self patternPhase];
-    [[NSGraphicsContext currentContext] setPatternPhase:phase];
-
-    NSColor *color = [NSColor colorWithPatternImage:backgroundImage];
+    NSColor* color = [NSColor colorWithPatternImage:backgroundImage];
     [color set];
     NSRectFill([self bounds]);
   } else {
     CGFloat winHeight = NSHeight([[self window] frame]);
-    NSGradient *gradient = [theme gradientForStyle:GTMThemeStyleToolBar
+    NSGradient* gradient = [theme gradientForStyle:GTMThemeStyleToolBar
                                              state:isKey];
-    NSPoint startPoint = [self convertPointFromBase:
-                          NSMakePoint(0, winHeight - kToolbarTopOffset)];
-    NSPoint endPoint = [self convertPointFromBase:
-        NSMakePoint(0, winHeight - kToolbarTopOffset - kToolbarMaxHeight)];
+    NSPoint startPoint =
+        [self convertPoint:NSMakePoint(0, winHeight - kToolbarTopOffset)
+                  fromView:nil];
+    NSPoint endPoint =
+        NSMakePoint(0, winHeight - kToolbarTopOffset - kToolbarMaxHeight);
+    endPoint = [self convertPoint:endPoint fromView:nil];
 
     [gradient drawFromPoint:startPoint
                     toPoint:endPoint
-                    options:NSGradientDrawsBeforeStartingLocation |
-                            NSGradientDrawsAfterEndingLocation];
+                    options:(NSGradientDrawsBeforeStartingLocation |
+                             NSGradientDrawsAfterEndingLocation)];
   }
 
   if (showsDivider_) {

@@ -9,6 +9,7 @@
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 
 namespace {
 
@@ -52,12 +53,16 @@ class TestTabStripDelegate : public TabStripModelDelegate {
   virtual bool CanRestoreTab() {
     return true;
   }
-  virtual void RestoreTab() { }
+  virtual void RestoreTab() {}
 
   virtual bool CanCloseContentsAt(int index) { return true; }
+
+  virtual bool CanBookmarkAllTabs() const { return false; }
+
+  virtual void BookmarkAllTabs() {}
 };
 
-class TabStripControllerTest : public testing::Test {
+class TabStripControllerTest : public PlatformTest {
  public:
   TabStripControllerTest() {
     NSView* parent = cocoa_helper_.contentView();
@@ -81,21 +86,18 @@ class TabStripControllerTest : public testing::Test {
                                              initWithFrame:button_frame]);
     [tab_strip_ addSubview:close_button.get()];
 
-    // Create the controller using that view and a model we create that has
-    // no other Browser ties.
     delegate_.reset(new TestTabStripDelegate());
-    model_.reset(new TabStripModel(delegate_.get(),
-                                   browser_helper_.profile()));
+    model_ = browser_helper_.browser()->tabstrip_model();
     controller_.reset([[TabStripController alloc]
                         initWithView:(TabStripView*)tab_strip_.get()
                           switchView:switch_view.get()
-                               model:model_.get()]);
+                             browser:browser_helper_.browser()]);
   }
 
   CocoaTestHelper cocoa_helper_;
   BrowserTestHelper browser_helper_;
   scoped_ptr<TestTabStripDelegate> delegate_;
-  scoped_ptr<TabStripModel> model_;
+  TabStripModel* model_;
   scoped_nsobject<TabStripController> controller_;
   scoped_nsobject<NSView> tab_strip_;
 };

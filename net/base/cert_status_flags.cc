@@ -31,6 +31,8 @@ int MapNetErrorToCertStatus(int error) {
       // Falls through.
     case ERR_CERT_INVALID:
       return CERT_STATUS_INVALID;
+    case ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
+      return CERT_STATUS_WEAK_SIGNATURE_ALGORITHM;
     default:
       return 0;
   }
@@ -41,16 +43,18 @@ int MapCertStatusToNetError(int cert_status) {
   // serious error.
 
   // Unrecoverable errors
-  if (cert_status & CERT_STATUS_INVALID)
-    return ERR_CERT_INVALID;
   if (cert_status & CERT_STATUS_REVOKED)
     return ERR_CERT_REVOKED;
+  if (cert_status & CERT_STATUS_INVALID)
+    return ERR_CERT_INVALID;
 
   // Recoverable errors
   if (cert_status & CERT_STATUS_AUTHORITY_INVALID)
     return ERR_CERT_AUTHORITY_INVALID;
   if (cert_status & CERT_STATUS_COMMON_NAME_INVALID)
     return ERR_CERT_COMMON_NAME_INVALID;
+  if (cert_status & CERT_STATUS_WEAK_SIGNATURE_ALGORITHM)
+    return ERR_CERT_WEAK_SIGNATURE_ALGORITHM;
   if (cert_status & CERT_STATUS_DATE_INVALID)
     return ERR_CERT_DATE_INVALID;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/l10n_util.h"
+#include "base/gfx/point.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "chrome/browser/profile.h"
@@ -109,6 +110,10 @@ bool KeywordEditorView::CanResize() const {
 
 std::wstring KeywordEditorView::GetWindowTitle() const {
   return l10n_util::GetString(IDS_SEARCH_ENGINES_EDITOR_WINDOW_TITLE);
+}
+
+std::wstring KeywordEditorView::GetWindowName() const {
+  return prefs::kKeywordEditorWindowPlacement;
 }
 
 int KeywordEditorView::GetDialogButtons() const {
@@ -215,16 +220,23 @@ void KeywordEditorView::OnSelectionChanged() {
 }
 
 void KeywordEditorView::OnDoubleClick() {
-  if (edit_button_->IsEnabled())
-    ButtonPressed(edit_button_);
+  if (edit_button_->IsEnabled()) {
+    DWORD pos = GetMessagePos();
+    gfx::Point cursor_point(pos);
+    views::MouseEvent event(views::Event::ET_MOUSE_RELEASED,
+                            cursor_point.x(), cursor_point.y(),
+                            views::Event::EF_LEFT_BUTTON_DOWN);
+    ButtonPressed(edit_button_, event);
+  }
 }
 
-void KeywordEditorView::ButtonPressed(views::Button* sender) {
+void KeywordEditorView::ButtonPressed(
+    views::Button* sender, const views::Event& event) {
   if (sender == add_button_) {
     browser::EditSearchEngine(GetWindow()->GetNativeWindow(), NULL, this,
                               profile_);
   } else if (sender == remove_button_) {
-    DCHECK(table_view_->SelectedRowCount() == 1);
+    DCHECK_EQ(1, table_view_->SelectedRowCount());
     int last_view_row = -1;
     for (views::TableView::iterator i = table_view_->SelectionBegin();
          i != table_view_->SelectionEnd(); ++i) {

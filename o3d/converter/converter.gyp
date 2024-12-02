@@ -28,7 +28,7 @@
         '../../<(zlibdir)/zlib.gyp:zlib',
         '../../base/base.gyp:base',
         '../../skia/skia.gyp:skia',
-        '../compiler/technique/technique.gyp:technique',
+        '../compiler/technique/technique.gyp:o3dTechnique',
         '../core/core.gyp:o3dCore',
         '../core/core.gyp:o3dCorePlatform',
         '../import/archive.gyp:o3dArchive',
@@ -55,28 +55,61 @@
         'cross/texture_stub.h',
       ],
       'conditions' : [
+        ['renderer == "gl"',
+          {
+            'dependencies': [
+              '../build/libs.gyp:cg_libs',
+            ],
+          },
+        ],
         ['OS == "mac"',
           {
+            'postbuilds': [
+              {
+                'variables': {
+                  # Define install_name in a variable ending in _path
+                  # so that gyp understands it's a path and performs proper
+                  # relativization during dict merging.
+                  'install_name_path': 'mac/converter_install_name.sh',
+                },
+                'postbuild_name': 'Fix Framework Paths',
+                'action': ['<(install_name_path)'],
+              },
+            ],
             'sources': [
               'mac/converter_main.mm',
             ],
             'link_settings': {
               'libraries': [
                 '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
+                '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework',
+                '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
+              ],
+            },
+          },
+        ],
+        ['OS == "linux"',
+          {
+            'link_settings': {
+              'libraries': [
+                '-lGL',
               ],
             },
           },
         ],
         ['OS == "win"',
           {
+            'dependencies': [
+              '../build/libs.gyp:dx_dll',
+              '../build/libs.gyp:cg_libs',
+            ],
+            'link_settings': {
+              'libraries': [
+                '-lrpcrt4.lib',
+              ],
+            },
             'msvs_settings': {
               'VCLinkerTool': {
-                'AdditionalDependencies': [
-                  'rpcrt4.lib',
-                  '"$(DXSDK_DIR)/Lib/x86/d3dx9.lib"',
-                  '../../<(cgdir)/lib/cg.lib',
-                  '../../<(cgdir)/lib/cgGL.lib',
-                ],
                 # Set /SUBSYSTEM:CONSOLE for converter.exe, since
                 # it is a console app.
                 'SubSystem': '1',
@@ -88,3 +121,9 @@
     },
   ],
 }
+
+# Local Variables:
+# tab-width:2
+# indent-tabs-mode:nil
+# End:
+# vim: set expandtab tabstop=2 shiftwidth=2:

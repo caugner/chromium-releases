@@ -50,25 +50,23 @@
 #include <string>
 #include "base/basictypes.h"
 #include "core/cross/types.h"
+#include "import/cross/iarchive_generator.h"
 #include "import/cross/memory_buffer.h"
 #include "import/cross/memory_stream.h"
 
 namespace o3d {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-class TarGenerator {
+class TarGenerator : public IArchiveGenerator {
  public:
   explicit TarGenerator(StreamProcessor *callback_client)
       : callback_client_(callback_client),
         data_block_buffer_(TAR_BLOCK_SIZE),  // initialized to zeroes
         data_buffer_stream_(data_block_buffer_, TAR_BLOCK_SIZE) {}
 
-  virtual ~TarGenerator() { Finalize(); }
-
   // Call AddFile() for each file entry, followed by calls to AddFileBytes()
-  // for the file's data
-  virtual void AddFile(const String &file_name,
-                       size_t file_size);
+  // for the file's data. Returns true on success.
+  virtual bool AddFile(const String &file_name, size_t file_size);
 
   // Call to "push" bytes to be processed - our client will get called back
   // with the byte stream, with files rounded up to the nearest block size
@@ -76,18 +74,31 @@ class TarGenerator {
   virtual int AddFileBytes(MemoryReadStream *stream, size_t n);
 
   // Must call this after all files and file data have been written
-  virtual void Finalize();
+  virtual void Close(bool success);
 
  private:
-  void AddEntry(const String &file_name,
+  // Returns true on success.
+  bool AddEntry(const String &file_name,
                 size_t file_size,
                 bool is_directory);
 
-  void AddDirectory(const String &file_name);
-  void AddDirectoryEntryIfNeeded(const String &file_name);
+  // Returns true on success.
+  bool AddDirectory(const String &file_name);
+
+  // Returns true on success.
+  bool AddDirectoryEntryIfNeeded(const String &file_name);
 
   // Checksum for each header
   void ComputeCheckSum(uint8 *header);
+
+  // Writes a head block.
+  void WriteHeader(const String& filename,
+                   size_t file_size,
+                   char type,
+                   int mode,
+                   int user_id,
+                   int group_id,
+                   int mod_time);
 
   // flushes buffered file data to the client callback
   // if |flush_padding_zeroes| is |true| then flush a complete block
