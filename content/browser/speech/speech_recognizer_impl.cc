@@ -232,7 +232,8 @@ void SpeechRecognizerImpl::StartRecognition(const std::string& device_id) {
 
 void SpeechRecognizerImpl::AbortRecognition() {
   base::PostTask(FROM_HERE, {BrowserThread::IO},
-                 base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this,
+                 base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(),
                                 FSMEventArgs(EVENT_ABORT)));
 }
 
@@ -879,10 +880,9 @@ void SpeechRecognizerImpl::CreateAudioCapturerSource() {
   if (connector) {
     audio_capturer_source_ = audio::CreateInputDevice(
         connector->Clone(), device_id_,
-        MediaInternals::GetInstance()
-            ->CreateMojoAudioLog(media::AudioLogFactory::AUDIO_INPUT_CONTROLLER,
-                                 0 /* component_id */)
-            .PassInterface());
+        MediaInternals::GetInstance()->CreateMojoAudioLog(
+            media::AudioLogFactory::AUDIO_INPUT_CONTROLLER,
+            0 /* component_id */));
   }
 }
 

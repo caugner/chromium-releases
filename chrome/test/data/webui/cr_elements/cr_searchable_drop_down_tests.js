@@ -24,14 +24,14 @@ suite('cr-searchable-drop-down', function() {
    *  the drop down.
    */
   function search(searchTerm) {
-    let input = dropDown.shadowRoot.querySelector('cr-input');
+    const input = dropDown.shadowRoot.querySelector('cr-input');
     input.value = searchTerm;
     input.fire('input');
     Polymer.dom.flush();
   }
 
   function blur() {
-    let input = dropDown.shadowRoot.querySelector('cr-input');
+    const input = dropDown.shadowRoot.querySelector('cr-input');
     input.fire('blur');
     Polymer.dom.flush();
   }
@@ -81,7 +81,7 @@ suite('cr-searchable-drop-down', function() {
   test('correct list items', function() {
     setItems(['one', 'two', 'three']);
 
-    let itemList = getList();
+    const itemList = getList();
 
     assertEquals(3, itemList.length);
     assertEquals('one', itemList[0].textContent.trim());
@@ -206,6 +206,26 @@ suite('cr-searchable-drop-down', function() {
     enter();
     assertEquals('mouse', dropDown.value);
     assertFalse(dropDown.$$('iron-dropdown').opened);
+  });
+
+  test('enter re-opens dropdown after selection', function() {
+    setItems(['dog', 'cat', 'mouse']);
+
+    dropDown.$.search.focus();
+    assertTrue(dropDown.$$('iron-dropdown').opened);
+
+    assertEquals(null, getSelectedElement());
+
+    down();
+    assertEquals('dog', getSelectedElement().textContent.trim());
+
+    enter();
+    assertEquals('dog', dropDown.value);
+    assertFalse(dropDown.$$('iron-dropdown').opened);
+
+    enter();
+    assertTrue(dropDown.$$('iron-dropdown').opened);
+    assertEquals(null, getSelectedElement());
   });
 
   test('focus and up selects last item', function() {
