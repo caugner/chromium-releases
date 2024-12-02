@@ -8,8 +8,10 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/metrics/metrics_hashes.h"
 #include "base/metrics/user_metrics.h"
 #include "base/run_loop.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
@@ -17,6 +19,7 @@
 #include "components/leveldb_proto/public/shared_proto_database_client_list.h"
 #include "components/leveldb_proto/testing/fake_db.h"
 #include "components/optimization_guide/core/test_optimization_guide_model_provider.h"
+#include "components/optimization_guide/machine_learning_tflite_buildflags.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
@@ -27,6 +30,7 @@
 #include "components/segmentation_platform/internal/execution/feature_aggregator_impl.h"
 #include "components/segmentation_platform/internal/execution/model_execution_manager.h"
 #include "components/segmentation_platform/internal/execution/model_execution_manager_factory.h"
+#include "components/segmentation_platform/internal/proto/model_metadata.pb.h"
 #include "components/segmentation_platform/internal/proto/model_prediction.pb.h"
 #include "components/segmentation_platform/internal/proto/signal.pb.h"
 #include "components/segmentation_platform/internal/proto/signal_storage_config.pb.h"
@@ -38,6 +42,10 @@
 #include "components/segmentation_platform/internal/signals/user_action_signal_handler.h"
 #include "components/segmentation_platform/public/config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
+#include "components/segmentation_platform/internal/execution/model_execution_manager_impl.h"
+#endif  // BUILDFLAG(BUILD_WITH_TFLITE_LIB
 
 namespace segmentation_platform {
 namespace {
@@ -114,7 +122,8 @@ class SegmentationPlatformServiceImplTest : public testing::Test {
   }
 
  protected:
-  base::test::TaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   Config* config_;
   std::map<std::string, proto::SegmentInfo> segment_db_entries_;
@@ -142,6 +151,54 @@ TEST_F(SegmentationPlatformServiceImplTest, InitializationFlow) {
 
   // If initialization is succeeded, model execution scheduler should start
   // querying segment db.
+  segment_db_->LoadCallback(true);
+
+  // If we build with TF Lite, we need to also inspect whether the
+  // ModelExecutionManagerImpl is publishing the correct data and whether that
+  // leads to the SegmentationPlatformServiceImpl doing the right thing.
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
+  proto::SegmentationModelMetadata metadata;
+  metadata.set_time_unit(proto::TimeUnit::DAY);
+  metadata.set_bucket_duration(42u);
+  // Add a test feature, which will later cause the signal storage DB to be
+  // updated.
+  auto* feature = metadata.add_features();
+  feature->set_type(proto::SignalType::HISTOGRAM_VALUE);
+  feature->set_name("other");
+  feature->set_name_hash(base::HashMetricName("other"));
+  feature->set_aggregation(proto::Aggregation::BUCKETED_SUM);
+  feature->set_bucket_count(3);
+  feature->set_tensor_length(3);
+
+  ModelExecutionManagerImpl* mem_impl = static_cast<ModelExecutionManagerImpl*>(
+      segmentation_platform_service_impl_->model_execution_manager_.get());
+
+  // This method is invoked from SegmentationModelHandler whenever a model has
+  // been updated and every time at startup. This will first read the old info
+  // from the database, and then write the merged result of the old and new to
+  // the database.
+  base::HistogramTester histogram_tester;
+  mem_impl->OnSegmentationModelUpdated(
+      OptimizationTarget::OPTIMIZATION_TARGET_SEGMENTATION_SHARE, metadata);
+  segment_db_->GetCallback(true);
+  segment_db_->UpdateCallback(true);
+
+  // Since the updated config had a new feature, the SignalStorageConfigs DB
+  // should have been updated.
+  segment_storage_config_db_->UpdateCallback(true);
+
+  // The SignalFilterProcessor needs to read the segment information from the
+  // database before starting to listen to the updated signals.
+  segment_db_->LoadCallback(true);
+  //  We should have started recording 1 value histogram, once.
+  EXPECT_EQ(
+      1, histogram_tester.GetBucketCount(
+             "SegmentationPlatform.Signals.ListeningCount.HistogramValue", 1));
+#endif  // BUILDFLAG(BUILD_WITH_TFLITE_LIB)
+
+  // Database maintenance tasks should try to cleanup the signals after a short
+  // delay, which starts with looking up data from the SegmentInfoDatabase.
+  task_environment_.FastForwardUntilNoTasksRemain();
   segment_db_->LoadCallback(true);
 }
 

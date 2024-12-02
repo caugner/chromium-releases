@@ -9,11 +9,14 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/sequenced_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
 #include "components/leveldb_proto/public/shared_proto_database_client_list.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/segmentation_platform/internal/constants.h"
+#include "components/segmentation_platform/internal/database/database_maintenance_impl.h"
+#include "components/segmentation_platform/internal/database/metadata_utils.h"
 #include "components/segmentation_platform/internal/database/segment_info_database.h"
 #include "components/segmentation_platform/internal/database/signal_database_impl.h"
 #include "components/segmentation_platform/internal/database/signal_storage_config.h"
@@ -40,6 +43,8 @@ const base::FilePath::CharType kSegmentInfoDBName[] =
 const base::FilePath::CharType kSignalDBName[] = FILE_PATH_LITERAL("SignalDB");
 const base::FilePath::CharType kSignalStorageConfigDBName[] =
     FILE_PATH_LITERAL("SignalStorageConfigDB");
+const base::TimeDelta kDatabaseMaintenanceDelay =
+    base::TimeDelta::FromSeconds(30);
 }  // namespace
 
 SegmentationPlatformServiceImpl::SegmentationPlatformServiceImpl(
@@ -80,11 +85,15 @@ SegmentationPlatformServiceImpl::SegmentationPlatformServiceImpl(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     base::Clock* clock,
     std::unique_ptr<Config> config)
-    : config_(std::move(config)) {
+    : model_provider_(model_provider),
+      task_runner_(task_runner),
+      clock_(clock),
+      config_(std::move(config)) {
   // Construct databases.
   segment_info_database_ =
       std::make_unique<SegmentInfoDatabase>(std::move(segment_db));
-  signal_database_ = std::make_unique<SignalDatabaseImpl>(std::move(signal_db));
+  signal_database_ =
+      std::make_unique<SignalDatabaseImpl>(std::move(signal_db), clock);
   signal_storage_config_ = std::make_unique<SignalStorageConfig>(
       std::move(signal_storage_config_db), clock);
   segmentation_result_prefs_ =
@@ -92,28 +101,20 @@ SegmentationPlatformServiceImpl::SegmentationPlatformServiceImpl(
 
   // Construct signal processors.
   user_action_signal_handler_ =
-      std::make_unique<UserActionSignalHandler>(signal_database_.get(), clock);
+      std::make_unique<UserActionSignalHandler>(signal_database_.get());
   histogram_signal_handler_ =
-      std::make_unique<HistogramSignalHandler>(signal_database_.get(), clock);
+      std::make_unique<HistogramSignalHandler>(signal_database_.get());
   signal_filter_processor_ = std::make_unique<SignalFilterProcessor>(
       segment_info_database_.get(), user_action_signal_handler_.get(),
       histogram_signal_handler_.get());
 
   segment_selector_ = std::make_unique<SegmentSelectorImpl>(
-      segment_info_database_.get(), segmentation_result_prefs_.get(),
-      config_.get());
+      segment_info_database_.get(), signal_storage_config_.get(),
+      segmentation_result_prefs_.get(), config_.get(), clock);
 
-  model_execution_manager_ = CreateModelExecutionManager(
-      model_provider, task_runner, config_->segment_ids, clock,
-      segment_info_database_.get(), signal_database_.get(),
-      std::make_unique<FeatureAggregatorImpl>());
-  model_execution_scheduler_ = std::make_unique<ModelExecutionSchedulerImpl>(
-      segment_selector_.get(), segment_info_database_.get(),
-      signal_storage_config_.get(), model_execution_manager_.get());
-  // |model_execution_scheduler_| and |segment_selector_| have circular
-  // dependency. Maybe in future we could flip the dependency.
-  segment_selector_->set_model_execution_scheduler(
-      model_execution_scheduler_.get());
+  database_maintenance_ = std::make_unique<DatabaseMaintenanceImpl>(
+      config_.get(), clock, segment_info_database_.get(),
+      signal_database_.get(), signal_storage_config_.get());
 
   // Kick off initialization of all databases. Internal operations will be
   // delayed until they are all complete.
@@ -175,9 +176,45 @@ void SegmentationPlatformServiceImpl::MaybeRunPostInitializationRoutines() {
   if (!init_success)
     return;
 
+  model_execution_manager_ = CreateModelExecutionManager(
+      model_provider_, task_runner_, config_->segment_ids, clock_,
+      segment_info_database_.get(), signal_database_.get(),
+      std::make_unique<FeatureAggregatorImpl>(),
+      base::BindRepeating(
+          &SegmentationPlatformServiceImpl::OnSegmentationModelUpdated,
+          weak_ptr_factory_.GetWeakPtr()));
+
+  model_execution_scheduler_ = std::make_unique<ModelExecutionSchedulerImpl>(
+      segment_selector_.get(), segment_info_database_.get(),
+      signal_storage_config_.get(), model_execution_manager_.get(), clock_);
+
   signal_filter_processor_->OnSignalListUpdated();
   model_execution_scheduler_->RequestModelExecutionForEligibleSegments(
-      true /*expired_only*/);
+      /*expired_only=*/true);
+
+  // Initiate database maintenance tasks with a small delay.
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(
+          &SegmentationPlatformServiceImpl::OnExecuteDatabaseMaintenanceTasks,
+          weak_ptr_factory_.GetWeakPtr()),
+      kDatabaseMaintenanceDelay);
+}
+
+void SegmentationPlatformServiceImpl::OnSegmentationModelUpdated(
+    proto::SegmentInfo segment_info) {
+  DCHECK(metadata_utils::ValidateSegmentInfoMetadataAndFeatures(segment_info) ==
+         metadata_utils::ValidationResult::kValidationSuccess);
+
+  signal_storage_config_->OnSignalCollectionStarted(
+      segment_info.model_metadata());
+  signal_filter_processor_->OnSignalListUpdated();
+
+  model_execution_scheduler_->OnNewModelInfoReady(segment_info);
+}
+
+void SegmentationPlatformServiceImpl::OnExecuteDatabaseMaintenanceTasks() {
+  database_maintenance_->ExecuteMaintenanceTasks();
 }
 
 // static

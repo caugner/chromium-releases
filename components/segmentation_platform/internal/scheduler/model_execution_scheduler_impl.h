@@ -8,11 +8,14 @@
 #include "components/segmentation_platform/internal/scheduler/model_execution_scheduler.h"
 
 #include "base/cancelable_callback.h"
-#include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/execution/model_execution_manager.h"
 #include "components/segmentation_platform/internal/execution/model_execution_status.h"
+
+namespace base {
+class Clock;
+}  // namespace base
 
 namespace segmentation_platform {
 
@@ -28,7 +31,8 @@ class ModelExecutionSchedulerImpl : public ModelExecutionScheduler {
   ModelExecutionSchedulerImpl(Observer* observer,
                               SegmentInfoDatabase* segment_database,
                               SignalStorageConfig* signal_storage_config,
-                              ModelExecutionManager* model_execution_manager);
+                              ModelExecutionManager* model_execution_manager,
+                              base::Clock* clock);
   ~ModelExecutionSchedulerImpl() override;
 
   // Disallow copy/assign.
@@ -37,7 +41,7 @@ class ModelExecutionSchedulerImpl : public ModelExecutionScheduler {
       delete;
 
   // ModelExecutionScheduler overrides.
-  void OnNewModelInfoReady(OptimizationTarget segment_id) override;
+  void OnNewModelInfoReady(const proto::SegmentInfo& segment_info) override;
   void RequestModelExecutionForEligibleSegments(bool expired_only) override;
   void RequestModelExecution(OptimizationTarget segment_id) override;
   void OnModelExecutionCompleted(
@@ -49,6 +53,9 @@ class ModelExecutionSchedulerImpl : public ModelExecutionScheduler {
       bool expired_only,
       std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>
           all_segments);
+  bool ShouldExecuteSegment(bool expired_only,
+                            const proto::SegmentInfo& segment_info);
+  void CancelOutstandingExecutionRequests(OptimizationTarget segment_id);
 
   void OnResultSaved(OptimizationTarget segment_id, bool success);
 
@@ -64,6 +71,9 @@ class ModelExecutionSchedulerImpl : public ModelExecutionScheduler {
 
   // The class that executes the models.
   ModelExecutionManager* model_execution_manager_;
+
+  // The time provider.
+  base::Clock* clock_;
 
   // In-flight model execution requests. Will be killed if we get a model
   // update.
