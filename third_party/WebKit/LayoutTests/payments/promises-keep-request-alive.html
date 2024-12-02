@@ -5,18 +5,11 @@
 <script src="resources/payment-request-mock.js"></script>
 <script>
 var details = {
-  items: [
+  total:
     {
-      id: 'bar',
-      label: 'Sub-total',
-      amount: { currency: 'USD', value : '55.00' }, // US$55.00
-    },
-    {
-      id: 'foo',
-      label: 'Sales Tax',
-      amount: { currency: 'USD', value : '5.00' }, // US$5.00
+      label: 'Total',
+      amount: {currency: 'USD', value: '55.00'}, // US$55.00
     }
-  ]
 };
 
 var response_data = {
@@ -30,13 +23,13 @@ promise_test(t => {
     return paymentRequestMock
       .then(m => {
           mock = m;
-          var result = new PaymentRequest(['visa'], details).show();
+          var result = new PaymentRequest([{'supportedMethods': ['visa']}], details).show();
           gc();
           mock.onPaymentResponse(response_data);
           return result;
         })
       .then(response => {
-          completeResult = response.complete(true);
+          completeResult = response.complete("success");
           // Return before calling gc() to make sure reference to response
           // is gone.
         })

@@ -74,7 +74,11 @@ crbug.com/24182 fast/encoding/char-encoding.html [ Slow ]
 crbug.com/24182 fast/frames/sandboxed-iframe-navigation-targetlink.html [ Slow ]
 crbug.com/24182 fast/html/marquee-destroyed-without-removed-from-crash.html [ Slow ]
 crbug.com/24182 fast/js/regress/string-cons-tower.html [ Slow ]
-crbug.com/24182 virtual/pointerevent/fast/events/tabindex-focus-blur-all.html [ Slow ]
+crbug.com/24182 fast/events/tabindex-focus-blur-all.html [ Slow ]
+crbug.com/24182 [ Debug ] svg/hixie/perf/003.xml [ Slow ]
+crbug.com/24182 [ Debug ] svg/hixie/perf/004.xml [ Slow ]
+crbug.com/24182 [ Debug ] svg/hixie/perf/005.xml [ Slow ]
+crbug.com/24182 [ Debug ] svg/hixie/perf/006.xml [ Slow ]
 crbug.com/451577 [ Debug ] fast/dom/gc-treescope.html  [ Slow ]
 crbug.com/451577 [ Debug ] fast/frames/calculate-round.html [ Slow ]
 crbug.com/451577 imported/wpt/IndexedDB/idbindex-multientry-big.htm [ Slow ]
@@ -97,7 +101,6 @@ crbug.com/451577 [ Win ] http/tests/inspector/network/network-datareceived.html 
 
 # Debugger and profiler tests are slow in Release as well.
 crbug.com/450493 inspector/sources/ [ Slow ]
-crbug.com/450493 virtual/pointerevent/inspector/sources/ [ Slow ]
 crbug.com/450493 inspector-enabled/sources/ [ Slow ]
 crbug.com/450493 http/tests/inspector/sources/ [ Slow ]
 crbug.com/450493 http/tests/inspector/stacktraces/ [ Slow ]
@@ -173,17 +176,17 @@ crbug.com/453312 html5lib/generated/run-webkit01-data.html [ Slow ]
 crbug.com/453312 html5lib/webkit-resumer.html [ Slow ]
 
 crbug.com/577381 [ Linux Debug ] imported/wpt/encoding/api-invalid-label.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/web-platform-tests/html/syntax/parsing/html5lib_tests10.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/web-platform-tests/html/syntax/parsing/html5lib_tests21.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/web-platform-tests/html/syntax/parsing/html5lib_webkit01.html [ Slow ]
-crbug.com/577381 [ Linux Debug ] imported/web-platform-tests/html/syntax/parsing/html5lib_domjs-unsafe.html [ Slow ]
+crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_tests10.html [ Slow ]
+crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_tests21.html [ Slow ]
+crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_webkit01.html [ Slow ]
+crbug.com/577381 [ Linux Debug ] imported/wpt/html/syntax/parsing/html5lib_domjs-unsafe.html [ Slow ]
 
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_entities01.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_template.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests1.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests16.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests19.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/syntax/parsing/html5lib_tests2.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_entities01.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_template.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests1.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests16.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests19.html [ Slow ]
+crbug.com/490511 imported/wpt/html/syntax/parsing/html5lib_tests2.html [ Slow ]
 
 # FIXME: These tests might still be buggy and time out. They were marked as Slow on 9/20/2013.
 # Double-check the data after they've been running another week or so.
@@ -221,9 +224,9 @@ crbug.com/492664 imported/csswg-test/css-writing-modes-3/text-orientation-script
 crbug.com/492664 imported/csswg-test/css-writing-modes-3/text-orientation-script-001o.html [ Slow ]
 
 crbug.com/336481 inspector/jump-to-previous-editing-location.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/rendering/replaced-elements/svg-embedded-sizing/ [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/semantics/embedded-content/media-elements/playing-the-media-resource/pause-remove-from-document-networkState.html [ Slow ]
-crbug.com/490511 imported/web-platform-tests/html/semantics/forms/textfieldselection/selection.html [ Slow ]
+crbug.com/490511 imported/wpt/html/rendering/replaced-elements/svg-embedded-sizing/ [ Slow ]
+crbug.com/490511 imported/wpt/html/semantics/embedded-content/media-elements/playing-the-media-resource/pause-remove-from-document-networkState.html [ Slow ]
+crbug.com/490511 imported/wpt/html/semantics/forms/textfieldselection/selection.html [ Slow ]
 crbug.com/346259 http/tests/websocket/no-crash-on-cookie-flood.html [ Slow ]
 
 crbug.com/358313 virtual/gpu/fast/canvas/webgl/webgl-large-texture.html [ Slow ]
@@ -270,13 +273,15 @@ crbug.com/24182 [ Debug ] animations/interpolation/webkit-transform-interpolatio
 crbug.com/521857 [ Win Debug ] imported/wpt/IndexedDB/idbdatabase_createObjectStore10-1000ends.htm [ Slow ]
 
 crbug.com/528419 [ Linux ] inspector/elements/shadow/shadow-host-display-modes.html [ Slow ]
-crbug.com/528419 [ Linux ] inspector/elements/styles-2/pseudo-elements.html [ Slow ]
+crbug.com/528419 inspector/elements/styles-2/pseudo-elements.html [ Slow ]
 
 crbug.com/529345 [ Win10 ] paint/masks/fieldset-mask.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-root-frame-animates.html [ Slow ]
 crbug.com/552556 [ Win Linux ] virtual/threaded/fast/scroll-behavior/overflow-scroll-animates.html [ Slow ]
 crbug.com/570656 [ Mac ] fast/writing-mode/Kusa-Makura-background-canvas.html [ Slow ]
 crbug.com/570656 [ Mac ] fast/text/unicode-fallback-font.html [ Slow ]
+
+crbug.com/445194 fast/dom/shadow/focus-controller-recursion-crash.html [ Slow ]
 
 crbug.com/584807 printing/webgl-oversized-printing.html [ Slow ]
 crbug.com/584807 virtual/threaded/printing/webgl-oversized-printing.html [ Slow ]
@@ -287,3 +292,8 @@ crbug.com/594189 virtual/spv2/fast/overflow/lots-of-sibling-inline-boxes.html [ 
 
 crbug.com/601726 http/tests/incremental/frame-focus-before-load.html [ Slow ]
 
+crbug.com/611442 imported/wpt/quirks-mode/hashless-hex-color.html [ Slow ]
+
+crbug.com/614910 virtual/gpu-rasterization/fast/images/color-profile-filter.html [ Slow ]
+
+crbug.com/606649 fast/dom/gc-dom-tree-lifetime.html [ Slow ]

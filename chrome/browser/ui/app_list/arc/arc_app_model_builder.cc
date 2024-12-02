@@ -18,6 +18,7 @@ ArcAppModelBuilder::~ArcAppModelBuilder() {
 
 void ArcAppModelBuilder::BuildModel() {
   prefs_ = ArcAppListPrefs::Get(profile());
+  DCHECK(prefs_);
 
   std::vector<std::string> app_ids = prefs_->GetAppIds();
   for (auto& app_id : app_ids) {
@@ -25,7 +26,8 @@ void ArcAppModelBuilder::BuildModel() {
     if (!app_info)
       continue;
 
-    InsertApp(CreateApp(app_id, *app_info));
+    if (app_info->showInLauncher)
+      InsertApp(CreateApp(app_id, *app_info));
   }
 
   prefs_->AddObserver(this);
@@ -39,25 +41,14 @@ std::unique_ptr<ArcAppItem> ArcAppModelBuilder::CreateApp(
     const std::string& app_id,
     const ArcAppListPrefs::AppInfo& app_info) {
   return base::WrapUnique(new ArcAppItem(profile(), GetSyncItem(app_id), app_id,
-                                         app_info.name, app_info.ready));
+                                         app_info.name));
 }
 
 void ArcAppModelBuilder::OnAppRegistered(
     const std::string& app_id,
     const ArcAppListPrefs::AppInfo& app_info) {
-  InsertApp(CreateApp(app_id, app_info));
-}
-
-void ArcAppModelBuilder::OnAppReadyChanged(const std::string& app_id,
-                                           bool ready) {
-  ArcAppItem* app_item = GetArcAppItem(app_id);
-  if (!app_item) {
-    VLOG(2) << "Could not update the state of ARC app(" << app_id
-            << ") because it was not found.";
-    return;
-  }
-
-  app_item->SetReady(ready);
+  if (app_info.showInLauncher)
+    InsertApp(CreateApp(app_id, app_info));
 }
 
 void ArcAppModelBuilder::OnAppRemoved(const std::string& app_id) {

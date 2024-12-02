@@ -6,19 +6,22 @@
         <link rel="author" title="Google" href="http://www.google.com/">
         <link rel="help" href="http://www.w3.org/TR/hr-time/#sec-extenstions-performance-interface">
 
-        <script src="../../../resources/testharness.js"></script>
-        <script src="../../../resources/testharnessreport.js"></script>
+        <script src="/resources/testharness.js"></script>
+        <script src="/resources/testharnessreport.js"></script>
 
         <script type="text/javascript">
             setup({explicit_done: true});
 
+            var setup_frame = async_test("Setup the frame");
+
             function start_test() {
-              setTimeout(function() {
+              setup_frame.step_timeout(function () {
                 var iframe = document.createElement('iframe');
                 iframe.id = 'frameContext';
                 iframe.onload = finish_test;
                 iframe.src = "resources/now_frame.html";
                 document.body.appendChild(iframe);
+                setup_frame.done();
               }, 1000);
             }
 

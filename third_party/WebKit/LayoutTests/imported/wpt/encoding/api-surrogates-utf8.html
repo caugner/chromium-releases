@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <title>Encoding API: Invalid UTF-16 surrogates with UTF-8 encoding</title>
-<script src="../../../resources/testharness.js"></script>
-<script src="../../../resources/testharnessreport.js"></script>
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
 <script>
 
 var badStrings = [
@@ -45,7 +45,7 @@ var badStrings = [
 
 badStrings.forEach(function(t) {
     test(function() {
-        var encoded = new TextEncoder('utf-8').encode(t.input);
+        var encoded = new TextEncoder().encode(t.input);
         assert_array_equals([].slice.call(encoded), t.expected);
         assert_equals(new TextDecoder('utf-8').decode(encoded), t.decoded);
     }, 'Invalid surrogates encoded into UTF-8: ' + t.name);
