@@ -441,6 +441,8 @@ html element command
 html element content
     property getDistributedNodes
     property select
+html element data
+    property value
 html element datalist
     property options
 html element dd
@@ -999,6 +1001,8 @@ html element thead
     property insertRow
     property rows
     property vAlign
+html element time
+    property dateTime
 html element title
     property text
 html element tr

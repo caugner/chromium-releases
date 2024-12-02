@@ -1,3 +1,9 @@
+/**
+ * These test helper APIs are being migrated to
+ * third_party/WebKit/Source/devtools/front_end/integration_test_runner
+ * See crbug.com/667560
+ */
+
 if (window.GCController)
     GCController.collectAll();
 
@@ -110,12 +116,7 @@ InspectorTest.evaluateFunctionInOverlay = function(func, callback)
 {
     var expression = "testRunner.evaluateInWebInspectorOverlay(\"(\" + " + func + " + \")()\")";
     var mainContext = InspectorTest.runtimeModel.executionContexts()[0];
-    mainContext.evaluate(expression, "", false, false, true, false, false, wrapCallback);
-
-    function wrapCallback(result, exceptionDetails)
-    {
-        callback(result.value)
-    }
+    mainContext.evaluate({expression: expression, returnByValue:true}).then(result => callback(result.object.value));
 }
 
 InspectorTest.check = function(passCondition, failureText)
@@ -148,6 +149,13 @@ InspectorTest.formatters = {};
 InspectorTest.formatters.formatAsTypeName = function(value)
 {
     return "<" + typeof value + ">";
+}
+
+InspectorTest.formatters.formatAsTypeNameOrNull = function(value)
+{
+    if (value === null)
+      return "null";
+    return InspectorTest.formatters.formatAsTypeName(value);
 }
 
 InspectorTest.formatters.formatAsRecentTime = function(value)
@@ -432,21 +440,21 @@ InspectorTest.dumpNavigatorViewInMode = function(view, mode)
 }
 
 /**
- * @param {symbol} event
+ * @param {symbol} eventName
  * @param {!Common.Object} obj
  * @param {function(?):boolean=} condition
  * @return {!Promise}
  */
-InspectorTest.waitForEvent = function(event, obj, condition)
+InspectorTest.waitForEvent = function(eventName, obj, condition)
 {
-    condition = condition || function() { return true;};
+    condition = condition || function() { return true; };
     return new Promise(resolve => {
-        obj.addEventListener(event, onEventFired);
+        obj.addEventListener(eventName, onEventFired);
 
         function onEventFired(event) {
             if (!condition(event.data))
                 return;
-            obj.removeEventListener(event, onEventFired);
+            obj.removeEventListener(eventName, onEventFired);
             resolve(event.data);
         }
     });
@@ -801,6 +809,7 @@ InspectorTest.textContentWithoutStyles = function(node)
 InspectorTest.clearSpecificInfoFromStackFrames = function(text)
 {
     var buffer = text.replace(/\(file:\/\/\/(?:[^)]+\)|[\w\/:-]+)/g, "(...)");
+    buffer = buffer.replace(/\(http:\/\/(?:[^)]+\)|[\w\/:-]+)/g, "(...)");
     buffer = buffer.replace(/\(<anonymous>:[^)]+\)/g, "(...)");
     buffer = buffer.replace(/VM\d+/g, "VM");
     return buffer.replace(/\s*at[^()]+\(native\)/g, "");
@@ -1048,6 +1057,25 @@ function runTest(pixelTest, enableWatchDogWhileDebugging)
         }
 
         InspectorTest = {};
+
+        self.AccessibilityTestRunner = InspectorTest;
+        self.ApplicationTestRunner = InspectorTest;
+        self.AuditsTestRunner = InspectorTest;
+        self.BindingsTestRunner = InspectorTest;
+        self.ConsoleTestRunner = InspectorTest;
+        self.CoverageTestRunner = InspectorTest;
+        self.DataGridTestRunner = InspectorTest;
+        self.DeviceModeTestRunner = InspectorTest;
+        self.ElementsTestRunner = InspectorTest;
+        self.ExtensionsTestRunner = InspectorTest;
+        self.LayersTestRunner = InspectorTest;
+        self.NetworkTestRunner = InspectorTest;
+        self.PerformanceTestRunner = InspectorTest;
+        self.ProfilerTestRunner = InspectorTest;
+        self.SASSTestRunner = InspectorTest;
+        self.SecurityTestRunner = InspectorTest;
+        self.SourcesTestRunner = InspectorTest;
+        self.TestRunner = InspectorTest;
 
         for (var i = 0; i < initializationFunctions.length; ++i) {
             try {

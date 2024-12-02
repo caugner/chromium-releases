@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startHTML(`
+  var {page, session, dp} = await testRunner.startHTML(`
     <style>
     body {
         min-height: 2000px;
@@ -15,7 +15,7 @@
     return;
   }
 
-  testRunner.logObject(message.result.layoutViewport, 'LayoutViewport: ');
-  testRunner.logObject(message.result.visualViewport, 'VisualViewport: ');
+  testRunner.log(message.result.layoutViewport, 'LayoutViewport: ');
+  testRunner.log(message.result.visualViewport, 'VisualViewport: ');
   testRunner.completeTest();
 })

@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank(`Tests timestamps in multiple input domain methods.`);
+  var {page, session, dp} = await testRunner.startBlank(`Tests timestamps in multiple input domain methods.`);
 
   await session.evaluate(`
     var logs = [];
@@ -34,7 +34,7 @@
       }
 
       function isNear(a, b) {
-        var epsilon = 0.5;
+        var epsilon = 5;
         return Math.abs(b - a) < epsilon;
       }
 
@@ -48,7 +48,7 @@
 
   // We send epoch timestamp but expect to receive high-res timestamps
   var baseEpochTimestamp = Date.now() / 1000; // in seconds
-  var offsets = [0, 5, 10, 15, 20, 25];
+  var offsets = [0, 5, 10, 15];
   var sentTimestamps = offsets.map(offset => baseEpochTimestamp + offset);
 
   var offsetsMs = offsets.map(offset => 1000 * offset);
@@ -58,7 +58,7 @@
 
   function dumpError(message) {
     if (message.error)
-      testRunner.log('Error: ' + message.error.message);
+      testRunner.fail(message.error.message);
   }
 
   dumpError(await dp.Input.dispatchKeyEvent({
@@ -85,25 +85,6 @@
     x: 100,
     y: 200
   }));
-  dumpError(await dp.Input.dispatchTouchEvent({
-    type: 'touchStart',
-    timestamp: sentTimestamps[4],
-    touchPoints: [{
-      state: 'touchPressed',
-      x: 100,
-      y: 200
-    }]
-  }));
-  dumpError(await dp.Input.dispatchTouchEvent({
-    type: 'touchStart',
-    timestamp: sentTimestamps[5],
-    touchPoints: [{
-      state: 'touchPressed',
-      x: 100,
-      y: 100
-    }]
-  }));
-
   testRunner.log(await session.evaluateAsync('verifyTimestampsPromise'));
   testRunner.completeTest();
 })

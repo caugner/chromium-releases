@@ -9,23 +9,10 @@
 # ask hajimehoshi@.                                                       #
 ###########################################################################
 
-# FIXME: The below tests crashes when the leak detector is run on debug builds
-crbug.com/366043 [ Debug ] fast/history/history-traversal-is-asynchronous.html [ Crash ]
-
 # FIXME: scroll customization leaks memory. See
 # codereview.chromium.org/1236913004/ for context.
 crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/touch-scroll-customization.html [ Leak ]
 crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/scrollstate-distribute-to-scroll-chain-descendant.html [ Leak ]
-
-# -----------------------------------------------------------------
-# Untriaged but known real leaks.
-# -----------------------------------------------------------------
-
-# -----------------------------------------------------------------
-# Untriaged but known leaks which may be false positives.
-# -----------------------------------------------------------------
-
-crbug.com/662477 external/wpt/html/webappapis/idle-callbacks/cancel-invoked.html [ Leak ]
 
 # -----------------------------------------------------------------
 # Untriaged but known leaks of SuspendableObject (fast).
@@ -37,19 +24,10 @@ crbug.com/661182 fast/loader/open-in-srcdoc-unload.html [ Leak ]
 # -----------------------------------------------------------------
 crbug.com/506754 http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 virtual/mojo-loading/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
-crbug.com/506754 virtual/off-main-thread-fetch/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 virtual/service-worker-script-streaming/http/tests/serviceworker/chromium/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 crbug.com/506754 virtual/mojo-loading/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
-crbug.com/506754 virtual/off-main-thread-fetch/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
 crbug.com/506754 virtual/service-worker-script-streaming/http/tests/serviceworker/chromium/window-close-during-registration.html [ Leak ]
-
-# -----------------------------------------------------------------
-# Leaks in external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/*
-# -----------------------------------------------------------------
-crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-align-self-baseline-vert-001.html [ Failure Pass Leak ]
-crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001a.html [ Leak ]
-crbug.com/594309 [ Linux ] external/wpt/css/vendor-imports/mozilla/mozilla-central-reftests/flexbox/flexbox-baseline-empty-001b.html [ Leak ]
 
 crbug.com/664874 http/tests/xmlhttprequest/workers/xmlhttprequest-allowed-with-disabled-web-security.html [ Leak ]
 crbug.com/664874 virtual/mojo-loading/http/tests/xmlhttprequest/workers/xmlhttprequest-allowed-with-disabled-web-security.html [ Leak ]
@@ -58,8 +36,13 @@ crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-i
 crbug.com/672740 virtual/mojo-loading/http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker-allowed.html [ Leak Pass ]
 crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker.html [ Leak Pass ]
 crbug.com/672740 virtual/mojo-loading/http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker.html [ Leak Pass ]
+crbug.com/754222 external/wpt/pointerevents/pointerevent_releasepointercapture_onpointerup_mouse-manual.html [ Leak Pass ]
 
-# New tests revealed existing leak
+crbug.com/755625 external/wpt/beacon/beacon-error.window.html [ Leak ]
+
+# -----------------------------------------------------------------
+# Known as false positives
+# -----------------------------------------------------------------
 crbug.com/726218 [ Linux ] fast/dom/inert/inert-node-is-uneditable.html [ Leak ]
 crbug.com/726218 [ Linux ] fast/dom/inert/inert-inlines.html [ Leak ]
 crbug.com/726218 [ Linux ] fast/dom/inert/inert-label-focus.html [ Leak ]

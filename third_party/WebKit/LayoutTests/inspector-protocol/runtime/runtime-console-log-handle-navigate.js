@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank(`This tests how navigation is handled from inside debugger code (console.log).`);
+  var {page, session, dp} = await testRunner.startBlank(`This tests how navigation is handled from inside debugger code (console.log).`);
 
   await session.evaluateAsync(`
     function appendIframe(url) {
@@ -23,6 +23,6 @@
     dp.Runtime.onceExecutionContextCreated().then(result => contextId = result.params.context.id);
     await session.evaluateAsync(`appendIframe('${testRunner.url('../resources/console-log-navigate.html')}')`);
     testRunner.log(`Got new context: ${contextId !== undefined}`);
-    testRunner.logMessage(await dp.Runtime.evaluate({ expression: expression, contextId: contextId }));
+    testRunner.log(await dp.Runtime.evaluate({ expression: expression, contextId: contextId }));
   }
 })

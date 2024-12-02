@@ -1,5 +1,5 @@
 (async function(testRunner) {
-  let {page, session, dp} = await testRunner.startBlank('Tests enabling/disabling Page domain while recording Timeline.');
+  var {page, session, dp} = await testRunner.startBlank('Tests enabling/disabling Page domain while recording Timeline.');
 
   var log = [];
   dp.Timeline.onEventRecorded(msg => {
@@ -14,7 +14,7 @@
       return;
     }
     testRunner.log('FAIL: Unexpected records arrived');
-    testRunner.logObject(msg);
+    testRunner.log(msg);
   });
 
   await dp.Timeline.start();

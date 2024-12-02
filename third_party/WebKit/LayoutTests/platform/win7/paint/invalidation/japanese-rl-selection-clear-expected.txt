@@ -4,11 +4,11 @@
       "name": "LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
-      "drawsContent": true,
+      "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
         {
           "object": "LayoutText #text",
-          "rect": [299, 123, 474, 394],
+          "rect": [302, 123, 471, 394],
           "reason": "geometry"
         }
       ]
