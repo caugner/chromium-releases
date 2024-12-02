@@ -22,11 +22,12 @@
 #include "chrome/browser/ash/input_method/editor_text_query_from_manta.h"
 #include "chrome/browser/ash/input_method/editor_text_query_from_memory.h"
 #include "chrome/browser/ash/input_method/editor_text_query_provider.h"
+#include "chrome/browser/ash/input_method/editor_transition_enums.h"
 #include "chrome/browser/ash/magic_boost/magic_boost_controller_ash.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/ui/webui/ash/mako/mako_bubble_coordinator.h"
 #include "chromeos/components/editor_menu/public/cpp/editor_helpers.h"
-#include "chromeos/constants/chromeos_features.h"
+#include "chromeos/components/magic_boost/public/cpp/magic_boost_state.h"
 #include "ui/base/ime/ash/ime_bridge.h"
 #include "ui/display/screen.h"
 #include "ui/display/tablet_state.h"
@@ -36,7 +37,18 @@ namespace {
 
 constexpr std::u16string_view kAnnouncementViewName = u"Orca";
 
+crosapi::mojom::MagicBoostController::TransitionAction
+ConvertToMagicBoostTransitionAction(EditorNoticeTransitionAction action) {
+  switch (action) {
+    case EditorNoticeTransitionAction::kDoNothing:
+      return crosapi::mojom::MagicBoostController::TransitionAction::kDoNothing;
+    case EditorNoticeTransitionAction::kShowEditorPanel:
+      return crosapi::mojom::MagicBoostController::TransitionAction::
+          kShowEditorPanel;
+  }
 }
+
+}  // namespace
 
 EditorMediator::EditorMediator(
     Profile* profile,
@@ -218,6 +230,7 @@ void EditorMediator::HandleTrigger(
       mako_bubble_coordinator_.LoadEditorUI(
           profile_, MakoEditorMode::kRewrite,
           /*can_fallback_to_center_position=*/true,
+          /*feedback_enabled=*/editor_switch_->IsFeedbackEnabled(),
           active_query_context.preset_query_id,
           active_query_context.freeform_text);
       query_context_ = std::nullopt;
@@ -227,6 +240,7 @@ void EditorMediator::HandleTrigger(
       mako_bubble_coordinator_.LoadEditorUI(
           profile_, MakoEditorMode::kWrite,
           /*can_fallback_to_center_position=*/true,
+          /*feedback_enabled=*/editor_switch_->IsFeedbackEnabled(),
           active_query_context.preset_query_id,
           active_query_context.freeform_text);
       query_context_ = std::nullopt;
@@ -235,27 +249,37 @@ void EditorMediator::HandleTrigger(
     case EditorMode::kConsentNeeded:
       query_context_ = EditorQueryContext(/*preset_query_id=*/preset_query_id,
                                           /*freeform_text=*/freeform_text);
-      if (chromeos::features::IsMagicBoostEnabled()) {
-        crosapi::CrosapiManager::Get()
-            ->crosapi_ash()
-            ->magic_boost_controller_ash()
-            ->ShowDisclaimerUi(
-                /*display_id=*/display::Screen::GetScreen()
-                    ->GetPrimaryDisplay()
-                    .id(),
-                /*action=*/
-                crosapi::mojom::MagicBoostController::TransitionAction::
-                    kShowEditorPanel,
-                /*opt_in_features=*/OptInFeatures::kOrcaAndHmr);
-      } else {
-        mako_bubble_coordinator_.LoadConsentUI(profile_);
-      }
+      ShowNotice(EditorNoticeTransitionAction::kShowEditorPanel);
       metrics_recorder_->LogEditorState(EditorStates::kConsentScreenImpression);
       break;
     case EditorMode::kHardBlocked:
     case EditorMode::kSoftBlocked:
       mako_bubble_coordinator_.CloseUI();
   }
+}
+
+void EditorMediator::ShowNotice(
+    EditorNoticeTransitionAction transition_action) {
+  if (chromeos::MagicBoostState::Get()->IsMagicBoostAvailable()) {
+    crosapi::CrosapiManager::Get()
+        ->crosapi_ash()
+        ->magic_boost_controller_ash()
+        ->ShowDisclaimerUi(
+            /*display_id=*/display::Screen::GetScreen()
+                ->GetPrimaryDisplay()
+                .id(),
+            /*action=*/
+            ConvertToMagicBoostTransitionAction(transition_action),
+            /*opt_in_features=*/OptInFeatures::kOrcaAndHmr);
+    return;
+  }
+
+  if (IsServiceConnected()) {
+    service_connection_->system_actuator()->SetNoticeTransitionAction(
+        transition_action);
+  }
+
+  mako_bubble_coordinator_.LoadConsentUI(profile_);
 }
 
 void EditorMediator::CacheContext() {
@@ -345,6 +369,10 @@ void EditorMediator::OnTextFieldContextualInfoChanged(
 
 bool EditorMediator::IsAllowedForUse() {
   return editor_switch_->IsAllowedForUse();
+}
+
+bool EditorMediator::CanShowNoticeBanner() const {
+  return editor_switch_->CanShowNoticeBanner();
 }
 
 EditorMode EditorMediator::GetEditorMode() const {

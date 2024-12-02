@@ -129,8 +129,13 @@ public class TabArchiver implements TabWindowManager.Observer {
                     tab,
                     (archivePersistedTabData) -> {
                         if (isArchivedTabEligibleForDeletion(archivePersistedTabData)) {
+                            int tabAgeDays =
+                                    timestampMillisToDays(
+                                            archivePersistedTabData.getArchivedTimeMs());
                             mArchivedTabModel.closeTabs(
                                     TabClosureParams.closeTab(tab).allowUndo(false).build());
+                            RecordHistogram.recordCount1000Histogram(
+                                    "Tabs.TabAutoDeleted.AfterNDays", tabAgeDays);
                             RecordUserAction.record("Tabs.ArchivedTabAutoDeleted");
                         }
                     });
@@ -160,21 +165,30 @@ public class TabArchiver implements TabWindowManager.Observer {
      */
     public Tab archiveAndRemoveTab(TabModel tabModel, Tab tab) {
         ThreadUtils.assertOnUiThread();
+        int tabAgeDays = timestampMillisToDays(tab.getTimestampMillis());
         TabState tabState = prepareTabState(tab);
         Tab newTab = mArchivedTabCreator.createFrozenTab(tabState, tab.getId(), INVALID_TAB_INDEX);
         tabModel.closeTabs(TabClosureParams.closeTab(tab).allowUndo(false).build());
 
+        initializePersistedTabData(newTab);
+
+        RecordHistogram.recordCount1000Histogram("Tabs.TabArchived.AfterNDays", tabAgeDays);
+        RecordUserAction.record("Tabs.TabArchived");
+        return newTab;
+    }
+
+    void initializePersistedTabData(Tab archivedTab) {
         ArchivePersistedTabData.from(
-                newTab,
+                archivedTab,
                 (archivePersistedTabData) -> {
+                    if (archivePersistedTabData == null) {
+                        return;
+                    }
                     // Persisted tab data requires a true supplier before saving to disk.
                     archivePersistedTabData.registerIsTabSaveEnabledSupplier(
                             new ObservableSupplierImpl<>(true));
                     archivePersistedTabData.setArchivedTimeMs(mClock.currentTimeMillis());
                 });
-
-        RecordUserAction.record("Tabs.TabArchived");
-        return newTab;
     }
 
     /**
@@ -223,10 +237,7 @@ public class TabArchiver implements TabWindowManager.Observer {
                             numExistingRegularTabsFound++;
                             model.closeTabs(
                                     TabClosureParams.closeTab(tab).allowUndo(false).build());
-                            continue;
-                        }
-
-                        if (activeTabId != tab.getId() && isTabEligibleForArchive(tab)) {
+                        } else if (activeTabId != tab.getId() && isTabEligibleForArchive(tab)) {
                             archiveAndRemoveTab(model, tab);
                         } else {
                             i++;
@@ -257,7 +268,7 @@ public class TabArchiver implements TabWindowManager.Observer {
                 isTimestampWithinTargetHours(
                         timestampMillis, mTabArchiveSettings.getArchiveTimeDeltaHours());
         RecordHistogram.recordCount1000Histogram(
-                "Tabs.TabEligibleForArchive.AfterNDays", tabAgeDays);
+                "Tabs.TabArchiveEligibilityCheck.AfterNDays", tabAgeDays);
         return result;
     }
 
@@ -271,7 +282,7 @@ public class TabArchiver implements TabWindowManager.Observer {
                 isTimestampWithinTargetHours(
                         archivedTimeMillis, mTabArchiveSettings.getAutoDeleteTimeDeltaHours());
         RecordHistogram.recordCount1000Histogram(
-                "Tabs.TabEligibleForAutoDeletion.AfterNDays", tabAgeDays);
+                "Tabs.TabAutoDeleteEligibilityCheck.AfterNDays", tabAgeDays);
         return result;
     }
 

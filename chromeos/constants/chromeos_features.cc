@@ -97,7 +97,7 @@ BASE_FEATURE(kCrosMall, "CrosMall", base::FEATURE_DISABLED_BY_DEFAULT);
 
 // When enabled, the Mall app will be installed as an SWA. Only takes effect
 // when CrosMall is enabled. This flag will be enabled with Finch.
-BASE_FEATURE(kCrosMallSwa, "CrosMallSwa", base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kCrosMallSwa, "CrosMallSwa", base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables denying file access to dlp protected files in MyFiles.
 BASE_FEATURE(kDataControlsFileAccessDefaultDeny,
@@ -164,7 +164,21 @@ BASE_FEATURE(kKioskHeartbeatsViaERP,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Controls enabling / disabling the mahi feature.
-BASE_FEATURE(kMahi, "Mahi", base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kMahi, "Mahi", base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Controls enabling / disabling the mahi feature from the feature management
+// module.
+BASE_FEATURE(kFeatureManagementMahi,
+             "FeatureManagementMahi",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Controls whether mahi sends url when making request to the server.
+BASE_FEATURE(kMahiSendingUrl,
+             "MahiSendingUrl",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Controls whether to enable Mahi for managed users.
+BASE_FEATURE(kMahiManaged, "MahiManaged", base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Controls enabling / disabling the sparky feature.
@@ -196,6 +210,13 @@ BASE_FEATURE(kOrcaInternationalize,
 BASE_FEATURE(kOrcaUseL10nStrings,
              "OrcaUseL10nStrings",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Whether a set of UI optimizations within `OverviewSession::Init()` are
+// enabled or not. These should have no user-visible impact, except a faster
+// presentation time for the first frame of most overview sessions.
+BASE_FEATURE(kOverviewSessionInitOptimizations,
+             "OverviewSessionInitOptimizations",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Feature management flag used to gate preinstallation of the container app.
 // This flag is meant to be enabled by the feature management module.
@@ -429,23 +450,32 @@ bool IsJellyrollEnabled() {
   return IsJellyEnabled() && base::FeatureList::IsEnabled(kJellyroll);
 }
 
-bool IsMagicBoostEnabled() {
-#if BUILDFLAG(IS_CHROMEOS_LACROS)
-  // Magic Boost does not work in Lacros.
-  return false;
-#else
-  return IsMahiEnabled();
-#endif
-}
-
 // Sparkly depends on Mahi, so we turn on Mahi if the sparky flag is enabled.
 // Sparky doesn't work on LACROS so that case is ignored.
 bool IsMahiEnabled() {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   return chromeos::BrowserParamsProxy::Get()->IsMahiEnabled();
 #else
-  return base::FeatureList::IsEnabled(kMahi) ||
+  return (base::FeatureList::IsEnabled(kMahi) &&
+          base::FeatureList::IsEnabled(kFeatureManagementMahi)) ||
          base::FeatureList::IsEnabled(kSparky);
+#endif
+}
+
+// Mahi requests are composed & sent from ash.
+bool IsMahiSendingUrl() {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  return base::FeatureList::IsEnabled(kMahiSendingUrl);
+#else
+  return false;
+#endif
+}
+
+bool IsMahiManagedEnabled() {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  return base::FeatureList::IsEnabled(kMahiManaged);
+#else
+  return false;
 #endif
 }
 
@@ -498,6 +528,10 @@ bool ShouldDisableChromeComposeOnChromeOS() {
 #endif
 }
 
+bool IsQuickAnswersMaterialNextUIEnabled() {
+  return base::FeatureList::IsEnabled(kQuickAnswersMaterialNextUI);
+}
+
 bool IsQuickAnswersV2TranslationDisabled() {
   return base::FeatureList::IsEnabled(kDisableQuickAnswersV2Translation);
 }
@@ -545,6 +579,10 @@ bool IsPkcs12ToChapsDualWriteEnabled() {
 
 bool IsFeatureManagementHistoryEmbeddingEnabled() {
   return base::FeatureList::IsEnabled(kFeatureManagementHistoryEmbedding);
+}
+
+bool AreOverviewSessionInitOptimizationsEnabled() {
+  return base::FeatureList::IsEnabled(kOverviewSessionInitOptimizations);
 }
 
 int RoundedWindowsRadius() {

@@ -23,7 +23,7 @@
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/resolver/filter_operation_resolver.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
@@ -76,25 +76,24 @@ namespace blink {
 bool StringToNumWithUnit(String spacing,
                          float* number_spacing,
                          CSSPrimitiveValue::UnitType* unit) {
-  CSSTokenizer tokenizer(spacing);
-  const auto tokens = tokenizer.TokenizeToEOF();
-  CSSParserTokenRange range(tokens);
+  CSSParserTokenStream stream(spacing);
   // If we failed to parse token, return immediately.
-  if (range.AtEnd())
+  if (stream.AtEnd()) {
     return false;
+  }
 
-  const CSSParserToken* result = range.begin();
-  range.Consume();
   // If there is more than 1 dimension token or |spacing| is not a valid
   // dimension token, or unit is not a valid CSS length unit, return
   // immediately.
-  if (!range.AtEnd() || result->GetType() != kDimensionToken ||
-      !CSSPrimitiveValue::IsLength(result->GetUnitType())) {
-    return false;
+  const CSSParserToken& result = stream.Peek();
+  if (result.GetType() == kDimensionToken &&
+      CSSPrimitiveValue::IsLength(result.GetUnitType())) {
+    *number_spacing = result.NumericValue();
+    *unit = result.GetUnitType();
+    stream.Consume();
+    return stream.AtEnd();
   }
-  *number_spacing = result->NumericValue();
-  *unit = result->GetUnitType();
-  return true;
+  return false;
 }
 
 FontSelectionValue CanvasFontStretchToSelectionValue(
@@ -134,7 +133,7 @@ FontSelectionValue CanvasFontStretchToSelectionValue(
   return stretch_value;
 }
 
-TextRenderingMode CanvasTextRenderingToTextRendering(
+TextRenderingMode CanvasTextRenderingToTextRenderingMode(
     V8CanvasTextRendering text_rendering) {
   TextRenderingMode text_rendering_mode;
   switch (text_rendering.AsEnum()) {
@@ -142,13 +141,13 @@ TextRenderingMode CanvasTextRenderingToTextRendering(
       text_rendering_mode = TextRenderingMode::kAutoTextRendering;
       break;
     case (V8CanvasTextRendering::Enum::kOptimizeSpeed):
-      text_rendering_mode = TextRenderingMode::kAutoTextRendering;
+      text_rendering_mode = TextRenderingMode::kOptimizeSpeed;
       break;
     case (V8CanvasTextRendering::Enum::kOptimizeLegibility):
-      text_rendering_mode = TextRenderingMode::kAutoTextRendering;
+      text_rendering_mode = TextRenderingMode::kOptimizeLegibility;
       break;
     case (V8CanvasTextRendering::Enum::kGeometricPrecision):
-      text_rendering_mode = TextRenderingMode::kAutoTextRendering;
+      text_rendering_mode = TextRenderingMode::kGeometricPrecision;
       break;
     default:
       NOTREACHED_IN_MIGRATION();
@@ -388,7 +387,7 @@ void CanvasRenderingContext2DState::SetFont(
   }
   font_description.SetKerning(font_kerning_);
   font_description.SetTextRendering(
-      CanvasTextRenderingToTextRendering(text_rendering_mode_));
+      CanvasTextRenderingToTextRenderingMode(text_rendering_mode_));
   font_variant_caps_ = font_description.VariantCaps();
   std::optional<blink::V8CanvasFontStretch> font_value =
       V8CanvasFontStretch::Create(
@@ -798,8 +797,8 @@ const cc::PaintFlags* CanvasRenderingContext2DState::GetFlags(
       break;
     default:
       NOTREACHED_IN_MIGRATION();
-      // no break on purpose: flags needs to be assigned to avoid compiler warning
-      // about uninitialized variable.
+      // no break on purpose: flags needs to be assigned to avoid compiler
+      // warning about uninitialized variable.
       [[fallthrough]];
     case kFillPaintType:
       fill_style_.SyncFlags(fill_flags_, global_alpha_);
@@ -921,7 +920,7 @@ void CanvasRenderingContext2DState::SetTextRendering(
     FontSelector* selector) {
   DCHECK(realized_font_);
   TextRenderingMode text_rendering_mode =
-      CanvasTextRenderingToTextRendering(text_rendering);
+      CanvasTextRenderingToTextRenderingMode(text_rendering);
   FontDescription font_description(GetFontDescription());
   font_description.SetTextRendering(text_rendering_mode);
   text_rendering_mode_ = text_rendering;

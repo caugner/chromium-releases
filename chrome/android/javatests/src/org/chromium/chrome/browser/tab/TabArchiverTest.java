@@ -48,6 +48,7 @@ import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabCreator;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabWindowManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
@@ -77,6 +78,8 @@ public class TabArchiverTest {
 
     private @Mock Clock mClock;
     private @Mock TabModelSelector mSelector;
+    private @Mock TabWindowManager mTabWindowManager;
+    private @Mock Tab mTab;
 
     private ArchivedTabModelOrchestrator mArchivedTabModelOrchestrator;
     private TabArchiver mTabArchiver;
@@ -242,8 +245,10 @@ public class TabArchiverTest {
         assertEquals(0, mArchivedTabModel.getCount());
         HistogramWatcher watcher =
                 HistogramWatcher.newBuilder()
-                        .expectIntRecords("Tabs.TabEligibleForArchive.AfterNDays", 0, 0)
+                        .expectIntRecords("Tabs.TabArchiveEligibilityCheck.AfterNDays", 0, 0)
+                        .expectIntRecords("Tabs.TabArchived.AfterNDays", 0, 0)
                         .build();
+
         // Send an event, similar to how TabWindowManager would.
         runOnUiThreadBlocking(
                 () ->
@@ -291,8 +296,10 @@ public class TabArchiverTest {
 
         Tab archivedTab = mArchivedTabModel.getTabAt(0);
         HistogramWatcher watcher =
-                HistogramWatcher.newSingleRecordWatcher(
-                        "Tabs.TabEligibleForAutoDeletion.AfterNDays", 0);
+                HistogramWatcher.newBuilder()
+                        .expectIntRecords("Tabs.TabAutoDeleteEligibilityCheck.AfterNDays", 0)
+                        .expectIntRecords("Tabs.TabAutoDeleted.AfterNDays", 0)
+                        .build();
         runOnUiThreadBlocking(
                 () -> {
                     mTabArchiveSettings.setAutoDeleteEnabled(true);
@@ -300,10 +307,9 @@ public class TabArchiverTest {
                     mTabArchiver.deleteEligibleArchivedTabs();
                 });
 
-        assertEquals(1, mRegularTabModel.getCount());
         CriteriaHelper.pollInstrumentationThread(() -> mArchivedTabModel.getCount() == 0);
         CriteriaHelper.pollInstrumentationThread(() -> archivedTab.isDestroyed());
-        watcher.assertExpected();
+        assertEquals(1, mRegularTabModel.getCount());
 
         runOnUiThreadBlocking(
                 () -> {
@@ -315,6 +321,7 @@ public class TabArchiverTest {
                             });
                 });
         callbackHelper.waitForNext();
+        watcher.assertExpected();
     }
 
     @Test
@@ -428,5 +435,25 @@ public class TabArchiverTest {
         CriteriaHelper.pollUiThread(() -> 1 == mRegularTabModel.getCount());
         assertEquals(1, mArchivedTabModel.getCount());
         watcher.assertExpected();
+    }
+
+    @Test
+    @MediumTest
+    public void testPersistedTabDataNull() throws Exception {
+        doReturn(false).when(mTab).isInitialized();
+        // This shouldn't NPE when the persisted tab data is null.
+        runOnUiThreadBlocking(() -> mTabArchiver.initializePersistedTabData(mTab));
+
+        CallbackHelper callbackHelper = new CallbackHelper();
+        runOnUiThreadBlocking(
+                () -> {
+                    ArchivePersistedTabData.from(
+                            mTab,
+                            (tabPersistedData) -> {
+                                assertNull(tabPersistedData);
+                                callbackHelper.notifyCalled();
+                            });
+                });
+        callbackHelper.waitForNext();
     }
 }

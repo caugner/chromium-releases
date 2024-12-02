@@ -83,8 +83,6 @@ BASE_DECLARE_FEATURE(kFewerUpdateConfirmations);
 #endif
 
 #if !BUILDFLAG(IS_ANDROID) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
-BASE_DECLARE_FEATURE(kGetTheMostOutOfChrome);
-
 BASE_DECLARE_FEATURE(kIOSPromoRefreshedPasswordBubble);
 
 BASE_DECLARE_FEATURE(kIOSPromoAddressBubble);
@@ -146,11 +144,21 @@ extern const base::FeatureParam<bool> kPreloadTopChromeWebUISmartPreload;
 extern const char kPreloadTopChromeWebUIDelayPreloadName[];
 extern const base::FeatureParam<bool> kPreloadTopChromeWebUIDelayPreload;
 
+// An list of exclude origins for WebUIs that don't participate in preloading.
+// The list is a string of format "<origin>,<origin2>,...,<origin-n>", where
+// each <origin> is a WebUI origin, e.g. "chrome://tab-search.top-chrome". This
+// is used for emergency preloading shutoff for problematic WebUIs.
+extern const char kPreloadTopChromeWebUIExcludeOriginsName[];
+extern const base::FeatureParam<std::string>
+    kPreloadTopChromeWebUIExcludeOrigins;
+
 #if !BUILDFLAG(IS_ANDROID)
 BASE_DECLARE_FEATURE(kPressAndHoldEscToExitBrowserFullscreen);
 #endif
 
 BASE_DECLARE_FEATURE(kResponsiveToolbar);
+
+BASE_DECLARE_FEATURE(kTabDuplicateMetrics);
 
 BASE_DECLARE_FEATURE(kTabScrollingButtonPosition);
 extern const char kTabScrollingButtonPositionParameterName[];
@@ -202,7 +210,7 @@ BASE_DECLARE_FEATURE(kTabOrganization);
 bool IsTabOrganization();
 
 BASE_DECLARE_FEATURE(kTabstripDeclutter);
-bool IsTabstripDeclutter();
+bool IsTabstripDeclutterEnabled();
 
 BASE_DECLARE_FEATURE(kMultiTabOrganization);
 
@@ -213,6 +221,8 @@ BASE_DECLARE_FEATURE(kTabReorganization);
 BASE_DECLARE_FEATURE(kTabReorganizationDivider);
 
 BASE_DECLARE_FEATURE(kTabOrganizationModelStrategy);
+
+BASE_DECLARE_FEATURE(kTabOrganizationEnableNudgeForEnterprise);
 
 // The target (and minimum) interval between proactive nudge triggers. Measured
 // against a clock that only runs while Chrome is in the foreground.
@@ -267,8 +277,6 @@ BASE_DECLARE_FEATURE(kEnterpriseUpdatedProfileCreationScreen);
 BASE_DECLARE_FEATURE(kManagementToolbarButton);
 BASE_DECLARE_FEATURE(kManagementToolbarButtonForTrustedManagementSources);
 
-BASE_DECLARE_FEATURE(kWebUIBubblePerProfilePersistence);
-
 BASE_DECLARE_FEATURE(kWebUITabStrip);
 
 // Controls whether the context menu is shown on a touch press or a touch
@@ -291,6 +299,11 @@ BASE_DECLARE_FEATURE(kUsePortalAccentColor);
 // standard UI and a compact version of the UI by right clicking the empty area
 // in the Tabstrip.
 BASE_DECLARE_FEATURE(kCompactMode);
+
+// Controls whether the site-specific data dialog shows a related installed
+// applications section.
+BASE_DECLARE_FEATURE(kPageSpecificDataDialogRelatedInstalledAppsSection);
+
 }  // namespace features
 
 #endif  // CHROME_BROWSER_UI_UI_FEATURES_H_
