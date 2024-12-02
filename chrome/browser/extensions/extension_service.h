@@ -20,27 +20,22 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_function_histogram_value.h"
-#include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/extensions/extension_toolbar_model.h"
-#include "chrome/browser/extensions/extensions_quota_service.h"
-#include "chrome/browser/extensions/external_provider_interface.h"
-#include "chrome/browser/extensions/management_policy.h"
-#include "chrome/browser/extensions/menu_manager.h"
-#include "chrome/browser/extensions/pending_enables.h"
-#include "chrome/browser/extensions/pending_extension_manager.h"
-#include "chrome/browser/extensions/process_map.h"
-#include "chrome/browser/extensions/update_observer.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/extensions/manifest_handlers/shared_module_info.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/external_provider_interface.h"
+#include "extensions/browser/management_policy.h"
+#include "extensions/browser/pending_extension_manager.h"
+#include "extensions/browser/process_manager.h"
+#include "extensions/browser/process_map.h"
+#include "extensions/browser/quota_service.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "extensions/common/one_shot_event.h"
 
 class CommandLine;
@@ -64,6 +59,7 @@ class ExtensionSystem;
 class ExtensionUpdater;
 class PendingExtensionManager;
 class SettingsFrontend;
+class UpdateObserver;
 }  // namespace extensions
 
 namespace syncer {
@@ -131,6 +127,12 @@ class ExtensionService
       public content::NotificationObserver,
       public extensions::Blacklist::Observer {
  public:
+  // Returns the Extension for a given url or NULL if the url doesn't belong to
+  // an installed extension. This may be a hosted app extent or a
+  // chrome-extension:// url.
+  const extensions::Extension* GetInstalledExtensionByUrl(
+      const GURL& url) const;
+
   // Returns the Extension of hosted or packaged apps, NULL otherwise.
   const extensions::Extension* GetInstalledApp(const GURL& url) const;
 
@@ -164,7 +166,7 @@ class ExtensionService
 
   // Returns a set of all installed, disabled, blacklisted, and terminated
   // extensions.
-  scoped_ptr<const ExtensionSet> GenerateInstalledExtensionsSet() const;
+  scoped_ptr<ExtensionSet> GenerateInstalledExtensionsSet() const;
 
   // Gets the object managing the set of pending extensions.
   virtual extensions::PendingExtensionManager*
@@ -206,6 +208,16 @@ class ExtensionService
 
   // Initialize and start all installed extensions.
   void Init();
+
+  // Attempts to verify all extensions using the InstallVerifier. The
+  // |bootstrap| parameter indicates whether we're doing this because the
+  // InstallVerifier needed to be bootstrapped (otherwise it's for another
+  // reason, e.g. extension install/uninstall).
+  void VerifyAllExtensions(bool bootstrap);
+
+  // Once the verifier work is finished, we may want to re-check management
+  // policy if |success| indicates the verifier got a new signature back.
+  void FinishVerifyAllExtensions(bool bootstrap, bool success);
 
   // Called when the associated Profile is going to be destroyed.
   void Shutdown();
@@ -272,15 +284,12 @@ class ExtensionService
   // to ExtensionPrefs some other way.
   virtual bool UninstallExtension(std::string extension_id,
                                   bool external_uninstall,
-                                  string16* error);
+                                  base::string16* error);
 
   virtual bool IsExtensionEnabled(
       const std::string& extension_id) const OVERRIDE;
   virtual bool IsExternalExtensionUninstalled(
       const std::string& extension_id) const OVERRIDE;
-
-  // Whether the extension should show as enabled state in launcher.
-  bool IsExtensionEnabledForLauncher(const std::string& extension_id) const;
 
   // Enables the extension.  If the extension is already enabled, does
   // nothing.
@@ -455,11 +464,13 @@ class ExtensionService
   // Note that this may return NULL if autoupdate is not turned on.
   extensions::ExtensionUpdater* updater();
 
-  ExtensionToolbarModel* toolbar_model() { return &toolbar_model_; }
+  extensions::QuotaService* quota_service() { return &quota_service_; }
 
-  ExtensionsQuotaService* quota_service() { return &quota_service_; }
-
-  extensions::MenuManager* menu_manager() { return &menu_manager_; }
+  // Sets the name, id and icon resource path of the given extension into the
+  // returned dictionary. Returns an empty dictionary if the given extension id
+  // is not found.
+  scoped_ptr<DictionaryValue> GetExtensionInfo(
+      const std::string& extension_id) const;
 
   // Notify the frontend that there was an error loading an extension.
   // This method is public because UnpackedInstaller and InstalledLoader
@@ -593,6 +604,13 @@ class ExtensionService
   // disable it with this method.
   void set_install_updates_when_idle_for_test(bool value) {
     install_updates_when_idle_ = value;
+  }
+
+  // Set a callback to be called when all external providers are ready and their
+  // extensions have been installed.
+  void set_external_updates_finished_callback_for_test(
+      const base::Closure& callback) {
+    external_updates_finished_callback_ = callback;
   }
 
   // Adds/Removes update observers.
@@ -764,16 +782,13 @@ class ExtensionService
   bool install_updates_when_idle_;
 
   // Used by dispatchers to limit API quota for individual extensions.
-  ExtensionsQuotaService quota_service_;
+  extensions::QuotaService quota_service_;
 
   // Signaled when all extensions are loaded.
   extensions::OneShotEvent* const ready_;
 
   // Our extension updater, if updates are turned on.
   scoped_ptr<extensions::ExtensionUpdater> updater_;
-
-  // The model that tracks extensions with BrowserAction buttons.
-  ExtensionToolbarModel toolbar_model_;
 
   // Map unloaded extensions' ids to their paths. When a temporarily loaded
   // extension is unloaded, we lose the information about it and don't have
@@ -796,9 +811,6 @@ class ExtensionService
   // Keeps track of loading and unloading component extensions.
   scoped_ptr<extensions::ComponentLoader> component_loader_;
 
-  // Keeps track of menu items added by extensions.
-  extensions::MenuManager menu_manager_;
-
   // A collection of external extension providers.  Each provider reads
   // a source of external extension information.  Examples include the
   // windows registry and external_extensions.json.
@@ -810,6 +822,11 @@ class ExtensionService
   // OnAllExternalProvidersReady() to determine if an update check is needed to
   // install pending extensions.
   bool update_once_all_providers_are_ready_;
+
+  // A callback to be called when all external providers are ready and their
+  // extensions have been installed. Normally this is a null callback, but
+  // is used in external provider related tests.
+  base::Closure external_updates_finished_callback_;
 
   // Set when the browser is terminating. Prevents us from installing or
   // updating additional extensions and allows in-progress installations to

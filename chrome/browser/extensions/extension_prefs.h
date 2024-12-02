@@ -14,24 +14,28 @@
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "extensions/browser/app_sorting.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/url_pattern_set.h"
 #include "sync/api/string_ordinal.h"
 
 class ExtensionPrefValueMap;
-class ExtensionSorting;
 class PrefService;
-class Profile;
+
+namespace content {
+class BrowserContext;
+}
 
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
 
 namespace extensions {
+
+class AppSorting;
 class ContentSettingsStore;
 class ExtensionPrefsUninstallExtension;
 class URLPatternSet;
@@ -58,22 +62,6 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
 
   // Vector containing identifiers for preferences.
   typedef std::set<std::string> PrefKeySet;
-
-  // This enum is used for the launch type the user wants to use for an
-  // application.
-  // Do not remove items or re-order this enum as it is used in preferences
-  // and histograms.
-  enum LaunchType {
-    LAUNCH_PINNED,
-    LAUNCH_REGULAR,
-    LAUNCH_FULLSCREEN,
-    LAUNCH_WINDOW,
-
-    // Launch an app in the in the way a click on the NTP would,
-    // if no user pref were set.  Update this constant to change
-    // the default for the NTP and chrome.management.launchApp().
-    LAUNCH_DEFAULT = LAUNCH_REGULAR
-  };
 
   // This enum is used to store the reason an extension's install has been
   // delayed.  Do not remove items or re-order this enum as it is used in
@@ -142,6 +130,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
       PrefService* prefs,
       const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
+      scoped_ptr<AppSorting> app_sorting,
       bool extensions_disabled);
 
   // A version of Create which allows injection of a custom base::Time provider.
@@ -150,13 +139,14 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
       PrefService* prefs,
       const base::FilePath& root_dir,
       ExtensionPrefValueMap* extension_pref_value_map,
+      scoped_ptr<AppSorting> app_sorting,
       bool extensions_disabled,
       scoped_ptr<TimeProvider> time_provider);
 
   virtual ~ExtensionPrefs();
 
-  // Convenience function to get the ExtensionPrefs for a Profile.
-  static ExtensionPrefs* Get(Profile* profile);
+  // Convenience function to get the ExtensionPrefs for a BrowserContext.
+  static ExtensionPrefs* Get(content::BrowserContext* context);
 
   // Returns all installed extensions from extension preferences provided by
   // |pref_service|. This is exposed for ProtectedPrefsWatcher because it needs
@@ -176,16 +166,20 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   ExtensionIdList GetToolbarOrder();
   void SetToolbarOrder(const ExtensionIdList& extension_ids);
 
-  // Get/Set the list of known disabled extension IDs.
-  ExtensionIdSet GetKnownDisabled();
+  // Gets the set of known disabled extension IDs into |id_set_out|. Returns
+  // false iff the set of known disabled extension IDs hasn't been set yet.
+  bool GetKnownDisabled(ExtensionIdSet* id_set_out);
+
+  // Sets the set of known disabled extension IDs.
   void SetKnownDisabled(const ExtensionIdSet& extension_ids);
 
   // Called when an extension is installed, so that prefs get created.
-  // If |page_ordinal| is an invalid ordinal, then a page will be found
-  // for the App.
+  // |blacklisted_for_malware| should be set if the extension was included in a
+  // blacklist due to being malware. If |page_ordinal| is an invalid ordinal,
+  // then a page will be found for the App.
   void OnExtensionInstalled(const Extension* extension,
                             Extension::State initial_state,
-                            Blacklist::BlacklistState blacklist_state,
+                            bool blacklisted_for_malware,
                             const syncer::StringOrdinal& page_ordinal);
 
   // Called when an extension is uninstalled, so that prefs get cleaned up.
@@ -240,7 +234,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
       bool did_escalate);
 
   // Getter and setters for disabled reason.
-  int GetDisableReasons(const std::string& extension_id);
+  int GetDisableReasons(const std::string& extension_id) const;
   void AddDisableReason(const std::string& extension_id,
                         Extension::DisableReason disable_reason);
   void RemoveDisableReason(const std::string& extension_id,
@@ -292,6 +286,11 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // of this profile.
   bool IsExternalInstallFirstRun(const std::string& extension_id);
   void SetExternalInstallFirstRun(const std::string& extension_id);
+
+  // Whether the user has been notified about extension with |extension_id|
+  // being wiped out.
+  bool HasWipeoutBeenAcknowledged(const std::string& extension_id);
+  void SetWipeoutAcknowledged(const std::string& extension_id, bool value);
 
   // Returns true if the extension notification code has already run for the
   // first time for this profile. Currently we use this flag to mean that any
@@ -384,20 +383,6 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   void SetAllowFileAccess(const std::string& extension_id, bool allow);
   bool HasAllowFileAccessSetting(const std::string& extension_id) const;
 
-  // Get the launch type preference.  If no preference is set, return
-  // |default_pref_value|.
-  LaunchType GetLaunchType(const Extension* extension,
-                           LaunchType default_pref_value);
-
-  void SetLaunchType(const std::string& extension_id, LaunchType launch_type);
-
-  // Find the right launch container based on the launch type.
-  // If |extension|'s prefs do not have a launch type set, then
-  // use |default_pref_value|.
-  extension_misc::LaunchContainer GetLaunchContainer(
-      const Extension* extension,
-      LaunchType default_pref_value);
-
   // Saves ExtensionInfo for each installed extension with the path to the
   // version directory and the location. Blacklisted extensions won't be saved
   // and neither will external extensions the user has explicitly uninstalled.
@@ -417,7 +402,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // to install it.
   void SetDelayedInstallInfo(const Extension* extension,
                              Extension::State initial_state,
-                             Blacklist::BlacklistState blacklist_state,
+                             bool blacklisted_for_malware,
                              DelayReason delay_reason,
                              const syncer::StringOrdinal& page_ordinal);
 
@@ -488,10 +473,8 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   // The underlying PrefService.
   PrefService* pref_service() const { return prefs_; }
 
-  // The underlying ExtensionSorting.
-  ExtensionSorting* extension_sorting() const {
-    return extension_sorting_.get();
-  }
+  // The underlying AppSorting.
+  AppSorting* app_sorting() const { return app_sorting_.get(); }
 
   // Describes the URLs that are able to install extensions. See
   // prefs::kExtensionAllowedInstallSites for more information.
@@ -510,6 +493,11 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   void SetGeometryCache(const std::string& extension_id,
                         scoped_ptr<base::DictionaryValue> cache);
 
+  // Used for verification of installed extension ids. For the Set method, pass
+  // null to remove the preference.
+  const base::DictionaryValue* GetInstallSignature();
+  void SetInstallSignature(const DictionaryValue* signature);
+
  private:
   friend class ExtensionPrefsBlacklistedExtensions;  // Unit test.
   friend class ExtensionPrefsUninstallExtension;     // Unit test.
@@ -518,6 +506,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   ExtensionPrefs(PrefService* prefs,
                  const base::FilePath& root_dir,
                  ExtensionPrefValueMap* extension_pref_value_map,
+                 scoped_ptr<AppSorting> app_sorting,
                  scoped_ptr<TimeProvider> time_provider,
                  bool extensions_disabled);
 
@@ -588,10 +577,13 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   bool DoesExtensionHaveState(const std::string& id,
                               Extension::State check_state) const;
 
-  // Reads the list of strings for |pref| from prefs into an
-  // ExtensionIdContainer.
+  // Reads the list of strings for |pref| from user prefs into
+  // |id_container_out|. Returns false if the pref wasn't found in the user
+  // pref store.
   template <class ExtensionIdContainer>
-  ExtensionIdContainer GetExtensionPrefAsContainer(const char* pref);
+  bool GetUserExtensionPrefIntoContainer(
+      const char* pref,
+      ExtensionIdContainer* id_container_out);
 
   // Writes the list of strings contained in |strings| to |pref| in prefs.
   template <class ExtensionIdContainer>
@@ -605,7 +597,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
   void PopulateExtensionInfoPrefs(const Extension* extension,
                                   const base::Time install_time,
                                   Extension::State initial_state,
-                                  Blacklist::BlacklistState blacklist_state,
+                                  bool blacklisted_for_malware,
                                   base::DictionaryValue* extension_dict);
 
   // Helper function to complete initialization of the values in
@@ -629,7 +621,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs,
 
   // Contains all the logic for handling the order for various extension
   // properties.
-  scoped_ptr<ExtensionSorting> extension_sorting_;
+  scoped_ptr<AppSorting> app_sorting_;
 
   scoped_refptr<ContentSettingsStore> content_settings_store_;
 

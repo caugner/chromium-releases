@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_CHROMEOS_CHARGER_REPLACE_CHARGER_LINK_DIALOG_H_
 #define CHROME_BROWSER_CHROMEOS_CHARGER_REPLACE_CHARGER_LINK_DIALOG_H_
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 

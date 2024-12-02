@@ -36,11 +36,13 @@
 namespace remoting {
 
 // Known entry points.
+int HostProcessMain();
+#if defined(OS_WIN)
 int DaemonProcessMain();
 int DesktopProcessMain();
 int ElevatedControllerMain();
-int HostProcessMain();
 int RdpDesktopSessionMain();
+#endif  // defined(OS_WIN)
 
 const char kElevateSwitchName[] = "elevate";
 const char kProcessTypeSwitchName[] = "type";
@@ -126,29 +128,6 @@ int RunElevated() {
   return kSuccessExitCode;
 }
 
-#else  // !defined(OS_WIN)
-
-// Fake entry points that exist only on Windows.
-int DaemonProcessMain() {
-  NOTREACHED();
-  return kInitializationFailed;
-}
-
-int DesktopProcessMain() {
-  NOTREACHED();
-  return kInitializationFailed;
-}
-
-int ElevatedControllerMain() {
-  NOTREACHED();
-  return kInitializationFailed;
-}
-
-int RdpDesktopSessionMain() {
-  NOTREACHED();
-  return kInitializationFailed;
-}
-
 #endif  // !defined(OS_WIN)
 
 // Select the entry point corresponding to the process type.
@@ -167,7 +146,7 @@ MainRoutineFn SelectMainRoutine(const std::string& process_type) {
   } else if (process_type == kProcessTypeRdpDesktopSession) {
     main_routine = &RdpDesktopSessionMain;
   } else if (process_type == kProcessTypeNativeMessagingHost) {
-    main_routine = &NativeMessagingHostMain;
+    main_routine = &Me2MeNativeMessagingHostMain;
 #endif  // defined(OS_WIN)
   }
 

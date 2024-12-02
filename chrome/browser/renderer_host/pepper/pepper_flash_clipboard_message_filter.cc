@@ -46,12 +46,12 @@ ui::ClipboardType ConvertClipboardType(uint32_t type) {
 // assume all data that is placed on the clipboard is UTF16 and pepper allows
 // arbitrary data so this change would require some reworking of the chrome
 // clipboard interface for custom data.
-bool JumpToFormatInPickle(const string16& format, PickleIterator* iter) {
+bool JumpToFormatInPickle(const base::string16& format, PickleIterator* iter) {
   uint64 size = 0;
   if (!iter->ReadUInt64(&size))
     return false;
   for (uint64 i = 0; i < size; ++i) {
-    string16 stored_format;
+    base::string16 stored_format;
     if (!iter->ReadString16(&stored_format))
       return false;
     if (stored_format == format)
@@ -65,12 +65,14 @@ bool JumpToFormatInPickle(const string16& format, PickleIterator* iter) {
   return false;
 }
 
-bool IsFormatAvailableInPickle(const string16& format, const Pickle& pickle) {
+bool IsFormatAvailableInPickle(const base::string16& format,
+                               const Pickle& pickle) {
   PickleIterator iter(pickle);
   return JumpToFormatInPickle(format, &iter);
 }
 
-std::string ReadDataFromPickle(const string16& format, const Pickle& pickle) {
+std::string ReadDataFromPickle(const base::string16& format,
+                               const Pickle& pickle) {
   std::string result;
   PickleIterator iter(pickle);
   if (!JumpToFormatInPickle(format, &iter) || !iter.ReadString(&result))
@@ -78,10 +80,10 @@ std::string ReadDataFromPickle(const string16& format, const Pickle& pickle) {
   return result;
 }
 
-bool WriteDataToPickle(const std::map<string16, std::string>& data,
+bool WriteDataToPickle(const std::map<base::string16, std::string>& data,
                        Pickle* pickle) {
   pickle->WriteUInt64(data.size());
-  for (std::map<string16, std::string>::const_iterator it = data.begin();
+  for (std::map<base::string16, std::string>::const_iterator it = data.begin();
        it != data.end(); ++it) {
     if (!pickle->WriteString16(it->first))
       return false;
@@ -213,7 +215,7 @@ int32_t PepperFlashClipboardMessageFilter::OnMsgReadData(
     case PP_FLASH_CLIPBOARD_FORMAT_PLAINTEXT: {
       if (clipboard->IsFormatAvailable(
           ui::Clipboard::GetPlainTextWFormatType(), type)) {
-        string16 text;
+        base::string16 text;
         clipboard->ReadText(type, &text);
         if (!text.empty()) {
           result = PP_OK;
@@ -236,7 +238,7 @@ int32_t PepperFlashClipboardMessageFilter::OnMsgReadData(
         break;
       }
 
-      string16 html;
+      base::string16 html;
       std::string url;
       uint32 fragment_start;
       uint32 fragment_end;
@@ -259,7 +261,7 @@ int32_t PepperFlashClipboardMessageFilter::OnMsgReadData(
       break;
     default: {
       if (custom_formats_.IsFormatRegistered(format)) {
-        string16 format_name =
+        base::string16 format_name =
             UTF8ToUTF16(custom_formats_.GetFormatName(format));
         std::string clipboard_data;
         clipboard->ReadData(
@@ -302,7 +304,7 @@ int32_t PepperFlashClipboardMessageFilter::OnMsgWriteData(
   }
 
   ui::ScopedClipboardWriter scw(clipboard, type);
-  std::map<string16, std::string> custom_data_map;
+  std::map<base::string16, std::string> custom_data_map;
   int32_t res = PP_OK;
   for (uint32_t i = 0; i < formats.size(); ++i) {
     if (data[i].length() > kMaxClipboardWriteSize) {

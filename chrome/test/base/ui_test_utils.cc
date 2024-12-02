@@ -36,6 +36,7 @@
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -97,6 +98,7 @@ namespace ui_test_utils {
 
 namespace {
 
+#if defined(OS_WIN)
 const char kSnapshotBaseName[] = "ChromiumSnapshot";
 const char kSnapshotExtension[] = ".png";
 
@@ -121,6 +123,7 @@ base::FilePath GetSnapshotFileName(const base::FilePath& snapshot_directory) {
   }
   return snapshot_file;
 }
+#endif  // defined(OS_WIN)
 
 Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
   Browser* new_browser = GetBrowserNotInSet(excluded_browsers);
@@ -161,6 +164,14 @@ Browser* OpenURLOffTheRecord(Profile* profile, const GURL& url) {
 void NavigateToURL(chrome::NavigateParams* params) {
   chrome::Navigate(params);
   content::WaitForLoadStop(params->target_contents);
+}
+
+
+void NavigateToURLWithPost(Browser* browser, const GURL& url) {
+  chrome::NavigateParams params(browser, url,
+                                content::PAGE_TRANSITION_FORM_SUBMIT);
+  params.uses_post = true;
+  NavigateToURL(&params);
 }
 
 void NavigateToURL(Browser* browser, const GURL& url) {
@@ -311,6 +322,10 @@ bool GetRelativeBuildDirectory(base::FilePath* build_dir) {
 }
 
 AppModalDialog* WaitForAppModalDialog() {
+  AppModalDialogQueue* dialog_queue = AppModalDialogQueue::GetInstance();
+  if (dialog_queue->HasActiveDialog())
+    return dialog_queue->active_dialog();
+
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_APP_MODAL_DIALOG_SHOWN,
       content::NotificationService::AllSources());
@@ -373,7 +388,7 @@ void DownloadURL(Browser* browser, const GURL& download_url) {
 
 void SendToOmniboxAndSubmit(LocationBar* location_bar,
                             const std::string& input) {
-  OmniboxView* omnibox = location_bar->GetLocationEntry();
+  OmniboxView* omnibox = location_bar->GetOmniboxView();
   omnibox->model()->OnSetFocus(false);
   omnibox->SetUserText(ASCIIToUTF16(input));
   location_bar->AcceptInput();

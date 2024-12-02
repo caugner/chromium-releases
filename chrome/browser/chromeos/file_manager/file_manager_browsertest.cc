@@ -30,15 +30,15 @@
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
-#include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/common/extension.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
+#include "google_apis/drive/test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "webkit/browser/fileapi/external_mount_points.h"
 
@@ -204,8 +204,11 @@ class LocalTestVolume {
     mount_points->RevokeFileSystem(kDownloads);
 
     return mount_points->RegisterFileSystem(
-        kDownloads, fileapi::kFileSystemTypeNativeLocal, local_path_) &&
-        file_util::CreateDirectory(local_path_);
+        kDownloads,
+        fileapi::kFileSystemTypeNativeLocal,
+        fileapi::FileSystemMountOption(),
+        local_path_) &&
+        base::CreateDirectory(local_path_);
   }
 
   void CreateEntry(const TestEntryInfo& entry) {
@@ -224,7 +227,7 @@ class LocalTestVolume {
         break;
       }
       case DIRECTORY:
-        ASSERT_TRUE(file_util::CreateDirectory(target_path)) <<
+        ASSERT_TRUE(base::CreateDirectory(target_path)) <<
             "Failed to create a directory: " << target_path.value();
         break;
     }
@@ -236,7 +239,8 @@ class LocalTestVolume {
   // TestEntryInfo. Returns true on success.
   bool UpdateModifiedTime(const TestEntryInfo& entry) {
     const base::FilePath path = local_path_.AppendASCII(entry.target_path);
-    if (!file_util::SetLastModifiedTime(path, entry.last_modified_time))
+    if (!base::TouchFile(path, entry.last_modified_time,
+                         entry.last_modified_time))
       return false;
 
     // Update the modified time of parent directories because it may be also
@@ -285,7 +289,7 @@ class DriveTestVolume {
     // Obtain the parent entry.
     drive::FileError error = drive::FILE_ERROR_OK;
     scoped_ptr<drive::ResourceEntry> parent_entry(new drive::ResourceEntry);
-    integration_service_->file_system()->GetResourceEntryByPath(
+    integration_service_->file_system()->GetResourceEntry(
         drive::util::GetDriveMyDriveRootPath().Append(path).DirName(),
         google_apis::test_util::CreateCopyResultCallback(
             &error, &parent_entry));
@@ -418,7 +422,7 @@ class FileManagerTestListener : public content::NotificationObserver {
   struct Message {
     int type;
     std::string message;
-    extensions::TestSendMessageFunction* function;
+    scoped_refptr<extensions::TestSendMessageFunction> function;
   };
 
   FileManagerTestListener() {
@@ -634,6 +638,7 @@ INSTANTIATE_TEST_CASE_P(
                                     "galleryOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "galleryOpenDrive")));
 
+/* http://crbug.com/316918 Tests are flaky.
 INSTANTIATE_TEST_CASE_P(
     KeyboardOperations,
     FileManagerBrowserTest,
@@ -644,6 +649,7 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(IN_GUEST_MODE, "keyboardCopyDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "keyboardCopyDrive")));
+*/
 
 INSTANTIATE_TEST_CASE_P(
     DriveSpecific,
@@ -695,7 +701,7 @@ INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "shareDirectory")));
 
 INSTANTIATE_TEST_CASE_P(
-    restoreGeometry,
+    RestoreGeometry,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "restoreGeometry"),
                       TestParameter(IN_GUEST_MODE, "restoreGeometry")));
@@ -713,6 +719,19 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "suggestAppDialog")));
 
 INSTANTIATE_TEST_CASE_P(
+    ExecuteDefaultTaskOnDownloads,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "executeDefaultTaskOnDownloads"),
+        TestParameter(IN_GUEST_MODE, "executeDefaultTaskOnDownloads")));
+
+INSTANTIATE_TEST_CASE_P(
+    ExecuteDefaultTaskOnDrive,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "executeDefaultTaskOnDrive")));
+
+INSTANTIATE_TEST_CASE_P(
     NavigationList,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
@@ -721,8 +740,13 @@ INSTANTIATE_TEST_CASE_P(
 INSTANTIATE_TEST_CASE_P(
     TabIndex,
     FileManagerBrowserTest,
-    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
-                                    "searchBoxFocus")));
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "searchBoxFocus")));
+
+INSTANTIATE_TEST_CASE_P(
+    Thumbnails,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "thumbnailsDownloads"),
+                      TestParameter(IN_GUEST_MODE, "thumbnailsDownloads")));
 
 }  // namespace
 }  // namespace file_manager

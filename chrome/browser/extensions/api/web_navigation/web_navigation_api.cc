@@ -10,7 +10,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_constants.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -27,6 +26,7 @@
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/view_type_utils.h"
 #include "net/base/net_errors.h"
 
@@ -406,7 +406,7 @@ void WebNavigationTabObserver::DidStartProvisionalLoadForFrame(
 
 void WebNavigationTabObserver::DidCommitProvisionalLoadForFrame(
     int64 frame_num,
-    const string16& frame_unique_name,
+    const base::string16& frame_unique_name,
     bool is_main_frame,
     const GURL& url,
     content::PageTransition transition_type,
@@ -484,11 +484,11 @@ void WebNavigationTabObserver::DidCommitProvisionalLoadForFrame(
 
 void WebNavigationTabObserver::DidFailProvisionalLoad(
     int64 frame_num,
-    const string16& frame_unique_id,
+    const base::string16& frame_unique_id,
     bool is_main_frame,
     const GURL& validated_url,
     int error_code,
-    const string16& error_description,
+    const base::string16& error_description,
     content::RenderViewHost* render_view_host) {
   DVLOG(2) << "DidFailProvisionalLoad("
            << "render_view_host=" << render_view_host
@@ -592,7 +592,7 @@ void WebNavigationTabObserver::DidFailLoad(
     const GURL& validated_url,
     bool is_main_frame,
     int error_code,
-    const string16& error_description,
+    const base::string16& error_description,
     content::RenderViewHost* render_view_host) {
   DVLOG(2) << "DidFailLoad("
            << "render_view_host=" << render_view_host

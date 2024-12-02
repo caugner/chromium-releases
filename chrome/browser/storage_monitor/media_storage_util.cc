@@ -37,14 +37,6 @@ enum DeviceInfoHistogramBuckets {
 const char kRootPath[] = "/";
 #endif
 
-void ValidatePathOnFileThread(
-    const base::FilePath& path,
-    const base::Callback<void(bool)>& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(callback, base::PathExists(path)));
-}
-
 typedef std::vector<StorageInfo> StorageInfoList;
 
 base::FilePath::StringType FindRemovableStorageLocationById(
@@ -219,9 +211,10 @@ base::FilePath MediaStorageUtil::FindDevicePathById(
 }
 
 // static
-void MediaStorageUtil::RecordDeviceInfoHistogram(bool mass_storage,
-                                                 const std::string& device_uuid,
-                                                 const string16& device_label) {
+void MediaStorageUtil::RecordDeviceInfoHistogram(
+    bool mass_storage,
+    const std::string& device_uuid,
+    const base::string16& device_label) {
   unsigned int event_number = 0;
   if (!mass_storage)
     event_number = 4;

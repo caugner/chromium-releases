@@ -10,15 +10,14 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/input/gesture_event_filter.h"
-#include "content/browser/renderer_host/input/immediate_input_router.h"
-#include "content/browser/renderer_host/input/synthetic_web_input_event_builders.h"
+#include "content/browser/renderer_host/input/input_router_impl.h"
 #include "content/browser/renderer_host/input/tap_suppression_controller.h"
 #include "content/browser/renderer_host/input/tap_suppression_controller_client.h"
 #include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
+#include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/port/browser/render_widget_host_view_port.h"
@@ -29,6 +28,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
+#include "content/test/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
@@ -46,11 +46,12 @@
 #endif
 
 using base::TimeDelta;
-using WebKit::WebGestureEvent;
-using WebKit::WebInputEvent;
-using WebKit::WebMouseWheelEvent;
-using WebKit::WebTouchEvent;
-using WebKit::WebTouchPoint;
+using blink::WebGestureEvent;
+using blink::WebInputEvent;
+using blink::WebKeyboardEvent;
+using blink::WebMouseWheelEvent;
+using blink::WebTouchEvent;
+using blink::WebTouchPoint;
 
 namespace content {
 
@@ -165,6 +166,7 @@ class MockInputRouter : public InputRouter {
     return NULL;
   }
   virtual bool ShouldForwardTouchEvent() const OVERRIDE { return true; }
+  virtual void OnViewUpdated(int view_flags) OVERRIDE {}
 
   // IPC::Listener
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
@@ -197,8 +199,7 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
       int routing_id)
       : RenderWidgetHostImpl(delegate, process, routing_id, false),
         unresponsive_timer_fired_(false) {
-    immediate_input_router_ =
-        static_cast<ImmediateInputRouter*>(input_router_.get());
+    input_router_impl_ = static_cast<InputRouterImpl*>(input_router_.get());
   }
 
   // Allow poking at a few private members.
@@ -257,8 +258,13 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
     overscroll_controller_->set_delegate(overscroll_delegate_.get());
   }
 
+  void DisableGestureDebounce() {
+    gesture_event_filter()->set_debounce_enabled_for_testing(false);
+  }
+
   void set_debounce_interval_time_ms(int delay_ms) {
-    gesture_event_filter()->debounce_interval_time_ms_ = delay_ms;
+    gesture_event_filter()->
+        set_debounce_interval_time_ms_for_testing(delay_ms);
   }
 
   bool TouchEventQueueEmpty() const {
@@ -312,24 +318,24 @@ class MockRenderWidgetHost : public RenderWidgetHostImpl {
   }
 
   const TouchEventQueue* touch_event_queue() const {
-    return immediate_input_router_->touch_event_queue_.get();
+    return input_router_impl_->touch_event_queue_.get();
   }
 
   const GestureEventFilter* gesture_event_filter() const {
-    return immediate_input_router_->gesture_event_filter_.get();
+    return input_router_impl_->gesture_event_filter_.get();
   }
 
   GestureEventFilter* gesture_event_filter() {
-    return immediate_input_router_->gesture_event_filter_.get();
+    return input_router_impl_->gesture_event_filter_.get();
   }
 
  private:
   bool unresponsive_timer_fired_;
 
-  // |immediate_input_router_| and |mock_input_router_| are owned by
-  // RenderWidgetHostImpl |input_router_|. Below are provided for convenience so
+  // |input_router_impl_| and |mock_input_router_| are owned by
+  // RenderWidgetHostImpl.  The handles below are provided for convenience so
   // that we don't have to reinterpret_cast it all the time.
-  ImmediateInputRouter* immediate_input_router_;
+  InputRouterImpl* input_router_impl_;
   MockInputRouter* mock_input_router_;
 
   scoped_ptr<TestOverscrollDelegate> overscroll_delegate_;
@@ -439,7 +445,7 @@ class TestView : public TestRenderWidgetHostView {
   const WebTouchEvent& acked_event() const { return acked_event_; }
   int acked_event_count() const { return acked_event_count_; }
   void ClearAckedEvent() {
-    acked_event_.type = WebKit::WebInputEvent::Undefined;
+    acked_event_.type = blink::WebInputEvent::Undefined;
     acked_event_count_ = 0;
   }
 
@@ -601,7 +607,7 @@ class RenderWidgetHostTest : public testing::Test {
   bool KeyPressEventCallback(const NativeWebKeyboardEvent& /* event */) {
     return handle_key_press_event_;
   }
-  bool MouseEventCallback(const WebKit::WebMouseEvent& /* event */) {
+  bool MouseEventCallback(const blink::WebMouseEvent& /* event */) {
     return handle_mouse_event_;
   }
 
@@ -647,7 +653,10 @@ class RenderWidgetHostTest : public testing::Test {
   }
 
   void SimulateKeyboardEvent(WebInputEvent::Type type) {
-    host_->ForwardKeyboardEvent(SyntheticWebKeyboardEventBuilder::Build(type));
+  WebKeyboardEvent event = SyntheticWebKeyboardEventBuilder::Build(type);
+  NativeWebKeyboardEvent native_event;
+  memcpy(&native_event, &event, sizeof(event));
+    host_->ForwardKeyboardEvent(native_event);
   }
 
   void SimulateMouseEvent(WebInputEvent::Type type) {
@@ -1161,7 +1170,7 @@ TEST_F(RenderWidgetHostTest, UnhandledWheelEvent) {
 }
 
 TEST_F(RenderWidgetHostTest, UnhandledGestureEvent) {
-  SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
+  SimulateGestureEvent(WebInputEvent::GestureScrollUpdate,
                        WebGestureEvent::Touchscreen);
 
   // Make sure we sent the input event to the renderer.
@@ -1170,9 +1179,9 @@ TEST_F(RenderWidgetHostTest, UnhandledGestureEvent) {
   process_->sink().ClearMessages();
 
   // Send the simulated response from the renderer back.
-  SendInputEventACK(WebInputEvent::GestureScrollBegin,
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
-  EXPECT_EQ(WebInputEvent::GestureScrollBegin, view_->gesture_event_type());
+  EXPECT_EQ(WebInputEvent::GestureScrollUpdate, view_->gesture_event_type());
   EXPECT_EQ(INPUT_EVENT_ACK_STATE_NOT_CONSUMED, view_->ack_result());
 }
 
@@ -1547,7 +1556,7 @@ TEST_F(RenderWidgetHostTest, ScrollEventsOverscrollWithZeroFling) {
 // overscroll nav instead of completing it.
 TEST_F(RenderWidgetHostTest, ReverseFlingCancelsOverscroll) {
   host_->SetupForOverscrollControllerTest();
-  host_->set_debounce_interval_time_ms(0);
+  host_->DisableGestureDebounce();
   process_->sink().ClearMessages();
   view_->set_bounds(gfx::Rect(0, 0, 400, 200));
   view_->Show();
@@ -1606,7 +1615,7 @@ TEST_F(RenderWidgetHostTest, ReverseFlingCancelsOverscroll) {
 TEST_F(RenderWidgetHostTest, GestureScrollOverscrolls) {
   // Turn off debounce handling for test isolation.
   host_->SetupForOverscrollControllerTest();
-  host_->set_debounce_interval_time_ms(0);
+  host_->DisableGestureDebounce();
   process_->sink().ClearMessages();
 
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
@@ -1651,7 +1660,9 @@ TEST_F(RenderWidgetHostTest, GestureScrollOverscrolls) {
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
   EXPECT_EQ(1U, process_->sink().message_count());
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll end event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
 }
 
 // Tests that if the page is scrolled because of a scroll-gesture, then that
@@ -1660,7 +1671,7 @@ TEST_F(RenderWidgetHostTest, GestureScrollOverscrolls) {
 TEST_F(RenderWidgetHostTest, GestureScrollConsumedHorizontal) {
   // Turn off debounce handling for test isolation.
   host_->SetupForOverscrollControllerTest();
-  host_->set_debounce_interval_time_ms(0);
+  host_->DisableGestureDebounce();
   process_->sink().ClearMessages();
 
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
@@ -1822,7 +1833,9 @@ TEST_F(RenderWidgetHostTest, GestureScrollDebounceTimerOverscroll) {
 
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_delegate()->current_mode());
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll end event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
   EXPECT_EQ(1U, process_->sink().message_count());
 }
@@ -1943,7 +1956,7 @@ TEST_F(RenderWidgetHostTest, OverscrollWithTouchEvents) {
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_TRUE(host_->TouchEventQueueEmpty());
 
-  SimulateGestureEvent(WebKit::WebInputEvent::GestureScrollEnd,
+  SimulateGestureEvent(blink::WebInputEvent::GestureScrollEnd,
                        WebGestureEvent::Touchscreen);
   base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
@@ -1971,7 +1984,9 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(1U, process_->sink().message_count());
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll begin event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   process_->sink().ClearMessages();
   SendInputEventACK(WebInputEvent::GestureScrollBegin,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
@@ -2001,7 +2016,7 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(-5.f, host_->overscroll_delegate()->delta_y());
 
   // Send end event.
-  SimulateGestureEvent(WebKit::WebInputEvent::GestureScrollEnd,
+  SimulateGestureEvent(blink::WebInputEvent::GestureScrollEnd,
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
@@ -2016,10 +2031,12 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll end event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
 
-  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd,
+  SendInputEventACK(blink::WebInputEvent::GestureScrollEnd,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2029,7 +2046,9 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(1U, process_->sink().message_count());
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll begin event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   process_->sink().ClearMessages();
   SendInputEventACK(WebInputEvent::GestureScrollBegin,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
@@ -2059,7 +2078,7 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   EXPECT_EQ(-5.f, host_->overscroll_delegate()->delta_y());
 
   // Send end event.
-  SimulateGestureEvent(WebKit::WebInputEvent::GestureScrollEnd,
+  SimulateGestureEvent(blink::WebInputEvent::GestureScrollEnd,
                        WebGestureEvent::Touchscreen);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(OVERSCROLL_NONE, host_->overscroll_mode());
@@ -2075,10 +2094,12 @@ TEST_F(RenderWidgetHostTest, TouchGestureEndDispatchedAfterOverscrollComplete) {
   base::MessageLoop::current()->Run();
   EXPECT_EQ(1U, process_->sink().message_count());
   process_->sink().ClearMessages();
-  EXPECT_EQ(1U, host_->GestureEventLastQueueEventSize());
+  // The scroll end event will have received a synthetic ack from the input
+  // router.
+  EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
   EXPECT_EQ(0U, host_->GestureEventDebouncingQueueSize());
 
-  SendInputEventACK(WebKit::WebInputEvent::GestureScrollEnd,
+  SendInputEventACK(blink::WebInputEvent::GestureScrollEnd,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
   EXPECT_EQ(0U, process_->sink().message_count());
   EXPECT_EQ(0U, host_->GestureEventLastQueueEventSize());
@@ -2129,7 +2150,7 @@ TEST_F(RenderWidgetHostTest, OverscrollDirectionChange) {
 // move events do reach the renderer.
 TEST_F(RenderWidgetHostTest, OverscrollMouseMoveCompletion) {
   host_->SetupForOverscrollControllerTest();
-  host_->set_debounce_interval_time_ms(0);
+  host_->DisableGestureDebounce();
   process_->sink().ClearMessages();
   view_->set_bounds(gfx::Rect(0, 0, 400, 200));
   view_->Show();
@@ -2224,7 +2245,7 @@ TEST_F(RenderWidgetHostTest, OverscrollMouseMoveCompletion) {
 // reset after the end of the scroll.
 TEST_F(RenderWidgetHostTest, OverscrollStateResetsAfterScroll) {
   host_->SetupForOverscrollControllerTest();
-  host_->set_debounce_interval_time_ms(0);
+  host_->DisableGestureDebounce();
   process_->sink().ClearMessages();
   view_->set_bounds(gfx::Rect(0, 0, 400, 200));
   view_->Show();
@@ -2359,13 +2380,13 @@ TEST_InputRouterRoutes_NOARGS(LostCapture);
 
 TEST_F(RenderWidgetHostTest, InputRouterRoutesReplace) {
   host_->SetupForInputRouterTest();
-  host_->Replace(EmptyString16());
+  host_->Replace(base::string16());
   EXPECT_TRUE(host_->mock_input_router()->send_event_called_);
 }
 
 TEST_F(RenderWidgetHostTest, InputRouterRoutesReplaceMisspelling) {
   host_->SetupForInputRouterTest();
-  host_->ReplaceMisspelling(EmptyString16());
+  host_->ReplaceMisspelling(base::string16());
   EXPECT_TRUE(host_->mock_input_router()->send_event_called_);
 }
 

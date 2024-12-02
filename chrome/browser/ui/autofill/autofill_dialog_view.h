@@ -74,12 +74,12 @@ class AutofillDialogView {
                            const DetailInput& originating_input) = 0;
 
   // Fills |output| with data the user manually input.
-  virtual void GetUserInput(DialogSection section, DetailOutputMap* output) = 0;
+  virtual void GetUserInput(DialogSection section, FieldValueMap* output) = 0;
 
   // Gets the CVC value the user typed to go along with the stored credit card
   // data. If the user is inputing credit card data from scratch, this is not
   // relevant.
-  virtual string16 GetCvc() = 0;
+  virtual base::string16 GetCvc() = 0;
 
   // Whether or not |point| is within |input|'s bounds.
   virtual bool HitTestInput(const DetailInput& input,

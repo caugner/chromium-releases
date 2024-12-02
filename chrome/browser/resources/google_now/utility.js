@@ -207,7 +207,7 @@ var wrapper = (function() {
    * An instance of WrapperPlugin can have state that can be shared by its
    * constructor, prologue() and epilogue(). Also WrapperPlugins can change
    * state of other objects, for example, to do refcounting.
-   * @type {function(): WrapperPlugin}
+   * @type {?function(): WrapperPlugin}
    */
   var wrapperPluginFactory = null;
 
@@ -251,7 +251,8 @@ var wrapper = (function() {
    * @return {string} Diagnostic string.
    */
   function debugGetStateString() {
-    return 'pendingCallbacks = ' + JSON.stringify(pendingCallbacks);
+    return 'pendingCallbacks @' + Date.now() + ' = ' +
+        JSON.stringify(pendingCallbacks);
   }
 
   /**
@@ -276,7 +277,7 @@ var wrapper = (function() {
 
     if (!opt_isEventListener) {
       checkInWrappedCallback();
-      pendingCallbacks[callbackId] = new Error().stack;
+      pendingCallbacks[callbackId] = new Error().stack + ' @' + Date.now();
     }
 
     // wrapperPluginFactory may be null before task manager is built, and in
@@ -389,7 +390,7 @@ var wrapper = (function() {
     var stringifiedPendingCallbacks = JSON.stringify(pendingCallbacks);
     verify(
         stringifiedPendingCallbacks == '{}',
-        'Pending callbacks when unloading event page:' +
+        'Pending callbacks when unloading event page @' + Date.now() + ':' +
         stringifiedPendingCallbacks);
   });
 
@@ -711,7 +712,7 @@ function buildAuthenticationManager() {
   /**
    * Removes the specified cached token.
    * @param {string} token Authentication Token to remove from the cache.
-   * @param {function} callback Called on completion.
+   * @param {function()} callback Called on completion.
    */
   function removeToken(token, callback) {
     instrumented.identity.removeCachedAuthToken({token: token}, function() {
@@ -726,7 +727,7 @@ function buildAuthenticationManager() {
   /**
    * Registers a listener that gets called back when the signed in state
    * is found to be changed.
-   * @param {function} callback Called when the answer to isSignedIn changes.
+   * @param {function()} callback Called when the answer to isSignedIn changes.
    */
   function addListener(callback) {
     listeners.push(callback);
@@ -743,11 +744,9 @@ function buildAuthenticationManager() {
         if (items.lastSignedInState != signedIn) {
           chrome.storage.local.set(
               {lastSignedInState: signedIn});
-          if (items.lastSignedInState != undefined) {
-            listeners.forEach(function(callback) {
-              callback();
-            });
-          }
+          listeners.forEach(function(callback) {
+            callback();
+          });
         }
       });
     });

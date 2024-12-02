@@ -13,7 +13,7 @@
 #include "base/stl_util.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
-#include "chrome/browser/policy/proto/chromeos/install_attributes.pb.h"
+#include "chrome/browser/chromeos/policy/proto/install_attributes.pb.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/dbus/fake_dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -72,21 +72,23 @@ void DevicePolicyCrosTestHelper::InstallOwnerKey() {
 }
 
 DevicePolicyCrosBrowserTest::DevicePolicyCrosBrowserTest()
-    : fake_dbus_thread_manager_(
-        new chromeos::FakeDBusThreadManager) {
+    : fake_dbus_thread_manager_(new chromeos::FakeDBusThreadManager),
+      fake_session_manager_client_(new chromeos::FakeSessionManagerClient) {
+  fake_dbus_thread_manager_->SetFakeClients();
+  fake_dbus_thread_manager_->SetSessionManagerClient(
+      scoped_ptr<chromeos::SessionManagerClient>(fake_session_manager_client_));
 }
 
 DevicePolicyCrosBrowserTest::~DevicePolicyCrosBrowserTest() {
 }
 
 void DevicePolicyCrosBrowserTest::SetUpInProcessBrowserTestFixture() {
-  chromeos::DBusThreadManager::InitializeForTesting(fake_dbus_thread_manager_);
+  chromeos::DBusThreadManager::SetInstanceForTesting(fake_dbus_thread_manager_);
   InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 }
 
 void DevicePolicyCrosBrowserTest::TearDownInProcessBrowserTestFixture() {
   InProcessBrowserTest::TearDownInProcessBrowserTestFixture();
-  chromeos::DBusThreadManager::Shutdown();
 }
 
 void DevicePolicyCrosBrowserTest::MarkAsEnterpriseOwned() {

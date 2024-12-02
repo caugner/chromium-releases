@@ -4,6 +4,8 @@
 
 #include "ui/app_list/views/app_list_folder_view.h"
 
+#include <algorithm>
+
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_model.h"
@@ -41,6 +43,7 @@ AppListFolderView::AppListFolderView(AppsContainerView* container_view,
 
   items_grid_view_ = new AppsGridView(
       app_list_main_view, pagination_model_.get(), NULL);
+  items_grid_view_->set_is_root_level(false);
   items_grid_view_->SetLayout(kPreferredIconDimension,
                               kPreferredCols,
                               kPreferredRows);

@@ -75,7 +75,7 @@ class TaskManagerTableModel
 
   // TableModel overrides:
   virtual int RowCount() OVERRIDE;
-  virtual string16 GetText(int row, int column) OVERRIDE;
+  virtual base::string16 GetText(int row, int column) OVERRIDE;
   virtual gfx::ImageSkia GetIcon(int row) OVERRIDE;
   virtual void SetObserver(ui::TableModelObserver* observer) OVERRIDE;
   virtual int CompareValues(int row1, int row2, int column_id) OVERRIDE;
@@ -101,7 +101,7 @@ int TaskManagerTableModel::RowCount() {
   return model_->ResourceCount();
 }
 
-string16 TaskManagerTableModel::GetText(int row, int col_id) {
+base::string16 TaskManagerTableModel::GetText(int row, int col_id) {
   return model_->GetResourceById(row, col_id);
 }
 
@@ -173,7 +173,7 @@ class TaskManagerView : public views::ButtonListener,
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual bool ExecuteWindowsCommand(int command_id) OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual std::string GetWindowName() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
@@ -242,7 +242,7 @@ class TaskManagerView : public views::ButtonListener,
   const chrome::HostDesktopType desktop_type_;
 
   // We need to own the text of the menu, the Windows API does not copy it.
-  string16 always_on_top_menu_text_;
+  base::string16 always_on_top_menu_text_;
 
   // An open Task manager window. There can only be one open at a time. This
   // is reset to NULL when the window is closed.
@@ -572,7 +572,7 @@ bool TaskManagerView::ExecuteWindowsCommand(int command_id) {
   return false;
 }
 
-string16 TaskManagerView::GetWindowTitle() const {
+base::string16 TaskManagerView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_TITLE);
 }
 

@@ -82,6 +82,7 @@
         '../../content/content.gyp:content',
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
+        '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',
         '../aura/aura.gyp:aura_test_support',
         '../compositor/compositor.gyp:compositor',
@@ -92,7 +93,6 @@
       ],
       'sources': [
         'keyboard_controller_unittest.cc',
-        'keyboard_test_suite.cc',
       ],
       'conditions': [
         ['OS=="linux" and linux_use_tcmalloc==1', {
@@ -102,6 +102,11 @@
           'link_settings': {
             'ldflags': ['-rdynamic'],
           },
+        }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
         }],
       ],
     },

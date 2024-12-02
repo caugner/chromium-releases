@@ -7,10 +7,10 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/manifest_handlers/sandboxed_page_info.h"
 #include "chrome/common/url_constants.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 
 using extensions::Extension;
 
@@ -23,6 +23,8 @@ ExtensionSet::const_iterator::const_iterator(const const_iterator& other)
 ExtensionSet::const_iterator::const_iterator(ExtensionMap::const_iterator it)
     : it_(it) {
 }
+
+ExtensionSet::const_iterator::~const_iterator() {}
 
 ExtensionSet::ExtensionSet() {
 }

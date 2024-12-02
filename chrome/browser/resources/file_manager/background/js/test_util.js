@@ -566,19 +566,31 @@ test.util.sync.fakeKeyDown = function(
 };
 
 /**
- * Sends a fake mouse click event (left button, single click) to the element
- * specified by |targetQuery|.
+ * Simulates a fake mouse click (left button, single click) on the element
+ * specified by |targetQuery|. This sends 'mouseover', 'mousedown', 'mouseup'
+ * and 'click' events in turns.
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
  * @param {string=} opt_iframeQuery Optional iframe selector.
- * @return {boolean} True if the event is sent to the target, false otherwise.
+ * @return {boolean} True if the all events are sent to the target, false
+ *     otherwise.
  */
 test.util.sync.fakeMouseClick = function(
     contentWindow, targetQuery, opt_iframeQuery) {
-  var event = new MouseEvent('click', { bubbles: true, detail: 1 });
-  return test.util.sync.sendEvent(
-      contentWindow, targetQuery, event, opt_iframeQuery);
+  var mouseOverEvent = new MouseEvent('mouseover', {bubbles: true, detail: 1});
+  var resultMouseOver = test.util.sync.sendEvent(
+      contentWindow, targetQuery, mouseOverEvent, opt_iframeQuery);
+  var mouseDownEvent = new MouseEvent('mousedown', {bubbles: true, detail: 1});
+  var resultMouseDown = test.util.sync.sendEvent(
+      contentWindow, targetQuery, mouseDownEvent, opt_iframeQuery);
+  var mouseUpEvent = new MouseEvent('mouseup', {bubbles: true, detail: 1});
+  var resultMouseUp = test.util.sync.sendEvent(
+      contentWindow, targetQuery, mouseUpEvent, opt_iframeQuery);
+  var clickEvent = new MouseEvent('click', {bubbles: true, detail: 1});
+  var resultClick = test.util.sync.sendEvent(
+      contentWindow, targetQuery, clickEvent, opt_iframeQuery);
+  return resultMouseOver && resultMouseDown && resultMouseUp && resultClick;
 };
 
 /**
@@ -688,7 +700,7 @@ test.util.sync.deleteFile = function(contentWindow, filename) {
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {Array.<object>} queries Queries that specifies the elements and
- *   expected styles.
+ *     expected styles.
  * @param {function()} callback Callback function to be notified the change of
  *     the styles.
  */
@@ -716,6 +728,91 @@ test.util.async.waitForStyles = function(contentWindow, queries, callback) {
  */
 test.util.sync.execCommand = function(contentWindow, command) {
   return contentWindow.document.execCommand(command);
+};
+
+/**
+ * Override the installWebstoreItem method in private api for test.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} expectedItemId Item ID to be called this method with.
+ * @param {?string} intendedError Error message to be returned when the item id
+ *     matches. 'null' represents no error.
+ * @return {boolean} Always return true.
+ */
+test.util.sync.overrideInstallWebstoreItemApi =
+    function(contentWindow, expectedItemId, intendedError) {
+  var setLastError = function(message) {
+    contentWindow.chrome.runtime.lastError =
+        message ? {message: message} : null;
+  };
+
+  var installWebstoreItem = function(itemId, callback) {
+    setTimeout(function() {
+      if (itemId !== expectedItemId) {
+        setLastError('Invalid Chrome Web Store item ID');
+        callback();
+        return;
+      }
+
+      setLastError(intendedError);
+      callback();
+    });
+  };
+
+  test.util.executedTasks_ = [];
+  contentWindow.chrome.fileBrowserPrivate.installWebstoreItem =
+      installWebstoreItem;
+  return true;
+};
+
+/**
+ * Override the task-related methods in private api for test.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {Array.<Object>} taskList List of tasks to be returned in
+ *     fileBrowserPrivate.getFileTasks().
+ * @return {boolean} Always return true.
+ */
+test.util.sync.overrideTasks = function(contentWindow, taskList) {
+  var getFileTasks = function(urls, mime, onTasks) {
+    // Call onTask asynchronously (same with original getFileTasks).
+    setTimeout(function() {
+      onTasks(taskList);
+    });
+  };
+
+  var executeTask = function(taskId, url) {
+    test.util.executedTasks_.push(taskId);
+  };
+
+  test.util.executedTasks_ = [];
+  contentWindow.chrome.fileBrowserPrivate.getFileTasks = getFileTasks;
+  contentWindow.chrome.fileBrowserPrivate.executeTask = executeTask;
+  return true;
+};
+
+/**
+ * Check if Files.app has ordered to execute the given task or not yet. This
+ * method must be used with test.util.sync.overrideTasks().
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} taskId Taskid of the task which should be executed.
+ * @param {function()} callback Callback function to be notified the order of
+ *     the execution.
+ */
+test.util.async.waitUntilTaskExecutes =
+    function(contentWindow, taskId, callback) {
+  if (!test.util.executedTasks_) {
+    console.error('Please call overrideTasks() first.');
+    return;
+  }
+
+  test.util.repeatUntilTrue_(function() {
+    if (test.util.executedTasks_.indexOf(taskId) === -1)
+      return false;
+    callback();
+    return true;
+  });
 };
 
 /**

@@ -38,7 +38,8 @@ bool AudioManagerCras::HasAudioInputDevices() {
   return true;
 }
 
-AudioManagerCras::AudioManagerCras() {
+AudioManagerCras::AudioManagerCras(AudioLogFactory* audio_log_factory)
+    : AudioManagerBase(audio_log_factory) {
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 }
 
@@ -124,7 +125,7 @@ AudioParameters AudioManagerCras::GetPreferredOutputStreamParameters(
 
   return AudioParameters(
       AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout, input_channels,
-      sample_rate, bits_per_sample, buffer_size);
+      sample_rate, bits_per_sample, buffer_size, AudioParameters::NO_EFFECTS);
 }
 
 AudioOutputStream* AudioManagerCras::MakeOutputStream(

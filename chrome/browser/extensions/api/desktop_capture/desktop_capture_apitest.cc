@@ -9,7 +9,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/desktop_capture/desktop_capture_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/media/desktop_media_picker.h"
+#include "chrome/browser/media/fake_desktop_media_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -17,8 +17,6 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "third_party/webrtc/modules/desktop_capture/screen_capturer.h"
-#include "third_party/webrtc/modules/desktop_capture/window_capturer.h"
 
 namespace extensions {
 
@@ -37,8 +35,8 @@ class FakeDesktopMediaPicker : public DesktopMediaPicker {
   // DesktopMediaPicker interface.
   virtual void Show(gfx::NativeWindow context,
                     gfx::NativeWindow parent,
-                    const string16& app_name,
-                    scoped_ptr<DesktopMediaPickerModel> model,
+                    const base::string16& app_name,
+                    scoped_ptr<DesktopMediaList> model,
                     const DoneCallback& done_callback) OVERRIDE {
     if (!expect_cancelled_) {
       // Post a task to call the callback asynchronously.
@@ -87,17 +85,15 @@ class FakeDesktopMediaPickerFactory :
   }
 
   // DesktopCaptureChooseDesktopMediaFunction::PickerFactory interface.
-  virtual scoped_ptr<DesktopMediaPickerModel> CreateModel(
-      scoped_ptr<webrtc::ScreenCapturer> screen_capturer,
-      scoped_ptr<webrtc::WindowCapturer> window_capturer) OVERRIDE {
+  virtual scoped_ptr<DesktopMediaList> CreateModel(
+      bool show_screens,
+      bool show_windows) OVERRIDE {
     EXPECT_TRUE(!expectations_.empty());
     if (!expectations_.empty()) {
-      EXPECT_EQ(expectations_.front().screens, !!screen_capturer.get());
-      EXPECT_EQ(expectations_.front().windows, !!window_capturer.get());
+      EXPECT_EQ(expectations_.front().screens, show_screens);
+      EXPECT_EQ(expectations_.front().windows, show_windows);
     }
-    return scoped_ptr<DesktopMediaPickerModel>(
-      new DesktopMediaPickerModelImpl(screen_capturer.Pass(),
-                                      window_capturer.Pass()));
+    return scoped_ptr<DesktopMediaList>(new FakeDesktopMediaList());
   }
   virtual scoped_ptr<DesktopMediaPicker> CreatePicker() OVERRIDE {
     content::DesktopMediaID next_source;
@@ -127,6 +123,15 @@ class DesktopCaptureApiTest : public ExtensionApiTest {
     DesktopCaptureChooseDesktopMediaFunction::
         SetPickerFactoryForTests(NULL);
   }
+
+#if defined(OS_CHROMEOS)
+  virtual void SetUp() OVERRIDE {
+    // The GPU accelerated desktop capture path needs real GL contexts.
+    UseRealGLContexts();
+
+    ExtensionApiTest::SetUp();
+  }
+#endif
 
  protected:
   GURL GetURLForPath(const std::string& host, const std::string& path) {
@@ -179,7 +184,8 @@ IN_PROC_BROWSER_TEST_F(DesktopCaptureApiTest, MAYBE_ChooseDesktopMedia) {
   ASSERT_TRUE(RunExtensionTest("desktop_capture")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(DesktopCaptureApiTest, Delegation) {
+// Does not work with Instant Extended. http://crbug.com/305391.
+IN_PROC_BROWSER_TEST_F(DesktopCaptureApiTest, DISABLED_Delegation) {
   // Initialize test server.
   base::FilePath test_data;
   EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));

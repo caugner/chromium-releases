@@ -87,7 +87,7 @@ void Me2MeBrowserTest::TestKeyboardInput() {
   ASSERT_TRUE(TimeoutWaiter(base::TimeDelta::FromMilliseconds(300)).Wait());
 
   base::FilePath temp_file;
-  EXPECT_TRUE(file_util::CreateTemporaryFile(&temp_file));
+  EXPECT_TRUE(base::CreateTemporaryFile(&temp_file));
 
   // Write some text into the temp file.
   std::string text = "Abigail";
@@ -102,8 +102,6 @@ void Me2MeBrowserTest::TestKeyboardInput() {
   // Read the content of the temp file.
   std::string content;
   EXPECT_TRUE(base::ReadFileToString(temp_file, &content));
-
-  LOG(INFO) << temp_file.value();
 
   EXPECT_EQ(text, content);
 

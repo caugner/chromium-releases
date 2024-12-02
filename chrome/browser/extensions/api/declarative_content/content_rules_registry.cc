@@ -19,6 +19,8 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 
+using url_matcher::URLMatcherConditionSet;
+
 namespace extensions {
 
 ContentRulesRegistry::ContentRulesRegistry(Profile* profile,
@@ -26,7 +28,8 @@ ContentRulesRegistry::ContentRulesRegistry(Profile* profile,
     : RulesRegistry(profile,
                     declarative_content_constants::kOnPageChanged,
                     content::BrowserThread::UI,
-                    cache_delegate) {
+                    cache_delegate,
+                    WebViewKey(0, 0)) {
   extension_info_map_ = ExtensionSystem::Get(profile)->info_map();
 
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,

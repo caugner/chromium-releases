@@ -18,10 +18,11 @@
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/common/extension.h"
+#include "ui/app_list/speech_ui_model_observer.h"
 #include "ui/events/event_constants.h"
 
 namespace app_list {
@@ -64,6 +65,18 @@ void StartPageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "launchApp",
       base::Bind(&StartPageHandler::HandleLaunchApp, base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "speechResult",
+      base::Bind(&StartPageHandler::HandleSpeechResult,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "speechSoundLevel",
+      base::Bind(&StartPageHandler::HandleSpeechSoundLevel,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "setSpeechRecognitionState",
+      base::Bind(&StartPageHandler::HandleSpeechRecognition,
+                 base::Unretained(this)));
 }
 
 void StartPageHandler::OnRecommendedAppsChanged() {
@@ -107,15 +120,48 @@ void StartPageHandler::HandleLaunchApp(const base::ListValue* args) {
     return;
   }
 
-  AppListService* app_list_service = AppListService::Get(
+  AppListControllerDelegate* controller = AppListService::Get(
       chrome::GetHostDesktopTypeForNativeView(
-          web_ui()->GetWebContents()->GetView()->GetNativeView()));
-  scoped_ptr<AppListControllerDelegate> controller(
-      app_list_service->CreateControllerDelegate());
+          web_ui()->GetWebContents()->GetView()->GetNativeView()))
+      ->GetControllerDelegate();
   controller->ActivateApp(profile,
                           app,
                           AppListControllerDelegate::LAUNCH_FROM_APP_LIST,
                           ui::EF_NONE);
+}
+
+void StartPageHandler::HandleSpeechResult(const base::ListValue* args) {
+  base::string16 query;
+  bool is_final = false;
+  CHECK(args->GetString(0, &query));
+  CHECK(args->GetBoolean(1, &is_final));
+
+  StartPageService::Get(Profile::FromWebUI(web_ui()))->OnSpeechResult(
+      query, is_final);
+}
+
+void StartPageHandler::HandleSpeechSoundLevel(const base::ListValue* args) {
+  double level;
+  CHECK(args->GetDouble(0, &level));
+
+  StartPageService* service =
+      StartPageService::Get(Profile::FromWebUI(web_ui()));
+  service->OnSpeechSoundLevelChanged(static_cast<int16>(level));
+}
+
+void StartPageHandler::HandleSpeechRecognition(const base::ListValue* args) {
+  std::string state_string;
+  CHECK(args->GetString(0, &state_string));
+
+  SpeechRecognitionState new_state = SPEECH_RECOGNITION_NOT_STARTED;
+  if (state_string == "on")
+    new_state = SPEECH_RECOGNITION_ON;
+  else if (state_string == "in-speech")
+    new_state = SPEECH_RECOGNITION_IN_SPEECH;
+
+  StartPageService* service =
+      StartPageService::Get(Profile::FromWebUI(web_ui()));
+  service->OnSpeechRecognitionStateChanged(new_state);
 }
 
 }  // namespace app_list

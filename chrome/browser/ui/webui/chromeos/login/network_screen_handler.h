@@ -17,6 +17,8 @@ namespace chromeos {
 
 class CoreOobeActor;
 
+struct NetworkScreenHandlerOnLanguageChangedCallbackData;
+
 // WebUI implementation of NetworkScreenActor. It is used to interact with
 // the welcome screen (part of the page) of the OOBE.
 class NetworkScreenHandler : public NetworkScreenActor,
@@ -30,10 +32,10 @@ class NetworkScreenHandler : public NetworkScreenActor,
   virtual void PrepareToShow() OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
-  virtual void ShowError(const string16& message) OVERRIDE;
+  virtual void ShowError(const base::string16& message) OVERRIDE;
   virtual void ClearErrors() OVERRIDE;
   virtual void ShowConnectingStatus(bool connecting,
-                                    const string16& network_id) OVERRIDE;
+                                    const base::string16& network_id) OVERRIDE;
   virtual void EnableContinue(bool enabled) OVERRIDE;
 
   // BaseScreenHandler implementation:
@@ -50,6 +52,13 @@ class NetworkScreenHandler : public NetworkScreenActor,
 
   // Handles change of the language.
   void HandleOnLanguageChanged(const std::string& locale);
+
+  // Async callback after ReloadResourceBundle(locale) completed.
+  static void OnLanguageChangedCallback(
+      scoped_ptr<NetworkScreenHandlerOnLanguageChangedCallbackData> context,
+      const std::string& requested_locale,
+      const std::string& loaded_locale,
+      const bool success);
 
   // Handles change of the input method.
   void HandleOnInputMethodChanged(const std::string& id);
@@ -83,6 +92,8 @@ class NetworkScreenHandler : public NetworkScreenActor,
   gfx::Point network_control_pos_;
 
   scoped_ptr<CrosSettings::ObserverSubscription> timezone_subscription_;
+
+  base::WeakPtrFactory<NetworkScreenHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkScreenHandler);
 };

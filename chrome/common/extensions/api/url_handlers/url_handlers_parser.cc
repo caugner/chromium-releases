@@ -9,9 +9,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/extensions/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/offline_enabled_info.h"
 #include "extensions/common/switches.h"
 #include "net/base/network_change_notifier.h"
 #include "url/gurl.h"
@@ -91,7 +91,7 @@ UrlHandlersParser::~UrlHandlersParser() {
 bool ParseUrlHandler(const std::string& handler_id,
                      const DictionaryValue& handler_info,
                      std::vector<UrlHandlerInfo>* url_handlers,
-                     string16* error) {
+                     base::string16* error) {
   DCHECK(error);
 
   UrlHandlerInfo handler;
@@ -132,7 +132,7 @@ bool ParseUrlHandler(const std::string& handler_id,
   return true;
 }
 
-bool UrlHandlersParser::Parse(Extension* extension, string16* error) {
+bool UrlHandlersParser::Parse(Extension* extension, base::string16* error) {
   scoped_ptr<UrlHandlers> info(new UrlHandlers);
   const DictionaryValue* all_handlers = NULL;
   if (!extension->manifest()->GetDictionary(

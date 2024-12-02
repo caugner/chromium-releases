@@ -39,8 +39,8 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/content_switches.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "third_party/WebKit/public/web/WebScreenInfo.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/x/active_window_watcher_x.h"
 #include "ui/base/x/x11_util.h"
@@ -50,8 +50,8 @@
 #include "ui/gfx/text_elider.h"
 #include "webkit/common/cursors/webcursor_gtk_data.h"
 
-using WebKit::WebMouseWheelEvent;
-using WebKit::WebScreenInfo;
+using blink::WebMouseWheelEvent;
+using blink::WebScreenInfo;
 
 namespace content {
 namespace {
@@ -94,7 +94,7 @@ GdkCursor* GetMozSpinningCursor() {
   return moz_spinning_cursor;
 }
 
-bool MovedToPoint(const WebKit::WebMouseEvent& mouse_event,
+bool MovedToPoint(const blink::WebMouseEvent& mouse_event,
                    const gfx::Point& center) {
   return mouse_event.globalX == center.x() &&
          mouse_event.globalY == center.y();
@@ -385,7 +385,7 @@ class RenderWidgetHostViewGtkWidget {
 
     host_view->ModifyEventForEdgeDragging(widget, event);
 
-    WebKit::WebMouseEvent mouse_event = WebMouseEventBuilder::Build(event);
+    blink::WebMouseEvent mouse_event = WebMouseEventBuilder::Build(event);
 
     if (host_view->mouse_locked_) {
       gfx::Point center = host_view->GetWidgetCenter();
@@ -435,7 +435,7 @@ class RenderWidgetHostViewGtkWidget {
     // additionally send this crossing event with the state indicating the
     // button is down, it causes problems with drag and drop in WebKit.)
     if (!(event->state & any_button_mask)) {
-      WebKit::WebMouseEvent mouse_event = WebMouseEventBuilder::Build(event);
+      blink::WebMouseEvent mouse_event = WebMouseEventBuilder::Build(event);
       host_view->ModifyEventMovementAndCoords(&mouse_event);
       // When crossing out and back into a render view the movement values
       // must represent the instantaneous movement of the mouse, not the jump
@@ -929,14 +929,15 @@ void RenderWidgetHostViewGtk::Destroy() {
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-void RenderWidgetHostViewGtk::SetTooltipText(const string16& tooltip_text) {
+void RenderWidgetHostViewGtk::SetTooltipText(
+    const base::string16& tooltip_text) {
   // Maximum number of characters we allow in a tooltip.
   const int kMaxTooltipLength = 8 << 10;
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
   // accidentally DOS the user with a mega tooltip (since GTK doesn't do
   // this itself).
   // I filed https://bugzilla.gnome.org/show_bug.cgi?id=604641 upstream.
-  const string16 clamped_tooltip =
+  const base::string16 clamped_tooltip =
       gfx::TruncateString(tooltip_text, kMaxTooltipLength);
 
   if (clamped_tooltip.empty()) {
@@ -947,7 +948,7 @@ void RenderWidgetHostViewGtk::SetTooltipText(const string16& tooltip_text) {
   }
 }
 
-void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
+void RenderWidgetHostViewGtk::SelectionChanged(const base::string16& text,
                                                size_t offset,
                                                const gfx::Range& range) {
   RenderWidgetHostViewBase::SelectionChanged(text, offset, range);
@@ -993,11 +994,11 @@ void RenderWidgetHostViewGtk::OnDestroy(GtkWidget* widget) {
 }
 
 bool RenderWidgetHostViewGtk::NeedsInputGrab() {
-  return popup_type_ == WebKit::WebPopupTypeSelect;
+  return popup_type_ == blink::WebPopupTypeSelect;
 }
 
 bool RenderWidgetHostViewGtk::IsPopup() const {
-  return popup_type_ != WebKit::WebPopupTypeNone;
+  return popup_type_ != blink::WebPopupTypeNone;
 }
 
 void RenderWidgetHostViewGtk::DoSharedInit() {
@@ -1061,6 +1062,10 @@ void RenderWidgetHostViewGtk::CopyFromCompositingSurfaceToVideoFrame(
 
 bool RenderWidgetHostViewGtk::CanCopyToVideoFrame() const {
   return false;
+}
+
+void RenderWidgetHostViewGtk::AcceleratedSurfaceInitialized(int host_id,
+                                                            int route_id) {
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
@@ -1343,12 +1348,19 @@ bool RenderWidgetHostViewGtk::LockMouse() {
   }
 
   // Clear the tooltip window.
-  SetTooltipText(string16());
+  SetTooltipText(base::string16());
 
   // Ensure that the widget center location will be relevant for this mouse
   // lock session. It is updated whenever the window geometry moves
   // but may be out of date due to switching tabs.
   MarkCachedWidgetCenterStale();
+
+  // Ensure that if we were previously warping the cursor to a specific point
+  // that we no longer track doing so when entering lock. It should be cleared
+  // by the cursor moving to the warp point, and this shouldn't be necessary.
+  // But, this is a small effort to ensure robustness in the event a warp isn't
+  // completed.
+  mouse_is_being_warped_to_unlocked_position_ = false;
 
   return true;
 }
@@ -1407,7 +1419,7 @@ bool RenderWidgetHostViewGtk::RetrieveSurrounding(std::string* text,
 
   *text = base::UTF16ToUTF8AndAdjustOffset(
       base::StringPiece16(selection_text_), &offset);
-  if (offset == string16::npos) {
+  if (offset == base::string16::npos) {
     NOTREACHED() << "Invalid offset in UTF16 string.";
     return false;
   }
@@ -1450,7 +1462,7 @@ gfx::Point RenderWidgetHostViewGtk::GetWidgetCenter() {
 }
 
 void RenderWidgetHostViewGtk::ModifyEventMovementAndCoords(
-    WebKit::WebMouseEvent* event) {
+    blink::WebMouseEvent* event) {
   // Movement is computed by taking the difference of the new cursor position
   // and the previous. Under mouse lock the cursor will be warped back to the
   // center so that we are not limited by clipping boundaries.
@@ -1480,7 +1492,7 @@ void RenderWidgetHostViewGtk::ModifyEventMovementAndCoords(
     event->windowY = unlocked_mouse_position_.y();
     event->globalX = unlocked_global_mouse_position_.x();
     event->globalY = unlocked_global_mouse_position_.y();
-  } else {
+  } else if (!mouse_is_being_warped_to_unlocked_position_) {
     unlocked_mouse_position_.SetPoint(event->windowX, event->windowY);
     unlocked_global_mouse_position_.SetPoint(event->globalX, event->globalY);
   }

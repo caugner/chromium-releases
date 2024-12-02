@@ -22,6 +22,7 @@ class AuthChallengeInfo;
 class HostPortPair;
 class HttpAuthCache;
 class HttpNetworkSession;
+class HttpResponseHeaders;
 class URLFetcher;
 }
 
@@ -84,6 +85,14 @@ class DataReductionProxySettings
   // trial that governs the use of the promotion.
   static bool IsDataReductionProxyPromoAllowed();
 
+  // Returns true if preconnect advisory hinting is enabled by command line
+  // flag or Finch trial.
+  static bool IsPreconnectHintingAllowed();
+
+  // Returns true if the Via header indicates that this request was fetched
+  // explicitly via the Chrome Proxy.
+  static bool WasFetchedViaProxy(const net::HttpResponseHeaders* headers);
+
   // Returns the URL of the data reduction proxy.
   static std::string GetDataReductionProxyOrigin();
 
@@ -145,9 +154,10 @@ class DataReductionProxySettings
   ContentLengthList GetDailyContentLengths(const char* pref_name);
 
   // Sets the proxy configs, enabling or disabling the proxy according to
-  // the value of |enabled|. |at_startup| is true when this method is called
-  // from InitDataReductionProxySettings.
-  virtual void SetProxyConfigs(bool enabled, bool at_startup);
+  // the value of |enabled|. If |restricted| is true, only enable the fallback
+  // proxy. |at_startup| is true when this method is called from
+  // InitDataReductionProxySettings.
+  virtual void SetProxyConfigs(bool enabled, bool restricted, bool at_startup);
 
   // Metrics methods. Subclasses should override if they wish to provide
   // alternate methods.
@@ -157,13 +167,7 @@ class DataReductionProxySettings
 
   // Writes a warning to the log that is used in backend processing of
   // customer feedback. Virtual so tests can mock it for verification.
-  virtual void LogProxyState(bool enabled, bool at_startup);
-
-  bool HasTurnedOn() { return has_turned_on_; }
-  bool HasTurnedOff() { return has_turned_off_; }
-  // Note that these flags may only be toggled to true, never back to false.
-  void SetHasTurnedOn() { has_turned_on_ = true; }
-  void SetHasTurnedOff() { has_turned_off_ = true; }
+  virtual void LogProxyState(bool enabled, bool restricted, bool at_startup);
 
   // Accessor for unit tests.
   std::vector<std::string> BypassRules() { return bypass_rules_;}
@@ -224,15 +228,7 @@ class DataReductionProxySettings
 
   std::vector<std::string> bypass_rules_;
 
-  // Indicate whether a user has turned on the data reduction proxy previously
-  // in this session.
-  bool has_turned_on_;
-
-  // Indicate whether a user has turned off the data reduction proxy previously
-  // in this session.
-  bool has_turned_off_;
-
-  bool disabled_by_carrier_;
+  bool restricted_by_carrier_;
   bool enabled_by_user_;
 
   scoped_ptr<net::URLFetcher> fetcher_;

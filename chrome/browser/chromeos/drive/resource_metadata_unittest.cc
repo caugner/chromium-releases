@@ -15,9 +15,9 @@
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
-#include "chrome/browser/google_apis/test_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "google_apis/drive/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace drive {
@@ -420,8 +420,8 @@ TEST_F(ResourceMetadataTest, RefreshEntry) {
 
   // Cannot refresh root.
   dir_entry.Clear();
-  dir_entry.set_resource_id(util::kDriveGrandRootSpecialResourceId);
-  dir_entry.set_local_id(util::kDriveGrandRootSpecialResourceId);
+  dir_entry.set_resource_id(util::kDriveGrandRootLocalId);
+  dir_entry.set_local_id(util::kDriveGrandRootLocalId);
   dir_entry.set_title("new-root-name");
   dir_entry.set_parent_local_id(dir3_id);
   EXPECT_EQ(FILE_ERROR_INVALID_OPERATION,
@@ -559,14 +559,14 @@ TEST_F(ResourceMetadataTest, RemoveEntry) {
 
   // Try removing root. This should fail.
   EXPECT_EQ(FILE_ERROR_ACCESS_DENIED, resource_metadata_->RemoveEntry(
-      util::kDriveGrandRootSpecialResourceId));
+      util::kDriveGrandRootLocalId));
 }
 
 TEST_F(ResourceMetadataTest, GetResourceEntryById_RootDirectory) {
   // Look up the root directory by its ID.
   ResourceEntry entry;
   EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->GetResourceEntryById(
-      util::kDriveGrandRootSpecialResourceId, &entry));
+      util::kDriveGrandRootLocalId, &entry));
   EXPECT_EQ("drive", entry.base_name());
 }
 
@@ -600,7 +600,7 @@ TEST_F(ResourceMetadataTest, Iterate) {
   }
 
   EXPECT_EQ(7, file_count);
-  EXPECT_EQ(6, directory_count);
+  EXPECT_EQ(7, directory_count);
 }
 
 TEST_F(ResourceMetadataTest, DuplicatedNames) {
@@ -688,7 +688,7 @@ TEST_F(ResourceMetadataTest, EncodedNames) {
       CreateDirectoryEntry("\\(^o^)/", root_local_id), &dir_id));
   ASSERT_EQ(FILE_ERROR_OK, resource_metadata_->GetResourceEntryById(
       dir_id, &entry));
-  EXPECT_EQ("\\(^o^)\xE2\x88\x95", entry.base_name());
+  EXPECT_EQ("\\(^o^)_", entry.base_name());
 
   std::string file_id;
   ASSERT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(
@@ -696,11 +696,11 @@ TEST_F(ResourceMetadataTest, EncodedNames) {
       &file_id));
   ASSERT_EQ(FILE_ERROR_OK, resource_metadata_->GetResourceEntryById(
       file_id, &entry));
-  EXPECT_EQ("Slash \xE2\x88\x95.txt", entry.base_name());
+  EXPECT_EQ("Slash _.txt", entry.base_name());
 
   ASSERT_EQ(FILE_ERROR_OK, resource_metadata_->GetResourceEntryByPath(
       base::FilePath::FromUTF8Unsafe(
-          "drive/root/\\(^o^)\xE2\x88\x95/Slash \xE2\x88\x95.txt"),
+          "drive/root/\\(^o^)_/Slash _.txt"),
       &entry));
   EXPECT_EQ("myfile", entry.resource_id());
 }
@@ -726,18 +726,24 @@ TEST_F(ResourceMetadataTest, Reset) {
                 base::FilePath::FromUTF8Unsafe("drive"), &entry));
   EXPECT_EQ("drive", entry.base_name());
   ASSERT_TRUE(entry.file_info().is_directory());
-  EXPECT_EQ(util::kDriveGrandRootSpecialResourceId, entry.resource_id());
+  EXPECT_EQ(util::kDriveGrandRootLocalId, entry.resource_id());
 
-  // There is "other" under "drive".
+  // There are "other" and "trash" under "drive".
   ASSERT_EQ(FILE_ERROR_OK,
             resource_metadata_->ReadDirectoryByPath(
                 base::FilePath::FromUTF8Unsafe("drive"), &entries));
-  EXPECT_EQ(1U, entries.size());
+  EXPECT_EQ(2U, entries.size());
 
   // The "other" directory should be empty.
   ASSERT_EQ(FILE_ERROR_OK,
             resource_metadata_->ReadDirectoryByPath(
                 base::FilePath::FromUTF8Unsafe("drive/other"), &entries));
+  EXPECT_TRUE(entries.empty());
+
+  // The "trash" directory should be empty.
+  ASSERT_EQ(FILE_ERROR_OK,
+            resource_metadata_->ReadDirectoryByPath(
+                base::FilePath::FromUTF8Unsafe("drive/trash"), &entries));
   EXPECT_TRUE(entries.empty());
 }
 

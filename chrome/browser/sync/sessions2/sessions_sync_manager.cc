@@ -8,6 +8,7 @@
 #if !defined(OS_ANDROID)
 #include "chrome/browser/network_time/navigation_time_helper.h"
 #endif
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
 #include "chrome/common/url_constants.h"
@@ -36,16 +37,28 @@ static const int kMaxSyncFavicons = 200;
 // The maximum number of navigations in each direction we care to sync.
 static const int kMaxSyncNavigationCount = 6;
 
+// The URL at which the set of synced tabs is displayed. We treat it differently
+// from all other URL's as accessing it triggers a sync refresh of Sessions.
+static const char kNTPOpenTabSyncURL[] = "chrome://newtab/#open_tabs";
+
+// Default number of days without activity after which a session is considered
+// stale and becomes a candidate for garbage collection.
+static const size_t kDefaultStaleSessionThresholdDays = 14;  // 2 weeks.
+
 SessionsSyncManager::SessionsSyncManager(
     Profile* profile,
-    scoped_ptr<SyncPrefs> sync_prefs,
-    SyncInternalApiDelegate* delegate)
+    SyncInternalApiDelegate* delegate,
+    scoped_ptr<LocalSessionEventRouter> router)
     : favicon_cache_(profile, kMaxSyncFavicons),
+      sync_prefs_(profile->GetPrefs()),
       profile_(profile),
       delegate_(delegate),
-      local_session_header_node_id_(TabNodePool2::kInvalidTabNodeID) {
-  sync_prefs_ = sync_prefs.Pass();
+      local_session_header_node_id_(TabNodePool2::kInvalidTabNodeID),
+      stale_session_threshold_days_(kDefaultStaleSessionThresholdDays),
+      local_event_router_(router.Pass()) {
 }
+
+LocalSessionEventRouter::~LocalSessionEventRouter() {}
 
 SessionsSyncManager::~SessionsSyncManager() {
 }
@@ -105,9 +118,10 @@ syncer::SyncMergeResult SessionsSyncManager::MergeDataAndStartSyncing(
   }
 
 #if defined(OS_ANDROID)
-  std::string sync_machine_tag(BuildMachineTag(delegate_->GetCacheGuid()));
+  std::string sync_machine_tag(BuildMachineTag(
+      delegate_->GetLocalSyncCacheGUID()));
   if (current_machine_tag_.compare(sync_machine_tag) != 0)
-    DeleteForeignSession(sync_machine_tag, &new_changes);
+    DeleteForeignSessionInternal(sync_machine_tag, &new_changes);
 #endif
 
   // Check if anything has changed on the local client side.
@@ -115,6 +129,8 @@ syncer::SyncMergeResult SessionsSyncManager::MergeDataAndStartSyncing(
 
   merge_result.set_error(
       sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes));
+
+  local_event_router_->StartRoutingTo(this);
   return merge_result;
 }
 
@@ -292,13 +308,43 @@ void SessionsSyncManager::AssociateTab(SyncedTabDelegate* const tab,
       base::Time::Now();
 }
 
-void SessionsSyncManager::OnLocalTabModified(
-    const SyncedTabDelegate& modified_tab, syncer::SyncError* error) {
-  NOTIMPLEMENTED() << "TODO(tim): SessionModelAssociator::Observe equivalent.";
+void SessionsSyncManager::OnLocalTabModified(SyncedTabDelegate* modified_tab) {
+  const content::NavigationEntry* entry = modified_tab->GetActiveEntry();
+  if (!modified_tab->IsBeingDestroyed() &&
+      entry &&
+      entry->GetVirtualURL().is_valid() &&
+      entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
+    DVLOG(1) << "Triggering sync refresh for sessions datatype.";
+    const syncer::ModelTypeSet types(syncer::SESSIONS);
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
+        content::Source<Profile>(profile_),
+        content::Details<const syncer::ModelTypeSet>(&types));
+  }
+
+  syncer::SyncChangeList changes;
+  // Associate tabs first so the synced session tracker is aware of them.
+  AssociateTab(modified_tab, &changes);
+  // Note, we always associate windows because it's possible a tab became
+  // "interesting" by going to a valid URL, in which case it needs to be added
+  // to the window's tab information.
+  AssociateWindows(DONT_RELOAD_TABS, &changes);
+  sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
 }
 
-void SessionsSyncManager::OnBrowserOpened() {
-  NOTIMPLEMENTED() << "TODO(tim): SessionModelAssociator::Observe equivalent.";
+void SessionsSyncManager::OnFaviconPageUrlsUpdated(
+    const std::set<GURL>& updated_favicon_page_urls) {
+  // TODO(zea): consider a separate container for tabs with outstanding favicon
+  // loads so we don't have to iterate through all tabs comparing urls.
+  for (std::set<GURL>::const_iterator i = updated_favicon_page_urls.begin();
+       i != updated_favicon_page_urls.end(); ++i) {
+    for (TabLinksMap::iterator tab_iter = local_tab_map_.begin();
+         tab_iter != local_tab_map_.end();
+         ++tab_iter) {
+      if (tab_iter->second->url() == *i)
+        favicon_cache_.OnPageFaviconUpdated(*i);
+    }
+  }
 }
 
 bool SessionsSyncManager::ShouldSyncTab(const SyncedTabDelegate& tab) const {
@@ -344,12 +390,6 @@ bool SessionsSyncManager::ShouldSyncWindow(
   return window->IsTypeTabbed() || window->IsTypePopup();
 }
 
-void SessionsSyncManager::ForwardRelevantFaviconUpdatesToFaviconCache(
-    const std::set<GURL>& updated_favicon_page_urls) {
-  NOTIMPLEMENTED() <<
-      "TODO(tim): SessionModelAssociator::FaviconsUpdated equivalent.";
-}
-
 void SessionsSyncManager::StopSyncing(syncer::ModelType type) {
   NOTIMPLEMENTED();
 }
@@ -386,6 +426,8 @@ syncer::SyncError SessionsSyncManager::ProcessSyncChanges(
           // Another client has attempted to delete our local data (possibly by
           // error or a clock is inaccurate). Just ignore the deletion for now
           // to avoid any possible ping-pong delete/reassociate sequence.
+          // TODO(tim): Bug 98892.  This corrupts TabNodePool. Perform full
+          // re-association.
           LOG(WARNING) << "Local session data deleted. Ignoring until next "
                        << "local navigation event.";
         } else if (session.has_header()) {
@@ -551,14 +593,14 @@ void SessionsSyncManager::UpdateTrackerWithForeignSession(
 void SessionsSyncManager::InitializeCurrentMachineTag() {
   DCHECK(current_machine_tag_.empty());
   std::string persisted_guid;
-  persisted_guid = sync_prefs_->GetSyncSessionsGUID();
+  persisted_guid = sync_prefs_.GetSyncSessionsGUID();
   if (!persisted_guid.empty()) {
     current_machine_tag_ = persisted_guid;
     DVLOG(1) << "Restoring persisted session sync guid: " << persisted_guid;
   } else {
-    current_machine_tag_ = BuildMachineTag(delegate_->GetCacheGuid());
+    current_machine_tag_ = BuildMachineTag(delegate_->GetLocalSyncCacheGUID());
     DVLOG(1) << "Creating session sync guid: " << current_machine_tag_;
-    sync_prefs_->SetSyncSessionsGUID(current_machine_tag_);
+    sync_prefs_.SetSyncSessionsGUID(current_machine_tag_);
   }
 
   local_tab_pool_.SetMachineTag(current_machine_tag_);
@@ -653,7 +695,13 @@ bool SessionsSyncManager::GetSyncedFaviconForPageURL(
   return favicon_cache_.GetSyncedFaviconForPageURL(GURL(page_url), favicon_png);
 }
 
-void SessionsSyncManager::DeleteForeignSession(
+void SessionsSyncManager::DeleteForeignSession(const std::string& tag) {
+  syncer::SyncChangeList changes;
+  DeleteForeignSessionInternal(tag, &changes);
+  sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
+}
+
+void SessionsSyncManager::DeleteForeignSessionInternal(
     const std::string& tag, syncer::SyncChangeList* change_output) {
  if (tag == current_machine_tag()) {
     LOG(ERROR) << "Attempting to delete local session. This is not currently "
@@ -720,6 +768,25 @@ GURL SessionsSyncManager::GetCurrentFaviconURL(
   return (current_entry->GetFavicon().valid ?
           current_entry->GetFavicon().url :
           GURL());
+}
+
+bool SessionsSyncManager::GetForeignSession(
+    const std::string& tag,
+    std::vector<const SessionWindow*>* windows) {
+  return session_tracker_.LookupSessionWindows(tag, windows);
+}
+
+bool SessionsSyncManager::GetForeignTab(
+    const std::string& tag,
+    const SessionID::id_type tab_id,
+    const SessionTab** tab) {
+  const SessionTab* synced_tab = NULL;
+  bool success = session_tracker_.LookupSessionTab(tag,
+                                                   tab_id,
+                                                   &synced_tab);
+  if (success)
+    *tab = synced_tab;
+  return success;
 }
 
 void SessionsSyncManager::LocalTabDelegateToSpecifics(
@@ -831,6 +898,37 @@ void SessionsSyncManager::SetSessionTabFromDelegate(
     }
   }
   session_tab->session_storage_persistent_id.clear();
+}
+
+FaviconCache* SessionsSyncManager::GetFaviconCache() {
+  return &favicon_cache_;
+}
+
+void SessionsSyncManager::DoGarbageCollection() {
+  std::vector<const SyncedSession*> sessions;
+  if (!GetAllForeignSessions(&sessions))
+    return;  // No foreign sessions.
+
+  // Iterate through all the sessions and delete any with age older than
+  // |stale_session_threshold_days_|.
+  syncer::SyncChangeList changes;
+  for (std::vector<const SyncedSession*>::const_iterator iter =
+           sessions.begin(); iter != sessions.end(); ++iter) {
+    const SyncedSession* session = *iter;
+    int session_age_in_days =
+        (base::Time::Now() - session->modified_time).InDays();
+    std::string session_tag = session->session_tag;
+    if (session_age_in_days > 0 &&  // If false, local clock is not trustworty.
+        static_cast<size_t>(session_age_in_days) >
+            stale_session_threshold_days_) {
+      DVLOG(1) << "Found stale session " << session_tag
+               << " with age " << session_age_in_days << ", deleting.";
+      DeleteForeignSessionInternal(session_tag, &changes);
+    }
+  }
+
+  if (!changes.empty())
+    sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
 }
 
 };  // namespace browser_sync

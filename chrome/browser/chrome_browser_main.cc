@@ -72,7 +72,6 @@
 #include "chrome/browser/metrics/variations/variations_http_header_provider.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
-#include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -90,7 +89,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/three_d_api_observer.h"
 #include "chrome/browser/translate/translate_manager.h"
@@ -116,6 +114,7 @@
 #include "chrome/common/profiling.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "components/nacl/browser/nacl_browser.h"
+#include "components/nacl/browser/nacl_process_host.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -217,6 +216,7 @@ void HandleTestParameters(const CommandLine& command_line) {
   }
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 void AddFirstRunNewTabs(StartupBrowserCreator* browser_creator,
                         const std::vector<GURL>& new_tabs) {
   for (std::vector<GURL>::const_iterator it = new_tabs.begin();
@@ -225,6 +225,7 @@ void AddFirstRunNewTabs(StartupBrowserCreator* browser_creator,
       browser_creator->AddFirstRunTab(*it);
   }
 }
+#endif  // !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
 
 // Returns the new local state object, guaranteed non-NULL.
 // |local_state_task_runner| must be a shutdown-blocking task runner.
@@ -329,6 +330,7 @@ Profile* CreateProfile(const content::MainFunctionParams& parameters,
                        const base::FilePath& user_data_dir,
                        const CommandLine& parsed_command_line) {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::CreateProfile")
+  base::Time start = base::Time::Now();
   if (profiles::IsMultipleProfilesEnabled() &&
       parsed_command_line.HasSwitch(switches::kProfileDirectory)) {
     g_browser_process->local_state()->SetString(prefs::kProfileLastUsed,
@@ -351,9 +353,26 @@ Profile* CreateProfile(const content::MainFunctionParams& parameters,
       GetStartupProfilePath(user_data_dir, parsed_command_line);
   profile = g_browser_process->profile_manager()->GetProfile(
       profile_path);
+
+  // If we're using the --new-profile-management flag and this profile is
+  // signed out, then we should show the user manager instead. By switching
+  // the active profile to the guest profile we ensure that no
+  // browser windows will be opened for the guest profile.
+  if (profiles::IsNewProfileManagementEnabled() && !profile->IsGuestSession()) {
+    ProfileInfoCache& cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    size_t profile_index = cache.GetIndexOfProfileWithPath(profile_path);
+
+    if (cache.ProfileIsSigninRequiredAtIndex(profile_index))
+      profile = g_browser_process->profile_manager()->GetProfile(
+          ProfileManager::GetGuestProfilePath());
+  }
 #endif
-  if (profile)
+  if (profile) {
+    UMA_HISTOGRAM_LONG_TIMES(
+        "Startup.CreateFirstProfile", base::Time::Now() - start);
     return profile;
+  }
 
 #if !defined(OS_WIN)
   // TODO(port): fix this.  See comments near the definition of
@@ -372,6 +391,7 @@ OSStatus KeychainCallback(SecKeychainEvent keychain_event,
 }
 #endif
 
+#if !defined(OS_ANDROID)
 void RegisterComponentsForUpdate(const CommandLine& command_line) {
   ComponentUpdateService* cus = g_browser_process->component_updater();
 
@@ -456,6 +476,7 @@ bool ProcessSingletonNotificationCallback(
       command_line, current_directory, startup_profile_dir);
   return true;
 }
+#endif  // !defined(OS_ANDROID)
 
 void LaunchDevToolsHandlerIfNeeded(const CommandLine& command_line) {
   if (command_line.HasSwitch(::switches::kRemoteDebuggingPort)) {
@@ -568,12 +589,14 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // Initialize FieldTrialList to support FieldTrials that use one-time
   // randomization.
   MetricsService* metrics = browser_process_->metrics_service();
-  bool metrics_reporting_enabled = IsMetricsReportingEnabled();
-  if (metrics_reporting_enabled)
+  MetricsService::ReportingState reporting_state =
+      IsMetricsReportingEnabled() ? MetricsService::REPORTING_ENABLED :
+                                    MetricsService::REPORTING_DISABLED;
+  if (reporting_state == MetricsService::REPORTING_ENABLED)
     metrics->ForceClientIdCreation();  // Needed below.
   field_trial_list_.reset(
       new base::FieldTrialList(
-          metrics->CreateEntropyProvider(metrics_reporting_enabled).release()));
+          metrics->CreateEntropyProvider(reporting_state).release()));
 
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableBenchmarking))
@@ -592,7 +615,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   }
   if (command_line->HasSwitch(switches::kForceVariationIds)) {
     // Create default variation ids which will always be included in the
-    // X-Chrome-Variations request header.
+    // X-Client-Data request header.
     chrome_variations::VariationsHttpHeaderProvider* provider =
         chrome_variations::VariationsHttpHeaderProvider::GetInstance();
     bool result = provider->SetDefaultVariationIds(
@@ -608,13 +631,14 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   // This must be called after the local state is initialized.
   browser_field_trials_.SetupFieldTrials(local_state_);
 
-  SetupPlatformFieldTrials();
-
   // Initialize FieldTrialSynchronizer system. This is a singleton and is used
   // for posting tasks via base::Bind. Its deleted when it goes out of scope.
   // Even though base::Bind does AddRef and Release, the object will not be
   // deleted after the Task is executed.
   field_trial_synchronizer_ = new FieldTrialSynchronizer();
+
+  // Now that field trials have been created, initializes metrics recording.
+  metrics->InitializeMetricsRecordingState(reporting_state);
 }
 
 // ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
@@ -623,16 +647,9 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::StartMetricsRecording");
   MetricsService* metrics = g_browser_process->metrics_service();
 
-  // TODO(miu): Metrics reporting is disabled in DEBUG builds until ill-fired
-  // DCHECKs are fixed, and/or we reconsider whether metrics reporting should
-  // really ever be enabled for debug builds.  http://crbug.com/156979
-#if defined(NDEBUG)
   const bool only_do_metrics_recording =
       parsed_command_line_.HasSwitch(switches::kMetricsRecordingOnly) ||
       parsed_command_line_.HasSwitch(switches::kEnableBenchmarking);
-#else
-  const bool only_do_metrics_recording = true;
-#endif
   if (only_do_metrics_recording) {
     // If we're testing then we don't care what the user preference is, we turn
     // on recording, but not reporting, otherwise tests fail.
@@ -1028,6 +1045,9 @@ void ChromeBrowserMainParts::PreMainMessageLoopRun() {
 void ChromeBrowserMainParts::PreProfileInit() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreProfileInit");
 
+  for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
+    chrome_extra_parts_[i]->PreProfileInit();
+
 #if !defined(OS_ANDROID)
   ProfileManager* profile_manager = g_browser_process->profile_manager();
 
@@ -1041,14 +1061,18 @@ void ChromeBrowserMainParts::PreProfileInit() {
     if (profile_cache.ProfileIsEphemeralAtIndex(i))
       profiles_to_delete.push_back(profile_cache.GetPathOfProfileAtIndex(i));
   }
-  for (size_t i = 0;i < profiles_to_delete.size(); ++i) {
-    profile_manager->ScheduleProfileForDeletion(
-        profiles_to_delete[i], ProfileManager::CreateCallback());
+
+  if (profiles_to_delete.size()) {
+    for (size_t i = 0;i < profiles_to_delete.size(); ++i) {
+      profile_manager->ScheduleProfileForDeletion(
+          profiles_to_delete[i], ProfileManager::CreateCallback());
+    }
+    // Clean up stale profiles immediately after browser start.
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&ProfileManager::CleanUpStaleProfiles, profiles_to_delete));
   }
 #endif  // OS_ANDROID
-
-  for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
-    chrome_extra_parts_[i]->PreProfileInit();
 }
 
 void ChromeBrowserMainParts::PostProfileInit() {
@@ -1076,10 +1100,6 @@ void ChromeBrowserMainParts::PostBrowserStart() {
 #endif
 }
 
-void ChromeBrowserMainParts::SetupPlatformFieldTrials() {
-  // Base class implementation of this does nothing.
-}
-
 int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreMainMessageLoopRunImpl");
 #if !defined(OS_ANDROID)
@@ -1096,7 +1116,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // application is in the foreground or not. Do not start here.
 #if !defined(OS_ANDROID)
   // Now that the file thread has been started, start recording.
-  MetricsService::SetExecutionPhase(MetricsService::START_METRICS_RECORDING);
   StartMetricsRecording();
 #endif
 
@@ -1135,6 +1154,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
         static_cast<int>(content::RESULT_CODE_NORMAL_EXIT) :
         static_cast<int>(chrome::RESULT_CODE_SHELL_INTEGRATION_FAILED);
   }
+
+#if defined(USE_AURA)
+  // Env creates the compositor. Aura widgets need the compositor to be created
+  // before they can be initialized by the browser.
+  aura::Env::CreateInstance();
+#endif
 
   // Android doesn't support extensions and doesn't implement ProcessSingleton.
 #if !defined(OS_ANDROID)
@@ -1317,7 +1342,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
                           master_prefs_->import_bookmarks_path);
 
     // Note: this can pop the first run consent dialog on linux.
-    first_run::DoPostImportTasks(profile_, master_prefs_->make_chrome_default);
+    first_run::DoPostImportTasks(profile_,
+                                 master_prefs_->make_chrome_default_for_user);
 
     if (!master_prefs_->suppress_first_run_default_browser_prompt) {
       browser_creator_->set_show_main_browser_window(
@@ -1463,7 +1489,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO,
       FROM_HERE,
-      base::Bind(NaClProcessHost::EarlyStartup));
+      base::Bind(nacl::NaClProcessHost::EarlyStartup));
 #endif
 
   // Make sure initial prefs are recorded
@@ -1502,12 +1528,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   if (!parsed_command_line().HasSwitch(switches::kDisableComponentUpdate))
     RegisterComponentsForUpdate(parsed_command_line());
-
-#if defined(USE_AURA)
-  // Env creates the compositor. Aura widgets need the compositor to be created
-  // before they can be initialized by the browser.
-  aura::Env::CreateInstance();
-#endif
 
   if (browser_creator_->Start(parsed_command_line(), base::FilePath(),
                               profile_, last_opened_profiles, &result_code)) {

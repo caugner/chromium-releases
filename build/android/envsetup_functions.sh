@@ -228,7 +228,7 @@ sdk_build_init() {
     export ANDROID_NDK_ROOT="${CHROME_SRC}/third_party/android_tools/ndk/"
   fi
   if [[ -z "${ANDROID_SDK_VERSION}" ]]; then
-    export ANDROID_SDK_VERSION=18
+    export ANDROID_SDK_VERSION=19
   else
     sdk_defines+=" android_sdk_version=${ANDROID_SDK_VERSION}"
   fi
@@ -240,7 +240,7 @@ sdk_build_init() {
     sdk_defines+=" android_sdk_root=${ANDROID_SDK_ROOT}"
   fi
   if [[ -z "${ANDROID_SDK_BUILD_TOOLS_VERSION}" ]]; then
-    export ANDROID_SDK_BUILD_TOOLS_VERSION=18.0.1
+    export ANDROID_SDK_BUILD_TOOLS_VERSION=19.0.0
   fi
 
   unset ANDROID_BUILD_TOP
@@ -310,8 +310,6 @@ ${ANDROID_SDK_VERSION}
       ;;
   esac
   DEFINES+=" android_webview_build=1"
-  # temporary until all uses of android_build_type are gone (crbug.com/184431)
-  DEFINES+=" android_build_type=1"
   DEFINES+=" android_src=\$(PWD)"
   DEFINES+=" android_sdk=\$(PWD)/${ANDROID_SDK}"
   DEFINES+=" android_sdk_root=\$(PWD)/${ANDROID_SDK}"

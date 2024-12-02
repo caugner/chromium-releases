@@ -62,15 +62,15 @@ void MetricsLogSerializer::SerializeLogs(
   const char* pref = NULL;
   size_t store_length_limit = 0;
   switch (log_type) {
-    case MetricsLogManager::INITIAL_LOG:
+    case MetricsLogBase::INITIAL_LOG:
       pref = prefs::kMetricsInitialLogs;
       store_length_limit = kInitialLogsPersistLimit;
       break;
-    case MetricsLogManager::ONGOING_LOG:
+    case MetricsLogBase::ONGOING_LOG:
       pref = prefs::kMetricsOngoingLogs;
       store_length_limit = kOngoingLogsPersistLimit;
       break;
-    case MetricsLogManager::NO_LOG:
+    case MetricsLogBase::NO_LOG:
       NOTREACHED();
       return;
   };
@@ -88,7 +88,7 @@ void MetricsLogSerializer::DeserializeLogs(
   DCHECK(local_state);
 
   const char* pref;
-  if (log_type == MetricsLogManager::INITIAL_LOG)
+  if (log_type == MetricsLogBase::INITIAL_LOG)
     pref = prefs::kMetricsInitialLogs;
   else
     pref = prefs::kMetricsOngoingLogs;
@@ -141,10 +141,7 @@ void MetricsLogSerializer::WriteLogsToPrefList(
        it != local_list.end(); ++it) {
     // We encode the compressed log as Value::CreateStringValue() expects to
     // take a valid UTF8 string.
-    if (!base::Base64Encode(it->log_text(), &encoded_log)) {
-      list->Clear();
-      return;
-    }
+    base::Base64Encode(it->log_text(), &encoded_log);
     base::MD5Update(&ctx, encoded_log);
     list->Append(Value::CreateStringValue(encoded_log));
   }

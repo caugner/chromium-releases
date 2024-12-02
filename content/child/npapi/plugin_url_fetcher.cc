@@ -4,6 +4,7 @@
 
 #include "content/child/npapi/plugin_url_fetcher.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "content/child/child_thread.h"
 #include "content/child/npapi/webplugin.h"
 #include "content/child/npapi/plugin_host.h"
@@ -31,15 +32,15 @@ namespace {
 // TODO(jam): this is similar to MultiPartResponseClient in webplugin_impl.cc,
 // we should remove that other class once we switch to loading from the plugin
 // process by default.
-class MultiPartResponseClient : public WebKit::WebURLLoaderClient {
+class MultiPartResponseClient : public blink::WebURLLoaderClient {
  public:
   explicit MultiPartResponseClient(PluginStreamUrl* plugin_stream)
       : byte_range_lower_bound_(0), plugin_stream_(plugin_stream) {}
 
-  // WebKit::WebURLLoaderClient implementation:
+  // blink::WebURLLoaderClient implementation:
   virtual void didReceiveResponse(
-      WebKit::WebURLLoader* loader,
-      const WebKit::WebURLResponse& response) OVERRIDE {
+      blink::WebURLLoader* loader,
+      const blink::WebURLResponse& response) OVERRIDE {
     int64 byte_range_upper_bound, instance_size;
     if (!webkit_glue::MultipartResponseDelegate::ReadContentRanges(
             response, &byte_range_lower_bound_, &byte_range_upper_bound,
@@ -47,7 +48,7 @@ class MultiPartResponseClient : public WebKit::WebURLLoaderClient {
       NOTREACHED();
     }
   }
-  virtual void didReceiveData(WebKit::WebURLLoader* loader,
+  virtual void didReceiveData(blink::WebURLLoader* loader,
                               const char* data,
                               int data_length,
                               int encoded_data_length) OVERRIDE {
@@ -80,7 +81,8 @@ PluginURLFetcher::PluginURLFetcher(PluginStreamUrl* plugin_stream,
                                    bool is_plugin_src_load,
                                    int origin_pid,
                                    int render_view_id,
-                                   unsigned long resource_id)
+                                   unsigned long resource_id,
+                                   bool copy_stream_data)
     : plugin_stream_(plugin_stream),
       url_(url),
       first_party_for_cookies_(first_party_for_cookies),
@@ -89,6 +91,7 @@ PluginURLFetcher::PluginURLFetcher(PluginStreamUrl* plugin_stream,
       notify_redirects_(notify_redirects),
       is_plugin_src_load_(is_plugin_src_load),
       resource_id_(resource_id),
+      copy_stream_data_(copy_stream_data),
       data_offset_(0),
       pending_failure_notification_(false) {
   webkit_glue::ResourceLoaderBridge::RequestInfo request_info;
@@ -213,7 +216,7 @@ void PluginURLFetcher::OnReceivedResponse(
   if (plugin_stream_->seekable()) {
     int response_code = info.headers->response_code();
     if (response_code == 206) {
-      WebKit::WebURLResponse response;
+      blink::WebURLResponse response;
       response.initialize();
       webkit_glue::WebURLLoaderImpl::PopulateURLResponse(url_, info, &response);
 
@@ -301,7 +304,17 @@ void PluginURLFetcher::OnReceivedData(const char* data,
   } else {
     int64 offset = data_offset_;
     data_offset_ += data_length;
-    plugin_stream_->DidReceiveData(data, data_length, offset);
+
+    if (copy_stream_data_) {
+      // QuickTime writes to this memory, and since we got it from
+      // ResourceDispatcher it's not mapped for write access in this process.
+      // http://crbug.com/308466.
+      scoped_ptr<char[]> data_copy(new char[data_length]);
+      memcpy(data_copy.get(), data, data_length);
+      plugin_stream_->DidReceiveData(data_copy.get(), data_length, offset);
+    } else {
+      plugin_stream_->DidReceiveData(data, data_length, offset);
+    }
     // DANGER: this instance may be deleted at this point.
   }
 }

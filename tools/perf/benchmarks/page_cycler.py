@@ -1,6 +1,8 @@
 # Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import sys
+
 from telemetry import test
 
 from measurements import page_cycler
@@ -88,6 +90,14 @@ class PageCyclerNetsimTop10(test.Test):
     self.test.clear_cache_before_each_run = True
 
 
+class PageCyclerTop10Mobile(test.Test):
+  enabled = False  # Fails on Android.
+
+  test = page_cycler.PageCycler
+  page_set = 'page_sets/top_10_mobile.json'
+  options = {'pageset_repeat_iters': 10}
+
+
 class PageCyclerToughLayoutCases(test.Test):
   test = page_cycler.PageCycler
   page_set = 'page_sets/tough_layout_cases.json'
@@ -95,6 +105,8 @@ class PageCyclerToughLayoutCases(test.Test):
 
 
 class PageCyclerTypical25(test.Test):
+  # crbug.com/273986: This test is really flakey on xp.
+  enabled = not sys.platform.startswith('win')
   test = page_cycler.PageCycler
   page_set = 'page_sets/typical_25.json'
   options = {'pageset_repeat_iters': 10}

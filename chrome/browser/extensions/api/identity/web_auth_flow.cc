@@ -11,7 +11,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/component_loader.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -28,6 +27,7 @@
 #include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "crypto/random.h"
+#include "extensions/browser/event_router.h"
 #include "grit/browser_resources.h"
 #include "url/gurl.h"
 
@@ -76,8 +76,7 @@ void WebAuthFlow::Start() {
   // in OnShellWindowAdded.
   std::string random_bytes;
   crypto::RandBytes(WriteInto(&random_bytes, 33), 32);
-  bool success = base::Base64Encode(random_bytes, &shell_window_key_);
-  DCHECK(success);
+  base::Base64Encode(random_bytes, &shell_window_key_);
 
   // identityPrivate.onWebFlowRequest(shell_window_key, provider_url_, mode_)
   scoped_ptr<base::ListValue> args(new base::ListValue());
@@ -90,7 +89,7 @@ void WebAuthFlow::Start() {
 
   scoped_ptr<Event> event(
       new Event(identity_private::OnWebFlowRequest::kEventName, args.Pass()));
-  event->restrict_to_profile = profile_;
+  event->restrict_to_browser_context = profile_;
   ExtensionSystem* system = ExtensionSystem::Get(profile_);
 
   extensions::ComponentLoader* component_loader =
@@ -222,13 +221,14 @@ void WebAuthFlow::DidStartProvisionalLoadForFrame(
     BeforeUrlLoaded(validated_url);
 }
 
-void WebAuthFlow::DidFailProvisionalLoad(int64 frame_id,
-                                         const string16& frame_unique_name,
-                                         bool is_main_frame,
-                                         const GURL& validated_url,
-                                         int error_code,
-                                         const string16& error_description,
-                                         RenderViewHost* render_view_host) {
+void WebAuthFlow::DidFailProvisionalLoad(
+    int64 frame_id,
+    const base::string16& frame_unique_name,
+    bool is_main_frame,
+    const GURL& validated_url,
+    int error_code,
+    const base::string16& error_description,
+    RenderViewHost* render_view_host) {
   if (delegate_)
     delegate_->OnAuthFlowFailure(LOAD_FAILED);
 }

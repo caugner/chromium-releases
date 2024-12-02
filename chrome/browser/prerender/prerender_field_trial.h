@@ -12,14 +12,17 @@ class Profile;
 
 namespace prerender {
 
-// Parse the --prerender= command line switch, which controls both prerendering
-// and prefetching.  If the switch is unset, or is set to "auto", then the user
-// is assigned to a field trial.
-void ConfigurePrefetchAndPrerender(const CommandLine& command_line);
+// Parse the --prerender= command line switch, which controls prerendering. If
+// the switch is unset or is set to "auto" then the user is assigned to a
+// field trial.
+void ConfigurePrerender(const CommandLine& command_line);
 
 // Returns true if the user has opted in or has been opted in to the
 // prerendering from Omnibox experiment.
 bool IsOmniboxEnabled(Profile* profile);
+
+// Returns true if session storage namespace merging is not disabled.
+bool ShouldMergeSessionStorageNamespaces();
 
 // Returns true iff the Prerender Local Predictor is enabled.
 bool IsLocalPredictorEnabled();

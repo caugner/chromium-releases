@@ -15,10 +15,10 @@
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/views/background.h"
 #include "ui/views/painter.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
-
 
 namespace ash {
 namespace internal {
@@ -124,7 +124,7 @@ void PhantomWindowController::Show(const gfx::Rect& bounds_in_screen) {
   // in one root window and progress into another root.
   aura::Window* start_root = wm::GetRootWindowMatching(start_bounds_);
   if (start_root == target_root) {
-    Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+    aura::Window::Windows root_windows = Shell::GetAllRootWindows();
     for (size_t i = 0; i < root_windows.size(); ++i) {
       if (root_windows[i] != target_root &&
           root_windows[i]->GetBoundsInScreen().Intersects(start_bounds_)) {

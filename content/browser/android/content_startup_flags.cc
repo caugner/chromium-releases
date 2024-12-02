@@ -4,6 +4,7 @@
 
 #include "content/browser/android/content_startup_flags.h"
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -60,11 +61,14 @@ void SetContentCommandLineFlags(int max_render_process_count,
   parsed_command_line->AppendSwitch(switches::kEnableBeginFrameScheduling);
   parsed_command_line->AppendSwitch(switches::kEnableDeadlineScheduling);
 
+  parsed_command_line->AppendSwitch(switches::kDisableGestureDebounce);
   parsed_command_line->AppendSwitch(switches::kEnableGestureTapHighlight);
   parsed_command_line->AppendSwitch(switches::kEnablePinch);
   parsed_command_line->AppendSwitch(switches::kEnableOverlayFullscreenVideo);
   parsed_command_line->AppendSwitch(switches::kEnableOverlayScrollbars);
   parsed_command_line->AppendSwitch(switches::kEnableOverscrollNotifications);
+  parsed_command_line->AppendSwitchASCII(switches::kTouchAckTimeoutDelayMs,
+                                         "200");
 
   // Run the GPU service as a thread in the browser instead of as a
   // standalone process.
@@ -72,14 +76,25 @@ void SetContentCommandLineFlags(int max_render_process_count,
   parsed_command_line->AppendSwitch(switches::kDisableGpuShaderDiskCache);
 
   parsed_command_line->AppendSwitch(switches::kEnableViewport);
+  parsed_command_line->AppendSwitch(switches::kEnableViewportMeta);
+  parsed_command_line->AppendSwitch(
+      switches::kMainFrameResizesAreOrientationChanges);
 
   // Disable anti-aliasing.
   parsed_command_line->AppendSwitch(
       cc::switches::kDisableCompositedAntialiasing);
 
+  parsed_command_line->AppendSwitch(switches::kUIPrioritizeInGpuProcess);
+
   if (!plugin_descriptor.empty()) {
     parsed_command_line->AppendSwitchNative(
       switches::kRegisterPepperPlugins, plugin_descriptor);
+  }
+
+  // Disable profiler timing by default.
+  if (!parsed_command_line->HasSwitch(switches::kProfilerTiming)) {
+    parsed_command_line->AppendSwitchASCII(
+        switches::kProfilerTiming, switches::kProfilerTimingDisabledValue);
   }
 }
 

@@ -8,19 +8,23 @@
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/browser/extensions/extension_prefs.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/common/extension.h"
 
 class Browser;
 class ExtensionService;
 class PrefService;
+class Profile;
 
 // Model for the browser actions toolbar.
-class ExtensionToolbarModel : public content::NotificationObserver {
+class ExtensionToolbarModel : public content::NotificationObserver,
+                              public BrowserContextKeyedService   {
  public:
-  explicit ExtensionToolbarModel(ExtensionService* service);
+  ExtensionToolbarModel(Profile* profile,
+                        extensions::ExtensionPrefs* extension_prefs);
   virtual ~ExtensionToolbarModel();
 
   // The action that should be taken as a result of clicking a browser action.
@@ -52,12 +56,16 @@ class ExtensionToolbarModel : public content::NotificationObserver {
     // Returns true if a popup was slated to be shown.
     virtual bool BrowserActionShowPopup(const extensions::Extension* extension);
 
-    // Called when the model has finished loading.
-    virtual void ModelLoaded() {}
+    // Signal when the container needs to be redrawn because of a size change,
+    // and when the model has finished loading.
+    virtual void VisibleCountChanged() {}
 
    protected:
     virtual ~Observer() {}
   };
+
+  // Convenience function to get the ExtensionToolbarModel for a Profile.
+  static ExtensionToolbarModel* Get(Profile* profile);
 
   // Functions called by the view.
   void AddObserver(Observer* observer);
@@ -97,6 +105,11 @@ class ExtensionToolbarModel : public content::NotificationObserver {
   // returns whether the popup was slated to be shown.
   bool ShowBrowserActionPopup(const extensions::Extension* extension);
 
+  // Ensures that the extensions in the |extension_ids| list are visible on the
+  // toolbar. This might mean they need to be moved to the front (if they are in
+  // the overflow bucket).
+  void EnsureVisibility(const extensions::ExtensionIdList& extension_ids);
+
  private:
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -106,11 +119,13 @@ class ExtensionToolbarModel : public content::NotificationObserver {
   // To be called after the extension service is ready; gets loaded extensions
   // from the extension service and their saved order from the pref service
   // and constructs |toolbar_items_| from these data.
-  void InitializeExtensionList();
-  void Populate(const extensions::ExtensionIdList& positions);
+  void InitializeExtensionList(ExtensionService* service);
+  void Populate(const extensions::ExtensionIdList& positions,
+                ExtensionService* service);
 
   // Fills |list| with extensions based on provided |order|.
-  void FillExtensionList(const extensions::ExtensionIdList& order);
+  void FillExtensionList(const extensions::ExtensionIdList& order,
+                         ExtensionService* service);
 
   // Save the model to prefs.
   void UpdatePrefs();
@@ -127,9 +142,10 @@ class ExtensionToolbarModel : public content::NotificationObserver {
   void RemoveExtension(const extensions::Extension* extension);
   void UninstalledExtension(const extensions::Extension* extension);
 
-  // Our ExtensionService, guaranteed to outlive us.
-  ExtensionService* service_;
+  // The Profile this toolbar model is for.
+  Profile* profile_;
 
+  extensions::ExtensionPrefs* extension_prefs_;
   PrefService* prefs_;
 
   // True if we've handled the initial EXTENSIONS_READY notification.

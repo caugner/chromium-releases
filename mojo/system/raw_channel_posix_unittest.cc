@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(vtl): Factor out the POSIX-specific bits of this test (once we have a
-// non-POSIX implementation).
+// TODO(vtl): Factor out the remaining POSIX-specific bits of this test (once we
+// have a non-POSIX implementation).
 
 #include "mojo/system/raw_channel.h"
 
 #include <fcntl.h>
 #include <stdint.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include <vector>
@@ -33,6 +31,7 @@
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "mojo/system/message_in_transit.h"
+#include "mojo/system/platform_channel.h"
 #include "mojo/system/platform_channel_handle.h"
 #include "mojo/system/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,7 +44,10 @@ MessageInTransit* MakeTestMessage(uint32_t num_bytes) {
   std::vector<unsigned char> bytes(num_bytes, 0);
   for (size_t i = 0; i < num_bytes; i++)
     bytes[i] = static_cast<unsigned char>(i + num_bytes);
-  return MessageInTransit::Create(bytes.data(), num_bytes);
+  return MessageInTransit::Create(
+      MessageInTransit::kTypeMessagePipeEndpoint,
+      MessageInTransit::kSubtypeMessagePipeEndpointData,
+      bytes.data(), num_bytes);
 }
 
 bool CheckMessageData(const void* bytes, uint32_t num_bytes) {
@@ -57,13 +59,15 @@ bool CheckMessageData(const void* bytes, uint32_t num_bytes) {
   return true;
 }
 
+void InitOnIOThread(RawChannel* raw_channel) {
+  CHECK(raw_channel->Init());
+}
+
 // -----------------------------------------------------------------------------
 
 class RawChannelPosixTest : public testing::Test {
  public:
   RawChannelPosixTest() : io_thread_("io_thread") {
-    fds_[0] = -1;
-    fds_[1] = -1;
   }
 
   virtual ~RawChannelPosixTest() {
@@ -73,26 +77,31 @@ class RawChannelPosixTest : public testing::Test {
     io_thread_.StartWithOptions(
         base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
 
-    // Create the socket.
-    PCHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, fds_) == 0);
+    scoped_ptr<PlatformServerChannel> server_channel(
+        PlatformServerChannel::Create("channel"));
+    CHECK(server_channel.get());
+    CHECK(server_channel->is_valid());
+    scoped_ptr<PlatformClientChannel> client_channel(
+        server_channel->CreateClientChannel());
+    CHECK(client_channel.get());
+    CHECK(client_channel->is_valid());
 
-    // Set the ends to non-blocking.
-    PCHECK(fcntl(fds_[0], F_SETFL, O_NONBLOCK) == 0);
-    PCHECK(fcntl(fds_[1], F_SETFL, O_NONBLOCK) == 0);
+    handles_[0] = server_channel->PassHandle();
+    handles_[1] = client_channel->PassHandle();
   }
 
   virtual void TearDown() OVERRIDE {
-    if (fds_[0] != -1)
-      CHECK_EQ(close(fds_[0]), 0);
-    if (fds_[1] != -1)
-      CHECK_EQ(close(fds_[1]), 0);
+    if (handles_[0].is_valid())
+      close(handles_[0].fd);
+    if (handles_[1].is_valid())
+      close(handles_[1].fd);
 
     io_thread_.Stop();
   }
 
  protected:
-  int fd(size_t i) { return fds_[i]; }
-  void clear_fd(size_t i) { fds_[i] = -1; }
+  int fd(size_t i) { return handles_[i].fd; }
+  void clear_fd(size_t i) { handles_[i] = PlatformChannelHandle(); }
 
   base::MessageLoop* io_thread_message_loop() {
     return io_thread_.message_loop();
@@ -104,7 +113,7 @@ class RawChannelPosixTest : public testing::Test {
 
  private:
   base::Thread io_thread_;
-  int fds_[2];
+  PlatformChannelHandle handles_[2];
 
   DISALLOW_COPY_AND_ASSIGN(RawChannelPosixTest);
 };
@@ -210,8 +219,7 @@ TEST_F(RawChannelPosixTest, WriteMessage) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(rc.get())));
+                        base::Bind(&InitOnIOThread, rc.get()));
 
   // Write and read, for a variety of sizes.
   for (uint32_t size = 1; size < 5 * 1000 * 1000; size += size / 2 + 1) {
@@ -304,15 +312,17 @@ TEST_F(RawChannelPosixTest, OnReadMessage) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(rc.get())));
+                        base::Bind(&InitOnIOThread, rc.get()));
 
   // Write and read, for a variety of sizes.
   for (uint32_t size = 1; size < 5 * 1000 * 1000; size += size / 2 + 1) {
     delegate.SetExpectedSizes(std::vector<uint32_t>(1, size));
     MessageInTransit* message = MakeTestMessage(size);
+
+    ssize_t write_size = HANDLE_EINTR(
+        write(fd(1), message, message->size_with_header_and_padding()));
     EXPECT_EQ(static_cast<ssize_t>(message->size_with_header_and_padding()),
-              write(fd(1), message, message->size_with_header_and_padding()));
+              write_size);
     message->Destroy();
     delegate.Wait();
   }
@@ -325,8 +335,10 @@ TEST_F(RawChannelPosixTest, OnReadMessage) {
   delegate.SetExpectedSizes(expected_sizes);
   for (uint32_t size = 1; size < 5 * 1000 * 1000; size += size / 2 + 1) {
     MessageInTransit* message = MakeTestMessage(size);
+    ssize_t write_size = HANDLE_EINTR(
+        write(fd(1), message, message->size_with_header_and_padding()));
     EXPECT_EQ(static_cast<ssize_t>(message->size_with_header_and_padding()),
-              write(fd(1), message, message->size_with_header_and_padding()));
+              write_size);
     message->Destroy();
   }
   delegate.Wait();
@@ -416,8 +428,7 @@ TEST_F(RawChannelPosixTest, WriteMessageAndOnReadMessage) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(writer_rc.get())));
+                        base::Bind(&InitOnIOThread, writer_rc.get()));
 
   ReadCountdownRawChannelDelegate reader_delegate(
       kNumWriterThreads * kNumWriteMessagesPerThread);
@@ -430,8 +441,7 @@ TEST_F(RawChannelPosixTest, WriteMessageAndOnReadMessage) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(reader_rc.get())));
+                        base::Bind(&InitOnIOThread, reader_rc.get()));
 
   {
     ScopedVector<RawChannelWriterThread> writer_threads;
@@ -510,8 +520,7 @@ TEST_F(RawChannelPosixTest, OnFatalError) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(rc.get())));
+                        base::Bind(&InitOnIOThread, rc.get()));
 
   // Close the other end, which should make writing fail.
   CHECK_EQ(close(fd(1)), 0);
@@ -545,8 +554,7 @@ TEST_F(RawChannelPosixTest, WriteMessageAfterShutdown) {
 
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
-                        base::Bind(&RawChannel::Init,
-                                   base::Unretained(rc.get())));
+                        base::Bind(&InitOnIOThread, rc.get()));
   test::PostTaskAndWait(io_thread_task_runner(),
                         FROM_HERE,
                         base::Bind(&RawChannel::Shutdown,

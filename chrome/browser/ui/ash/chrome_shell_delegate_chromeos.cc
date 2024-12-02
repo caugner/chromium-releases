@@ -10,6 +10,7 @@
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/accessibility/accessibility_events.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
@@ -33,7 +34,9 @@
 #include "chromeos/ime/input_method_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "grit/generated_resources.h"
 #include "ui/aura/window.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -115,14 +118,10 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return chromeos::AccessibilityManager::Get()->IsAutoclickEnabled();
   }
 
-  virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE {
-    Profile* profile = ProfileManager::GetDefaultProfile();
-    if (!profile)
-      return false;
-
-    PrefService* user_pref_service = profile->GetPrefs();
-    return user_pref_service && user_pref_service->GetBoolean(
-        prefs::kShouldAlwaysShowAccessibilityMenu);
+  virtual bool ShouldShowAccessibilityMenu() const OVERRIDE {
+    DCHECK(chromeos::AccessibilityManager::Get());
+    return chromeos::AccessibilityManager::Get()->
+        ShouldShowAccessibilityMenu();
   }
 
   virtual void SilenceSpokenFeedback() const OVERRIDE {
@@ -142,6 +141,32 @@ class AccessibilityDelegateImpl : public ash::AccessibilityDelegate {
     return std::numeric_limits<double>::min();
   }
 
+  virtual void TriggerAccessibilityAlert(
+      ash::AccessibilityAlert alert) OVERRIDE {
+    Profile* profile = ProfileManager::GetActiveUserProfileOrOffTheRecord();
+    if (profile) {
+      switch (alert) {
+        case ash::A11Y_ALERT_WINDOW_NEEDED: {
+          AccessibilityAlertInfo event(
+              profile, l10n_util::GetStringUTF8(IDS_A11Y_ALERT_WINDOW_NEEDED));
+          SendControlAccessibilityNotification(
+              ui::AccessibilityTypes::EVENT_ALERT, &event);
+          break;
+        }
+        case ash::A11Y_ALERT_NONE:
+          break;
+      }
+    }
+  }
+
+  virtual ash::AccessibilityAlert GetLastAccessibilityAlert() OVERRIDE {
+    return ash::A11Y_ALERT_NONE;
+  }
+
+  virtual base::TimeDelta PlayShutdownSound() const OVERRIDE {
+    return chromeos::AccessibilityManager::Get()->PlayShutdownSound();
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(AccessibilityDelegateImpl);
 };
@@ -153,19 +178,19 @@ class MediaDelegateImpl : public ash::MediaDelegate {
 
   virtual void HandleMediaNextTrack() OVERRIDE {
     extensions::MediaPlayerAPI::Get(
-        ProfileManager::GetDefaultProfileOrOffTheRecord())->
+        ProfileManager::GetActiveUserProfileOrOffTheRecord())->
             media_player_event_router()->NotifyNextTrack();
   }
 
   virtual void HandleMediaPlayPause() OVERRIDE {
     extensions::MediaPlayerAPI::Get(
-        ProfileManager::GetDefaultProfileOrOffTheRecord())->
+        ProfileManager::GetActiveUserProfileOrOffTheRecord())->
             media_player_event_router()->NotifyTogglePlayState();
   }
 
   virtual void HandleMediaPrevTrack() OVERRIDE {
     extensions::MediaPlayerAPI::Get(
-        ProfileManager::GetDefaultProfileOrOffTheRecord())->
+        ProfileManager::GetActiveUserProfileOrOffTheRecord())->
             media_player_event_router()->NotifyPrevTrack();
   }
 
@@ -225,7 +250,7 @@ void ChromeShellDelegate::Observe(int type,
                                   const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED:
-      ash::Shell::GetInstance()->CreateLauncher();
+      ash::Shell::GetInstance()->OnLoginUserProfilePrepared();
       break;
     case chrome::NOTIFICATION_SESSION_STARTED:
       RestoreFocus();

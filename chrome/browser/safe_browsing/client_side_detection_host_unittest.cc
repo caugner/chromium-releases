@@ -19,10 +19,12 @@
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_renderer_host.h"
+#include "content/public/test/web_contents_tester.h"
 #include "ipc/ipc_test_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -64,8 +66,17 @@ MATCHER_P(PartiallyEqualVerdict, other, "") {
 }
 
 MATCHER_P(PartiallyEqualMalwareVerdict, other, "") {
-  return (other.url() == arg.url() &&
-          other.feature_map_size() == arg.feature_map_size());
+  if (other.url() != arg.url() ||
+      other.referrer_url() != arg.referrer_url() ||
+      other.bad_ip_url_info_size() != arg.bad_ip_url_info_size())
+    return false;
+
+  for (int i = 0; i < other.bad_ip_url_info_size(); ++i) {
+    if (other.bad_ip_url_info(i).ip() != arg.bad_ip_url_info(i).ip() ||
+        other.bad_ip_url_info(i).url() != arg.bad_ip_url_info(i).url())
+    return false;
+  }
+  return true;
 }
 
 // Test that the callback is NULL when the verdict is not phishing.
@@ -84,6 +95,12 @@ ACTION_TEMPLATE(InvokeCallbackArgument,
                 HAS_1_TEMPLATE_PARAMS(int, k),
                 AND_2_VALUE_PARAMS(p0, p1)) {
   ::std::tr1::get<k>(args).Run(p0, p1);
+}
+
+ACTION_P(InvokeMalwareCallback, verdict) {
+  scoped_ptr<ClientMalwareRequest> request(::std::tr1::get<1>(args));
+  request->CopyFrom(*verdict);
+  ::std::tr1::get<2>(args).Run(true, request.Pass());
 }
 
 void EmptyUrlCheckCallback(bool processed) {
@@ -120,10 +137,10 @@ class MockSafeBrowsingUIManager : public SafeBrowsingUIManager {
   // object.
   void InvokeOnBlockingPageComplete(const UrlCheckCallback& callback) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    DCHECK(!callback.is_null());
     // Note: this will delete the client object in the case of the CsdClient
     // implementation.
-    callback.Run(false);
+    if (!callback.is_null())
+      callback.Run(false);
   }
 
  protected:
@@ -139,6 +156,7 @@ class MockSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
       : SafeBrowsingDatabaseManager(service) { }
 
   MOCK_METHOD1(MatchCsdWhitelistUrl, bool(const GURL&));
+  MOCK_METHOD1(MatchMalwareIP, bool(const std::string& ip_address));
 
  protected:
   virtual ~MockSafeBrowsingDatabaseManager() {}
@@ -159,18 +177,19 @@ class MockBrowserFeatureExtractor : public BrowserFeatureExtractor {
  public:
   explicit MockBrowserFeatureExtractor(
       WebContents* tab,
-      ClientSideDetectionService* service)
-      : BrowserFeatureExtractor(tab, service) {}
+      ClientSideDetectionHost* host)
+      : BrowserFeatureExtractor(tab, host) {}
   virtual ~MockBrowserFeatureExtractor() {}
 
   MOCK_METHOD3(ExtractFeatures,
-               void(const BrowseInfo* info,
+               void(const BrowseInfo*,
                     ClientPhishingRequest*,
                     const BrowserFeatureExtractor::DoneCallback&));
 
-  MOCK_METHOD2(ExtractMalwareFeatures,
-               void(const BrowseInfo* info,
-                    ClientMalwareRequest*));
+  MOCK_METHOD3(ExtractMalwareFeatures,
+               void(BrowseInfo*,
+                    ClientMalwareRequest*,
+                    const BrowserFeatureExtractor::MalwareDoneCallback&));
 };
 
 }  // namespace
@@ -228,7 +247,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
   }
 
   void UpdateIPUrlMap(const std::string& ip, const std::string& host) {
-    csd_host_->UpdateIPUrlMap(ip, host);
+    csd_host_->UpdateIPUrlMap(ip, host, "", "", ResourceType::OBJECT);
   }
 
   BrowseInfo* GetBrowseInfo() {
@@ -285,22 +304,14 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     csd_host_->browse_info_->url_redirects = redirect_chain;
   }
 
-  void SetUnsafeResourceToCurrent() {
-    UnsafeResource resource;
-    resource.url = GURL("http://www.malware.com/");
-    resource.original_url = web_contents()->GetURL();
-    resource.is_subresource = true;
-    resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
-    resource.callback = base::Bind(&EmptyUrlCheckCallback);
-    resource.render_process_host_id = web_contents()->GetRenderProcessHost()->
-        GetID();
-    resource.render_view_id =
-        web_contents()->GetRenderViewHost()->GetRoutingID();
-    csd_host_->OnSafeBrowsingHit(resource);
-    resource.callback.Reset();
-    ASSERT_TRUE(csd_host_->DidShowSBInterstitial());
+  void SetReferrer(const GURL& referrer) {
+    csd_host_->browse_info_->referrer = referrer;
+  }
+
+  void TestUnsafeResourceCopied(const UnsafeResource& resource) {
     ASSERT_TRUE(csd_host_->unsafe_resource_.get());
-    // Test that the resource above was copied.
+    // Test that the resource from OnSafeBrowsingHit notification was copied
+    // into the CSDH.
     EXPECT_EQ(resource.url, csd_host_->unsafe_resource_->url);
     EXPECT_EQ(resource.original_url, csd_host_->unsafe_resource_->original_url);
     EXPECT_EQ(resource.is_subresource,
@@ -313,6 +324,73 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
               csd_host_->unsafe_resource_->render_view_id);
   }
 
+  void SetUnsafeSubResourceForCurrent() {
+    UnsafeResource resource;
+    resource.url = GURL("http://www.malware.com/");
+    resource.original_url = web_contents()->GetURL();
+    resource.is_subresource = true;
+    resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
+    resource.callback = base::Bind(&EmptyUrlCheckCallback);
+    resource.render_process_host_id = web_contents()->GetRenderProcessHost()->
+        GetID();
+    resource.render_view_id =
+        web_contents()->GetRenderViewHost()->GetRoutingID();
+    ASSERT_FALSE(csd_host_->DidPageReceiveSafeBrowsingMatch());
+    csd_host_->OnSafeBrowsingMatch(resource);
+    ASSERT_TRUE(csd_host_->DidPageReceiveSafeBrowsingMatch());
+    csd_host_->OnSafeBrowsingHit(resource);
+    ASSERT_TRUE(csd_host_->DidPageReceiveSafeBrowsingMatch());
+    resource.callback.Reset();
+    ASSERT_TRUE(csd_host_->DidShowSBInterstitial());
+    TestUnsafeResourceCopied(resource);
+  }
+
+  void NavigateWithSBHitAndCommit(const GURL& url) {
+    // Create a pending navigation.
+    controller().LoadURL(
+        url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
+
+    ASSERT_TRUE(pending_rvh());
+    if (web_contents()->GetRenderViewHost()->GetProcess()->GetID() ==
+        pending_rvh()->GetProcess()->GetID()) {
+      EXPECT_NE(web_contents()->GetRenderViewHost()->GetRoutingID(),
+                pending_rvh()->GetRoutingID());
+    }
+
+    // Simulate a safebrowsing hit before navigation completes.
+    UnsafeResource resource;
+    resource.url = url;
+    resource.original_url = url;
+    resource.is_subresource = false;
+    resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
+    resource.callback = base::Bind(&EmptyUrlCheckCallback);
+    resource.render_process_host_id = pending_rvh()->GetProcess()->GetID();
+    resource.render_view_id = pending_rvh()->GetRoutingID();
+    csd_host_->OnSafeBrowsingMatch(resource);
+    csd_host_->OnSafeBrowsingHit(resource);
+    resource.callback.Reset();
+
+    // LoadURL created a navigation entry, now simulate the RenderView sending
+    // a notification that it actually navigated.
+    content::WebContentsTester::For(web_contents())->CommitPendingNavigation();
+
+    ASSERT_TRUE(csd_host_->DidPageReceiveSafeBrowsingMatch());
+    ASSERT_TRUE(csd_host_->DidShowSBInterstitial());
+    TestUnsafeResourceCopied(resource);
+  }
+
+  void CheckIPUrlEqual(const std::vector<IPUrlInfo>& expect,
+                       const std::vector<IPUrlInfo>& result) {
+    ASSERT_EQ(expect.size(), result.size());
+
+    for (unsigned int i = 0; i < expect.size(); ++i) {
+      EXPECT_EQ(expect[i].url, result[i].url);
+      EXPECT_EQ(expect[i].method, result[i].method);
+      EXPECT_EQ(expect[i].referrer, result[i].referrer);
+      EXPECT_EQ(expect[i].resource_type, result[i].resource_type);
+    }
+  }
+
  protected:
   scoped_ptr<ClientSideDetectionHost> csd_host_;
   scoped_ptr<StrictMock<MockClientSideDetectionService> > csd_service_;
@@ -321,36 +399,26 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
   MockTestingProfile* mock_profile_;  // We don't own this object
 };
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneInvalidVerdict) {
-#else
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneInvalidVerdict) {
-#endif
   // Case 0: renderer sends an invalid verdict string that we're unable to
   // parse.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
   OnPhishingDetectionDone("Invalid Protocol Buffer");
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneNotPhishing) {
-#else
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
-#endif
   // Case 1: client thinks the page is phishing.  The server does not agree.
   // No interstitial is shown.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientSideDetectionService::ClientReportPhishingRequestCallback cb;
@@ -359,15 +427,19 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
   verdict.set_client_score(1.0f);
   verdict.set_is_phishing(true);
 
+  ClientMalwareRequest malware_verdict;
+  malware_verdict.set_url(verdict.url());
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
       .WillOnce(DoAll(DeleteArg<1>(),
                       InvokeCallbackArgument<2>(true, &verdict)));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _))
       .WillOnce(SaveArg<1>(&cb));
   OnPhishingDetectionDone(verdict.SerializeAsString());
-  EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   ASSERT_FALSE(cb.is_null());
 
   // Make sure DoDisplayBlockingPage is not going to be called.
@@ -377,17 +449,13 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneNotPhishing) {
   EXPECT_TRUE(Mock::VerifyAndClear(ui_manager_.get()));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest, DISABLED_OnPhishingDetectionDoneDisabled) {
-#else
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
-#endif
   // Case 2: client thinks the page is phishing and so does the server but
   // showing the interstitial is disabled => no interstitial is shown.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientSideDetectionService::ClientReportPhishingRequestCallback cb;
@@ -403,8 +471,16 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _))
       .WillOnce(SaveArg<1>(&cb));
+
+  ClientMalwareRequest malware_verdict;
+  malware_verdict.set_url(verdict.url());
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
+  EXPECT_CALL(*csd_service_,
+              SendClientReportMalwareRequest(_, _)).Times(0);
+
   OnPhishingDetectionDone(verdict.SerializeAsString());
-  EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   ASSERT_FALSE(cb.is_null());
 
   // Make sure DoDisplayBlockingPage is not going to be called.
@@ -414,18 +490,13 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneDisabled) {
   EXPECT_TRUE(Mock::VerifyAndClear(ui_manager_.get()));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneShowInterstitial) {
-#else
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
-#endif
   // Case 3: client thinks the page is phishing and so does the server.
   // We show an interstitial.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientSideDetectionService::ClientReportPhishingRequestCallback cb;
@@ -435,14 +506,20 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
   verdict.set_client_score(1.0f);
   verdict.set_is_phishing(true);
 
+  ClientMalwareRequest malware_verdict;
+  malware_verdict.set_url(verdict.url());
+
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
       .WillOnce(DoAll(DeleteArg<1>(),
                       InvokeCallbackArgument<2>(true, &verdict)));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _))
       .WillOnce(SaveArg<1>(&cb));
   OnPhishingDetectionDone(verdict.SerializeAsString());
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
 
@@ -470,21 +547,16 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneShowInterstitial) {
                  ui_manager_, resource.callback));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneMultiplePings) {
-#else
 TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
-#endif
   // Case 4 & 5: client thinks a page is phishing then navigates to
   // another page which is also considered phishing by the client
   // before the server responds with a verdict.  After a while the
   // server responds for both requests with a phishing verdict.  Only
   // a single interstitial is shown for the second URL.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientSideDetectionService::ClientReportPhishingRequestCallback cb;
@@ -494,14 +566,20 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   verdict.set_client_score(1.0f);
   verdict.set_is_phishing(true);
 
+  ClientMalwareRequest malware_verdict;
+  malware_verdict.set_url(verdict.url());
+
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _))
       .WillOnce(DoAll(DeleteArg<1>(),
                       InvokeCallbackArgument<2>(true, &verdict)));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _))
       .WillOnce(SaveArg<1>(&cb));
   OnPhishingDetectionDone(verdict.SerializeAsString());
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
 
@@ -509,7 +587,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   // NavigateAndCommit() and it's easier to use the real thing than setting up
   // mock expectations.
   SetFeatureExtractor(new BrowserFeatureExtractor(web_contents(),
-                                                  csd_service_.get()));
+                                                  csd_host_.get()));
   GURL other_phishing_url("http://other_phishing_url.com/bla");
   ExpectPreClassificationChecks(other_phishing_url, &kFalse, &kFalse, &kFalse,
                                 &kFalse, &kFalse, &kFalse);
@@ -532,6 +610,7 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
   SetRedirectChain(redirect_chain);
   OnPhishingDetectionDone(verdict.SerializeAsString());
   base::MessageLoop::current()->Run();
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb_other.is_null());
 
@@ -563,18 +642,13 @@ TEST_F(ClientSideDetectionHostTest, OnPhishingDetectionDoneMultiplePings) {
                  ui_manager_, resource.callback));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneVerdictNotPhishing) {
-#else
 TEST_F(ClientSideDetectionHostTest,
        OnPhishingDetectionDoneVerdictNotPhishing) {
-#endif
   // Case 6: renderer sends a verdict string that isn't phishing.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientPhishingRequest verdict;
@@ -582,21 +656,20 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_client_score(0.1f);
   verdict.set_is_phishing(false);
 
+  ClientMalwareRequest malware_verdict;
+  malware_verdict.set_url(verdict.url());
+
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   OnPhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
-#if defined(OS_WIN)
-// Fails on Blink canary bots: http://crbug.com/299149
 TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneVerdictNotPhishingButSBMatch) {
-#else
-TEST_F(ClientSideDetectionHostTest,
-       OnPhishingDetectionDoneVerdictNotPhishingButSBMatch) {
-#endif
+       OnPhishingDetectionDoneVerdictNotPhishingButSBMatchSubResource) {
   // Case 7: renderer sends a verdict string that isn't phishing but the URL
-  // was on the regular phishing or malware lists.
+  // of a subresource was on the regular phishing or malware lists.
   GURL url("http://not-phishing.com/");
   ClientPhishingRequest verdict;
   verdict.set_url(url.spec());
@@ -608,7 +681,7 @@ TEST_F(ClientSideDetectionHostTest,
                                 &kFalse, &kFalse);
   NavigateAndCommit(url);
   WaitAndCheckPreClassificationChecks();
-  SetUnsafeResourceToCurrent();
+  SetUnsafeSubResourceForCurrent();
 
   EXPECT_CALL(*csd_service_,
               SendClientReportPhishingRequest(
@@ -619,15 +692,48 @@ TEST_F(ClientSideDetectionHostTest,
   SetRedirectChain(redirect_chain);
   OnPhishingDetectionDone(verdict.SerializeAsString());
   base::MessageLoop::current()->Run();
-  EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest, DISABLED_UpdateIPUrlMap) {
-#else
+TEST_F(ClientSideDetectionHostTest,
+       OnPhishingDetectionDoneVerdictNotPhishingButSBMatchOnNewRVH) {
+  // When navigating to a different host (thus creating a pending RVH) which
+  // matches regular malware list, and after navigation the renderer sends a
+  // verdict string that isn't phishing, we should still send the report.
+
+  // Do an initial navigation to a safe host.
+  GURL start_url("http://safe.example.com/");
+  ExpectPreClassificationChecks(
+      start_url, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse, &kFalse);
+  NavigateAndCommit(start_url);
+  WaitAndCheckPreClassificationChecks();
+
+  // Now navigate to a different host which will have a malware hit before the
+  // navigation commits.
+  GURL url("http://malware-but-not-phishing.com/");
+  ClientPhishingRequest verdict;
+  verdict.set_url(url.spec());
+  verdict.set_client_score(0.1f);
+  verdict.set_is_phishing(false);
+
+  ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
+                                &kFalse, &kFalse);
+  NavigateWithSBHitAndCommit(url);
+  WaitAndCheckPreClassificationChecks();
+
+  EXPECT_CALL(*csd_service_,
+              SendClientReportPhishingRequest(
+                  Pointee(PartiallyEqualVerdict(verdict)), CallbackIsNull()))
+      .WillOnce(DoAll(DeleteArg<0>(), QuitUIMessageLoop()));
+  std::vector<GURL> redirect_chain;
+  redirect_chain.push_back(url);
+  SetRedirectChain(redirect_chain);
+  OnPhishingDetectionDone(verdict.SerializeAsString());
+  base::MessageLoop::current()->Run();
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
+}
+
 TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
-#endif
   BrowseInfo* browse_info = GetBrowseInfo();
 
   // Empty IP or host are skipped
@@ -638,30 +744,34 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
   UpdateIPUrlMap(std::string(), std::string());
   ASSERT_EQ(0U, browse_info->ips.size());
 
-  std::set<std::string> expected_urls;
+  std::vector<IPUrlInfo> expected_urls;
   for (int i = 0; i < 20; i++) {
     std::string url = base::StringPrintf("http://%d.com/", i);
-    expected_urls.insert(url);
+    expected_urls.push_back(IPUrlInfo(url, "", "", ResourceType::OBJECT));
     UpdateIPUrlMap("250.10.10.10", url);
   }
   ASSERT_EQ(1U, browse_info->ips.size());
   ASSERT_EQ(20U, browse_info->ips["250.10.10.10"].size());
-  EXPECT_EQ(expected_urls, browse_info->ips["250.10.10.10"]);
+  CheckIPUrlEqual(expected_urls,
+                  browse_info->ips["250.10.10.10"]);
 
   // Add more urls for this ip, it exceeds max limit and won't be added
   UpdateIPUrlMap("250.10.10.10", "http://21.com/");
   ASSERT_EQ(1U, browse_info->ips.size());
   ASSERT_EQ(20U, browse_info->ips["250.10.10.10"].size());
-  EXPECT_EQ(expected_urls, browse_info->ips["250.10.10.10"]);
+  CheckIPUrlEqual(expected_urls,
+                  browse_info->ips["250.10.10.10"]);
 
   // Add 199 more IPs
   for (int i = 0; i < 199; i++) {
     std::string ip = base::StringPrintf("%d.%d.%d.256", i, i, i);
     expected_urls.clear();
-    expected_urls.insert("test.com/");
+    expected_urls.push_back(IPUrlInfo("test.com/", "", "",
+                            ResourceType::OBJECT));
     UpdateIPUrlMap(ip, "test.com/");
     ASSERT_EQ(1U, browse_info->ips[ip].size());
-    EXPECT_EQ(expected_urls, browse_info->ips[ip]);
+    CheckIPUrlEqual(expected_urls,
+                    browse_info->ips[ip]);
   }
   ASSERT_EQ(200U, browse_info->ips.size());
 
@@ -675,24 +785,20 @@ TEST_F(ClientSideDetectionHostTest, UpdateIPUrlMap) {
   UpdateIPUrlMap("100.100.100.256", "more.com/");
   ASSERT_EQ(2U, browse_info->ips["100.100.100.256"].size());
   expected_urls.clear();
-  expected_urls.insert("test.com/");
-  expected_urls.insert("more.com/");
-  EXPECT_EQ(expected_urls, browse_info->ips["100.100.100.256"]);
+  expected_urls.push_back(IPUrlInfo("test.com/", "", "", ResourceType::OBJECT));
+  expected_urls.push_back(IPUrlInfo("more.com/", "", "", ResourceType::OBJECT));
+  CheckIPUrlEqual(expected_urls,
+                  browse_info->ips["100.100.100.256"]);
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneVerdictNotPhishingNotMalwareIP) {
-#else
 TEST_F(ClientSideDetectionHostTest,
        OnPhishingDetectionDoneVerdictNotPhishingNotMalwareIP) {
-#endif
   // Case 7: renderer sends a verdict string that isn't phishing and not matches
   // malware bad IP list
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientPhishingRequest verdict;
@@ -701,10 +807,12 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_is_phishing(false);
 
   ClientMalwareRequest malware_verdict;
-  malware_verdict.set_url("http://not-phishing.com/");
+  malware_verdict.set_url(verdict.url());
 
-  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _))
-      .WillOnce(SetArgumentPointee<1>(malware_verdict));
+  // That is a special case.  If there were no IP matches or if feature
+  // extraction failed the callback will delete the malware_verdict.
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportMalwareRequest(_, _)).Times(0);
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
@@ -713,19 +821,14 @@ TEST_F(ClientSideDetectionHostTest,
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneVerdictNotPhishingButMalwareIP) {
-#else
 TEST_F(ClientSideDetectionHostTest,
        OnPhishingDetectionDoneVerdictNotPhishingButMalwareIP) {
-#endif
   // Case 8: renderer sends a verdict string that isn't phishing but matches
   // malware bad IP list
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientPhishingRequest verdict;
@@ -734,37 +837,34 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_is_phishing(false);
 
   ClientMalwareRequest malware_verdict;
-  malware_verdict.set_url("http://not-phishing.com/");
-  ClientMalwareRequest::Feature* feature = malware_verdict.add_feature_map();
-  feature->set_name("malwareip1.2.3.4");
-  feature->set_value(1.0);
-  feature->add_metainfo("badip.com");
+  malware_verdict.set_url(verdict.url());
+  malware_verdict.set_referrer_url("http://referrer.com/");
+  ClientMalwareRequest::UrlInfo* badipurl =
+      malware_verdict.add_bad_ip_url_info();
+  badipurl->set_ip("1.2.3.4");
+  badipurl->set_url("badip.com");
 
-  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _))
-      .WillOnce(SetArgumentPointee<1>(malware_verdict));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportMalwareRequest(
                   Pointee(PartiallyEqualMalwareVerdict(malware_verdict)), _))
       .WillOnce(DeleteArg<0>());
   EXPECT_CALL(*mock_extractor, ExtractFeatures(_, _, _)).Times(0);
 
+  SetReferrer(GURL("http://referrer.com/"));
   OnPhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneVerdictPhishingAndMalwareIP) {
-#else
 TEST_F(ClientSideDetectionHostTest,
        OnPhishingDetectionDoneVerdictPhishingAndMalwareIP) {
-#endif
   // Case 9: renderer sends a verdict string that is phishing and matches
   // malware bad IP list
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientSideDetectionService::ClientReportPhishingRequestCallback cb;
@@ -774,14 +874,14 @@ TEST_F(ClientSideDetectionHostTest,
   verdict.set_is_phishing(true);
 
   ClientMalwareRequest malware_verdict;
-  malware_verdict.set_url("http://not-phishing.com/");
-  ClientMalwareRequest::Feature* feature = malware_verdict.add_feature_map();
-  feature->set_name("malwareip1.2.3.4");
-  feature->set_value(1.0);
-  feature->add_metainfo("badip.com");
+  malware_verdict.set_url(verdict.url());
+  ClientMalwareRequest::UrlInfo* badipurl =
+      malware_verdict.add_bad_ip_url_info();
+  badipurl->set_ip("1.2.3.4");
+  badipurl->set_url("badip.com");
 
-  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _))
-      .WillOnce(SetArgumentPointee<1>(malware_verdict));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportMalwareRequest(
                   Pointee(PartiallyEqualMalwareVerdict(malware_verdict)), _))
@@ -795,25 +895,24 @@ TEST_F(ClientSideDetectionHostTest,
               SendClientReportPhishingRequest(
                   Pointee(PartiallyEqualVerdict(verdict)), _))
       .WillOnce(SaveArg<1>(&cb));
+
+  // Referrer url using https won't be set and sent out.
+  SetReferrer(GURL("https://referrer.com/"));
   OnPhishingDetectionDone(verdict.SerializeAsString());
   EXPECT_TRUE(Mock::VerifyAndClear(mock_extractor));
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_OnPhishingDetectionDoneShowMalwareInterstitial) {
-#else
 TEST_F(ClientSideDetectionHostTest,
        OnPhishingDetectionDoneShowMalwareInterstitial) {
-#endif
   // Case 10: client thinks the page match malware IP and so does the server.
   // We show an sub-resource malware interstitial.
-  MockBrowserFeatureExtractor* mock_extractor = new MockBrowserFeatureExtractor(
-      web_contents(),
-      csd_service_.get());
+  MockBrowserFeatureExtractor* mock_extractor =
+      new StrictMock<MockBrowserFeatureExtractor>(
+          web_contents(),
+          csd_host_.get());
   SetFeatureExtractor(mock_extractor);  // The host class takes ownership.
 
   ClientPhishingRequest verdict;
@@ -826,19 +925,19 @@ TEST_F(ClientSideDetectionHostTest,
   GURL malware_ip_url("http://badip.com");
   ClientMalwareRequest malware_verdict;
   malware_verdict.set_url("http://malware.com/");
-  ClientMalwareRequest::Feature* feature = malware_verdict.add_feature_map();
-  feature->set_name("malwareip1.2.3.4");
-  feature->set_value(1.0);
-  feature->add_metainfo("http://badip.com");
+  ClientMalwareRequest::UrlInfo* badipurl =
+      malware_verdict.add_bad_ip_url_info();
+  badipurl->set_ip("1.2.3.4");
+  badipurl->set_url("http://badip.com");
 
-  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _))
-      .WillOnce(SetArgumentPointee<1>(malware_verdict));
+  EXPECT_CALL(*mock_extractor, ExtractMalwareFeatures(_, _, _))
+      .WillOnce(InvokeMalwareCallback(&malware_verdict));
   EXPECT_CALL(*csd_service_,
               SendClientReportMalwareRequest(
                   Pointee(PartiallyEqualMalwareVerdict(malware_verdict)), _))
-      .WillOnce(DoAll(DeleteArg<0>(),
-                      SaveArg<1>(&cb)));
+      .WillOnce(DoAll(DeleteArg<0>(), SaveArg<1>(&cb)));
   OnPhishingDetectionDone(verdict.SerializeAsString());
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
   ASSERT_FALSE(cb.is_null());
 
@@ -866,13 +965,7 @@ TEST_F(ClientSideDetectionHostTest,
                  ui_manager_, resource.callback));
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest,
-       DISABLED_NavigationCancelsShouldClassifyUrl) {
-#else
 TEST_F(ClientSideDetectionHostTest, NavigationCancelsShouldClassifyUrl) {
-#endif
   // Test that canceling pending should classify requests works as expected.
 
   GURL first_url("http://first.phishy.url.com");
@@ -897,12 +990,7 @@ TEST_F(ClientSideDetectionHostTest, NavigationCancelsShouldClassifyUrl) {
   WaitAndCheckPreClassificationChecks();
 }
 
-#if defined(OS_WIN)
-// Crashes on Blink canary bots: http://crbug.com/299149
-TEST_F(ClientSideDetectionHostTest, DISABLED_ShouldClassifyUrl) {
-#else
 TEST_F(ClientSideDetectionHostTest, ShouldClassifyUrl) {
-#endif
   // Navigate the tab to a page.  We should see a StartPhishingDetection IPC.
   GURL url("http://host.com/");
   ExpectPreClassificationChecks(url, &kFalse, &kFalse, &kFalse, &kFalse,
@@ -1045,7 +1133,7 @@ TEST_F(ClientSideDetectionHostTest, ShouldClassifyUrl) {
   base::RunLoop().RunUntilIdle();
   // Now we check that all expected functions were indeed called on the two
   // service objects.
-  EXPECT_TRUE(Mock::VerifyAndClear(csd_service_.get()));
+  EXPECT_TRUE(Mock::VerifyAndClear(csd_host_.get()));
   EXPECT_TRUE(Mock::VerifyAndClear(ui_manager_.get()));
   EXPECT_EQ(url, resource.url);
   EXPECT_EQ(url, resource.original_url);
@@ -1054,5 +1142,4 @@ TEST_F(ClientSideDetectionHostTest, ShouldClassifyUrl) {
       SafeBrowsingMsg_StartPhishingDetection::ID);
   ASSERT_FALSE(msg);
 }
-
 }  // namespace safe_browsing

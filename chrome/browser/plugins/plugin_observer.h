@@ -52,7 +52,7 @@ class PluginObserver : public content::WebContentsObserver,
 #endif
 
   // Message handlers:
-  void OnBlockedUnauthorizedPlugin(const string16& name,
+  void OnBlockedUnauthorizedPlugin(const base::string16& name,
                                    const std::string& identifier);
   void OnBlockedOutdatedPlugin(int placeholder_id,
                                const std::string& identifier);
@@ -65,12 +65,12 @@ class PluginObserver : public content::WebContentsObserver,
   void OnCouldNotLoadPlugin(const base::FilePath& plugin_path);
   void OnNPAPINotSupported(const std::string& identifier);
 
-  base::WeakPtrFactory<PluginObserver> weak_ptr_factory_;
-
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   // Stores all PluginPlaceholderHosts, keyed by their routing ID.
   std::map<int, PluginPlaceholderHost*> plugin_placeholders_;
 #endif
+
+  base::WeakPtrFactory<PluginObserver> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginObserver);
 };

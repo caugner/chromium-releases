@@ -179,7 +179,7 @@ TEST_F(SQLiteCursorTest, Run) {
 
   // Query the inserted row.
   service_->QueryHistoryAndBookmarks(projections, std::string(),
-      std::vector<string16>(), std::string(), &cancelable_consumer_,
+      std::vector<base::string16>(), std::string(), &cancelable_consumer_,
       Bind(&CallbackHelper::OnQueryResult, callback.get()));
   base::MessageLoop::current()->Run();
   ASSERT_TRUE(callback->success());
@@ -195,7 +195,7 @@ TEST_F(SQLiteCursorTest, Run) {
   column_names.push_back(HistoryAndBookmarkRow::GetAndroidName(
       HistoryAndBookmarkRow::FAVICON));
 
-  FaviconService* favicon_service = new FaviconService(hs_);
+  FaviconService* favicon_service = new FaviconService(testing_profile_);
 
   SQLiteCursor* cursor = new SQLiteCursor(column_names, statement,
       service_.get(), favicon_service);

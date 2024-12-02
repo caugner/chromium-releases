@@ -35,6 +35,7 @@
 .pydevproject
 # Settings directory for eclipse
 /.settings
+.checkstyle
 cscope.*
 Session.vim
 tags
@@ -58,12 +59,6 @@ v8.log
 # The Chrome OS build creates a /c symlink due to http://crbug.com/54866.
 /c
 /ceee/internal/
-/chrome/app/policy/chrome_settings_proto_compile.xml
-/chrome/app/policy/chrome_settings_proto_generated_compile.xml
-/chrome/app/policy/cloud_policy_backend_header_compile.xml
-/chrome/app/policy/cloud_policy_proto_compile.xml
-/chrome/app/policy/cloud_policy_proto_generated_compile.xml
-/chrome/app/policy/policy_proto_compile.xml
 /chrome/app/theme/default_100_percent/google_chrome
 /chrome/app/theme/default_200_percent/google_chrome
 /chrome/app/theme/google_chrome
@@ -121,16 +116,17 @@ v8.log
 /chrome/tools/memory
 /chrome/tools/test/reference_build
 /chrome/unit_tests_run.xml
-/chrome_frame/chrome_frame_ie.xml
-/chrome_frame/chrome_frame_launcher_version_resources.xml
-/chrome_frame/chrome_frame_version_resources.xml
 /chrome_frame/tools/test/reference_build
 /cloud_print/cloud_print_version_resources.xml
 /components/variations.xml
+/content/content_unittests_run.xml
+/content/test/data/gpu/generated/
+/content/test/data/gpu/gpu_reference/
 /content/test/data/layout_tests/
 /content/test/data/plugin/
 /data
 /delegate_execute
+/google_apis/gcm/gcm.xml
 /google_apis/internal
 /googleurl
 /gpu/gles2_conform_test
@@ -142,6 +138,10 @@ v8.log
 /media/test/data/security
 /media/yuv_convert_simd_x86.xml
 /metro_driver
+/mojo/hello_world_service.xml
+/mojo/mojo_public_unittests.xml
+/mojo/mojom_test.xml
+/mojo/sample_service.xml
 /native_client
 /net/Debug
 /net/net_unittests_run.xml
@@ -173,6 +173,7 @@ v8.log
 /sandbox/linux/seccomp-legacy/
 /sdch/open-vcdiff
 /seccompsandbox
+/skia/tools/clusterfuzz-data/
 /testing/gmock
 /testing/gtest
 /testing/iossim/third_party/
@@ -183,6 +184,7 @@ v8.log
 /third_party/amd/
 /third_party/android_tools/
 /third_party/android_tools_internal/
+/third_party/angle
 /third_party/angle_dx11
 /third_party/aosp
 /third_party/apache-mime4j
@@ -224,10 +226,12 @@ v8.log
 /third_party/jsr-305/src
 /third_party/leveldatabase/src
 /third_party/leveldb
+/third_party/libaddressinput/src
 /third_party/libexif/sources
 /third_party/libjingle/source
 /third_party/libjingle/source_internal
 /third_party/libjpeg_turbo
+/third_party/liblouis/src
 /third_party/libmtp/
 /third_party/libphonenumber/libphonenumber.xml
 /third_party/libphonenumber/libphonenumber_without_metadata.xml
@@ -288,7 +292,7 @@ v8.log
 /third_party/valgrind
 /third_party/webdriver/pylib
 /third_party/webdriver/python/selenium
-/third_party/webgl_conformance
+/third_party/webgl
 /third_party/WebKit
 /third_party/webpagereplay/
 /third_party/webrtc
@@ -296,6 +300,8 @@ v8.log
 /third_party/webrtc/modules/video_coding/codecs/vp8_internal
 /third_party/widevine/cdm/binaries
 /third_party/widevine/cdm/symbols
+/third_party/win_toolchain/.timestamps
+/third_party/win_toolchain/files
 /third_party/wix
 /third_party/xdg-utils
 /third_party/xulrunner-sdk
@@ -312,6 +318,7 @@ v8.log
 /tools/gyp
 /tools/histograms
 /tools/json_schema_compiler/test/json_schema_compiler_tests.xml
+/tools/metrics/histograms/histograms.before.pretty-print.xml
 /tools/page_cycler/acid3
 /tools/perf/data
 /tools/perf/results.html

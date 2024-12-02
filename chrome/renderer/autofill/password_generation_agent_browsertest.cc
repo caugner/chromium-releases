@@ -8,19 +8,19 @@
 #include "base/memory/scoped_vector.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/base/chrome_render_view_test.h"
+#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
-#include "components/autofill/core/common/autofill_messages.h"
 #include "components/autofill/core/common/form_data.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 
-using WebKit::WebDocument;
-using WebKit::WebElement;
-using WebKit::WebInputElement;
-using WebKit::WebNode;
-using WebKit::WebString;
+using blink::WebDocument;
+using blink::WebElement;
+using blink::WebInputElement;
+using blink::WebNode;
+using blink::WebString;
 
 namespace autofill {
 
@@ -44,7 +44,7 @@ class TestPasswordGenerationAgent : public PasswordGenerationAgent {
   }
 
  protected:
-  virtual bool ShouldAnalyzeDocument(const WebKit::WebDocument& document) const
+  virtual bool ShouldAnalyzeDocument(const blink::WebDocument& document) const
       OVERRIDE {
     return true;
   }
@@ -78,15 +78,15 @@ class PasswordGenerationAgentTest : public ChromeRenderViewTest {
     ChromeRenderViewTest::TearDown();
   }
 
-  void SimulateClickOnDecoration(WebKit::WebInputElement* input_element) {
+  void SimulateClickOnDecoration(blink::WebInputElement* input_element) {
     generation_manager_->ClearMessages();
-    WebKit::WebElement decoration =
+    blink::WebElement decoration =
         input_element->decorationElementFor(generation_manager_.get());
     decoration.simulateClick();
   }
 
-  bool DecorationIsVisible(WebKit::WebInputElement* input_element) {
-    WebKit::WebElement decoration =
+  bool DecorationIsVisible(blink::WebInputElement* input_element) {
+    blink::WebElement decoration =
         input_element->decorationElementFor(generation_manager_.get());
     return decoration.hasNonEmptyBoundingBox();
   }
@@ -214,7 +214,7 @@ TEST_F(PasswordGenerationAgentTest, FillTest) {
   EXPECT_TRUE(first_password_element.value().isNull());
   EXPECT_TRUE(second_password_element.value().isNull());
 
-  string16 password = ASCIIToUTF16("random_password");
+  base::string16 password = ASCIIToUTF16("random_password");
   AutofillMsg_GeneratedPasswordAccepted msg(0, password);
   generation_manager_->OnMessageReceived(msg);
 

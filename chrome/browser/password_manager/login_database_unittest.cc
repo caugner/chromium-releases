@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/login_database.h"
+#include "chrome/browser/password_manager/psl_matching_helper.h"
 #include "chrome/common/chrome_paths.h"
 #include "components/autofill/core/common/password_form.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -29,16 +30,12 @@ class LoginDatabaseTest : public testing::Test {
     ASSERT_TRUE(db_.Init(file_));
   }
 
-  Pickle SerializeVector(const std::vector<string16>& vec) const {
+  Pickle SerializeVector(const std::vector<base::string16>& vec) const {
     return db_.SerializeVector(vec);
   }
 
-  std::vector<string16> DeserializeVector(const Pickle& pickle) const {
+  std::vector<base::string16> DeserializeVector(const Pickle& pickle) const {
     return db_.DeserializeVector(pickle);
-  }
-
-  void SetPublicSuffixMatching(bool enabled) {
-    db_.public_suffix_domain_matching_ = enabled;
   }
 
   void FormsAreEqual(const PasswordForm& expected, const PasswordForm& actual) {
@@ -181,7 +178,7 @@ TEST_F(LoginDatabaseTest, Logins) {
   // Password element was updated.
 #if defined(OS_MACOSX)
   // On the Mac we should never be storing passwords in the database.
-  EXPECT_EQ(string16(), result[0]->password_value);
+  EXPECT_EQ(base::string16(), result[0]->password_value);
 #else
   EXPECT_EQ(form6.password_value, result[0]->password_value);
 #endif
@@ -197,7 +194,7 @@ TEST_F(LoginDatabaseTest, Logins) {
 }
 
 TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatching) {
-  SetPublicSuffixMatching(true);
+  PSLMatchingHelper::EnablePublicSuffixDomainMatchingForTesting();
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -247,7 +244,7 @@ TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatching) {
 }
 
 TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatchingShouldMatchingApply) {
-  SetPublicSuffixMatching(true);
+  PSLMatchingHelper::EnablePublicSuffixDomainMatchingForTesting();
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -297,7 +294,7 @@ TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatchingShouldMatchingApply) {
 // instead of GetUniqueStatement, since REGEXP is in use. See
 // http://crbug.com/248608.
 TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatchingDifferentSites) {
-  SetPublicSuffixMatching(true);
+  PSLMatchingHelper::EnablePublicSuffixDomainMatchingForTesting();
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -391,7 +388,7 @@ PasswordForm GetFormWithNewSignonRealm(PasswordForm form,
 }
 
 TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatchingRegexp) {
-  SetPublicSuffixMatching(true);
+  PSLMatchingHelper::EnablePublicSuffixDomainMatchingForTesting();
   std::vector<PasswordForm*> result;
 
   // Verify the database is empty.
@@ -615,9 +612,9 @@ TEST_F(LoginDatabaseTest, BlacklistedLogins) {
 
 TEST_F(LoginDatabaseTest, VectorSerialization) {
   // Empty vector.
-  std::vector<string16> vec;
+  std::vector<base::string16> vec;
   Pickle temp = SerializeVector(vec);
-  std::vector<string16> output = DeserializeVector(temp);
+  std::vector<base::string16> output = DeserializeVector(temp);
   EXPECT_THAT(output, Eq(vec));
 
   // Normal data.
@@ -637,8 +634,8 @@ TEST_F(LoginDatabaseTest, VectorSerialization) {
 // This tests that sql::Connection::set_restrict_to_user() was called,
 // and that function is a noop on non-POSIX platforms in any case.
 TEST_F(LoginDatabaseTest, FilePermissions) {
-  int mode = file_util::FILE_PERMISSION_MASK;
-  EXPECT_TRUE(file_util::GetPosixFilePermissions(file_, &mode));
-  EXPECT_EQ((mode & file_util::FILE_PERMISSION_USER_MASK), mode);
+  int mode = base::FILE_PERMISSION_MASK;
+  EXPECT_TRUE(base::GetPosixFilePermissions(file_, &mode));
+  EXPECT_EQ((mode & base::FILE_PERMISSION_USER_MASK), mode);
 }
 #endif  // defined(OS_POSIX)

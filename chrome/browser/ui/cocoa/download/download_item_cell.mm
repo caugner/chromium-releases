@@ -18,7 +18,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/canvas_skia_paint.h"
-#include "ui/gfx/font.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 // Distance from top border to icon.
@@ -185,7 +185,7 @@ using content::DownloadItem;
   // Set the name of the download.
   downloadPath_ = downloadModel->download()->GetFileNameToReportUser();
 
-  string16 statusText = downloadModel->GetStatusText();
+  base::string16 statusText = downloadModel->GetStatusText();
   if (statusText.empty()) {
     // Remove the status text label.
     [self hideSecondaryTitle];
@@ -374,8 +374,8 @@ using content::DownloadItem;
   gfx::Font font_chr(base::SysNSStringToUTF8([font fontName]),
                      [font pointSize]);
 
-  return base::SysUTF16ToNSString(
-      gfx::ElideFilename(downloadPath_, font_chr, availableWidth));
+  return base::SysUTF16ToNSString(gfx::ElideFilename(
+      downloadPath_, gfx::FontList(font_chr), availableWidth));
 }
 
 - (NSString*)elideStatus:(int)availableWidth {

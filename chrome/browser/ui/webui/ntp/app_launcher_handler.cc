@@ -21,9 +21,8 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/management_policy.h"
+#include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
@@ -38,7 +37,6 @@
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -49,6 +47,10 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/favicon_url.h"
+#include "extensions/browser/app_sorting.h"
+#include "extensions/browser/management_policy.h"
+#include "extensions/common/constants.h"
+#include "extensions/common/extension.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -57,6 +59,7 @@
 #include "url/gurl.h"
 
 using content::WebContents;
+using extensions::AppSorting;
 using extensions::CrxInstaller;
 using extensions::Extension;
 using extensions::ExtensionPrefs;
@@ -111,14 +114,14 @@ void AppLauncherHandler::CreateAppInfo(
 
   // The Extension class 'helpfully' wraps bidi control characters that
   // impede our ability to determine directionality.
-  string16 short_name = UTF8ToUTF16(extension->short_name());
+  base::string16 short_name = UTF8ToUTF16(extension->short_name());
   base::i18n::UnadjustStringForLocaleDirection(&short_name);
   NewTabUI::SetUrlTitleAndDirection(
       value,
       short_name,
       extensions::AppLaunchInfo::GetFullLaunchURL(extension));
 
-  string16 name = UTF8ToUTF16(extension->name());
+  base::string16 name = UTF8ToUTF16(extension->name());
   base::i18n::UnadjustStringForLocaleDirection(&name);
   NewTabUI::SetFullNameAndDirection(name, value);
 
@@ -152,15 +155,13 @@ void AppLauncherHandler::CreateAppInfo(
   value->SetInteger("launch_container",
                     extensions::AppLaunchInfo::GetLaunchContainer(extension));
   ExtensionPrefs* prefs = service->extension_prefs();
-  value->SetInteger("launch_type",
-      prefs->GetLaunchType(extension,
-                           ExtensionPrefs::LAUNCH_DEFAULT));
+  value->SetInteger("launch_type", extensions::GetLaunchType(prefs, extension));
   value->SetBoolean("is_component",
                     extension->location() == extensions::Manifest::COMPONENT);
   value->SetBoolean("is_webstore",
       extension->id() == extension_misc::kWebStoreAppId);
 
-  ExtensionSorting* sorting = prefs->extension_sorting();
+  AppSorting* sorting = prefs->app_sorting();
   syncer::StringOrdinal page_ordinal = sorting->GetPageOrdinal(extension->id());
   if (!page_ordinal.IsValid()) {
     // Make sure every app has a page ordinal (some predate the page ordinal).
@@ -465,8 +466,8 @@ void AppLauncherHandler::HandleGetApps(const ListValue* args) {
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
         content::Source<Profile>(profile));
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
-        content::Source<ExtensionSorting>(
-            extension_service_->extension_prefs()->extension_sorting()));
+        content::Source<AppSorting>(
+            extension_service_->extension_prefs()->app_sorting()));
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
         content::Source<CrxInstaller>(NULL));
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOAD_ERROR,
@@ -517,8 +518,8 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
     // TODO(jamescook): Proper support for background tabs.
     AppLaunchParams params(profile, extension,
                            disposition == NEW_WINDOW ?
-                               extension_misc::LAUNCH_WINDOW :
-                               extension_misc::LAUNCH_TAB,
+                               extensions::LAUNCH_CONTAINER_WINDOW :
+                               extensions::LAUNCH_CONTAINER_TAB,
                            disposition);
     params.override_url = GURL(url);
     OpenApplication(params);
@@ -558,9 +559,10 @@ void AppLauncherHandler::HandleSetLaunchType(const ListValue* args) {
   // Don't update the page; it already knows about the launch type change.
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
 
-  extension_service_->extension_prefs()->SetLaunchType(
+  extensions::SetLaunchType(
+      extension_service_->extension_prefs(),
       extension_id,
-      static_cast<ExtensionPrefs::LaunchType>(
+      static_cast<extensions::LaunchType>(
           static_cast<int>(launch_type)));
 }
 
@@ -639,24 +641,23 @@ void AppLauncherHandler::HandleReorderApps(const ListValue* args) {
 }
 
 void AppLauncherHandler::HandleSetPageIndex(const ListValue* args) {
-  ExtensionSorting* extension_sorting =
-      extension_service_->extension_prefs()->extension_sorting();
+  AppSorting* app_sorting =
+      extension_service_->extension_prefs()->app_sorting();
 
   std::string extension_id;
   double page_index;
   CHECK(args->GetString(0, &extension_id));
   CHECK(args->GetDouble(1, &page_index));
   const syncer::StringOrdinal& page_ordinal =
-      extension_sorting->PageIntegerAsStringOrdinal(
-          static_cast<size_t>(page_index));
+      app_sorting->PageIntegerAsStringOrdinal(static_cast<size_t>(page_index));
 
   // Don't update the page; it already knows the apps have been reordered.
   base::AutoReset<bool> auto_reset(&ignore_changes_, true);
-  extension_sorting->SetPageOrdinal(extension_id, page_ordinal);
+  app_sorting->SetPageOrdinal(extension_id, page_ordinal);
 }
 
 void AppLauncherHandler::HandleSaveAppPageName(const ListValue* args) {
-  string16 name;
+  base::string16 name;
   CHECK(args->GetString(0, &name));
 
   double page_index;
@@ -674,16 +675,15 @@ void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
   CHECK(args->GetString(0, &url));
   GURL launch_url(url);
 
-  string16 title;
+  base::string16 title;
   CHECK(args->GetString(1, &title));
 
   double page_index;
   CHECK(args->GetDouble(2, &page_index));
-  ExtensionSorting* extension_sorting =
-      extension_service_->extension_prefs()->extension_sorting();
+  AppSorting* app_sorting =
+      extension_service_->extension_prefs()->app_sorting();
   const syncer::StringOrdinal& page_ordinal =
-      extension_sorting->PageIntegerAsStringOrdinal(
-          static_cast<size_t>(page_index));
+      app_sorting->PageIntegerAsStringOrdinal(static_cast<size_t>(page_index));
 
   Profile* profile = Profile::FromWebUI(web_ui());
   FaviconService* favicon_service =
@@ -700,8 +700,7 @@ void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
   install_info->page_ordinal = page_ordinal;
 
   favicon_service->GetFaviconImageForURL(
-      FaviconService::FaviconForURLParams(profile,
-                                          launch_url,
+      FaviconService::FaviconForURLParams(launch_url,
                                           chrome::FAVICON,
                                           gfx::kFaviconSize),
       base::Bind(&AppLauncherHandler::OnFaviconForApp,

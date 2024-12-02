@@ -16,8 +16,8 @@
 #include "chrome/browser/media_galleries/media_galleries_test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/render_view_host.h"
+#include "extensions/common/extension.h"
 
 namespace {
 
@@ -89,7 +89,8 @@ class MediaGalleriesPrivateGalleryWatchApiTest : public ExtensionApiTest {
                               const std::string& js_command,
                               const std::string& ok_message) {
     ExtensionTestMessageListener listener(ok_message, false);
-    host->ExecuteJavascriptInWebFrame(string16(), ASCIIToUTF16(js_command));
+    host->ExecuteJavascriptInWebFrame(base::string16(),
+                                      ASCIIToUTF16(js_command));
     EXPECT_TRUE(listener.WaitUntilSatisfied());
   }
 

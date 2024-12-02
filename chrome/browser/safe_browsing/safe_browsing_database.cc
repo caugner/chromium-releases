@@ -330,7 +330,7 @@ bool SBAddFullHashPrefixLess(const SBAddFullHash& a, const SBAddFullHash& b) {
 // that less verbose.
 int64 GetFileSizeOrZero(const base::FilePath& file_path) {
   int64 size_64;
-  if (!file_util::GetFileSize(file_path, &size_64))
+  if (!base::GetFileSize(file_path, &size_64))
     return 0;
   return size_64;
 }
@@ -612,7 +612,7 @@ void SafeBrowsingDatabaseNew::Init(const base::FilePath& filename_base) {
 
     // If there is no database, the filter cannot be used.
     base::PlatformFileInfo db_info;
-    if (file_util::GetFileInfo(side_effect_free_whitelist_filename_, &db_info)
+    if (base::GetFileInfo(side_effect_free_whitelist_filename_, &db_info)
         && db_info.size != 0) {
       const base::TimeTicks before = base::TimeTicks::Now();
       side_effect_free_whitelist_prefix_set_.reset(
@@ -1347,15 +1347,11 @@ void SafeBrowsingDatabaseNew::UpdateWhitelistStore(
   // hashes are already full.
   std::vector<SBAddFullHash> empty_add_hashes;
 
-  // Not needed for the whitelists.
-  std::set<SBPrefix> empty_miss_cache;
-
   // Note: prefixes will not be empty.  The current data store implementation
   // stores all full-length hashes as both full and prefix hashes.
   SBAddPrefixes prefixes;
   std::vector<SBAddFullHash> full_hashes;
-  if (!store->FinishUpdate(empty_add_hashes, empty_miss_cache, &prefixes,
-                           &full_hashes)) {
+  if (!store->FinishUpdate(empty_add_hashes, &prefixes, &full_hashes)) {
     RecordFailure(FAILURE_WHITELIST_DATABASE_UPDATE_FINISH);
     WhitelistEverything(whitelist);
     return;
@@ -1375,16 +1371,12 @@ int64 SafeBrowsingDatabaseNew::UpdateHashPrefixStore(
   // We don't cache and save full hashes.
   std::vector<SBAddFullHash> empty_add_hashes;
 
-  // Backend lookup happens only if a prefix is in add list.
-  std::set<SBPrefix> empty_miss_cache;
-
   // These results are not used after this call. Simply ignore the
   // returned value after FinishUpdate(...).
   SBAddPrefixes add_prefixes_result;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   if (!store->FinishUpdate(empty_add_hashes,
-                           empty_miss_cache,
                            &add_prefixes_result,
                            &add_full_hashes_result)) {
     RecordFailure(failure_type);
@@ -1429,7 +1421,7 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
 
   SBAddPrefixes add_prefixes;
   std::vector<SBAddFullHash> add_full_hashes;
-  if (!browse_store_->FinishUpdate(pending_add_hashes, prefix_miss_cache_,
+  if (!browse_store_->FinishUpdate(pending_add_hashes,
                                    &add_prefixes, &add_full_hashes)) {
     RecordFailure(FAILURE_BROWSE_DATABASE_UPDATE_FINISH);
     return;
@@ -1508,13 +1500,11 @@ void SafeBrowsingDatabaseNew::UpdateBrowseStore() {
 
 void SafeBrowsingDatabaseNew::UpdateSideEffectFreeWhitelistStore() {
   std::vector<SBAddFullHash> empty_add_hashes;
-  std::set<SBPrefix> empty_miss_cache;
   SBAddPrefixes add_prefixes;
   std::vector<SBAddFullHash> add_full_hashes_result;
 
   if (!side_effect_free_whitelist_store_->FinishUpdate(
           empty_add_hashes,
-          empty_miss_cache,
           &add_prefixes,
           &add_full_hashes_result)) {
     RecordFailure(FAILURE_SIDE_EFFECT_FREE_WHITELIST_UPDATE_FINISH);
@@ -1575,14 +1565,11 @@ void SafeBrowsingDatabaseNew::UpdateIpBlacklistStore() {
   // hashes are already full.
   std::vector<SBAddFullHash> empty_add_hashes;
 
-  // Not needed for the IP blacklist.
-  std::set<SBPrefix> empty_miss_cache;
-
   // Note: prefixes will not be empty.  The current data store implementation
   // stores all full-length hashes as both full and prefix hashes.
   SBAddPrefixes prefixes;
   std::vector<SBAddFullHash> full_hashes;
-  if (!ip_blacklist_store_->FinishUpdate(empty_add_hashes, empty_miss_cache,
+  if (!ip_blacklist_store_->FinishUpdate(empty_add_hashes,
                                          &prefixes, &full_hashes)) {
     RecordFailure(FAILURE_IP_BLACKLIST_UPDATE_FINISH);
     LoadIpBlacklist(std::vector<SBAddFullHash>());  // Clear the list.
@@ -1622,7 +1609,7 @@ void SafeBrowsingDatabaseNew::LoadPrefixSet() {
 
   // If there is no database, the filter cannot be used.
   base::PlatformFileInfo db_info;
-  if (!file_util::GetFileInfo(browse_filename_, &db_info) || db_info.size == 0)
+  if (!base::GetFileInfo(browse_filename_, &db_info) || db_info.size == 0)
     return;
 
   // Cleanup any stale bloom filter (no longer used).

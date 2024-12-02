@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_ui_delegate.h"
@@ -57,11 +57,11 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
   // |original_language| == kUnknownLanguageCode.
   //
   // If |replace_existing_infobar| is true, the infobar is created and added to
-  // |infobar_service|, replacing any other translate infobar already present
-  // there.  Otherwise, the infobar will only be added if there is no other
-  // translate infobar already present.
+  // the infobar service for |web_contents|, replacing any other translate
+  // infobar already present there.  Otherwise, the infobar will only be added
+  // if there is no other translate infobar already present.
   static void Create(bool replace_existing_infobar,
-                     InfoBarService* infobar_service,
+                     content::WebContents* web_contents,
                      Type infobar_type,
                      const std::string& original_language,
                      const std::string& target_language,
@@ -78,7 +78,7 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
   }
 
   // Returns the displayable name for the language at |index|.
-  string16 language_name_at(size_t index) const {
+  base::string16 language_name_at(size_t index) const {
     return ui_delegate_.GetLanguageNameAt(index);
   }
 
@@ -138,8 +138,8 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
 
   // The following methods are called by the infobar that displays the status
   // while translating and also the one displaying the error message.
-  string16 GetMessageInfoBarText();
-  string16 GetMessageInfoBarButtonText();
+  base::string16 GetMessageInfoBarText();
+  base::string16 GetMessageInfoBarButtonText();
   void MessageInfoBarButtonPressed();
   bool ShouldShowMessageInfoBarButton();
 
@@ -153,7 +153,8 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
 
   // Convenience method that returns the displayable language name for
   // |language_code| in the current application locale.
-  static string16 GetLanguageDisplayableName(const std::string& language_code);
+  static base::string16 GetLanguageDisplayableName(
+      const std::string& language_code);
 
   // Adds the strings that should be displayed in the after translate infobar to
   // |strings|. If |autodetermined_source_language| is false, the text in that
@@ -167,12 +168,12 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
   // should be inverted (some languages express the sentense as "The page has
   // been translate to <lang2> from <lang1>."). It is ignored if
   // |autodetermined_source_language| is true.
-  static void GetAfterTranslateStrings(std::vector<string16>* strings,
+  static void GetAfterTranslateStrings(std::vector<base::string16>* strings,
                                        bool* swap_languages,
                                        bool autodetermined_source_language);
 
  protected:
-  TranslateInfoBarDelegate(InfoBarService* infobar_service,
+  TranslateInfoBarDelegate(content::WebContents* web_contents,
                            Type infobar_type,
                            TranslateInfoBarDelegate* old_delegate,
                            const std::string& original_language,
@@ -182,10 +183,14 @@ class TranslateInfoBarDelegate : public InfoBarDelegate {
                            ShortcutConfiguration shortcut_config);
 
  private:
-  typedef std::pair<std::string, string16> LanguageNamePair;
+  friend class TranslationInfoBarTest;
+  typedef std::pair<std::string, base::string16> LanguageNamePair;
+
+  // Returns a translate infobar that owns |delegate|.
+  static scoped_ptr<InfoBar> CreateInfoBar(
+      scoped_ptr<TranslateInfoBarDelegate> delegate);
 
   // InfoBarDelegate:
-  virtual InfoBar* CreateInfoBar(InfoBarService* infobar_service) OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual int GetIconID() const OVERRIDE;
   virtual InfoBarDelegate::Type GetInfoBarType() const OVERRIDE;

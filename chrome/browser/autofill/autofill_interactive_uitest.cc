@@ -18,6 +18,7 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -30,10 +31,10 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/content/browser/autofill_driver_impl.h"
-#include "components/autofill/core/browser/autofill_common_test.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/autofill_manager_test_delegate.h"
 #include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/autofill/core/browser/validation.h"
@@ -168,7 +169,8 @@ class WindowedPersonalDataManagerObserver
                        const content::NotificationDetails& details) OVERRIDE {
     infobar_service_ = InfoBarService::FromWebContents(
         browser_->tab_strip_model()->GetActiveWebContents());
-    infobar_service_->infobar_at(0)->AsConfirmInfoBarDelegate()->Accept();
+    infobar_service_->infobar_at(0)->delegate()->AsConfirmInfoBarDelegate()->
+        Accept();
   }
 
   void Wait() {
@@ -363,7 +365,7 @@ class AutofillInteractiveTest : public InProcessBrowserTest {
     // Route popup-targeted key presses via the render view host.
     content::NativeWebKeyboardEvent event;
     event.windowsKeyCode = key;
-    event.type = WebKit::WebKeyboardEvent::RawKeyDown;
+    event.type = blink::WebKeyboardEvent::RawKeyDown;
     test_delegate_.Reset();
     // Install the key press event sink to ensure that any events that are not
     // handled by the installed callbacks do not end up crashing the test.
@@ -831,8 +833,9 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterTranslate) {
 
   // Wait for the translation bar to appear and get it.
   infobar_observer.Wait();
-  TranslateInfoBarDelegate* delegate = InfoBarService::FromWebContents(
-      GetWebContents())->infobar_at(0)->AsTranslateInfoBarDelegate();
+  TranslateInfoBarDelegate* delegate =
+      InfoBarService::FromWebContents(GetWebContents())->infobar_at(0)->
+          delegate()->AsTranslateInfoBarDelegate();
   ASSERT_TRUE(delegate);
   EXPECT_EQ(TranslateInfoBarDelegate::BEFORE_TRANSLATE,
             delegate->infobar_type());
@@ -1023,13 +1026,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest,
   std::vector<AutofillProfile> profiles;
   for (int i = 0; i < kNumProfiles; i++) {
     AutofillProfile profile;
-    string16 name(base::IntToString16(i));
-    string16 email(name + ASCIIToUTF16("@example.com"));
-    string16 street = ASCIIToUTF16(
+    base::string16 name(base::IntToString16(i));
+    base::string16 email(name + ASCIIToUTF16("@example.com"));
+    base::string16 street = ASCIIToUTF16(
         base::IntToString(base::RandInt(0, 10000)) + " " +
         streets[base::RandInt(0, streets.size() - 1)]);
-    string16 city = ASCIIToUTF16(cities[base::RandInt(0, cities.size() - 1)]);
-    string16 zip(base::IntToString16(base::RandInt(0, 10000)));
+    base::string16 city = ASCIIToUTF16(cities[base::RandInt(0, cities.size() - 1)]);
+    base::string16 zip(base::IntToString16(base::RandInt(0, 10000)));
     profile.SetRawInfo(NAME_FIRST, name);
     profile.SetRawInfo(EMAIL_ADDRESS, email);
     profile.SetRawInfo(ADDRESS_HOME_LINE1, street);

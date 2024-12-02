@@ -29,12 +29,12 @@ public class BookmarksBridge {
     public static final int ROOT_FOLDER_ID = -1;
 
     private final Profile mProfile;
-    private int mNativeBookmarksBridge;
+    private long mNativeBookmarksBridge;
     private boolean mIsNativeBookmarkModelLoaded;
-    private final List<DelayedBookmarkCallback> mDelayedBookmarkCallbacks
-            = new ArrayList<DelayedBookmarkCallback>();
-    private final ObserverList<BookmarkModelObserver> mObservers
-            = new ObserverList<BookmarkModelObserver>();
+    private final List<DelayedBookmarkCallback> mDelayedBookmarkCallbacks =
+            new ArrayList<DelayedBookmarkCallback>();
+    private final ObserverList<BookmarkModelObserver> mObservers =
+            new ObserverList<BookmarkModelObserver>();
 
     /**
      * Interface for callback object for fetching bookmarks and folder hierarchy.
@@ -295,15 +295,15 @@ public class BookmarksBridge {
         return new BookmarkId(id, type);
     }
 
-    private native void nativeGetBookmarksForFolder(int nativeBookmarksBridge,
+    private native void nativeGetBookmarksForFolder(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
-    private native void nativeGetCurrentFolderHierarchy(int nativeBookmarksBridge,
+    private native void nativeGetCurrentFolderHierarchy(long nativeBookmarksBridge,
             BookmarkId folderId, BookmarksCallback callback,
             List<BookmarkItem> bookmarksList);
-    private native void nativeDeleteBookmark(int nativeBookmarksBridge, BookmarkId bookmarkId);
-    private native int nativeInit(Profile profile);
-    private native void nativeDestroy(int nativeBookmarksBridge);
+    private native void nativeDeleteBookmark(long nativeBookmarksBridge, BookmarkId bookmarkId);
+    private native long nativeInit(Profile profile);
+    private native void nativeDestroy(long nativeBookmarksBridge);
     private static native boolean nativeIsEditBookmarksEnabled();
 
     /**

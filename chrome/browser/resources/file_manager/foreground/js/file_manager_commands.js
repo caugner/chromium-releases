@@ -386,13 +386,22 @@ CommandHandler.COMMANDS_['format'] = {
    * @param {FileManager} fileManager The file manager instance.
    */
   execute: function(event, fileManager) {
+    var directoryModel = fileManager.directoryModel;
     var root = CommandUtil.getCommandEntry(event.target);
+    // If an entry is not found from the event target, use the current
+    // directory. This can happen for the format button for unsupported and
+    // unrecognized volumes.
+    if (!root)
+      root = directoryModel.getCurrentDirEntry();
 
-    if (root) {
-      var url = util.makeFilesystemUrl(PathUtil.getRootPath(root.fullPath));
+    // TODO(satorux): Stop assuming fullPath to be unique. crbug.com/320967
+    var mountPath = root.fullPath;
+    var volumeInfo = fileManager.volumeManager.getVolumeInfo(mountPath);
+    if (volumeInfo) {
       fileManager.confirm.show(
           loadTimeData.getString('FORMATTING_WARNING'),
-          chrome.fileBrowserPrivate.formatDevice.bind(null, url));
+          chrome.fileBrowserPrivate.formatVolume.bind(null,
+                                                      volumeInfo.volumeId));
     }
   },
   /**
@@ -402,39 +411,16 @@ CommandHandler.COMMANDS_['format'] = {
   canExecute: function(event, fileManager) {
     var directoryModel = fileManager.directoryModel;
     var root = CommandUtil.getCommandEntry(event.target);
+    // See the comment in execute() for why doing this.
+    if (!root)
+      root = directoryModel.getCurrentDirEntry();
     var removable = root &&
                     PathUtil.getRootType(root.fullPath) == RootType.REMOVABLE;
-    var isReadOnly = root && directoryModel.isPathReadOnly(root.fullPath);
-    event.canExecute = removable && !isReadOnly;
+    // Don't check if the volume is read-only. Unformatted volume is
+    // considered read-only per directoryModel.isPathReadOnly(), but can be
+    // formatted. An error will be raised if formatting failed anyway.
+    event.canExecute = removable;
     event.command.setHidden(!removable);
-  }
-};
-
-/**
- * Imports photos from external drive.
- * @type {Command}
- */
-CommandHandler.COMMANDS_['import-photos'] = {
-  /**
-   * @param {Event} event Command event.
-   * @param {NavigationList} navigationList Target navigation list.
-   */
-  execute: function(event, fileManager) {
-    var navigationList = fileManager.navigationList;
-    var root = CommandUtil.getCommandEntry(navigationList);
-    if (!root)
-      return;
-
-    // TODO(mtomasz): Implement launching Photo Importer.
-  },
-  /**
-   * @param {Event} event Command event.
-   * @param {NavigationList} navigationList Target navigation list.
-   */
-  canExecute: function(event, fileManager) {
-    var navigationList = fileManager.navigationList;
-    var rootType = CommandUtil.getCommandRootType(navigationList);
-    event.canExecute = (rootType != RootType.DRIVE);
   }
 };
 
@@ -473,17 +459,6 @@ CommandHandler.COMMANDS_['new-window'] = {
 };
 
 /**
- * Changed the default app handling inserted media.
- * @type {Command}
- */
-CommandHandler.COMMANDS_['change-default-app'] = {
-  execute: function(event, fileManager) {
-    fileManager.showChangeDefaultAppPicker();
-  },
-  canExecute: CommandUtil.canExecuteAlways
-};
-
-/**
  * Deletes selected files.
  * @type {Command}
  */
@@ -492,8 +467,11 @@ CommandHandler.COMMANDS_['delete'] = {
     fileManager.deleteSelection();
   },
   canExecute: function(event, fileManager) {
+    var allowDeletingWhileOffline =
+        fileManager.directoryModel.getCurrentRootType() === RootType.DRIVE;
     var selection = fileManager.getSelection();
-    event.canExecute = !fileManager.isOnReadonlyDirectory() &&
+    event.canExecute = (!fileManager.isOnReadonlyDirectory() ||
+                        allowDeletingWhileOffline) &&
                        selection &&
                        selection.totalCount > 0;
   }
@@ -527,10 +505,12 @@ CommandHandler.COMMANDS_['rename'] = {
     fileManager.initiateRename();
   },
   canExecute: function(event, fileManager) {
+    var allowRenamingWhileOffline =
+        fileManager.directoryModel.getCurrentRootType() === RootType.DRIVE;
     var selection = fileManager.getSelection();
     event.canExecute =
         !fileManager.isRenamingInProgress() &&
-        !fileManager.isOnReadonlyDirectory() &&
+        (!fileManager.isOnReadonlyDirectory() || allowRenamingWhileOffline) &&
         selection &&
         selection.totalCount == 1;
   }
@@ -543,9 +523,9 @@ CommandHandler.COMMANDS_['rename'] = {
 CommandHandler.COMMANDS_['volume-help'] = {
   execute: function(event, fileManager) {
     if (fileManager.isOnDrive())
-      util.visitURL(urlConstants.GOOGLE_DRIVE_HELP);
+      util.visitURL(str('GOOGLE_DRIVE_HELP_URL'));
     else
-      util.visitURL(urlConstants.FILES_APP_HELP);
+      util.visitURL(str('FILES_APP_HELP_URL'));
   },
   canExecute: CommandUtil.canExecuteAlways
 };
@@ -556,23 +536,9 @@ CommandHandler.COMMANDS_['volume-help'] = {
  */
 CommandHandler.COMMANDS_['drive-buy-more-space'] = {
   execute: function(event, fileManager) {
-    util.visitURL(urlConstants.GOOGLE_DRIVE_BUY_STORAGE);
+    util.visitURL(str('GOOGLE_DRIVE_BUY_STORAGE_URL'));
   },
   canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
-};
-
-/**
- * Clears drive cache.
- * @type {Command}
- */
-CommandHandler.COMMANDS_['drive-clear-local-cache'] = {
-  execute: function(event, fileManager) {
-    chrome.fileBrowserPrivate.clearDriveCache();
-  },
-  canExecute: function(event, fileManager) {
-    event.canExecute = fileManager.isOnDrive() && this.ctrlKeyPressed_;
-    event.command.setHidden(!event.canExecute);
-  }
 };
 
 /**
@@ -581,7 +547,7 @@ CommandHandler.COMMANDS_['drive-clear-local-cache'] = {
  */
 CommandHandler.COMMANDS_['drive-go-to-drive'] = {
   execute: function(event, fileManager) {
-    util.visitURL(urlConstants.GOOGLE_DRIVE_ROOT);
+    util.visitURL(str('GOOGLE_DRIVE_ROOT_URL'));
   },
   canExecute: CommandUtil.canExecuteVisibleOnDriveOnly
 };
@@ -777,13 +743,6 @@ CommandHandler.COMMANDS_['create-folder-shortcut'] = {
    * @param {FileManager} fileManager The file manager instance.
    */
   canExecute: function(event, fileManager) {
-    var target = event.target;
-    if (!(target instanceof NavigationListItem) &&
-        !(target instanceof DirectoryItem)) {
-      event.command.setHidden(true);
-      return;
-    }
-
     var entry = CommandUtil.getCommandEntry(event.target);
     var folderShortcutExists = entry &&
                                fileManager.folderShortcutExists(entry.fullPath);
@@ -825,14 +784,7 @@ CommandHandler.COMMANDS_['remove-folder-shortcut'] = {
    * @param {FileManager} fileManager The file manager instance.
    */
   canExecute: function(event, fileManager) {
-    var target = event.target;
-    if (!target instanceof NavigationListItem &&
-        !target instanceof DirectoryItem) {
-      event.command.setHidden(true);
-      return;
-    }
-
-    var entry = CommandUtil.getCommandEntry(target);
+    var entry = CommandUtil.getCommandEntry(event.target);
     var path = entry && entry.fullPath;
 
     var eligible = path && PathUtil.isEligibleForFolderShortcut(path);

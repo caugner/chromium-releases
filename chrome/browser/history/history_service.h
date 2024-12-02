@@ -217,13 +217,11 @@ class HistoryService : public CancelableRequestProvider,
   // Adds an entry for the specified url without creating a visit. This should
   // only be used when bookmarking a page, otherwise the row leaks in the
   // history db (it never gets cleaned).
-  void AddPageNoVisitForBookmark(const GURL& url, const string16& title);
+  void AddPageNoVisitForBookmark(const GURL& url, const base::string16& title);
 
   // Sets the title for the given page. The page should be in history. If it
-  // is not, this operation is ignored. This call will not update the full
-  // text index. The last title set when the page is indexed will be the
-  // title in the full text index.
-  void SetPageTitle(const GURL& url, const string16& title);
+  // is not, this operation is ignored.
+  void SetPageTitle(const GURL& url, const base::string16& title);
 
   // Updates the history database with a page's ending time stamp information.
   // The page can be identified by the combination of the pointer to
@@ -235,13 +233,6 @@ class HistoryService : public CancelableRequestProvider,
                              int32 page_id,
                              const GURL& url,
                              base::Time end_ts);
-
-  // Indexing ------------------------------------------------------------------
-
-  // Notifies history of the body text of the given recently-visited URL.
-  // If the URL was not visited "recently enough," the history system may
-  // discard it.
-  void SetPageContents(const GURL& url, const string16& contents);
 
   // Querying ------------------------------------------------------------------
 
@@ -274,13 +265,9 @@ class HistoryService : public CancelableRequestProvider,
       QueryHistoryCallback;
 
   // Queries all history with the given options (see QueryOptions in
-  // history_types.h). If non-empty, the full-text database will be queried with
-  // the given |text_query|. If empty, all results matching the given options
+  // history_types.h).  If empty, all results matching the given options
   // will be returned.
-  //
-  // This isn't totally hooked up yet, this will query the "new" full text
-  // database (see SetPageContents) which won't generally be set yet.
-  Handle QueryHistory(const string16& text_query,
+  Handle QueryHistory(const base::string16& text_query,
                       const history::QueryOptions& options,
                       CancelableRequestConsumerBase* consumer,
                       const QueryHistoryCallback& callback);
@@ -383,12 +370,12 @@ class HistoryService : public CancelableRequestProvider,
   // URLs one by one is slow as it has to flush to disk each time.)
   void DeleteURLsForTest(const std::vector<GURL>& urls);
 
-  // Removes all visits in the selected time range (including the start time),
-  // updating the URLs accordingly. This deletes the associated data, including
-  // the full text index. This function also deletes the associated favicons,
-  // if they are no longer referenced. |callback| runs when the expiration is
-  // complete. You may use null Time values to do an unbounded delete in
-  // either direction.
+  // Removes all visits in the selected time range (including the
+  // start time), updating the URLs accordingly. This deletes any
+  // associated data. This function also deletes the associated
+  // favicons, if they are no longer referenced. |callback| runs when
+  // the expiration is complete. You may use null Time values to do an
+  // unbounded delete in either direction.
   // If |restrict_urls| is not empty, only visits to the URLs in this set are
   // removed.
   void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
@@ -500,7 +487,7 @@ class HistoryService : public CancelableRequestProvider,
   // id of the url, keyword_id the id of the keyword and term the search term.
   void SetKeywordSearchTermsForURL(const GURL& url,
                                    TemplateURLID keyword_id,
-                                   const string16& term);
+                                   const base::string16& term);
 
   // Deletes all search terms for the specified keyword.
   void DeleteAllSearchTermsForKeyword(TemplateURLID keyword_id);
@@ -515,13 +502,18 @@ class HistoryService : public CancelableRequestProvider,
   // first.
   Handle GetMostRecentKeywordSearchTerms(
       TemplateURLID keyword_id,
-      const string16& prefix,
+      const base::string16& prefix,
       int max_count,
       CancelableRequestConsumerBase* consumer,
       const GetMostRecentKeywordSearchTermsCallback& callback);
 
   // Deletes any search term corresponding to |url|.
   void DeleteKeywordSearchTermForURL(const GURL& url);
+
+  // Deletes all URL and search term entries matching the given |term| and
+  // |keyword_id|.
+  void DeleteMatchingURLsForKeyword(TemplateURLID keyword_id,
+                                    const base::string16& term);
 
   // Bookmarks -----------------------------------------------------------------
 
@@ -569,7 +561,7 @@ class HistoryService : public CancelableRequestProvider,
   // visit using the |last_visit| timestamp, and a PageTransition type of LINK,
   // if |visit_source| != SYNCED.
   void AddPageWithDetails(const GURL& url,
-                          const string16& title,
+                          const base::string16& title,
                           int visit_count,
                           int typed_count,
                           base::Time last_visit,

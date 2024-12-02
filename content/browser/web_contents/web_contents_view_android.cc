@@ -54,13 +54,13 @@ void WebContentsViewAndroid::SetContentViewCore(
   }
 }
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
 void WebContentsViewAndroid::NotifyExternalSurface(
     int player_id, bool is_request, const gfx::RectF& rect) {
   if (content_view_core_)
     content_view_core_->NotifyExternalSurface(player_id, is_request, rect);
 }
-#endif
+#endif  // defined(VIDEO_HOLE)
 
 gfx::NativeView WebContentsViewAndroid::GetNativeView() const {
   return content_view_core_ ? content_view_core_->GetViewAndroid() : NULL;
@@ -80,7 +80,7 @@ void WebContentsViewAndroid::GetContainerBounds(gfx::Rect* out) const {
     *out = rwhv->GetViewBounds();
 }
 
-void WebContentsViewAndroid::SetPageTitle(const string16& title) {
+void WebContentsViewAndroid::SetPageTitle(const base::string16& title) {
   if (content_view_core_)
     content_view_core_->SetTitle(title);
 }
@@ -199,14 +199,14 @@ void WebContentsViewAndroid::ShowPopupMenu(
 
 void WebContentsViewAndroid::StartDragging(
     const DropData& drop_data,
-    WebKit::WebDragOperationsMask allowed_ops,
+    blink::WebDragOperationsMask allowed_ops,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,
     const DragEventSourceInfo& event_info) {
   NOTIMPLEMENTED();
 }
 
-void WebContentsViewAndroid::UpdateDragCursor(WebKit::WebDragOperation op) {
+void WebContentsViewAndroid::UpdateDragCursor(blink::WebDragOperation op) {
   NOTIMPLEMENTED();
 }
 

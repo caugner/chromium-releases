@@ -80,14 +80,14 @@ void GetSelectedFileInfoInternal(Profile* profile,
               ui::SelectedFileInfo(file_path, base::FilePath()));
           break;
         case NEED_LOCAL_PATH_FOR_OPENING:
-          file_system->GetFileByPath(
+          file_system->GetFile(
               drive::util::ExtractDrivePath(file_path),
               base::Bind(&ContinueGetSelectedFileInfo,
                          profile,
                          base::Passed(&params)));
           return;  // Remaining work is done in ContinueGetSelectedFileInfo.
         case NEED_LOCAL_PATH_FOR_SAVING:
-          file_system->GetFileByPathForSaving(
+          file_system->GetFileForSaving(
               drive::util::ExtractDrivePath(file_path),
               base::Bind(&ContinueGetSelectedFileInfo,
                          profile,
@@ -127,16 +127,23 @@ void VolumeInfoToVolumeMetadata(
     const VolumeInfo& volume_info,
     file_browser_private::VolumeMetadata* volume_metadata) {
   DCHECK(volume_metadata);
+  DCHECK(!volume_info.mount_path.empty());
 
-  if (!volume_info.mount_path.empty()) {
-    // Convert mount point path to relative path with the external file system
-    // exposed within File API.
-    base::FilePath relative_mount_path;
-    if (ConvertAbsoluteFilePathToRelativeFileSystemPath(
-            profile, kFileManagerAppId, base::FilePath(volume_info.mount_path),
-            &relative_mount_path))
-      volume_metadata->mount_path = "/" + relative_mount_path.AsUTF8Unsafe();
+  // Convert mount point path to relative path with the external file system
+  // exposed within File API.
+  base::FilePath relative_mount_path;
+  if (ConvertAbsoluteFilePathToRelativeFileSystemPath(
+          profile, kFileManagerAppId, base::FilePath(volume_info.mount_path),
+          &relative_mount_path)) {
+    volume_metadata->mount_path = "/" + relative_mount_path.AsUTF8Unsafe();
   }
+
+  volume_metadata->volume_id = volume_info.volume_id;
+
+  // TODO(kinaba): fill appropriate information once multi-profile support is
+  // implemented.
+  volume_metadata->profile.display_name = profile->GetProfileName();
+  volume_metadata->profile.is_current_profile = true;
 
   if (!volume_info.source_path.empty()) {
     volume_metadata->source_path.reset(
@@ -146,19 +153,18 @@ void VolumeInfoToVolumeMetadata(
   switch (volume_info.type) {
     case VOLUME_TYPE_GOOGLE_DRIVE:
       volume_metadata->volume_type =
-          file_browser_private::VolumeMetadata::VOLUME_TYPE_DRIVE;
+          file_browser_private::VOLUME_TYPE_DRIVE;
       break;
     case VOLUME_TYPE_DOWNLOADS_DIRECTORY:
       volume_metadata->volume_type =
-          file_browser_private::VolumeMetadata::VOLUME_TYPE_DOWNLOADS;
+          file_browser_private::VOLUME_TYPE_DOWNLOADS;
       break;
     case VOLUME_TYPE_REMOVABLE_DISK_PARTITION:
       volume_metadata->volume_type =
-          file_browser_private::VolumeMetadata::VOLUME_TYPE_REMOVABLE;
+          file_browser_private::VOLUME_TYPE_REMOVABLE;
       break;
     case VOLUME_TYPE_MOUNTED_ARCHIVE_FILE:
-      volume_metadata->volume_type =
-          file_browser_private::VolumeMetadata::VOLUME_TYPE_ARCHIVE;
+      volume_metadata->volume_type = file_browser_private::VOLUME_TYPE_ARCHIVE;
       break;
   }
 
@@ -167,29 +173,26 @@ void VolumeInfoToVolumeMetadata(
     switch (volume_info.device_type) {
       case chromeos::DEVICE_TYPE_UNKNOWN:
         volume_metadata->device_type =
-            file_browser_private::VolumeMetadata::DEVICE_TYPE_UNKNOWN;
+            file_browser_private::DEVICE_TYPE_UNKNOWN;
         break;
       case chromeos::DEVICE_TYPE_USB:
-        volume_metadata->device_type =
-            file_browser_private::VolumeMetadata::DEVICE_TYPE_USB;
+        volume_metadata->device_type = file_browser_private::DEVICE_TYPE_USB;
         break;
       case chromeos::DEVICE_TYPE_SD:
-        volume_metadata->device_type =
-            file_browser_private::VolumeMetadata::DEVICE_TYPE_SD;
+        volume_metadata->device_type = file_browser_private::DEVICE_TYPE_SD;
         break;
       case chromeos::DEVICE_TYPE_OPTICAL_DISC:
       case chromeos::DEVICE_TYPE_DVD:
         volume_metadata->device_type =
-            file_browser_private::VolumeMetadata::DEVICE_TYPE_OPTICAL;
+            file_browser_private::DEVICE_TYPE_OPTICAL;
         break;
       case chromeos::DEVICE_TYPE_MOBILE:
-        volume_metadata->device_type =
-            file_browser_private::VolumeMetadata::DEVICE_TYPE_MOBILE;
+        volume_metadata->device_type = file_browser_private::DEVICE_TYPE_MOBILE;
         break;
     }
   } else {
     volume_metadata->device_type =
-        file_browser_private::VolumeMetadata::DEVICE_TYPE_NONE;
+        file_browser_private::DEVICE_TYPE_NONE;
   }
 
   volume_metadata->is_read_only = volume_info.is_read_only;
@@ -197,15 +200,15 @@ void VolumeInfoToVolumeMetadata(
   switch (volume_info.mount_condition) {
     case chromeos::disks::MOUNT_CONDITION_NONE:
       volume_metadata->mount_condition =
-          file_browser_private::VolumeMetadata::MOUNT_CONDITION_NONE;
+          file_browser_private::MOUNT_CONDITION_NONE;
       break;
     case chromeos::disks::MOUNT_CONDITION_UNKNOWN_FILESYSTEM:
       volume_metadata->mount_condition =
-          file_browser_private::VolumeMetadata::MOUNT_CONDITION_UNKNOWN;
+          file_browser_private::MOUNT_CONDITION_UNKNOWN;
       break;
     case chromeos::disks::MOUNT_CONDITION_UNSUPPORTED_FILESYSTEM:
       volume_metadata->mount_condition =
-          file_browser_private::VolumeMetadata::MOUNT_CONDITION_UNSUPPORTED;
+          file_browser_private::MOUNT_CONDITION_UNSUPPORTED;
       break;
   }
 }
@@ -226,11 +229,6 @@ content::WebContents* GetWebContents(ExtensionFunctionDispatcher* dispatcher) {
     return NULL;
   }
   return web_contents;
-}
-
-int32 GetTabId(ExtensionFunctionDispatcher* dispatcher) {
-  content::WebContents* web_contents = GetWebContents(dispatcher);
-  return web_contents ? ExtensionTabUtil::GetTabId(web_contents) : 0;
 }
 
 base::FilePath GetLocalPathFromURL(

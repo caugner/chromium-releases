@@ -42,9 +42,12 @@ namespace keyboard {
 bool IsKeyboardEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableVirtualKeyboard) ||
-          CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kKeyboardUsabilityTest);
+          IsKeyboardUsabilityExperimentEnabled();
+}
 
+bool IsKeyboardUsabilityExperimentEnabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kKeyboardUsabilityExperiment);
 }
 
 bool InsertText(const base::string16& text, aura::Window* root_window) {
@@ -107,6 +110,7 @@ bool MoveCursor(int swipe_direction,
 bool SendKeyEvent(const std::string type,
                   int key_value,
                   int key_code,
+                  std::string key_name,
                   int modifiers,
                   aura::WindowEventDispatcher* dispatcher) {
   ui::EventType event_type = ui::ET_UNKNOWN;
@@ -123,7 +127,7 @@ bool SendKeyEvent(const std::string type,
     // Handling of special printable characters (e.g. accented characters) for
     // which there is no key code.
     if (event_type == ui::ET_KEY_RELEASED) {
-      ui::InputMethod* input_method = dispatcher->GetProperty(
+      ui::InputMethod* input_method = dispatcher->window()->GetProperty(
           aura::client::kRootWindowInputMethodKey);
       if (!input_method)
         return false;
@@ -150,7 +154,7 @@ bool SendKeyEvent(const std::string type,
       }
     }
 
-    ui::KeyEvent event(event_type, code, modifiers, false);
+    ui::KeyEvent event(event_type, code, key_name, modifiers, false);
     dispatcher->AsRootWindowHostDelegate()->OnHostKeyEvent(&event);
   }
   return true;
@@ -221,6 +225,7 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
     {"keyboard/images/mute.svg", IDR_KEYBOARD_IMAGES_MUTE},
     {"keyboard/images/reload.svg", IDR_KEYBOARD_IMAGES_RELOAD},
     {"keyboard/images/right.svg", IDR_KEYBOARD_IMAGES_RIGHT},
+    {"keyboard/images/search.svg", IDR_KEYBOARD_IMAGES_SEARCH},
     {"keyboard/images/shutdown.svg", IDR_KEYBOARD_IMAGES_SHUTDOWN},
     {"keyboard/images/up.svg", IDR_KEYBOARD_IMAGES_UP},
     {"keyboard/images/volume-down.svg", IDR_KEYBOARD_IMAGES_VOLUME_DOWN},
@@ -237,7 +242,7 @@ const GritResourceMap* GetKeyboardExtensionResources(size_t* size) {
     {"keyboard/main.js", IDR_KEYBOARD_MAIN_JS},
     {"keyboard/manifest.json", IDR_KEYBOARD_MANIFEST},
     {"keyboard/main.css", IDR_KEYBOARD_MAIN_CSS},
-    {"keyboard/polymer.min.js", IDR_KEYBOARD_POLYMER},
+    {"keyboard/polymer_loader.js", IDR_KEYBOARD_POLYMER_LOADER},
     {"keyboard/voice_input.js", IDR_KEYBOARD_VOICE_INPUT_JS},
   };
   static const size_t kKeyboardResourcesSize = arraysize(kKeyboardResources);

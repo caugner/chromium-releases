@@ -14,15 +14,17 @@
 #include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_builder.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,7 +32,7 @@ using content::MessageLoopRunner;
 
 namespace {
 
-void OnProfileDownloadedFail(const string16& full_name) {
+void OnProfileDownloadedFail(const base::string16& full_name) {
   ASSERT_TRUE(false) << "Profile download should not have succeeded.";
 }
 
@@ -67,15 +69,26 @@ class ManagedModeURLFilterObserver : public ManagedModeURLFilter::Observer {
 
 class ManagedUserServiceTest : public ::testing::Test {
  public:
-  ManagedUserServiceTest() {
-    managed_user_service_ = ManagedUserServiceFactory::GetForProfile(&profile_);
+  ManagedUserServiceTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    TestingProfile::Builder builder;
+    builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
+                              FakeProfileOAuth2TokenService::Build);
+    profile_ = builder.Build();
+    managed_user_service_ =
+        ManagedUserServiceFactory::GetForProfile(profile_.get());
+  }
+
+  virtual void TearDown() OVERRIDE {
+    profile_.reset();
   }
 
   virtual ~ManagedUserServiceTest() {}
 
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
-  TestingProfile profile_;
+  scoped_ptr<TestingProfile> profile_;
   ManagedUserService* managed_user_service_;
 };
 
@@ -88,7 +101,7 @@ TEST_F(ManagedUserServiceTest, GetManualExceptionsForHost) {
   GURL kBlurpURL("http://blurp.net/bla");
   GURL kMooseURL("http://moose.org/baz");
   {
-    DictionaryPrefUpdate update(profile_.GetPrefs(),
+    DictionaryPrefUpdate update(profile_->GetPrefs(),
                                 prefs::kManagedModeManualURLs);
     base::DictionaryValue* dict = update.Get();
     dict->SetBooleanWithoutPathExpansion(kExampleFooURL.spec(), true);
@@ -116,7 +129,7 @@ TEST_F(ManagedUserServiceTest, GetManualExceptionsForHost) {
   EXPECT_EQ(kExampleFooURL, exceptions[1]);
 
   {
-    DictionaryPrefUpdate update(profile_.GetPrefs(),
+    DictionaryPrefUpdate update(profile_->GetPrefs(),
                                 prefs::kManagedModeManualURLs);
     base::DictionaryValue* dict = update.Get();
     for (std::vector<GURL>::iterator it = exceptions.begin();
@@ -142,15 +155,15 @@ TEST_F(ManagedUserServiceTest, GetManualExceptionsForHost) {
 // DCHECK is hit when the service is destroyed, this test passed.
 TEST_F(ManagedUserServiceTest, ShutDownCustodianProfileDownloader) {
   CustodianProfileDownloaderService* downloader_service =
-      CustodianProfileDownloaderServiceFactory::GetForProfile(
-          &profile_);
+      CustodianProfileDownloaderServiceFactory::GetForProfile(profile_.get());
 
   // Emulate being logged in, then start to download a profile so a
   // ProfileDownloader gets created.
-  profile_.GetPrefs()->SetString(prefs::kGoogleServicesUsername, "Logged In");
+  profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername, "Logged In");
   downloader_service->DownloadProfile(base::Bind(&OnProfileDownloadedFail));
 }
 
+#if !defined(OS_ANDROID)
 class ManagedUserServiceExtensionTestBase : public ExtensionServiceTestBase {
  public:
   explicit ManagedUserServiceExtensionTestBase(bool is_managed)
@@ -220,14 +233,14 @@ TEST_F(ManagedUserServiceExtensionTestUnmanaged,
   EXPECT_FALSE(profile_->IsManaged());
 
   scoped_refptr<extensions::Extension> extension = MakeExtension();
-  string16 error_1;
+  base::string16 error_1;
   EXPECT_TRUE(managed_user_service->UserMayLoad(extension.get(), &error_1));
-  EXPECT_EQ(string16(), error_1);
+  EXPECT_EQ(base::string16(), error_1);
 
-  string16 error_2;
+  base::string16 error_2;
   EXPECT_TRUE(
       managed_user_service->UserMayModifySettings(extension.get(), &error_2));
-  EXPECT_EQ(string16(), error_2);
+  EXPECT_EQ(base::string16(), error_2);
 }
 
 TEST_F(ManagedUserServiceExtensionTest, ExtensionManagementPolicyProvider) {
@@ -241,7 +254,7 @@ TEST_F(ManagedUserServiceExtensionTest, ExtensionManagementPolicyProvider) {
 
   // Check that a supervised user can install a theme.
   scoped_refptr<extensions::Extension> theme = MakeThemeExtension();
-  string16 error_1;
+  base::string16 error_1;
   EXPECT_TRUE(managed_user_service->UserMayLoad(theme.get(), &error_1));
   EXPECT_TRUE(error_1.empty());
   EXPECT_TRUE(
@@ -253,7 +266,7 @@ TEST_F(ManagedUserServiceExtensionTest, ExtensionManagementPolicyProvider) {
   EXPECT_FALSE(managed_user_service->UserMayLoad(extension.get(), &error_1));
   EXPECT_FALSE(error_1.empty());
 
-  string16 error_2;
+  base::string16 error_2;
   EXPECT_FALSE(
       managed_user_service->UserMayModifySettings(extension.get(), &error_2));
   EXPECT_FALSE(error_2.empty());
@@ -330,7 +343,7 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   ASSERT_EQ(3u, sites.size());
   EXPECT_EQ(ASCIIToUTF16("YouTube"), sites[0].name);
   EXPECT_EQ(ASCIIToUTF16("Homestar Runner"), sites[1].name);
-  EXPECT_EQ(string16(), sites[2].name);
+  EXPECT_EQ(base::string16(), sites[2].name);
 
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(example_url));
@@ -383,3 +396,4 @@ TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   EXPECT_EQ(ManagedModeURLFilter::ALLOW,
             url_filter->GetFilteringBehaviorForURL(moose_url));
 }
+#endif  // !defined(OS_ANDROID)

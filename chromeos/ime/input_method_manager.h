@@ -11,7 +11,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chromeos/chromeos_export.h"
-#include "chromeos/ime/input_method_config.h"
 #include "chromeos/ime/input_method_descriptor.h"
 #include "chromeos/ime/input_method_property.h"
 
@@ -21,7 +20,7 @@ class Accelerator;
 
 namespace chromeos {
 class ComponentExtensionIMEManager;
-class InputMethodEngine;
+class InputMethodEngineInterface;
 namespace input_method {
 
 class InputMethodUtil;
@@ -29,7 +28,7 @@ class XKeyboard;
 
 // This class manages input methodshandles.  Classes can add themselves as
 // observers. Clients can get an instance of this library class by:
-// GetInputMethodManager().
+// InputMethodManager::Get().
 class CHROMEOS_EXPORT InputMethodManager {
  public:
   enum State {
@@ -143,7 +142,8 @@ class CHROMEOS_EXPORT InputMethodManager {
       const std::vector<std::string>& layouts,
       const std::vector<std::string>& languages,
       const GURL& options_url,
-      InputMethodEngine* instance) = 0;
+      const GURL& inputview_url,
+      InputMethodEngineInterface* instance) = 0;
 
   // Removes an input method extension.
   virtual void RemoveInputMethodExtension(const std::string& id) = 0;
@@ -162,6 +162,10 @@ class CHROMEOS_EXPORT InputMethodManager {
 
   // Gets the list of input method properties. The list could be empty().
   virtual InputMethodPropertyList GetCurrentInputMethodProperties() const = 0;
+
+  // Sets the list of input method properties. The list could be empty().
+  virtual void SetCurrentInputMethodProperties(
+      const InputMethodPropertyList& property_list) = 0;
 
   // Returns an X keyboard object which could be used to change the current XKB
   // layout, change the caps lock status, and set the auto repeat rate/interval.

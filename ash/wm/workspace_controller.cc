@@ -4,6 +4,7 @@
 
 #include "ash/wm/workspace_controller.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -29,6 +30,12 @@ namespace {
 // Amount of time to pause before animating anything. Only used during initial
 // animation (when logging in).
 const int kInitialPauseTimeMS = 750;
+
+// Returns true if there are visible docked windows in the same screen as the
+// |shelf|.
+bool IsDockedAreaVisible(const ShelfLayoutManager* shelf) {
+  return shelf->dock_bounds().width() > 0;
+}
 
 }  // namespace
 
@@ -57,33 +64,43 @@ WorkspaceController::~WorkspaceController() {
 WorkspaceWindowState WorkspaceController::GetWindowState() const {
   if (!shelf_)
     return WORKSPACE_WINDOW_STATE_DEFAULT;
-
-  const gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
-  const aura::Window::Windows& windows(viewport_->children());
-  bool window_overlaps_launcher = false;
-  bool has_maximized_window = false;
-  for (aura::Window::Windows::const_iterator i = windows.begin();
-       i != windows.end(); ++i) {
-    wm::WindowState* window_state = wm::GetWindowState(*i);
-    if (window_state->ignored_by_shelf())
-      continue;
-    ui::Layer* layer = (*i)->layer();
-    if (!layer->GetTargetVisibility() || layer->GetTargetOpacity() == 0.0f)
-      continue;
-    if (window_state->IsMaximized()) {
-      // An untracked window may still be fullscreen so we keep iterating when
-      // we hit a maximized window.
-      has_maximized_window = true;
-    } else if (window_state->IsFullscreen()) {
-      return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
-    }
-    if (!window_overlaps_launcher && (*i)->bounds().Intersects(shelf_bounds))
-      window_overlaps_launcher = true;
+  const aura::Window* topmost_fullscreen_window = GetRootWindowController(
+      viewport_->GetRootWindow())->GetWindowForFullscreenMode();
+  if (topmost_fullscreen_window &&
+      !wm::GetWindowState(topmost_fullscreen_window)->ignored_by_shelf()) {
+    return WORKSPACE_WINDOW_STATE_FULL_SCREEN;
   }
-  if (has_maximized_window)
-    return WORKSPACE_WINDOW_STATE_MAXIMIZED;
 
-  return window_overlaps_launcher ?
+  // These are the container ids of containers which may contain windows that
+  // may overlap the launcher shelf and affect its transparency.
+  const int kWindowContainerIds[] = {
+      internal::kShellWindowId_DefaultContainer,
+      internal::kShellWindowId_DockedContainer,
+  };
+  const gfx::Rect shelf_bounds(shelf_->GetIdealBounds());
+  bool window_overlaps_launcher = false;
+  for (size_t idx = 0; idx < arraysize(kWindowContainerIds); idx++) {
+    const aura::Window* container = Shell::GetContainer(
+        viewport_->GetRootWindow(), kWindowContainerIds[idx]);
+    const aura::Window::Windows& windows(container->children());
+    for (aura::Window::Windows::const_iterator i = windows.begin();
+         i != windows.end(); ++i) {
+      wm::WindowState* window_state = wm::GetWindowState(*i);
+      if (window_state->ignored_by_shelf())
+        continue;
+      ui::Layer* layer = (*i)->layer();
+      if (!layer->GetTargetVisibility())
+        continue;
+      if (window_state->IsMaximized())
+        return WORKSPACE_WINDOW_STATE_MAXIMIZED;
+      if (!window_overlaps_launcher &&
+          ((*i)->bounds().Intersects(shelf_bounds))) {
+        window_overlaps_launcher = true;
+      }
+    }
+  }
+
+  return (window_overlaps_launcher || IsDockedAreaVisible(shelf_)) ?
       WORKSPACE_WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
       WORKSPACE_WINDOW_STATE_DEFAULT;
 }

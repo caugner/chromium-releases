@@ -13,9 +13,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/policy/cloud/cloud_policy_client.h"
-#include "chrome/browser/policy/cloud/cloud_policy_service.h"
 #include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/cloud_policy_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -50,8 +50,10 @@ class UserPolicySigninServiceBase : public BrowserContextKeyedService,
                                     public content::NotificationObserver {
  public:
   // The callback invoked once policy registration is complete. Passed
-  // CloudPolicyClient parameter is null if DMToken fetch failed.
-  typedef base::Callback<void(scoped_ptr<CloudPolicyClient>)>
+  // |dm_token| and |client_id| parameters are empty if policy registration
+  // failed.
+  typedef base::Callback<void(const std::string& dm_token,
+                              const std::string& client_id)>
       PolicyRegistrationCallback;
 
   // The callback invoked once policy fetch is complete. Passed boolean
@@ -62,15 +64,17 @@ class UserPolicySigninServiceBase : public BrowserContextKeyedService,
   UserPolicySigninServiceBase(
       Profile* profile,
       PrefService* local_state,
-      scoped_refptr<net::URLRequestContextGetter> request_context,
-      DeviceManagementService* device_management_service);
+      DeviceManagementService* device_management_service,
+      scoped_refptr<net::URLRequestContextGetter> system_request_context);
   virtual ~UserPolicySigninServiceBase();
 
-  // Initiates a policy fetch as part of user signin, using a CloudPolicyClient
-  // previously initialized via RegisterPolicyClient. |callback| is invoked
+  // Initiates a policy fetch as part of user signin, using a |dm_token| and
+  // |client_id| fetched via RegisterForPolicy(). |callback| is invoked
   // once the policy fetch is complete, passing true if the policy fetch
   // succeeded.
-  void FetchPolicyForSignedInUser(scoped_ptr<CloudPolicyClient> client,
+  void FetchPolicyForSignedInUser(const std::string& username,
+                                  const std::string& dm_token,
+                                  const std::string& client_id,
                                   const PolicyFetchCallback& callback);
 
   // content::NotificationObserver implementation:
@@ -89,14 +93,22 @@ class UserPolicySigninServiceBase : public BrowserContextKeyedService,
   // BrowserContextKeyedService implementation:
   virtual void Shutdown() OVERRIDE;
 
+  void SetSystemRequestContext(
+      scoped_refptr<net::URLRequestContextGetter> request_context);
+
  protected:
+  net::URLRequestContextGetter* system_request_context() {
+    return system_request_context_;
+  }
+
   // Returns true if policy should be loaded even when Gaia reports that the
   // account doesn't have management enabled.
   static bool ShouldForceLoadPolicy();
 
   // Returns a CloudPolicyClient to perform a registration with the DM server,
   // or NULL if |username| shouldn't register for policy management.
-  scoped_ptr<CloudPolicyClient> PrepareToRegister(const std::string& username);
+  scoped_ptr<CloudPolicyClient> CreateClientForRegistrationOnly(
+      const std::string& username);
 
   // Returns false if cloud policy is disabled or if the passed |email_address|
   // is definitely not from a hosted domain (according to the blacklist in
@@ -121,6 +133,7 @@ class UserPolicySigninServiceBase : public BrowserContextKeyedService,
   // signed in account at startup, and from FetchPolicyForSignedInUser() during
   // the initial policy fetch after signing in.
   virtual void InitializeUserCloudPolicyManager(
+      const std::string& username,
       scoped_ptr<CloudPolicyClient> client);
 
   // Prepares for the UserCloudPolicyManager to be shutdown due to
@@ -139,14 +152,18 @@ class UserPolicySigninServiceBase : public BrowserContextKeyedService,
   SigninManager* GetSigninManager();
 
  private:
+  // Helper functions to create a request context for use by CloudPolicyClients.
+  scoped_refptr<net::URLRequestContextGetter> CreateUserRequestContext();
+  scoped_refptr<net::URLRequestContextGetter> CreateSystemRequestContext();
+
   // Weak pointer to the profile this service is associated with.
   Profile* profile_;
 
   content::NotificationRegistrar registrar_;
 
   PrefService* local_state_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
   DeviceManagementService* device_management_service_;
+  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
 
   base::WeakPtrFactory<UserPolicySigninServiceBase> weak_factory_;
 

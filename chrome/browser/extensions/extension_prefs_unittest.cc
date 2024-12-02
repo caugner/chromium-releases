@@ -22,6 +22,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/mock_notification_observer.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_info.h"
@@ -102,18 +103,18 @@ class ExtensionPrefsToolbarOrder : public ExtensionPrefsTest {
     list_.push_back(prefs_.AddExtensionAndReturnId("1"));
     list_.push_back(prefs_.AddExtensionAndReturnId("2"));
     list_.push_back(prefs_.AddExtensionAndReturnId("3"));
-    std::vector<std::string> before_list = prefs()->GetToolbarOrder();
+    ExtensionIdList before_list = prefs()->GetToolbarOrder();
     EXPECT_TRUE(before_list.empty());
     prefs()->SetToolbarOrder(list_);
   }
 
   virtual void Verify() OVERRIDE {
-    std::vector<std::string> result = prefs()->GetToolbarOrder();
+    ExtensionIdList result = prefs()->GetToolbarOrder();
     ASSERT_EQ(list_, result);
   }
 
  private:
-  std::vector<std::string> list_;
+  ExtensionIdList list_;
 };
 TEST_F(ExtensionPrefsToolbarOrder, ToolbarOrder) {}
 
@@ -121,21 +122,30 @@ TEST_F(ExtensionPrefsToolbarOrder, ToolbarOrder) {}
 class ExtensionPrefsKnownDisabled : public ExtensionPrefsTest {
  public:
   virtual void Initialize() OVERRIDE {
+    ExtensionIdSet before_set;
+    EXPECT_FALSE(prefs()->GetKnownDisabled(&before_set));
+    EXPECT_TRUE(before_set.empty());
+
+    // Initialize to an empty list and confirm that GetKnownDisabled() returns
+    // true and an empty list.
+    prefs()->SetKnownDisabled(before_set);
+    EXPECT_TRUE(prefs()->GetKnownDisabled(&before_set));
+    EXPECT_TRUE(before_set.empty());
+
     set_.insert(prefs_.AddExtensionAndReturnId("1"));
     set_.insert(prefs_.AddExtensionAndReturnId("2"));
     set_.insert(prefs_.AddExtensionAndReturnId("3"));
-    std::set<std::string> before_set = prefs()->GetKnownDisabled();
-    EXPECT_TRUE(before_set.empty());
     prefs()->SetKnownDisabled(set_);
   }
 
   virtual void Verify() OVERRIDE {
-    std::set<std::string> result = prefs()->GetKnownDisabled();
+    ExtensionIdSet result;
+    EXPECT_TRUE(prefs()->GetKnownDisabled(&result));
     ASSERT_EQ(set_, result);
   }
 
  private:
-  std::set<std::string> set_;
+  ExtensionIdSet set_;
 };
 TEST_F(ExtensionPrefsKnownDisabled, KnownDisabled) {}
 
@@ -222,6 +232,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     AddPattern(&shost_permissions_, "http://example.com/*");
 
     APIPermissionSet empty_set;
+    ManifestPermissionSet empty_manifest_permissions;
     URLPatternSet empty_extent;
     scoped_refptr<PermissionSet> permissions;
     scoped_refptr<PermissionSet> granted_permissions;
@@ -232,7 +243,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
     EXPECT_TRUE(granted_permissions->IsEmpty());
 
     permissions = new PermissionSet(
-        api_perm_set1_, empty_extent, empty_extent);
+        api_perm_set1_, empty_manifest_permissions, empty_extent, empty_extent);
 
     // Add part of the api permissions.
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
@@ -246,7 +257,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
 
     // Add part of the explicit host permissions.
     permissions = new PermissionSet(
-        empty_set, ehost_perm_set1_, empty_extent);
+        empty_set, empty_manifest_permissions, ehost_perm_set1_, empty_extent);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
@@ -259,7 +270,7 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
 
     // Add part of the scriptable host permissions.
     permissions = new PermissionSet(
-        empty_set, empty_extent, shost_perm_set1_);
+        empty_set, empty_manifest_permissions, empty_extent, shost_perm_set1_);
     prefs()->AddGrantedPermissions(extension_id_, permissions.get());
     granted_permissions = prefs()->GetGrantedPermissions(extension_id_);
     EXPECT_FALSE(granted_permissions->IsEmpty());
@@ -276,7 +287,8 @@ class ExtensionPrefsGrantedPermissions : public ExtensionPrefsTest {
 
     // Add the rest of the permissions.
     permissions = new PermissionSet(
-        api_perm_set2_, ehost_perm_set2_, shost_perm_set2_);
+        api_perm_set2_, empty_manifest_permissions,
+        ehost_perm_set2_, shost_perm_set2_);
 
     APIPermissionSet::Union(expected_apis, api_perm_set2_, &api_permissions_);
 
@@ -334,6 +346,8 @@ class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
     api_perms.insert(APIPermission::kBookmark);
     api_perms.insert(APIPermission::kHistory);
 
+    ManifestPermissionSet empty_manifest_permissions;
+
     URLPatternSet ehosts;
     AddPattern(&ehosts, "http://*.google.com/*");
     AddPattern(&ehosts, "http://example.com/*");
@@ -343,7 +357,8 @@ class ExtensionPrefsActivePermissions : public ExtensionPrefsTest {
     AddPattern(&shosts, "https://*.google.com/*");
     AddPattern(&shosts, "http://reddit.com/r/test/*");
 
-    active_perms_ = new PermissionSet(api_perms, ehosts, shosts);
+    active_perms_ = new PermissionSet(
+        api_perms, empty_manifest_permissions, ehosts, shosts);
 
     // Make sure the active permissions start empty.
     scoped_refptr<PermissionSet> active(
@@ -470,7 +485,7 @@ class ExtensionPrefsDelayedInstallInfo : public ExtensionPrefsTest {
     ASSERT_EQ(id, extension->id());
     prefs()->SetDelayedInstallInfo(extension.get(),
                                    Extension::ENABLED,
-                                   Blacklist::NOT_BLACKLISTED,
+                                   false,
                                    ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
                                    syncer::StringOrdinal());
   }
@@ -594,7 +609,7 @@ class ExtensionPrefsFinishDelayedInstallInfo : public ExtensionPrefsTest {
     ASSERT_EQ(id_, new_extension->id());
     prefs()->SetDelayedInstallInfo(new_extension.get(),
                                    Extension::ENABLED,
-                                   Blacklist::NOT_BLACKLISTED,
+                                   false,
                                    ExtensionPrefs::DELAY_REASON_WAIT_FOR_IDLE,
                                    syncer::StringOrdinal());
 
@@ -631,7 +646,7 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
     prefs()->OnExtensionInstalled(extension_.get(),
                                   Extension::DISABLED,
-                                  Blacklist::NOT_BLACKLISTED,
+                                  false,
                                   syncer::StringOrdinal());
   }
 
@@ -652,7 +667,7 @@ class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
     prefs()->OnExtensionInstalled(extension_.get(),
                                   Extension::ENABLED,
-                                  Blacklist::NOT_BLACKLISTED,
+                                  false,
                                   syncer::StringOrdinal());
   }
 
@@ -771,19 +786,19 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
 
   virtual void Verify() OVERRIDE {
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
     }
     prefs()->SetExtensionBlacklisted(extension_a_->id(), true);
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       ids.insert(extension_a_->id());
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
     }
     prefs()->SetExtensionBlacklisted(extension_b_->id(), true);
     prefs()->SetExtensionBlacklisted(extension_c_->id(), true);
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       ids.insert(extension_a_->id());
       ids.insert(extension_b_->id());
       ids.insert(extension_c_->id());
@@ -791,7 +806,7 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
     }
     prefs()->SetExtensionBlacklisted(extension_a_->id(), false);
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       ids.insert(extension_b_->id());
       ids.insert(extension_c_->id());
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
@@ -799,7 +814,7 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
     prefs()->SetExtensionBlacklisted(extension_b_->id(), false);
     prefs()->SetExtensionBlacklisted(extension_c_->id(), false);
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
     }
 
@@ -815,7 +830,7 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
 
     EXPECT_TRUE(prefs()->GetExtensionPref(arbitrary_id));
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       ids.insert(arbitrary_id);
       ids.insert(extension_a_->id());
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
@@ -824,7 +839,7 @@ class ExtensionPrefsBlacklistedExtensions : public ExtensionPrefsTest {
     prefs()->SetExtensionBlacklisted(extension_a_->id(), false);
     EXPECT_FALSE(prefs()->GetExtensionPref(arbitrary_id));
     {
-      std::set<std::string> ids;
+      ExtensionIdSet ids;
       EXPECT_EQ(ids, prefs()->GetBlacklistedExtensions());
     }
   }

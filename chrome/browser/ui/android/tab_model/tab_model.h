@@ -53,8 +53,9 @@ class TabModel : public content::NotificationObserver,
   // Used for restoring tabs from synced foreign sessions.
   virtual void CreateTab(content::WebContents* web_contents) = 0;
 
-  // Used for creating a new tab with a given URL.
-  virtual content::WebContents* CreateTabForTesting(const GURL& url) = 0;
+  // Used by Developer Tools to create a new tab with a given URL.
+  // Replaces CreateTabForTesting.
+  virtual content::WebContents* CreateNewTabForDevTools(const GURL& url) = 0;
 
   // Return true if we are currently restoring sessions asynchronously.
   virtual bool IsSessionRestoreInProgress() const = 0;
@@ -62,14 +63,14 @@ class TabModel : public content::NotificationObserver,
   virtual void OpenClearBrowsingData() const = 0;
 
   // Returns search terms extracted from the current url if possible.
-  string16 GetSearchTermsForCurrentTab();
+  base::string16 GetSearchTermsForCurrentTab();
 
   // Returns the parameter that is used to trigger query extraction.
   std::string GetQueryExtractionParam();
 
   // Calls through to the ToolbarModel's GetCorpusNameForMobile -- see
   // comments in toolbar_model.h.
-  string16 GetCorpusNameForCurrentTab();
+  base::string16 GetCorpusNameForCurrentTab();
 
  protected:
   // Instructs the TabModel to broadcast a notification that all tabs are now

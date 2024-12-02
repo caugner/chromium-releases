@@ -9,7 +9,6 @@
 
 #include "apps/shell_window.h"
 #include "apps/shell_window_registry.h"
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -35,6 +34,8 @@
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
+#include "chrome/browser/profile_resetter/automatic_profile_resetter.h"
+#include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_util.h"
@@ -47,7 +48,6 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -81,6 +81,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/page_zoom.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -99,13 +100,20 @@
 #include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/extensions/wallpaper_manager_util.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/policy/profile_policy_connector.h"
+#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/policy/core/common/policy_map.h"
+#include "components/policy/core/common/policy_namespace.h"
+#include "components/policy/core/common/policy_service.h"
+#include "policy/policy_constants.h"
 #include "ui/gfx/image/image_skia.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -325,6 +333,8 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #if defined(OS_CHROMEOS)
     { "accessibilityExplanation",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_EXPLANATION },
+    { "accessibilitySettings",
+      IDS_OPTIONS_SETTINGS_ACCESSIBILITY_SETTINGS },
     { "accessibilityHighContrast",
       IDS_OPTIONS_SETTINGS_ACCESSIBILITY_HIGH_CONTRAST_DESCRIPTION },
     { "accessibilityScreenMagnifier",
@@ -371,7 +381,8 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "factoryResetDataRestart", IDS_RELAUNCH_BUTTON },
     { "factoryResetWarning", IDS_OPTIONS_FACTORY_RESET_WARNING },
     { "factoryResetHelpUrl", IDS_FACTORY_RESET_HELP_URL },
-    { "changePicture", IDS_OPTIONS_CHANGE_PICTURE_CAPTION },
+    { "changePicture", IDS_OPTIONS_CHANGE_PICTURE },
+    { "changePictureCaption", IDS_OPTIONS_CHANGE_PICTURE_CAPTION },
     { "datetimeTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME },
     { "deviceGroupDescription", IDS_OPTIONS_DEVICE_GROUP_DESCRIPTION },
     { "deviceGroupPointer", IDS_OPTIONS_DEVICE_GROUP_POINTER_SECTION },
@@ -462,18 +473,33 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #endif
 
   values->SetString("syncLearnMoreURL", chrome::kSyncLearnMoreURL);
-  string16 omnibox_url = ASCIIToUTF16(chrome::kOmniboxLearnMoreURL);
+  base::string16 omnibox_url = ASCIIToUTF16(chrome::kOmniboxLearnMoreURL);
   values->SetString(
       "defaultSearchGroupLabel",
       l10n_util::GetStringFUTF16(IDS_SEARCH_PREF_EXPLANATION, omnibox_url));
 
 #if defined(OS_CHROMEOS)
-  const chromeos::User* user = chromeos::UserManager::Get()->GetLoggedInUser();
-  values->SetString("username", user ? user->email() : std::string());
+  Profile* profile = Profile::FromWebUI(web_ui());
+  std::string username = profile->GetProfileName();
+  if (username.empty()) {
+    chromeos::User* user =
+        chromeos::UserManager::Get()->GetUserByProfile(profile);
+    if (user && (user->GetType() != chromeos::User::USER_TYPE_GUEST))
+      username = user->email();
+  }
+  if (!username.empty())
+    username = gaia::SanitizeEmail(gaia::CanonicalizeEmail(username));
+
+  values->SetString("username", username);
 #endif
 
   // Pass along sync status early so it will be available during page init.
   values->Set("syncData", GetSyncStateDictionary().release());
+
+  // The Reset Profile Settings feature makes no sense for an off-the-record
+  // profile (e.g. in Guest mode on Chrome OS), so hide it.
+  values->SetBoolean("enableResetProfileSettings",
+                     !Profile::FromWebUI(web_ui())->IsOffTheRecord());
 
   values->SetString("privacyLearnMoreURL", chrome::kPrivacyLearnMoreURL);
   values->SetString("doNotTrackLearnMoreURL", chrome::kDoNotTrackLearnMoreURL);
@@ -485,6 +511,13 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 
   values->SetString("accessibilityLearnMoreURL",
                     chrome::kChromeAccessibilityHelpURL);
+
+  std::string settings_url = std::string("chrome-extension://") +
+      extension_misc::kChromeVoxExtensionId +
+      chrome::kChromeAccessibilitySettingsURL;
+
+  values->SetString("accessibilitySettingsURL",
+                    settings_url);
 
   values->SetString("contentProtectionAttestationLearnMoreURL",
                     chrome::kAttestationForContentProtectionLearnMoreURL);
@@ -764,7 +797,18 @@ void BrowserOptionsHandler::InitializeHandler() {
       base::Bind(&BrowserOptionsHandler::OnSigninAllowedPrefChange,
                  base::Unretained(this)));
 
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+  if (!policy_registrar_) {
+    policy_registrar_.reset(new policy::PolicyChangeRegistrar(
+        policy::ProfilePolicyConnectorFactory::GetForProfile(profile)->
+            policy_service(),
+        policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string())));
+    policy_registrar_->Observe(
+        policy::key::kUserAvatarImage,
+        base::Bind(&BrowserOptionsHandler::OnUserImagePolicyChanged,
+                   base::Unretained(this)));
+  }
+#else  // !defined(OS_CHROMEOS)
   profile_pref_registrar_.Add(
       prefs::kProxy,
       base::Bind(&BrowserOptionsHandler::SetupProxySettingsSection,
@@ -809,6 +853,14 @@ void BrowserOptionsHandler::InitializePage() {
     web_ui()->CallJavascriptFunction(
         "BrowserOptions.enableFactoryResetSection");
   }
+
+  OnAccountPictureManagedChanged(
+      policy::ProfilePolicyConnectorFactory::GetForProfile(
+          Profile::FromWebUI(web_ui()))->
+          policy_service()->GetPolicies(
+              policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME,
+                                      std::string()))
+             .Get(policy::key::kUserAvatarImage));
 #endif
 }
 
@@ -974,7 +1026,8 @@ void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
       search_engines,
       base::FundamentalValue(default_index),
       base::FundamentalValue(
-          template_url_service_->is_default_search_managed()));
+          template_url_service_->is_default_search_managed() ||
+          template_url_service_->IsExtensionControlledDefaultSearch()));
 }
 
 void BrowserOptionsHandler::SetDefaultSearchEngine(const ListValue* args) {
@@ -1162,6 +1215,11 @@ void BrowserOptionsHandler::UpdateAccountPicture() {
                                      email_value);
   }
 }
+
+void BrowserOptionsHandler::OnAccountPictureManagedChanged(bool managed) {
+  web_ui()->CallJavascriptFunction("BrowserOptions.setAccountPictureManaged",
+                                   base::FundamentalValue(managed));
+}
 #endif
 
 scoped_ptr<DictionaryValue> BrowserOptionsHandler::GetSyncStateDictionary() {
@@ -1199,8 +1257,8 @@ scoped_ptr<DictionaryValue> BrowserOptionsHandler::GetSyncStateDictionary() {
   sync_status->SetBoolean("setupInProgress",
       service && !service->IsManaged() && service->FirstSetupInProgress());
 
-  string16 status_label;
-  string16 link_label;
+  base::string16 status_label;
+  base::string16 link_label;
   bool status_has_error = sync_ui_util::GetStatusLabels(
       service, *signin, sync_ui_util::WITH_HTML, &status_label, &link_label) ==
           sync_ui_util::SYNC_ERROR;
@@ -1258,7 +1316,17 @@ void BrowserOptionsHandler::MouseExists(bool exists) {
   base::FundamentalValue val(exists);
   web_ui()->CallJavascriptFunction("BrowserOptions.showMouseControls", val);
 }
-#endif
+
+void BrowserOptionsHandler::OnUserImagePolicyChanged(
+    const base::Value* previous_policy,
+    const base::Value* current_policy) {
+  const bool had_policy = !!previous_policy;
+  const bool has_policy = !!current_policy;
+  if (had_policy != has_policy)
+    OnAccountPictureManagedChanged(has_policy);
+}
+
+#endif  // defined(OS_CHROMEOS)
 
 void BrowserOptionsHandler::UpdateSyncState() {
   web_ui()->CallJavascriptFunction("BrowserOptions.updateSyncState",
@@ -1296,6 +1364,21 @@ void BrowserOptionsHandler::HandleDefaultZoomFactor(const ListValue* args) {
 }
 
 void BrowserOptionsHandler::HandleRestartBrowser(const ListValue* args) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // If hardware acceleration is disabled then we need to force restart
+  // browser in desktop mode.
+  // TODO(shrikant): Remove this once we fix start mode logic for browser.
+  // Currently there are issues with determining correct browser mode
+  // at startup.
+  if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH) {
+    PrefService* pref_service = g_browser_process->local_state();
+    if (!pref_service->GetBoolean(prefs::kHardwareAccelerationModeEnabled)) {
+      chrome::AttemptRestartToDesktopMode();
+      return;
+    }
+  }
+#endif
+
   chrome::AttemptRestart();
 }
 
@@ -1389,7 +1472,7 @@ void BrowserOptionsHandler::SetupCloudPrintConnectorSection() {
   }
   base::FundamentalValue disabled(email.empty());
 
-  string16 label_str;
+  base::string16 label_str;
   if (email.empty()) {
     label_str = l10n_util::GetStringFUTF16(
         IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_LABEL,

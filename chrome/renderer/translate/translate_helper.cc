@@ -30,16 +30,16 @@
 #include "url/gurl.h"
 #include "v8/include/v8.h"
 
-using WebKit::WebDocument;
-using WebKit::WebElement;
-using WebKit::WebFrame;
-using WebKit::WebNode;
-using WebKit::WebNodeList;
-using WebKit::WebScriptSource;
-using WebKit::WebSecurityOrigin;
-using WebKit::WebString;
-using WebKit::WebVector;
-using WebKit::WebView;
+using blink::WebDocument;
+using blink::WebElement;
+using blink::WebFrame;
+using blink::WebNode;
+using blink::WebNodeList;
+using blink::WebScriptSource;
+using blink::WebSecurityOrigin;
+using blink::WebString;
+using blink::WebVector;
+using blink::WebView;
 
 namespace {
 
@@ -77,7 +77,8 @@ TranslateHelper::~TranslateHelper() {
   CancelPendingTranslation();
 }
 
-void TranslateHelper::PageCaptured(int page_id, const string16& contents) {
+void TranslateHelper::PageCaptured(int page_id,
+                                   const base::string16& contents) {
   // Get the document language as set by WebKit from the http-equiv
   // meta tag for "content-language".  This may or may not also
   // have a value derived from the actual Content-Language HTTP

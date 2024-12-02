@@ -6,8 +6,10 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/browser/download/drag_download_util.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/dip_util.h"
@@ -21,6 +23,7 @@
 #include "content/browser/web_contents/aura/window_slider.h"
 #include "content/browser/web_contents/touch_editable_impl_aura.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
@@ -33,6 +36,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_view_delegate.h"
 #include "content/public/browser/web_drag_dest_delegate.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/drop_data.h"
 #include "net/base/net_util.h"
@@ -249,19 +253,83 @@ void PrepareDragForFileContents(const DropData& drop_data,
   // Images without ALT text will only have a file extension so we need to
   // synthesize one from the provided extension and URL.
   if (file_name.BaseName().RemoveExtension().empty()) {
-    const string16 extension = file_name.Extension();
+    const base::string16 extension = file_name.Extension();
     // Retrieve the name from the URL.
     file_name = base::FilePath(net::GetSuggestedFilename(
         drop_data.url, "", "", "", "", "")).ReplaceExtension(extension);
   }
   provider->SetFileContents(file_name, drop_data.file_contents);
 }
+
+void PrepareDragForDownload(
+    const DropData& drop_data,
+    ui::OSExchangeData::Provider* provider,
+    WebContentsImpl* web_contents) {
+  const GURL& page_url = web_contents->GetLastCommittedURL();
+  const std::string& page_encoding = web_contents->GetEncoding();
+
+  // Parse the download metadata.
+  base::string16 mime_type;
+  base::FilePath file_name;
+  GURL download_url;
+  if (!ParseDownloadMetadata(drop_data.download_metadata,
+                             &mime_type,
+                             &file_name,
+                             &download_url))
+    return;
+
+  // Generate the file name based on both mime type and proposed file name.
+  std::string default_name =
+      GetContentClient()->browser()->GetDefaultDownloadName();
+  base::FilePath generated_download_file_name =
+      net::GenerateFileName(download_url,
+                            std::string(),
+                            std::string(),
+                            base::UTF16ToUTF8(file_name.value()),
+                            base::UTF16ToUTF8(mime_type),
+                            default_name);
+
+  // http://crbug.com/332579
+  base::ThreadRestrictions::ScopedAllowIO allow_file_operations;
+
+  base::FilePath temp_dir_path;
+  if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("chrome_drag"),
+                                    &temp_dir_path))
+    return;
+
+  base::FilePath download_path =
+      temp_dir_path.Append(generated_download_file_name);
+
+  // We cannot know when the target application will be done using the temporary
+  // file, so schedule it to be deleted after rebooting.
+  base::DeleteFileAfterReboot(download_path);
+  base::DeleteFileAfterReboot(temp_dir_path);
+
+  // Provide the data as file (CF_HDROP). A temporary download file with the
+  // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
+  scoped_refptr<DragDownloadFile> download_file =
+      new DragDownloadFile(
+          download_path,
+          scoped_ptr<net::FileStream>(),
+          download_url,
+          Referrer(page_url, drop_data.referrer_policy),
+          page_encoding,
+          web_contents);
+  ui::OSExchangeData::DownloadFileInfo file_download(base::FilePath(),
+                                                     download_file.get());
+  provider->SetDownloadFileInfo(file_download);
+}
 #endif
 
 // Utility to fill a ui::OSExchangeDataProvider object from DropData.
 void PrepareDragData(const DropData& drop_data,
-                     ui::OSExchangeData::Provider* provider) {
+                     ui::OSExchangeData::Provider* provider,
+                     WebContentsImpl* web_contents) {
 #if defined(OS_WIN)
+  // Put download before file contents to prefer the download of a image over
+  // its thumbnail link.
+  if (!drop_data.download_metadata.empty())
+    PrepareDragForDownload(drop_data, provider, web_contents);
   // We set the file contents before the URL because the URL also sets file
   // contents (to a .URL shortcut).  We want to prefer file content data over
   // a shortcut so we add it first.
@@ -296,20 +364,21 @@ void PrepareDragData(const DropData& drop_data,
 
 // Utility to fill a DropData object from ui::OSExchangeData.
 void PrepareDropData(DropData* drop_data, const ui::OSExchangeData& data) {
-  string16 plain_text;
+  base::string16 plain_text;
   data.GetString(&plain_text);
   if (!plain_text.empty())
     drop_data->text = base::NullableString16(plain_text, false);
 
   GURL url;
-  string16 url_title;
-  data.GetURLAndTitle(&url, &url_title);
+  base::string16 url_title;
+  data.GetURLAndTitle(
+      ui::OSExchangeData::DO_NOT_CONVERT_FILENAMES, &url, &url_title);
   if (url.is_valid()) {
     drop_data->url = url;
     drop_data->url_title = url_title;
   }
 
-  string16 html;
+  base::string16 html;
   GURL html_base_url;
   data.GetHtml(&html, &html_base_url);
   if (!html.empty())
@@ -334,40 +403,40 @@ void PrepareDropData(DropData* drop_data, const ui::OSExchangeData& data) {
         pickle.data(), pickle.size(), &drop_data->custom_data);
 }
 
-// Utilities to convert between WebKit::WebDragOperationsMask and
+// Utilities to convert between blink::WebDragOperationsMask and
 // ui::DragDropTypes.
-int ConvertFromWeb(WebKit::WebDragOperationsMask ops) {
+int ConvertFromWeb(blink::WebDragOperationsMask ops) {
   int drag_op = ui::DragDropTypes::DRAG_NONE;
-  if (ops & WebKit::WebDragOperationCopy)
+  if (ops & blink::WebDragOperationCopy)
     drag_op |= ui::DragDropTypes::DRAG_COPY;
-  if (ops & WebKit::WebDragOperationMove)
+  if (ops & blink::WebDragOperationMove)
     drag_op |= ui::DragDropTypes::DRAG_MOVE;
-  if (ops & WebKit::WebDragOperationLink)
+  if (ops & blink::WebDragOperationLink)
     drag_op |= ui::DragDropTypes::DRAG_LINK;
   return drag_op;
 }
 
-WebKit::WebDragOperationsMask ConvertToWeb(int drag_op) {
-  int web_drag_op = WebKit::WebDragOperationNone;
+blink::WebDragOperationsMask ConvertToWeb(int drag_op) {
+  int web_drag_op = blink::WebDragOperationNone;
   if (drag_op & ui::DragDropTypes::DRAG_COPY)
-    web_drag_op |= WebKit::WebDragOperationCopy;
+    web_drag_op |= blink::WebDragOperationCopy;
   if (drag_op & ui::DragDropTypes::DRAG_MOVE)
-    web_drag_op |= WebKit::WebDragOperationMove;
+    web_drag_op |= blink::WebDragOperationMove;
   if (drag_op & ui::DragDropTypes::DRAG_LINK)
-    web_drag_op |= WebKit::WebDragOperationLink;
-  return (WebKit::WebDragOperationsMask) web_drag_op;
+    web_drag_op |= blink::WebDragOperationLink;
+  return (blink::WebDragOperationsMask) web_drag_op;
 }
 
 int ConvertAuraEventFlagsToWebInputEventModifiers(int aura_event_flags) {
   int web_input_event_modifiers = 0;
   if (aura_event_flags & ui::EF_SHIFT_DOWN)
-    web_input_event_modifiers |= WebKit::WebInputEvent::ShiftKey;
+    web_input_event_modifiers |= blink::WebInputEvent::ShiftKey;
   if (aura_event_flags & ui::EF_CONTROL_DOWN)
-    web_input_event_modifiers |= WebKit::WebInputEvent::ControlKey;
+    web_input_event_modifiers |= blink::WebInputEvent::ControlKey;
   if (aura_event_flags & ui::EF_ALT_DOWN)
-    web_input_event_modifiers |= WebKit::WebInputEvent::AltKey;
+    web_input_event_modifiers |= blink::WebInputEvent::AltKey;
   if (aura_event_flags & ui::EF_COMMAND_DOWN)
-    web_input_event_modifiers |= WebKit::WebInputEvent::MetaKey;
+    web_input_event_modifiers |= blink::WebInputEvent::MetaKey;
   return web_input_event_modifiers;
 }
 
@@ -720,10 +789,8 @@ class WebContentsViewAura::WindowObserver
 
   virtual void OnWindowVisibilityChanged(aura::Window* window,
                                          bool visible) OVERRIDE {
-    if (window == view_->window_)
-      return;
-
-    if (window->parent() == parent_ ||
+    if (window == view_->window_ ||
+        window->parent() == parent_ ||
         window->parent() == view_->window_->GetRootWindow()) {
       UpdateConstrainedWindows(NULL);
     }
@@ -823,6 +890,10 @@ class WebContentsViewAura::WindowObserver
   // Overridden RootWindowObserver:
   virtual void OnRootWindowHostMoved(const aura::RootWindow* root,
                                      const gfx::Point& new_origin) OVERRIDE {
+    TRACE_EVENT1("ui",
+                 "WebContentsViewAura::WindowObserver::OnRootWindowHostMoved",
+                 "new_origin", new_origin.ToString());
+
     // This is for the desktop case (i.e. Aura desktop).
     SendScreenRects();
   }
@@ -885,7 +956,7 @@ WebContentsViewAura::WebContentsViewAura(
     WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
       delegate_(delegate),
-      current_drag_op_(WebKit::WebDragOperationNone),
+      current_drag_op_(blink::WebDragOperationNone),
       drag_dest_delegate_(NULL),
       current_rvh_for_drag_(NULL),
       overscroll_change_brightness_(false),
@@ -928,7 +999,7 @@ void WebContentsViewAura::SizeChangedCommon(const gfx::Size& size) {
     rwhv->SetSize(size);
 }
 
-void WebContentsViewAura::EndDrag(WebKit::WebDragOperationsMask ops) {
+void WebContentsViewAura::EndDrag(blink::WebDragOperationsMask ops) {
   aura::Window* root_window = GetNativeView()->GetRootWindow();
   gfx::Point screen_loc =
       gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
@@ -1294,7 +1365,7 @@ RenderWidgetHostView* WebContentsViewAura::CreateViewForPopupWidget(
   return RenderWidgetHostViewPort::CreateViewForWidget(render_widget_host);
 }
 
-void WebContentsViewAura::SetPageTitle(const string16& title) {
+void WebContentsViewAura::SetPageTitle(const base::string16& title) {
   window_->set_title(title);
 }
 
@@ -1349,7 +1420,7 @@ void WebContentsViewAura::ShowPopupMenu(const gfx::Rect& bounds,
 
 void WebContentsViewAura::StartDragging(
     const DropData& drop_data,
-    WebKit::WebDragOperationsMask operations,
+    blink::WebDragOperationsMask operations,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,
     const DragEventSourceInfo& event_info) {
@@ -1363,7 +1434,7 @@ void WebContentsViewAura::StartDragging(
     touch_editable_->EndTouchEditing();
 
   ui::OSExchangeData::Provider* provider = ui::OSExchangeData::CreateProvider();
-  PrepareDragData(drop_data, provider);
+  PrepareDragData(drop_data, provider, web_contents_);
 
   ui::OSExchangeData data(provider);  // takes ownership of |provider|.
 
@@ -1405,7 +1476,7 @@ void WebContentsViewAura::StartDragging(
   web_contents_->SystemDragEnded();
 }
 
-void WebContentsViewAura::UpdateDragCursor(WebKit::WebDragOperation operation) {
+void WebContentsViewAura::UpdateDragCursor(blink::WebDragOperation operation) {
   current_drag_op_ = operation;
 }
 
@@ -1663,7 +1734,7 @@ void WebContentsViewAura::OnDragEntered(const ui::DropTargetEvent& event) {
   current_drop_data_.reset(new DropData());
 
   PrepareDropData(current_drop_data_.get(), event.data());
-  WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
+  blink::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
 
   gfx::Point screen_pt =
       gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
@@ -1683,7 +1754,7 @@ int WebContentsViewAura::OnDragUpdated(const ui::DropTargetEvent& event) {
   if (current_rvh_for_drag_ != web_contents_->GetRenderViewHost())
     OnDragEntered(event);
 
-  WebKit::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
+  blink::WebDragOperationsMask op = ConvertToWeb(event.source_operations());
   gfx::Point screen_pt =
       gfx::Screen::GetScreenFor(GetNativeView())->GetCursorScreenPoint();
   web_contents_->GetRenderViewHost()->DragTargetDragOver(

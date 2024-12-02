@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/synchronization/lock.h"
 #include "cc/animation/timing_function.h"
+#include "cc/base/swap_promise.h"
 #include "cc/debug/frame_rate_counter.h"
 #include "cc/layers/content_layer.h"
 #include "cc/layers/content_layer_client.h"
@@ -2373,7 +2374,7 @@ TEST(LayerTreeHostTest, PartialUpdatesWithGLRenderer) {
   settings.max_partial_texture_updates = 4;
 
   scoped_ptr<LayerTreeHost> host =
-      LayerTreeHost::Create(&client, NULL, settings, NULL);
+      LayerTreeHost::CreateSingleThreaded(&client, &client, NULL, settings);
   EXPECT_TRUE(host->InitializeOutputSurfaceIfNeeded());
   EXPECT_EQ(4u, host->settings().max_partial_texture_updates);
 }
@@ -2385,7 +2386,7 @@ TEST(LayerTreeHostTest, PartialUpdatesWithSoftwareRenderer) {
   settings.max_partial_texture_updates = 4;
 
   scoped_ptr<LayerTreeHost> host =
-      LayerTreeHost::Create(&client, NULL, settings, NULL);
+      LayerTreeHost::CreateSingleThreaded(&client, &client, NULL, settings);
   EXPECT_TRUE(host->InitializeOutputSurfaceIfNeeded());
   EXPECT_EQ(4u, host->settings().max_partial_texture_updates);
 }
@@ -2397,7 +2398,7 @@ TEST(LayerTreeHostTest, PartialUpdatesWithDelegatingRendererAndGLContent) {
   settings.max_partial_texture_updates = 4;
 
   scoped_ptr<LayerTreeHost> host =
-      LayerTreeHost::Create(&client, NULL, settings, NULL);
+      LayerTreeHost::CreateSingleThreaded(&client, &client, NULL, settings);
   EXPECT_TRUE(host->InitializeOutputSurfaceIfNeeded());
   EXPECT_EQ(0u, host->MaxPartialTextureUpdates());
 }
@@ -2410,7 +2411,7 @@ TEST(LayerTreeHostTest,
   settings.max_partial_texture_updates = 4;
 
   scoped_ptr<LayerTreeHost> host =
-      LayerTreeHost::Create(&client, NULL, settings, NULL);
+      LayerTreeHost::CreateSingleThreaded(&client, &client, NULL, settings);
   EXPECT_TRUE(host->InitializeOutputSurfaceIfNeeded());
   EXPECT_EQ(0u, host->MaxPartialTextureUpdates());
 }
@@ -2808,26 +2809,26 @@ class MockIOSurfaceWebGraphicsContext3D : public TestWebGraphicsContext3D {
     test_capabilities_.texture_rectangle = true;
   }
 
-  virtual WebKit::WebGLId createTexture() OVERRIDE {
+  virtual blink::WebGLId createTexture() OVERRIDE {
     return 1;
   }
 
-  MOCK_METHOD1(activeTexture, void(WebKit::WGC3Denum texture));
-  MOCK_METHOD2(bindTexture, void(WebKit::WGC3Denum target,
-                                 WebKit::WebGLId texture_id));
-  MOCK_METHOD3(texParameteri, void(WebKit::WGC3Denum target,
-                                   WebKit::WGC3Denum pname,
-                                   WebKit::WGC3Dint param));
-  MOCK_METHOD5(texImageIOSurface2DCHROMIUM, void(WebKit::WGC3Denum target,
-                                                 WebKit::WGC3Dint width,
-                                                 WebKit::WGC3Dint height,
-                                                 WebKit::WGC3Duint ioSurfaceId,
-                                                 WebKit::WGC3Duint plane));
-  MOCK_METHOD4(drawElements, void(WebKit::WGC3Denum mode,
-                                  WebKit::WGC3Dsizei count,
-                                  WebKit::WGC3Denum type,
-                                  WebKit::WGC3Dintptr offset));
-  MOCK_METHOD1(deleteTexture, void(WebKit::WGC3Denum texture));
+  MOCK_METHOD1(activeTexture, void(blink::WGC3Denum texture));
+  MOCK_METHOD2(bindTexture, void(blink::WGC3Denum target,
+                                 blink::WebGLId texture_id));
+  MOCK_METHOD3(texParameteri, void(blink::WGC3Denum target,
+                                   blink::WGC3Denum pname,
+                                   blink::WGC3Dint param));
+  MOCK_METHOD5(texImageIOSurface2DCHROMIUM, void(blink::WGC3Denum target,
+                                                 blink::WGC3Dint width,
+                                                 blink::WGC3Dint height,
+                                                 blink::WGC3Duint ioSurfaceId,
+                                                 blink::WGC3Duint plane));
+  MOCK_METHOD4(drawElements, void(blink::WGC3Denum mode,
+                                  blink::WGC3Dsizei count,
+                                  blink::WGC3Denum type,
+                                  blink::WGC3Dintptr offset));
+  MOCK_METHOD1(deleteTexture, void(blink::WGC3Denum texture));
 };
 
 
@@ -2935,660 +2936,6 @@ class LayerTreeHostTestIOSurfaceDrawing : public LayerTreeHostTest {
 SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
     LayerTreeHostTestIOSurfaceDrawing);
 
-class LayerTreeHostTestAsyncReadback : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root = FakeContentLayer::Create(&client_);
-    root->SetBounds(gfx::Size(20, 20));
-
-    child = FakeContentLayer::Create(&client_);
-    child->SetBounds(gfx::Size(10, 10));
-    root->AddChild(child);
-
-    layer_tree_host()->SetRootLayer(root);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DidCommitAndDrawFrame() OVERRIDE {
-    WaitForCallback();
-  }
-
-  void WaitForCallback() {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(
-            &LayerTreeHostTestAsyncReadback::NextStep,
-            base::Unretained(this)));
-  }
-
-  void NextStep() {
-    int frame = layer_tree_host()->source_frame_number();
-    switch (frame) {
-      case 1:
-        child->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-            base::Bind(&LayerTreeHostTestAsyncReadback::CopyOutputCallback,
-                       base::Unretained(this))));
-        EXPECT_EQ(0u, callbacks_.size());
-        break;
-      case 2:
-        if (callbacks_.size() < 1u) {
-          WaitForCallback();
-          return;
-        }
-        EXPECT_EQ(1u, callbacks_.size());
-        EXPECT_EQ(gfx::Size(10, 10).ToString(), callbacks_[0].ToString());
-
-        child->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-            base::Bind(&LayerTreeHostTestAsyncReadback::CopyOutputCallback,
-                       base::Unretained(this))));
-        root->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-            base::Bind(&LayerTreeHostTestAsyncReadback::CopyOutputCallback,
-                       base::Unretained(this))));
-        child->RequestCopyOfOutput(CopyOutputRequest::CreateBitmapRequest(
-            base::Bind(&LayerTreeHostTestAsyncReadback::CopyOutputCallback,
-                       base::Unretained(this))));
-        EXPECT_EQ(1u, callbacks_.size());
-        break;
-      case 3:
-        if (callbacks_.size() < 4u) {
-          WaitForCallback();
-          return;
-        }
-        EXPECT_EQ(4u, callbacks_.size());
-        // The child was copied to a bitmap and passed back twice.
-        EXPECT_EQ(gfx::Size(10, 10).ToString(), callbacks_[1].ToString());
-        EXPECT_EQ(gfx::Size(10, 10).ToString(), callbacks_[2].ToString());
-        // The root was copied to a bitmap and passed back also.
-        EXPECT_EQ(gfx::Size(20, 20).ToString(), callbacks_[3].ToString());
-        EndTest();
-        break;
-    }
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_TRUE(result->HasBitmap());
-    scoped_ptr<SkBitmap> bitmap = result->TakeBitmap().Pass();
-    EXPECT_EQ(result->size().ToString(),
-              gfx::Size(bitmap->width(), bitmap->height()).ToString());
-    callbacks_.push_back(result->size());
-  }
-
-  virtual void AfterTest() OVERRIDE {
-    EXPECT_EQ(4u, callbacks_.size());
-  }
-
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback)
-      OVERRIDE {
-    scoped_ptr<FakeOutputSurface> output_surface;
-    if (use_gl_renderer_) {
-      output_surface = FakeOutputSurface::Create3d().Pass();
-    } else {
-      output_surface = FakeOutputSurface::CreateSoftware(
-          make_scoped_ptr(new SoftwareOutputDevice)).Pass();
-    }
-    return output_surface.PassAs<OutputSurface>();
-  }
-
-  bool use_gl_renderer_;
-  std::vector<gfx::Size> callbacks_;
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root;
-  scoped_refptr<FakeContentLayer> child;
-};
-
-// Readback can't be done with a delegating renderer.
-TEST_F(LayerTreeHostTestAsyncReadback, GLRenderer_RunSingleThread) {
-  use_gl_renderer_ = true;
-  RunTest(false, false, false);
-}
-
-TEST_F(LayerTreeHostTestAsyncReadback,
-       GLRenderer_RunMultiThread_MainThreadPainting) {
-  use_gl_renderer_ = true;
-  RunTest(true, false, false);
-}
-
-TEST_F(LayerTreeHostTestAsyncReadback, SoftwareRenderer_RunSingleThread) {
-  use_gl_renderer_ = false;
-  RunTest(false, false, false);
-}
-
-TEST_F(LayerTreeHostTestAsyncReadback,
-       SoftwareRenderer_RunMultiThread_MainThreadPainting) {
-  use_gl_renderer_ = false;
-  RunTest(true, false, false);
-}
-
-class LayerTreeHostTestAsyncReadbackLayerDestroyed : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    main_destroyed_ = FakeContentLayer::Create(&client_);
-    main_destroyed_->SetBounds(gfx::Size(15, 15));
-    root_->AddChild(main_destroyed_);
-
-    impl_destroyed_ = FakeContentLayer::Create(&client_);
-    impl_destroyed_->SetBounds(gfx::Size(10, 10));
-    root_->AddChild(impl_destroyed_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    callback_count_ = 0;
-    PostSetNeedsCommitToMainThread();
-  }
-
-  virtual void DidCommit() OVERRIDE {
-    int frame = layer_tree_host()->source_frame_number();
-    switch (frame) {
-      case 1:
-        main_destroyed_->RequestCopyOfOutput(
-            CopyOutputRequest::CreateBitmapRequest(base::Bind(
-                &LayerTreeHostTestAsyncReadbackLayerDestroyed::
-                    CopyOutputCallback,
-                base::Unretained(this))));
-        impl_destroyed_->RequestCopyOfOutput(
-            CopyOutputRequest::CreateBitmapRequest(base::Bind(
-                &LayerTreeHostTestAsyncReadbackLayerDestroyed::
-                    CopyOutputCallback,
-                base::Unretained(this))));
-        EXPECT_EQ(0, callback_count_);
-
-        // Destroy the main thread layer right away.
-        main_destroyed_->RemoveFromParent();
-        main_destroyed_ = NULL;
-
-        // Should callback with a NULL bitmap.
-        EXPECT_EQ(1, callback_count_);
-
-        // Prevent drawing so we can't make a copy of the impl_destroyed layer.
-        layer_tree_host()->SetViewportSize(gfx::Size());
-        break;
-      case 2:
-        // Flush the message loops and make sure the callbacks run.
-        layer_tree_host()->SetNeedsCommit();
-        break;
-      case 3:
-        // No drawing means no readback yet.
-        EXPECT_EQ(1, callback_count_);
-
-        // Destroy the impl thread layer.
-        impl_destroyed_->RemoveFromParent();
-        impl_destroyed_ = NULL;
-
-        // No callback yet because it's on the impl side.
-        EXPECT_EQ(1, callback_count_);
-        break;
-      case 4:
-        // Flush the message loops and make sure the callbacks run.
-        layer_tree_host()->SetNeedsCommit();
-        break;
-      case 5:
-        // We should get another callback with a NULL bitmap.
-        EXPECT_EQ(2, callback_count_);
-        EndTest();
-        break;
-    }
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_TRUE(result->IsEmpty());
-    ++callback_count_;
-  }
-
-  virtual void AfterTest() OVERRIDE {}
-
-  int callback_count_;
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> main_destroyed_;
-  scoped_refptr<FakeContentLayer> impl_destroyed_;
-};
-
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestAsyncReadbackLayerDestroyed);
-
-class LayerTreeHostTestAsyncReadbackInHiddenSubtree : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    grand_parent_layer_ = FakeContentLayer::Create(&client_);
-    grand_parent_layer_->SetBounds(gfx::Size(15, 15));
-    root_->AddChild(grand_parent_layer_);
-
-    // parent_layer_ owns a render surface.
-    parent_layer_ = FakeContentLayer::Create(&client_);
-    parent_layer_->SetBounds(gfx::Size(15, 15));
-    parent_layer_->SetForceRenderSurface(true);
-    grand_parent_layer_->AddChild(parent_layer_);
-
-    copy_layer_ = FakeContentLayer::Create(&client_);
-    copy_layer_->SetBounds(gfx::Size(10, 10));
-    parent_layer_->AddChild(copy_layer_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  void AddCopyRequest(Layer* layer) {
-    layer->RequestCopyOfOutput(
-        CopyOutputRequest::CreateBitmapRequest(base::Bind(
-            &LayerTreeHostTestAsyncReadbackInHiddenSubtree::CopyOutputCallback,
-            base::Unretained(this))));
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    callback_count_ = 0;
-    PostSetNeedsCommitToMainThread();
-
-    AddCopyRequest(copy_layer_.get());
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_EQ(copy_layer_->bounds().ToString(), result->size().ToString());
-    ++callback_count_;
-
-    switch (callback_count_) {
-      case 1:
-        // Hide the copy request layer.
-        grand_parent_layer_->SetHideLayerAndSubtree(false);
-        parent_layer_->SetHideLayerAndSubtree(false);
-        copy_layer_->SetHideLayerAndSubtree(true);
-        AddCopyRequest(copy_layer_.get());
-        break;
-      case 2:
-        // Hide the copy request layer's parent only.
-        grand_parent_layer_->SetHideLayerAndSubtree(false);
-        parent_layer_->SetHideLayerAndSubtree(true);
-        copy_layer_->SetHideLayerAndSubtree(false);
-        AddCopyRequest(copy_layer_.get());
-        break;
-      case 3:
-        // Hide the copy request layer's grand parent only.
-        grand_parent_layer_->SetHideLayerAndSubtree(true);
-        parent_layer_->SetHideLayerAndSubtree(false);
-        copy_layer_->SetHideLayerAndSubtree(false);
-        AddCopyRequest(copy_layer_.get());
-        break;
-      case 4:
-        // Hide the copy request layer's parent and grandparent.
-        grand_parent_layer_->SetHideLayerAndSubtree(true);
-        parent_layer_->SetHideLayerAndSubtree(true);
-        copy_layer_->SetHideLayerAndSubtree(false);
-        AddCopyRequest(copy_layer_.get());
-        break;
-      case 5:
-        // Hide the copy request layer as well as its parent and grandparent.
-        grand_parent_layer_->SetHideLayerAndSubtree(true);
-        parent_layer_->SetHideLayerAndSubtree(true);
-        copy_layer_->SetHideLayerAndSubtree(true);
-        AddCopyRequest(copy_layer_.get());
-        break;
-      case 6:
-        EndTest();
-        break;
-    }
-  }
-
-  virtual void AfterTest() OVERRIDE {}
-
-  int callback_count_;
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> grand_parent_layer_;
-  scoped_refptr<FakeContentLayer> parent_layer_;
-  scoped_refptr<FakeContentLayer> copy_layer_;
-};
-
-// No output to copy for delegated renderers.
-SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(
-    LayerTreeHostTestAsyncReadbackInHiddenSubtree);
-
-class LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest
-    : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    grand_parent_layer_ = FakeContentLayer::Create(&client_);
-    grand_parent_layer_->SetBounds(gfx::Size(15, 15));
-    grand_parent_layer_->SetHideLayerAndSubtree(true);
-    root_->AddChild(grand_parent_layer_);
-
-    // parent_layer_ owns a render surface.
-    parent_layer_ = FakeContentLayer::Create(&client_);
-    parent_layer_->SetBounds(gfx::Size(15, 15));
-    parent_layer_->SetForceRenderSurface(true);
-    grand_parent_layer_->AddChild(parent_layer_);
-
-    copy_layer_ = FakeContentLayer::Create(&client_);
-    copy_layer_->SetBounds(gfx::Size(10, 10));
-    parent_layer_->AddChild(copy_layer_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    did_draw_ = false;
-    PostSetNeedsCommitToMainThread();
-
-    copy_layer_->RequestCopyOfOutput(
-        CopyOutputRequest::CreateBitmapRequest(base::Bind(
-            &LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest::
-                CopyOutputCallback,
-            base::Unretained(this))));
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_EQ(copy_layer_->bounds().ToString(), result->size().ToString());
-    EndTest();
-  }
-
-  virtual void DrawLayersOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
-    Renderer* renderer = host_impl->renderer();
-
-    LayerImpl* root = host_impl->active_tree()->root_layer();
-    LayerImpl* grand_parent = root->children()[0];
-    LayerImpl* parent = grand_parent->children()[0];
-    LayerImpl* copy_layer = parent->children()[0];
-
-    // |parent| owns a surface, but it was hidden and not part of the copy
-    // request so it should not allocate any resource.
-    EXPECT_FALSE(renderer->HasAllocatedResourcesForTesting(
-        parent->render_surface()->RenderPassId()));
-
-    // |copy_layer| should have been rendered to a texture since it was needed
-    // for a copy request.
-    EXPECT_TRUE(renderer->HasAllocatedResourcesForTesting(
-        copy_layer->render_surface()->RenderPassId()));
-
-    did_draw_ = true;
-  }
-
-  virtual void AfterTest() OVERRIDE { EXPECT_TRUE(did_draw_); }
-
-  FakeContentLayerClient client_;
-  bool did_draw_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> grand_parent_layer_;
-  scoped_refptr<FakeContentLayer> parent_layer_;
-  scoped_refptr<FakeContentLayer> copy_layer_;
-};
-
-// No output to copy for delegated renderers.
-SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
-      LayerTreeHostTestHiddenSurfaceNotAllocatedForSubtreeCopyRequest);
-
-class LayerTreeHostTestAsyncReadbackClippedOut : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    parent_layer_ = FakeContentLayer::Create(&client_);
-    parent_layer_->SetBounds(gfx::Size(15, 15));
-    parent_layer_->SetMasksToBounds(true);
-    root_->AddChild(parent_layer_);
-
-    copy_layer_ = FakeContentLayer::Create(&client_);
-    copy_layer_->SetPosition(gfx::Point(15, 15));
-    copy_layer_->SetBounds(gfx::Size(10, 10));
-    parent_layer_->AddChild(copy_layer_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    PostSetNeedsCommitToMainThread();
-
-    copy_layer_->RequestCopyOfOutput(
-        CopyOutputRequest::CreateBitmapRequest(base::Bind(
-            &LayerTreeHostTestAsyncReadbackClippedOut::CopyOutputCallback,
-            base::Unretained(this))));
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    // We should still get a callback with no output if the copy requested layer
-    // was completely clipped away.
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_EQ(gfx::Size().ToString(), result->size().ToString());
-    EndTest();
-  }
-
-  virtual void AfterTest() OVERRIDE {}
-
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> parent_layer_;
-  scoped_refptr<FakeContentLayer> copy_layer_;
-};
-
-// No output to copy for delegated renderers.
-SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(
-    LayerTreeHostTestAsyncReadbackClippedOut);
-
-class LayerTreeHostTestAsyncTwoReadbacksWithoutDraw : public LayerTreeHostTest {
- protected:
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    copy_layer_ = FakeContentLayer::Create(&client_);
-    copy_layer_->SetBounds(gfx::Size(10, 10));
-    root_->AddChild(copy_layer_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  void AddCopyRequest(Layer* layer) {
-    layer->RequestCopyOfOutput(
-        CopyOutputRequest::CreateBitmapRequest(base::Bind(
-            &LayerTreeHostTestAsyncTwoReadbacksWithoutDraw::CopyOutputCallback,
-            base::Unretained(this))));
-  }
-
-  virtual void BeginTest() OVERRIDE {
-    saw_copy_request_ = false;
-    callback_count_ = 0;
-    PostSetNeedsCommitToMainThread();
-
-    // Prevent drawing.
-    layer_tree_host()->SetViewportSize(gfx::Size(0, 0));
-
-    AddCopyRequest(copy_layer_.get());
-  }
-
-  virtual void DidActivateTreeOnThread(LayerTreeHostImpl* impl) OVERRIDE {
-    if (impl->active_tree()->source_frame_number() == 0) {
-      LayerImpl* root = impl->active_tree()->root_layer();
-      EXPECT_TRUE(root->children()[0]->HasCopyRequest());
-      saw_copy_request_ = true;
-    }
-  }
-
-  virtual void DidCommit() OVERRIDE {
-    if (layer_tree_host()->source_frame_number() == 1) {
-      // Allow drawing.
-      layer_tree_host()->SetViewportSize(gfx::Size(root_->bounds()));
-
-      AddCopyRequest(copy_layer_.get());
-    }
-  }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_EQ(copy_layer_->bounds().ToString(), result->size().ToString());
-    ++callback_count_;
-
-    if (callback_count_ == 2)
-      EndTest();
-  }
-
-  virtual void AfterTest() OVERRIDE { EXPECT_TRUE(saw_copy_request_); }
-
-  bool saw_copy_request_;
-  int callback_count_;
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> copy_layer_;
-};
-
-// No output to copy for delegated renderers.
-SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(
-    LayerTreeHostTestAsyncTwoReadbacksWithoutDraw);
-
-class LayerTreeHostTestAsyncReadbackLostOutputSurface
-    : public LayerTreeHostTest {
- protected:
-  virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback)
-      OVERRIDE {
-    if (!first_context_provider_.get()) {
-      first_context_provider_ = TestContextProvider::Create();
-      return FakeOutputSurface::Create3d(first_context_provider_)
-          .PassAs<OutputSurface>();
-    }
-
-    EXPECT_FALSE(second_context_provider_.get());
-    second_context_provider_ = TestContextProvider::Create();
-    return FakeOutputSurface::Create3d(second_context_provider_)
-        .PassAs<OutputSurface>();
-  }
-
-  virtual void SetupTree() OVERRIDE {
-    root_ = FakeContentLayer::Create(&client_);
-    root_->SetBounds(gfx::Size(20, 20));
-
-    copy_layer_ = FakeContentLayer::Create(&client_);
-    copy_layer_->SetBounds(gfx::Size(10, 10));
-    root_->AddChild(copy_layer_);
-
-    layer_tree_host()->SetRootLayer(root_);
-    LayerTreeHostTest::SetupTree();
-  }
-
-  virtual void BeginTest() OVERRIDE { PostSetNeedsCommitToMainThread(); }
-
-  void CopyOutputCallback(scoped_ptr<CopyOutputResult> result) {
-    EXPECT_TRUE(layer_tree_host()->proxy()->IsMainThread());
-    EXPECT_EQ(gfx::Size(10, 10).ToString(), result->size().ToString());
-    EXPECT_TRUE(result->HasTexture());
-
-    // Save the result for later.
-    EXPECT_FALSE(result_);
-    result_ = result.Pass();
-
-    // Post a commit to lose the output surface.
-    layer_tree_host()->SetNeedsCommit();
-  }
-
-  virtual void DidCommitAndDrawFrame() OVERRIDE {
-    switch (layer_tree_host()->source_frame_number()) {
-      case 1:
-        // The layers have been pushed to the impl side. The layer textures have
-        // been allocated.
-
-        // Request a copy of the layer. This will use another texture.
-        copy_layer_->RequestCopyOfOutput(
-            CopyOutputRequest::CreateRequest(base::Bind(
-                &LayerTreeHostTestAsyncReadbackLostOutputSurface::
-                CopyOutputCallback,
-                base::Unretained(this))));
-        break;
-      case 4:
-        // With SingleThreadProxy it takes two commits to finally swap after a
-        // context loss.
-      case 5:
-        // Now destroy the CopyOutputResult, releasing the texture inside back
-        // to the compositor.
-        EXPECT_TRUE(result_);
-        result_.reset();
-
-        // Check that it is released.
-        ImplThreadTaskRunner()->PostTask(
-            FROM_HERE,
-            base::Bind(&LayerTreeHostTestAsyncReadbackLostOutputSurface::
-                            CheckNumTextures,
-                       base::Unretained(this),
-                       num_textures_after_loss_ - 1));
-        break;
-    }
-  }
-
-  virtual void SwapBuffersOnThread(LayerTreeHostImpl *impl, bool result)
-      OVERRIDE {
-    switch (impl->active_tree()->source_frame_number()) {
-      case 0:
-        // The layers have been drawn, so their textures have been allocated.
-        EXPECT_FALSE(result_);
-        num_textures_without_readback_ =
-            first_context_provider_->TestContext3d()->NumTextures();
-        break;
-      case 1:
-        // We did a readback, so there will be a readback texture around now.
-        EXPECT_LT(num_textures_without_readback_,
-                  first_context_provider_->TestContext3d()->NumTextures());
-        break;
-      case 2:
-        // The readback texture is collected.
-        EXPECT_TRUE(result_);
-
-        // Lose the output surface.
-        first_context_provider_->TestContext3d()->loseContextCHROMIUM(
-            GL_GUILTY_CONTEXT_RESET_ARB,
-            GL_INNOCENT_CONTEXT_RESET_ARB);
-        break;
-      case 3:
-        // With SingleThreadProxy it takes two commits to finally swap after a
-        // context loss.
-      case 4:
-        // The output surface has been recreated.
-        EXPECT_TRUE(second_context_provider_.get());
-
-        num_textures_after_loss_ =
-            first_context_provider_->TestContext3d()->NumTextures();
-        break;
-    }
-  }
-
-  void CheckNumTextures(size_t expected_num_textures) {
-    EXPECT_EQ(expected_num_textures,
-              first_context_provider_->TestContext3d()->NumTextures());
-    EndTest();
-  }
-
-  virtual void AfterTest() OVERRIDE {}
-
-  scoped_refptr<TestContextProvider> first_context_provider_;
-  scoped_refptr<TestContextProvider> second_context_provider_;
-  size_t num_textures_without_readback_;
-  size_t num_textures_after_loss_;
-  FakeContentLayerClient client_;
-  scoped_refptr<FakeContentLayer> root_;
-  scoped_refptr<FakeContentLayer> copy_layer_;
-  scoped_ptr<CopyOutputResult> result_;
-};
-
-// No output to copy for delegated renderers.
-SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(
-    LayerTreeHostTestAsyncReadbackLostOutputSurface);
-
 class LayerTreeHostTestNumFramesPending : public LayerTreeHostTest {
  public:
   virtual void BeginTest() OVERRIDE {
@@ -3687,7 +3034,6 @@ class LayerTreeHostTestDeferredInitialize : public LayerTreeHostTest {
       OVERRIDE {
     scoped_ptr<TestWebGraphicsContext3D> context3d(
         TestWebGraphicsContext3D::Create());
-    context3d->set_support_swapbuffers_complete_callback(false);
 
     return FakeOutputSurface::CreateDeferredGL(
         scoped_ptr<SoftwareOutputDevice>(new SoftwareOutputDevice))
@@ -4891,6 +4237,7 @@ class LayerTreeHostTestMaxTransferBufferUsageBytes : public LayerTreeHostTest {
  protected:
   virtual void InitializeSettings(LayerTreeSettings* settings) OVERRIDE {
     settings->impl_side_painting = true;
+    settings->default_tile_size = gfx::Size(128, 128);
   }
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback)
@@ -4922,8 +4269,11 @@ class LayerTreeHostTestMaxTransferBufferUsageBytes : public LayerTreeHostTest {
 
     // Expect that the transfer buffer memory used is equal to the
     // MaxTransferBufferUsageBytes value set in CreateOutputSurface.
-    EXPECT_EQ(1024 * 1024u,
-              context->GetTransferBufferMemoryUsedBytes());
+    // NOTE: This is now 1/2 due to raster memory limit in TileManager.
+    //       Only half the limit will be reached unless the task set
+    //       thrashes to a completly new set of tiles.
+    EXPECT_EQ(512 * 1024u,
+              context->GetPeakTransferBufferMemoryUsedBytes());
     EndTest();
   }
 
@@ -5219,5 +4569,207 @@ class LayerTreeHostTestSetMemoryPolicyOnLostOutputSurface
 // No output to copy for delegated renderers.
 SINGLE_AND_MULTI_THREAD_TEST_F(
     LayerTreeHostTestSetMemoryPolicyOnLostOutputSurface);
+
+struct TestSwapPromiseResult {
+  TestSwapPromiseResult() : did_swap_called(false),
+                            did_not_swap_called(false),
+                            dtor_called(false),
+                            reason(SwapPromise::DID_NOT_SWAP_UNKNOWN) {
+  }
+
+  bool did_swap_called;
+  bool did_not_swap_called;
+  bool dtor_called;
+  SwapPromise::DidNotSwapReason reason;
+  base::Lock lock;
+};
+
+class TestSwapPromise : public SwapPromise {
+ public:
+  explicit TestSwapPromise(TestSwapPromiseResult* result)
+      : result_(result) {
+  }
+
+  virtual ~TestSwapPromise() {
+    base::AutoLock lock(result_->lock);
+    result_->dtor_called = true;
+  }
+
+  virtual void DidSwap(CompositorFrameMetadata* metadata) OVERRIDE {
+    base::AutoLock lock(result_->lock);
+    EXPECT_FALSE(result_->did_swap_called);
+    EXPECT_FALSE(result_->did_not_swap_called);
+    result_->did_swap_called = true;
+  }
+
+  virtual void DidNotSwap(DidNotSwapReason reason) OVERRIDE {
+    base::AutoLock lock(result_->lock);
+    EXPECT_FALSE(result_->did_swap_called);
+    EXPECT_FALSE(result_->did_not_swap_called);
+    result_->did_not_swap_called = true;
+    result_->reason = reason;
+  }
+
+ private:
+  // Not owned.
+  TestSwapPromiseResult* result_;
+};
+
+class LayerTreeHostTestBreakSwapPromise
+    : public LayerTreeHostTest {
+ protected:
+  LayerTreeHostTestBreakSwapPromise()
+      : commit_count_(0), commit_complete_count_(0) {
+  }
+
+  virtual void WillBeginMainFrame() OVERRIDE {
+    ASSERT_LE(commit_count_, 2);
+    scoped_ptr<SwapPromise> swap_promise(new TestSwapPromise(
+        &swap_promise_result_[commit_count_]));
+    layer_tree_host()->QueueSwapPromise(swap_promise.Pass());
+  }
+
+  virtual void BeginTest() OVERRIDE { PostSetNeedsCommitToMainThread(); }
+
+  virtual void DidCommit() OVERRIDE {
+    commit_count_++;
+    if (commit_count_ == 2) {
+      // This commit will finish.
+      layer_tree_host()->SetNeedsCommit();
+    }
+  }
+
+  virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
+    commit_complete_count_++;
+    if (commit_complete_count_ == 1) {
+      // This commit will be aborted because no actual update.
+      PostSetNeedsUpdateLayersToMainThread();
+    } else {
+      EndTest();
+    }
+  }
+
+  virtual void AfterTest() OVERRIDE {
+    // 3 commits are scheduled. 2 completes. 1 is aborted.
+    EXPECT_EQ(commit_count_, 3);
+    EXPECT_EQ(commit_complete_count_, 2);
+
+    {
+      // The first commit completes and causes swap buffer which finishes
+      // the promise.
+      base::AutoLock lock(swap_promise_result_[0].lock);
+      EXPECT_TRUE(swap_promise_result_[0].did_swap_called);
+      EXPECT_FALSE(swap_promise_result_[0].did_not_swap_called);
+      EXPECT_TRUE(swap_promise_result_[0].dtor_called);
+    }
+
+    {
+      // The second commit aborts.
+      base::AutoLock lock(swap_promise_result_[1].lock);
+      EXPECT_FALSE(swap_promise_result_[1].did_swap_called);
+      EXPECT_TRUE(swap_promise_result_[1].did_not_swap_called);
+      EXPECT_EQ(SwapPromise::COMMIT_FAILS, swap_promise_result_[1].reason);
+      EXPECT_TRUE(swap_promise_result_[1].dtor_called);
+    }
+
+    {
+      // The last commit completes but it does not cause swap buffer because
+      // there is no damage in the frame data.
+      base::AutoLock lock(swap_promise_result_[2].lock);
+      EXPECT_FALSE(swap_promise_result_[2].did_swap_called);
+      EXPECT_TRUE(swap_promise_result_[2].did_not_swap_called);
+      EXPECT_EQ(SwapPromise::SWAP_FAILS, swap_promise_result_[2].reason);
+      EXPECT_TRUE(swap_promise_result_[2].dtor_called);
+    }
+  }
+
+  int commit_count_;
+  int commit_complete_count_;
+  TestSwapPromiseResult swap_promise_result_[3];
+};
+
+MULTI_THREAD_TEST_F(LayerTreeHostTestBreakSwapPromise);
+
+
+class SimpleSwapPromiseMonitor : public SwapPromiseMonitor {
+ public:
+  SimpleSwapPromiseMonitor(LayerTreeHost* layer_tree_host,
+                           LayerTreeHostImpl* layer_tree_host_impl,
+                           int* set_needs_commit_count,
+                           int* set_needs_redraw_count)
+      : SwapPromiseMonitor(layer_tree_host, layer_tree_host_impl),
+        set_needs_commit_count_(set_needs_commit_count),
+        set_needs_redraw_count_(set_needs_redraw_count) {}
+
+  virtual ~SimpleSwapPromiseMonitor() {}
+
+  virtual void OnSetNeedsCommitOnMain() OVERRIDE {
+    (*set_needs_commit_count_)++;
+  }
+
+  virtual void OnSetNeedsRedrawOnImpl() OVERRIDE {
+    (*set_needs_redraw_count_)++;
+  }
+
+ private:
+  int* set_needs_commit_count_;
+  int* set_needs_redraw_count_;
+};
+
+class LayerTreeHostTestSimpleSwapPromiseMonitor
+    : public LayerTreeHostTest {
+
+  virtual void BeginTest() OVERRIDE { PostSetNeedsCommitToMainThread(); }
+
+  virtual void WillBeginMainFrame() OVERRIDE {
+    int set_needs_commit_count = 0;
+    int set_needs_redraw_count = 0;
+
+    {
+      scoped_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
+          new SimpleSwapPromiseMonitor(layer_tree_host(),
+                                       NULL,
+                                       &set_needs_commit_count,
+                                       &set_needs_redraw_count));
+      layer_tree_host()->SetNeedsCommit();
+      EXPECT_EQ(1, set_needs_commit_count);
+      EXPECT_EQ(0, set_needs_redraw_count);
+    }
+
+    // Now the monitor is destroyed, SetNeedsCommit() is no longer being
+    // monitored.
+    layer_tree_host()->SetNeedsCommit();
+    EXPECT_EQ(1, set_needs_commit_count);
+    EXPECT_EQ(0, set_needs_redraw_count);
+
+    {
+      scoped_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
+          new SimpleSwapPromiseMonitor(layer_tree_host(),
+                                       NULL,
+                                       &set_needs_commit_count,
+                                       &set_needs_redraw_count));
+      layer_tree_host()->SetNeedsUpdateLayers();
+      EXPECT_EQ(2, set_needs_commit_count);
+      EXPECT_EQ(0, set_needs_redraw_count);
+    }
+
+    {
+      scoped_ptr<SimpleSwapPromiseMonitor> swap_promise_monitor(
+          new SimpleSwapPromiseMonitor(layer_tree_host(),
+                                       NULL,
+                                       &set_needs_commit_count,
+                                       &set_needs_redraw_count));
+      layer_tree_host()->SetNeedsAnimate();
+      EXPECT_EQ(3, set_needs_commit_count);
+      EXPECT_EQ(0, set_needs_redraw_count);
+    }
+
+    EndTest();
+  }
+
+  virtual void AfterTest() OVERRIDE {}
+};
+
+MULTI_THREAD_TEST_F(LayerTreeHostTestSimpleSwapPromiseMonitor);
 
 }  // namespace cc

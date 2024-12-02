@@ -37,7 +37,7 @@ class PanelStackWindow : public views::WidgetObserver,
   virtual ~PanelStackWindow();
 
   // Overridden from views::WidgetDelegate:
-  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual base::string16 GetWindowTitle() const OVERRIDE;
   virtual gfx::ImageSkia GetWindowAppIcon() OVERRIDE;
   virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
@@ -73,8 +73,8 @@ PanelStackWindow::PanelStackWindow(const gfx::Rect& bounds,
 PanelStackWindow::~PanelStackWindow() {
 }
 
-string16 PanelStackWindow::GetWindowTitle() const {
-  return delegate_ ? delegate_->GetTitle() : string16();
+base::string16 PanelStackWindow::GetWindowTitle() const {
+  return delegate_ ? delegate_->GetTitle() : base::string16();
 }
 
 gfx::ImageSkia PanelStackWindow::GetWindowAppIcon() {

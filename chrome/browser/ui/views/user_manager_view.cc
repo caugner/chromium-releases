@@ -84,8 +84,8 @@ void UserManagerView::Show(const base::FilePath& profile_path_to_focus) {
       ProfileManager::GetGuestProfilePath(),
       base::Bind(&UserManagerView::OnGuestProfileCreated,
                  profile_path_to_focus),
-      string16(),
-      string16(),
+      base::string16(),
+      base::string16(),
       std::string());
 }
 
@@ -148,7 +148,7 @@ bool UserManagerView::CanMaximize() const {
   return true;
 }
 
-string16 UserManagerView::GetWindowTitle() const {
+base::string16 UserManagerView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_USER_MANAGER_SCREEN_TITLE);
 }
 

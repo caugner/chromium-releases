@@ -72,9 +72,12 @@ class QuicDispatcher : public QuicPacketWriter, public QuicSessionOwner {
       QuicBlockedWriterInterface* writer) OVERRIDE;
   virtual bool IsWriteBlockedDataBuffered() const OVERRIDE;
 
+  // Process the incoming packet by creating a new session, passing it to
+  // an existing session, or passing it to the TimeWaitListManager.
   virtual void ProcessPacket(const IPEndPoint& server_address,
                              const IPEndPoint& client_address,
                              QuicGuid guid,
+                             bool has_version_flag,
                              const QuicEncryptedPacket& packet);
 
   // Called when the underyling connection becomes writable to allow
@@ -96,6 +99,7 @@ class QuicDispatcher : public QuicPacketWriter, public QuicSessionOwner {
 
   virtual QuicSession* CreateQuicSession(
       QuicGuid guid,
+      const IPEndPoint& server_address,
       const IPEndPoint& client_address);
 
   // Deletes all sessions on the closed session list and clears the list.

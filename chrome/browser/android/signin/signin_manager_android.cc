@@ -17,7 +17,11 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/signin/android_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/google_auto_login_helper.h"
+#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/pref_names.h"
@@ -25,13 +29,12 @@
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/cloud/cloud_policy_client.h"
-#include "chrome/browser/policy/cloud/cloud_policy_core.h"
-#include "chrome/browser/policy/cloud/cloud_policy_store.h"
-#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_android.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
+#include "components/policy/core/common/cloud/cloud_policy_core.h"
+#include "components/policy/core/common/cloud/cloud_policy_store.h"
+#include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #endif
 
@@ -86,7 +89,7 @@ void SigninManagerAndroid::CheckPolicyBeforeSignIn(JNIEnv* env,
   username_ = base::android::ConvertJavaStringToUTF8(env, username);
   policy::UserPolicySigninService* service =
       policy::UserPolicySigninServiceFactory::GetForProfile(profile_);
-  service->RegisterPolicyClient(
+  service->RegisterForPolicy(
       base::android::ConvertJavaStringToUTF8(env, username),
       base::Bind(&SigninManagerAndroid::OnPolicyRegisterDone,
                  weak_factory_.GetWeakPtr()));
@@ -102,13 +105,17 @@ void SigninManagerAndroid::CheckPolicyBeforeSignIn(JNIEnv* env,
 
 void SigninManagerAndroid::FetchPolicyBeforeSignIn(JNIEnv* env, jobject obj) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  if (cloud_policy_client_) {
+  if (!dm_token_.empty()) {
     policy::UserPolicySigninService* service =
         policy::UserPolicySigninServiceFactory::GetForProfile(profile_);
     service->FetchPolicyForSignedInUser(
-        cloud_policy_client_.Pass(),
+        username_,
+        dm_token_,
+        client_id_,
         base::Bind(&SigninManagerAndroid::OnPolicyFetchDone,
                    weak_factory_.GetWeakPtr()));
+    dm_token_.clear();
+    client_id_.clear();
     return;
   }
 #endif
@@ -136,7 +143,7 @@ SigninManagerAndroid::GetManagementDomain(JNIEnv* env, jobject obj) {
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::UserCloudPolicyManager* manager =
-      policy::UserCloudPolicyManagerFactory::GetForProfile(profile_);
+      policy::UserCloudPolicyManagerFactory::GetForBrowserContext(profile_);
   policy::CloudPolicyStore* store = manager->core()->store();
 
   if (store && store->is_managed() && store->policy()->has_username()) {
@@ -160,12 +167,14 @@ void SigninManagerAndroid::WipeProfileData(JNIEnv* env, jobject obj) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
 
 void SigninManagerAndroid::OnPolicyRegisterDone(
-    scoped_ptr<policy::CloudPolicyClient> client) {
-  cloud_policy_client_ = client.Pass();
+    const std::string& dm_token,
+    const std::string& client_id) {
+  dm_token_ = dm_token;
+  client_id_ = client_id;
 
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jstring> domain;
-  if (cloud_policy_client_) {
+  if (!dm_token_.empty()) {
     DCHECK(!username_.empty());
     domain.Reset(
         base::android::ConvertUTF8ToJavaString(
@@ -200,15 +209,32 @@ void SigninManagerAndroid::OnBrowsingDataRemoverDone() {
 }
 
 void SigninManagerAndroid::LogInSignedInUser(JNIEnv* env, jobject obj) {
-  // AutoLogin deletes itself.
-  GoogleAutoLoginHelper* autoLogin = new GoogleAutoLoginHelper(profile_);
-  autoLogin->LogIn();
+  if (profiles::IsNewProfileManagementEnabled()) {
+    // New Mirror code path that just fires the events and let the
+    // Account Reconcilor handles everything.
+    AndroidProfileOAuth2TokenService* token_service =
+        ProfileOAuth2TokenServiceFactory::GetPlatformSpecificForProfile(
+            profile_);
+    const std::string& primary_acct = token_service->GetPrimaryAccountId();
+    const std::vector<std::string>& ids = token_service->GetAccounts();
+    token_service->ValidateAccounts(primary_acct, ids);
+
+  } else {
+    DVLOG(1) << "SigninManagerAndroid::LogInSignedInUser "
+        " Manually calling GoogleAutoLoginHelper";
+    // Old code path that doesn't depend on the new Account Reconcilor.
+    // We manually login.
+
+    // AutoLogin deletes itself.
+    GoogleAutoLoginHelper* autoLogin = new GoogleAutoLoginHelper(profile_);
+    autoLogin->LogIn();
+  }
 }
 
-static int Init(JNIEnv* env, jobject obj) {
+static jlong Init(JNIEnv* env, jobject obj) {
   SigninManagerAndroid* signin_manager_android =
       new SigninManagerAndroid(env, obj);
-  return reinterpret_cast<jint>(signin_manager_android);
+  return reinterpret_cast<intptr_t>(signin_manager_android);
 }
 
 static jboolean ShouldLoadPolicyForUser(JNIEnv* env,

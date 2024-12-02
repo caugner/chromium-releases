@@ -457,6 +457,25 @@ class TabDragController : public content::WebContentsDelegate,
   // |source_tabstrip_|.
   bool AreTabsConsecutive();
 
+  // Calculates and returns new bounds for the dragged browser window.
+  // Takes into consideration current and restore bounds of |source| tab strip
+  // preventing the dragged size from being too small. Positions the new bounds
+  // such that the tab that was dragged remains under the |point_in_screen|.
+  // Offsets |drag_bounds| if necessary when dragging to the right from the
+  // source browser.
+  gfx::Rect CalculateDraggedBrowserBounds(TabStrip* source,
+                                          const gfx::Point& point_in_screen,
+                                          std::vector<gfx::Rect>* drag_bounds);
+
+  // Calculates scaled |drag_bounds| for dragged tabs and sets the tabs bounds.
+  // Layout of the tabstrip is performed and a new tabstrip width calculated.
+  // When |last_tabstrip_width| is larger than the new tabstrip width the tabs
+  // in attached tabstrip are scaled and the attached browser is positioned such
+  // that the tab that was dragged remains under the |point_in_screen|.
+  void AdjustBrowserAndTabBoundsForDrag(int last_tabstrip_width,
+                                        const gfx::Point& point_in_screen,
+                                        std::vector<gfx::Rect>* drag_bounds);
+
   // Creates and returns a new Browser to handle the drag.
   Browser* CreateBrowserForDrag(TabStrip* source,
                                 const gfx::Point& point_in_screen,
@@ -538,9 +557,9 @@ class TabDragController : public content::WebContentsDelegate,
   // attached to the hidden frame and the frame moved back to these bounds.
   gfx::Rect restore_bounds_;
 
-  // ID of the last view that had focus in the window containing
-  // |source_tab_|. This is saved so that focus can be restored properly when a
-  // drag begins and ends within this same window.
+  // Storage ID in ViewStorage where the last view that had focus in the window
+  // containing |source_tab_| is saved. This is saved so that focus can be
+  // restored properly when a drag begins and ends within this same window.
   const int old_focused_view_id_;
 
   // The horizontal position of the mouse cursor in screen coordinates at the

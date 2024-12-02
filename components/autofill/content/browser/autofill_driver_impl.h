@@ -9,6 +9,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/supports_user_data.h"
+#include "components/autofill/content/browser/request_autocomplete_manager.h"
 #include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
@@ -42,7 +43,8 @@ class AutofillDriverImpl : public AutofillDriver,
   static AutofillDriverImpl* FromWebContents(content::WebContents* contents);
 
   // AutofillDriver:
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  virtual bool IsOffTheRecord() const OVERRIDE;
+  virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
   virtual base::SequencedWorkerPool* GetBlockingPool() OVERRIDE;
   virtual bool RendererIsAvailable() OVERRIDE;
   virtual void SetRendererActionOnFormDataReception(
@@ -51,8 +53,16 @@ class AutofillDriverImpl : public AutofillDriver,
                                       const FormData& data) OVERRIDE;
   virtual void SendAutofillTypePredictionsToRenderer(
       const std::vector<FormStructure*>& forms) OVERRIDE;
+  virtual void RendererShouldAcceptDataListSuggestion(
+      const base::string16& value) OVERRIDE;
+  virtual void RendererShouldAcceptPasswordAutofillSuggestion(
+      const base::string16& username) OVERRIDE;
   virtual void RendererShouldClearFilledForm() OVERRIDE;
   virtual void RendererShouldClearPreviewedForm() OVERRIDE;
+  virtual void RendererShouldSetNodeText(const base::string16& value) OVERRIDE;
+
+  // Returns the WebContents with which this instance is associated.
+  content::WebContents* GetWebContents();
 
   AutofillExternalDelegate* autofill_external_delegate() {
     return &autofill_external_delegate_;
@@ -89,6 +99,9 @@ class AutofillDriverImpl : public AutofillDriver,
   // AutofillExternalDelegate instance that this object instantiates in the
   // case where the Autofill native UI is enabled.
   AutofillExternalDelegate autofill_external_delegate_;
+
+  // Driver for the interactive autocomplete dialog.
+  RequestAutocompleteManager request_autocomplete_manager_;
 };
 
 }  // namespace autofill

@@ -326,8 +326,7 @@ TEST_F(DraggedFileUtilTest, UnregisteredPathsTest) {
 
     // Make sure regular GetFileInfo succeeds.
     base::PlatformFileInfo info;
-    ASSERT_TRUE(file_util::GetFileInfo(
-        root_path().Append(test_case.path), &info));
+    ASSERT_TRUE(base::GetFileInfo(root_path().Append(test_case.path), &info));
     if (!test_case.is_directory)
       ASSERT_EQ(test_case.data_file_size, info.size);
     ASSERT_EQ(test_case.is_directory, info.is_directory);
@@ -374,7 +373,7 @@ TEST_F(DraggedFileUtilTest, ReadDirectoryTest) {
       // Creates a symlink for each file/directory.
       // They should be ignored by ReadDirectory, so we don't add them
       // to expected_entry_map.
-      file_util::CreateSymbolicLink(
+      base::CreateSymbolicLink(
           current,
           dir_path.Append(current.BaseName().AddExtension(
               FILE_PATH_LITERAL("link"))));

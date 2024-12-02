@@ -65,18 +65,18 @@ void CrashTab(WebContents* web_contents);
 // may contain bits from WebInputEvent::Modifiers.
 void SimulateMouseClick(WebContents* web_contents,
                         int modifiers,
-                        WebKit::WebMouseEvent::Button button);
+                        blink::WebMouseEvent::Button button);
 
 // Simulates clicking at the point |point| of the given tab asynchronously;
 // modifiers may contain bits from WebInputEvent::Modifiers.
 void SimulateMouseClickAt(WebContents* web_contents,
                           int modifiers,
-                          WebKit::WebMouseEvent::Button button,
+                          blink::WebMouseEvent::Button button,
                           const gfx::Point& point);
 
 // Simulates asynchronously a mouse enter/move/leave event.
 void SimulateMouseEvent(WebContents* web_contents,
-                        WebKit::WebInputEvent::Type type,
+                        blink::WebInputEvent::Type type,
                         const gfx::Point& point);
 
 // Sends a key press asynchronously.
@@ -196,16 +196,16 @@ class TitleWatcher : public WebContentsObserver {
   // entire lifetime of |this|. |expected_title| is the title that |this|
   // will wait for.
   TitleWatcher(WebContents* web_contents,
-               const string16& expected_title);
+               const base::string16& expected_title);
   virtual ~TitleWatcher();
 
   // Adds another title to watch for.
-  void AlsoWaitForTitle(const string16& expected_title);
+  void AlsoWaitForTitle(const base::string16& expected_title);
 
   // Waits until the title matches either expected_title or one of the titles
   // added with AlsoWaitForTitle. Returns the value of the most recently
   // observed matching title.
-  const string16& WaitAndGetTitle() WARN_UNUSED_RESULT;
+  const base::string16& WaitAndGetTitle() WARN_UNUSED_RESULT;
 
  private:
   // Overridden WebContentsObserver methods.
@@ -214,11 +214,11 @@ class TitleWatcher : public WebContentsObserver {
 
   void TestTitle();
 
-  std::vector<string16> expected_titles_;
+  std::vector<base::string16> expected_titles_;
   scoped_refptr<MessageLoopRunner> message_loop_runner_;
 
   // The most recently observed expected title, if any.
-  string16 observed_title_;
+  base::string16 observed_title_;
 
   DISALLOW_COPY_AND_ASSIGN(TitleWatcher);
 };

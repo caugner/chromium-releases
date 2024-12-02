@@ -276,7 +276,4 @@ int DefaultSystemTrayDelegate::GetSystemTrayMenuWidth() {
   return 300;
 }
 
-void DefaultSystemTrayDelegate::MaybeSpeak(const std::string& utterance) const {
-}
-
 }  // namespace ash

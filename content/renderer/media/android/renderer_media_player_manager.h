@@ -21,7 +21,7 @@
 #include "ui/gfx/rect_f.h"
 #endif
 
-namespace WebKit {
+namespace blink {
 class WebFrame;
 }
 
@@ -75,32 +75,32 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   void DestroyPlayer(int player_id);
 
   // Requests the player to enter fullscreen.
-  void EnterFullscreen(int player_id);
+  void EnterFullscreen(int player_id, blink::WebFrame* frame);
 
   // Requests the player to exit fullscreen.
   void ExitFullscreen(int player_id);
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
   // Requests an external surface for out-of-band compositing.
   void RequestExternalSurface(int player_id, const gfx::RectF& geometry);
 
   // RenderViewObserver overrides.
   virtual void DidCommitCompositorFrame() OVERRIDE;
-#endif
+#endif  // defined(VIDEO_HOLE)
 
   // Encrypted media related methods.
   void InitializeCDM(int media_keys_id,
                      ProxyMediaKeys* media_keys,
                      const std::vector<uint8>& uuid,
                      const GURL& frame_url);
-  void GenerateKeyRequest(int media_keys_id,
-                          const std::string& type,
-                          const std::vector<uint8>& init_data);
-  void AddKey(int media_keys_id,
-              const std::vector<uint8>& key,
-              const std::vector<uint8>& init_data,
-              const std::string& session_id);
-  void CancelKeyRequest(int media_keys_id, const std::string& session_id);
+  void CreateSession(int media_keys_id,
+                     uint32 session_id,
+                     const std::string& type,
+                     const std::vector<uint8>& init_data);
+  void UpdateSession(int media_keys_id,
+                     uint32 session_id,
+                     const std::vector<uint8>& response);
+  void ReleaseSession(int media_keys_id, uint32 session_id);
 
   // Registers and unregisters a WebMediaPlayerAndroid object.
   int RegisterMediaPlayer(WebMediaPlayerAndroid* player);
@@ -117,14 +117,17 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   void ReleaseVideoResources();
 
   // Checks whether a player can enter fullscreen.
-  bool CanEnterFullscreen(WebKit::WebFrame* frame);
+  bool CanEnterFullscreen(blink::WebFrame* frame);
 
   // Called when a player entered or exited fullscreen.
-  void DidEnterFullscreen(WebKit::WebFrame* frame);
+  void DidEnterFullscreen(blink::WebFrame* frame);
   void DidExitFullscreen();
 
   // Checks whether the Webframe is in fullscreen.
-  bool IsInFullscreen(WebKit::WebFrame* frame);
+  bool IsInFullscreen(blink::WebFrame* frame);
+
+  // True if a newly created media player should enter fullscreen.
+  bool ShouldEnterFullscreen(blink::WebFrame* frame);
 
   // Gets the pointer to WebMediaPlayerAndroid given the |player_id|.
   WebMediaPlayerAndroid* GetMediaPlayer(int player_id);
@@ -132,10 +135,10 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   // Gets the pointer to ProxyMediaKeys given the |media_keys_id|.
   ProxyMediaKeys* GetMediaKeys(int media_keys_id);
 
-#if defined(GOOGLE_TV)
+#if defined(VIDEO_HOLE)
   // Gets the list of media players with video geometry changes.
   void RetrieveGeometryChanges(std::map<int, gfx::RectF>* changes);
-#endif
+#endif  // defined(VIDEO_HOLE)
 
  private:
   // Message handlers.
@@ -158,15 +161,20 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   void OnDidEnterFullscreen(int player_id);
   void OnPlayerPlay(int player_id);
   void OnPlayerPause(int player_id);
-  void OnKeyAdded(int media_keys_id, const std::string& session_id);
-  void OnKeyError(int media_keys_id,
-                  const std::string& session_id,
-                  media::MediaKeys::KeyError error_code,
-                  int system_code);
-  void OnKeyMessage(int media_keys_id,
-                    const std::string& session_id,
-                    const std::vector<uint8>& message,
-                    const std::string& destination_url);
+  void OnRequestFullscreen(int player_id);
+  void OnSessionCreated(int media_keys_id,
+                        uint32 session_id,
+                        const std::string& web_session_id);
+  void OnSessionMessage(int media_keys_id,
+                        uint32 session_id,
+                        const std::vector<uint8>& message,
+                        const std::string& destination_url);
+  void OnSessionReady(int media_keys_id, uint32 session_id);
+  void OnSessionClosed(int media_keys_id, uint32 session_id);
+  void OnSessionError(int media_keys_id,
+                      uint32 session_id,
+                      media::MediaKeys::KeyError error_code,
+                      int system_code);
 
   // Info for all available WebMediaPlayerAndroid on a page; kept so that
   // we can enumerate them to send updates about tab focus and visibility.
@@ -179,7 +187,10 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   int next_media_player_id_;
 
   // WebFrame of the fullscreen video.
-  WebKit::WebFrame* fullscreen_frame_;
+  blink::WebFrame* fullscreen_frame_;
+
+  // WebFrame of pending fullscreen request.
+  blink::WebFrame* pending_fullscreen_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererMediaPlayerManager);
 };

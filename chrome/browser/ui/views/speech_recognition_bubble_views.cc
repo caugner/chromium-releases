@@ -10,8 +10,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/location_icon_view.h"
-#include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/speech_recognition_manager.h"
 #include "content/public/browser/web_contents.h"
@@ -47,7 +46,7 @@ class SpeechRecognitionBubbleView : public views::BubbleDelegateView,
                               WebContents* web_contents);
 
   void UpdateLayout(SpeechRecognitionBubbleBase::DisplayMode mode,
-                    const string16& message_text,
+                    const base::string16& message_text,
                     const gfx::ImageSkia& image);
   void SetImage(const gfx::ImageSkia& image);
 
@@ -171,7 +170,7 @@ void SpeechRecognitionBubbleView::Init() {
 
 void SpeechRecognitionBubbleView::UpdateLayout(
     SpeechRecognitionBubbleBase::DisplayMode mode,
-    const string16& message_text,
+    const base::string16& message_text,
     const gfx::ImageSkia& image) {
   display_mode_ = mode;
   bool is_message = (mode == SpeechRecognitionBubbleBase::DISPLAY_MODE_MESSAGE);
@@ -357,14 +356,14 @@ void SpeechRecognitionBubbleImpl::Show() {
   if (!bubble_) {
     views::View* icon = NULL;
 
-    // Anchor to the location icon view, in case |element_rect| is offscreen.
+    // Anchor to the location bar, in case |element_rect| is offscreen.
     WebContents* web_contents = GetWebContents();
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
     if (browser) {
       BrowserView* browser_view =
           BrowserView::GetBrowserViewForBrowser(browser);
       icon = browser_view->GetLocationBarView() ?
-          browser_view->GetLocationBarView()->location_icon_view() : NULL;
+          browser_view->GetLocationBarView()->GetLocationBarAnchor() : NULL;
     }
 
     bubble_ = new SpeechRecognitionBubbleView(delegate_, icon, element_rect_,

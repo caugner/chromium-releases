@@ -9,6 +9,7 @@ Assumes adb binary is currently on system path.
 
 import collections
 import datetime
+import inspect
 import logging
 import os
 import re
@@ -21,6 +22,11 @@ import time
 
 import cmd_helper
 import constants
+import screenshot
+import system_properties
+
+from utils import host_path_finder
+
 try:
   from pylib import pexpect
 except:
@@ -224,14 +230,17 @@ def GetLogTimestamp(log_line, year):
 
 
 class AndroidCommands(object):
-  """Helper class for communicating with Android device via adb.
+  """Helper class for communicating with Android device via adb."""
 
-  Args:
-    device: If given, adb commands are only send to the device of this ID.
-        Otherwise commands are sent to all attached devices.
-  """
+  def __init__(self, device=None, api_strict_mode=False):
+    """Constructor.
 
-  def __init__(self, device=None):
+    Args:
+      device: If given, adb commands are only send to the device of this ID.
+          Otherwise commands are sent to all attached devices.
+      api_strict_mode: A boolean indicating whether fatal errors should be
+          raised if this API is used improperly.
+    """
     adb_dir = os.path.dirname(constants.ADB_PATH)
     if adb_dir and adb_dir not in os.environ['PATH'].split(os.pathsep):
       # Required by third_party/android_testrunner to call directly 'adb'.
@@ -249,6 +258,19 @@ class AndroidCommands(object):
     self._actual_push_size = 0
     self._external_storage = ''
     self._util_wrapper = ''
+    self._api_strict_mode = api_strict_mode
+    self._system_properties = system_properties.SystemProperties(self.Adb())
+    self._push_if_needed_cache = {}
+
+    if not self._api_strict_mode:
+      logging.warning(
+          'API STRICT MODE IS DISABLED.\n'
+          'It should be enabled as soon as possible as it will eventually '
+          'become the default.')
+
+  @property
+  def system_properties(self):
+    return self._system_properties
 
   def _LogShell(self, cmd):
     """Logs the adb shell command."""
@@ -260,6 +282,7 @@ class AndroidCommands(object):
 
   def Adb(self):
     """Returns our AdbInterface to avoid us wrapping all its methods."""
+    # TODO(tonyg): Disable this method when in _api_strict_mode.
     return self._adb
 
   def GetDevice(self):
@@ -348,6 +371,7 @@ class AndroidCommands(object):
       return
     if full_reboot or not self.IsRootEnabled():
       self._adb.SendCommand('reboot')
+      self._system_properties = system_properties.SystemProperties(self.Adb())
       timeout = 300
       retries = 1
       # Wait for the device to disappear.
@@ -365,6 +389,7 @@ class AndroidCommands(object):
   def Shutdown(self):
     """Shuts down the device."""
     self._adb.SendCommand('reboot -p')
+    self._system_properties = system_properties.SystemProperties(self.Adb())
 
   def Uninstall(self, package):
     """Uninstalls the specified package from the device.
@@ -461,10 +486,18 @@ class AndroidCommands(object):
 
   def RestartAdbdOnDevice(self):
     logging.info('Killing adbd on the device...')
-    adb_pids = self.KillAll('adbd', signal=signal.SIGTERM, with_su=True)
-    assert adb_pids, 'Unable to obtain adbd pid'
-    logging.info('Waiting for device to settle...')
-    self._adb.SendCommand('wait-for-device')
+    adb_pids = self.ExtractPid('adbd')
+    if not adb_pids:
+      raise errors.MsgException('Unable to obtain adbd pid')
+    try:
+      self.KillAll('adbd', signal=signal.SIGTERM, with_su=True)
+      logging.info('Waiting for device to settle...')
+      self._adb.SendCommand('wait-for-device')
+      new_adb_pids = self.ExtractPid('adbd')
+      if new_adb_pids == adb_pids:
+        logging.error('adbd on the device may not have been restarted.')
+    except Exception as e:
+      logging.error('Exception when trying to kill adbd on the device [%s]', e)
 
   def RestartAdbServer(self):
     """Restart the adb server."""
@@ -498,7 +531,9 @@ class AndroidCommands(object):
     while retry < 3:
       ret = cmd_helper.RunCmd(['pgrep', 'adb'])
       if ret == 0:
-        # pgrep fonud adb, start-server succeeded.
+        # pgrep found adb, start-server succeeded.
+        # Waiting for device to reconnect before returning success.
+        self._adb.SendCommand('wait-for-device')
         return 0
       retry += 1
       time.sleep(retry)
@@ -522,8 +557,7 @@ class AndroidCommands(object):
     attempts = 0
     wait_period = 5
     while not boot_completed and (attempts * wait_period) < wait_time:
-      output = self._adb.SendShellCommand('getprop sys.boot_completed',
-                                          retry_count=1)
+      output = self.system_properties['sys.boot_completed']
       output = output.strip()
       if output == '1':
         boot_completed = True
@@ -557,6 +591,34 @@ class AndroidCommands(object):
       raise errors.WaitForResponseTimedOutError(
           'SD card not ready after %s seconds' % timeout_time)
 
+  def _CheckCommandIsValid(self, command):
+    """Raises a ValueError if the command is not valid."""
+
+    # A dict of commands the user should not run directly and a mapping to the
+    # API they should use instead.
+    preferred_apis = {
+        'getprop': 'system_properties[<PROPERTY>]',
+        'setprop': 'system_properties[<PROPERTY>]',
+        'su': 'RunShellCommandWithSU()',
+        }
+
+    # A dict of commands to methods that may call them.
+    whitelisted_callers = {
+        'su': 'RunShellCommandWithSU',
+        }
+
+    base_command = shlex.split(command)[0]
+    if (base_command in preferred_apis and
+        (base_command not in whitelisted_callers or
+         whitelisted_callers[base_command] not in [
+          f[3] for f in inspect.stack()])):
+      error_msg = ('%s cannot be run directly. Instead use: %s' %
+                   (base_command, preferred_apis[base_command]))
+      if self._api_strict_mode:
+        raise ValueError(error_msg)
+      else:
+        logging.warning(error_msg)
+
   # It is tempting to turn this function into a generator, however this is not
   # possible without using a private (local) adb_shell instance (to ensure no
   # other command interleaves usage of it), which would defeat the main aim of
@@ -575,6 +637,7 @@ class AndroidCommands(object):
     Returns:
       list containing the lines of output received from running the command
     """
+    self._CheckCommandIsValid(command)
     self._LogShell(command)
     if "'" in command: logging.warning(command + " contains ' quotes")
     result = self._adb.SendShellCommand(
@@ -737,6 +800,20 @@ class AndroidCommands(object):
     start_line = m.group(0)
     return GetLogTimestamp(start_line, self.GetDeviceYear())
 
+  def StartCrashUploadService(self, package):
+    # TODO(frankf): We really need a python wrapper around Intent
+    # to be shared with StartActivity/BroadcastIntent.
+    cmd = (
+      'am startservice -a %s.crash.ACTION_FIND_ALL -n '
+      '%s/%s.crash.MinidumpUploadService' %
+      (constants.PACKAGE_INFO['chrome'].package,
+       package,
+       constants.PACKAGE_INFO['chrome'].package))
+    am_output = self.RunShellCommandWithSU(cmd)
+    assert am_output and 'Starting' in am_output[-1], (
+        'Service failed to start: %s' % am_output)
+    time.sleep(15)
+
   def BroadcastIntent(self, package, intent, *args):
     """Send a broadcast intent.
 
@@ -841,13 +918,21 @@ class AndroidCommands(object):
       A list of tuples of the form (host_path, device_path) for files whose
       md5sums do not match.
     """
+
+    # Md5Sum resolves symbolic links in path names so the calculation of
+    # relative path names from its output will need the real path names of the
+    # base directories. Having calculated these they are used throughout the
+    # function since this makes us less subject to any future changes to Md5Sum.
+    real_host_path = os.path.realpath(host_path)
+    real_device_path = self.RunShellCommand('realpath "%s"' % device_path)[0]
+
     host_hash_tuples, device_hash_tuples = self._RunMd5Sum(
-        host_path, device_path)
+        real_host_path, real_device_path)
 
     # Ignore extra files on the device.
     if not ignore_filenames:
       host_files = [os.path.relpath(os.path.normpath(p.path),
-                    os.path.normpath(host_path)) for p in host_hash_tuples]
+                                    real_host_path) for p in host_hash_tuples]
 
       def HostHas(fname):
         return any(path in fname for path in host_files)
@@ -862,12 +947,12 @@ class AndroidCommands(object):
     # only a single file is given as the base name given in device_path may
     # differ from that in host_path.
     def HostToDevicePath(host_file_path):
-      return os.path.join(device_path, os.path.relpath(
-          host_file_path, os.path.normpath(host_path)))
+      return os.path.join(device_path, os.path.relpath(host_file_path,
+                                                       real_host_path))
 
     device_hashes = [h.hash for h in device_hash_tuples]
-    return [(t.path, HostToDevicePath(t.path) if os.path.isdir(host_path) else
-             device_path)
+    return [(t.path, HostToDevicePath(t.path) if
+             os.path.isdir(real_host_path) else real_device_path)
             for t in host_hash_tuples if t.hash not in device_hashes]
 
   def PushIfNeeded(self, host_path, device_path):
@@ -880,6 +965,15 @@ class AndroidCommands(object):
     """
     MAX_INDIVIDUAL_PUSHES = 50
     assert os.path.exists(host_path), 'Local path not found %s' % host_path
+
+    # See if the file on the host changed since the last push (if any) and
+    # return early if it didn't. Note that this shortcut assumes that the tests
+    # on the device don't modify the files.
+    if not os.path.isdir(host_path):
+      if host_path in self._push_if_needed_cache:
+        host_path_mtime = self._push_if_needed_cache[host_path]
+        if host_path_mtime == os.stat(host_path).st_mtime:
+          return
 
     def GetHostSize(path):
       return int(cmd_helper.GetCmdOutput(['du', '-sb', path]).split()[0])
@@ -905,6 +999,8 @@ class AndroidCommands(object):
       while True:
         output = self._adb.SendCommand(push_command, timeout_time=30 * 60)
         if _HasAdbPushSucceeded(output):
+          if not os.path.isdir(host_path):
+            self._push_if_needed_cache[host] = os.stat(host).st_mtime
           return
         if retry < 3:
           retry += 1
@@ -964,9 +1060,7 @@ class AndroidCommands(object):
     return self.GetExternalStorage() + '/' + base_name % i
 
   def RunShellCommandWithSU(self, command, timeout_time=20, log_result=False):
-    return self.RunShellCommand('su -c %s' % command,
-                                timeout_time=timeout_time,
-                                log_result=log_result)
+    return self.RunShellCommand('su -c %s' % command, timeout_time, log_result)
 
   def CanAccessProtectedFileContents(self):
     """Returns True if Get/SetProtectedFileContents would work via "su".
@@ -1067,41 +1161,39 @@ class AndroidCommands(object):
 
     # Next, check the current runtime value is what we need, and
     # if not, set it and report that a reboot is required.
-    was_set = 'all' in self.RunShellCommand('getprop ' + JAVA_ASSERT_PROPERTY)
+    was_set = 'all' in self.system_properties[JAVA_ASSERT_PROPERTY]
     if was_set == enable:
       return False
-
-    self.RunShellCommand('setprop %s "%s"' % (JAVA_ASSERT_PROPERTY,
-                                              enable and 'all' or ''))
+    self.system_properties[JAVA_ASSERT_PROPERTY] = enable and 'all' or ''
     return True
 
   def GetBuildId(self):
     """Returns the build ID of the system (e.g. JRM79C)."""
-    build_id = self.RunShellCommand('getprop ro.build.id')[0]
+    build_id = self.system_properties['ro.build.id']
     assert build_id
     return build_id
 
   def GetBuildType(self):
     """Returns the build type of the system (e.g. eng)."""
-    build_type = self.RunShellCommand('getprop ro.build.type')[0]
+    build_type = self.system_properties['ro.build.type']
     assert build_type
     return build_type
 
   def GetBuildProduct(self):
     """Returns the build product of the device (e.g. maguro)."""
-    build_product = self.RunShellCommand('getprop ro.build.product')[0]
+    build_product = self.system_properties['ro.build.product']
     assert build_product
     return build_product
 
   def GetProductName(self):
     """Returns the product name of the device (e.g. takju)."""
-    name = self.RunShellCommand('getprop ro.product.name')[0]
+    name = self.system_properties['ro.product.name']
     assert name
     return name
 
   def GetBuildFingerprint(self):
     """Returns the build fingerprint of the device."""
-    build_fingerprint = self.RunShellCommand('getprop ro.build.fingerprint')[0]
+    build_fingerprint = self.system_properties['ro.build.fingerprint']
     assert build_fingerprint
     return build_fingerprint
 
@@ -1110,19 +1202,19 @@ class AndroidCommands(object):
 
     For example, "yakju-userdebug 4.1 JRN54F 364167 dev-keys".
     """
-    description = self.RunShellCommand('getprop ro.build.description')[0]
+    description = self.system_properties['ro.build.description']
     assert description
     return description
 
   def GetProductModel(self):
     """Returns the name of the product model (e.g. "Galaxy Nexus") """
-    model = self.RunShellCommand('getprop ro.product.model')[0]
+    model = self.system_properties['ro.product.model']
     assert model
     return model
 
   def GetWifiIP(self):
     """Returns the wifi IP on the device."""
-    wifi_ip = self.RunShellCommand('getprop dhcp.wlan0.ipaddress')[0]
+    wifi_ip = self.system_properties['dhcp.wlan0.ipaddress']
     # Do not assert here. Devices (e.g. emulators) may not have a WifiIP.
     return wifi_ip
 
@@ -1140,7 +1232,7 @@ class AndroidCommands(object):
 
   def GetSetupWizardStatus(self):
     """Returns the status of the device setup wizard (e.g. DISABLED)."""
-    status = self.RunShellCommand('getprop ro.setupwizard.mode')[0]
+    status = self.system_properties['ro.setupwizard.mode']
     # On some devices, the status is empty if not otherwise set. In such cases
     # the caller should expect an empty string to be returned.
     return status
@@ -1409,6 +1501,20 @@ class AndroidCommands(object):
     logging.warning('Could not find disk IO stats.')
     return None
 
+  def PurgeUnpinnedAshmem(self):
+    """Purges the unpinned ashmem memory for the whole system.
+
+    This can be used to make memory measurements more stable in particular.
+    """
+    host_path = host_path_finder.GetMostRecentHostPath('purge_ashmem')
+    if not host_path:
+      raise Exception('Could not find the purge_ashmem binary.')
+    device_path = os.path.join(constants.TEST_EXECUTABLE_DIR, 'purge_ashmem')
+    self.PushIfNeeded(host_path, device_path)
+    if self.RunShellCommand(device_path, log_result=True):
+      return
+    raise Exception('Error while purging ashmem.')
+
   def GetMemoryUsageForPid(self, pid):
     """Returns the memory usage for given pid.
 
@@ -1420,7 +1526,7 @@ class AndroidCommands(object):
       [0]: Dict of {metric:usage_kb}, for the process which has specified pid.
       The metric keys which may be included are: Size, Rss, Pss, Shared_Clean,
       Shared_Dirty, Private_Clean, Private_Dirty, Referenced, Swap,
-      KernelPageSize, MMUPageSize, Nvidia (tablet only).
+      KernelPageSize, MMUPageSize, Nvidia (tablet only), VmHWM.
       [1]: Detailed /proc/[PID]/smaps information.
     """
     usage_dict = collections.defaultdict(int)
@@ -1454,6 +1560,16 @@ class AndroidCommands(object):
         usage_bytes = int(match.group('usage_bytes'))
         usage_dict['Nvidia'] = int(round(usage_bytes / 1000.0))  # kB
         break
+
+    peak_value_kb = 0
+    for line in self.GetProtectedFileContents('/proc/%s/status' % pid,
+                                              log_result=False):
+      if not line.startswith('VmHWM:'):  # Format: 'VmHWM: +[0-9]+ kB'
+        continue
+      peak_value_kb = int(line.split(':')[1].strip().split(' ')[0])
+    usage_dict['VmHWM'] = peak_value_kb
+    if not peak_value_kb:
+      logging.warning('Could not find memory peak value for pid ' + str(pid))
 
     return (usage_dict, smaps)
 
@@ -1570,14 +1686,13 @@ class AndroidCommands(object):
     """Saves a screenshot image to |host_file| on the host.
 
     Args:
-      host_file: Absolute path to the image file to store on the host.
+      host_file: Absolute path to the image file to store on the host or None to
+                 use an autogenerated file name.
+
+    Returns:
+      Resulting host file name of the screenshot.
     """
-    host_dir = os.path.dirname(host_file)
-    if not os.path.exists(host_dir):
-      os.makedirs(host_dir)
-    device_file = '%s/screenshot.png' % self.GetExternalStorage()
-    self.RunShellCommand('/system/bin/screencap -p %s' % device_file)
-    self.PullFileFromDevice(device_file, host_file)
+    return screenshot.TakeScreenshot(self, host_file)
 
   def PullFileFromDevice(self, device_file, host_file):
     """Download |device_file| on the device from to |host_file| on the host.
@@ -1641,6 +1756,36 @@ class AndroidCommands(object):
       raise errors.InstrumentationError(
           'no test results... device setup correctly?')
     return test_results[0]
+
+  def DismissCrashDialogIfNeeded(self):
+    """Dismiss the error/ANR dialog if present.
+
+    Returns: Name of the crashed package if a dialog is focused,
+             None otherwise.
+    """
+    re_focus = re.compile(
+        r'\s*mCurrentFocus.*Application (Error|Not Responding): (\S+)}')
+
+    def _FindFocusedWindow():
+      match = None
+      for line in self.RunShellCommand('dumpsys window windows'):
+        match = re.match(re_focus, line)
+        if match:
+          break
+      return match
+
+    match = _FindFocusedWindow()
+    if not match:
+      return
+    package = match.group(2)
+    logging.warning('Trying to dismiss %s dialog for %s' % match.groups())
+    self.SendKeyEvent(KEYCODE_DPAD_RIGHT)
+    self.SendKeyEvent(KEYCODE_DPAD_RIGHT)
+    self.SendKeyEvent(KEYCODE_ENTER)
+    match = _FindFocusedWindow()
+    if match:
+      logging.error('Still showing a %s dialog for %s' % match.groups())
+    return package
 
 
 class NewLineNormalizer(object):

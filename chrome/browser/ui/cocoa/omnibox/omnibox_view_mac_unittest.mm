@@ -4,7 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
@@ -117,7 +116,6 @@ TEST_F(OmniboxViewMacTest, GetFieldFont) {
 }
 
 TEST_F(OmniboxViewMacTest, TabToAutocomplete) {
-  chrome::EnableInstantExtendedAPIForTesting();
   OmniboxViewMac view(NULL, profile(), NULL, NULL);
 
   // This is deleted by the omnibox view.
@@ -167,9 +165,9 @@ TEST_F(OmniboxViewMacTest, SetGrayTextAutocompletion) {
   EXPECT_EQ("Alfred", UTF16ToUTF8(view.GetText()));
   EXPECT_EQ(" Hitchcock", UTF16ToUTF8(view.GetGrayTextAutocompletion()));
 
-  view.SetUserText(string16());
-  EXPECT_EQ(string16(), view.GetText());
-  EXPECT_EQ(string16(), view.GetGrayTextAutocompletion());
+  view.SetUserText(base::string16());
+  EXPECT_EQ(base::string16(), view.GetText());
+  EXPECT_EQ(base::string16(), view.GetGrayTextAutocompletion());
 }
 
 TEST_F(OmniboxViewMacTest, UpDownArrow) {

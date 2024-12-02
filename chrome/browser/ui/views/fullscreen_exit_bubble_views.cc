@@ -64,14 +64,14 @@ ButtonView::ButtonView(views::ButtonListener* listener,
                        int between_button_spacing)
     : accept_button_(NULL),
       deny_button_(NULL) {
-  accept_button_ = new views::LabelButton(listener, string16());
+  accept_button_ = new views::LabelButton(listener, base::string16());
   accept_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
-  accept_button_->set_focusable(false);
+  accept_button_->SetFocusable(false);
   AddChildView(accept_button_);
 
-  deny_button_ = new views::LabelButton(listener, string16());
+  deny_button_ = new views::LabelButton(listener, base::string16());
   deny_button_->SetStyle(views::Button::STYLE_NATIVE_TEXTBUTTON);
-  deny_button_->set_focusable(false);
+  deny_button_->SetFocusable(false);
   AddChildView(deny_button_);
 
   SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0,
@@ -93,7 +93,7 @@ class FullscreenExitBubbleViews::FullscreenExitView
       public views::LinkListener {
  public:
   FullscreenExitView(FullscreenExitBubbleViews* bubble,
-                     const string16& accelerator,
+                     const base::string16& accelerator,
                      const GURL& url,
                      FullscreenExitBubbleType bubble_type);
   virtual ~FullscreenExitView();
@@ -117,14 +117,14 @@ class FullscreenExitBubbleViews::FullscreenExitView
   // Informational label: 'www.foo.com has gone fullscreen'.
   views::Label* message_label_;
   ButtonView* button_view_;
-  const string16 browser_fullscreen_exit_accelerator_;
+  const base::string16 browser_fullscreen_exit_accelerator_;
 
   DISALLOW_COPY_AND_ASSIGN(FullscreenExitView);
 };
 
 FullscreenExitBubbleViews::FullscreenExitView::FullscreenExitView(
     FullscreenExitBubbleViews* bubble,
-    const string16& accelerator,
+    const base::string16& accelerator,
     const GURL& url,
     FullscreenExitBubbleType bubble_type)
     : bubble_(bubble),
@@ -138,7 +138,7 @@ FullscreenExitBubbleViews::FullscreenExitView::FullscreenExitView(
       SK_ColorWHITE);
   set_background(new views::BubbleBackground(bubble_border));
   set_border(bubble_border);
-  set_focusable(false);
+  SetFocusable(false);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   message_label_ = new views::Label();
@@ -152,7 +152,7 @@ FullscreenExitBubbleViews::FullscreenExitView::FullscreenExitView(
 
   link_ = new views::Link();
   link_->set_collapse_when_hidden(true);
-  link_->set_focusable(false);
+  link_->SetFocusable(false);
 #if defined(OS_CHROMEOS)
   // On CrOS, the link text doesn't change, since it doesn't show the shortcut.
   link_->SetText(l10n_util::GetStringUTF16(IDS_EXIT_FULLSCREEN_MODE));
@@ -228,7 +228,7 @@ void FullscreenExitBubbleViews::FullscreenExitView::UpdateContent(
     button_view_->deny_button()->set_min_size(gfx::Size());
   } else {
     bool link_visible = true;
-    string16 accelerator;
+    base::string16 accelerator;
     if (bubble_type == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION ||
         bubble_type == FEB_TYPE_BROWSER_EXTENSION_FULLSCREEN_EXIT_INSTRUCTION) {
       accelerator = browser_fullscreen_exit_accelerator_;
@@ -470,7 +470,7 @@ gfx::Rect FullscreenExitBubbleViews::GetPopupRect(
 gfx::Point FullscreenExitBubbleViews::GetCursorScreenPoint() {
   gfx::Point cursor_pos = gfx::Screen::GetScreenFor(
       browser_view_->GetWidget()->GetNativeView())->GetCursorScreenPoint();
-  views::View::ConvertPointToTarget(NULL, GetBrowserRootView(), &cursor_pos);
+  views::View::ConvertPointFromScreen(GetBrowserRootView(), &cursor_pos);
   return cursor_pos;
 }
 

@@ -100,20 +100,20 @@ int RecentlyUsedFoldersComboModel::GetItemCount() const {
   return static_cast<int>(items_.size());
 }
 
-string16 RecentlyUsedFoldersComboModel::GetItemAt(int index) {
+base::string16 RecentlyUsedFoldersComboModel::GetItemAt(int index) {
   switch (items_[index].type) {
     case Item::TYPE_NODE:
       return items_[index].node->GetTitle();
     case Item::TYPE_SEPARATOR:
       // This function should not be called for separators.
       NOTREACHED();
-      return string16();
+      return base::string16();
     case Item::TYPE_CHOOSE_ANOTHER_FOLDER:
       return l10n_util::GetStringUTF16(
           IDS_BOOKMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
   }
   NOTREACHED();
-  return string16();
+  return base::string16();
 }
 
 bool RecentlyUsedFoldersComboModel::IsItemSeparatorAt(int index) {

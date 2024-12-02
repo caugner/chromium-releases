@@ -6,6 +6,8 @@
 
 #include <stdlib.h>
 
+#include <algorithm>
+
 namespace mojo {
 
 Message::Message()
@@ -14,6 +16,17 @@ Message::Message()
 
 Message::~Message() {
   free(data);
+
+  for (std::vector<Handle>::iterator it = handles.begin(); it != handles.end();
+       ++it) {
+    if (it->is_valid())
+      CloseRaw(*it);
+  }
+}
+
+void Message::Swap(Message* other) {
+  std::swap(data, other->data);
+  std::swap(handles, other->handles);
 }
 
 }  // namespace mojo

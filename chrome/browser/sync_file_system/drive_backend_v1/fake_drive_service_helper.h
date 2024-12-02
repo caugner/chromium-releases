@@ -10,7 +10,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "chrome/browser/drive/drive_uploader.h"
 #include "chrome/browser/drive/fake_drive_service.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
 
 namespace base {
 class FilePath;
@@ -40,7 +40,9 @@ class FakeDriveServiceHelper {
   google_apis::GDataErrorCode UpdateFile(
       const std::string& file_id,
       const std::string& content);
-  google_apis::GDataErrorCode RemoveResource(
+  google_apis::GDataErrorCode DeleteResource(
+      const std::string& file_id);
+  google_apis::GDataErrorCode TrashResource(
       const std::string& file_id);
   google_apis::GDataErrorCode GetSyncRootFolderID(
       std::string* sync_root_folder_id);

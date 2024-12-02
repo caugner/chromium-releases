@@ -69,8 +69,8 @@ TEST_F(IndexedDBTest, ClearSessionOnlyDatabases) {
         webkit_database::GetIdentifierFromOrigin(kNormalOrigin));
     session_only_path = idb_context->GetFilePathForTesting(
         webkit_database::GetIdentifierFromOrigin(kSessionOnlyOrigin));
-    ASSERT_TRUE(file_util::CreateDirectory(normal_path));
-    ASSERT_TRUE(file_util::CreateDirectory(session_only_path));
+    ASSERT_TRUE(base::CreateDirectory(normal_path));
+    ASSERT_TRUE(base::CreateDirectory(session_only_path));
     FlushIndexedDBTaskRunner();
     message_loop_.RunUntilIdle();
   }
@@ -103,8 +103,8 @@ TEST_F(IndexedDBTest, SetForceKeepSessionState) {
         webkit_database::GetIdentifierFromOrigin(kNormalOrigin));
     session_only_path = idb_context->GetFilePathForTesting(
         webkit_database::GetIdentifierFromOrigin(kSessionOnlyOrigin));
-    ASSERT_TRUE(file_util::CreateDirectory(normal_path));
-    ASSERT_TRUE(file_util::CreateDirectory(session_only_path));
+    ASSERT_TRUE(base::CreateDirectory(normal_path));
+    ASSERT_TRUE(base::CreateDirectory(session_only_path));
     message_loop_.RunUntilIdle();
   }
 
@@ -158,7 +158,7 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnDelete) {
 
     test_path = idb_context->GetFilePathForTesting(
         webkit_database::GetIdentifierFromOrigin(kTestOrigin));
-    ASSERT_TRUE(file_util::CreateDirectory(test_path));
+    ASSERT_TRUE(base::CreateDirectory(test_path));
 
     const bool kExpectForceClose = true;
 
@@ -208,7 +208,7 @@ TEST_F(IndexedDBTest, DeleteFailsIfDirectoryLocked) {
 
   base::FilePath test_path = idb_context->GetFilePathForTesting(
       webkit_database::GetIdentifierFromOrigin(kTestOrigin));
-  ASSERT_TRUE(file_util::CreateDirectory(test_path));
+  ASSERT_TRUE(base::CreateDirectory(test_path));
 
   scoped_ptr<LevelDBLock> lock =
       LevelDBDatabase::LockForTesting(test_path);
@@ -251,13 +251,13 @@ TEST_F(IndexedDBTest, ForceCloseOpenDatabasesOnCommitFailure) {
   // ConnectionOpened() is usually called by the dispatcher.
   context->ConnectionOpened(kTestOrigin, callbacks->connection());
 
-  EXPECT_TRUE(factory->IsBackingStoreOpenForTesting(kTestOrigin));
+  EXPECT_TRUE(factory->IsBackingStoreOpen(kTestOrigin));
 
   // Simulate the write failure.
   callbacks->connection()->database()->TransactionCommitFailed();
 
   EXPECT_TRUE(db_callbacks->forced_close_called());
-  EXPECT_FALSE(factory->IsBackingStoreOpenForTesting(kTestOrigin));
+  EXPECT_FALSE(factory->IsBackingStoreOpen(kTestOrigin));
 }
 
 }  // namespace content

@@ -14,8 +14,8 @@
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_manager_factory_chromeos.h"
 #else
-#include "chrome/browser/policy/cloud/user_cloud_policy_manager.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
+#include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #endif
 
 namespace policy {
@@ -54,7 +54,7 @@ BrowserContextKeyedService*
       UserCloudPolicyManagerFactoryChromeOS::GetForProfile(profile);
 #else
   CloudPolicyManager* policy_manager =
-      UserCloudPolicyManagerFactory::GetForProfile(profile);
+      UserCloudPolicyManagerFactory::GetForBrowserContext(context);
 #endif
   if (!policy_manager)
     return NULL;

@@ -45,10 +45,10 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void Exit() OVERRIDE;
   virtual keyboard::KeyboardControllerProxy*
       CreateKeyboardControllerProxy() OVERRIDE;
-  virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
+  virtual content::BrowserContext* GetActiveBrowserContext() OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual ash::LauncherDelegate* CreateLauncherDelegate(
-      ash::LauncherModel* model) OVERRIDE;
+  virtual ash::ShelfDelegate* CreateShelfDelegate(
+      ash::ShelfModel* model) OVERRIDE;
   virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate() OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
   virtual ash::CapsLockDelegate* CreateCapsLockDelegate() OVERRIDE;
@@ -57,10 +57,9 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual ash::NewWindowDelegate* CreateNewWindowDelegate() OVERRIDE;
   virtual ash::MediaDelegate* CreateMediaDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
-  virtual void RecordUserMetricsAction(ash::UserMetricsAction action) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(aura::Window* root) OVERRIDE;
   virtual ash::RootWindowHostFactory* CreateRootWindowHostFactory() OVERRIDE;
-  virtual string16 GetProductName() const OVERRIDE;
+  virtual base::string16 GetProductName() const OVERRIDE;
 
   // content::NotificationObserver override:
   virtual void Observe(int type,
@@ -74,7 +73,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 
   content::NotificationRegistrar registrar_;
 
-  ChromeLauncherController* launcher_delegate_;
+  ChromeLauncherController* shelf_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeShellDelegate);
 };

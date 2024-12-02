@@ -17,7 +17,6 @@
 #include "chrome/browser/chromeos/input_method/delayable_widget.h"
 #include "chrome/browser/chromeos/input_method/infolist_window_view.h"
 #include "chrome/browser/chromeos/input_method/mode_indicator_controller.h"
-#include "chrome/browser/chromeos/input_method/mode_indicator_widget.h"
 #include "ui/views/widget/widget.h"
 
 
@@ -30,19 +29,18 @@ const int kInfolistShowDelayMilliSeconds = 500;
 // The milliseconds of the delay to hide the infolist window.
 const int kInfolistHideDelayMilliSeconds = 500;
 
-// Converts from ibus::Rect to gfx::Rect.
-gfx::Rect IBusRectToGfxRect(const ibus::Rect& rect) {
-  return gfx::Rect(rect.x, rect.y, rect.width, rect.height);
-}
 }  // namespace
 
-bool CandidateWindowControllerImpl::Init() {
-  // Create the candidate window view.
+CandidateWindowControllerImpl::CandidateWindowControllerImpl()
+    : candidate_window_view_(NULL),
+      latest_infolist_focused_index_(InfolistWindowView::InvalidFocusIndex()) {
+  IBusBridge::Get()->SetCandidateWindowHandler(this);
   CreateView();
-  return true;
 }
 
-void CandidateWindowControllerImpl::Shutdown() {
+CandidateWindowControllerImpl::~CandidateWindowControllerImpl() {
+  IBusBridge::Get()->SetCandidateWindowHandler(NULL);
+  candidate_window_view_->RemoveObserver(this);
 }
 
 void CandidateWindowControllerImpl::CreateView() {
@@ -84,59 +82,42 @@ void CandidateWindowControllerImpl::CreateView() {
 
   // Create the mode indicator controller.
   mode_indicator_controller_.reset(
-      new ModeIndicatorController(new ModeIndicatorWidget));
+      new ModeIndicatorController(InputMethodManager::Get()));
 }
 
-CandidateWindowControllerImpl::CandidateWindowControllerImpl()
-    : candidate_window_view_(NULL),
-      latest_infolist_focused_index_(InfolistWindowView::InvalidFocusIndex()) {
-  IBusBridge::Get()->SetCandidateWindowHandler(this);
-}
-
-CandidateWindowControllerImpl::~CandidateWindowControllerImpl() {
-  IBusBridge::Get()->SetCandidateWindowHandler(NULL);
-  candidate_window_view_->RemoveObserver(this);
-}
-
-void CandidateWindowControllerImpl::HideAuxiliaryText() {
-  candidate_window_view_->HideAuxiliaryText();
-}
-
-void CandidateWindowControllerImpl::HideLookupTable() {
+void CandidateWindowControllerImpl::Hide() {
+  // To hide the candidate window we have to call HideLookupTable and
+  // HideAuxiliaryText. Without calling HideAuxiliaryText the
+  // auxiliary text area will remain.
   candidate_window_view_->HideLookupTable();
+  candidate_window_view_->HideAuxiliaryText();
   infolist_window_->Hide();
 }
 
-void CandidateWindowControllerImpl::HidePreeditText() {
-  candidate_window_view_->HidePreeditText();
-}
-
-void CandidateWindowControllerImpl::SetCursorLocation(
-    const ibus::Rect& cursor_location,
-    const ibus::Rect& composition_head) {
+void CandidateWindowControllerImpl::SetCursorBounds(
+    const gfx::Rect& cursor_bounds,
+    const gfx::Rect& composition_head) {
   // A workaround for http://crosbug.com/6460. We should ignore very short Y
   // move to prevent the window from shaking up and down.
   const int kKeepPositionThreshold = 2;  // px
-  const gfx::Rect& last_location =
-      candidate_window_view_->cursor_location();
-  const int delta_y = abs(last_location.y() - cursor_location.y);
-  if ((last_location.x() == cursor_location.x) &&
+  const gfx::Rect& last_bounds =
+      candidate_window_view_->cursor_bounds();
+  const int delta_y = abs(last_bounds.y() - cursor_bounds.y());
+  if ((last_bounds.x() == cursor_bounds.x()) &&
       (delta_y <= kKeepPositionThreshold)) {
-    DVLOG(1) << "Ignored set_cursor_location signal to prevent window shake";
+    DVLOG(1) << "Ignored set_cursor_bounds signal to prevent window shake";
     return;
   }
 
-  const gfx::Rect gfx_cursor_location = IBusRectToGfxRect(cursor_location);
-  // Remember the cursor location.
-  candidate_window_view_->set_cursor_location(gfx_cursor_location);
-  candidate_window_view_->set_composition_head_location(
-      IBusRectToGfxRect(composition_head));
-  // Move the window per the cursor location.
+  // Remember the cursor bounds.
+  candidate_window_view_->set_cursor_bounds(cursor_bounds);
+  candidate_window_view_->set_composition_head_bounds(composition_head);
+  // Move the window per the cursor bounds.
   candidate_window_view_->ResizeAndMoveParentFrame();
   UpdateInfolistBounds();
 
-  // Mode indicator controller also needs the cursor location.
-  mode_indicator_controller_->SetCursorLocation(gfx_cursor_location);
+  // Mode indicator controller also needs the cursor bounds.
+  mode_indicator_controller_->SetCursorBounds(cursor_bounds);
 }
 
 void CandidateWindowControllerImpl::UpdateAuxiliaryText(
@@ -149,6 +130,10 @@ void CandidateWindowControllerImpl::UpdateAuxiliaryText(
   }
   candidate_window_view_->UpdateAuxiliaryText(utf8_text);
   candidate_window_view_->ShowAuxiliaryText();
+}
+
+void CandidateWindowControllerImpl::FocusStateChanged(bool is_focused) {
+  mode_indicator_controller_->FocusStateChanged(is_focused);
 }
 
 // static
@@ -285,14 +270,9 @@ void CandidateWindowControllerImpl::UpdatePreeditText(
   candidate_window_view_->ShowPreeditText();
 }
 
-void CandidateWindowControllerImpl::OnCandidateCommitted(int index,
-                                                         int button,
-                                                         int flags) {
-  IBusEngineHandlerInterface* engine = IBusBridge::Get()->GetEngineHandler();
-  if (engine)
-    engine->CandidateClicked(index,
-                             static_cast<ibus::IBusMouseButton>(button),
-                             flags);
+void CandidateWindowControllerImpl::OnCandidateCommitted(int index) {
+  FOR_EACH_OBSERVER(CandidateWindowController::Observer, observers_,
+                    CandidateClicked(index));
 }
 
 void CandidateWindowControllerImpl::OnCandidateWindowOpened() {

@@ -12,7 +12,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/favicon/favicon_service.h"
@@ -31,6 +30,7 @@
 #include "chrome/common/favicon/favicon_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "extensions/browser/event_router.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -50,8 +50,8 @@ namespace message_center {
 class ProfileNotifierGroup : public message_center::NotifierGroup {
  public:
   ProfileNotifierGroup(const gfx::Image& icon,
-                       const string16& display_name,
-                       const string16& login_info,
+                       const base::string16& display_name,
+                       const base::string16& login_info,
                        size_t index,
                        const base::FilePath& profile_path);
   virtual ~ProfileNotifierGroup() {}
@@ -63,8 +63,8 @@ class ProfileNotifierGroup : public message_center::NotifierGroup {
 };
 
 ProfileNotifierGroup::ProfileNotifierGroup(const gfx::Image& icon,
-                                           const string16& display_name,
-                                           const string16& login_info,
+                                           const base::string16& display_name,
+                                           const base::string16& login_info,
                                            size_t index,
                                            const base::FilePath& profile_path)
     : message_center::NotifierGroup(icon, display_name, login_info, index),
@@ -115,9 +115,20 @@ MessageCenterSettingsController::MessageCenterSettingsController(
                  chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
                  content::NotificationService::AllBrowserContextsAndSources());
   RebuildNotifierGroups();
+
+#if defined(OS_CHROMEOS)
+  // UserManager may not exist in some tests.
+  if (chromeos::UserManager::IsInitialized())
+    chromeos::UserManager::Get()->AddSessionStateObserver(this);
+#endif
 }
 
 MessageCenterSettingsController::~MessageCenterSettingsController() {
+#if defined(OS_CHROMEOS)
+  // UserManager may not exist in some tests.
+  if (chromeos::UserManager::IsInitialized())
+    chromeos::UserManager::Get()->RemoveSessionStateObserver(this);
+#endif
 }
 
 void MessageCenterSettingsController::AddObserver(
@@ -238,7 +249,7 @@ void MessageCenterSettingsController::GetNotifierList(
     }
 
     std::string url_pattern = iter->primary_pattern.ToString();
-    string16 name = UTF8ToUTF16(url_pattern);
+    base::string16 name = UTF8ToUTF16(url_pattern);
     GURL url(url_pattern);
     NotifierId notifier_id(url);
     notifiers->push_back(new Notifier(
@@ -247,7 +258,6 @@ void MessageCenterSettingsController::GetNotifierList(
         notification_service->IsNotifierEnabled(notifier_id)));
     patterns_[name] = iter->primary_pattern;
     FaviconService::FaviconForURLParams favicon_params(
-        profile,
         url,
         chrome::FAVICON | chrome::TOUCH_ICON,
         message_center::kSettingsIconSize);
@@ -263,9 +273,10 @@ void MessageCenterSettingsController::GetNotifierList(
 
   // Screenshot notification feature is only for ChromeOS. See crbug.com/238358
 #if defined(OS_CHROMEOS)
-  const string16 screenshot_name =
+  const base::string16 screenshot_name =
       l10n_util::GetStringUTF16(IDS_MESSAGE_CENTER_NOTIFIER_SCREENSHOT_NAME);
-  NotifierId screenshot_notifier_id(ash::system_notifier::NOTIFIER_SCREENSHOT);
+  NotifierId screenshot_notifier_id(
+      NotifierId::SYSTEM_COMPONENT, ash::system_notifier::kNotifierScreenshot);
   Notifier* const screenshot_notifier = new Notifier(
       screenshot_notifier_id,
       screenshot_name,
@@ -314,7 +325,7 @@ void MessageCenterSettingsController::SetNotifierEnabled(
                    << notifier.notifier_id.url.spec();
       }
     } else {
-      std::map<string16, ContentSettingsPattern>::const_iterator iter =
+      std::map<base::string16, ContentSettingsPattern>::const_iterator iter =
           patterns_.find(notifier.name);
       if (iter != patterns_.end()) {
         notification_service->ClearSetting(iter->second);
@@ -393,6 +404,13 @@ void MessageCenterSettingsController::OnFaviconLoaded(
 }
 
 
+#if defined(OS_CHROMEOS)
+void MessageCenterSettingsController::ActiveUserChanged(
+    const chromeos::User* active_user) {
+  RebuildNotifierGroups();
+}
+#endif
+
 void MessageCenterSettingsController::SetAppImage(const std::string& id,
                                                   const gfx::ImageSkia& image) {
   FOR_EACH_OBSERVER(message_center::NotifierSettingsObserver,
@@ -441,6 +459,16 @@ void MessageCenterSettingsController::RebuildNotifierGroups() {
       continue;
 
 #if defined(OS_CHROMEOS)
+    // Allows the active user only.
+    // UserManager may not exist in some tests.
+    if (chromeos::UserManager::IsInitialized()) {
+      chromeos::UserManager* user_manager = chromeos::UserManager::Get();
+      if (user_manager->GetUserByProfile(group->profile()) !=
+          user_manager->GetActiveUser()) {
+        continue;
+      }
+    }
+
     // In ChromeOS, the login screen first creates a dummy profile which is not
     // actually used, and then the real profile for the user is created when
     // login (or turns into kiosk mode). This profile should be skipped.

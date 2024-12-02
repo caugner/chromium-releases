@@ -274,7 +274,6 @@ void SyncableFileSystemOperation::TouchFile(
 void SyncableFileSystemOperation::OpenFile(
     const FileSystemURL& url,
     int file_flags,
-    base::ProcessHandle peer_handle,
     const OpenFileCallback& callback) {
   NOTREACHED();
 }
@@ -371,7 +370,8 @@ SyncableFileSystemOperation::SyncableFileSystemOperation(
   impl_.reset(fileapi::FileSystemOperation::Create(
       url_, file_system_context, operation_context.Pass()));
   operation_runner_ = backend->sync_context()->operation_runner();
-  is_directory_operation_enabled_ = IsSyncFSDirectoryOperationEnabled();
+  is_directory_operation_enabled_ = IsSyncFSDirectoryOperationEnabled(
+      url.origin());
 }
 
 void SyncableFileSystemOperation::DidFinish(base::PlatformFileError status) {

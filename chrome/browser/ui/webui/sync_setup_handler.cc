@@ -95,7 +95,7 @@ const char* kDataTypeNames[] = {
   "tabs"
 };
 
-COMPILE_ASSERT(29 == syncer::MODEL_TYPE_COUNT,
+COMPILE_ASSERT(30 == syncer::MODEL_TYPE_COUNT,
                update_kDataTypeNames_to_match_UserSelectableTypes);
 
 typedef std::map<syncer::ModelType, const char*> ModelTypeNameMap;
@@ -199,7 +199,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     content::WebUI* web_ui) {
   DCHECK(localized_strings);
 
-  string16 product_name(GetStringUTF16(IDS_PRODUCT_NAME));
+  base::string16 product_name(GetStringUTF16(IDS_PRODUCT_NAME));
   localized_strings->SetString(
       "chooseDataTypesInstructions",
       GetStringFUTF16(IDS_SYNC_CHOOSE_DATATYPES_INSTRUCTIONS, product_name));
@@ -367,7 +367,8 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   base::Time passphrase_time = service->GetExplicitPassphraseTime();
   syncer::PassphraseType passphrase_type = service->GetPassphraseType();
   if (!passphrase_time.is_null()) {
-    string16 passphrase_time_str = base::TimeFormatShortDate(passphrase_time);
+    base::string16 passphrase_time_str =
+        base::TimeFormatShortDate(passphrase_time);
     args.SetString(
         "enterPassphraseBody",
         GetStringFUTF16(IDS_SYNC_ENTER_PASSPHRASE_BODY_WITH_DATE,
@@ -751,7 +752,7 @@ void SyncSetupHandler::HandleShowSetupUI(const ListValue* args) {
 // On ChromeOS, we need to sign out the user session to fix an auth error, so
 // the user goes through the real signin flow to generate a new auth token.
 void SyncSetupHandler::HandleDoSignOutOnAuthError(const ListValue* args) {
-  DLOG(INFO) << "Signing out the user to fix a sync error.";
+  DVLOG(1) << "Signing out the user to fix a sync error.";
   chrome::AttemptUserExit();
 }
 #endif

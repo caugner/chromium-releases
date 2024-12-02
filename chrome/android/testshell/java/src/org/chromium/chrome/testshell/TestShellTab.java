@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,20 @@ import android.content.Context;
 import android.text.TextUtils;
 
 import org.chromium.chrome.browser.TabBase;
+import org.chromium.chrome.browser.contextmenu.ChromeContextMenuPopulator;
+import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.infobar.AutoLoginProcessor;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.common.CleanupReference;
-import org.chromium.ui.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * TestShell's implementation of a tab. This mirrors how Chrome for Android subclasses
  * and extends {@link TabBase}.
  */
 public class TestShellTab extends TabBase {
-    private int mNativeTestShellTab;
+    private long mNativeTestShellTab;
 
     private CleanupReference mCleanupReference;
 
@@ -79,7 +81,7 @@ public class TestShellTab extends TabBase {
 
         ContentView contentView = getContentView();
         if (TextUtils.equals(url, contentView.getUrl())) {
-            contentView.reload();
+            contentView.getContentViewCore().reload(true);
         } else {
             if (postData == null) {
                 contentView.loadUrl(new LoadUrlParams(url));
@@ -103,8 +105,8 @@ public class TestShellTab extends TabBase {
     }
 
     private static final class DestroyRunnable implements Runnable {
-        private final int mNativeTestShellTab;
-        private DestroyRunnable(int nativeTestShellTab) {
+        private final long mNativeTestShellTab;
+        private DestroyRunnable(long nativeTestShellTab) {
             mNativeTestShellTab = nativeTestShellTab;
         }
         @Override
@@ -115,16 +117,25 @@ public class TestShellTab extends TabBase {
 
     @Override
     protected AutoLoginProcessor createAutoLoginProcessor() {
-       return new AutoLoginProcessor() {
-           @Override
-           public void processAutoLoginResult(String accountName,
-                   String authToken, boolean success, String result) {
-               getInfoBarContainer().processAutoLogin(accountName, authToken,
-                       success, result);
-           }
-       };
+        return new AutoLoginProcessor() {
+            @Override
+            public void processAutoLoginResult(String accountName,
+                    String authToken, boolean success, String result) {
+                getInfoBarContainer().processAutoLogin(accountName, authToken,
+                        success, result);
+            }
+        };
     }
 
+    @Override
+    protected ContextMenuPopulator createContextMenuPopulator() {
+        return new ChromeContextMenuPopulator(new TabBaseChromeContextMenuItemDelegate() {
+            @Override
+            public void onOpenImageUrl(String url) {
+                loadUrlWithSanitization(url);
+            }
+        });
+    }
 
     private class TestShellTabBaseChromeWebContentsDelegateAndroid
             extends TabBaseChromeWebContentsDelegateAndroid {
@@ -139,7 +150,7 @@ public class TestShellTab extends TabBase {
         }
     }
 
-    private native int nativeInit();
-    private static native void nativeDestroy(int nativeTestShellTab);
-    private native String nativeFixupUrl(int nativeTestShellTab, String url);
+    private native long nativeInit();
+    private static native void nativeDestroy(long nativeTestShellTab);
+    private native String nativeFixupUrl(long nativeTestShellTab, String url);
 }

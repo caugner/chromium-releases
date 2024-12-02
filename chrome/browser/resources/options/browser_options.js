@@ -169,6 +169,11 @@ cr.define('options', function() {
       };
       $('default-search-engine').addEventListener('change',
           this.setDefaultSearchEngine_);
+      // Without this, the bubble would overlap the uber frame navigation pane
+      // and would not get mouse event as explained in crbug.com/311421.
+      document.querySelector(
+          '#default-search-engine + .controlled-setting-indicator').location =
+              cr.ui.ArrowLocation.TOP_START;
 
       // Users section.
       if (loadTimeData.valueExists('profilesInfo')) {
@@ -209,30 +214,14 @@ cr.define('options', function() {
       }
 
       if (cr.isChromeOS) {
-        if (!UIAccountTweaks.loggedInAsGuest()) {
-          var pictureWrapper = $('account-picture-wrapper');
-          pictureWrapper.setAttribute('role', 'button');
-          pictureWrapper.tabIndex = 0;
-          function activate(event) {
-            if (event.type == 'click' ||
-                (event.type == 'keydown' && event.keyCode == 32)) {
-              OptionsPage.navigateToPage('changePicture');
-            }
-          };
-          pictureWrapper.onclick = activate;
-          pictureWrapper.addEventListener('keydown', activate);
-
-        }
-
         // Username (canonical email) of the currently logged in user or
         // |kGuestUser| if a guest session is active.
         this.username_ = loadTimeData.getString('username');
 
         this.updateAccountPicture_();
 
-        $('account-picture-wrapper').oncontextmenu = function(e) {
-          e.preventDefault();
-        };
+        $('account-picture').onclick = this.showImagerPickerOverlay_;
+        $('change-picture-caption').onclick = this.showImagerPickerOverlay_;
 
         $('manage-accounts-button').onclick = function(event) {
           OptionsPage.navigateToPage('accounts');
@@ -274,8 +263,9 @@ cr.define('options', function() {
       };
       $('privacyClearDataButton').hidden = OptionsPage.isSettingsApp();
       // 'metricsReportingEnabled' element is only present on Chrome branded
-      // builds.
-      if ($('metricsReportingEnabled')) {
+      // builds, and the 'metricsReportingCheckboxAction' message is only
+      // handled on ChromeOS.
+      if ($('metricsReportingEnabled') && cr.isChromeOS) {
         $('metricsReportingEnabled').onclick = function(event) {
           chrome.send('metricsReportingCheckboxAction',
               [String(event.currentTarget.checked)]);
@@ -434,15 +424,36 @@ cr.define('options', function() {
 
       // Accessibility section (CrOS only).
       if (cr.isChromeOS) {
+        var updateAccessibilitySettingsButton = function() {
+          $('accessibility-settings').hidden =
+              !($('accessibility-spoken-feedback-check').checked);
+        };
+        Preferences.getInstance().addEventListener(
+            'settings.accessibility',
+            updateAccessibilitySettingsButton);
+        $('accessibility-settings-button').onclick = function(event) {
+          window.open(loadTimeData.getString('accessibilitySettingsURL'));
+        };
         $('accessibility-spoken-feedback-check').onchange = function(event) {
           chrome.send('spokenFeedbackChange',
                       [$('accessibility-spoken-feedback-check').checked]);
+          updateAccessibilitySettingsButton();
         };
+        updateAccessibilitySettingsButton();
 
         $('accessibility-high-contrast-check').onchange = function(event) {
           chrome.send('highContrastChange',
                       [$('accessibility-high-contrast-check').checked]);
         };
+
+        var updateDelayDropdown = function() {
+          $('accessibility-autoclick-dropdown').disabled =
+              !$('accessibility-autoclick-check').checked;
+        };
+        Preferences.getInstance().addEventListener(
+            $('accessibility-autoclick-check').getAttribute('pref'),
+            updateDelayDropdown);
+
         $('accessibility-sticky-keys').hidden =
             !loadTimeData.getBoolean('enableStickyKeys');
       }
@@ -483,6 +494,8 @@ cr.define('options', function() {
       $('reset-profile-settings').onclick = function(event) {
         OptionsPage.navigateToPage('resetProfileSettings');
       };
+      $('reset-profile-settings-section').hidden =
+          !loadTimeData.getBoolean('enableResetProfileSettings');
     },
 
     /** @override */
@@ -549,6 +562,7 @@ cr.define('options', function() {
 
       // Unhide
       section.hidden = false;
+      section.style.height = '0px';
 
       var expander = function() {
         // Reveal the section using a WebKit transition if animating.
@@ -594,7 +608,7 @@ cr.define('options', function() {
       setTimeout(function() {
         // Hide the section using a WebKit transition.
         section.classList.add('sliding');
-        section.style.height = '';
+        section.style.height = '0px';
       }, 0);
     },
 
@@ -683,9 +697,10 @@ cr.define('options', function() {
       // Disable WebKit transitions.
       section.classList.remove('sliding');
 
-      if (section.style.height == '') {
+      if (section.style.height == '0px') {
         // Hide the content so it can't get tab focus.
         section.hidden = true;
+        section.style.height = '';
       } else {
         // Set the section height to 'auto' to allow for size changes
         // (due to font change or dynamic content).
@@ -1175,6 +1190,25 @@ cr.define('options', function() {
       $('themes-reset').disabled = !enabled;
     },
 
+    setAccountPictureManaged_: function(managed) {
+      var picture = $('account-picture');
+      if (managed || UIAccountTweaks.loggedInAsGuest()) {
+        picture.disabled = true;
+        ChangePictureOptions.closeOverlay();
+      } else {
+        picture.disabled = false;
+      }
+
+      // Create a synthetic pref change event decorated as
+      // CoreOptionsHandler::CreateValueForPref() does.
+      var event = new Event('account-picture');
+      if (managed)
+        event.value = { controlledBy: 'policy' };
+      else
+        event.value = {};
+      $('account-picture-indicator').handlePrefChange(event);
+    },
+
     /**
      * (Re)loads IMG element with current user account picture.
      * @private
@@ -1508,6 +1542,14 @@ cr.define('options', function() {
         if (index != undefined)
           $('bluetooth-paired-devices-list').deleteItemAtIndex(index);
       }
+    },
+
+    /**
+     * Shows the overlay dialog for changing the user avatar image.
+     * @private
+     */
+    showImagerPickerOverlay_: function() {
+      OptionsPage.navigateToPage('changePicture');
     }
   };
 
@@ -1523,6 +1565,7 @@ cr.define('options', function() {
     'removeBluetoothDevice',
     'removeCloudPrintConnectorSection',
     'scrollToSection',
+    'setAccountPictureManaged',
     'setAutoOpenFileTypesDisplayed',
     'setBluetoothState',
     'setFontSize',

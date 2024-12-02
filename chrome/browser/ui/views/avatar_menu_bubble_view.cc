@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -149,7 +150,7 @@ class HighlightDelegate {
 // the mouse is over this link.
 class EditProfileLink : public views::Link {
  public:
-  explicit EditProfileLink(const string16& title,
+  explicit EditProfileLink(const base::string16& title,
                            HighlightDelegate* delegate);
 
   virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
@@ -164,7 +165,7 @@ class EditProfileLink : public views::Link {
   views::CustomButton::ButtonState state_;
 };
 
-EditProfileLink::EditProfileLink(const string16& title,
+EditProfileLink::EditProfileLink(const base::string16& title,
                                  HighlightDelegate* delegate)
     : views::Link(title),
       delegate_(delegate),
@@ -477,7 +478,7 @@ ActionButtonView::ActionButtonView(views::ButtonListener* listener,
 
 // static
 AvatarMenuBubbleView* AvatarMenuBubbleView::avatar_bubble_ = NULL;
-bool AvatarMenuBubbleView::close_on_deactivate_ = true;
+bool AvatarMenuBubbleView::close_on_deactivate_for_testing_ = true;
 
 // static
 void AvatarMenuBubbleView::ShowBubble(
@@ -493,7 +494,7 @@ void AvatarMenuBubbleView::ShowBubble(
   avatar_bubble_ = new AvatarMenuBubbleView(
       anchor_view, arrow, anchor_rect, browser);
   views::BubbleDelegateView::CreateBubble(avatar_bubble_);
-  avatar_bubble_->set_close_on_deactivate(close_on_deactivate_);
+  avatar_bubble_->set_close_on_deactivate(close_on_deactivate_for_testing_);
   avatar_bubble_->SetBackgroundColors();
   avatar_bubble_->SetAlignment(border_alignment);
   avatar_bubble_->GetWidget()->Show();
@@ -658,7 +659,7 @@ void AvatarMenuBubbleView::ButtonPressed(views::Button* sender,
     chrome::ShowSettingsSubPage(browser_, subpage);
     return;
   } else if (sender->tag() == IDS_PROFILES_PROFILE_SIGNOUT_BUTTON) {
-    avatar_menu_->BeginSignOut();
+    profiles::LockProfile(browser_->profile());
     return;
   }
 
@@ -720,7 +721,7 @@ void AvatarMenuBubbleView::InitMenuContents(
                                                      avatar_menu_.get());
     item_view->SetAccessibleName(l10n_util::GetStringFUTF16(
         IDS_PROFILES_SWITCH_TO_PROFILE_ACCESSIBLE_NAME, item.name));
-    item_view->set_focusable(true);
+    item_view->SetFocusable(true);
     AddChildView(item_view);
     item_views_.push_back(item_view);
   }

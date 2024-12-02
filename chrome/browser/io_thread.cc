@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/base64.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -40,16 +41,18 @@
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/net/spdyproxy/http_auth_handler_spdyproxy.h"
-#include "chrome/browser/policy/policy_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/policy/core/common/policy_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/net_util.h"
 #include "net/base/network_time_notifier.h"
 #include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert/ct_known_logs.h"
+#include "net/cert/ct_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
@@ -82,6 +85,11 @@
 #include "policy/policy_constants.h"
 #endif
 
+#if !defined(USE_OPENSSL)
+#include "net/cert/ct_log_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
+#endif
+
 #if defined(USE_NSS) || defined(OS_IOS)
 #include "net/ocsp/nss_ocsp.h"
 #endif
@@ -106,6 +114,7 @@ namespace {
 const char kQuicFieldTrialName[] = "QUIC";
 const char kQuicFieldTrialEnabledGroupName[] = "Enabled";
 const char kQuicFieldTrialHttpsEnabledGroupName[] = "HttpsEnabled";
+const char kQuicFieldTrialPacketLengthSuffix[] = "BytePackets";
 
 const char kSpdyFieldTrialName[] = "SPDY";
 const char kSpdyFieldTrialDisabledGroupName[] = "SpdyDisabled";
@@ -204,6 +213,8 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
   context->set_cert_verifier(globals->cert_verifier.get());
   context->set_transport_security_state(
       globals->transport_security_state.get());
+  context->set_cert_transparency_verifier(
+      globals->cert_transparency_verifier.get());
   context->set_http_auth_handler_factory(
       globals->http_auth_handler_factory.get());
   context->set_proxy_service(globals->proxy_script_fetcher_proxy_service.get());
@@ -232,6 +243,8 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   context->set_cert_verifier(globals->cert_verifier.get());
   context->set_transport_security_state(
       globals->transport_security_state.get());
+  context->set_cert_transparency_verifier(
+      globals->cert_transparency_verifier.get());
   context->set_http_auth_handler_factory(
       globals->http_auth_handler_factory.get());
   context->set_proxy_service(globals->system_proxy_service.get());
@@ -527,6 +540,41 @@ void IOThread::InitAsync() {
   UpdateDnsClientEnabled();
   globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
   globals_->transport_security_state.reset(new net::TransportSecurityState());
+#if !defined(USE_OPENSSL)
+  // For now, Certificate Transparency is only implemented for platforms
+  // that use NSS.
+  net::MultiLogCTVerifier* ct_verifier = new net::MultiLogCTVerifier();
+  globals_->cert_transparency_verifier.reset(ct_verifier);
+
+  // Add built-in logs
+  ct_verifier->AddLog(net::ct::CreateGooglePilotLogVerifier().Pass());
+  ct_verifier->AddLog(net::ct::CreateGoogleAviatorLogVerifier().Pass());
+  ct_verifier->AddLog(net::ct::CreateGoogleRocketeerLogVerifier().Pass());
+
+  // Add logs from command line
+  if (command_line.HasSwitch(switches::kCertificateTransparencyLog)) {
+    std::string switch_value = command_line.GetSwitchValueASCII(
+        switches::kCertificateTransparencyLog);
+    size_t delim_pos = switch_value.find(":");
+    CHECK(delim_pos != std::string::npos)
+        << "CT log description not provided (switch format"
+           " is 'description:base64_key')";
+    std::string log_description(switch_value.substr(0, delim_pos));
+    std::string ct_public_key_data;
+    CHECK(base::Base64Decode(
+          switch_value.substr(delim_pos + 1),
+          &ct_public_key_data)) << "Unable to decode CT public key.";
+    scoped_ptr<net::CTLogVerifier> external_log_verifier(
+        net::CTLogVerifier::Create(ct_public_key_data, log_description));
+    CHECK(external_log_verifier) << "Unable to parse CT public key.";
+    ct_verifier->AddLog(external_log_verifier.Pass());
+  }
+#else
+  if (command_line.HasSwitch(switches::kCertificateTransparencyLog)) {
+    LOG(DFATAL) << "Certificate Transparency is not yet supported in Chrome "
+                   "builds using OpenSSL.";
+  }
+#endif
   globals_->ssl_config_service = GetSSLConfigService();
 #if defined(OS_ANDROID) || defined(OS_IOS)
   if (DataReductionProxySettings::IsDataReductionProxyAllowed()) {
@@ -568,18 +616,7 @@ void IOThread::InitAsync() {
     globals_->testing_fixed_https_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpsPort);
   }
-  bool enable_quic = ShouldEnableQuic(command_line);
-  globals_->enable_quic.set(enable_quic);
-  if (enable_quic)
-    globals_->enable_quic_https.set(ShouldEnableQuicHttps(command_line));
-  if (command_line.HasSwitch(switches::kOriginToForceQuicOn)) {
-    net::HostPortPair quic_origin =
-        net::HostPortPair::FromString(
-            command_line.GetSwitchValueASCII(switches::kOriginToForceQuicOn));
-    if (!quic_origin.IsEmpty()) {
-      globals_->origin_to_force_quic_on.set(quic_origin);
-    }
-  }
+  ConfigureQuic(command_line);
   if (command_line.HasSwitch(
           switches::kEnableUserAlternateProtocolPorts)) {
     globals_->enable_user_alternate_protocol_ports = true;
@@ -612,7 +649,7 @@ void IOThread::InitAsync() {
   globals_->proxy_script_fetcher_ftp_transaction_factory.reset(
       new net::FtpNetworkLayer(globals_->host_resolver.get()));
   job_factory->SetProtocolHandler(
-      chrome::kFtpScheme,
+      content::kFtpScheme,
       new net::FtpProtocolHandler(
           globals_->proxy_script_fetcher_ftp_transaction_factory.get()));
 #endif
@@ -733,8 +770,8 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
       net::HttpStreamFactory::EnableNpnSpdy4a2();
     } else if (command_line.HasSwitch(switches::kDisableSpdy31)) {
       net::HttpStreamFactory::EnableNpnSpdy3();
-    } else if (command_line.HasSwitch(switches::kDisableSpdy2)) {
-      net::HttpStreamFactory::EnableNpnSpdy31();
+    } else if (command_line.HasSwitch(switches::kEnableSpdy2)) {
+      net::HttpStreamFactory::EnableNpnSpdy31WithSpdy2();
     } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
       net::HttpStreamFactory::EnableNpnHttpOnly();
     } else {
@@ -743,10 +780,7 @@ void IOThread::InitializeNetworkOptions(const CommandLine& command_line) {
          net::HttpStreamFactory::set_spdy_enabled(false);
       } else {
         // Use SPDY/3.1 by default.
-        //
-        // TODO(akalin): Turn off SPDY/2 by default
-        // (http://crbug.com/318651).
-        net::HttpStreamFactory::EnableNpnSpdy31WithSpdy2();
+        net::HttpStreamFactory::EnableNpnSpdy31();
       }
     }
   }
@@ -809,7 +843,7 @@ void IOThread::EnableSpdy(const std::string& mode) {
       pair.protocol = net::NPN_SPDY_3;
       net::HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
     } else if (option == kSingleDomain) {
-      DLOG(INFO) << "FORCING SINGLE DOMAIN";
+      DVLOG(1) << "FORCING SINGLE DOMAIN";
       globals_->force_spdy_single_domain.set(true);
     } else if (option == kInitialMaxConcurrentStreams) {
       int streams;
@@ -845,6 +879,14 @@ void IOThread::RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kDailyOriginalContentLengthWithDataReductionProxyEnabled);
   registry->RegisterListPref(
       prefs::kDailyContentLengthWithDataReductionProxyEnabled);
+  registry->RegisterListPref(
+      prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled);
+  registry->RegisterListPref(
+      prefs::kDailyContentLengthShortBypassWithDataReductionProxyEnabled);
+  registry->RegisterListPref(
+      prefs::kDailyContentLengthLongBypassWithDataReductionProxyEnabled);
+  registry->RegisterListPref(
+      prefs::kDailyContentLengthUnknownWithDataReductionProxyEnabled);
   registry->RegisterListPref(
       prefs::kDailyOriginalContentLengthViaDataReductionProxy);
   registry->RegisterListPref(
@@ -932,6 +974,7 @@ void IOThread::InitializeNetworkSessionParams(
       &params->trusted_spdy_proxy);
   globals_->enable_quic.CopyToIfSet(&params->enable_quic);
   globals_->enable_quic_https.CopyToIfSet(&params->enable_quic_https);
+  globals_->quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
   globals_->origin_to_force_quic_on.CopyToIfSet(
       &params->origin_to_force_quic_on);
   params->enable_user_alternate_protocol_ports =
@@ -1003,38 +1046,88 @@ void IOThread::UpdateDnsClientEnabled() {
   globals()->host_resolver->SetDnsClientEnabled(*dns_client_enabled_);
 }
 
-bool IOThread::ShouldEnableQuic(const CommandLine& command_line) {
+void IOThread::ConfigureQuic(const CommandLine& command_line) {
   // Always fetch the field trial group to ensure it is reported correctly.
   // The command line flags will be associated with a group that is reported
   // so long as trial is actually queried.
   std::string quic_trial_group =
       base::FieldTrialList::FindFullName(kQuicFieldTrialName);
 
+  bool enable_quic = ShouldEnableQuic(command_line, quic_trial_group);
+  globals_->enable_quic.set(enable_quic);
+  if (enable_quic) {
+    globals_->enable_quic_https.set(
+        ShouldEnableQuicHttps(command_line, quic_trial_group));
+  }
+
+  size_t max_packet_length = GetQuicMaxPacketLength(command_line,
+                                                    quic_trial_group);
+  if (max_packet_length != 0) {
+    globals_->quic_max_packet_length.set(max_packet_length);
+  }
+
+  if (command_line.HasSwitch(switches::kOriginToForceQuicOn)) {
+    net::HostPortPair quic_origin =
+        net::HostPortPair::FromString(
+            command_line.GetSwitchValueASCII(switches::kOriginToForceQuicOn));
+    if (!quic_origin.IsEmpty()) {
+      globals_->origin_to_force_quic_on.set(quic_origin);
+    }
+  }
+}
+
+bool IOThread::ShouldEnableQuic(const CommandLine& command_line,
+                                base::StringPiece quic_trial_group) {
   if (command_line.HasSwitch(switches::kDisableQuic))
     return false;
 
   if (command_line.HasSwitch(switches::kEnableQuic))
     return true;
 
-  // QUIC should be enabled if we are in either field trial group.
-  return quic_trial_group == kQuicFieldTrialEnabledGroupName ||
-      quic_trial_group == kQuicFieldTrialHttpsEnabledGroupName;
+  return quic_trial_group.starts_with(kQuicFieldTrialEnabledGroupName) ||
+      quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName);
 }
 
-bool IOThread::ShouldEnableQuicHttps(const CommandLine& command_line) {
-  // Always fetch the field trial group to ensure it is reported correctly.
-  // The command line flags will be associated with a group that is reported
-  // so long as trial is actually queried.
-  std::string quic_trial_group =
-      base::FieldTrialList::FindFullName(kQuicFieldTrialName);
-
+bool IOThread::ShouldEnableQuicHttps(const CommandLine& command_line,
+                                     base::StringPiece quic_trial_group) {
   if (command_line.HasSwitch(switches::kDisableQuicHttps))
     return false;
 
   if (command_line.HasSwitch(switches::kEnableQuicHttps))
     return true;
 
-  // HTTPS over QUIC should only be enabled if we are in the https
-  // field trial group.
-  return quic_trial_group == kQuicFieldTrialHttpsEnabledGroupName;
+  return quic_trial_group.starts_with(kQuicFieldTrialHttpsEnabledGroupName);
+}
+
+size_t IOThread::GetQuicMaxPacketLength(const CommandLine& command_line,
+                                        base::StringPiece quic_trial_group) {
+  if (command_line.HasSwitch(switches::kQuicMaxPacketLength)) {
+    unsigned value;
+    if (!base::StringToUint(
+            command_line.GetSwitchValueASCII(switches::kQuicMaxPacketLength),
+            &value)) {
+      return 0;
+    }
+    return value;
+  }
+
+  // Format of the packet length group names is:
+  //   (Https)?Enabled<length>BytePackets.
+  base::StringPiece length_str(quic_trial_group);
+  if (length_str.starts_with(kQuicFieldTrialEnabledGroupName)) {
+    length_str.remove_prefix(strlen(kQuicFieldTrialEnabledGroupName));
+  } else if (length_str.starts_with(kQuicFieldTrialHttpsEnabledGroupName)) {
+    length_str.remove_prefix(strlen(kQuicFieldTrialHttpsEnabledGroupName));
+  } else {
+    return 0;
+  }
+  if (!length_str.ends_with(kQuicFieldTrialPacketLengthSuffix)) {
+    return 0;
+  }
+  length_str.remove_suffix(strlen(kQuicFieldTrialPacketLengthSuffix));
+  unsigned value;
+  if (!base::StringToUint(length_str, &value)) {
+    return 0;
+  }
+  return value;
 }

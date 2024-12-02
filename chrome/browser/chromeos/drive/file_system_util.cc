@@ -11,11 +11,9 @@
 #include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
-#include "base/files/scoped_platform_file_closer.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
@@ -30,7 +28,6 @@
 #include "chrome/browser/chromeos/drive/job_list.h"
 #include "chrome/browser/chromeos/drive/write_on_cache_file.h"
 #include "chrome/browser/chromeos/profiles/profile_util.h"
-#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -39,6 +36,7 @@
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "google_apis/drive/gdata_wapi_parser.h"
 #include "net/base/escape.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 
@@ -61,7 +59,8 @@ const base::FilePath::CharType kFileCacheVersionDir[] =
     FILE_PATH_LITERAL("v1");
 
 const char kSlash[] = "/";
-const char kEscapedSlash[] = "\xE2\x88\x95";
+const char kDot = '.';
+const char kEscapedChars[] = "_";
 
 const base::FilePath& GetDriveMyDriveMountPointPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mydrive_mount_path,
@@ -73,9 +72,9 @@ std::string ReadStringFromGDocFile(const base::FilePath& file_path,
                                    const std::string& key) {
   const int64 kMaxGDocSize = 4096;
   int64 file_size = 0;
-  if (!file_util::GetFileSize(file_path, &file_size) ||
+  if (!base::GetFileSize(file_path, &file_size) ||
       file_size > kMaxGDocSize) {
-    DLOG(INFO) << "File too large to be a GDoc file " << file_path.value();
+    LOG(WARNING) << "File too large to be a GDoc file " << file_path.value();
     return std::string();
   }
 
@@ -83,8 +82,8 @@ std::string ReadStringFromGDocFile(const base::FilePath& file_path,
   std::string error_message;
   scoped_ptr<base::Value> root_value(reader.Deserialize(NULL, &error_message));
   if (!root_value) {
-    DLOG(INFO) << "Failed to parse " << file_path.value() << " as JSON."
-               << " error = " << error_message;
+    LOG(WARNING) << "Failed to parse " << file_path.value() << " as JSON."
+                 << " error = " << error_message;
     return std::string();
   }
 
@@ -92,8 +91,8 @@ std::string ReadStringFromGDocFile(const base::FilePath& file_path,
   std::string result;
   if (!root_value->GetAsDictionary(&dictionary_value) ||
       !dictionary_value->GetString(key, &result)) {
-    DLOG(INFO) << "No value for the given key is stored in "
-               << file_path.value() << ". key = " << key;
+    LOG(WARNING) << "No value for the given key is stored in "
+                 << file_path.value() << ". key = " << key;
     return std::string();
   }
 
@@ -168,15 +167,15 @@ DriveServiceInterface* GetDriveServiceByProfile(Profile* profile) {
 }
 
 bool IsSpecialResourceId(const std::string& resource_id) {
-  return resource_id == kDriveGrandRootSpecialResourceId ||
-      resource_id == kDriveOtherDirSpecialResourceId;
+  return resource_id == kDriveGrandRootLocalId ||
+      resource_id == kDriveOtherDirLocalId;
 }
 
 ResourceEntry CreateMyDriveRootEntry(const std::string& root_resource_id) {
   ResourceEntry mydrive_root;
   mydrive_root.mutable_file_info()->set_is_directory(true);
   mydrive_root.set_resource_id(root_resource_id);
-  mydrive_root.set_parent_local_id(util::kDriveGrandRootSpecialResourceId);
+  mydrive_root.set_parent_local_id(util::kDriveGrandRootLocalId);
   mydrive_root.set_title(util::kDriveMyDriveRootDirName);
   return mydrive_root;
 }
@@ -305,7 +304,9 @@ std::string NormalizeFileName(const std::string& input) {
   std::string output;
   if (!base::ConvertToUtf8AndNormalize(input, base::kCodepageUTF8, &output))
     output = input;
-  ReplaceChars(output, kSlash, std::string(kEscapedSlash), &output);
+  base::ReplaceChars(output, kSlash, std::string(kEscapedChars), &output);
+  if (!output.empty() && output.find_first_not_of(kDot, 0) == std::string::npos)
+    output = kEscapedChars;
   return output;
 }
 
@@ -374,42 +375,6 @@ std::string ReadResourceIdFromGDocFile(const base::FilePath& file_path) {
   return ReadStringFromGDocFile(file_path, "resource_id");
 }
 
-std::string GetMd5Digest(const base::FilePath& file_path) {
-  const int kBufferSize = 512 * 1024;  // 512kB.
-
-  base::PlatformFile file = base::CreatePlatformFile(
-      file_path, base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
-      NULL, NULL);
-  if (file == base::kInvalidPlatformFileValue)
-    return std::string();
-  base::ScopedPlatformFileCloser file_closer(&file);
-
-  base::MD5Context context;
-  base::MD5Init(&context);
-
-  scoped_ptr<char[]> buffer(new char[kBufferSize]);
-  while (true) {
-    int result = base::ReadPlatformFileCurPosNoBestEffort(
-        file, buffer.get(), kBufferSize);
-
-    if (result < 0) {
-      // Found an error.
-      return std::string();
-    }
-
-    if (result == 0) {
-      // End of file.
-      break;
-    }
-
-    base::MD5Update(&context, base::StringPiece(buffer.get(), result));
-  }
-
-  base::MD5Digest digest;
-  base::MD5Final(&digest, &context);
-  return MD5DigestToBase16(digest);
-}
-
 bool IsDriveEnabledForProfile(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -422,6 +387,28 @@ bool IsDriveEnabledForProfile(Profile* profile) {
     return false;
 
   return true;
+}
+
+ConnectionStatusType GetDriveConnectionStatus(Profile* profile) {
+  drive::DriveServiceInterface* const drive_service =
+      drive::util::GetDriveServiceByProfile(profile);
+
+  if (!drive_service)
+    return DRIVE_DISCONNECTED_NOSERVICE;
+  if (net::NetworkChangeNotifier::IsOffline())
+    return DRIVE_DISCONNECTED_NONETWORK;
+  if (!drive_service->CanSendRequest())
+    return DRIVE_DISCONNECTED_NOTREADY;
+
+  const bool is_connection_cellular =
+      net::NetworkChangeNotifier::IsConnectionCellular(
+          net::NetworkChangeNotifier::GetConnectionType());
+  const bool disable_sync_over_celluar =
+      profile->GetPrefs()->GetBoolean(prefs::kDisableDriveOverCellular);
+
+  if (is_connection_cellular && disable_sync_over_celluar)
+    return DRIVE_CONNECTED_METERED;
+  return DRIVE_CONNECTED;
 }
 
 }  // namespace util

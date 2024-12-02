@@ -12,6 +12,7 @@ class WaitAction(page_action.PageAction):
   def __init__(self, attributes=None):
     self.timeout = 60
     super(WaitAction, self).__init__(attributes)
+    self._SetTimelineMarkerBaseName('WaitAction::RunAction')
 
   def RunsPreviousAction(self):
     return (getattr(self, 'condition', None) == 'navigate' or
@@ -19,7 +20,7 @@ class WaitAction(page_action.PageAction):
 
   def RunAction(self, page, tab, previous_action):
     tab.ExecuteJavaScript(
-        'console.time("' + self.GetTimelineMarkerLabel() + '")')
+        'console.time("' + self.GetTimelineMarkerName() + '")')
 
     if hasattr(self, 'seconds'):
       time.sleep(self.seconds)
@@ -31,6 +32,7 @@ class WaitAction(page_action.PageAction):
       previous_action.WillRunAction(page, tab)
       action_to_perform = lambda: previous_action.RunAction(page, tab, None)
       tab.PerformActionAndWaitForNavigate(action_to_perform, self.timeout)
+      tab.WaitForDocumentReadyStateToBeInteractiveOrBetter()
 
     elif getattr(self, 'condition', None) == 'href_change':
       if not previous_action:
@@ -69,7 +71,4 @@ class WaitAction(page_action.PageAction):
       raise page_action.PageActionFailed('No wait condition found')
 
     tab.ExecuteJavaScript(
-        'console.timeEnd("' + self.GetTimelineMarkerLabel() + '")')
-
-  def GetTimelineMarkerLabel(self):
-    return 'WaitAction::RunAction'
+        'console.timeEnd("' + self.GetTimelineMarkerName() + '")')

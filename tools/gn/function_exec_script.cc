@@ -85,8 +85,7 @@ bool ExecProcess(const CommandLine& cmdline,
 
   base::FilePath::StringType cmdline_str(cmdline.GetCommandLineString());
 
-  base::win::ScopedProcessInformation proc_info;
-  STARTUPINFO start_info = { 0 };
+  STARTUPINFO start_info = {};
 
   start_info.cb = sizeof(STARTUPINFO);
   start_info.hStdOutput = out_write;
@@ -98,15 +97,17 @@ bool ExecProcess(const CommandLine& cmdline,
   start_info.dwFlags |= STARTF_USESTDHANDLES;
 
   // Create the child process.
+  PROCESS_INFORMATION temp_process_info = {};
   if (!CreateProcess(NULL,
                      &cmdline_str[0],
                      NULL, NULL,
                      TRUE,  // Handles are inherited.
                      0, NULL,
                      startup_dir.value().c_str(),
-                     &start_info, proc_info.Receive())) {
+                     &start_info, &temp_process_info)) {
     return false;
   }
+  base::win::ScopedProcessInformation proc_info(temp_process_info);
 
   // Close our writing end of pipes now. Otherwise later read would not be able
   // to detect end of child's output.
@@ -355,7 +356,7 @@ Value RunExecScript(Scope* scope,
   //
   // If this shows up on benchmarks, we can cache whether we've done this
   // or not and skip creating the directory.
-  file_util::CreateDirectory(startup_dir);
+  base::CreateDirectory(startup_dir);
 
   // Execute the process.
   // TODO(brettw) set the environment block.

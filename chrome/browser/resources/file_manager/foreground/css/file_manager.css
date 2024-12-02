@@ -100,67 +100,6 @@ body {
   opacity: 0.5;
 }
 
-#butter-bar-container {
-  width: 100%;
-}
-
-#butter-bar {
-  color: #666;
-  display: -webkit-box;
-  padding: 15px;
-}
-
-#butter-bar:not(.visible) {
-  display: none;
-}
-
-#butter-bar .content {
-  -webkit-box-flex: 1.0;
-  -webkit-box-orient: block-axis;
-  -webkit-box-pack: end;
-  display: -webkit-box;
-}
-
-#butter-bar .actions {
-  -webkit-box-align: end;
-  -webkit-box-orient: horizontal;
-  -webkit-box-pack: end;
-  -webkit-margin-start: 6px;
-  display: -webkit-box;
-}
-
-#butter-bar .actions a {
-  color: rgb(17, 85, 204);
-  cursor: pointer;
-  vertical-align: middle;
-}
-
-#butter-bar .actions a.x {
-  background: center center no-repeat;
-  background-image: -webkit-image-set(
-    url('../images/files/ui/close_bar.png') 1x,
-    url('../images/files/ui/2x/close_bar.png') 2x);
-  display: inline-block;
-  height: 35px;  /* #butter-bar .content's min-height. */
-  margin-right: -12px;
-  width: 35px;
-}
-
-#butter-bar .actions a.x:first-child {
-  margin-left: -6px;
-}
-
-#butter-bar .actions a.x {
-  margin-bottom: -14px;
-}
-
-#butter-bar .butter-message.single-line {
-  line-height: 2.0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Main part of the dialog between header and footer. */
 .dialog-container {
   -webkit-box-align: stretch;
@@ -193,7 +132,8 @@ body {
   -webkit-box-flex: 0;
   -webkit-box-orient: vertical;
   background-color: #f1f1f1;
-  display: -webkit-box;
+  display: flex;
+  flex-direction: column;
   max-width: 50%;
   min-width: 100px;
   overflow: hidden;
@@ -203,8 +143,7 @@ body {
 
 .dialog-navigation-list-header {
   -webkit-app-region: drag;
-  -webkit-box-flex: 0;
-  display: -webkit-box;
+  flex: none;
   height: 48px;  /* Keep in sync with #dialog-header. */
   line-height: 45px;
 }
@@ -216,14 +155,14 @@ body {
 }
 
 .dialog-navigation-list-contents {
-  -webkit-box-flex: 1;
   display: -webkit-box;
+  flex: 1 1 auto;
   position: relative;
 }
 
 .dialog-navigation-list-footer {
-  -webkit-box-flex: 0;
   display: -webkit-flex;
+  flex: none;
   flex-direction: column;
 }
 
@@ -406,10 +345,6 @@ div.splitter {
 
 #navigation-list:focus .root-item[selected] > div.root-eject {
   -webkit-filter: brightness(0) invert();
-  opacity: 1;
-}
-
-#directory-tree .tree-row > div.root-eject:hover {
   opacity: 1;
 }
 
@@ -1015,10 +950,11 @@ input.rename {
 }
 
 .preview-panel[visibility=hiding] {
-  /* Using all seems to cause preview panel and checkbox flicking issue. */
   -webkit-transform: translate(0, 5px);
   opacity: 0;
-  transition: opacity 220ms ease;
+  /* Using all seems to cause preview panel and checkbox flicking issue. */
+  transition: opacity 220ms ease,
+              -webkit-transform 220ms ease;
 }
 
 .preview-panel[visibility=hidden] {
@@ -1835,7 +1771,6 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
 
 #suggest-app-dialog .spinner-layer {
   background-color: rgba(255, 255, 255, 0.7);
-  top: 45px;  /* Title: 44px, border: 1px */
 }
 
 #suggest-app-dialog .cr-dialog-buttons,
@@ -1926,49 +1861,49 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
   display: none;
 }
 
-#conflict-confirm-dialog .apply-all-line {
-  margin: 8px;
-  text-align: end;
+#conflict-confirm-dialog .cr-dialog-buttons {
+  align-items: baseline;
+  display: flex;
 }
 
-#conflict-confirm-dialog input {
+#conflict-confirm-dialog input[type=checkbox] {
+  -webkit-margin-start: -2px;
   width: auto;
+}
+
+#conflict-confirm-dialog label {
+  flex: 1 0 auto;
 }
 
 /* Progress center */
 
+@-webkit-keyframes progress-center-toggle {
+  /* Height values of each frame are set by script. */
+  from {
+  }
+  to {
+  }
+}
+
 #progress-center {
-  background: transparent;
+  background-color: transparent;
   border-top: 1px solid transparent;
-  display: -webkit-flex;
-  flex-direction: column;
-  /* TODO(hirono): Set the height by scripts. */
-  height: 53px;
   overflow: hidden;
   position: relative;
-  transition: height 300ms ease-out,
-              background 300ms linear,
+  transition: background-color 300ms linear,
               border 300ms linear;
-  width: 100%;
 }
 
 #progress-center.opened {
-  /* TODO(hirono): Set the height by scripts. */
-  height: 300px;
+  background-color: #ebebeb;
+  border-top: 1px solid #d8d8d8;
 }
 
-#progress-center-open-view,
-#progress-center-close-view {
-  bottom: 0;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
+#progress-center.animated {
+  -webkit-animation: progress-center-toggle 300ms ease-out;
 }
 
 #progress-center-open-view {
-  background: #ebebeb;
-  border-top: 1px solid #d8d8d8;
   opacity: 1;
   padding-top: 42px;
   transition: opacity 300ms linear;
@@ -1977,36 +1912,61 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
 #progress-center:not(.opened) #progress-center-open-view {
   opacity: 0;
   pointer-events: none;
+  position: absolute;
+}
+
+#progress-center-close-view {
+  opacity: 1;
+  transition: opacity 300ms linear;
+}
+
+#progress-center.opened #progress-center-close-view {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+#progress-center.animated #progress-center-open-view,
+#progress-center.animated #progress-center-close-view {
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
 }
 
 #progress-center li {
-  -webkit-padding-end: 10px;
-  -webkit-padding-start: 20px;
   display: block;
-  flex: none;
-  height: 33px;
-  margin-bottom: 20px;
+  min-height: 29px;  /* label 17px + frame 12px */
+  padding-bottom: 20px;
 }
 
 #progress-center label {
   color: #777;
   display: block;
-  height: 17px;
-  opacity: 1;
+  font: 12px/17px normal;
+  min-height: 17px;
   overflow: hidden;
+  padding: 0 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+#progress-center li.error label {
+  white-space: normal;
+}
+
 #progress-center .progress-frame {
+  -webkit-padding-end: 10px;
+  -webkit-padding-start: 20px;
   align-items: center;
   display: flex;
   margin-top: 4px;
 }
 
-#progress-center li.error .progress-bar,
-#progress-center li.canceled .progress-bar {
-  visibility: hidden;
+#progress-center li.error .progress-frame {
+  height: 0;
 }
 
 #progress-center .progress-bar {
@@ -2019,13 +1979,17 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
   overflow: hidden;
 }
 
-#progress-center.opened li.closed-item .progress-bar {
-  opacity: 0;
+#progress-center li.error .progress-bar,
+#progress-center li.canceled .progress-bar {
+  visibility: hidden;
 }
 
 #progress-center .progress-track {
   background: #787878;
   height: 100%;
+}
+
+#progress-center .progress-track.animated {
   transition: width 300ms linear;
 }
 
@@ -2048,9 +2012,10 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
       url(../images/files/ui/process_drawer_button_opened.png) 1x,
       url(../images/files/ui/2x/process_drawer_button_opened.png) 2x)
       no-repeat;
-  bottom: 0;
-  position: relative;
-  transition: bottom 300ms ease-out;
+  position: absolute;
+  right: 10px;
+  top: 17px; /* label height */
+  transition: top 300ms ease-out;
   z-index: 1;
 }
 
@@ -2069,10 +2034,11 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
 }
 
 /*
- * If the progress center only one item,
+ * If the closed progress center has only one item,
  * toggle button turned into cancel button the item.
  */
-#progress-center-close-view.single button.toggle,
+#progress-center:not(.opened) #progress-center-close-view.single ~
+    button.toggle,
 #progress-center button.cancel {
   background: -webkit-image-set(
       url(../images/files/ui/close_bar.png) 1x,
@@ -2080,7 +2046,8 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
       no-repeat;
 }
 
-#progress-center-close-view.single li:not(.cancelable) button.toggle,
+#progress-center:not(.opened)
+    #progress-center-close-view.single:not(.cancelable) button.toggle,
 #progress-center li:not(.cancelable) button.cancel {
   visibility: hidden;
 }
@@ -2090,13 +2057,7 @@ menuitem#thumbnail-view[lead]:not([disabled]) {
       url(../images/files/ui/process_drawer_button_closed.png) 1x,
       url(../images/files/ui/2x/process_drawer_button_closed.png) 2x)
       no-repeat;
-  /*
-   * This offset is for aliginig the position of toggle button in both open and
-   * close view. The value euals to:
-   *     label height 17px + label bottom margin 4px -
-   *     top border width 1px - required margin in the open view 10px.
-   */
-  bottom: 10px;
+  top: 10px;
 }
 
 #progress-center.opened button.toggle:hover {

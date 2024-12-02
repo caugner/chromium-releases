@@ -163,11 +163,12 @@
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
 #define IDC_CREATE_SHORTCUTS            40001
-#define IDC_DEVELOPER_MENU              40002
-#define IDC_DEV_TOOLS                   40003
-#define IDC_DEV_TOOLS_CONSOLE           40004
-#define IDC_TASK_MANAGER                40005
-#define IDC_DEV_TOOLS_DEVICES           40006
+#define IDC_CREATE_HOSTED_APP           40002
+#define IDC_DEVELOPER_MENU              40003
+#define IDC_DEV_TOOLS                   40004
+#define IDC_DEV_TOOLS_CONSOLE           40005
+#define IDC_TASK_MANAGER                40006
+#define IDC_DEV_TOOLS_DEVICES           40007
 #if defined(GOOGLE_CHROME_BUILD)
 #define IDC_FEEDBACK                    40008
 #endif
@@ -227,10 +228,10 @@
 #define IDC_SPELLCHECK_ADD_TO_DICTIONARY 41110
 
 // Writing direction
-#define IDC_WRITING_DIRECTION_MENU       41120     // OSX only
-#define IDC_WRITING_DIRECTION_DEFAULT    41121     // OSX only
-#define IDC_WRITING_DIRECTION_LTR        41122     // OSX only
-#define IDC_WRITING_DIRECTION_RTL        41123     // OSX only
+#define IDC_WRITING_DIRECTION_MENU       41120
+#define IDC_WRITING_DIRECTION_DEFAULT    41121
+#define IDC_WRITING_DIRECTION_LTR        41122
+#define IDC_WRITING_DIRECTION_RTL        41123
 
 // Translate
 #define IDC_TRANSLATE_OPTIONS_ALWAYS                42000
@@ -335,6 +336,8 @@
 #define IDC_BOOKMARK_MANAGER 51009
 #define IDC_BOOKMARK_BAR_ALWAYS_SHOW 51010
 #define IDC_BOOKMARK_BAR_SHOW_APPS_SHORTCUT 51011
+#define IDC_BOOKMARK_BAR_UNDO 51012
+#define IDC_BOOKMARK_BAR_REDO 51013
 
 // Context menu items in the status tray
 #define IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND 51100

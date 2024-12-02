@@ -5,6 +5,7 @@
 #ifndef UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_ROOT_WINDOW_HOST_X11_H_
 #define UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_ROOT_WINDOW_HOST_X11_H_
 
+#include <X11/extensions/shape.h>
 #include <X11/Xlib.h>
 
 // Get rid of a macro from Xlib.h that conflicts with Aura's RootWindow class.
@@ -13,12 +14,17 @@
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "ui/aura/root_window_host.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor_loader_x11.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/x/x11_atom_cache.h"
 #include "ui/views/views_export.h"
 #include "ui/views/widget/desktop_aura/desktop_root_window_host.h"
+
+namespace gfx {
+class ImageSkia;
+class ImageSkiaRep;
+}
 
 namespace views {
 class DesktopDragDropClientAuraX11;
@@ -44,7 +50,8 @@ class VIEWS_EXPORT DesktopRootWindowHostX11 :
   static DesktopRootWindowHostX11* GetHostForXID(XID xid);
 
   // Get all open top-level windows. This includes windows that may not be
-  // visible.
+  // visible. This list is sorted in their stacking order, i.e. the first window
+  // is the topmost window.
   static std::vector<aura::Window*> GetAllOpenWindows();
 
   // Returns the current bounds in terms of the X11 Root Window.
@@ -78,6 +85,7 @@ class VIEWS_EXPORT DesktopRootWindowHostX11 :
       const gfx::Rect& restored_bounds) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
+  virtual void StackAtTop() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
       gfx::Rect* bounds,
@@ -98,7 +106,7 @@ class VIEWS_EXPORT DesktopRootWindowHostX11 :
   virtual bool HasCapture() const OVERRIDE;
   virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE;
   virtual bool IsAlwaysOnTop() const OVERRIDE;
-  virtual void SetWindowTitle(const string16& title) OVERRIDE;
+  virtual bool SetWindowTitle(const string16& title) OVERRIDE;
   virtual void ClearNativeFocus() OVERRIDE;
   virtual Widget::MoveLoopResult RunMoveLoop(
       const gfx::Vector2d& drag_offset,
@@ -122,7 +130,6 @@ class VIEWS_EXPORT DesktopRootWindowHostX11 :
   virtual bool IsAnimatingClosed() const OVERRIDE;
 
   // Overridden from aura::RootWindowHost:
-  virtual void SetDelegate(aura::RootWindowHostDelegate* delegate) OVERRIDE;
   virtual aura::RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -141,7 +148,6 @@ class VIEWS_EXPORT DesktopRootWindowHostX11 :
   virtual void UnConfineCursor() OVERRIDE;
   virtual void OnCursorVisibilityChanged(bool show) OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
-  virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
   virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void PrepareForShutdown() OVERRIDE;
@@ -176,8 +182,17 @@ private:
   // and dispatch it to that host instead.
   void DispatchMouseEvent(ui::MouseEvent* event);
 
+  // Dispatches a touch event, taking capture into account. If a different host
+  // has capture, then touch-press events are translated to its coordinate space
+  // and dispatched to that host instead.
+  void DispatchTouchEvent(ui::TouchEvent* event);
+
   // Resets the window region for the current widget bounds if necessary.
   void ResetWindowRegion();
+
+  // Serializes an image to the format used by _NET_WM_ICON.
+  void SerializeImageRepresentation(const gfx::ImageSkiaRep& rep,
+                                    std::vector<unsigned long>* data);
 
   // See comment for variable open_windows_.
   static std::list<XID>& open_windows();
@@ -214,9 +229,6 @@ private:
   // The bounds of our window before we were maximized.
   gfx::Rect restored_bounds_;
 
-  // True if the window should be focused when the window is shown.
-  bool focus_when_shown_;
-
   // The window manager state bits.
   std::set< ::Atom> window_properties_;
 
@@ -246,7 +258,6 @@ private:
 
   DesktopNativeWidgetAura* desktop_native_widget_aura_;
 
-  aura::RootWindowHostDelegate* root_window_host_delegate_;
   aura::Window* content_window_;
 
   // We can optionally have a parent which can order us to close, or own
@@ -255,6 +266,9 @@ private:
   std::set<DesktopRootWindowHostX11*> window_children_;
 
   ObserverList<DesktopRootWindowHostObserverX11> observer_list_;
+
+  // Copy of custom window shape specified via SetShape(), if any.
+  ::Region custom_window_shape_;
 
   // The current root window host that has capture. While X11 has something
   // like Windows SetCapture()/ReleaseCapture(), it is entirely implicit and
@@ -266,6 +280,8 @@ private:
   // A list of all (top-level) windows that have been created but not yet
   // destroyed.
   static std::list<XID>* open_windows_;
+
+  string16 window_title_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopRootWindowHostX11);
 };

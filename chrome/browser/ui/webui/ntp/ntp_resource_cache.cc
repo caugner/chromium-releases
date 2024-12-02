@@ -36,13 +36,13 @@
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 #include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "extensions/common/extension.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -81,7 +81,7 @@ const char kLearnMoreIncognitoUrl[] =
 const char kLearnMoreGuestSessionUrl[] =
     "https://www.google.com/support/chromeos/bin/answer.py?answer=1057090";
 
-string16 GetUrlWithLang(const GURL& url) {
+base::string16 GetUrlWithLang(const GURL& url) {
   return ASCIIToUTF16(google_util::AppendGoogleLocaleParam(url).spec());
 }
 
@@ -309,7 +309,7 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
     if (!enterprise_domain.empty()) {
       // Device is enterprise enrolled.
       localized_strings.SetString("enterpriseInfoVisible", "true");
-      string16 enterprise_info = l10n_util::GetStringFUTF16(
+      base::string16 enterprise_info = l10n_util::GetStringFUTF16(
           IDS_DEVICE_OWNED_BY_NOTICE,
           UTF8ToUTF16(enterprise_domain));
       localized_strings.SetString("enterpriseInfoMessage", enterprise_info);

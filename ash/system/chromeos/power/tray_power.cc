@@ -168,13 +168,7 @@ void TrayPower::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
 void TrayPower::OnPowerStatusChanged() {
   RecordChargerType();
 
-  // TODO(jennyz): Enable showing spring charger dialog on locked screen after
-  // crbug.com/328593 is fixed.
-  user::LoginStatus login_status =
-      Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus();
-  if (PowerStatus::Get()->IsOriginalSpringChargerConnected() &&
-      (login_status != user::LOGGED_IN_NONE &&
-       login_status != user::LOGGED_IN_LOCKED)) {
+  if (PowerStatus::Get()->IsOriginalSpringChargerConnected()) {
     ash::Shell::GetInstance()->system_tray_delegate()->
         ShowSpringChargerReplacementDialog();
   }
@@ -217,7 +211,9 @@ bool TrayPower::MaybeShowUsbChargerNotification() {
             IDS_ASH_STATUS_TRAY_LOW_POWER_CHARGER_MESSAGE_SHORT),
         rb.GetImageNamed(IDR_AURA_NOTIFICATION_LOW_POWER_CHARGER),
         base::string16(),
-        message_center::NotifierId(system_notifier::NOTIFIER_POWER),
+        message_center::NotifierId(
+            message_center::NotifierId::SYSTEM_COMPONENT,
+            system_notifier::kNotifierPower),
         message_center::RichNotificationData(),
         NULL));
     message_center_->AddNotification(notification.Pass());
@@ -237,7 +233,8 @@ bool TrayPower::UpdateNotificationState() {
   const PowerStatus& status = *PowerStatus::Get();
   if (!status.IsBatteryPresent() ||
       status.IsBatteryTimeBeingCalculated() ||
-      status.IsMainsChargerConnected()) {
+      status.IsMainsChargerConnected() ||
+      status.IsOriginalSpringChargerConnected()) {
     notification_state_ = NOTIFICATION_NONE;
     return false;
   }
@@ -253,7 +250,8 @@ bool TrayPower::UpdateNotificationStateForRemainingTime() {
   const int remaining_minutes = static_cast<int>(
       PowerStatus::Get()->GetBatteryTimeToEmpty().InSecondsF() / 60.0 + 0.5);
 
-  if (remaining_minutes >= kNoWarningMinutes) {
+  if (remaining_minutes >= kNoWarningMinutes ||
+      PowerStatus::Get()->IsBatteryFull()) {
     notification_state_ = NOTIFICATION_NONE;
     return false;
   }
@@ -288,7 +286,8 @@ bool TrayPower::UpdateNotificationStateForRemainingPercentage() {
   const int remaining_percentage =
       PowerStatus::Get()->GetRoundedBatteryPercent();
 
-  if (remaining_percentage >= kNoWarningPercentage) {
+  if (remaining_percentage >= kNoWarningPercentage ||
+      PowerStatus::Get()->IsBatteryFull()) {
     notification_state_ = NOTIFICATION_NONE;
     return false;
   }

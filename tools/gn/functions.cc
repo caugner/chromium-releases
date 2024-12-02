@@ -11,12 +11,10 @@
 #include "tools/gn/config_values_generator.h"
 #include "tools/gn/err.h"
 #include "tools/gn/input_file.h"
-#include "tools/gn/item_tree.h"
 #include "tools/gn/parse_tree.h"
 #include "tools/gn/scheduler.h"
 #include "tools/gn/scope.h"
 #include "tools/gn/settings.h"
-#include "tools/gn/target_manager.h"
 #include "tools/gn/token.h"
 #include "tools/gn/value.h"
 
@@ -261,29 +259,21 @@ Value RunConfig(const FunctionCallNode* function,
   Label label(MakeLabelForScope(scope, function, args[0].string_value()));
 
   if (g_scheduler->verbose_logging())
-    g_scheduler->Log("Generating config", label.GetUserVisibleName(true));
+    g_scheduler->Log("Defining config", label.GetUserVisibleName(true));
 
-  // Create the empty config object.
-  ItemTree* tree = &scope->settings()->build_settings()->item_tree();
-  Config* config = Config::GetConfig(scope->settings(), function->GetRange(),
-                                     label, NULL, err);
-  if (err->has_error())
-    return Value();
+  // Create the new config.
+  scoped_ptr<Config> config(new Config(scope->settings(), label));
+  config->set_defined_from(function);
 
   // Fill it.
   const SourceDir& input_dir = scope->GetSourceDir();
-  ConfigValuesGenerator gen(&config->config_values(), scope,
-                            function->function(), input_dir, err);
+  ConfigValuesGenerator gen(&config->config_values(), scope, input_dir, err);
   gen.Run();
   if (err->has_error())
     return Value();
 
   // Mark as complete.
-  {
-    base::AutoLock lock(tree->lock());
-    tree->MarkItemDefinedLocked(scope->settings()->build_settings(), label,
-                                err);
-  }
+  scope->settings()->build_settings()->ItemDefined(config.PassAs<Item>());
   return Value();
 }
 
@@ -382,10 +372,10 @@ const char kImport_Help[] =
     "\n"
     "  By convention, imported files are named with a .gni extension.\n"
     "\n"
-    "  It does not do an \"include\". The imported file is executed in a\n"
-    "  standalone environment from the caller of the import command. The\n"
-    "  results of this execution are cached for other files that import the\n"
-    "  same .gni file.\n"
+    "  An import is different than a C++ \"include\". The imported file is\n"
+    "  executed in a standalone environment from the caller of the import\n"
+    "  command. The results of this execution are cached for other files that\n"
+    "  import the same .gni file.\n"
     "\n"
     "  Note that you can not import a BUILD.gn file that's otherwise used\n"
     "  in the build. Files must either be imported or implicitly loaded as\n"
@@ -393,9 +383,9 @@ const char kImport_Help[] =
     "\n"
     "  The imported file's scope will be merged with the scope at the point\n"
     "  import was called. If there is a conflict (both the current scope and\n"
-    "  the imported file define some variable or rule with the same name)\n"
-    "  a runtime error will be thrown. Therefore, it's good practice to\n"
-    "  minimize the stuff that an imported file defines.\n"
+    "  the imported file define some variable or rule with the same name but\n"
+    "  different value), a runtime error will be thrown. Therefore, it's good\n"
+    "  practice to minimize the stuff that an imported file defines.\n"
     "\n"
     "Examples:\n"
     "\n"
@@ -408,8 +398,7 @@ Value RunImport(Scope* scope,
                 const FunctionCallNode* function,
                 const std::vector<Value>& args,
                 Err* err) {
-  if (!EnsureSingleStringArg(function, args, err) ||
-      !EnsureNotProcessingImport(function, scope, err))
+  if (!EnsureSingleStringArg(function, args, err))
     return Value();
 
   const SourceDir& input_dir = scope->GetSourceDir();

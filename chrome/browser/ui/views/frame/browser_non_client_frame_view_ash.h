@@ -35,7 +35,7 @@ class BrowserNonClientFrameViewAsh
 
   // BrowserNonClientFrameView overrides:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
-  virtual TabStripInsets GetTabStripInsets(bool force_restored) const OVERRIDE;
+  virtual int GetTopInset() const OVERRIDE;
   virtual int GetThemeBackgroundXInset() const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
 
@@ -70,8 +70,12 @@ class BrowserNonClientFrameViewAsh
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            ImmersiveFullscreen);
 
-  // Distance between top of window and client area.
-  int NonClientTopBorderHeight() const;
+  // Distance between the left edge of the NonClientFrameView and the tab strip.
+  int GetTabStripLeftInset() const;
+
+  // Distance between the right edge of the NonClientFrameView and the tab
+  // strip.
+  int GetTabStripRightInset() const;
 
   // Returns true if we should use a short header, such as for popup windows.
   bool UseShortHeader() const;

@@ -226,12 +226,8 @@ PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
                            pnacl_options,
                            translate_notify_callback);
   coordinator->pnacl_init_time_ = NaClGetTimeOfDayMicroseconds();
-  coordinator->off_the_record_ =
-      plugin->nacl_interface()->IsOffTheRecord();
-  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p, "
-                 "off_the_record=%d)\n",
-                 reinterpret_cast<const void*>(coordinator->manifest_.get()),
-                 coordinator->off_the_record_));
+  PLUGIN_PRINTF(("PnaclCoordinator::BitcodeToNative (manifest=%p, ",
+                 reinterpret_cast<const void*>(coordinator->manifest_.get())));
 
   // First start a network request for the pexe, to tickle the component
   // updater's On-Demand resource throttler, and to get Last-Modified/ETag
@@ -255,7 +251,6 @@ PnaclCoordinator::PnaclCoordinator(
     pnacl_options_(pnacl_options),
     is_cache_hit_(PP_FALSE),
     error_already_reported_(false),
-    off_the_record_(false),
     pnacl_init_time_(0),
     pexe_size_(0),
     pexe_bytes_compiled_(0),
@@ -344,7 +339,7 @@ void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
   // that were delayed (see the delay inserted in BitcodeGotCompiled).
   if (ExpectedProgressKnown()) {
     pexe_bytes_compiled_ = expected_pexe_size_;
-    plugin_->EnqueueProgressEvent(plugin::Plugin::kProgressEventProgress,
+    plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
                                   pexe_url_,
                                   plugin::Plugin::LENGTH_IS_COMPUTABLE,
                                   pexe_bytes_compiled_,
@@ -634,14 +629,14 @@ void PnaclCoordinator::BitcodeGotCompiled(int32_t pp_error,
   // that bytes were sent to the compiler.
   if (ExpectedProgressKnown()) {
     if (!ShouldDelayProgressEvent()) {
-      plugin_->EnqueueProgressEvent(plugin::Plugin::kProgressEventProgress,
+      plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
                                     pexe_url_,
                                     plugin::Plugin::LENGTH_IS_COMPUTABLE,
                                     pexe_bytes_compiled_,
                                     expected_pexe_size_);
     }
   } else {
-    plugin_->EnqueueProgressEvent(plugin::Plugin::kProgressEventProgress,
+    plugin_->EnqueueProgressEvent(PP_NACL_EVENT_PROGRESS,
                                   pexe_url_,
                                   plugin::Plugin::LENGTH_IS_NOT_COMPUTABLE,
                                   pexe_bytes_compiled_,

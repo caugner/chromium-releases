@@ -31,6 +31,7 @@ class LayerTreePixelTest : public LayerTreeTest {
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) OVERRIDE;
   virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE;
+  virtual void CommitCompleteOnThread(LayerTreeHostImpl* impl) OVERRIDE;
 
   virtual scoped_ptr<CopyOutputRequest> CreateCopyOutputRequest();
 
@@ -79,7 +80,7 @@ class LayerTreePixelTest : public LayerTreeTest {
       scoped_ptr<SingleReleaseCallback>* release_callback);
 
   void ReleaseTextureMailbox(
-      scoped_ptr<WebKit::WebGraphicsContext3D> context3d,
+      scoped_ptr<blink::WebGraphicsContext3D> context3d,
       uint32 texture,
       uint32 sync_point,
       bool lost_resource);

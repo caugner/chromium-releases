@@ -63,8 +63,7 @@ class SearchMetadataTest : public testing::Test {
 
   void AddEntriesToMetadata() {
     base::FilePath temp_file;
-    EXPECT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir_.path(),
-                                                    &temp_file));
+    EXPECT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &temp_file));
     const std::string temp_file_md5 = "md5";
 
     ResourceEntry entry;
@@ -73,7 +72,7 @@ class SearchMetadataTest : public testing::Test {
     // drive/root
     EXPECT_EQ(FILE_ERROR_OK, resource_metadata_->AddEntry(GetDirectoryEntry(
         util::kDriveMyDriveRootDirName, "root", 100,
-        util::kDriveGrandRootSpecialResourceId), &local_id));
+        util::kDriveGrandRootLocalId), &local_id));
     const std::string root_local_id = local_id;
 
     // drive/root/Directory 1

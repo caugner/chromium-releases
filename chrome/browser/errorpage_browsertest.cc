@@ -129,11 +129,11 @@ class TestFailProvisionalLoadObserver : public content::WebContentsObserver {
   // This method is invoked when the provisional load failed.
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
-      const string16& frame_unique_name,
+      const base::string16& frame_unique_name,
       bool is_main_frame,
       const GURL& validated_url,
       int error_code,
-      const string16& error_description,
+      const base::string16& error_description,
       content::RenderViewHost* render_view_host) OVERRIDE {
     fail_url_ = validated_url;
   }
@@ -262,7 +262,9 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_IFrameDNSError_GoBack) {
 }
 
 // This test fails regularly on win_rel trybots. See crbug.com/121540
-#if defined(OS_WIN)
+//
+// This fails on linux_aura bringup: http://crbug.com/163931
+#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 #define MAYBE_IFrameDNSError_GoBackAndForward DISABLED_IFrameDNSError_GoBackAndForward
 #else
 #define MAYBE_IFrameDNSError_GoBackAndForward IFrameDNSError_GoBackAndForward
@@ -302,7 +304,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
     wc->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
-        string16(), ASCIIToUTF16(script));
+        base::string16(), ASCIIToUTF16(script));
     load_observer.Wait();
 
     // Ensure we saw the expected failure.
@@ -323,7 +325,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
     wc->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
-        string16(), ASCIIToUTF16(script));
+        base::string16(), ASCIIToUTF16(script));
     load_observer.Wait();
   }
 
@@ -335,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, IFrameDNSError_JavaScript) {
         content::NOTIFICATION_LOAD_STOP,
         content::Source<NavigationController>(&wc->GetController()));
     wc->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
-        string16(), ASCIIToUTF16(script));
+        base::string16(), ASCIIToUTF16(script));
     load_observer.Wait();
 
     EXPECT_EQ(fail_url, fail_observer.fail_url());

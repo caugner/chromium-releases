@@ -24,6 +24,9 @@
 #include "ui/events/gestures/gesture_sequence.h"
 #include "ui/metro_viewer/metro_viewer_messages.h"
 #include "win8/metro_driver/file_picker_ash.h"
+#include "win8/metro_driver/ime/ime_popup_monitor.h"
+#include "win8/metro_driver/ime/input_source.h"
+#include "win8/metro_driver/ime/text_service.h"
 #include "win8/metro_driver/metro_driver.h"
 #include "win8/metro_driver/winrt_utils.h"
 #include "win8/viewer/metro_viewer_constants.h"
@@ -154,6 +157,7 @@ class ChromeChannelListener : public IPC::Listener {
     IPC_BEGIN_MESSAGE_MAP(ChromeChannelListener, message)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_ActivateDesktop,
                           OnActivateDesktop)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_MetroExit, OnMetroExit)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_OpenURLOnDesktop,
                           OnOpenURLOnDesktop)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_SetCursor, OnSetCursor)
@@ -164,6 +168,10 @@ class ChromeChannelListener : public IPC::Listener {
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_DisplaySelectFolder,
                           OnDisplayFolderPicker)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_SetCursorPos, OnSetCursorPos)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_ImeCancelComposition,
+                          OnImeCancelComposition)
+      IPC_MESSAGE_HANDLER(MetroViewerHostMsg_ImeTextInputClientUpdated,
+                          OnImeTextInputClientChanged)
       IPC_MESSAGE_UNHANDLED(__debugbreak())
     IPC_END_MESSAGE_MAP()
     return true;
@@ -185,6 +193,10 @@ class ChromeChannelListener : public IPC::Listener {
         base::Bind(&ChromeAppViewAsh::OnActivateDesktop,
         base::Unretained(app_view_),
         shortcut, ash_exit));
+  }
+
+  void OnMetroExit() {
+    MetroExit(app_view_->core_window_hwnd());
   }
 
   void OnOpenURLOnDesktop(const base::FilePath& shortcut,
@@ -241,6 +253,23 @@ class ChromeChannelListener : public IPC::Listener {
                    x, y));
   }
 
+  void OnImeCancelComposition() {
+    ui_proxy_->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromeAppViewAsh::OnImeCancelComposition,
+                   base::Unretained(app_view_)));
+  }
+
+  void OnImeTextInputClientChanged(
+      const std::vector<int32>& input_scopes,
+      const std::vector<metro_viewer::CharacterBounds>& character_bounds) {
+    ui_proxy_->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromeAppViewAsh::OnImeUpdateTextInputClient,
+                   base::Unretained(app_view_),
+                   input_scopes,
+                   character_bounds));
+  }
 
   scoped_refptr<base::MessageLoopProxy> ui_proxy_;
   ChromeAppViewAsh* app_view_;
@@ -387,7 +416,32 @@ uint32 GetKeyboardEventFlags() {
   return flags;
 }
 
-bool LaunchChromeBrowserProcess (const wchar_t* additional_parameters) {
+bool LaunchChromeBrowserProcess(const wchar_t* additional_parameters,
+                                winapp::Activation::IActivatedEventArgs* args) {
+  if (args) {
+    DVLOG(1) << __FUNCTION__ << ":" << ::GetCommandLineW();
+    winapp::Activation::ActivationKind activation_kind;
+    CheckHR(args->get_Kind(&activation_kind));
+
+    DVLOG(1) << __FUNCTION__ << ", activation_kind=" << activation_kind;
+
+    if (activation_kind == winapp::Activation::ActivationKind_Launch) {
+      mswr::ComPtr<winapp::Activation::ILaunchActivatedEventArgs> launch_args;
+      if (args->QueryInterface(
+              winapp::Activation::IID_ILaunchActivatedEventArgs,
+              &launch_args) == S_OK) {
+        DVLOG(1) << "Activate: ActivationKind_Launch";
+        mswrw::HString launch_args_str;
+        launch_args->get_Arguments(launch_args_str.GetAddressOf());
+        string16 actual_launch_args(MakeStdWString(launch_args_str.Get()));
+        if (actual_launch_args == win8::kMetroViewerConnectVerb) {
+          DVLOG(1) << __FUNCTION__ << "Not launching chrome server";
+          return true;
+        }
+      }
+    }
+  }
+
   DVLOG(1) << "Launching chrome server";
   base::FilePath chrome_exe_path;
 
@@ -445,6 +499,8 @@ ChromeAppViewAsh::SetWindow(winui::Core::ICoreWindow* window) {
   CheckHR(hr);
   hr = interop->get_WindowHandle(&core_window_hwnd_);
   CheckHR(hr);
+
+  text_service_ = metro_driver::CreateTextService(this, core_window_hwnd_);
 
   hr = window_->add_SizeChanged(mswr::Callback<SizeChangedHandler>(
       this, &ChromeAppViewAsh::OnSizeChanged).Get(),
@@ -582,6 +638,16 @@ ChromeAppViewAsh::Run() {
       new MetroViewerHostMsg_WindowSizeChanged(rect.right - rect.left,
                                                rect.bottom - rect.top));
 
+  input_source_ = metro_driver::InputSource::Create();
+  if (input_source_) {
+    input_source_->AddObserver(this);
+    // Send an initial input source.
+    OnInputSourceChanged();
+  }
+
+  // Start receiving IME popup window notifications.
+  metro_driver::AddImePopupObserver(this);
+
   // And post the task that'll do the inner Metro message pumping to it.
   ui_loop_.PostTask(FROM_HERE, base::Bind(&RunMessageLoop, dispatcher.Get()));
   ui_loop_.Run();
@@ -593,6 +659,9 @@ ChromeAppViewAsh::Run() {
 IFACEMETHODIMP
 ChromeAppViewAsh::Uninitialize() {
   DVLOG(1) << __FUNCTION__;
+  metro_driver::RemoveImePopupObserver(this);
+  input_source_.reset();
+  text_service_.reset();
   window_ = nullptr;
   view_ = nullptr;
   core_window_hwnd_ = NULL;
@@ -627,7 +696,7 @@ HRESULT ChromeAppViewAsh::Unsnap() {
 
 void ChromeAppViewAsh::OnActivateDesktop(const base::FilePath& file_path,
                                          bool ash_exit) {
-  DLOG(INFO) << "ChannelAppViewAsh::OnActivateDesktop\n";
+  DVLOG(1) << "ChannelAppViewAsh::OnActivateDesktop\n";
 
   if (ash_exit) {
     // As we are the top level window, the exiting is done async so we manage
@@ -654,7 +723,6 @@ void ChromeAppViewAsh::OnActivateDesktop(const base::FilePath& file_path,
     ::TerminateProcess(sei.hProcess, 0);
     ::CloseHandle(sei.hProcess);
   }
-  ui_channel_->Send(new MetroViewerHostMsg_ActivateDesktopDone());
 }
 
 void ChromeAppViewAsh::OnOpenURLOnDesktop(const base::FilePath& shortcut,
@@ -770,6 +838,67 @@ void ChromeAppViewAsh::OnFolderPickerCompleted(
   delete folder_picker;
 }
 
+void ChromeAppViewAsh::OnImeCancelComposition() {
+  if (!text_service_)
+    return;
+  text_service_->CancelComposition();
+}
+
+void ChromeAppViewAsh::OnImeUpdateTextInputClient(
+    const std::vector<int32>& input_scopes,
+    const std::vector<metro_viewer::CharacterBounds>& character_bounds) {
+  if (!text_service_)
+    return;
+  text_service_->OnDocumentChanged(input_scopes, character_bounds);
+}
+
+void ChromeAppViewAsh::OnImePopupChanged(ImePopupObserver::EventType event) {
+  if (!ui_channel_)
+    return;
+  switch (event) {
+    case ImePopupObserver::kPopupShown:
+      ui_channel_->Send(new MetroViewerHostMsg_ImeCandidatePopupChanged(true));
+      return;
+    case ImePopupObserver::kPopupHidden:
+      ui_channel_->Send(new MetroViewerHostMsg_ImeCandidatePopupChanged(false));
+      return;
+    case ImePopupObserver::kPopupUpdated:
+      // TODO(kochi): Support this event for W3C IME API proposal.
+      // See crbug.com/238585.
+      return;
+    default:
+      NOTREACHED() << "unknown event type: " << event;
+      return;
+  }
+}
+
+void ChromeAppViewAsh::OnInputSourceChanged() {
+  if (!input_source_)
+    return;
+
+  LANGID langid = 0;
+  bool is_ime = false;
+  if (!input_source_->GetActiveSource(&langid, &is_ime)) {
+    LOG(ERROR) << "GetActiveSource failed";
+    return;
+  }
+  ui_channel_->Send(new MetroViewerHostMsg_ImeInputSourceChanged(langid,
+                                                                 is_ime));
+}
+
+void ChromeAppViewAsh::OnCompositionChanged(
+    const string16& text,
+    int32 selection_start,
+    int32 selection_end,
+    const std::vector<metro_viewer::UnderlineInfo>& underlines) {
+  ui_channel_->Send(new MetroViewerHostMsg_ImeCompositionChanged(
+      text, selection_start, selection_end, underlines));
+}
+
+void ChromeAppViewAsh::OnTextCommitted(const string16& text) {
+  ui_channel_->Send(new MetroViewerHostMsg_ImeTextCommitted(text));
+}
+
 HRESULT ChromeAppViewAsh::OnActivate(
     winapp::Core::ICoreApplicationView*,
     winapp::Activation::IActivatedEventArgs* args) {
@@ -789,7 +918,7 @@ HRESULT ChromeAppViewAsh::OnActivate(
   else if (activation_kind == winapp::Activation::ActivationKind_Protocol)
     HandleProtocolRequest(args);
   else
-    LaunchChromeBrowserProcess(NULL);
+    LaunchChromeBrowserProcess(NULL, args);
   // We call ICoreWindow::Activate after the handling for the search/protocol
   // requests because Chrome can be launched to handle a search request which
   // in turn launches the chrome browser process in desktop mode via
@@ -1016,6 +1145,8 @@ HRESULT ChromeAppViewAsh::OnWindowActivated(
   // clicked back in Ash after using another app on another monitor) the same.
   if (state == winui::Core::CoreWindowActivationState_CodeActivated ||
       state == winui::Core::CoreWindowActivationState_PointerActivated) {
+    if (text_service_)
+      text_service_->OnWindowActivated();
     ui_channel_->Send(new MetroViewerHostMsg_WindowActivated());
   }
   return S_OK;
@@ -1029,7 +1160,7 @@ HRESULT ChromeAppViewAsh::HandleSearchRequest(
 
   if (!ui_channel_) {
     DVLOG(1) << "Launched to handle search request";
-    LaunchChromeBrowserProcess(L"--windows8-search");
+    LaunchChromeBrowserProcess(L"--windows8-search", args);
   }
 
   mswrw::HString search_string;

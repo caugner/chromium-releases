@@ -5,16 +5,21 @@
 #include "chrome/browser/chromeos/login/multi_profile_user_controller.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/chromeos/login/multi_profile_user_controller_delegate.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/policy/policy_cert_service.h"
+#include "chrome/browser/chromeos/policy/policy_cert_service_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 
 namespace chromeos {
@@ -56,9 +61,18 @@ void MultiProfileUserController::RegisterPrefs(
 // static
 void MultiProfileUserController::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
+  // Use "disabled" default if there is no user manager or no logged in user.
+  // This is true for signin proflie (where the value does not matter) or
+  // for the primary user's profile. This essentially disables multiprofile
+  // unless the primary user has a policy to say otherwise.
+  const bool use_disable_default =
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kForceMultiProfileInTests) &&
+      (!UserManager::IsInitialized() ||
+       UserManager::Get()->GetLoggedInUsers().size() == 1);
   registry->RegisterStringPref(
       prefs::kMultiProfileUserBehavior,
-      kBehaviorUnrestricted,
+      use_disable_default ? kBehaviorNotAllowed : kBehaviorUnrestricted,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
@@ -67,9 +81,10 @@ bool MultiProfileUserController::IsUserAllowedInSession(
   UserManager* user_manager = UserManager::Get();
   CHECK(user_manager);
 
+  const User* primary_user = user_manager->GetPrimaryUser();
   std::string primary_user_email;
-  if (user_manager->GetPrimaryUser())
-    primary_user_email = user_manager->GetPrimaryUser()->email();
+  if (primary_user)
+    primary_user_email = primary_user->email();
 
   // Always allow if there is no primary user or user being checked is the
   // primary user.
@@ -80,8 +95,36 @@ bool MultiProfileUserController::IsUserAllowedInSession(
   if (user_manager->GetOwnerEmail() == user_email)
     return false;
 
+  // Don't allow profiles potentially tainted by data fetched with policy-pushed
+  // certificates to join a multiprofile session.
+  if (policy::PolicyCertServiceFactory::UsedPolicyCertificates(user_email))
+    return false;
+
+  // Don't allow any secondary profiles if the primary profile is tainted.
+  if (policy::PolicyCertServiceFactory::UsedPolicyCertificates(
+          primary_user_email)) {
+    // Check directly in local_state before checking if the primary user has
+    // a PolicyCertService. His profile may have been tainted previously though
+    // he didn't get a PolicyCertService created for this session.
+    return false;
+  }
+
+  // If the primary profile already has policy certificates installed but hasn't
+  // used them yet then it can become tainted at any time during this session;
+  // disable secondary profiles in this case too.
+  Profile* primary_user_profile =
+      primary_user ? user_manager->GetProfileByUser(primary_user) : NULL;
+  policy::PolicyCertService* service =
+      primary_user_profile ? policy::PolicyCertServiceFactory::GetForProfile(
+                                 primary_user_profile)
+                           : NULL;
+  if (service && service->has_policy_certificates())
+    return false;
+
   // No user is allowed if the primary user policy forbids it.
-  const std::string primary_user_behavior = GetCachedValue(primary_user_email);
+  const std::string primary_user_behavior =
+      primary_user_profile->GetPrefs()->GetString(
+          prefs::kMultiProfileUserBehavior);
   if (primary_user_behavior == kBehaviorNotAllowed)
     return false;
 
@@ -107,11 +150,12 @@ void MultiProfileUserController::StartObserving(Profile* user_profile) {
   OnUserPrefChanged(user_profile);
 }
 
-void MultiProfileUserController::RemoveCachedValue(
+void MultiProfileUserController::RemoveCachedValues(
     const std::string& user_email) {
   DictionaryPrefUpdate update(local_state_,
                               prefs::kCachedMultiProfileUserBehavior);
   update->RemoveWithoutPathExpansion(user_email, NULL);
+  policy::PolicyCertServiceFactory::ClearUsedPolicyCertificates(user_email);
 }
 
 std::string MultiProfileUserController::GetCachedValue(
@@ -151,9 +195,18 @@ void MultiProfileUserController::OnUserPrefChanged(
   user_email = gaia::CanonicalizeEmail(user_email);
 
   PrefService* prefs = user_profile->GetPrefs();
-  const std::string behavior =
-      prefs->GetString(prefs::kMultiProfileUserBehavior);
-  SetCachedValue(user_email, behavior);
+  if (prefs->FindPreference(prefs::kMultiProfileUserBehavior)
+          ->IsDefaultValue()) {
+    // Migration code to clear cached default behavior.
+    // TODO(xiyuan): Remove this after M35.
+    DictionaryPrefUpdate update(local_state_,
+                                prefs::kCachedMultiProfileUserBehavior);
+    update->RemoveWithoutPathExpansion(user_email, NULL);
+  } else {
+    const std::string behavior =
+        prefs->GetString(prefs::kMultiProfileUserBehavior);
+    SetCachedValue(user_email, behavior);
+  }
 
   CheckSessionUsers();
 }

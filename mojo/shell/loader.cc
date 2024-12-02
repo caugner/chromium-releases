@@ -4,23 +4,14 @@
 
 #include "mojo/shell/loader.h"
 
+#include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
+#include "mojo/shell/switches.h"
+#include "net/base/load_flags.h"
 #include "net/base/network_delegate.h"
 
 namespace mojo {
 namespace shell {
-
-namespace {
-
-scoped_ptr<base::Thread> CreateIOThread(const char* name) {
-  scoped_ptr<base::Thread> thread(new base::Thread(name));
-  base::Thread::Options options;
-  options.message_loop_type = base::MessageLoop::TYPE_IO;
-  thread->StartWithOptions(options);
-  return thread.Pass();
-}
-
-}  // namespace
 
 Loader::Delegate::~Delegate() {
 }
@@ -41,15 +32,15 @@ void Loader::Job::OnURLFetchComplete(const net::URLFetcher* source) {
 
 Loader::Loader(base::SingleThreadTaskRunner* network_runner,
                base::SingleThreadTaskRunner* file_runner,
+               base::MessageLoopProxy* cache_runner,
                scoped_ptr<net::NetworkDelegate> network_delegate,
                base::FilePath base_path)
     : file_runner_(file_runner),
-      cache_thread_(CreateIOThread("cache_thread")),
       url_request_context_getter_(new URLRequestContextGetter(
           base_path,
           network_runner,
           file_runner,
-          cache_thread_->message_loop_proxy(),
+          cache_runner,
           network_delegate.Pass())) {
 }
 
@@ -60,6 +51,8 @@ scoped_ptr<Loader::Job> Loader::Load(const GURL& app_url, Delegate* delegate) {
   scoped_ptr<Job> job(new Job(app_url, delegate));
   job->fetcher_->SetRequestContext(url_request_context_getter_.get());
   job->fetcher_->SaveResponseToTemporaryFile(file_runner_.get());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableCache))
+    job->fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   job->fetcher_->Start();
   return job.Pass();
 }

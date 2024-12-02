@@ -5,8 +5,12 @@
 #ifndef MOJO_SERVICES_NATIVE_VIEWPORT_NATIVE_VIEWPORT_ANDROID_H_
 #define MOJO_SERVICES_NATIVE_VIEWPORT_NATIVE_VIEWPORT_ANDROID_H_
 
+#include "base/android/jni_helper.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/services/native_viewport/native_viewport.h"
+#include "ui/events/event_constants.h"
+#include "ui/gfx/sequential_id_generator.h"
 #include "ui/gfx/size.h"
 
 namespace gpu {
@@ -20,28 +24,34 @@ namespace services {
 
 class NativeViewportAndroid : public NativeViewport {
  public:
-  explicit NativeViewportAndroid(NativeViewportDelegate* delegate);
+  static bool Register(JNIEnv* env);
+
+  explicit NativeViewportAndroid(shell::Context* context,
+                                 NativeViewportDelegate* delegate);
   virtual ~NativeViewportAndroid();
 
-  base::WeakPtr<NativeViewportAndroid> GetWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
-
-  void OnNativeWindowCreated(ANativeWindow* window);
-  void OnNativeWindowDestroyed();
-  void OnResized(const gfx::Size& size);
+  void Destroy(JNIEnv* env, jobject obj);
+  void SurfaceCreated(JNIEnv* env, jobject obj, jobject jsurface);
+  void SurfaceDestroyed(JNIEnv* env, jobject obj);
+  void SurfaceSetSize(JNIEnv* env, jobject obj, jint width, jint height);
+  bool TouchEvent(JNIEnv* env, jobject obj, jint pointer_id, jint action,
+                  jfloat x, jfloat y, jlong time_ms);
 
  private:
   // Overridden from NativeViewport:
+  virtual void Init() OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
+  virtual void SetCapture() OVERRIDE;
+  virtual void ReleaseCapture() OVERRIDE;
 
-  void OnGLContextLost();
   void ReleaseWindow();
 
   NativeViewportDelegate* delegate_;
+  shell::Context* context_;
   ANativeWindow* window_;
   gfx::Size size_;
-  scoped_ptr<gpu::GLInProcessContext> gl_context_;
+  ui::SequentialIDGenerator id_generator_;
 
   base::WeakPtrFactory<NativeViewportAndroid> weak_factory_;
 

@@ -12,16 +12,16 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/event_names.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "extensions/browser/event_router.h"
+#include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -55,9 +55,8 @@ bool NotificationBitmapToGfxImage(
     return false;
 
   // Ensure a sane set of dimensions.
-  const int max_width = message_center::kNotificationPreferredImageSize;
-  const int max_height =
-      message_center::kNotificationPreferredImageRatio * max_width;
+  const int max_width = message_center::kNotificationPreferredImageWidth;
+  const int max_height = message_center::kNotificationPreferredImageHeight;
   const int BYTES_PER_PIXEL = 4;
 
   const int width = notification_bitmap->width;
@@ -249,8 +248,8 @@ bool NotificationsApiFunction::CreateNotification(
   // Extract required fields: type, title, message, and icon.
   message_center::NotificationType type =
       MapApiTemplateTypeToType(options->type);
-  const string16 title(UTF8ToUTF16(*options->title));
-  const string16 message(UTF8ToUTF16(*options->message));
+  const base::string16 title(UTF8ToUTF16(*options->title));
+  const base::string16 message(UTF8ToUTF16(*options->message));
   gfx::Image icon;
 
   // TODO(dewittj): Return error if this fails.
@@ -334,7 +333,7 @@ bool NotificationsApiFunction::CreateNotification(
                             title,
                             message,
                             icon,
-                            WebKit::WebTextDirectionDefault,
+                            blink::WebTextDirectionDefault,
                             message_center::NotifierId(
                                 message_center::NotifierId::APPLICATION,
                                 extension_->id()),

@@ -21,6 +21,8 @@
 
 EXTERN_C_BEGIN
 
+struct fuse_operations;
+
 // The kernel intercept module provides a C->C++ thunk between the libc
 // kernel calls and the KernelProxy singleton.
 
@@ -31,6 +33,9 @@ void ki_init(void* kernel_proxy);
 void ki_init_ppapi(void* kernel_proxy,
                    PP_Instance instance,
                    PPB_GetInterface get_browser_interface);
+int ki_register_mount_type(const char* mount_type,
+                           struct fuse_operations* fuse_ops);
+int ki_unregister_mount_type(const char* mount_type);
 int ki_is_initialized();
 void ki_uninit();
 
@@ -91,7 +96,8 @@ int ki_tcsetattr(int fd, int optional_actions,
                  const struct termios *termios_p);
 int ki_kill(pid_t pid, int sig);
 int ki_killpg(pid_t pid, int sig);
-int ki_sigaction(int, const struct sigaction*, struct sigaction*);
+int ki_sigaction(int signum, const struct sigaction* action,
+                 struct sigaction* oaction);
 int ki_sigpause(int sigmask);
 int ki_sigpending(sigset_t* set);
 int ki_sigsuspend(const sigset_t* set);
