@@ -213,12 +213,9 @@ policies and contribution forms [3].
     }
 
     WindowTestEnvironment.prototype.next_default_test_name = function() {
-        //Don't use document.title to work around an Opera bug in XHTML documents
-        var title = document.getElementsByTagName("title")[0];
-        var prefix = (title && title.firstChild && title.firstChild.data) || "Untitled";
         var suffix = this.name_counter > 0 ? " " + this.name_counter : "";
         this.name_counter++;
-        return prefix + suffix;
+        return get_title() + suffix;
     };
 
     WindowTestEnvironment.prototype.on_new_harness_properties = function(properties) {
@@ -288,7 +285,7 @@ policies and contribution forms [3].
     WorkerTestEnvironment.prototype.next_default_test_name = function() {
         var suffix = this.name_counter > 0 ? " " + this.name_counter : "";
         this.name_counter++;
-        return "Untitled" + suffix;
+        return get_title() + suffix;
     };
 
     WorkerTestEnvironment.prototype.on_new_harness_properties = function() {};
@@ -1000,6 +997,9 @@ policies and contribution forms [3].
 
     function assert_object_equals(actual, expected, description)
     {
+         assert(typeof actual === "object" && actual !== null, "assert_object_equals", description,
+                                                               "value is ${actual}, expected object",
+                                                               {actual: actual});
          //This needs to be improved a great deal
          function check_equal(actual, expected, stack)
          {
@@ -1833,6 +1833,15 @@ policies and contribution forms [3].
         }
         this.message_target.removeEventListener("message", this.message_handler);
         this.running = false;
+
+        // If remote context is cross origin assigning to onerror is not
+        // possible, so silently catch those errors.
+        try {
+          this.remote.onerror = null;
+        } catch (e) {
+          // Ignore.
+        }
+
         this.remote = null;
         this.message_target = null;
         if (this.doneResolve) {
@@ -2917,6 +2926,25 @@ policies and contribution forms [3].
         return undefined;
     }
 
+    /** Returns the <title> or filename or "Untitled" */
+    function get_title()
+    {
+        if ('document' in global_scope) {
+            //Don't use document.title to work around an Opera bug in XHTML documents
+            var title = document.getElementsByTagName("title")[0];
+            if (title && title.firstChild && title.firstChild.data) {
+                return title.firstChild.data;
+            }
+        }
+        if ('META_TITLE' in global_scope && META_TITLE) {
+            return META_TITLE;
+        }
+        if ('location' in global_scope) {
+            return location.pathname.substring(location.pathname.lastIndexOf('/') + 1, location.pathname.indexOf('.'));
+        }
+        return "Untitled";
+    }
+
     function supports_post_message(w)
     {
         var supports;
@@ -2998,110 +3026,110 @@ policies and contribution forms [3].
     /**
      * Stylesheet
      */
-     var stylesheetContent = `
-html {
-    font-family:DejaVu Sans, Bitstream Vera Sans, Arial, Sans;
-}
-
-#log .warning,
-#log .warning a {
-  color: black;
-  background: yellow;
-}
-
-#log .error,
-#log .error a {
-  color: white;
-  background: red;
-}
-
-section#summary {
-    margin-bottom:1em;
-}
-
-table#results {
-    border-collapse:collapse;
-    table-layout:fixed;
-    width:100%;
-}
-
-table#results th:first-child,
-table#results td:first-child {
-    width:4em;
-}
-
-table#results th:last-child,
-table#results td:last-child {
-    width:50%;
-}
-
-table#results.assertions th:last-child,
-table#results.assertions td:last-child {
-    width:35%;
-}
-
-table#results th {
-    padding:0;
-    padding-bottom:0.5em;
-    border-bottom:medium solid black;
-}
-
-table#results td {
-    padding:1em;
-    padding-bottom:0.5em;
-    border-bottom:thin solid black;
-}
-
-tr.pass > td:first-child {
-    color:green;
-}
-
-tr.fail > td:first-child {
-    color:red;
-}
-
-tr.timeout > td:first-child {
-    color:red;
-}
-
-tr.notrun > td:first-child {
-    color:blue;
-}
-
-.pass > td:first-child, .fail > td:first-child, .timeout > td:first-child, .notrun > td:first-child {
-    font-variant:small-caps;
-}
-
-table#results span {
-    display:block;
-}
-
-table#results span.expected {
-    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;
-    white-space:pre;
-}
-
-table#results span.actual {
-    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;
-    white-space:pre;
-}
-
-span.ok {
-    color:green;
-}
-
-tr.error {
-    color:red;
-}
-
-span.timeout {
-    color:red;
-}
-
-span.ok, span.timeout, span.error {
-    font-variant:small-caps;
-}
-`;
+     var stylesheetContent = "\
+html {\
+    font-family:DejaVu Sans, Bitstream Vera Sans, Arial, Sans;\
+}\
+\
+#log .warning,\
+#log .warning a {\
+  color: black;\
+  background: yellow;\
+}\
+\
+#log .error,\
+#log .error a {\
+  color: white;\
+  background: red;\
+}\
+\
+section#summary {\
+    margin-bottom:1em;\
+}\
+\
+table#results {\
+    border-collapse:collapse;\
+    table-layout:fixed;\
+    width:100%;\
+}\
+\
+table#results th:first-child,\
+table#results td:first-child {\
+    width:4em;\
+}\
+\
+table#results th:last-child,\
+table#results td:last-child {\
+    width:50%;\
+}\
+\
+table#results.assertions th:last-child,\
+table#results.assertions td:last-child {\
+    width:35%;\
+}\
+\
+table#results th {\
+    padding:0;\
+    padding-bottom:0.5em;\
+    border-bottom:medium solid black;\
+}\
+\
+table#results td {\
+    padding:1em;\
+    padding-bottom:0.5em;\
+    border-bottom:thin solid black;\
+}\
+\
+tr.pass > td:first-child {\
+    color:green;\
+}\
+\
+tr.fail > td:first-child {\
+    color:red;\
+}\
+\
+tr.timeout > td:first-child {\
+    color:red;\
+}\
+\
+tr.notrun > td:first-child {\
+    color:blue;\
+}\
+\
+.pass > td:first-child, .fail > td:first-child, .timeout > td:first-child, .notrun > td:first-child {\
+    font-variant:small-caps;\
+}\
+\
+table#results span {\
+    display:block;\
+}\
+\
+table#results span.expected {\
+    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;\
+    white-space:pre;\
+}\
+\
+table#results span.actual {\
+    font-family:DejaVu Sans Mono, Bitstream Vera Sans Mono, Monospace;\
+    white-space:pre;\
+}\
+\
+span.ok {\
+    color:green;\
+}\
+\
+tr.error {\
+    color:red;\
+}\
+\
+span.timeout {\
+    color:red;\
+}\
+\
+span.ok, span.timeout, span.error {\
+    font-variant:small-caps;\
+}\
+";
 
 })(this);
 // vim: set expandtab shiftwidth=4 tabstop=4:

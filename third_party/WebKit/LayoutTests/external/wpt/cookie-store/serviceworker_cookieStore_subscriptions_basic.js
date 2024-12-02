@@ -6,13 +6,13 @@ importScripts("/resources/testharness.js");
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    cookieStore.subscribeToChanges([
+    await cookieStore.subscribeToChanges([
       { name: 'cookie-name', matchType: 'equals', url: '/scope/path' }]);
   })());
 });
 
 // Workaround because add_cleanup doesn't support async functions yet.
-// See https://github.com/w3c/web-platform-tests/issues/6075
+// See https://github.com/web-platform-tests/wpt/issues/6075
 async function async_cleanup(cleanup_function) {
   try {
     await cleanup_function();
@@ -40,7 +40,7 @@ promise_test(async testCase => {
 promise_test(async testCase => {
   await kServiceWorkerActivatedPromise;
 
-  cookie_change_received_promise = new Promise((resolve) => {
+  const cookie_change_received_promise = new Promise((resolve) => {
     self.addEventListener('cookiechange', (event) => {
       resolve(event);
     });
@@ -57,7 +57,8 @@ promise_test(async testCase => {
   assert_true(event instanceof ExtendableCookieChangeEvent);
   assert_true(event instanceof ExtendableEvent);
 
-  await async_cleanup(() => { cookieStore.delete('cookie-name'); });
-}, 'cookiechange dispatched with cookie change that matches subscription');
+  await async_cleanup(() => cookieStore.delete('cookie-name'));
+}, 'cookiechange dispatched with cookie change that matches subscription ' +
+   'to event handler registered with addEventListener');
 
 done();

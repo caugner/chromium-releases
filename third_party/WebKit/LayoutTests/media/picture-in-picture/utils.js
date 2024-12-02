@@ -12,7 +12,7 @@ function clickPictureInPictureButton(video, callback) {
 }
 
 function checkPictureInPictureInterstitialDoesNotExist(video) {
-  var controlID = '-internal-picture-in-picture-icon';
+  var controlID = '-internal-picture-in-picture-interstitial-message';
 
   var interstitial = getElementByPseudoId(internals.shadowRoot(video), controlID);
   if (interstitial)
@@ -44,4 +44,14 @@ function enablePictureInPictureForTest(t)
     internals.runtimeFlags.pictureInPictureEnabled =
         pictureInPictureEnabledValue;
   });
+}
+
+function pictureInPictureInterstitialMessage(video) {
+  var elementId = '-internal-picture-in-picture-interstitial-message';
+  var interstitial = mediaControlsElement(
+      internals.shadowRoot(video).firstChild,
+      elementId);
+  if (!interstitial)
+    throw 'Failed to find picture in picture interstitial message.';
+  return interstitial;
 }

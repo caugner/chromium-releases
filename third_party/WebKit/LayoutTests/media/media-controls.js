@@ -440,7 +440,7 @@ function mediaControlsOverlayPlayButtonInternal(videoElement) {
 }
 
 function pictureInPictureInterstitial(videoElement) {
-  var controlID = '-internal-picture-in-picture-icon';
+  var controlID = '-internal-picture-in-picture-interstitial-message';
 
   var interstitial = getElementByPseudoId(internals.shadowRoot(videoElement).firstChild, controlID);
   if (!interstitial)
@@ -449,7 +449,7 @@ function pictureInPictureInterstitial(videoElement) {
 }
 
 function checkPictureInPictureInterstitialDoesNotExist(videoElement) {
-  var controlID = '-internal-picture-in-picture-icon';
+  var controlID = '-internal-picture-in-picture-interstitial-message';
 
   var interstitial = getElementByPseudoId(internals.shadowRoot(videoElement), controlID);
   if (interstitial)
@@ -519,6 +519,11 @@ function doubleTouchAtCoordinates(x, y, timeout, callback) {
       ]
     }
   ], callback);
+}
+
+function singleTouchOnControl(control, callback) {
+  const coordinates = elementCoordinates(control);
+  singleTouchAtCoordinates(coordinates[0], coordinates[1], callback);
 }
 
 function traverseNextNode(node, stayWithin) {

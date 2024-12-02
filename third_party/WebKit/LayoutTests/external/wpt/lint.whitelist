@@ -79,7 +79,7 @@ AHEM COPY: fonts/Ahem.ttf
 # None of these are actually Ahem
 AHEM COPY: fonts/ahem-extra/AHEM_*.TTF
 
-# https://github.com/w3c/web-platform-tests/issues/7437
+# https://github.com/web-platform-tests/wpt/issues/7437
 AHEM COPY: css/vendor-imports/mozilla/mozilla-central-reftests/*/Ahem.ttf
 
 ## Test exclusions ##
@@ -110,6 +110,8 @@ CONSOLE: streams/resources/test-utils.js
 CONSOLE: service-workers/service-worker/resources/navigation-redirect-other-origin.html
 CONSOLE: service-workers/service-worker/navigation-redirect.https.html
 CONSOLE: service-workers/service-worker/resources/clients-get-other-origin.html
+CONSOLE: webrtc/tools/*
+CONSOLE: webaudio/resources/audit.js:39
 
 # use of console in a public library - annotation-model ensures
 # it is not actually used
@@ -144,6 +146,7 @@ SET TIMEOUT: encrypted-media/polyfill/clearkey-polyfill.js
 SET TIMEOUT: encrypted-media/scripts/playback-temporary-events.js
 SET TIMEOUT: eventsource/eventsource-close.htm
 SET TIMEOUT: eventsource/eventsource-request-cancellation.htm
+SET TIMEOUT: generic-sensor/resources/iframe_sensor_handler.html
 SET TIMEOUT: html/browsers/browsing-the-web/history-traversal/*
 SET TIMEOUT: html/browsers/browsing-the-web/navigating-across-documents/*
 SET TIMEOUT: html/browsers/browsing-the-web/scroll-to-fragid/*
@@ -153,11 +156,11 @@ SET TIMEOUT: html/browsers/history/the-location-interface/*
 SET TIMEOUT: html/browsers/history/the-session-history-of-browsing-contexts/*
 SET TIMEOUT: html/browsers/offline/*
 SET TIMEOUT: html/browsers/the-window-object/*
-SET TIMEOUT: html/dom/dynamic-markup-insertion/opening-the-input-stream/*
 SET TIMEOUT: html/editing/dnd/*
 SET TIMEOUT: html/semantics/embedded-content/the-iframe-element/*
 SET TIMEOUT: html/semantics/embedded-content/the-img-element/*
 SET TIMEOUT: html/semantics/scripting-1/the-script-element/*
+SET TIMEOUT: html/webappapis/dynamic-markup-insertion/opening-the-input-stream/0*
 SET TIMEOUT: html/webappapis/scripting/event-loops/*
 SET TIMEOUT: html/webappapis/scripting/events/event-handler-processing-algorithm-error/*
 SET TIMEOUT: html/webappapis/scripting/processing-model-2/*
@@ -635,6 +638,8 @@ CSS-COLLIDING-REF-NAME: css/css-transforms/individual-transform/individual-trans
 CSS-COLLIDING-REF-NAME: css/vendor-imports/mozilla/mozilla-central-reftests/transforms/individual-transform-1-ref.html
 CSS-COLLIDING-REF-NAME: css/css-flexbox/reference/percentage-size-subitems-001-ref.html
 CSS-COLLIDING-REF-NAME: css/css-grid/grid-items/percentage-size-subitems-001-ref.html
+CSS-COLLIDING-REF-NAME: css/css-contain/reference/contain-size-button-001-ref.html
+CSS-COLLIDING-REF-NAME: css/vendor-imports/mozilla/mozilla-central-reftests/contain/contain-size-button-001-ref.html
 CSS-COLLIDING-SUPPORT-NAME: css/css-backgrounds/support/red.png
 CSS-COLLIDING-SUPPORT-NAME: css/compositing/mix-blend-mode/support/red.png
 CSS-COLLIDING-SUPPORT-NAME: css/compositing/background-blending/support/red.png
@@ -765,26 +770,10 @@ MISSING-LINK: css/cssom-view/scrollIntoView-shadow.html
 MISSING-LINK: css/cssom-view/scrollIntoView-smooth.html
 MISSING-LINK: css/cssom-view/scrollTop-display-change.html
 
-# TODO https://github.com/w3c/web-platform-tests/issues/5770
+# TODO https://github.com/web-platform-tests/wpt/issues/5770
 MISSING-LINK: css/geometry/*.worker.js
 MISSING-LINK: css/filter-effects/*.any.js
 
 # Tests that use WebKit/Blink testing APIs
 LAYOUTTESTS APIS: css/css-regions/interactivity/*
 LAYOUTTESTS APIS: resources/chromium/generic_sensor_mocks.js
-
-# Existing use of WEB-PLATFORM.TEST
-WEB-PLATFORM.TEST: clear-site-data/support/test_utils.sub.js
-WEB-PLATFORM.TEST: content-security-policy/base-uri/report-uri-does-not-respect-base-uri.sub.html
-WEB-PLATFORM.TEST: content-security-policy/generic/generic-0_8.sub.html
-WEB-PLATFORM.TEST: content-security-policy/generic/generic-0_8_1.sub.html
-WEB-PLATFORM.TEST: content-security-policy/nonce-hiding/script-nonces-hidden-meta.tentative.html
-WEB-PLATFORM.TEST: content-security-policy/nonce-hiding/svgscript-nonces-hidden-meta.tentative.html
-WEB-PLATFORM.TEST: fetch/api/request/request-structure.html
-WEB-PLATFORM.TEST: html/browsers/origin/relaxing-the-same-origin-restriction/document_domain_setter.html
-WEB-PLATFORM.TEST: html/semantics/embedded-content/the-iframe-element/cross_origin_parentage.html
-WEB-PLATFORM.TEST: html/semantics/forms/the-label-element/label-attributes.html
-WEB-PLATFORM.TEST: navigation-timing/nav2_test_attributes_values.html
-WEB-PLATFORM.TEST: navigation-timing/nav2_test_instance_accessors.html
-WEB-PLATFORM.TEST: webrtc/RTCPeerConnection-getIdentityAssertion.html
-WEB-PLATFORM.TEST: webrtc/identity-helper.js

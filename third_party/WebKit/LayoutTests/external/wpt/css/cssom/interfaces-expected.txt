@@ -1,6 +1,8 @@
 This is a testharness.js-based test.
-Found 442 tests; 386 PASS, 56 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 444 tests; 389 PASS, 55 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS Test driver
+PASS Partial interface Document: original interface defined
+PASS Partial interface Window: original interface defined
 PASS HTMLElement interface: attribute style
 PASS Unscopable handled correctly for style property on HTMLElement
 PASS HTMLElement interface: style_element must inherit property "style" with the proper type
@@ -75,8 +77,8 @@ PASS StyleSheet interface: attribute media
 PASS Unscopable handled correctly for media property on StyleSheet
 PASS StyleSheet interface: attribute disabled
 PASS Unscopable handled correctly for disabled property on StyleSheet
-PASS CSSStyleSheet interface: existence and properties of interface object
-FAIL CSSStyleSheet interface object length assert_equals: wrong value for CSSStyleSheet.length expected 0 but got 1
+FAIL CSSStyleSheet interface: existence and properties of interface object assert_throws: interface object didn't throw TypeError when called as a constructor function "function () { [native code] }" did not throw
+PASS CSSStyleSheet interface object length
 PASS CSSStyleSheet interface object name
 PASS CSSStyleSheet interface: existence and properties of interface prototype object
 PASS CSSStyleSheet interface: existence and properties of interface prototype object's "constructor" property
@@ -105,7 +107,7 @@ PASS StyleSheet interface: style_element.sheet must inherit property "title" wit
 PASS StyleSheet interface: style_element.sheet must inherit property "media" with the proper type
 PASS StyleSheet interface: style_element.sheet must inherit property "disabled" with the proper type
 PASS StyleSheetList interface: existence and properties of interface object
-FAIL StyleSheetList interface object length assert_equals: wrong value for StyleSheetList.length expected 0 but got 1
+PASS StyleSheetList interface object length
 PASS StyleSheetList interface object name
 PASS StyleSheetList interface: existence and properties of interface prototype object
 PASS StyleSheetList interface: existence and properties of interface prototype object's "constructor" property

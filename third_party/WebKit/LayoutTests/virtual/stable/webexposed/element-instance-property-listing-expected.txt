@@ -241,6 +241,7 @@ namespace http://www.w3.org/1999/xhtml
     property textContent
     property title
     property toString
+    property toggleAttribute
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -412,6 +413,7 @@ html element canvas
     property height
     property toBlob
     property toDataURL
+    property transferControlToOffscreen
     property width
 html element caption
     property align
@@ -1054,6 +1056,7 @@ html element video
     property currentTime
     property defaultMuted
     property defaultPlaybackRate
+    property disablePictureInPicture
     property disableRemotePlayback
     property duration
     property ended
@@ -1065,6 +1068,8 @@ html element video
     property muted
     property networkState
     property onencrypted
+    property onenterpictureinpicture
+    property onleavepictureinpicture
     property onwaitingforkey
     property pause
     property paused
@@ -1075,6 +1080,7 @@ html element video
     property preload
     property readyState
     property remote
+    property requestPictureInPicture
     property seekable
     property seeking
     property setMediaKeys
@@ -1319,6 +1325,7 @@ namespace http://www.w3.org/2000/svg
     property tabIndex
     property tagName
     property textContent
+    property toggleAttribute
     property viewportElement
     property webkitMatchesSelector
     property webkitRequestFullScreen

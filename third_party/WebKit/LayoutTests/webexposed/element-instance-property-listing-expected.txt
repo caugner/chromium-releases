@@ -59,6 +59,7 @@ namespace http://www.w3.org/1999/xhtml
     property ariaPlaceholder
     property ariaPosInSet
     property ariaPressed
+    property ariaReadOnly
     property ariaRelevant
     property ariaRequired
     property ariaRoleDescription
@@ -291,6 +292,7 @@ namespace http://www.w3.org/1999/xhtml
     property textContent
     property title
     property toString
+    property toggleAttribute
     property translate
     property webkitMatchesSelector
     property webkitRequestFullScreen
@@ -460,6 +462,7 @@ html element button
     property willValidate
 html element canvas
     property captureStream
+    property convertToBlob
     property getContext
     property height
     property toBlob
@@ -645,6 +648,7 @@ html element img
     property decoding
     property height
     property hspace
+    property importance
     property isMap
     property longDesc
     property lowsrc
@@ -742,6 +746,7 @@ html element link
     property href
     property hreflang
     property import
+    property importance
     property integrity
     property media
     property referrerPolicy
@@ -1124,6 +1129,7 @@ html element video
     property onencrypted
     property onenterpictureinpicture
     property onleavepictureinpicture
+    property onpictureinpicturecontrolclick
     property onwaitingforkey
     property pause
     property paused
@@ -1216,6 +1222,7 @@ namespace http://www.w3.org/2000/svg
     property ariaPlaceholder
     property ariaPosInSet
     property ariaPressed
+    property ariaReadOnly
     property ariaRelevant
     property ariaRequired
     property ariaRoleDescription
@@ -1429,6 +1436,7 @@ namespace http://www.w3.org/2000/svg
     property tabIndex
     property tagName
     property textContent
+    property toggleAttribute
     property viewportElement
     property webkitMatchesSelector
     property webkitRequestFullScreen

@@ -17,7 +17,7 @@ xr_session_promise_test( (session, t) =>  {
 
   setPose(null);
 
-  return session.requestFrameOfReference("eyeLevel")
+  return session.requestFrameOfReference("eye-level")
     .then((frameOfRef) => new Promise((resolve, reject) => {
       let expected_pose = VALID_POSE;
       let counter = 0;
@@ -55,9 +55,9 @@ xr_session_promise_test( (session, t) =>  {
       session.requestAnimationFrame(onFrame);
     }));
 }, fakeDevices["FakeGooglePixelPhone"], [
-      { exclusive: true },
+      { immersive: true },
       { outputContext: getOutputContext() }
   ],
-"XRPresentationFrame getDevicePose updates on the next frame");
+"XRFrame getDevicePose updates on the next frame");
 
 </script>

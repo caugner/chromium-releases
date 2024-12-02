@@ -26,12 +26,11 @@ crbug.com/661182 fast/loader/open-in-srcdoc-unload.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/resolve-after-window-close.html [ Leak ]
 crbug.com/506754 http/tests/serviceworker/window-close-during-registration.html [ Leak ]
 
-crbug.com/664874 http/tests/xmlhttprequest/workers/xmlhttprequest-allowed-with-disabled-web-security.html [ Leak ]
-
 crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker-allowed.html [ Leak Pass ]
 crbug.com/672740 http/tests/security/mixedContent/websocket/insecure-websocket-in-secure-page-worker.html [ Leak Pass ]
 
 crbug.com/786995 virtual/threaded/http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js [ Leak Pass ]
+crbug.com/859640 http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js  [ Leak Pass ]
 
 # Requests with keepalive specified will be kept alive even when the frame is
 # detached, which means leaks reported by the leak detector are by design.
@@ -47,6 +46,8 @@ crbug.com/780386 external/wpt/html/dom/reflection-grouping.html [ Leak Pass ]
 crbug.com/667560 [ Linux ] http/tests/devtools/console/console-search.js [ Leak Pass ]
 crbug.com/835943 [ Linux ] http/tests/appcache/non-html.xhtml [ Leak Pass ]
 
+crbug.com/860117 [ Linux ] editing/pasteboard/drag-drop-iframe-refresh-crash.html [ Pass Leak ]
+
 # -----------------------------------------------------------------
 # Not revert suspected CL as jam@ request, expected to be fixed soon.
 # -----------------------------------------------------------------
@@ -61,6 +62,7 @@ crbug.com/809609 [ Linux ] editing/inserting/insert_div_with_style.html [ Pass L
 # -----------------------------------------------------------------
 crbug.com/821547 [ Linux ] animations/composition/backdrop-filter-composition.html [ Pass Leak ]
 crbug.com/821547 [ Linux ] animations/interpolation/backdrop-filter-interpolation.html [ Pass Leak ]
+crbug.com/821547 [ Linux ] animations/interpolation/filter-interpolation-003.html [ Pass Leak ]
 crbug.com/821547 [ Linux ] external/wpt/web-animations/animation-model/animation-types/interpolation-per-property.html [ Pass Leak ]
 crbug.com/821547 [ Linux ] svg/animations/additive-type-by-animation.html [ Pass Leak ]
 crbug.com/821547 [ Linux ] virtual/threaded/animations/composition/backdrop-filter-composition.html [ Pass Leak ]
@@ -70,9 +72,12 @@ crbug.com/821547 [ Linux ] virtual/threaded/animations/interpolation/filter-inte
 # -----------------------------------------------------------------
 # Sheriff 2018-04-23
 # -----------------------------------------------------------------
-crbug.com/835802 [ Linux ] fast/loader/scroll-position-restored-on-back-at-load-event.html [ Pass Leak ]
 crbug.com/836278 [ Linux ] external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Pass Leak ]
 crbug.com/836278 [ Linux ] virtual/threaded/external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Pass Leak ]
+
+# Sheriff 2018-07-10
+# Test flaking on Linux Trusty Leak
+crbug.com/862029 [ Linux ] http/tests/devtools/tracing/timeline-misc/timeline-window-filter.js [ Pass Leak ]
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #
