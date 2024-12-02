@@ -251,23 +251,40 @@ void ScriptResource::SetSerializedCachedMetadata(mojo_base::BigBuffer data) {
   if (cached_metadata_handler_) {
     cached_metadata_handler_->SetSerializedCachedMetadata(std::move(data));
   }
-  if (consume_cache_state_ == ConsumeCacheState::kWaitingForCache &&
-      V8CodeCache::HasCodeCache(
-          cached_metadata_handler_,
-          // It's safe to access unchecked cached metadata here, because the
-          // ScriptCacheConsumer result will be ignored if the cached metadata
-          // check fails later.
-          CachedMetadataHandler::kAllowUnchecked)) {
-    CHECK(isolate_if_main_thread_);
-    cache_consumer_ = MakeGarbageCollected<ScriptCacheConsumer>(
-        isolate_if_main_thread_,
-        V8CodeCache::GetCachedMetadata(CacheHandler(),
-                                       CachedMetadataHandler::kAllowUnchecked),
-        Url(), InspectorId());
-    AdvanceConsumeCacheState(ConsumeCacheState::kRunningOffThread);
-  } else {
-    DisableOffThreadConsumeCache();
+  if (consume_cache_state_ == ConsumeCacheState::kWaitingForCache) {
+    // If `background_streamer_` has decoded the code cache, use the decoded
+    // code cache.
+    if (background_streamer_ &&
+        background_streamer_->HasConsumeCodeCacheTask()) {
+      cache_consumer_ = MakeGarbageCollected<ScriptCacheConsumer>(
+          isolate_if_main_thread_,
+          V8CodeCache::GetCachedMetadata(
+              CacheHandler(), CachedMetadataHandler::kAllowUnchecked),
+          background_streamer_->TakeConsumeCodeCacheTask(), Url(),
+          InspectorId());
+      AdvanceConsumeCacheState(ConsumeCacheState::kRunningOffThread);
+      return;
+    }
+
+    // If `cached_metadata_handler_` has a valid code cache, use the code cache.
+    if (V8CodeCache::HasCodeCache(
+            cached_metadata_handler_,
+            // It's safe to access unchecked cached metadata here, because the
+            // ScriptCacheConsumer result will be ignored if the cached metadata
+            // check fails later.
+            CachedMetadataHandler::kAllowUnchecked)) {
+      CHECK(isolate_if_main_thread_);
+      cache_consumer_ = MakeGarbageCollected<ScriptCacheConsumer>(
+          isolate_if_main_thread_,
+          V8CodeCache::GetCachedMetadata(
+              CacheHandler(), CachedMetadataHandler::kAllowUnchecked),
+          Url(), InspectorId());
+      AdvanceConsumeCacheState(ConsumeCacheState::kRunningOffThread);
+      return;
+    }
   }
+
+  DisableOffThreadConsumeCache();
 }
 
 void ScriptResource::DestroyDecodedDataIfPossible() {
@@ -340,12 +357,11 @@ void ScriptResource::ResponseReceived(const ResourceResponse& response) {
     return;
   }
 
-  if (background_streamer_) {
-    if (!background_streamer_->IsStreamingSuppressed()) {
-      source_text_ = background_streamer_->TakeDecodedData();
-      SetDecodedSize(source_text_.CharactersSizeInBytes());
-    }
+  if (background_streamer_ && background_streamer_->HasDecodedData()) {
+    source_text_ = background_streamer_->TakeDecodedData();
+    SetDecodedSize(source_text_.CharactersSizeInBytes());
   }
+
   cached_metadata_handler_ = nullptr;
   // Currently we support the metadata caching only for HTTP family and any
   // schemes defined by SchemeRegistry as requiring a hash check.

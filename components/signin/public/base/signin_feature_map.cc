@@ -23,10 +23,10 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &switches::kEnterprisePolicyOnSignin,
     &switches::kSkipCheckForAccountManagementOnSignin,
     &switches::kRestoreSignedInAccountAndSettingsFromBackup,
-    &switches::kMinorModeRestrictionsForHistorySyncOptIn,
     &switches::kHideSettingsSignInPromo,
     &switches::kUpdateMetricsServicesStateInRestore,
-    &switches::kUseConsentLevelSigninForLegacyAccountEmailPref};
+    &switches::kUseConsentLevelSigninForLegacyAccountEmailPref,
+    &switches::kDontFallbackToDefaultImplementationInAccountManagerFacade};
 
 // static
 base::android::FeatureMap* GetFeatureMap() {

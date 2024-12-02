@@ -20,6 +20,7 @@
 #include "components/autofill/core/browser/test_browser_autofill_manager.h"
 #include "components/autofill/core/browser/ui/suggestion_type.h"
 #include "components/autofill/core/common/autofill_test_utils.h"
+#include "components/autofill/core/common/form_data_test_api.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -65,7 +66,8 @@ ukm::TestUkmRecorder::HumanReadableUkmMetrics CreateUkmMetrics(
     bool is_newly_created,
     bool submitted_plus_address,
     PasswordFormType password_form_type,
-    SuggestionContext suggestion_context) {
+    SuggestionContext suggestion_context,
+    bool was_shown_create_suggestion) {
   ukm::TestUkmRecorder::HumanReadableUkmMetrics metrics;
   metrics["FieldCountBrowserForm"] = field_count_browser_form;
   metrics["FieldCountRendererForm"] = field_count_renderer_form;
@@ -76,6 +78,7 @@ ukm::TestUkmRecorder::HumanReadableUkmMetrics CreateUkmMetrics(
   metrics["SubmittedPlusAddress"] = submitted_plus_address;
   metrics["PasswordFormType"] = base::to_underlying(password_form_type);
   metrics["SuggestionContext"] = base::to_underlying(suggestion_context);
+  metrics["WasShownCreateSuggestion"] = was_shown_create_suggestion;
   return metrics;
 }
 
@@ -117,7 +120,8 @@ class PlusAddressSubmissionLoggerTest : public ::testing::Test {
         ukm::builders::PlusAddresses_Submission::kEntryName,
         {"FieldCountBrowserForm", "FieldCountRendererForm", "PlusAddressCount",
          "CheckoutOrCartPage", "ManagedProfile", "NewlyCreatedPlusAddress",
-         "SubmittedPlusAddress", "PasswordFormType", "SuggestionContext"});
+         "SubmittedPlusAddress", "PasswordFormType", "SuggestionContext",
+         "WasShownCreateSuggestion"});
   }
 
   bool VerifyPlusAddress(const std::string& plus_address) {
@@ -155,13 +159,13 @@ class PlusAddressSubmissionLoggerTest : public ::testing::Test {
 TEST_F(PlusAddressSubmissionLoggerTest, NoMetricForSignedOutUsers) {
   FormData form = GetEmailForm();
   submission_logger().OnPlusAddressSuggestionShown(
-      autofill_manager(), form.global_id(), form.fields[0].global_id(),
+      autofill_manager(), form.global_id(), test_api(form).field(0).global_id(),
       SuggestionContext::kAutofillProfileOnEmailField,
       PasswordFormType::kNoPasswordForm,
       SuggestionType::kFillExistingPlusAddress,
       /*plus_address_count=*/1);
 
-  form.fields[0].set_value(kSamplePlusAddress_U16);
+  test_api(form).field(0).set_value(kSamplePlusAddress_U16);
   autofill_manager().OnFormSubmitted(form, /*known_success=*/true,
                                      kSubmissionSource);
   EXPECT_THAT(GetUkmMetrics(), IsEmpty());
@@ -252,11 +256,11 @@ TEST_P(PlusAddressSubmissionTestWithParam, SubmittingFormRecordsUkm) {
     }
   }();
   submission_logger().OnPlusAddressSuggestionShown(
-      autofill_manager(), form.global_id(), form.fields[0].global_id(),
+      autofill_manager(), form.global_id(), test_api(form).field(0).global_id(),
       input.context, input.form_type, input.suggestion_type,
       input.plus_address_count);
 
-  form.fields[0].set_value(input.submitted_value);
+  test_api(form).field(0).set_value(input.submitted_value);
   autofill_manager().OnFormSubmitted(form, /*known_success=*/true,
                                      kSubmissionSource);
   EXPECT_THAT(GetUkmMetrics(), ElementsAreArray(GetParam().ukms));
@@ -307,7 +311,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/true,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kNoPasswordForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/true)},
             .uma =
                 {.submitted_plus_address = true,
                  .submitted_plus_address_first_time_user_yes = true,
@@ -332,7 +337,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/true,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kNoPasswordForm,
-                SuggestionContext::kAutocomplete)},
+                SuggestionContext::kAutocomplete,
+                /*was_shown_create_suggestion=*/true)},
             .uma =
                 {.submitted_plus_address = true,
                  .submitted_plus_address_first_time_user_yes = true,
@@ -357,7 +363,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/false,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kSingleUsernameForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/false)},
             .uma =
                 {.submitted_plus_address = true,
                  .submitted_plus_address_first_time_user_no = true,
@@ -383,7 +390,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/false,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kSingleUsernameForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/false)},
             .uma = {.submitted_plus_address = true,
                     .submitted_plus_address_first_time_user_no = true,
                     .submitted_plus_address_managed_user_yes = true,
@@ -407,7 +415,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/false,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kSingleUsernameForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/false)},
             .uma =
                 {.submitted_plus_address = true,
                  .submitted_plus_address_first_time_user_no = true,
@@ -433,7 +442,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/false,
                 /*submitted_plus_address=*/false,
                 PasswordFormType::kSingleUsernameForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/false)},
             .uma =
                 {.submitted_plus_address = false,
                  .submitted_plus_address_first_time_user_no = false,
@@ -459,7 +469,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/false,
                 /*submitted_plus_address=*/false,
                 PasswordFormType::kNoPasswordForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/true)},
             .uma =
                 {.submitted_plus_address = false,
                  .submitted_plus_address_first_time_user_no = false,
@@ -487,7 +498,8 @@ INSTANTIATE_TEST_SUITE_P(
                 /*is_newly_created=*/true,
                 /*submitted_plus_address=*/true,
                 PasswordFormType::kNoPasswordForm,
-                SuggestionContext::kAutofillProfileOnEmailField)},
+                SuggestionContext::kAutofillProfileOnEmailField,
+                /*was_shown_create_suggestion=*/true)},
             .uma = {.submitted_plus_address = true,
                     .submitted_plus_address_first_time_user_no = true,
                     .submitted_plus_address_managed_user_no = true}},

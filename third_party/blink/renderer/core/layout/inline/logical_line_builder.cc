@@ -87,8 +87,8 @@ void LogicalLineBuilder::CreateLine(LineInfo* line_info,
     std::pair<LayoutUnit, LayoutUnit>& insets = logical_column->base_insets;
     ApplyLeftAndRightExpansion(
         insets.first, insets.second,
-        line_box->MakeSpan().subspan(logical_column->start_index,
-                                     logical_column->size));
+        base::span(*line_box).subspan(logical_column->start_index,
+                                      logical_column->size));
   }
 }
 
@@ -356,7 +356,7 @@ InlineBoxState* LogicalLineBuilder::PlaceAtomicInline(
 
   if (LIKELY(!IsA<LayoutTextCombine>(layout_object))) {
     PlaceLayoutResult(item_result, line_box, box,
-                      box->margin_inline_start + item_result->spacing_before);
+                      box->margins.inline_start + item_result->spacing_before);
   } else {
     // The metrics should be as text instead of atomic inline box.
     const auto& style = layout_object->Parent()->StyleRef();
@@ -365,7 +365,7 @@ InlineBoxState* LogicalLineBuilder::PlaceAtomicInline(
     // is |LayoutTextCombine| and after CJK character.
     // See "text-combine-justify.html".
     const LayoutUnit inline_offset =
-        box->margin_inline_start + item_result->spacing_before;
+        box->margins.inline_start + item_result->spacing_before;
     line_box->AddChild(std::move(item_result->layout_result),
                        LogicalOffset{inline_offset, box->text_top},
                        item_result->inline_size, /* children_count */ 0,
@@ -531,7 +531,7 @@ void LogicalLineBuilder::PlaceRubyAnnotation(
   annotation_builder.CreateLine(&annotation_line, line_items,
                                 /* main_line_helper */ nullptr);
   ApplyLeftAndRightExpansion(insets.first, insets.second,
-                             line_items->MakeSpan());
+                             base::span(*line_items));
 
   logical_column.state_stack.ComputeInlinePositions(
       line_items, LayoutUnit(), /* ignore_box_margin_border_padding */ false);
@@ -635,9 +635,9 @@ void LogicalLineBuilder::BidiReorder(
       //
       // min_element() below doesn't return the end iterator because we
       // ensure there is at least one item in the range.
-      column->start_index =
-          *base::ranges::min_element(logical_to_visual.MakeSpan().subspan(
-              column->start_index, column->size));
+      column->start_index = *base::ranges::min_element(
+          base::span(logical_to_visual)
+              .subspan(column->start_index, column->size));
     }
     // The order is important for RubyBlockPositionCalculator::HandleRubyLine().
     std::stable_sort(

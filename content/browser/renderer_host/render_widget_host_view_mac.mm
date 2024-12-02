@@ -25,7 +25,9 @@
 #import "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "components/device_event_log/device_event_log.h"
+#include "components/input/cursor_manager.h"
 #include "components/input/native_web_keyboard_event.h"
+#include "components/input/render_widget_host_input_event_router.h"
 #include "components/input/web_input_event_builders_mac.h"
 #include "components/remote_cocoa/browser/ns_view_ids.h"
 #include "components/remote_cocoa/common/application.mojom.h"
@@ -43,9 +45,7 @@
 #include "content/browser/renderer_host/render_widget_helper.h"
 #import "content/browser/renderer_host/text_input_client_mac.h"
 #include "content/browser/renderer_host/visible_time_request_trigger.h"
-#include "content/common/input/cursor_manager.h"
 #import "content/common/input/events_helper.h"
-#include "content/common/input/render_widget_host_input_event_router.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/render_widget_host.h"
@@ -240,7 +240,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
     std::ignore = owner_delegate->GetWebkitPreferencesForWidget();
   }
 
-  cursor_manager_ = std::make_unique<CursorManager>(this);
+  cursor_manager_ = std::make_unique<input::CursorManager>(this);
   // Start observing changes to the system's cursor accessibility scale factor.
   __block auto render_widget_host_view_mac = this;
   cursor_scale_observer_ =
@@ -616,7 +616,7 @@ void RenderWidgetHostViewMac::DisplayCursor(const ui::Cursor& cursor) {
   ns_view_->DisplayCursor(cursor);
 }
 
-CursorManager* RenderWidgetHostViewMac::GetCursorManager() {
+input::CursorManager* RenderWidgetHostViewMac::GetCursorManager() {
   return cursor_manager_.get();
 }
 
@@ -776,14 +776,15 @@ void RenderWidgetHostViewMac::OnGestureEvent(
   blink::WebGestureEvent web_gesture =
       ui::CreateWebGestureEventFromGestureEventData(gesture);
 
-  ui::LatencyInfo latency_info(ui::SourceEventType::TOUCH);
+  ui::LatencyInfo latency_info;
 
   if (ShouldRouteEvents()) {
     blink::WebGestureEvent gesture_event(web_gesture);
     host()->delegate()->GetInputEventRouter()->RouteGestureEvent(
         this, &gesture_event, latency_info);
   } else {
-    host()->ForwardGestureEventWithLatencyInfo(web_gesture, latency_info);
+    host()->GetRenderInputRouter()->ForwardGestureEventWithLatencyInfo(
+        web_gesture, latency_info);
   }
 }
 
@@ -995,7 +996,7 @@ void RenderWidgetHostViewMac::GetPageTextForSpeech(SpeechCallback callback) {
       base::BindOnce(CombineTextNodesAndMakeCallback, std::move(callback)),
       ui::AXMode::kWebContents,
       /* max_nodes= */ 5000,
-      /* timeout= */ {});
+      /* timeout= */ {}, WebContents::AXTreeSnapshotPolicy::kAll);
 }
 
 void RenderWidgetHostViewMac::SpeakSelection() {
@@ -1525,7 +1526,7 @@ void RenderWidgetHostViewMac::SendTouchpadZoomEvent(
   DCHECK(event->IsTouchpadZoomEvent());
   if (ShouldRouteEvents()) {
     host()->delegate()->GetInputEventRouter()->RouteGestureEvent(
-        this, event, ui::LatencyInfo(ui::SourceEventType::TOUCHPAD));
+        this, event, ui::LatencyInfo());
     return;
   }
   host()->ForwardGestureEvent(*event);
@@ -1839,7 +1840,7 @@ void RenderWidgetHostViewMac::ForwardKeyboardEventWithCommands(
 void RenderWidgetHostViewMac::RouteOrProcessMouseEvent(
     const blink::WebMouseEvent& const_web_event) {
   blink::WebMouseEvent web_event = const_web_event;
-  ui::LatencyInfo latency_info(ui::SourceEventType::OTHER);
+  ui::LatencyInfo latency_info;
   latency_info.AddLatencyNumber(ui::INPUT_EVENT_LATENCY_UI_COMPONENT);
   if (ShouldRouteEvents()) {
     host()->delegate()->GetInputEventRouter()->RouteMouseEvent(this, &web_event,
@@ -1857,7 +1858,7 @@ void RenderWidgetHostViewMac::RouteOrProcessTouchEvent(
   if (!result.succeeded)
     return;
 
-  ui::LatencyInfo latency_info(ui::SourceEventType::OTHER);
+  ui::LatencyInfo latency_info;
   latency_info.AddLatencyNumber(ui::INPUT_EVENT_LATENCY_UI_COMPONENT);
   if (ShouldRouteEvents()) {
     host()->delegate()->GetInputEventRouter()->RouteTouchEvent(this, &web_event,
@@ -1870,7 +1871,7 @@ void RenderWidgetHostViewMac::RouteOrProcessTouchEvent(
 void RenderWidgetHostViewMac::RouteOrProcessWheelEvent(
     const blink::WebMouseWheelEvent& const_web_event) {
   blink::WebMouseWheelEvent web_event = const_web_event;
-  ui::LatencyInfo latency_info(ui::SourceEventType::WHEEL);
+  ui::LatencyInfo latency_info;
   latency_info.AddLatencyNumber(ui::INPUT_EVENT_LATENCY_UI_COMPONENT);
   mouse_wheel_phase_handler_.AddPhaseIfNeededAndScheduleEndEvent(
       web_event, ShouldRouteEvents());

@@ -7,6 +7,8 @@
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/optional_trace_event.h"
+#include "components/input/cursor_manager.h"
+#include "components/input/render_widget_host_input_event_router.h"
 #include "components/viz/common/features.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
@@ -19,8 +21,6 @@
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
 #include "content/common/features.h"
-#include "content/common/input/cursor_manager.h"
-#include "content/common/input/render_widget_host_input_event_router.h"
 #include "third_party/blink/public/common/frame/frame_visual_properties.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/mojom/frame/intrinsic_sizing_info.mojom.h"
@@ -239,7 +239,7 @@ gfx::PointF CrossProcessFrameConnector::TransformPointToRootCoordSpace(
 
 bool CrossProcessFrameConnector::TransformPointToCoordSpaceForView(
     const gfx::PointF& point,
-    RenderWidgetHostViewInput* target_view,
+    input::RenderWidgetHostViewInput* target_view,
     const viz::SurfaceId& local_surface_id,
     gfx::PointF* transformed_point) {
   RenderWidgetHostViewBase* root_view = GetRootRenderWidgetHostView();
@@ -278,6 +278,8 @@ void CrossProcessFrameConnector::ForwardAckedTouchpadZoomEvent(
 
 bool CrossProcessFrameConnector::BubbleScrollEvent(
     const blink::WebGestureEvent& event) {
+  TRACE_EVENT1("input", "CrossProcessFrameConnector::BubbleScrollEvent", "type",
+               blink::WebInputEvent::GetName(event.GetType()));
   DCHECK(event.GetType() == blink::WebInputEvent::Type::kGestureScrollBegin ||
          event.GetType() == blink::WebInputEvent::Type::kGestureScrollUpdate ||
          event.GetType() == blink::WebInputEvent::Type::kGestureScrollEnd);
@@ -300,6 +302,8 @@ bool CrossProcessFrameConnector::BubbleScrollEvent(
   // action of the parent frame to Auto so that this gesture event is allowed.
   parent_view->host()->input_router()->ForceSetTouchActionAuto();
 
+  TRACE_EVENT_INSTANT0("input", "Did_Bubble_To_InputEventRouter",
+                       TRACE_EVENT_SCOPE_THREAD);
   return event_router->BubbleScrollEvent(parent_view, view_,
                                          resent_gesture_event);
 }
@@ -379,8 +383,8 @@ void CrossProcessFrameConnector::UpdateViewportIntersection(
     if (visual_properties.has_value()) {
       // Subtlety: RenderWidgetHostViewChildFrame::UpdateViewportIntersection()
       // will quietly fail to propagate the new intersection state for main
-      // frames, including portals and fenced frames. For those cases, we need
-      // to ensure that the updated VisualProperties are still propagated.
+      // frames, including fenced frames. For those cases, we need to ensure
+      // that the updated VisualProperties are still propagated.
       std::optional<blink::VisualProperties> last_properties;
       if (host && !main_frame)
         last_properties = host->LastComputedVisualProperties();
