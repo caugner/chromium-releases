@@ -39,7 +39,7 @@ CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method divide
 CONSOLE MESSAGE: line 138:     method multiply
 CONSOLE MESSAGE: line 138:     method subtract
-CONSOLE MESSAGE: line 138: interface CSSMatrixTransformComponent : CSSTransformComponent
+CONSOLE MESSAGE: line 138: interface CSSMatrixComponent : CSSTransformComponent
 CONSOLE MESSAGE: line 138:     getter a
 CONSOLE MESSAGE: line 138:     getter b
 CONSOLE MESSAGE: line 138:     getter c
@@ -105,6 +105,7 @@ CONSOLE MESSAGE: line 138:     method asMatrix
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method is2D
 CONSOLE MESSAGE: line 138: interface CSSTransformValue : CSSStyleValue
+CONSOLE MESSAGE: line 138:     getter length
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method entries
 CONSOLE MESSAGE: line 138:     method forEach
@@ -120,6 +121,7 @@ CONSOLE MESSAGE: line 138: interface CSSURLImageValue : CSSImageValue
 CONSOLE MESSAGE: line 138:     getter url
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138: interface CSSUnparsedValue : CSSStyleValue
+CONSOLE MESSAGE: line 138:     getter length
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method entries
 CONSOLE MESSAGE: line 138:     method forEach
@@ -242,6 +244,8 @@ CONSOLE MESSAGE: line 138:     getter locked
 CONSOLE MESSAGE: line 138:     method cancel
 CONSOLE MESSAGE: line 138:     method constructor
 CONSOLE MESSAGE: line 138:     method getReader
+CONSOLE MESSAGE: line 138:     method pipeThrough
+CONSOLE MESSAGE: line 138:     method pipeTo
 CONSOLE MESSAGE: line 138:     method tee
 CONSOLE MESSAGE: line 138: interface StylePropertyMap
 CONSOLE MESSAGE: line 138:     method append

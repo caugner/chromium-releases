@@ -11,7 +11,7 @@ function test()
     var partSize = sourceStringified.length >> 3;
 
     function injectMockProfile(callback) {
-        var dispatcher = InspectorTest.mainTarget._dispatchers["HeapProfiler"]._dispatcher;
+        var dispatcher = InspectorTest.mainTarget._dispatchers["HeapProfiler"]._dispatchers[0];
         var panel = UI.panels.heap_profiler;
         panel._reset();
 
@@ -25,7 +25,7 @@ function test()
             }
             for (var i = 0, l = sourceStringified.length; i < l; i += partSize)
                 dispatcher.addHeapSnapshotChunk(sourceStringified.slice(i, i + partSize));
-            setTimeout(callback, 0);
+            return Promise.resolve(callback(null));
         }
 
         function tempFileReady()

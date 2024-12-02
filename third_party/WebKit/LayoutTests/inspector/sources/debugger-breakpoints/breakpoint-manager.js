@@ -39,30 +39,20 @@ InspectorTest._pageCapabilities =
 InspectorTest.createMockTarget = function(id, debuggerModelConstructor, capabilities)
 {
     capabilities = capabilities || InspectorTest._pageCapabilities;
-    var MockTarget = class extends SDK.Target {
-        constructor(name, connectionFactory, callback) {
-            super(InspectorTest.testTargetManager, name, capabilities, connectionFactory, null, callback);
-            this._inspectedURL = InspectorTest.mainTarget.inspectedURL();
-            this.consoleModel = new SDK.ConsoleModel(this);
-            this.networkManager = new SDK.NetworkManager(this);
-            this.runtimeModel = new SDK.RuntimeModel(this);
-            this.securityOriginManager = SDK.SecurityOriginManager.fromTarget(this);
-            this.resourceTreeModel = new SDK.ResourceTreeModel(this, this.networkManager, this.securityOriginManager);
-            this.resourceTreeModel._cachedResourcesProcessed = true;
-            this.resourceTreeModel._frameAttached("42", 0);
-            this.debuggerModel = debuggerModelConstructor ? new debuggerModelConstructor(this) : new SDK.DebuggerModel(this);
-            this._modelByConstructor.set(SDK.DebuggerModel, this.debuggerModel);
-            this.domModel = new SDK.DOMModel(this);
-            this.cssModel = new SDK.CSSModel(this, this.domModel);
-        }
-
-        _loadedWithCapabilities()
-        {
-        }
-    };
-
-    var target = new MockTarget("mock-target-" + id, (params) => new SDK.StubConnection(params));
-    InspectorTest.testTargetManager.addTarget(target);
+    var target = InspectorTest.testTargetManager.createTarget("mock-target-" + id, "mock-target-" + id, capabilities & (~SDK.Target.Capability.JS), (params) => new SDK.StubConnection(params), null);
+    target._capabilitiesMask = capabilities;
+    target._inspectedURL = InspectorTest.mainTarget.inspectedURL();
+    target.resourceTreeModel = target.model(SDK.ResourceTreeModel);
+    target.resourceTreeModel._cachedResourcesProcessed = true;
+    target.resourceTreeModel._frameAttached("42", 0);
+    target.runtimeModel = /** @type {!SDK.RuntimeModel} */ (target.model(SDK.RuntimeModel));
+    if (debuggerModelConstructor) {
+        target.debuggerModel = new debuggerModelConstructor(target);
+        target._modelByConstructor.set(SDK.DebuggerModel, target.debuggerModel);
+        InspectorTest.testTargetManager.modelAdded(target, SDK.DebuggerModel, target.debuggerModel);
+    } else {
+        target.debuggerModel = target.model(SDK.DebuggerModel);
+    }
     return target;
 }
 
@@ -224,7 +214,8 @@ InspectorTest.dumpTarget = function(targetAware)
 InspectorTest.DebuggerModelMock = class extends SDK.SDKModel {
     constructor(target)
     {
-        super(SDK.DebuggerModel, target);
+        super(target);
+        this._target = target;
         this._breakpointResolvedEventTarget = new Common.Object();
         this._scripts = {};
         this._breakpoints = {};
@@ -255,13 +246,13 @@ InspectorTest.DebuggerModelMock = class extends SDK.SDKModel {
     {
         var script = new SDK.Script(this, scriptId, url);
         this._scripts[scriptId] = script;
-        this._debuggerWorkspaceBinding._targetToData.get(this._target)._parsedScriptSource({data: script});
+        this._debuggerWorkspaceBinding._debuggerModelToData.get(this)._parsedScriptSource({data: script});
     }
 
     _registerScript(script)
     {
         this._scripts[script.scriptId] = script;
-        this._debuggerWorkspaceBinding._targetToData.get(this._target)._parsedScriptSource({data: script});
+        this._debuggerWorkspaceBinding._debuggerModelToData.get(this)._parsedScriptSource({data: script});
     }
 
     _scriptForURL(url)
@@ -344,7 +335,7 @@ InspectorTest.DebuggerModelMock = class extends SDK.SDKModel {
     {
         InspectorTest.addResult("  Resetting debugger.");
         this._scripts = {};
-        this._debuggerWorkspaceBinding._reset(this._target);
+        this._debuggerWorkspaceBinding._reset(this);
     }
 
     pushSourceMapping(sourceMapping)
@@ -396,7 +387,7 @@ InspectorTest.addScript = function(target, breakpointManager, url)
     for (var i = 0; i < uiSourceCodes.length; ++i) {
         var uiSourceCode = uiSourceCodes[i];
         if (uiSourceCode.url() === url) {
-            breakpointManager._debuggerWorkspaceBinding.setSourceMapping(target, uiSourceCode, breakpointManager.defaultMapping);
+            breakpointManager._debuggerWorkspaceBinding.setSourceMapping(target.debuggerModel, uiSourceCode, breakpointManager.defaultMapping);
             InspectorTest.uiSourceCodes[url] = uiSourceCode;
             return uiSourceCode;
         }
@@ -413,7 +404,7 @@ InspectorTest.addUISourceCode = function(target, breakpointManager, url, doNotSe
     var uiSourceCode = InspectorTest.testNetworkProject.addFile(contentProvider, null);
     InspectorTest.uiSourceCodes[url] = uiSourceCode;
     if (!doNotSetSourceMapping) {
-        breakpointManager._debuggerWorkspaceBinding.setSourceMapping(target, uiSourceCode, breakpointManager.defaultMapping);
+        breakpointManager._debuggerWorkspaceBinding.setSourceMapping(target.debuggerModel, uiSourceCode, breakpointManager.defaultMapping);
         breakpointManager._debuggerWorkspaceBinding.updateLocations(target.debuggerModel.scriptForId(url));
     }
     return uiSourceCode;
@@ -422,8 +413,8 @@ InspectorTest.addUISourceCode = function(target, breakpointManager, url, doNotSe
 InspectorTest.createBreakpointManager = function(targetManager, debuggerWorkspaceBinding, persistentBreakpoints)
 {
     InspectorTest._pendingBreakpointUpdates = 0;
-    InspectorTest.addSniffer(Bindings.BreakpointManager.TargetBreakpoint.prototype, "_updateInDebugger", updateInDebugger, true);
-    InspectorTest.addSniffer(Bindings.BreakpointManager.TargetBreakpoint.prototype, "_didUpdateInDebugger", didUpdateInDebugger, true);
+    InspectorTest.addSniffer(Bindings.BreakpointManager.ModelBreakpoint.prototype, "_updateInDebugger", updateInDebugger, true);
+    InspectorTest.addSniffer(Bindings.BreakpointManager.ModelBreakpoint.prototype, "_didUpdateInDebugger", didUpdateInDebugger, true);
 
     function updateInDebugger()
     {

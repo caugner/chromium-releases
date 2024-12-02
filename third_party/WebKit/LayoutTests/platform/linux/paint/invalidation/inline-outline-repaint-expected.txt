@@ -8,33 +8,13 @@
       "paintInvalidations": [
         {
           "object": "LayoutBlockFlow DIV",
-          "rect": [8, 156, 100, 40],
+          "rect": [8, 176, 100, 40],
           "reason": "forced by layout"
         },
         {
           "object": "LayoutInline SPAN id='test'",
-          "rect": [5, 153, 92, 45],
+          "rect": [5, 173, 95, 45],
           "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [8, 156, 86, 39],
-          "reason": "full"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [43, 175, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [43, 175, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [43, 175, 3, 21],
-          "reason": "invalidate paint rectangle"
         }
       ]
     }
@@ -43,10 +23,6 @@
     {
       "object": "LayoutText #text",
       "reason": "layoutObject removal"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
     },
     {
       "object": "LayoutBlockFlow DIV",
@@ -58,11 +34,7 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutInline SPAN id='test'",

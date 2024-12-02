@@ -2,7 +2,9 @@
 #
 # This file acts as a blacklist; directories and files not listed here will automatically
 # be found and imported.
-
+#
+# This file is read by webkitpy/w3c/directory_owners_extractor.py to decide who
+# to contact for new failures; to allow it to read
 # When removing blacklist entries:
 # * Comment out the line rather than deleting it, to show it is intentional
 # * Change [ Skip ] to [ Pass ]
@@ -27,7 +29,8 @@ external/csswg-test/css-exclusions-1 [ Skip ]
 # external/csswg-test/css-flexbox-1 [ Pass ]
 external/csswg-test/css-fonts-3 [ Skip ]
 external/csswg-test/css-gcpm-3 [ Skip ]
-external/csswg-test/css-grid-1 [ Skip ]
+## Owners: rego@igalia.com
+# external/csswg-test/css-grid-1 [ Pass ]
 external/csswg-test/css-images-3 [ Skip ]
 external/csswg-test/css-lists-3 [ Skip ]
 external/csswg-test/css-masking-1 [ Skip ]
@@ -48,8 +51,10 @@ external/csswg-test/css-style-attr-1 [ Skip ]
 external/csswg-test/css-syntax-3 [ Skip ]
 external/csswg-test/css-tables-3 [ Skip ]
 external/csswg-test/css-text-3/hanging-punctuation [ Skip ]
-external/csswg-test/css-text-3/i18n [ Skip ]
-external/csswg-test/css-text-3/line-break [ Skip ]
+## Owners: kojii@chromium.org
+# external/csswg-test/css-text-3/i18n [ Pass ]
+# external/csswg-test/css-text-3/line-break [ Pass ]
+external/csswg-test/css-text-3/line-breaking [ Skip ]
 ## Owners: kojii@chromium.org
 # external/csswg-test/css-text-3/overflow-wrap [ Pass ]
 external/csswg-test/css-text-3/support [ Skip ]
@@ -68,6 +73,7 @@ external/csswg-test/css-transitions-2 [ Skip ]
 ## Owners: rego@igalia.com
 # external/csswg-test/css-ui-3 [ Pass ]
 external/csswg-test/css-values-3 [ Skip ]
+external/csswg-test/css-values-4 [ Skip ]
 external/csswg-test/css-variables-1 [ Skip ]
 ## Owners: kojii@chromium.org
 # external/csswg-test/css-writing-modes-3 [ Pass ]
@@ -162,7 +168,7 @@ external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/css21 [ Skip
 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/filters [ Skip ]
 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/background [ Skip ]
 ## Owners: cbiesinger@chromium.org
-# external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox [ Skip ]
+# external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox [ Pass ]
 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/flexbox/reftest.list [ Skip ]
 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/fonts3 [ Skip ]
 external/csswg-test/vendor-imports/mozilla/mozilla-central-reftests/images3 [ Skip ]
@@ -218,17 +224,18 @@ external/wpt/compat [ Skip ]
 external/wpt/config.default.json [ Skip ]
 external/wpt/conformance-checkers [ Skip ]
 external/wpt/console [ Skip ]
-external/wpt/content-security-policy [ Skip ]
+## Owners: mkwst@chromium.org
+# external/wpt/content-security-policy [ Pass ]
 external/wpt/cookies [ Skip ]
 external/wpt/cors [ Skip ]
 external/wpt/csp [ Skip ]
 external/wpt/cssom [ Skip ]
 external/wpt/cssom-view [ Skip ]
-## Owners: TBD
+## Owners: dom-dev@chromium.org
 # external/wpt/custom-elements [ Pass ]
 external/wpt/custom-elements/v0/registering/unresolved-element-pseudoclass [ Skip ]
 external/wpt/docs [ Skip ]
-## Owners: tkent@chromium.org
+## Owners: dom-dev@chromium.org
 external/wpt/dom [ Pass ]
 ## Owners: dom-dev@chromium.org
 # external/wpt/domparsing [ Pass ]
@@ -254,9 +261,9 @@ external/wpt/generic-sensor [ Skip ]
 external/wpt/geolocation-API [ Skip ]
 ## Owners: jsbell@chromium.org
 # external/wpt/hr-time [ Pass ]
-## Owners: tkent@chromium.org
+## Owners: dom-dev@chromium.org
 # external/wpt/html [ Pass ]
-## Owners: TBD
+## Owners: dom-dev@chromium.org
 # external/wpt/html-imports [ Pass ]
 external/wpt/html-longdesc [ Skip ]
 external/wpt/html-media-capture [ Skip ]
@@ -274,13 +281,19 @@ external/wpt/manifest [ Skip ]
 external/wpt/mathml [ Skip ]
 ## Owners: none; No tests in the directory.
 # external/wpt/media [ Skip ]
+## Owners: mlamouri@chromium.org,zqzhang@chromium.org
+# external/wpt/mediasession [ Pass ]
+## Owners: chcunningham@chromium.org,mlamouri@chromium.org
+# external/wpt/media-capabilities
 external/wpt/media-source [ Skip ]
 external/wpt/mediacapture-record [ Skip ]
 ## Owners: phoglund@chromium.org
 # external/wpt/mediacapture-streams [ Pass ]
 external/wpt/microdata [ Skip ]
-external/wpt/mixed-content [ Skip ]
-external/wpt/navigation-timing [ Skip ]
+## Owners: mkwst@chromium.org
+# external/wpt/mixed-content [ Pass ]
+## Owners: sunjian@chromium.org,panicker@chromium.org
+external/wpt/navigation-timing [ Pass ]
 external/wpt/notifications [ Skip ]
 external/wpt/offscreen-canvas [ Skip ]
 external/wpt/old-tests [ Skip ]
@@ -296,9 +309,10 @@ external/wpt/progress-events [ Skip ]
 external/wpt/proximity [ Skip ]
 ## Owners: rob.buis@samsung.com
 # external/wpt/quirks-mode [ Skip ]
-## Owners: mkwst@chromium.org
-# http://crbug.com/360762: Requires HTTPS server with python.
-external/wpt/referrer-policy [ Skip ]
+## Owners: avayvod@chromium.org,mlamouri@chromium.org
+# external/wpt/remote-playback [ Pass ]
+## Owners: jochen@chromium.org,estark@chromium.org
+# external/wpt/referrer-policy [ Pass ]
 external/wpt/resource-timing [ Skip ]
 ## Owners: jsbell@chromium.org
 # external/wpt/resources [ Pass ]
@@ -319,21 +333,23 @@ external/wpt/server-side.md [ Skip ]
 # external/wpt/service-workers [ Pass ]
 ## Owners: jsbell@chromium.org
 # external/wpt/service-workers/cache-storage [ Pass ]
-## Owners: kochi@chromium.org crbug.com/505364
+## Owners: dom-dev@chromium.org
 # external/wpt/shadow-dom [ Pass ]
+## Owners: jsbell@chromium.org
+# external/wpt/storage [ Pass ]
 ## Owners: domenic@chromium.org,ricea@chromium.org,tyoshino@chromium.org
 external/wpt/streams [ Pass ]
-## Owners: jww@chromium.org
-external/wpt/subresource-integrity [ Skip ]
+## Owners: mkwst@chromium.org,jochen@chromium.org
+# external/wpt/subresource-integrity [ Pass ]
 ## Owners: foolip@chromium.org
-external/wpt/svg [ Pass ]
+# external/wpt/svg [ Pass ]
 external/wpt/svg/import [ Skip ]
 external/wpt/tools [ Skip ]
 ## Owners: chongz@chromium.org
 # external/wpt/touch-events [ Pass ]
 external/wpt/typedarrays [ Skip ]
 ## Owners: dtapuska@chromium.org
-external/wpt/uievents [ Pass ]
+# external/wpt/uievents [ Pass ]
 external/wpt/url [ Skip ]
 ## Owners: jsbell@chromium.org
 # external/wpt/user-timing [ Pass ]
@@ -354,7 +370,8 @@ external/wpt/webgl [ Skip ]
 external/wpt/websockets [ Skip ]
 ## Owners: michaeln@chromium.org,jsbell@chromium.org
 # external/wpt/webstorage [ Pass ]
-external/wpt/webvtt [ Skip ]
+## Owners: foolip@chromium.org, maksim.sisov@intel.com
+# external/wpt/webvtt [ Pass ]
 ## Owners: nhiroki@chromium.org
 # external/wpt/workers [ Pass ]
 
@@ -364,18 +381,10 @@ external/wpt/webvtt [ Skip ]
 # (if it's a blink/test tooling issue) or an upstream bug reference
 # (if the test itself is buggy).
 
-# crbug.com/490694: Needs to support *.headers.
-external/wpt/html/dom/documents/resource-metadata-management/document-lastModified.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-001.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-007.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-009.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-015.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-016.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-018.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-030.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-034.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-037.html [ Skip ]
-external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-038.html [ Skip ]
+# wpt.config.json overrides the following files with LayoutTests/resources
+# files. Having unused files would be confusing.
+external/wpt/resources/testharnessreport.js [ Skip ]
+external/wpt/common/vendor-prefix.js [ Skip ]
 
 # crbug.com/490939: The following tests are too large.  They cause time out frequently.
 # Also, html/dom/interfaces.html is flaky.
@@ -387,9 +396,6 @@ external/wpt/html/rendering/replaced-elements/svg-embedded-sizing/svg-in-iframe-
 external/wpt/html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-auto.html [ Skip ]
 external/wpt/html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-fixed.html [ Skip ]
 external/wpt/html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-percentage.html [ Skip ]
-
-# Depends on unimported directories of web-platform-tests/.
-external/wpt/html/browsers/browsing-the-web/read-text/load-text-plain.html [ Skip ]
 
 # crbug.com/498120: Using absolute URL links.
 external/wpt/html/semantics/embedded-content/media-elements/audio_loop_base.html [ Skip ]
@@ -485,36 +491,14 @@ external/wpt/svg/shapes/rect-02.svg [ Skip ]
 external/wpt/svg/shapes/rect-03.svg [ Skip ]
 external/wpt/svg/shapes/rect-04.svg [ Skip ]
 
-# https://github.com/w3c/web-platform-tests/issues/1861: A function can be
-# called before it's defined.
-# crbug.com/493465: Requires the pipe feature of wptserve
-external/wpt/html/browsers/the-window-object/security-window/window-security.sub.html [ Skip ]
+# The outputs of these tests contain random values generated by token()
+# in common/utils.js. These could be imported if the results for
+# testharness tests just had pass/fail but no console error messages.
+crbug.com/679742 external/wpt/html/semantics/embedded-content/media-elements/track/track-element/cors [ Skip ]
 
-# crbug.com/493465: Requires the pipe feature of wptserve
-external/wpt/dom/events/EventListener-incumbent-global.sub.html [ Skip ]
-external/wpt/html/browsers/history/the-location-interface/allow_prototype_cycle_through_location.sub.html [ Skip ]
-external/wpt/html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html [ Skip ]
-external/wpt/html/browsers/windows/nested-browsing-contexts/frameElement.sub.html [ Skip ]
-external/wpt/html/dom/documents/dom-tree-accessors/Document.currentScript.sub.html [ Skip ]
-external/wpt/html/infrastructure/urls/dynamic-changes-to-base-urls/dynamic-urls.sub.xhtml [ Skip ]
-external/wpt/html/infrastructure/urls/resolving-urls [ Skip ]
-external/wpt/html/infrastructure/urls/terminology-0/multiple-base.sub.html [ Skip ]
-external/wpt/html/semantics/document-metadata/the-base-element/base_href_specified.sub.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/track/track-element/cors [ Skip ]
-external/wpt/dom/events/EventListener-incumbent-global-1.sub.html [ Skip ]
-external/wpt/dom/events/EventListener-incumbent-global-2.sub.html [ Skip ]
-
-# https://github.com/w3c/web-platform-tests/issues/1862:
-# The test doesn't handle ':' after a drive letter in file: URL on Windows.
-external/wpt/html/browsers/history/the-location-interface/location_hostname.html [ Skip ]
-
-# crbug.com/535615: Pathnames are too long for Windows.
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-fragment-into-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-parent-into-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-source-networkState.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-insert-source-not-in-document.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-invoke-remove-from-document-networkState.html [ Skip ]
-external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-pointer-remove-source-after.html [ Skip ]
+crbug.com/626703 external/csswg-test/css-values-4/ic-unit-004.html [ Failure ]
+crbug.com/626703 external/csswg-test/css-values-4/ic-unit-001.html [ Failure ]
+crbug.com/626703 external/csswg-test/css-values-4/ic-unit-003.html [ Failure ]
 
 # It contains only manual SVG tests.
 external/wpt/html/editing/dnd/svg [ Skip ]
@@ -526,42 +510,12 @@ external/wpt/html/editing/dnd/platform/plugin/swfsources [ Skip ]
 external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-003.html [ Skip ]
 external/wpt/html/syntax/parsing-html-fragments/the-input-byte-stream-004.html [ Skip ]
 
-# https://github.com/w3c/web-platform-tests/issues/1881: Tests refer
-# non-existing .js file.
-external/wpt/html/syntax/parsing/template [ Skip ]
-
-# these contain an extraneous debug log div ..
-external/wpt/html-imports/link-import-null.html [ Skip ]
-external/wpt/html-imports/link-import.html [ Skip ]
-external/wpt/html-imports/loading-import.html [ Skip ]
-
 # We'll never be able to test WebRTC deny tests since we always auto-allow
 # user media.
 external/wpt/mediacapture-streams/obtaining-local-multimedia-content/navigatorusermedia/deny.html [ Skip ]
 
 # Requires http server. Needs http: scheme, using XHR, etc.
 external/wpt/FileAPI/url/url_xmlhttprequest_img.html [ Skip ]
-external/wpt/dom/nodes/Document-URL.sub.html [ Skip ]
-external/wpt/dom/nodes/Document-characterSet-normalization.html [ Skip ]
-external/wpt/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_01.html [ Skip ]
-external/wpt/dom/nodes/Document-contentType/contentType/contenttype_mimeheader_02.html [ Skip ]
-external/wpt/dom/nodes/Document-contentType/contentType/contenttype_xml.html [ Skip ]
-external/wpt/dom/nodes/Document-contentType/contentType/xhr_responseType_document.html [ Skip ]
-external/wpt/dom/nodes/Element-matches.html [ Skip ]
-external/wpt/html/browsers/history/the-history-interface/008.html [ Skip ]
-external/wpt/html/browsers/origin/relaxing-the-same-origin-restriction/document_domain.html [ Skip ]
-external/wpt/html/browsers/the-window-object/apis-for-creating-and-navigating-browsing-contexts-by-name/creating_browsing_context_test_01.htmln [ Skip ]
-external/wpt/html/infrastructure/urls/terminology-0/document-base-url.html [ Skip ]
-external/wpt/html/semantics/embedded-content/the-iframe-element/cross_origin_parentage.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/external-script-utf8.js [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/external-script-windows1250.js [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-charset-01.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-charset-02.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-not-found-not-executed-2.py [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-not-found-not-executed.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-not-found-not-executed.py [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/serve-with-content-type.py [ Skip ]
-external/wpt/html/webappapis/system-state-and-capabilities/the-navigator-object/NavigatorID.html [ Skip ]
 
 # Requires http server. Moved the following test to http/tests/custom-elements/.
 external/wpt/custom-elements/v0/creating-and-passing-registries/no-registry-test.html [ Skip ]
@@ -578,17 +532,6 @@ external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-re
 external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-candidate-remove-addEventListener.html [ Skip ]
 external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-candidate-remove-no-listener.html [ Skip ]
 external/wpt/html/semantics/embedded-content/media-elements/loading-the-media-resource/resource-selection-candidate-remove-onerror.html [ Skip ]
-external/wpt/html/semantics/forms/form-submission-0/submit-entity-body.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_003.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_004.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_005.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_006.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_007.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_008.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_009.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/async_010.htm [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/script-crossorigin-network.html [ Skip ]
-external/wpt/html/semantics/scripting-1/the-script-element/resources/cross-origin.py [ Skip ]
 
 # This test requires manual interventions.
 external/wpt/pointerevents/pointerevent_pointermove-on-chorded-mouse-button.html [ Skip ]
@@ -694,10 +637,6 @@ external/csswg-test/css-writing-modes-3/text-combine-upright-value-digits4-003.h
 external/wpt/html/semantics/document-metadata/the-meta-element/pragma-directives/attr-meta-http-equiv-refresh/parsing.html [ Skip ]
 external/wpt/html/semantics/document-metadata/the-meta-element/pragma-directives/attr-meta-http-equiv-refresh/support [ Skip ]
 
-# Untriaged: Test results contain local file paths
-external/wpt/html/semantics/document-metadata/the-base-element/base_about_blank.html [ Skip ]
-external/wpt/html/semantics/document-metadata/the-base-element/base_srcdoc.html [ Skip ]
-
 # Untriaged: Tests don't complete.
 external/wpt/html/browsers/browsing-the-web/navigating-across-documents/008.html [ Skip ]
 external/wpt/html/browsers/browsing-the-web/navigating-across-documents/009.html [ Skip ]
@@ -720,17 +659,14 @@ external/wpt/html/semantics/embedded-content/the-iframe-element/iframe_sandbox_p
 external/wpt/html/semantics/forms/form-submission-0/url-encoded.html [ Skip ]
 external/wpt/svg/linking/scripted [ Skip ]
 
-# crbug.com/656171: w3c-test-importer fails to import file with non-valid utf8 (004.worker.js).
-crbug.com/656171 external/wpt/workers/semantics/encodings [ Skip ]
-
 # They have a wrong encoding, and test_parser.py throws UnicodeEncodeError.
 external/wpt/domxpath/001.html [ Skip ]
 external/wpt/domxpath/002.html [ Skip ]
 
-# This test depends on a file xml_xpath_tests.xml, which is too large
-# for Rietveld to handle now, so it's not currently imported.
-crbug.com/676491 external/wpt/domxpath/xml_xpath_runner.html [ Skip ]
-crbug.com/676491 external/wpt/domxpath/xml_xpath_tests.xml [ Skip ]
+# This test depends on a support file with non-LF new lines, which
+# causes a patch error in the bot_update step when importing this test.
+crbug.com/691107 external/wpt/webvtt/webvtt-file-format-parsing/webvtt-file-parsing/001.html [ Skip ]
+crbug.com/691107 external/wpt/webvtt/webvtt-file-format-parsing/webvtt-file-parsing/support/newlines.vtt [ Skip ]
 
 # Manual tests that fail as TIMEOUT or NOTRUN. Consider adding wpt_automation.
 external/wpt/FileAPI/BlobURL/test1-manual.html [ Skip ]

@@ -9,8 +9,11 @@ Loaded modules:
     dom_extension
     emulation
     extensions
+    help
     host
     main
+    network_conditions
+    object_ui
     persistence
     platform
     protocol
@@ -28,10 +31,14 @@ Loaded modules:
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
+    network_conditions
+    object_ui
     persistence
     platform
     protocol
@@ -54,11 +61,15 @@ Loaded modules:
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    object_ui
     perf_ui
     persistence
     platform
@@ -84,11 +95,15 @@ Loaded modules:
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    object_ui
     perf_ui
     persistence
     platform
@@ -117,11 +132,15 @@ Loaded modules:
     dom_extension
     elements
     emulation
+    event_listeners
     extensions
+    help
     host
     inline_editor
     main
     network
+    network_conditions
+    object_ui
     perf_ui
     persistence
     platform
