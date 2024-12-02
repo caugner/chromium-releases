@@ -122,11 +122,6 @@ LayoutBoxModelObject::ComputeBackgroundPaintLocationIfComposited() const {
       return kBackgroundPaintInScrollingContents;
   }
 
-  // TODO(flackr): When we correctly clip the scrolling contents layer we can
-  // paint locally equivalent backgrounds into it. https://crbug.com/645957
-  if (HasClip())
-    return kBackgroundPaintInGraphicsLayer;
-
   // Inset box shadow is painted in the scrolling area above the background, and
   // it doesn't scroll, so the background can only be painted in the main layer.
   if (HasInsetBoxShadow(StyleRef()))
@@ -245,8 +240,8 @@ void LayoutBoxModelObject::StyleWillChange(StyleDifference diff,
   // invalidate the current compositing container chain which may have painted
   // cached subsequences containing this object or descendant objects.
   if (Style() &&
-      (StyleRef().IsStacked() != new_style.IsStacked() ||
-       StyleRef().IsStackingContext() != new_style.IsStackingContext()) &&
+      (IsStacked() != IsStacked(new_style) ||
+       IsStackingContext() != IsStackingContext(new_style)) &&
       // ObjectPaintInvalidator requires this.
       IsRooted()) {
     if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
@@ -599,7 +594,7 @@ void LayoutBoxModelObject::AddOutlineRectsForDescendant(
     Vector<PhysicalRect>& rects,
     const PhysicalOffset& additional_offset,
     NGOutlineType include_block_overflows) const {
-  if (descendant.IsText() || descendant.IsListMarker())
+  if (descendant.IsText() || descendant.IsListMarkerForNormalContent())
     return;
 
   if (descendant.HasLayer()) {
@@ -720,6 +715,13 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight(
       if (flex_box.UseOverrideLogicalHeightForPerentageResolution(*this_box))
         return false;
     } else if (this_box->GetCachedLayoutResult()) {
+      // TODO(dgrogan): We won't get here when laying out the FlexNG item and
+      // its descendant(s) for the first time because the item (|this_box|)
+      // doesn't have anything in its cache. That seems bad because this method
+      // returns true even when the item has a fixed definite height. There
+      // doesn't seem to be an easy way to check the flex item's definiteness
+      // here because the flex item's LayoutObject doesn't have a
+      // BoxLayoutExtraInput that we could add a flag to.
       const NGConstraintSpace& space =
           this_box->GetCachedLayoutResult()->GetConstraintSpaceForCaching();
       if (space.IsFixedBlockSize() && !space.IsFixedBlockSizeIndefinite())
@@ -748,6 +750,12 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight(
           this_box->HasOverrideContainingBlockContentLogicalHeight()) {
         return this_box->OverrideContainingBlockContentLogicalHeight() ==
                LayoutUnit(-1);
+      } else if (this_box && this_box->GetCachedLayoutResult() &&
+                 !this_box->GetBoxLayoutExtraInput()) {
+        return this_box->GetCachedLayoutResult()
+                   ->GetConstraintSpaceForCaching()
+                   .AvailableSize()
+                   .block_size == LayoutUnit(-1);
       }
       return !cb->HasDefiniteLogicalHeight();
     }
@@ -758,7 +766,7 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight(
 
 PhysicalOffset LayoutBoxModelObject::RelativePositionOffset() const {
   DCHECK(IsRelPositioned());
-  PhysicalOffset offset = AccumulateInFlowPositionOffsets();
+  PhysicalOffset offset = AccumulateRelativePositionOffsets();
 
   LayoutBlock* containing_block = ContainingBlock();
 

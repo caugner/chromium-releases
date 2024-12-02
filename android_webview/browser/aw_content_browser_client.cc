@@ -50,7 +50,6 @@
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/cdm/browser/cdm_message_filter_android.h"
@@ -226,8 +225,8 @@ void MaybeCreateSafeBrowsing(
   if (!render_process_host)
     return;
 
-  base::PostTask(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&safe_browsing::MojoSafeBrowsingImpl::MaybeCreate, rph_id,
                      resource_context, std::move(get_checker_delegate),
                      std::move(receiver)));
@@ -279,12 +278,12 @@ bool AwContentBrowserClient::get_check_cleartext_permitted() {
 
 AwContentBrowserClient::AwContentBrowserClient(
     AwFeatureListCreator* aw_feature_list_creator)
-    : aw_feature_list_creator_(aw_feature_list_creator) {
+    : sniff_file_urls_(AwSettings::GetAllowSniffingFileUrls()),
+      aw_feature_list_creator_(aw_feature_list_creator) {
   // |aw_feature_list_creator| should not be null. The AwBrowserContext will
   // take the PrefService owned by the creator as the Local State instead
   // of loading the JSON file from disk.
   DCHECK(aw_feature_list_creator_);
-  sniff_file_urls_ = AwSettings::GetAllowSniffingFileUrls();
 }
 
 AwContentBrowserClient::~AwContentBrowserClient() {}
@@ -403,6 +402,9 @@ bool AwContentBrowserClient::ForceSniffingFileUrlsForHtml() {
 void AwContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
+  // AppCache should always be enabled for WebView until it is removed.
+  command_line->AppendSwitch(switches::kAppCacheForceEnabled);
+
   if (!command_line->HasSwitch(switches::kSingleProcess)) {
     // The only kind of a child process WebView can have is renderer or utility.
     std::string process_type =
@@ -683,7 +685,7 @@ void AwContentBrowserClient::ExposeInterfacesToRenderer(
           base::BindRepeating(
               &AwContentBrowserClient::GetSafeBrowsingUrlCheckerDelegate,
               base::Unretained(this))),
-      base::CreateSingleThreadTaskRunner({BrowserThread::UI}));
+      content::GetUIThreadTaskRunner({}));
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   auto create_spellcheck_host =
@@ -691,9 +693,8 @@ void AwContentBrowserClient::ExposeInterfacesToRenderer(
         mojo::MakeSelfOwnedReceiver(std::make_unique<SpellCheckHostImpl>(),
                                     std::move(receiver));
       };
-  registry->AddInterface(
-      base::BindRepeating(create_spellcheck_host),
-      base::CreateSingleThreadTaskRunner({BrowserThread::UI}));
+  registry->AddInterface(base::BindRepeating(create_spellcheck_host),
+                         content::GetUIThreadTaskRunner({}));
 #endif
 }
 
@@ -833,21 +834,24 @@ bool AwContentBrowserClient::HandleExternalProtocol(
     mojo::PendingRemote<network::mojom::URLLoaderFactory>* out_factory) {
   mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver =
       out_factory->InitWithNewPipeAndPassReceiver();
+  // We don't need to care for |security_options| as the factories constructed
+  // below are used only for navigation.
   if (content::BrowserThread::CurrentlyOn(content::BrowserThread::IO)) {
     // Manages its own lifetime.
     new android_webview::AwProxyingURLLoaderFactory(
         0 /* process_id */, std::move(receiver), mojo::NullRemote(),
-        true /* intercept_only */);
+        true /* intercept_only */, base::nullopt /* security_options */);
   } else {
-    base::PostTask(
-        FROM_HERE, {content::BrowserThread::IO},
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(
             [](mojo::PendingReceiver<network::mojom::URLLoaderFactory>
                    receiver) {
               // Manages its own lifetime.
               new android_webview::AwProxyingURLLoaderFactory(
                   0 /* process_id */, std::move(receiver), mojo::NullRemote(),
-                  true /* intercept_only */);
+                  true /* intercept_only */,
+                  base::nullopt /* security_options */);
             },
             std::move(receiver)));
   }
@@ -895,15 +899,6 @@ bool AwContentBrowserClient::ShouldLockToOrigin(
   return false;
 }
 
-bool AwContentBrowserClient::DoesWebUISchemeRequireProcessLock(
-    base::StringPiece scheme) {
-  // TODO(nasko,alexmos): WebView does not currently lock processes for WebUI
-  // navigations, even though it does cross-process navigations. It should be
-  // fixed and this method can be removed.
-  // See https://crbug.com/1071464.
-  return false;
-}
-
 bool AwContentBrowserClient::WillCreateURLLoaderFactory(
     content::BrowserContext* browser_context,
     content::RenderFrameHost* frame,
@@ -945,10 +940,44 @@ bool AwContentBrowserClient::WillCreateURLLoaderFactory(
       type == URLLoaderFactoryType::kNavigation ? 0 : render_process_id;
 
   // Android WebView has one non off-the-record browser context.
-  base::PostTask(FROM_HERE, {content::BrowserThread::IO},
-                 base::BindOnce(&AwProxyingURLLoaderFactory::CreateProxy,
-                                process_id, std::move(proxied_receiver),
-                                std::move(target_factory_remote)));
+  if (frame) {
+    auto security_options =
+        base::make_optional<AwProxyingURLLoaderFactory::SecurityOptions>();
+    security_options->disable_web_security =
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kDisableWebSecurity);
+    const auto& preferences =
+        frame->GetRenderViewHost()->GetWebkitPreferences();
+    // See also //android_webview/docs/cors-and-webview-api.md to understand how
+    // each settings affect CORS behaviors on file:// and content://.
+    if (request_initiator.scheme() == url::kFileScheme) {
+      security_options->disable_web_security |=
+          preferences.allow_universal_access_from_file_urls;
+      // Usual file:// to file:// requests are mapped to kNoCors if the setting
+      // is set to true. Howover, file:///android_{asset|res}/ still uses kCors
+      // and needs to permit it in the |security_options|.
+      security_options->allow_cors_to_same_scheme =
+          preferences.allow_file_access_from_file_urls;
+    } else if (request_initiator.scheme() == url::kContentScheme) {
+      security_options->allow_cors_to_same_scheme =
+          preferences.allow_file_access_from_file_urls ||
+          preferences.allow_universal_access_from_file_urls;
+    }
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
+        base::BindOnce(&AwProxyingURLLoaderFactory::CreateProxy, process_id,
+                       std::move(proxied_receiver),
+                       std::move(target_factory_remote), security_options));
+  } else {
+    // A service worker and worker subresources set nullptr to |frame|, and
+    // work without seeing the AllowUniversalAccessFromFileURLs setting. So,
+    // we don't pass a valid |security_options| here.
+    content::GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&AwProxyingURLLoaderFactory::CreateProxy,
+                                  process_id, std::move(proxied_receiver),
+                                  std::move(target_factory_remote),
+                                  base::nullopt /* security_options */));
+  }
   return true;
 }
 
