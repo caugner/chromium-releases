@@ -11,13 +11,20 @@ function templateString()
     };
 }
 
+function shouldNotFindThisFunction() { }
+
+window["should not find this"] = true;
+
 function test()
 {
     var consoleEditor;
     function testCompletions(text, expected, force)
     {
-        consoleEditor.setText(text);
-        consoleEditor.setSelection(Common.TextRange.createFromLocation(Infinity, Infinity));
+        var cursorPosition = text.indexOf('|');
+        if (cursorPosition < 0)
+            cursorPosition = Infinity;
+        consoleEditor.setText(text.replace('|', ''));
+        consoleEditor.setSelection(Common.TextRange.createFromLocation(0, cursorPosition));
         consoleEditor._autocompleteController.autocomplete(force);
         return InspectorTest.addSnifferPromise(consoleEditor._autocompleteController, "_onSuggestionsShownForTest").then(checkExpected);
 
@@ -62,7 +69,21 @@ function test()
         () => testCompletions('"string g', ["getComputedStyle"], false),
         () => testCompletions("`template string docu", ["document"], false),
         () => testCompletions("`${do", ["document"], false),
-        () => testCompletions("// do", ["document"], false)
+        () => testCompletions("// do", ["document"], false),
+        () => testCompletions('["should', ["shouldNotFindThisFunction"]),
+        () => testCompletions("shou", ["should not find this"]),
+        () => testCompletions("document.   bo", ["body"]),
+        () => testCompletions("document.\tbo", ["body"]),
+        () => testCompletions("document.\nbo", ["body"]),
+        () => testCompletions("document.\r\nbo", ["body"]),
+        () => testCompletions("document   [    'bo", ["'body']"]),
+        () => testCompletions("function hey(should", ["shouldNotFindThisFunction"]),
+        () => testCompletions("var should", ["shouldNotFindThisFunction"]),
+        () => testCompletions("document[[win", ["window"]),
+        () => testCompletions("document[   [win", ["window"]),
+        () => testCompletions("document[   [  win", ["window"]),
+        () => testCompletions('I|mag', ['Image', 'Infinity']),
+        () => testCompletions('var x = (do|);', ['document'])
     ]).then(InspectorTest.completeTest);
 
 }
