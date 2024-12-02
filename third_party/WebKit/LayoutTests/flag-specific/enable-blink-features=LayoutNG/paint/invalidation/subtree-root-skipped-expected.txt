@@ -24,13 +24,13 @@
         },
         {
           "object": "NGPaintFragment",
-          "rect": [9, 34, 102, 11],
-          "reason": "appeared"
+          "rect": [8, 30, 103, 19],
+          "reason": "chunk appeared"
         },
         {
           "object": "NGPaintFragment",
-          "rect": [9, 34, 102, 11],
-          "reason": "disappeared"
+          "rect": [8, 30, 103, 19],
+          "reason": "chunk disappeared"
         },
         {
           "object": "InlineTextBox 'PASS'",

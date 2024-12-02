@@ -32,6 +32,7 @@ interface AccessibleNode : EventTarget
     getter autocomplete
     getter busy
     getter checked
+    getter childNodes
     getter colCount
     getter colIndex
     getter colSpan
@@ -82,6 +83,7 @@ interface AccessibleNode : EventTarget
     getter valueText
     method appendChild
     method constructor
+    method removeChild
     setter activeDescendant
     setter atomic
     setter autocomplete
@@ -200,6 +202,7 @@ interface AnimationEvent : Event
     attribute @@toStringTag
     getter animationName
     getter elapsedTime
+    getter pseudoElement
     method constructor
 interface AnimationPlaybackEvent : Event
     attribute @@toStringTag
@@ -325,6 +328,7 @@ interface AudioNode : EventTarget
     setter channelInterpretation
 interface AudioParam
     attribute @@toStringTag
+    getter automationRate
     getter defaultValue
     getter maxValue
     getter minValue
@@ -337,6 +341,7 @@ interface AudioParam
     method setTargetAtTime
     method setValueAtTime
     method setValueCurveAtTime
+    setter automationRate
     setter value
 interface AudioParamMap
     attribute @@toStringTag
@@ -901,7 +906,6 @@ interface CanvasPattern
 interface CanvasRenderingContext2D
     attribute @@toStringTag
     getter canvas
-    getter currentTransform
     getter direction
     getter fillStyle
     getter filter
@@ -945,6 +949,7 @@ interface CanvasRenderingContext2D
     method getContextAttributes
     method getImageData
     method getLineDash
+    method getTransform
     method isContextLost
     method isPointInPath
     method isPointInStroke
@@ -968,7 +973,6 @@ interface CanvasRenderingContext2D
     method strokeText
     method transform
     method translate
-    setter currentTransform
     setter direction
     setter fillStyle
     setter filter
@@ -1135,6 +1139,7 @@ interface CustomElementRegistry
     method constructor
     method define
     method get
+    method upgrade
     method whenDefined
 interface CustomEvent : Event
     attribute @@toStringTag
@@ -1337,6 +1342,12 @@ interface DOMRect : DOMRectReadOnly
     setter width
     setter x
     setter y
+interface DOMRectList
+    attribute @@toStringTag
+    getter length
+    method @@iterator
+    method constructor
+    method item
 interface DOMRectReadOnly
     static method fromRect
     attribute @@toStringTag
@@ -1588,14 +1599,12 @@ interface Document : Node
     getter plugins
     getter pointerLockElement
     getter policy
-    getter preferredStylesheetSet
     getter readyState
     getter referrer
     getter rootElement
     getter rootScroller
     getter scripts
     getter scrollingElement
-    getter selectedStylesheetSet
     getter styleSheets
     getter timeline
     getter title
@@ -1632,7 +1641,6 @@ interface Document : Node
     method createProcessingInstruction
     method createRange
     method createTextNode
-    method createTouch
     method createTouchList
     method createTreeWalker
     method elementFromPoint
@@ -1772,7 +1780,6 @@ interface Document : Node
     setter onwebkitfullscreenerror
     setter onwheel
     setter rootScroller
-    setter selectedStylesheetSet
     setter title
     setter vlinkColor
     setter xmlStandalone
@@ -1821,6 +1828,46 @@ interface Element : Node
     attribute @@toStringTag
     attribute @@unscopables
     getter accessibleNode
+    getter ariaActiveDescendant
+    getter ariaAtomic
+    getter ariaAutoComplete
+    getter ariaBusy
+    getter ariaChecked
+    getter ariaColCount
+    getter ariaColIndex
+    getter ariaColSpan
+    getter ariaControls
+    getter ariaCurrent
+    getter ariaDescribedBy
+    getter ariaDetails
+    getter ariaDisabled
+    getter ariaExpanded
+    getter ariaHasPopup
+    getter ariaHidden
+    getter ariaLabel
+    getter ariaLabelledBy
+    getter ariaLevel
+    getter ariaLive
+    getter ariaModal
+    getter ariaMultiLine
+    getter ariaMultiSelectable
+    getter ariaOrientation
+    getter ariaOwns
+    getter ariaPlaceholder
+    getter ariaPosInSet
+    getter ariaPressed
+    getter ariaRelevant
+    getter ariaRequired
+    getter ariaRoleDescription
+    getter ariaRowCount
+    getter ariaRowIndex
+    getter ariaRowSpan
+    getter ariaSelected
+    getter ariaSort
+    getter ariaValueMax
+    getter ariaValueMin
+    getter ariaValueNow
+    getter ariaValueText
     getter assignedSlot
     getter attributeStyleMap
     getter attributes
@@ -1856,6 +1903,7 @@ interface Element : Node
     getter outerHTML
     getter prefix
     getter previousElementSibling
+    getter role
     getter scrollHeight
     getter scrollLeft
     getter scrollTop
@@ -1916,6 +1964,46 @@ interface Element : Node
     method webkitMatchesSelector
     method webkitRequestFullScreen
     method webkitRequestFullscreen
+    setter ariaActiveDescendant
+    setter ariaAtomic
+    setter ariaAutoComplete
+    setter ariaBusy
+    setter ariaChecked
+    setter ariaColCount
+    setter ariaColIndex
+    setter ariaColSpan
+    setter ariaControls
+    setter ariaCurrent
+    setter ariaDescribedBy
+    setter ariaDetails
+    setter ariaDisabled
+    setter ariaExpanded
+    setter ariaHasPopup
+    setter ariaHidden
+    setter ariaLabel
+    setter ariaLabelledBy
+    setter ariaLevel
+    setter ariaLive
+    setter ariaModal
+    setter ariaMultiLine
+    setter ariaMultiSelectable
+    setter ariaOrientation
+    setter ariaOwns
+    setter ariaPlaceholder
+    setter ariaPosInSet
+    setter ariaPressed
+    setter ariaRelevant
+    setter ariaRequired
+    setter ariaRoleDescription
+    setter ariaRowCount
+    setter ariaRowIndex
+    setter ariaRowSpan
+    setter ariaSelected
+    setter ariaSort
+    setter ariaValueMax
+    setter ariaValueMin
+    setter ariaValueNow
+    setter ariaValueText
     setter classList
     setter className
     setter id
@@ -1933,6 +2021,7 @@ interface Element : Node
     setter onwebkitfullscreenchange
     setter onwebkitfullscreenerror
     setter outerHTML
+    setter role
     setter scrollLeft
     setter scrollTop
     setter slot
@@ -3969,6 +4058,7 @@ interface IntersectionObserverEntry
 interface Keyboard
     attribute @@toStringTag
     method constructor
+    method getLayoutMap
     method lock
     method unlock
 interface KeyboardEvent : UIEvent
@@ -3991,6 +4081,17 @@ interface KeyboardEvent : UIEvent
     method constructor
     method getModifierState
     method initKeyboardEvent
+interface KeyboardLayoutMap
+    attribute @@toStringTag
+    getter size
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method get
+    method has
+    method keys
+    method values
 interface KeyframeEffect : AnimationEffect
     attribute @@toStringTag
     getter composite
@@ -4929,9 +5030,11 @@ interface Performance : EventTarget
     attribute @@toStringTag
     getter memory
     getter navigation
+    getter oneventtimingbufferfull
     getter onresourcetimingbufferfull
     getter timeOrigin
     getter timing
+    method clearEventTimings
     method clearMarks
     method clearMeasures
     method clearResourceTimings
@@ -4942,8 +5045,10 @@ interface Performance : EventTarget
     method mark
     method measure
     method now
+    method setEventTimingBufferMaxSize
     method setResourceTimingBufferSize
     method toJSON
+    setter oneventtimingbufferfull
     setter onresourcetimingbufferfull
 interface PerformanceEntry
     attribute @@toStringTag
@@ -4951,6 +5056,13 @@ interface PerformanceEntry
     getter entryType
     getter name
     getter startTime
+    method constructor
+    method toJSON
+interface PerformanceEventTiming : PerformanceEntry
+    attribute @@toStringTag
+    getter cancelable
+    getter processingEnd
+    getter processingStart
     method constructor
     method toJSON
 interface PerformanceLongTaskTiming : PerformanceEntry
@@ -8734,6 +8846,7 @@ interface WebKitAnimationEvent : Event
     attribute @@toStringTag
     getter animationName
     getter elapsedTime
+    getter pseudoElement
     method constructor
 interface WebKitCSSMatrix : DOMMatrixReadOnly
     attribute @@toStringTag
@@ -8864,6 +8977,7 @@ interface Worklet
 interface WorkletAnimation
     attribute @@toStringTag
     getter playState
+    getter timeline
     method cancel
     method constructor
     method play
