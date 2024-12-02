@@ -10,23 +10,19 @@
 #include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
-#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/query_parser.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/user_metrics.h"
 #include "net/base/net_util.h"
 #include "ui/base/models/tree_node_iterator.h"
-#include "ui/events/event.h"
 
 using base::Time;
-using content::UserMetricsAction;
 
 namespace {
 
@@ -107,14 +103,13 @@ void CloneBookmarkNode(BookmarkModel* model,
   }
 }
 
-
 void CopyToClipboard(BookmarkModel* model,
                      const std::vector<const BookmarkNode*>& nodes,
                      bool remove_nodes) {
   if (nodes.empty())
     return;
 
-  BookmarkNodeData(nodes).WriteToClipboard();
+  BookmarkNodeData(nodes).WriteToClipboard(ui::CLIPBOARD_TYPE_COPY_PASTE);
 
   if (remove_nodes) {
     for (size_t i = 0; i < nodes.size(); ++i) {
@@ -132,7 +127,7 @@ void PasteFromClipboard(BookmarkModel* model,
     return;
 
   BookmarkNodeData bookmark_data;
-  if (!bookmark_data.ReadFromClipboard())
+  if (!bookmark_data.ReadFromClipboard(ui::CLIPBOARD_TYPE_COPY_PASTE))
     return;
 
   if (index == -1)
@@ -319,25 +314,6 @@ void RemoveAllBookmarks(BookmarkModel* model, const GURL& url) {
     int index = node->parent()->GetIndexOf(node);
     if (index > -1)
       model->Remove(node->parent(), index);
-  }
-}
-
-void RecordBookmarkFolderOpen(BookmarkLaunchLocation location) {
-  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
-    content::RecordAction(UserMetricsAction("ClickedBookmarkBarFolder"));
-}
-
-void RecordBookmarkLaunch(BookmarkLaunchLocation location) {
-  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR)
-    content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
-
-  UMA_HISTOGRAM_ENUMERATION("Bookmarks.LaunchLocation", location, LAUNCH_LIMIT);
-}
-
-void RecordAppsPageOpen(BookmarkLaunchLocation location) {
-  if (location == LAUNCH_DETACHED_BAR || location == LAUNCH_ATTACHED_BAR) {
-    content::RecordAction(
-        UserMetricsAction("ClickedBookmarkBarAppsShortcutButton"));
   }
 }
 

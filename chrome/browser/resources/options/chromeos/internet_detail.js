@@ -73,6 +73,17 @@ cr.define('options.internet', function() {
     return value ? String(value) : '';
   }
 
+  /**
+   * Sends the 'checked' state of a control to chrome for a network.
+   * @param {string} path The service path of the network.
+   * @param {string} message The message to send to chrome.
+   * @param {HTMLInputElement} checkbox The checkbox storing the value to send.
+   */
+  function sendCheckedIfEnabled(path, message, checkbox) {
+    if (!checkbox.hidden && !checkbox.disabled)
+      chrome.send(message, [path, checkbox.checked ? 'true' : 'false']);
+  }
+
   /////////////////////////////////////////////////////////////////////////////
   // DetailsInternetPage class:
 
@@ -109,12 +120,10 @@ cr.define('options.internet', function() {
      */
     showNetworkDetails_: function(params) {
       var servicePath = params.servicePath;
-      var networkType = params.networkType;
-      if (!servicePath || !servicePath.length ||
-          !networkType || !networkType.length)
+      if (!servicePath || !servicePath.length)
         return;
-      chrome.send('networkCommand',
-          [networkType, servicePath, 'options']);
+      var networkType = '';  // ignored for 'options'
+      chrome.send('networkCommand', [networkType, servicePath, 'options']);
     },
 
 
@@ -710,28 +719,22 @@ cr.define('options.internet', function() {
     var data = $('connection-state').data;
     var servicePath = data.servicePath;
     if (data.type == Constants.TYPE_WIFI) {
-      chrome.send('setPreferNetwork',
-                   [servicePath,
-                    $('prefer-network-wifi').checked ? 'true' : 'false']);
-      chrome.send('setAutoConnect',
-                  [servicePath,
-                   $('auto-connect-network-wifi').checked ? 'true' : 'false']);
+      sendCheckedIfEnabled(servicePath, 'setPreferNetwork',
+                           $('prefer-network-wifi'));
+      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
+                           $('auto-connect-network-wifi'));
     } else if (data.type == Constants.TYPE_WIMAX) {
-      chrome.send('setAutoConnect',
-                  [servicePath,
-                   $('auto-connect-network-wimax').checked ? 'true' : 'false']);
+      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
+                           $('auto-connect-network-wimax'));
     } else if (data.type == Constants.TYPE_CELLULAR) {
-      chrome.send('setAutoConnect',
-                  [servicePath,
-                   $('auto-connect-network-cellular').checked ? 'true' :
-                       'false']);
+      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
+                           $('auto-connect-network-cellular'));
     } else if (data.type == Constants.TYPE_VPN) {
       chrome.send('setServerHostname',
                   [servicePath,
                    $('inet-server-hostname').value]);
-      chrome.send('setAutoConnect',
-                  [servicePath,
-                   $('auto-connect-network-vpn').checked ? 'true' : 'false']);
+      sendCheckedIfEnabled(servicePath, 'setAutoConnect',
+                           $('auto-connect-network-vpn'));
     }
 
     var nameServerTypes = ['automatic', 'google', 'user'];
@@ -1233,7 +1236,7 @@ cr.define('options.internet', function() {
       var propData = data[propName];
       // Create a synthetic pref change event decorated as
       // CoreOptionsHandler::CreateValueForPref() does.
-      var event = new cr.Event(name);
+      var event = new Event(name);
       event.value = {
         value: propData.value,
         controlledBy: propData.controlledBy,
@@ -1242,7 +1245,8 @@ cr.define('options.internet', function() {
       indicators[i].handlePrefChange(event);
       var forElement = $(indicators[i].getAttribute('for'));
       if (forElement) {
-        forElement.disabled = propData.controlledBy == 'policy';
+        if (propData.controlledBy == 'policy')
+          forElement.disabled = true;
         if (forElement.resetHandler)
           indicators[i].resetHandler = forElement.resetHandler;
       }

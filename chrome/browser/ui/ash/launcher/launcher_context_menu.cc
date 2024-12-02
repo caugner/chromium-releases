@@ -37,7 +37,7 @@ bool MenuItemHasLauncherContext(const extensions::MenuItem* item) {
 
 LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
                                          const ash::LauncherItem* item,
-                                         aura::RootWindow* root)
+                                         aura::Window* root)
     : ui::SimpleMenuModel(NULL),
       controller_(controller),
       item_(*item),
@@ -49,7 +49,7 @@ LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
 }
 
 LauncherContextMenu::LauncherContextMenu(ChromeLauncherController* controller,
-                                         aura::RootWindow* root)
+                                         aura::Window* root)
     : ui::SimpleMenuModel(NULL),
       controller_(controller),
       item_(ash::LauncherItem()),
@@ -94,16 +94,14 @@ void LauncherContextMenu::Init() {
         AddCheckItemWithStringId(
             LAUNCH_TYPE_PINNED_TAB,
             IDS_APP_CONTEXT_MENU_OPEN_PINNED);
-        if (!ash::Shell::IsForcedMaximizeMode()) {
-          AddCheckItemWithStringId(
-              LAUNCH_TYPE_WINDOW,
-              IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
-          // Even though the launch type is Full Screen it is more accurately
-          // described as Maximized in Ash.
-          AddCheckItemWithStringId(
-              LAUNCH_TYPE_FULLSCREEN,
-              IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
-        }
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_WINDOW,
+            IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
+        // Even though the launch type is Full Screen it is more accurately
+        // described as Maximized in Ash.
+        AddCheckItemWithStringId(
+            LAUNCH_TYPE_FULLSCREEN,
+            IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
       }
     } else if (item_.type == ash::TYPE_BROWSER_SHORTCUT) {
       AddItem(MENU_NEW_WINDOW,
@@ -140,9 +138,10 @@ void LauncherContextMenu::Init() {
   // the type of fullscreen. Do not show the auto-hide menu item while in
   // fullscreen because it is confusing when the preference appears not to
   // apply.
-  if (!IsFullScreenMode()) {
+  if (!IsFullScreenMode() &&
+        controller_->CanUserModifyShelfAutoHideBehavior(root_window_)) {
     AddCheckItemWithStringId(MENU_AUTO_HIDE,
-                             IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
+                              IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
   }
   if (ash::ShelfWidget::ShelfAlignmentAllowed()) {
     AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
@@ -205,8 +204,7 @@ bool LauncherContextMenu::IsCommandIdChecked(int command_id) const {
 bool LauncherContextMenu::IsCommandIdEnabled(int command_id) const {
   switch (command_id) {
     case MENU_PIN:
-      return item_.type == ash::TYPE_PLATFORM_APP ||
-          controller_->IsPinnable(item_.id);
+      return controller_->IsPinnable(item_.id);
 #if defined(OS_CHROMEOS)
     case MENU_CHANGE_WALLPAPER:
       return ash::Shell::GetInstance()->user_wallpaper_delegate()->

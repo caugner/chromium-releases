@@ -9,6 +9,7 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_web_contents_observer.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
@@ -114,6 +115,7 @@ void AshKeyboardControllerProxy::SetupWebContents(
       new ExtensionFunctionDispatcher(ProfileManager::GetDefaultProfile(),
                                       this));
   extensions::SetViewType(contents, extensions::VIEW_TYPE_VIRTUAL_KEYBOARD);
+  extensions::ExtensionWebContentsObserver::CreateForWebContents(contents);
   Observe(contents);
 }
 
@@ -140,10 +142,19 @@ bool AshKeyboardControllerProxy::OnMessageReceived(
 
 void AshKeyboardControllerProxy::ShowKeyboardContainer(
     aura::Window* container) {
+  // TODO(bshe): Implement logic to decide which root window should display
+  // virtual keyboard. http://crbug.com/303429
+  if (container->GetRootWindow() != ash::Shell::GetPrimaryRootWindow())
+    NOTIMPLEMENTED();
+
   KeyboardControllerProxy::ShowKeyboardContainer(container);
-  gfx::Rect showing_area =
-      ash::DisplayController::GetPrimaryDisplay().work_area();
-  GetInputMethod()->GetTextInputClient()->EnsureCaretInRect(showing_area);
+  // GetTextInputClient may return NULL when keyboard-usability-test flag is
+  // set.
+  if (GetInputMethod()->GetTextInputClient()) {
+    gfx::Rect showing_area =
+        ash::DisplayController::GetPrimaryDisplay().work_area();
+    GetInputMethod()->GetTextInputClient()->EnsureCaretInRect(showing_area);
+  }
 }
 
 void AshKeyboardControllerProxy::SetUpdateInputType(ui::TextInputType type) {

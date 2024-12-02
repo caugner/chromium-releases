@@ -33,8 +33,6 @@
 namespace ash {
 namespace internal {
 
-using aura::RootWindow;
-
 namespace {
 // The duration of the drag cancel animation in millisecond.
 const int kCancelAnimationDuration = 250;
@@ -160,7 +158,7 @@ DragDropController::~DragDropController() {
 
 int DragDropController::StartDragAndDrop(
     const ui::OSExchangeData& data,
-    aura::RootWindow* root_window,
+    aura::Window* root_window,
     aura::Window* source_window,
     const gfx::Point& root_location,
     int operation,
@@ -181,7 +179,7 @@ int DragDropController::StartDragAndDrop(
     // We need to transfer the current gesture sequence and the GR's touch event
     // queue to the |drag_drop_tracker_|'s capture window so that when it takes
     // capture, it still gets a valid gesture state.
-    root_window->gesture_recognizer()->TransferEventsTo(source_window,
+    ui::GestureRecognizer::Get()->TransferEventsTo(source_window,
         tracker->capture_window());
     // We also send a gesture end to the source window so it can clear state.
     // TODO(varunjain): Remove this whole block when gesture sequence
@@ -209,7 +207,7 @@ int DragDropController::StartDragAndDrop(
   drag_image_final_bounds_for_cancel_animation_ = gfx::Rect(
       start_location - provider->GetDragImageOffset(),
       provider->GetDragImage().size());
-  drag_image_.reset(new DragImageView(source_window->GetRootWindow()));
+  drag_image_.reset(new DragImageView(source_window->GetRootWindow(), source));
   drag_image_->SetImage(provider->GetDragImage());
   drag_image_offset_ = provider->GetDragImageOffset();
   gfx::Rect drag_image_bounds(start_location, drag_image_->GetPreferredSize());
@@ -217,6 +215,11 @@ int DragDropController::StartDragAndDrop(
       drag_image_vertical_offset, drag_image_scale, &drag_image_offset_);
   drag_image_->SetBoundsInScreen(drag_image_bounds);
   drag_image_->SetWidgetVisible(true);
+  if (source == ui::DragDropTypes::DRAG_EVENT_SOURCE_TOUCH) {
+    drag_image_->SetTouchDragOperationHintPosition(gfx::Point(
+        drag_image_offset_.x(),
+        drag_image_offset_.y() + drag_image_vertical_offset));
+  }
 
   drag_window_ = NULL;
 
@@ -247,6 +250,7 @@ int DragDropController::StartDragAndDrop(
 void DragDropController::DragUpdate(aura::Window* target,
                                     const ui::LocatedEvent& event) {
   aura::client::DragDropDelegate* delegate = NULL;
+  int op = ui::DragDropTypes::DRAG_NONE;
   if (target != drag_window_) {
     if (drag_window_) {
       if ((delegate = aura::client::GetDragDropDelegate(drag_window_)))
@@ -273,7 +277,7 @@ void DragDropController::DragUpdate(aura::Window* target,
                             event.root_location(),
                             drag_operation_);
       e.set_flags(event.flags());
-      int op = delegate->OnDragUpdated(e);
+      op = delegate->OnDragUpdated(e);
       gfx::NativeCursor cursor = ui::kCursorNoDrop;
       if (op & ui::DragDropTypes::DRAG_COPY)
         cursor = ui::kCursorCopy;
@@ -292,6 +296,7 @@ void DragDropController::DragUpdate(aura::Window* target,
                                   &root_location_in_screen);
     drag_image_->SetScreenPosition(
         root_location_in_screen - drag_image_offset_);
+    drag_image_->SetTouchDragOperation(op);
   }
 }
 
@@ -531,6 +536,7 @@ void DragDropController::AnimationCanceled(const gfx::Animation* animation) {
 
 void DragDropController::StartCanceledAnimation(int animation_duration_ms) {
   DCHECK(drag_image_.get());
+  drag_image_->SetTouchDragOperationHintOff();
   drag_image_initial_bounds_for_cancel_animation_ =
       drag_image_->GetBoundsInScreen();
   cancel_animation_.reset(CreateCancelAnimation(animation_duration_ms,

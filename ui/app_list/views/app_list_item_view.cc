@@ -32,12 +32,9 @@ namespace app_list {
 
 namespace {
 
-const int kTopBottomPadding = 10;
 const int kTopPadding = 20;
 const int kIconTitleSpacing = 7;
 const int kProgressBarHorizontalPadding = 12;
-const int kProgressBarVerticalPadding = 4;
-const int kProgressBarHeight = 4;
 
 const int kLeftRightPaddingChars = 1;
 
@@ -184,11 +181,7 @@ void AppListItemView::CancelContextMenu() {
 }
 
 gfx::ImageSkia AppListItemView::GetDragImage() {
-  gfx::Canvas canvas(size(), ui::SCALE_FACTOR_100P, false /* is_opaque */);
-  gfx::Rect bounds(size());
-  canvas.DrawColor(SK_ColorTRANSPARENT);
-  PaintChildren(&canvas);
-  return gfx::ImageSkia(canvas.ExtractImageRep());
+  return icon_->GetImage();
 }
 
 void AppListItemView::ItemIconChanged() {

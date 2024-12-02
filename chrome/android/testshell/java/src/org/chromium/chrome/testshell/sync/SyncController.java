@@ -12,10 +12,10 @@ import android.util.Log;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
-import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.identity.UuidBasedUniqueIdentificationGenerator;
+import org.chromium.chrome.browser.invalidation.InvalidationController;
+import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
-import org.chromium.sync.notifier.InvalidationController;
 import org.chromium.sync.notifier.SyncStatusHelper;
 import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
@@ -43,6 +43,7 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
         mContext = context;
         mChromeSigninController = ChromeSigninController.get(mContext);
         mSyncStatusHelper = SyncStatusHelper.get(context);
+        mSyncStatusHelper.registerSyncSettingsChangedObserver(this);
         mProfileSyncService = ProfileSyncService.get(mContext);
         mProfileSyncService.addSyncStateChangedListener(this);
 
@@ -99,6 +100,7 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
         // The SigninManager handles most of the sign-in flow, and doFinishSignIn handles the
         // Chromium testshell specific details.
         SigninManager signinManager = SigninManager.get(mContext);
+        signinManager.onFirstRunCheckDone();
         final boolean passive = false;
         signinManager.startSignIn(activity, account, passive, new SigninManager.Observer() {
             @Override
@@ -116,7 +118,7 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
         });
     }
 
-    public void onResume() {
+    public void onStart() {
         refreshSyncState();
     }
 

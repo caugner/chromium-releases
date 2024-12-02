@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
 #include "chrome/common/url_constants.h"
@@ -40,9 +41,9 @@
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
-#include <algorithm>
 #include <atlbase.h>
 #include <malloc.h>
+#include <algorithm>
 #include "base/strings/string_util.h"
 #include "chrome/common/child_process_logging.h"
 #include "sandbox/win/src/sandbox.h"
@@ -53,12 +54,12 @@
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #include "base/mac/os_crash_dumps.h"
-#include "chrome/app/breakpad_mac.h"
 #include "chrome/app/chrome_main_mac.h"
 #include "chrome/browser/mac/relauncher.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/mac/cfbundle_blocker.h"
 #include "chrome/common/mac/objc_zombie.h"
+#include "components/breakpad/app/breakpad_mac.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #endif
@@ -67,7 +68,7 @@
 #include <locale.h>
 #include <signal.h>
 #include "chrome/app/chrome_breakpad_client.h"
-#include "components/breakpad/breakpad_client.h"
+#include "components/breakpad/app/breakpad_client.h"
 #endif
 
 #if !defined(DISABLE_NACL) && defined(OS_LINUX)
@@ -97,7 +98,7 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "chrome/app/breakpad_linux.h"
+#include "components/breakpad/app/breakpad_linux.h"
 #endif
 
 #if !defined(CHROME_MULTIPLE_DLL_CHILD)
@@ -250,32 +251,6 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
       process_type == switches::kRendererProcess ||
       process_type == switches::kUtilityProcess;
 }
-
-#if defined(OS_MACOSX)
-// Update the name shown in Activity Monitor so users are less likely to ask
-// why Chrome has so many processes.
-void SetMacProcessName(const CommandLine& command_line) {
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-  // Don't worry about the browser process, its gets the stock name.
-  int name_id = 0;
-  if (command_line.HasSwitch(switches::kExtensionProcess)) {
-    name_id = IDS_WORKER_APP_NAME;
-  } else if (process_type == switches::kRendererProcess) {
-    name_id = IDS_RENDERER_APP_NAME;
-  } else if (process_type == switches::kPluginProcess ||
-             process_type == switches::kPpapiPluginProcess) {
-    name_id = IDS_PLUGIN_APP_NAME;
-  } else if (process_type == switches::kUtilityProcess) {
-    name_id = IDS_UTILITY_APP_NAME;
-  }
-  if (name_id) {
-    NSString* app_name = l10n_util::GetNSString(name_id);
-    base::mac::SetProcessName(base::mac::NSToCFCast(app_name));
-  }
-}
-
-#endif  // defined(OS_MACOSX)
 
 #if defined(OS_POSIX)
 // Check for --version and --product-version; return true if we encountered
@@ -503,7 +478,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   // CommandLine::Init() and chrome::RegisterPathProvider().  Ideally,
   // Breakpad initialization could occur sooner, preferably even before the
   // framework dylib is even loaded, to catch potential early crashes.
-  InitCrashReporter();
+  breakpad::InitCrashReporter();
 
 #if defined(NDEBUG)
   bool is_debug_build = false;
@@ -528,7 +503,7 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
   if (!command_line.HasSwitch(switches::kDisableBreakpad)) {
     bool disable_apple_crash_reporter = is_debug_build ||
         base::mac::IsBackgroundOnlyProcess();
-    if (!IsCrashReporterEnabled() && disable_apple_crash_reporter) {
+    if (!breakpad::IsCrashReporterEnabled() && disable_apple_crash_reporter) {
       base::mac::DisableOSCrashDumps();
     }
   }
@@ -579,8 +554,8 @@ void ChromeMainDelegate::InitMacCrashReporter(const CommandLine& command_line,
         << "Main application forbids --type, saw " << process_type;
   }
 
-  if (IsCrashReporterEnabled())
-    InitCrashProcessInfo();
+  if (breakpad::IsCrashReporterEnabled())
+    breakpad::InitCrashProcessInfo();
 }
 #endif  // defined(OS_MACOSX)
 
@@ -720,12 +695,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
 
-#if defined(OS_MACOSX)
-    // Update the process name (need resources to get the strings, so
-    // only do this when ResourcesBundle has been initialized).
-    SetMacProcessName(command_line);
-#endif  // defined(OS_MACOSX)
-
 #if !defined(CHROME_MULTIPLE_DLL_BROWSER)
     if (process_type == switches::kUtilityProcess)
       chrome::ChromeContentUtilityClient::PreSandboxStartup();
@@ -733,25 +702,22 @@ void ChromeMainDelegate::PreSandboxStartup() {
   }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain
-  // sets this up for the browser process in a different manner. Zygotes
-  // need to call InitCrashReporter() in RunZygote().
-  if (!process_type.empty() && process_type != switches::kZygoteProcess) {
+  // Zygote needs to call InitCrashReporter() in RunZygote().
+  if (process_type != switches::kZygoteProcess) {
 #if defined(OS_ANDROID)
-    InitNonBrowserCrashReporterForAndroid();
-#else
-    InitCrashReporter();
-#endif
+    if (process_type.empty())
+      breakpad::InitCrashReporter();
+    else
+      breakpad::InitNonBrowserCrashReporterForAndroid();
+#else  // !defined(OS_ANDROID)
+    breakpad::InitCrashReporter();
+#endif  // defined(OS_ANDROID)
   }
-#endif
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
-#if defined(OS_CHROMEOS)
-  // Read and cache ChromeOS version from file,
-  // to be used from inside the sandbox.
-  int32 major_version, minor_version, bugfix_version;
-  base::SysInfo::OperatingSystemVersionNumbers(
-      &major_version, &minor_version, &bugfix_version);
-#endif
+  // After all the platform Breakpads have been initialized, store the command
+  // line for crash reporting.
+  crash_keys::SetSwitchesFromCommandLine(&command_line);
 }
 
 void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
@@ -783,7 +749,10 @@ int ChromeMainDelegate::RunProcess(
       mac_relauncher::internal::RelauncherMain },
 #endif
 
-#if !defined(DISABLE_NACL) && !defined(CHROME_MULTIPLE_DLL_BROWSER)
+    // This entry is not needed on Linux, where the NaCl loader
+    // process is launched via nacl_helper instead.
+#if !defined(DISABLE_NACL) && !defined(CHROME_MULTIPLE_DLL_BROWSER) && \
+    !defined(OS_LINUX)
     { switches::kNaClLoaderProcess,  NaClMain },
 #else
     { "<invalid>", NULL },  // To avoid constant array of size 0
@@ -848,7 +817,10 @@ void ChromeMainDelegate::ZygoteForked() {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain sets
   // this up for the browser process in a different manner.
-  InitCrashReporter();
+  breakpad::InitCrashReporter();
+
+  // Reset the command line for the newly spawned process.
+  crash_keys::SetSwitchesFromCommandLine(CommandLine::ForCurrentProcess());
 #endif
 }
 

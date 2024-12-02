@@ -41,7 +41,6 @@ namespace {
 const char kCapturingSameTab[] = "Cannot capture a tab with an active stream.";
 const char kFindingTabError[] = "Error finding tab to capture.";
 const char kNoAudioOrVideo[] = "Capture failed. No audio or video requested.";
-const char kPermissionError[] = "Tab Capture API flag is not enabled.";
 const char kGrantError[] =
     "Extension has not been invoked for the current page (see activeTab "
     "permission). Chrome pages cannot be captured.";
@@ -70,9 +69,8 @@ bool TabCaptureCaptureFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   // Figure out the active WebContents and retrieve the needed ids.
-  Browser* target_browser = chrome::FindAnyBrowser(profile(),
-                                                   include_incognito(),
-                                                   chrome::GetActiveDesktop());
+  Browser* target_browser = chrome::FindAnyBrowser(
+      GetProfile(), include_incognito(), chrome::GetActiveDesktop());
   if (!target_browser) {
     error_ = kFindingTabError;
     return false;
@@ -146,7 +144,7 @@ bool TabCaptureCaptureFunction::RunImpl() {
   }
 
   extensions::TabCaptureRegistry* registry =
-      extensions::TabCaptureRegistry::Get(profile());
+      extensions::TabCaptureRegistry::Get(GetProfile());
   if (!registry->AddRequest(render_process_id,
                             routing_id,
                             extension_id,
@@ -168,7 +166,7 @@ bool TabCaptureCaptureFunction::RunImpl() {
 
 bool TabCaptureGetCapturedTabsFunction::RunImpl() {
   extensions::TabCaptureRegistry* registry =
-      extensions::TabCaptureRegistry::Get(profile());
+      extensions::TabCaptureRegistry::Get(GetProfile());
 
   const TabCaptureRegistry::RegistryCaptureInfo& captured_tabs =
       registry->GetCapturedTabs(GetExtension()->id());

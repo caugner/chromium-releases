@@ -12,8 +12,11 @@
 #include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/webkit_resources.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/rect_conversions.h"
@@ -30,23 +33,19 @@ namespace {
 // Used to indicate that no line is currently selected by the user.
 const int kNoSelection = -1;
 
-// Size difference between name and subtext in pixels.
-const int kLabelFontSizeDelta = -2;
-
 // The vertical height of each row in pixels.
 const size_t kRowHeight = 24;
 
 // The vertical height of a separator in pixels.
 const size_t kSeparatorHeight = 1;
 
-// The maximum amount of characters to display from either the name or subtext.
-const size_t kMaxTextLength = 15;
-
 #if !defined(OS_ANDROID)
+// Size difference between name and subtext in pixels.
+const int kLabelFontSizeDelta = -2;
+
 const size_t kNamePadding = AutofillPopupView::kNamePadding;
 const size_t kIconPadding = AutofillPopupView::kIconPadding;
 const size_t kEndPadding = AutofillPopupView::kEndPadding;
-const size_t kAutofillIconWidth = AutofillPopupView::kAutofillIconWidth;
 #endif
 
 struct DataResource {
@@ -70,12 +69,14 @@ const DataResource kDataResources[] = {
 WeakPtr<AutofillPopupControllerImpl> AutofillPopupControllerImpl::GetOrCreate(
     WeakPtr<AutofillPopupControllerImpl> previous,
     WeakPtr<AutofillPopupDelegate> delegate,
+    content::WebContents* web_contents,
     gfx::NativeView container_view,
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction) {
   DCHECK(!previous.get() || previous->delegate_.get() == delegate.get());
 
-  if (previous.get() && previous->container_view() == container_view &&
+  if (previous.get() && previous->web_contents_ == web_contents &&
+      previous->container_view() == container_view &&
       previous->element_bounds() == element_bounds) {
     previous->ClearState();
     return previous;
@@ -86,29 +87,38 @@ WeakPtr<AutofillPopupControllerImpl> AutofillPopupControllerImpl::GetOrCreate(
 
   AutofillPopupControllerImpl* controller =
       new AutofillPopupControllerImpl(
-          delegate, container_view, element_bounds, text_direction);
+          delegate, web_contents, container_view, element_bounds,
+          text_direction);
   return controller->GetWeakPtr();
 }
 
 AutofillPopupControllerImpl::AutofillPopupControllerImpl(
     base::WeakPtr<AutofillPopupDelegate> delegate,
+    content::WebContents* web_contents,
     gfx::NativeView container_view,
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction)
     : view_(NULL),
       delegate_(delegate),
+      web_contents_(web_contents),
       container_view_(container_view),
       element_bounds_(element_bounds),
       text_direction_(text_direction),
+      registered_key_press_event_callback_with_(NULL),
       hide_on_outside_click_(false),
-      weak_ptr_factory_(this),
       key_press_event_callback_(
           base::Bind(&AutofillPopupControllerImpl::HandleKeyPressEvent,
-                     base::Unretained(this))) {
+                     base::Unretained(this))),
+      weak_ptr_factory_(this) {
   ClearState();
 #if !defined(OS_ANDROID)
   subtext_font_ = name_font_.DeriveFont(kLabelFontSizeDelta);
+#if defined(OS_MACOSX)
+  // There is no italic version of the system font.
+  warning_font_ = name_font_;
+#else
   warning_font_ = name_font_.DeriveFont(0, gfx::Font::ITALIC);
+#endif
 #endif
 }
 
@@ -171,7 +181,13 @@ void AutofillPopupControllerImpl::Show(
     UpdateBoundsAndRedrawPopup();
   }
 
-  delegate_->OnPopupShown(&key_press_event_callback_);
+  delegate_->OnPopupShown();
+  if (web_contents_ && !registered_key_press_event_callback_with_) {
+    registered_key_press_event_callback_with_ =
+        web_contents_->GetRenderViewHost();
+    registered_key_press_event_callback_with_->AddKeyPressEventCallback(
+        key_press_event_callback_);
+  }
 }
 
 void AutofillPopupControllerImpl::UpdateDataListValues(
@@ -231,8 +247,16 @@ void AutofillPopupControllerImpl::UpdateDataListValues(
 }
 
 void AutofillPopupControllerImpl::Hide() {
+  if (web_contents_ && (!web_contents_->IsBeingDestroyed()) &&
+      (registered_key_press_event_callback_with_ ==
+          web_contents_->GetRenderViewHost())) {
+    web_contents_->GetRenderViewHost()->RemoveKeyPressEventCallback(
+        key_press_event_callback_);
+  }
+  registered_key_press_event_callback_with_ = NULL;
+
   if (delegate_.get())
-    delegate_->OnPopupHidden(&key_press_event_callback_);
+    delegate_->OnPopupHidden();
 
   if (view_)
     view_->Hide();
@@ -316,7 +340,7 @@ void AutofillPopupControllerImpl::AcceptSuggestion(size_t index) {
 }
 
 int AutofillPopupControllerImpl::GetIconResourceID(
-    const string16& resource_name) {
+    const string16& resource_name) const {
   for (size_t i = 0; i < arraysize(kDataResources); ++i) {
     if (resource_name == ASCIIToUTF16(kDataResources[i].name))
       return kDataResources[i].id;
@@ -339,15 +363,15 @@ bool AutofillPopupControllerImpl::IsWarning(size_t index) const {
 }
 
 gfx::Rect AutofillPopupControllerImpl::GetRowBounds(size_t index) {
-  int top = 0;
+  int top = AutofillPopupView::kBorderThickness;
   for (size_t i = 0; i < index; ++i) {
     top += GetRowHeightFromId(identifiers()[i]);
   }
 
   return gfx::Rect(
-      0,
+      AutofillPopupView::kBorderThickness,
       top,
-      popup_bounds_.width(),
+      popup_bounds_.width() - 2 * AutofillPopupView::kBorderThickness,
       GetRowHeightFromId(identifiers()[index]));
 }
 
@@ -511,7 +535,7 @@ bool AutofillPopupControllerImpl::RemoveSelectedLine() {
 }
 
 int AutofillPopupControllerImpl::LineFromY(int y) {
-  int current_height = 0;
+  int current_height = AutofillPopupView::kBorderThickness;
 
   for (size_t i = 0; i < identifiers().size(); ++i) {
     current_height += GetRowHeightFromId(identifiers()[i]);
@@ -589,7 +613,7 @@ int AutofillPopupControllerImpl::GetDesiredPopupWidth() const {
 }
 
 int AutofillPopupControllerImpl::GetDesiredPopupHeight() const {
-  int popup_height = 0;
+  int popup_height = 2 * AutofillPopupView::kBorderThickness;
 
   for (size_t i = 0; i < identifiers().size(); ++i) {
     popup_height += GetRowHeightFromId(identifiers()[i]);
@@ -605,11 +629,17 @@ int AutofillPopupControllerImpl::RowWidthWithoutText(int row) const {
     row_size += kNamePadding;
 
   // Add the Autofill icon size, if required.
-  if (!icons_[row].empty())
-    row_size += kAutofillIconWidth + kIconPadding;
+  if (!icons_[row].empty()) {
+    int icon_width = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        GetIconResourceID(icons_[row])).Width();
+    row_size += icon_width + kIconPadding;
+  }
 
-  // Add the padding at the end
+  // Add the padding at the end.
   row_size += kEndPadding;
+
+  // Add room for the popup border.
+  row_size += 2 * AutofillPopupView::kBorderThickness;
 
   return row_size;
 }

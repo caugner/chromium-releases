@@ -6,11 +6,13 @@
 #define CHROME_BROWSER_EXTENSIONS_API_FEEDBACK_PRIVATE_FEEDBACK_PRIVATE_API_H_
 
 #include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
-#include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/feedback_private.h"
 #include "ui/gfx/rect.h"
 
 namespace extensions {
+
+extern char kFeedbackExtensionId[];
 
 class FeedbackService;
 
@@ -24,8 +26,7 @@ class FeedbackPrivateAPI : public ProfileKeyedAPI {
   FeedbackService* GetService() const;
   void RequestFeedback(const std::string& description_template,
                        const std::string& category_tag,
-                       const GURL& page_url,
-                       const gfx::Rect& screen_size);
+                       const GURL& page_url);
 
   // ProfileKeyedAPI implementation.
   static ProfileKeyedAPIFactory<FeedbackPrivateAPI>* GetFactoryInstance();
@@ -45,19 +46,27 @@ class FeedbackPrivateAPI : public ProfileKeyedAPI {
 };
 
 // Feedback strings.
-class FeedbackPrivateGetStringsFunction : public SyncExtensionFunction {
+class FeedbackPrivateGetStringsFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getStrings",
                              FEEDBACKPRIVATE_GETSTRINGS)
+
+  // Invoke this callback when this function is called - used for testing.
+  static void set_test_callback(base::Closure* const callback) {
+    test_callback_ = callback;
+  }
 
  protected:
   virtual ~FeedbackPrivateGetStringsFunction() {}
 
   // SyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
+
+ private:
+  static base::Closure* test_callback_;
 };
 
-class FeedbackPrivateGetUserEmailFunction : public SyncExtensionFunction {
+class FeedbackPrivateGetUserEmailFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getUserEmail",
                              FEEDBACKPRIVATE_GETUSEREMAIL);
@@ -68,7 +77,7 @@ class FeedbackPrivateGetUserEmailFunction : public SyncExtensionFunction {
 };
 
 class FeedbackPrivateGetSystemInformationFunction
-    : public AsyncExtensionFunction {
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getSystemInformation",
                              FEEDBACKPRIVATE_GETSYSTEMINFORMATION);
@@ -82,7 +91,8 @@ class FeedbackPrivateGetSystemInformationFunction
       const std::vector<linked_ptr<SystemInformation> >& sys_info);
 };
 
-class FeedbackPrivateSendFeedbackFunction : public AsyncExtensionFunction {
+class FeedbackPrivateSendFeedbackFunction
+    : public ChromeAsyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.sendFeedback",
                              FEEDBACKPRIVATE_SENDFEEDBACK);

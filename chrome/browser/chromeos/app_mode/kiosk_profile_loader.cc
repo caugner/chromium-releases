@@ -4,11 +4,11 @@
 
 #include "chrome/browser/chromeos/app_mode/kiosk_profile_loader.h"
 
-#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
+#include "base/sys_info.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
@@ -17,7 +17,6 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chromeos/cryptohome/async_method_caller.h"
-#include "chromeos/cryptohome/cryptohome_library.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -113,7 +112,7 @@ class KioskProfileLoader::CryptohomedChecker
       LOG(ERROR) << "Cryptohome is mounted before launching kiosk app.";
 
     // Proceed only when cryptohome is not mounded or running on dev box.
-    if (!is_mounted || !base::chromeos::IsRunningOnChromeOS())
+    if (!is_mounted || !base::SysInfo::IsRunningOnChromeOS())
       ReportCheckResult(KioskAppLaunchError::NONE);
     else
       ReportCheckResult(KioskAppLaunchError::ALREADY_MOUNTED);
@@ -181,17 +180,13 @@ void KioskProfileLoader::ReportLaunchResult(KioskAppLaunchError::Error error) {
   }
 }
 
-void KioskProfileLoader::OnLoginSuccess(
-    const UserContext& user_context,
-    bool pending_requests,
-    bool using_oauth)  {
+void KioskProfileLoader::OnLoginSuccess(const UserContext& user_context)  {
   // LoginPerformer will delete itself.
   login_performer_->set_delegate(NULL);
   ignore_result(login_performer_.release());
 
   LoginUtils::Get()->PrepareProfile(user_context,
                                     std::string(),  // display email
-                                    false,  // using_oauth
                                     false,  // has_cookies
                                     false,  // has_active_session
                                     this);

@@ -52,8 +52,6 @@ Status ParseFilePath(base::FilePath* to_set,
   base::FilePath::StringType str;
   if (!option.GetAsString(&str))
     return Status(kUnknownError, "must be a string");
-  if (str.empty())
-    return Status(kUnknownError, "cannot be empty");
   *to_set = base::FilePath(str);
   return Status(kOk);
 }
@@ -279,6 +277,8 @@ Status ParseChromeOptions(
     parser_map["localState"] =
         base::Bind(&ParseDict, &capabilities->local_state);
     parser_map["logPath"] = base::Bind(&ParseLogPath);
+    parser_map["minidumpPath"] =
+        base::Bind(&ParseString, &capabilities->minidump_path);
     parser_map["prefs"] = base::Bind(&ParseDict, &capabilities->prefs);
   }
 

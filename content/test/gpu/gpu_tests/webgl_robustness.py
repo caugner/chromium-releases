@@ -45,7 +45,6 @@ robustness_harness_script = conformance_harness_script + r"""
 
 
 class WebglRobustness(test.Test):
-  enabled = False
   test = WebglConformanceValidator
 
   def CreatePageSet(self, options):
@@ -55,7 +54,7 @@ class WebglRobustness(test.Test):
       'serving_dirs': [''],
       'pages': [
         {
-          'url': 'file:///extra/lots-of-polys-example.html',
+          'url': 'file://extra/lots-of-polys-example.html',
           'script_to_evaluate_on_commit': robustness_harness_script,
           'navigate_steps': [
             { 'action': 'navigate' },

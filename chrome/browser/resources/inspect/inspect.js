@@ -15,8 +15,8 @@ function activate(data) {
   chrome.send('activate', [data]);
 }
 
-function terminate(data) {
-  chrome.send('terminate', [data]);
+function close(data) {
+  chrome.send('close', [data]);
 }
 
 function reload(data) {
@@ -48,7 +48,7 @@ function onload() {
   }
   var selectedTabName = window.location.hash.slice(1) || 'devices';
   selectTab(selectedTabName);
-  initPortForwarding();
+  initSettings();
   chrome.send('init-ui');
 }
 
@@ -69,7 +69,7 @@ function selectTab(id) {
   window.location.hash = id;
 }
 
-function populateLists(data) {
+function populateWebContentsTargets(data) {
   removeChildren('pages-list');
   removeChildren('extensions-list');
   removeChildren('apps-list');
@@ -78,7 +78,7 @@ function populateLists(data) {
   for (var i = 0; i < data.length; i++) {
     if (data[i].type === 'page')
       addToPagesList(data[i]);
-    else if (data[i].type === 'extension')
+    else if (data[i].type === 'background_page')
       addToExtensionsList(data[i]);
     else if (data[i].type === 'app')
       addToAppsList(data[i]);
@@ -87,16 +87,21 @@ function populateLists(data) {
   }
 }
 
-function populateWorkersList(data) {
+function populateWorkerTargets(data) {
   removeChildren('workers-list');
 
   for (var i = 0; i < data.length; i++)
     addToWorkersList(data[i]);
 }
 
-function populateDeviceLists(devices) {
+function populateRemoteTargets(devices) {
   if (!devices)
     return;
+
+  if (window.modal) {
+    window.holdDevices = devices;
+    return;
+  }
 
   function alreadyDisplayed(element, data) {
     var json = JSON.stringify(data);
@@ -135,13 +140,8 @@ function populateDeviceLists(devices) {
   for (var d = 0; d < devices.length; d++) {
     var device = devices[d];
 
-    var devicePorts;
-    var browserList;
     var deviceSection = $(device.adbGlobalId);
-    if (deviceSection) {
-      devicePorts = deviceSection.querySelector('.device-ports');
-      browserList = deviceSection.querySelector('.browsers');
-    } else {
+    if (!deviceSection) {
       deviceSection = document.createElement('div');
       deviceSection.id = device.adbGlobalId;
       deviceSection.className = 'device';
@@ -153,7 +153,6 @@ function populateDeviceLists(devices) {
 
       var deviceName = document.createElement('div');
       deviceName.className = 'device-name';
-      deviceName.textContent = device.adbModel;
       deviceHeader.appendChild(deviceName);
 
       if (device.adbSerial) {
@@ -163,18 +162,28 @@ function populateDeviceLists(devices) {
         deviceHeader.appendChild(deviceSerial);
       }
 
-      devicePorts = document.createElement('div');
+      var devicePorts = document.createElement('div');
       devicePorts.className = 'device-ports';
       deviceHeader.appendChild(devicePorts);
 
-      browserList = document.createElement('div');
+      var browserList = document.createElement('div');
       browserList.className = 'browsers';
       deviceSection.appendChild(browserList);
+
+      var authenticating = document.createElement('div');
+      authenticating.className = 'device-auth';
+      deviceSection.appendChild(authenticating);
     }
 
     if (alreadyDisplayed(deviceSection, device))
       continue;
 
+    deviceSection.querySelector('.device-name').textContent = device.adbModel;
+    deviceSection.querySelector('.device-auth').textContent =
+        device.adbConnected ? '' : 'Pending authentication: please accept ' +
+          'debugging session on the device.';
+
+    var devicePorts = deviceSection.querySelector('.device-ports');
     devicePorts.textContent = '';
     if (device.adbPortStatus) {
       for (var port in device.adbPortStatus) {
@@ -198,6 +207,7 @@ function populateDeviceLists(devices) {
       }
     }
 
+    var browserList = deviceSection.querySelector('.browsers');
     var newBrowserIds =
         device.browsers.map(function(b) { return b.adbGlobalId });
     Array.prototype.forEach.call(
@@ -289,12 +299,12 @@ function populateDeviceLists(devices) {
           addFavicon(row, page);
         if (isChrome) {
           if (majorChromeVersion >= MIN_VERSION_TAB_ACTIVATE) {
-            addActionLink(row, 'activate', activate.bind(null, page), false);
+            addActionLink(row, 'focus tab', activate.bind(null, page), false);
           }
           addActionLink(row, 'reload', reload.bind(null, page), page.attached);
           if (majorChromeVersion >= MIN_VERSION_TAB_CLOSE) {
             addActionLink(
-                row, 'close', terminate.bind(null, page), page.attached);
+                row, 'close', close.bind(null, page), page.attached);
           }
         }
       }
@@ -308,23 +318,26 @@ function addToPagesList(data) {
 }
 
 function addToExtensionsList(data) {
-  addTargetToList(data, $('extensions-list'), ['name', 'url']);
+  var row = addTargetToList(data, $('extensions-list'), ['name', 'url']);
+  addFavicon(row, data);
 }
 
 function addToAppsList(data) {
   var row = addTargetToList(data, $('apps-list'), ['name', 'url']);
+  addFavicon(row, data);
   if (data.guests) {
     Array.prototype.forEach.call(data.guests, function(guest) {
       var guestRow = addTargetToList(guest, row, ['name', 'url']);
       guestRow.classList.add('guest');
-      addFavicon(guestRow, data);
+      addFavicon(guestRow, guest);
     });
   }
 }
 
 function addToWorkersList(data) {
-  var row = addTargetToList(data, $('workers-list'), ['pid', 'url']);
-  addActionLink(row, 'terminate', terminate.bind(null, data), data.attached);
+  var row =
+      addTargetToList(data, $('workers-list'), ['name', 'description', 'url']);
+  addActionLink(row, 'terminate', close.bind(null, data), data.attached);
 }
 
 function addToOthersList(data) {
@@ -341,9 +354,6 @@ function formatValue(data, property) {
   var text = value ? String(value) : '';
   if (text.length > 100)
     text = text.substring(0, 100) + '\u2026';
-
-  if (property == 'pid')
-    text = 'Pid:' + text;
 
   var span = document.createElement('div');
   span.textContent = text;
@@ -372,13 +382,15 @@ function addWebViewDetails(row, data) {
 }
 
 function addWebViewDescription(row, webview) {
-  var viewStatus = { visibility: 'empty', position: '', size: '' };
+  var viewStatus = { visibility: '', position: '', size: '' };
   if (!webview.empty) {
-    if (webview.attached)
-      viewStatus.visibility = webview.visible ? 'visible' : 'hidden';
-    else
+    if (webview.attached && !webview.visible)
+      viewStatus.visibility = 'hidden';
+    else if (!webview.attached)
       viewStatus.visibility = 'detached';
     viewStatus.size = 'size ' + webview.width + ' \u00d7 ' + webview.height;
+  } else {
+    viewStatus.visibility = 'empty';
   }
   if (webview.attached) {
       viewStatus.position =
@@ -389,7 +401,8 @@ function addWebViewDescription(row, webview) {
   subRow.className = 'subrow webview';
   if (webview.empty || !webview.attached || !webview.visible)
     subRow.className += ' invisible-view';
-  subRow.appendChild(formatValue(viewStatus, 'visibility'));
+  if (viewStatus.visibility)
+    subRow.appendChild(formatValue(viewStatus, 'visibility'));
   subRow.appendChild(formatValue(viewStatus, 'position'));
   subRow.appendChild(formatValue(viewStatus, 'size'));
   var mainSubrow = row.querySelector('.subrow.main');
@@ -416,10 +429,14 @@ function addWebViewThumbnail(row, webview, screenWidth, screenHeight) {
   var thumbnail = document.createElement('div');
   thumbnail.className = 'webview-thumbnail';
   var thumbnailWidth = 3 * screenRectWidth;
+  var thumbnailHeight = 60;
   thumbnail.style.width = thumbnailWidth + 'px';
+  thumbnail.style.height = thumbnailHeight + 'px';
 
   var screenRect = document.createElement('div');
   screenRect.className = 'screen-rect';
+  screenRect.style.left = screenRectWidth + 'px';
+  screenRect.style.top = (thumbnailHeight - screenRectHeight) / 2 + 'px';
   screenRect.style.width = screenRectWidth + 'px';
   screenRect.style.height = screenRectHeight + 'px';
   thumbnail.appendChild(screenRect);
@@ -447,6 +464,7 @@ function addTargetToList(data, list, properties) {
   row.className = 'row';
 
   var subrowBox = document.createElement('div');
+  subrowBox.className = 'subrow-box';
   row.appendChild(subrowBox);
 
   var subrow = document.createElement('div');
@@ -464,7 +482,8 @@ function addTargetToList(data, list, properties) {
   actionBox.className = 'actions';
   subrowBox.appendChild(actionBox);
 
-  addActionLink(row, 'inspect', inspect.bind(null, data), data.hasNoUniqueId);
+  addActionLink(row, 'inspect', inspect.bind(null, data),
+      data.hasNoUniqueId || data.adbAttachedForeign);
 
   list.appendChild(row);
   return row;
@@ -484,15 +503,21 @@ function addActionLink(row, text, handler, opt_disabled) {
 }
 
 
-function initPortForwarding() {
-  $('port-forwarding-enable').addEventListener('change', enablePortForwarding);
+function initSettings() {
+  $('discover-usb-devices-enable').addEventListener('change',
+                                                    enableDiscoverUsbDevices);
 
+  $('port-forwarding-enable').addEventListener('change', enablePortForwarding);
   $('port-forwarding-config-open').addEventListener(
       'click', openPortForwardingConfig);
   $('port-forwarding-config-close').addEventListener(
       'click', closePortForwardingConfig);
   $('port-forwarding-config-done').addEventListener(
-      'click', commitPortForwardingConfig);
+      'click', commitPortForwardingConfig.bind(true));
+}
+
+function enableDiscoverUsbDevices(event) {
+  chrome.send('set-discover-usb-devices-enabled', [event.target.checked]);
 }
 
 function enablePortForwarding(event) {
@@ -505,19 +530,54 @@ function handleKey(event) {
       if (event.target.nodeName == 'INPUT') {
         var line = event.target.parentNode;
         if (!line.classList.contains('fresh') ||
-            line.classList.contains('empty'))
-          commitPortForwardingConfig();
-        else
+            line.classList.contains('empty')) {
+          commitPortForwardingConfig(true);
+        } else {
           commitFreshLineIfValid(true /* select new line */);
+          commitPortForwardingConfig(false);
+        }
       } else {
-        commitPortForwardingConfig();
+        commitPortForwardingConfig(true);
       }
       break;
 
     case 27:
-      closePortForwardingConfig();
+      commitPortForwardingConfig(true);
       break;
   }
+}
+
+function setModal(dialog) {
+  dialog.deactivatedNodes = Array.prototype.filter.call(
+      document.querySelectorAll('*'),
+      function(n) {
+        return n != dialog && !dialog.contains(n) && n.tabIndex >= 0;
+      });
+
+  dialog.tabIndexes = dialog.deactivatedNodes.map(
+    function(n) { return n.getAttribute('tabindex'); });
+
+  dialog.deactivatedNodes.forEach(function(n) { n.tabIndex = -1; });
+  window.modal = dialog;
+}
+
+function unsetModal(dialog) {
+  for (var i = 0; i < dialog.deactivatedNodes.length; i++) {
+    var node = dialog.deactivatedNodes[i];
+    if (dialog.tabIndexes[i] === null)
+      node.removeAttribute('tabindex');
+    else
+      node.setAttribute('tabindex', tabIndexes[i]);
+  }
+
+  if (window.holdDevices) {
+    populateRemoteTargets(window.holdDevices);
+    delete window.holdDevices;
+  }
+
+  delete dialog.deactivatedNodes;
+  delete dialog.tabIndexes;
+  delete window.modal;
 }
 
 function openPortForwardingConfig() {
@@ -531,11 +591,14 @@ function openPortForwardingConfig() {
     freshPort.focus();
   else
     $('port-forwarding-config-done').focus();
+
+  setModal($('port-forwarding-overlay'));
 }
 
 function closePortForwardingConfig() {
   $('port-forwarding-overlay').classList.remove('open');
   document.removeEventListener('keyup', handleKey);
+  unsetModal($('port-forwarding-overlay'));
 }
 
 function loadPortForwardingConfig(config) {
@@ -546,27 +609,36 @@ function loadPortForwardingConfig(config) {
   list.appendChild(createEmptyConfigLine());
 }
 
-function commitPortForwardingConfig() {
-  if (document.querySelector(
-      '.port-forwarding-pair:not(.fresh) input.invalid'))
-    return;
+function commitPortForwardingConfig(closeConfig) {
+  if (closeConfig)
+    closePortForwardingConfig();
 
-  if (document.querySelector(
-      '.port-forwarding-pair.fresh:not(.empty) input.invalid'))
-    return;
-
-  closePortForwardingConfig();
   commitFreshLineIfValid();
   var lines = document.querySelectorAll('.port-forwarding-pair');
   var config = {};
   for (var i = 0; i != lines.length; i++) {
     var line = lines[i];
-    var portInput = line.querySelector('.port:not(.invalid)');
-    var locationInput = line.querySelector('.location:not(.invalid)');
-    if (portInput && locationInput)
-      config[portInput.value] = locationInput.value;
+    var portInput = line.querySelector('.port');
+    var locationInput = line.querySelector('.location');
+
+    var port = portInput.classList.contains('invalid') ?
+               portInput.lastValidValue :
+               portInput.value;
+
+    var location = locationInput.classList.contains('invalid') ?
+                   locationInput.lastValidValue :
+                   locationInput.value;
+
+    if (port && location)
+      config[port] = location;
   }
   chrome.send('set-port-forwarding-config', [config]);
+}
+
+function updateDiscoverUsbDevicesEnabled(enabled) {
+  var checkbox = $('discover-usb-devices-enable');
+  checkbox.checked = !!enabled;
+  checkbox.disabled = false;
 }
 
 function updatePortForwardingEnabled(enabled) {
@@ -656,6 +728,7 @@ function createConfigField(value, className, hint, validate) {
   input.type = 'text';
   input.placeholder = hint;
   input.value = value;
+  input.lastValidValue = value;
 
   function checkInput() {
     if (validate(input))
@@ -670,6 +743,11 @@ function createConfigField(value, className, hint, validate) {
   input.addEventListener('keyup', checkInput);
   input.addEventListener('focus', function() {
     selectLine(input.parentNode);
+  });
+
+  input.addEventListener('blur', function() {
+    if (validate(input))
+      input.lastValidValue = input.value;
   });
 
   return input;

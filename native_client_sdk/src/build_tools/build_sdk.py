@@ -42,7 +42,7 @@ import parse_dsc
 import verify_filelist
 
 from build_paths import SCRIPT_DIR, SDK_SRC_DIR, SRC_DIR, NACL_DIR, OUT_DIR
-from build_paths import NACLPORTS_DIR, GSTORE
+from build_paths import NACLPORTS_DIR, GSTORE, GONACL_APPENGINE_SRC_DIR
 
 # Add SDK make tools scripts to the python path.
 sys.path.append(os.path.join(SDK_SRC_DIR, 'tools'))
@@ -54,7 +54,7 @@ import oshelpers
 CYGTAR = os.path.join(NACL_DIR, 'build', 'cygtar.py')
 
 NACLPORTS_URL = 'https://naclports.googlecode.com/svn/trunk/src'
-NACLPORTS_REV = 850
+NACLPORTS_REV = 954
 
 GYPBUILD_DIR = 'gypbuild'
 
@@ -168,6 +168,7 @@ TEXT_FILES = [
   'COPYING',
   'LICENSE',
   'README.Makefiles',
+  'getting_started/README',
 ]
 
 def BuildStepCopyTextFiles(pepperdir, pepper_ver, chrome_revision,
@@ -282,11 +283,11 @@ NACL_HEADER_MAP = {
       ('src/include/nacl/nacl_exception.h', 'nacl/'),
       ('src/include/nacl/nacl_minidump.h', 'nacl/'),
       ('src/untrusted/irt/irt.h', ''),
+      ('src/untrusted/irt/irt_dev.h', ''),
       ('src/untrusted/irt/irt_ppapi.h', ''),
       ('src/untrusted/nacl/nacl_dyncode.h', 'nacl/'),
       ('src/untrusted/nacl/nacl_startup.h', 'nacl/'),
       ('src/untrusted/nacl/nacl_thread.h', 'nacl/'),
-      ('src/untrusted/nacl/pnacl.h', ''),
       ('src/untrusted/pthread/pthread.h', ''),
       ('src/untrusted/pthread/semaphore.h', ''),
       ('src/untrusted/valgrind/dynamic_annotations.h', 'nacl/'),
@@ -295,11 +296,11 @@ NACL_HEADER_MAP = {
       ('src/include/nacl/nacl_exception.h', 'nacl/'),
       ('src/include/nacl/nacl_minidump.h', 'nacl/'),
       ('src/untrusted/irt/irt.h', ''),
+      ('src/untrusted/irt/irt_dev.h', ''),
       ('src/untrusted/irt/irt_ppapi.h', ''),
       ('src/untrusted/nacl/nacl_dyncode.h', 'nacl/'),
       ('src/untrusted/nacl/nacl_startup.h', 'nacl/'),
       ('src/untrusted/nacl/nacl_thread.h', 'nacl/'),
-      ('src/untrusted/nacl/pnacl.h', ''),
       ('src/untrusted/valgrind/dynamic_annotations.h', 'nacl/'),
   ],
   'host': []
@@ -425,9 +426,7 @@ def GypNinjaInstall(pepperdir, toolchains):
       ['minidump_stackwalk', 'minidump_stackwalk']
     ]
 
-  if platform != 'mac':
-    # Mac doesn't build 64-bit binaries.
-    tools_files.append(['sel_ldr64', 'sel_ldr_x86_64'])
+  tools_files.append(['sel_ldr64', 'sel_ldr_x86_64'])
 
   if platform == 'linux':
     tools_files.append(['nacl_helper_bootstrap',
@@ -478,16 +477,15 @@ def GypNinjaBuild_NaCl(rel_out_dir):
   platform = getos.GetPlatform()
   if platform == 'win':
     NinjaBuild('sel_ldr64', out_dir)
-  elif platform == 'linux':
+  else:
     out_dir_64 = MakeNinjaRelPath(rel_out_dir + '-64')
     GypNinjaBuild('x64', gyp_py, nacl_core_sdk_gyp, 'sel_ldr', out_dir_64)
 
     # We only need sel_ldr from the 64-bit out directory.
     # sel_ldr needs to be renamed, so we'll call it sel_ldr64.
-    files_to_copy = [
-      ('sel_ldr', 'sel_ldr64'),
-      ('nacl_helper_bootstrap', 'nacl_helper_bootstrap64'),
-    ]
+    files_to_copy = [('sel_ldr', 'sel_ldr64')]
+    if platform == 'linux':
+      files_to_copy.append(('nacl_helper_bootstrap', 'nacl_helper_bootstrap64'))
 
     for src, dst in files_to_copy:
       buildbot_common.CopyFile(
@@ -549,11 +547,13 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
     print '%s="%s"' % (key, value)
   gyp_generator_flags = ['-G', 'output_dir=%s' % (out_dir,)]
   gyp_depth = '--depth=.'
-  buildbot_common.Run(
-      [sys.executable, gyp_py_script, gyp_file, gyp_depth] + \
-          gyp_generator_flags,
-      cwd=SRC_DIR,
-      env=gyp_env)
+  cmd = [sys.executable, gyp_py_script, gyp_file, gyp_depth]
+  # Hack added to fix M32 branch windows_sdk_multirel bot, without having to
+  # branch the native_client repo.
+  # TODO(binji): remove after I drover the change to 1700 branch.
+  cmd.append('--no-parallel')
+  cmd.extend(gyp_generator_flags)
+  buildbot_common.Run(cmd, cwd=SRC_DIR, env=gyp_env)
   NinjaBuild(targets, out_dir)
 
 
@@ -682,6 +682,10 @@ def BuildStepBuildLibraries(pepperdir, directory):
   BuildStepMakeAll(pepperdir, directory, 'Build Libraries Release',
       clean=True, config='Release')
 
+  # Cleanup .pyc file generated while building libraries.  Without
+  # this we would end up shipping the pyc in the SDK tarball.
+  buildbot_common.RemoveFile(os.path.join(pepperdir, 'tools', '*.pyc'))
+
 
 def GenerateNotice(fileroot, output_filename='NOTICE', extra_files=None):
   # Look for LICENSE files
@@ -730,13 +734,11 @@ to test.""" % (e, file_list_rel, verify_filelist_py, file_list_rel,
     buildbot_common.ErrorExit(msg)
 
 
-
 def BuildStepTarBundle(pepper_ver, tarfile):
   buildbot_common.BuildStep('Tar Pepper Bundle')
   buildbot_common.MakeDir(os.path.dirname(tarfile))
   buildbot_common.Run([sys.executable, CYGTAR, '-C', OUT_DIR, '-cjf', tarfile,
        'pepper_' + pepper_ver], cwd=NACL_DIR)
-
 
 
 def GetManifestBundle(pepper_ver, chrome_revision, nacl_revision, tarfile,
@@ -820,10 +822,10 @@ def BuildStepBuildNaClPorts(pepper_ver, pepperdir):
   """Build selected naclports in all configurations."""
   # TODO(sbc): currently naclports doesn't know anything about
   # Debug builds so the Debug subfolders are all empty.
-  bundle_dir = os.path.join(NACLPORTS_DIR, 'out', 'sdk_bundle')
 
   env = dict(os.environ)
   env['NACL_SDK_ROOT'] = pepperdir
+  env['PEPPER_DIR'] = os.path.basename(pepperdir)  # pepper_NN
   env['NACLPORTS_NO_ANNOTATE'] = "1"
   env['NACLPORTS_NO_UPLOAD'] = "1"
 
@@ -831,6 +833,7 @@ def BuildStepBuildNaClPorts(pepper_ver, pepperdir):
   buildbot_common.BuildStep('Build naclports')
   buildbot_common.Run([build_script], env=env, cwd=NACLPORTS_DIR)
 
+  bundle_dir = os.path.join(NACLPORTS_DIR, 'out', 'sdk_bundle')
   out_dir = os.path.join(bundle_dir, 'pepper_%s' % pepper_ver)
 
   # Some naclports do not include a standalone LICENSE/COPYING file
@@ -858,9 +861,18 @@ def BuildStepTarNaClPorts(pepper_ver, tarfile):
   buildbot_common.Run(cmd, cwd=NACL_DIR)
 
 
+def BuildStepBuildAppEngine(pepperdir, chrome_revision):
+  """Build the projects found in src/gonacl_appengine/src"""
+  buildbot_common.BuildStep('Build GoNaCl AppEngine Projects')
+  cmd = ['make', 'upload', 'REVISION=%s' % chrome_revision]
+  env = dict(os.environ)
+  env['NACL_SDK_ROOT'] = pepperdir
+  buildbot_common.Run(cmd, env=env, cwd=GONACL_APPENGINE_SRC_DIR)
+
+
 def main(args):
   parser = optparse.OptionParser()
-  parser.add_option('--skip-tar', help='Skip generating a tarball.',
+  parser.add_option('--tar', help='Force the tar step.',
       action='store_true')
   parser.add_option('--archive', help='Force the archive step.',
       action='store_true')
@@ -871,14 +883,24 @@ def main(args):
       dest='release', default=None)
   parser.add_option('--build-ports',
       help='Build naclport bundle.', action='store_true')
+  parser.add_option('--build-app-engine',
+      help='Build AppEngine demos.', action='store_true')
   parser.add_option('--experimental',
       help='build experimental examples and libraries', action='store_true',
       dest='build_experimental')
   parser.add_option('--skip-toolchain', help='Skip toolchain untar',
       action='store_true')
-  parser.add_option('--mac_sdk',
-      help='Set the mac_sdk (e.g. 10.6) to use when building with ninja.',
-      dest='mac_sdk')
+  parser.add_option('--mac-sdk',
+      help='Set the mac-sdk (e.g. 10.6) to use when building with ninja.')
+
+  # To setup bash completion for this command first install optcomplete
+  # and then add this line to your .bashrc:
+  #  complete -F _optcomplete build_sdk.py
+  try:
+    import optcomplete
+    optcomplete.autocomplete(parser)
+  except ImportError:
+    pass
 
   global options
   options, args = parser.parse_args(args[1:])
@@ -887,11 +909,13 @@ def main(args):
   if buildbot_common.IsSDKBuilder():
     options.archive = True
     options.build_ports = True
+    options.build_app_engine = True
+    options.tar = True
 
   toolchains = ['newlib', 'glibc', 'arm', 'pnacl', 'host']
   print 'Building: ' + ' '.join(toolchains)
 
-  if options.archive and options.skip_tar:
+  if options.archive and not options.tar:
     parser.error('Incompatible arguments with archive.')
 
   chrome_version = int(build_version.ChromeMajorVersion())
@@ -919,12 +943,13 @@ def main(args):
     BuildStepDownloadToolchains()
     BuildStepUntarToolchains(pepperdir, toolchains)
 
-  BuildStepCopyTextFiles(pepperdir, pepper_ver, chrome_revision, nacl_revision)
   BuildStepBuildToolchains(pepperdir, toolchains)
 
   BuildStepUpdateHelpers(pepperdir, True)
   BuildStepUpdateUserProjects(pepperdir, toolchains,
                               options.build_experimental, True)
+
+  BuildStepCopyTextFiles(pepperdir, pepper_ver, chrome_revision, nacl_revision)
 
   # Ship with libraries prebuilt, so run that first.
   BuildStepBuildLibraries(pepperdir, 'src')
@@ -933,15 +958,18 @@ def main(args):
   # Verify the SDK contains what we expect.
   BuildStepVerifyFilelist(pepperdir)
 
-  if not options.skip_tar:
+  if options.tar:
     BuildStepTarBundle(pepper_ver, tarfile)
 
   if options.build_ports and getos.GetPlatform() == 'linux':
     ports_tarfile = os.path.join(OUT_DIR, 'naclports.tar.bz2')
     BuildStepSyncNaClPorts()
     BuildStepBuildNaClPorts(pepper_ver, pepperdir)
-    if not options.skip_tar:
+    if options.tar:
       BuildStepTarNaClPorts(pepper_ver, ports_tarfile)
+
+  if options.build_app_engine and getos.GetPlatform() == 'linux':
+    BuildStepBuildAppEngine(pepperdir, chrome_revision)
 
   # Archive on non-trybots.
   if options.archive:

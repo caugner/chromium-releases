@@ -24,6 +24,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "chrome/browser/mac/dock.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -133,12 +135,17 @@ bool AddGfxImageToIconFamily(IconFamilyHandle icon_family,
 
 base::FilePath GetWritableApplicationsDirectory() {
   base::FilePath path;
-  if (base::mac::GetLocalDirectory(NSApplicationDirectory, &path) &&
-      base::PathIsWritable(path)) {
-    return path;
+  if (base::mac::GetUserDirectory(NSApplicationDirectory, &path)) {
+    if (!base::DirectoryExists(path)) {
+      if (!file_util::CreateDirectory(path))
+        return base::FilePath();
+
+      // Create a zero-byte ".localized" file to inherit localizations from OSX
+      // for folders that have special meaning.
+      file_util::WriteFile(path.Append(".localized"), NULL, 0);
+    }
+    return base::PathIsWritable(path) ? path : base::FilePath();
   }
-  if (base::mac::GetUserDirectory(NSApplicationDirectory, &path))
-    return path;
   return base::FilePath();
 }
 
@@ -338,7 +345,33 @@ ShellIntegration::ShortcutInfo BuildShortcutInfoFromBundle(
   return shortcut_info;
 }
 
+void CreateShortcutsAndRunCallback(
+    const base::Closure& close_callback,
+    const ShellIntegration::ShortcutInfo& shortcut_info) {
+  // creation_locations will be ignored by CreatePlatformShortcuts on Mac.
+  ShellIntegration::ShortcutLocations creation_locations;
+  web_app::CreateShortcuts(shortcut_info, creation_locations,
+                           web_app::SHORTCUT_CREATION_BY_USER);
+  if (!close_callback.is_null())
+    close_callback.Run();
+}
+
 }  // namespace
+
+namespace chrome {
+
+void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow /*parent_window*/,
+                                        Profile* profile,
+                                        const extensions::Extension* app,
+                                        const base::Closure& close_callback) {
+  // Normally we would show a dialog, but since we always create the app
+  // shortcut in /Applications there are no options for the user to choose.
+  web_app::UpdateShortcutInfoAndIconForApp(
+      *app, profile,
+      base::Bind(&CreateShortcutsAndRunCallback, close_callback));
+}
+
+}  // namespace chrome
 
 namespace web_app {
 
@@ -462,8 +495,18 @@ bool WebAppShortcutCreator::CreateShortcuts(
   if (success_count != paths.size())
     return false;
 
-  if (creation_locations.in_quick_launch_bar && path_to_add_to_dock)
-    dock::AddIcon(path_to_add_to_dock, nil);
+  if (creation_locations.in_quick_launch_bar && path_to_add_to_dock) {
+    switch (dock::AddIcon(path_to_add_to_dock, nil)) {
+      case dock::IconAddFailure:
+        // If adding the icon failed, instead reveal the Finder window.
+        RevealAppShimInFinder();
+        break;
+      case dock::IconAddSuccess:
+      case dock::IconAlreadyPresent:
+        break;
+    }
+    return true;
+  }
 
   if (creation_reason == SHORTCUT_CREATION_BY_USER)
     RevealAppShimInFinder();

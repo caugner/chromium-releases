@@ -51,12 +51,11 @@
 #include "url/gurl.h"
 
 #if defined(OS_WIN)
-#include "base/win/metro.h"
 #include "chrome/browser/browser_process.h"
 #endif
 
 #if defined(USE_AURA)
-#include "ui/aura/focus_manager.h"
+#include "ui/aura/client/focus_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/compositor/layer.h"
 #endif
@@ -68,20 +67,29 @@ struct OmniboxState : public base::SupportsUserData::Data {
   static const char kKey[];
 
   OmniboxState(const OmniboxEditModel::State& model_state,
-               const gfx::SelectionModel& selection_model);
+               const gfx::Range& selection,
+               const gfx::Range& saved_selection_for_focus_change);
   virtual ~OmniboxState();
 
   const OmniboxEditModel::State model_state;
-  const gfx::SelectionModel selection_model;
+
+  // We store both the actual selection and any saved selection (for when the
+  // omnibox is not focused).  This allows us to properly handle cases like
+  // selecting text, tabbing out of the omnibox, switching tabs away and back,
+  // and tabbing back into the omnibox.
+  const gfx::Range selection;
+  const gfx::Range saved_selection_for_focus_change;
 };
 
 // static
 const char OmniboxState::kKey[] = "OmniboxState";
 
 OmniboxState::OmniboxState(const OmniboxEditModel::State& model_state,
-                           const gfx::SelectionModel& selection_model)
+                           const gfx::Range& selection,
+                           const gfx::Range& saved_selection_for_focus_change)
     : model_state(model_state),
-      selection_model(selection_model) {
+      selection(selection),
+      saved_selection_for_focus_change(saved_selection_for_focus_change) {
 }
 
 OmniboxState::~OmniboxState() {}
@@ -94,24 +102,22 @@ OmniboxState::~OmniboxState() {}
 // application language, and set the input type accordingly.
 ui::TextInputType DetermineTextInputType() {
 #if defined(OS_WIN)
-  if (base::win::IsTSFAwareRequired()) {
-    DCHECK(g_browser_process);
-    const std::string& locale = g_browser_process->GetApplicationLocale();
-    const std::string& language = locale.substr(0, 2);
-    // Assume CJK + Thai users are using an IME.
-    if (language == "ja" ||
-        language == "ko" ||
-        language == "th" ||
-        language == "zh")
-      return ui::TEXT_INPUT_TYPE_SEARCH;
-  }
+  DCHECK(g_browser_process);
+  const std::string& locale = g_browser_process->GetApplicationLocale();
+  const std::string& language = locale.substr(0, 2);
+  // Assume CJK + Thai users are using an IME.
+  if (language == "ja" ||
+      language == "ko" ||
+      language == "th" ||
+      language == "zh")
+    return ui::TEXT_INPUT_TYPE_SEARCH;
 #endif
   return ui::TEXT_INPUT_TYPE_URL;
 }
 
 bool IsOmniboxAutoCompletionForImeEnabled() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableOmniboxAutoCompletionForIme);
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableOmniboxAutoCompletionForIme);
 }
 
 }  // namespace
@@ -124,11 +130,11 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
                                    LocationBarView* location_bar,
-                                   const gfx::FontList& font_list,
-                                   int font_y_offset)
+                                   const gfx::FontList& font_list)
     : OmniboxView(profile, controller, command_updater),
       popup_window_mode_(popup_window_mode),
       security_level_(ToolbarModel::NONE),
+      saved_selection_for_focus_change_(gfx::Range::InvalidRange()),
       ime_composing_before_change_(false),
       delete_at_end_pressed_(false),
       location_bar_view_(location_bar),
@@ -138,8 +144,6 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
   RemoveBorder();
   set_id(VIEW_ID_OMNIBOX);
   SetFontList(font_list);
-  SetVerticalMargins(font_y_offset, 0);
-  SetVerticalAlignment(gfx::ALIGN_TOP);
 }
 
 OmniboxViewViews::~OmniboxViewViews() {
@@ -186,11 +190,24 @@ void OmniboxViewViews::OnGestureEvent(ui::GestureEvent* event) {
   views::Textfield::OnGestureEvent(event);
   if (!HasFocus() && event->type() == ui::ET_GESTURE_TAP_DOWN) {
     select_all_on_gesture_tap_ = true;
+
+    // If we're trying to select all on tap, invalidate any saved selection lest
+    // restoring it fights with the "select all" action.
+    saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
     return;
   }
   if (select_all_on_gesture_tap_ && event->type() == ui::ET_GESTURE_TAP)
     SelectAll(false);
-  select_all_on_gesture_tap_ = false;
+
+  if (event->type() == ui::ET_GESTURE_TAP ||
+      event->type() == ui::ET_GESTURE_TAP_CANCEL ||
+      event->type() == ui::ET_GESTURE_TWO_FINGER_TAP ||
+      event->type() == ui::ET_GESTURE_SCROLL_BEGIN ||
+      event->type() == ui::ET_GESTURE_PINCH_BEGIN ||
+      event->type() == ui::ET_GESTURE_LONG_PRESS ||
+      event->type() == ui::ET_GESTURE_LONG_TAP) {
+    select_all_on_gesture_tap_ = false;
+  }
 }
 
 void OmniboxViewViews::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -202,12 +219,20 @@ bool OmniboxViewViews::OnMousePressed(const ui::MouseEvent& event) {
   select_all_on_mouse_release_ =
       (event.IsOnlyLeftMouseButton() || event.IsOnlyRightMouseButton()) &&
       (!HasFocus() || (model()->focus_state() == OMNIBOX_FOCUS_INVISIBLE));
-  // Restore caret visibility whenever the user clicks in the omnibox in a way
-  // that would give it focus.  We must handle this case separately here because
-  // if the omnibox currently has invisible focus, the mouse event won't trigger
-  // either SetFocus() or OmniboxEditModel::OnSetFocus().
-  if (select_all_on_mouse_release_)
+  if (select_all_on_mouse_release_) {
+    // Restore caret visibility whenever the user clicks in the omnibox in a way
+    // that would give it focus.  We must handle this case separately here
+    // because if the omnibox currently has invisible focus, the mouse event
+    // won't trigger either SetFocus() or OmniboxEditModel::OnSetFocus().
     model()->SetCaretVisibility(true);
+
+    // When we're going to select all on mouse release, invalidate any saved
+    // selection lest restoring it fights with the "select all" action.  It's
+    // possible to later set select_all_on_mouse_release_ back to false, but
+    // that happens for things like dragging, which are cases where having
+    // invalidated this saved selection is still OK.
+    saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
+  }
   return views::Textfield::OnMousePressed(event);
 }
 
@@ -238,10 +263,12 @@ bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
   if (event.IsUnicodeKeyCode())
     return views::Textfield::OnKeyPressed(event);
 
+  const bool shift = event.IsShiftDown();
+  const bool control = event.IsControlDown();
+  const bool alt = event.IsAltDown() || event.IsAltGrDown();
   switch (event.key_code()) {
     case ui::VKEY_RETURN:
-      model()->AcceptInput(event.IsAltDown() ? NEW_FOREGROUND_TAB : CURRENT_TAB,
-                           false);
+      model()->AcceptInput(alt ? NEW_FOREGROUND_TAB : CURRENT_TAB, false);
       return true;
     case ui::VKEY_ESCAPE:
       return model()->OnEscapeKeyPressed();
@@ -249,7 +276,7 @@ bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
       model()->OnControlKeyChanged(true);
       break;
     case ui::VKEY_DELETE:
-      if (event.IsShiftDown() && model()->popup_model()->IsOpen())
+      if (shift && model()->popup_model()->IsOpen())
         model()->popup_model()->TryDeletingCurrentItem();
       break;
     case ui::VKEY_UP:
@@ -259,24 +286,24 @@ bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
       model()->OnUpOrDownKeyPressed(1);
       return true;
     case ui::VKEY_PRIOR:
-      if (event.IsControlDown() || event.IsAltDown() ||
-          event.IsShiftDown()) {
+      if (control || alt || shift)
         return false;
-      }
       model()->OnUpOrDownKeyPressed(-1 * model()->result().size());
       return true;
     case ui::VKEY_NEXT:
-      if (event.IsControlDown() || event.IsAltDown() ||
-          event.IsShiftDown()) {
+      if (control || alt || shift)
         return false;
-      }
       model()->OnUpOrDownKeyPressed(model()->result().size());
       return true;
     case ui::VKEY_V:
-      if (event.IsControlDown() && !read_only()) {
-        OnBeforePossibleChange();
-        OnPaste();
-        OnAfterPossibleChange();
+      if (control && !alt && !read_only()) {
+        ExecuteCommand(IDS_APP_PASTE, 0);
+        return true;
+      }
+      break;
+    case ui::VKEY_INSERT:
+      if (shift && !control && !read_only()) {
+        ExecuteCommand(IDS_APP_PASTE, 0);
         return true;
       }
       break;
@@ -284,12 +311,7 @@ bool OmniboxViewViews::OnKeyPressed(const ui::KeyEvent& event) {
       break;
   }
 
-  bool handled = views::Textfield::OnKeyPressed(event);
-#if !defined(OS_WIN) || defined(USE_AURA)
-  // TODO(msw): Avoid this complexity, consolidate cross-platform behavior.
-  handled |= SkipDefaultKeyEventProcessing(event);
-#endif
-  return handled;
+  return views::Textfield::OnKeyPressed(event) || HandleEarlyTabActions(event);
 }
 
 bool OmniboxViewViews::OnKeyReleased(const ui::KeyEvent& event) {
@@ -301,8 +323,17 @@ bool OmniboxViewViews::OnKeyReleased(const ui::KeyEvent& event) {
 
 bool OmniboxViewViews::SkipDefaultKeyEventProcessing(
     const ui::KeyEvent& event) {
-  // Handle keyword hint tab-to-search and tabbing through dropdown results.
+  if (views::FocusManager::IsTabTraversalKeyEvent(event) &&
+      ((model()->is_keyword_hint() && !event.IsShiftDown()) ||
+       model()->popup_model()->IsOpen())) {
+    return true;
+  }
+  return Textfield::SkipDefaultKeyEventProcessing(event);
+}
+
+bool OmniboxViewViews::HandleEarlyTabActions(const ui::KeyEvent& event) {
   // This must run before acclerator handling invokes a focus change on tab.
+  // Note the parallel with SkipDefaultKeyEventProcessing above.
   if (views::FocusManager::IsTabTraversalKeyEvent(event)) {
     if (model()->is_keyword_hint() && !event.IsShiftDown()) {
       model()->AcceptKeyword(ENTERED_KEYWORD_MODE_VIA_TAB);
@@ -320,7 +351,7 @@ bool OmniboxViewViews::SkipDefaultKeyEventProcessing(
     }
   }
 
-  return Textfield::SkipDefaultKeyEventProcessing(event);
+  return false;
 }
 
 void OmniboxViewViews::OnFocus() {
@@ -329,19 +360,16 @@ void OmniboxViewViews::OnFocus() {
   model()->OnSetFocus(false);
   // Don't call controller()->OnSetFocus, this view has already acquired focus.
 
-  // Restore a valid saved selection on tab-to-focus.
-  if (location_bar_view_->GetWebContents() && !select_all_on_mouse_release_) {
-    const OmniboxState* state = static_cast<OmniboxState*>(
-        location_bar_view_->GetWebContents()->GetUserData(&OmniboxState::kKey));
-    if (state)
-      SelectSelectionModel(state->selection_model);
+  // Restore the selection we saved in OnBlur() if it's still valid.
+  if (saved_selection_for_focus_change_.IsValid()) {
+    SelectRange(saved_selection_for_focus_change_);
+    saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
   }
 }
 
 void OmniboxViewViews::OnBlur() {
-  // Save the selection to restore on tab-to-focus.
-  if (location_bar_view_->GetWebContents())
-    SaveStateToTab(location_bar_view_->GetWebContents());
+  // Save the user's existing selection to restore it later.
+  saved_selection_for_focus_change_ = GetSelectedRange();
 
   views::Textfield::OnBlur();
   gfx::NativeView native_view = NULL;
@@ -357,9 +385,9 @@ void OmniboxViewViews::OnBlur() {
   model()->OnWillKillFocus(native_view);
   // Close the popup.
   CloseOmniboxPopup();
+
   // Tell the model to reset itself.
   model()->OnKillFocus();
-  controller()->OnKillFocus();
 
   // Make sure the beginning of the text is visible.
   SelectRange(gfx::Range(0));
@@ -379,10 +407,11 @@ void OmniboxViewViews::SaveStateToTab(content::WebContents* tab) {
     GetInputMethod()->CancelComposition(this);
   }
 
-  // NOTE: GetStateForTabSwitch may affect GetSelection, so order is important.
+  // NOTE: GetStateForTabSwitch() may affect GetSelectedRange(), so order is
+  // important.
   OmniboxEditModel::State state = model()->GetStateForTabSwitch();
-  const gfx::SelectionModel selection = GetSelectionModel();
-  tab->SetUserData(OmniboxState::kKey, new OmniboxState(state, selection));
+  tab->SetUserData(OmniboxState::kKey, new OmniboxState(
+      state, GetSelectedRange(), saved_selection_for_focus_change_));
 }
 
 void OmniboxViewViews::OnTabChanged(const content::WebContents* web_contents) {
@@ -391,8 +420,14 @@ void OmniboxViewViews::OnTabChanged(const content::WebContents* web_contents) {
   const OmniboxState* state = static_cast<OmniboxState*>(
       web_contents->GetUserData(&OmniboxState::kKey));
   model()->RestoreState(state ? &state->model_state : NULL);
-  if (state)
-    SelectSelectionModel(state->selection_model);
+  if (state) {
+    // This assumes that the omnibox has already been focused or blurred as
+    // appropriate; otherwise, a subsequent OnFocus() or OnBlur() call could
+    // goof up the selection.  See comments at the end of
+    // BrowserView::ActiveTabChanged().
+    SelectRange(state->selection);
+    saved_selection_for_focus_change_ = state->saved_selection_for_focus_change;
+  }
 
   // TODO(msw|oshima): Consider saving/restoring edit history.
   ClearEditHistory();
@@ -436,6 +471,13 @@ string16 OmniboxViewViews::GetText() const {
   return text();
 }
 
+void OmniboxViewViews::SetUserText(const string16& text,
+                                   const string16& display_text,
+                                   bool update_popup) {
+  saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
+  OmniboxView::SetUserText(text, display_text, update_popup);
+}
+
 void OmniboxViewViews::SetWindowTextAndCaretPos(const string16& text,
                                                 size_t caret_pos,
                                                 bool update_popup,
@@ -454,7 +496,7 @@ void OmniboxViewViews::SetForcedQuery() {
   const string16 current_text(text());
   const size_t start = current_text.find_first_not_of(kWhitespaceUTF16);
   if (start == string16::npos || (current_text[start] != '?'))
-    SetUserText(ASCIIToUTF16("?"));
+    OmniboxView::SetUserText(ASCIIToUTF16("?"));
   else
     SelectRange(gfx::Range(current_text.size(), start + 1));
 }
@@ -477,6 +519,11 @@ void OmniboxViewViews::GetSelectionBounds(string16::size_type* start,
 
 void OmniboxViewViews::SelectAll(bool reversed) {
   views::Textfield::SelectAll(reversed);
+}
+
+void OmniboxViewViews::RevertAll() {
+  saved_selection_for_focus_change_ = gfx::Range::InvalidRange();
+  OmniboxView::RevertAll();
 }
 
 void OmniboxViewViews::UpdatePopup() {
@@ -696,7 +743,7 @@ void OmniboxViewViews::OnAfterUserAction(views::Textfield* sender) {
 void OmniboxViewViews::OnAfterCutOrCopy() {
   ui::Clipboard* cb = ui::Clipboard::GetForCurrentThread();
   string16 selected_text;
-  cb->ReadText(ui::Clipboard::BUFFER_STANDARD, &selected_text);
+  cb->ReadText(ui::CLIPBOARD_TYPE_COPY_PASTE, &selected_text);
   GURL url;
   bool write_url;
   model()->AdjustTextForCopy(GetSelectedRange().GetMin(), IsSelectAll(),
@@ -704,10 +751,10 @@ void OmniboxViewViews::OnAfterCutOrCopy() {
   if (write_url) {
     BookmarkNodeData data;
     data.ReadFromTuple(url, selected_text);
-    data.WriteToClipboard();
+    data.WriteToClipboard(ui::CLIPBOARD_TYPE_COPY_PASTE);
   } else {
     ui::ScopedClipboardWriter scoped_clipboard_writer(
-        ui::Clipboard::GetForCurrentThread(), ui::Clipboard::BUFFER_STANDARD);
+        ui::Clipboard::GetForCurrentThread(), ui::CLIPBOARD_TYPE_COPY_PASTE);
     scoped_clipboard_writer.WriteText(selected_text);
   }
 }
@@ -798,8 +845,10 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
 }
 
 bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
+  if (command_id == IDS_APP_PASTE)
+    return !read_only() && !GetClipboardText().empty();
   if (command_id == IDS_PASTE_AND_GO)
-    return model()->CanPasteAndGo(GetClipboardText());
+    return !read_only() && model()->CanPasteAndGo(GetClipboardText());
   if (command_id != IDS_SHOW_URL)
     return command_updater()->IsCommandEnabled(command_id);
   return controller()->GetToolbarModel()->WouldPerformSearchTermReplacement(

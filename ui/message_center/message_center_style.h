@@ -33,6 +33,22 @@ MESSAGE_CENTER_EXPORT extern const int kNotificationWidth;  // H size of the
 MESSAGE_CENTER_EXPORT extern const SkColor kMessageCenterBorderColor;
 MESSAGE_CENTER_EXPORT extern const SkColor kMessageCenterShadowColor;
 
+// Settings dialog constants.
+namespace settings {
+
+const SkColor kEntrySeparatorColor = SkColorSetARGB(0.1 * 255, 0, 0, 0);
+const int kEntryHeight = 45;
+const int kEntrySeparatorHeight = 1;
+const int kHorizontalMargin = 10;
+const int kTopMargin = 20;
+const int kTitleToDescriptionSpace = 20;
+const int kEntryIconSize = 16;
+const int kDescriptionToSwitcherSpace = 15;
+const int kInternalHorizontalSpacing = 10;
+const int kCheckboxSizeWithPadding = 24;
+
+}  // namespace settings
+
 // Within a notification ///////////////////////////////////////////////////////
 
 // DIP dimensions (H = horizontal, V = vertical).
@@ -50,7 +66,7 @@ extern const int kMessageLineHeight;         // In DIPs.
 
 // Colors.
 extern const SkColor kNotificationBackgroundColor; // Background of the card.
-extern const SkColor kLegacyIconBackgroundColor;   // Used behind icons smaller.
+extern const SkColor kIconBackgroundColor;         // Used behind icons smaller.
                                                    // than the icon view.
 extern const SkColor kRegularTextColor;            // Title, message, ...
 extern const SkColor kDimTextColor;

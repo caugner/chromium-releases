@@ -47,6 +47,7 @@
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/chrome_browser_main_extra_parts_profiles.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/storage_partition_descriptor.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
@@ -230,6 +231,7 @@ TestingProfile::TestingProfile(
     scoped_refptr<ExtensionSpecialStoragePolicy> extension_policy,
     scoped_ptr<PrefServiceSyncable> prefs,
     bool incognito,
+    const std::string& managed_user_id,
     const TestingFactories& factories)
     : start_time_(Time::Now()),
       prefs_(prefs.release()),
@@ -237,6 +239,7 @@ TestingProfile::TestingProfile(
       incognito_(incognito),
       force_incognito_(false),
       original_profile_(NULL),
+      managed_user_id_(managed_user_id),
       last_session_exited_cleanly_(true),
       extension_special_storage_policy_(extension_policy),
       profile_path_(path),
@@ -354,6 +357,10 @@ void TestingProfile::FinishInit() {
       chrome::NOTIFICATION_PROFILE_CREATED,
       content::Source<Profile>(static_cast<Profile*>(this)),
       content::NotificationService::NoDetails());
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  if (profile_manager)
+    profile_manager->InitProfileUserPrefs(this);
 
   if (delegate_)
     delegate_->OnProfileCreated(this, true, false);
@@ -586,7 +593,7 @@ Profile* TestingProfile::GetOriginalProfile() {
 }
 
 bool TestingProfile::IsManaged() {
-  return !GetPrefs()->GetString(prefs::kManagedUserId).empty();
+  return !managed_user_id_.empty();
 }
 
 ExtensionService* TestingProfile::GetExtensionService() {
@@ -693,10 +700,18 @@ TestingProfile::GetMediaRequestContextForStoragePartition(
 void TestingProfile::RequestMIDISysExPermission(
       int render_process_id,
       int render_view_id,
+      int bridge_id,
       const GURL& requesting_frame,
       const MIDISysExPermissionCallback& callback) {
   // Always reject requests for testing.
   callback.Run(false);
+}
+
+void TestingProfile::CancelMIDISysExPermissionRequest(
+    int render_process_id,
+    int render_view_id,
+    int bridge_id,
+    const GURL& requesting_frame) {
 }
 
 net::URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
@@ -824,9 +839,16 @@ bool TestingProfile::WasCreatedByVersionOrLater(const std::string& version) {
 bool TestingProfile::IsGuestSession() const {
   return false;
 }
+
 Profile::ExitType TestingProfile::GetLastSessionExitType() {
   return last_session_exited_cleanly_ ? EXIT_NORMAL : EXIT_CRASHED;
 }
+
+#if defined(OS_CHROMEOS)
+bool TestingProfile::IsLoginProfile() {
+  return false;
+}
+#endif
 
 TestingProfile::Builder::Builder()
     : build_called_(false),
@@ -859,6 +881,11 @@ void TestingProfile::Builder::SetIncognito() {
   incognito_ = true;
 }
 
+void TestingProfile::Builder::SetManagedUserId(
+    const std::string& managed_user_id) {
+  managed_user_id_ = managed_user_id;
+}
+
 void TestingProfile::Builder::AddTestingFactory(
     BrowserContextKeyedServiceFactory* service_factory,
     BrowserContextKeyedServiceFactory::FactoryFunction callback) {
@@ -868,11 +895,13 @@ void TestingProfile::Builder::AddTestingFactory(
 scoped_ptr<TestingProfile> TestingProfile::Builder::Build() {
   DCHECK(!build_called_);
   build_called_ = true;
+
   return scoped_ptr<TestingProfile>(new TestingProfile(
       path_,
       delegate_,
       extension_policy_,
       pref_service_.Pass(),
       incognito_,
+      managed_user_id_,
       testing_factories_));
 }

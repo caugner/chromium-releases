@@ -9,6 +9,7 @@ import optparse
 import os
 import platform
 import sys
+import tempfile
 
 _THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir))
@@ -46,15 +47,20 @@ def _GenerateTestCommand(script,
                          chrome_version=None,
                          android_package=None,
                          verbose=False):
+  _, log_path = tempfile.mkstemp(prefix='chromedriver_')
+  print 'chromedriver server log: %s' % log_path
   cmd = [
       sys.executable,
       os.path.join(_THIS_DIR, script),
-      '--chromedriver=' + chromedriver,
+      '--chromedriver=%s' % chromedriver,
+      '--log-path=%s' % log_path,
   ]
   if ref_chromedriver:
     cmd.append('--reference-chromedriver=' + ref_chromedriver)
+
   if chrome:
     cmd.append('--chrome=' + chrome)
+
   if chrome_version:
     cmd.append('--chrome-version=' + chrome_version)
 
@@ -62,7 +68,7 @@ def _GenerateTestCommand(script,
     cmd.append('--verbose')
 
   if android_package:
-    cmd.insert(0, 'xvfb-run')
+    cmd = ['xvfb-run', '-a'] + cmd
     cmd.append('--android-package=' + android_package)
   return cmd
 
@@ -107,7 +113,7 @@ def RunJavaTests(chromedriver, chrome=None, chrome_version=None,
 
 
 def RunCppTests(cpp_tests):
-  util.MarkBuildStepStart('chromedriver2_tests')
+  util.MarkBuildStepStart('chromedriver_tests')
   code = util.RunCommand([cpp_tests])
   if code:
     util.MarkBuildStepError()
@@ -136,8 +142,8 @@ def main():
   exe_postfix = ''
   if util.IsWindows():
     exe_postfix = '.exe'
-  cpp_tests_name = 'chromedriver2_tests' + exe_postfix
-  server_name = 'chromedriver2_server' + exe_postfix
+  cpp_tests_name = 'chromedriver_tests' + exe_postfix
+  server_name = 'chromedriver' + exe_postfix
 
   required_build_outputs = [server_name]
   if not options.android_packages:
@@ -183,9 +189,9 @@ def main():
     latest_snapshot_revision = archive.GetLatestRevision(archive.Site.SNAPSHOT)
     versions = [
         ['HEAD', latest_snapshot_revision],
+        ['31', archive.CHROME_31_REVISION],
         ['30', archive.CHROME_30_REVISION],
-        ['29', archive.CHROME_29_REVISION],
-        ['28', archive.CHROME_28_REVISION]
+        ['29', archive.CHROME_29_REVISION]
     ]
     code = 0
     for version in versions:

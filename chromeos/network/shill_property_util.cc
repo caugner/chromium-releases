@@ -58,86 +58,105 @@ bool CopyStringFromDictionary(const base::DictionaryValue& source,
 
 }  // namespace
 
-std::string GetNameFromProperties(const std::string& service_path,
-                                  const base::DictionaryValue& properties) {
-  std::string name, hex_ssid;
-  properties.GetStringWithoutPathExpansion(flimflam::kNameProperty, &name);
-  properties.GetStringWithoutPathExpansion(flimflam::kWifiHexSsid, &hex_ssid);
+void SetSSID(const std::string ssid, base::DictionaryValue* properties) {
+  std::string hex_ssid = base::HexEncode(ssid.c_str(), ssid.size());
+  properties->SetStringWithoutPathExpansion(shill::kWifiHexSsid, hex_ssid);
+}
+
+std::string GetSSIDFromProperties(const base::DictionaryValue& properties,
+                                  bool* unknown_encoding) {
+  if (unknown_encoding)
+    *unknown_encoding = false;
+  std::string hex_ssid;
+  properties.GetStringWithoutPathExpansion(shill::kWifiHexSsid, &hex_ssid);
 
   if (hex_ssid.empty()) {
-    if (name.empty())
-      return name;
-    // Validate name for UTF8.
-    std::string valid_ssid = ValidateUTF8(name);
-    if (valid_ssid != name) {
-      NET_LOG_DEBUG(
-          "GetNameFromProperties",
-          base::StringPrintf(
-              "%s: UTF8: %s", service_path.c_str(), valid_ssid.c_str()));
-    }
-    return valid_ssid;
+    NET_LOG_ERROR("GetSSIDFromProperties", "No HexSSID set.");
+    return std::string();
   }
 
   std::string ssid;
   std::vector<uint8> raw_ssid_bytes;
   if (base::HexStringToBytes(hex_ssid, &raw_ssid_bytes)) {
     ssid = std::string(raw_ssid_bytes.begin(), raw_ssid_bytes.end());
-    NET_LOG_DEBUG("GetNameFromProperties",
-                  base::StringPrintf("%s: %s, SSID: %s",
-                                     service_path.c_str(),
-                                     hex_ssid.c_str(),
-                                     ssid.c_str()));
+    NET_LOG_DEBUG(
+        "GetSSIDFromProperties",
+        base::StringPrintf("%s, SSID: %s", hex_ssid.c_str(), ssid.c_str()));
   } else {
-    NET_LOG_ERROR("GetNameFromProperties",
-                  base::StringPrintf("%s: Error processing: %s",
-                                     service_path.c_str(),
-                                     hex_ssid.c_str()));
-    return name;
+    NET_LOG_ERROR("GetSSIDFromProperties",
+                  base::StringPrintf("Error processing: %s", hex_ssid.c_str()));
+    return std::string();
   }
 
-  if (IsStringUTF8(ssid)) {
-    if (ssid != name) {
-      NET_LOG_DEBUG("GetNameFromProperties",
-                    base::StringPrintf(
-                        "%s: UTF8: %s", service_path.c_str(), ssid.c_str()));
-    }
+  if (IsStringUTF8(ssid))
     return ssid;
-  }
 
   // Detect encoding and convert to UTF-8.
-  std::string country_code;
-  properties.GetStringWithoutPathExpansion(flimflam::kCountryProperty,
-                                           &country_code);
   std::string encoding;
   if (!base::DetectEncoding(ssid, &encoding)) {
     // TODO(stevenjb): This is currently experimental. If we find a case where
     // base::DetectEncoding() fails, we need to figure out whether we can use
     // country_code with ConvertToUtf8(). crbug.com/233267.
-    encoding = country_code;
+    properties.GetStringWithoutPathExpansion(shill::kCountryProperty,
+                                             &encoding);
   }
-  if (!encoding.empty()) {
-    std::string utf8_ssid;
-    if (base::ConvertToUtf8AndNormalize(ssid, encoding, &utf8_ssid)) {
-      if (utf8_ssid != name) {
-        NET_LOG_DEBUG("GetNameFromProperties",
-                      base::StringPrintf("%s: Encoding=%s: %s",
-                                         service_path.c_str(),
-                                         encoding.c_str(),
-                                         utf8_ssid.c_str()));
-      }
-      return utf8_ssid;
+  std::string utf8_ssid;
+  if (!encoding.empty() &&
+      base::ConvertToUtf8AndNormalize(ssid, encoding, &utf8_ssid)) {
+    if (utf8_ssid != ssid) {
+      NET_LOG_DEBUG(
+          "GetSSIDFromProperties",
+          base::StringPrintf(
+              "Encoding=%s: %s", encoding.c_str(), utf8_ssid.c_str()));
     }
+    return utf8_ssid;
   }
 
-  // Unrecognized encoding. Only use raw bytes if name_ is empty.
-  NET_LOG_DEBUG("GetNameFromProperties",
-                base::StringPrintf("%s: Unrecognized Encoding=%s: %s",
-                                   service_path.c_str(),
-                                   encoding.c_str(),
-                                   ssid.c_str()));
-  if (name.empty() && !ssid.empty())
-    return ssid;
-  return name;
+  if (unknown_encoding)
+    *unknown_encoding = true;
+  NET_LOG_DEBUG(
+      "GetSSIDFromProperties",
+      base::StringPrintf("Unrecognized Encoding=%s", encoding.c_str()));
+  return ssid;
+}
+
+std::string GetNameFromProperties(const std::string& service_path,
+                                  const base::DictionaryValue& properties) {
+  std::string name;
+  properties.GetStringWithoutPathExpansion(shill::kNameProperty, &name);
+
+  std::string validated_name = ValidateUTF8(name);
+  if (validated_name != name) {
+    NET_LOG_DEBUG("GetNameFromProperties",
+                  base::StringPrintf("Validated name %s: UTF8: %s",
+                                     service_path.c_str(),
+                                     validated_name.c_str()));
+  }
+
+  std::string type;
+  properties.GetStringWithoutPathExpansion(shill::kTypeProperty, &type);
+  if (!NetworkTypePattern::WiFi().MatchesType(type))
+    return validated_name;
+
+  bool unknown_ssid_encoding = false;
+  std::string ssid = GetSSIDFromProperties(properties, &unknown_ssid_encoding);
+  if (ssid.empty())
+    NET_LOG_ERROR("GetNameFromProperties", "No SSID set: " + service_path);
+
+  // Use |validated_name| if |ssid| is empty.
+  // And if the encoding of the SSID is unknown, use |ssid|, which contains raw
+  // bytes in that case, only if |validated_name| is empty.
+  if (ssid.empty() || (unknown_ssid_encoding && !validated_name.empty()))
+    return validated_name;
+
+  if (ssid != validated_name) {
+    NET_LOG_DEBUG("GetNameFromProperties",
+                  base::StringPrintf("%s: SSID: %s, Name: %s",
+                                     service_path.c_str(),
+                                     ssid.c_str(),
+                                     validated_name.c_str()));
+  }
+  return ssid;
 }
 
 scoped_ptr<NetworkUIData> GetUIDataFromValue(const base::Value& ui_data_value) {
@@ -156,7 +175,7 @@ scoped_ptr<NetworkUIData> GetUIDataFromValue(const base::Value& ui_data_value) {
 scoped_ptr<NetworkUIData> GetUIDataFromProperties(
     const base::DictionaryValue& shill_dictionary) {
   const base::Value* ui_data_value = NULL;
-  shill_dictionary.GetWithoutPathExpansion(flimflam::kUIDataProperty,
+  shill_dictionary.GetWithoutPathExpansion(shill::kUIDataProperty,
                                            &ui_data_value);
   if (!ui_data_value) {
     VLOG(2) << "Dictionary has no UIData entry.";
@@ -174,7 +193,7 @@ void SetUIData(const NetworkUIData& ui_data,
   ui_data.FillDictionary(&ui_data_dict);
   std::string ui_data_blob;
   base::JSONWriter::Write(&ui_data_dict, &ui_data_blob);
-  shill_dictionary->SetStringWithoutPathExpansion(flimflam::kUIDataProperty,
+  shill_dictionary->SetStringWithoutPathExpansion(shill::kUIDataProperty,
                                                   ui_data_blob);
 }
 
@@ -183,46 +202,44 @@ bool CopyIdentifyingProperties(const base::DictionaryValue& service_properties,
   bool success = true;
 
   // GUID is optional.
-  CopyStringFromDictionary(service_properties, flimflam::kGuidProperty, dest);
+  CopyStringFromDictionary(service_properties, shill::kGuidProperty, dest);
 
   std::string type;
-  service_properties.GetStringWithoutPathExpansion(flimflam::kTypeProperty,
-                                                   &type);
+  service_properties.GetStringWithoutPathExpansion(shill::kTypeProperty, &type);
   success &= !type.empty();
-  dest->SetStringWithoutPathExpansion(flimflam::kTypeProperty, type);
-  if (type == flimflam::kTypeWifi) {
+  dest->SetStringWithoutPathExpansion(shill::kTypeProperty, type);
+  if (type == shill::kTypeWifi) {
     success &= CopyStringFromDictionary(
-        service_properties, flimflam::kSecurityProperty, dest);
+        service_properties, shill::kSecurityProperty, dest);
+    success &=
+        CopyStringFromDictionary(service_properties, shill::kWifiHexSsid, dest);
     success &= CopyStringFromDictionary(
-        service_properties, flimflam::kSSIDProperty, dest);
+        service_properties, shill::kModeProperty, dest);
+  } else if (type == shill::kTypeVPN) {
     success &= CopyStringFromDictionary(
-        service_properties, flimflam::kModeProperty, dest);
-  } else if (type == flimflam::kTypeVPN) {
-    success &= CopyStringFromDictionary(
-        service_properties, flimflam::kNameProperty, dest);
+        service_properties, shill::kNameProperty, dest);
     // VPN Provider values are read from the "Provider" dictionary, but written
     // with the keys "Provider.Type" and "Provider.Host".
     const base::DictionaryValue* provider_properties = NULL;
     if (!service_properties.GetDictionaryWithoutPathExpansion(
-             flimflam::kProviderProperty, &provider_properties)) {
+             shill::kProviderProperty, &provider_properties)) {
       NET_LOG_ERROR("CopyIdentifyingProperties", "Missing VPN provider dict");
       return false;
     }
     std::string vpn_provider_type;
-    provider_properties->GetStringWithoutPathExpansion(flimflam::kTypeProperty,
+    provider_properties->GetStringWithoutPathExpansion(shill::kTypeProperty,
                                                        &vpn_provider_type);
     success &= !vpn_provider_type.empty();
-    dest->SetStringWithoutPathExpansion(flimflam::kProviderTypeProperty,
+    dest->SetStringWithoutPathExpansion(shill::kProviderTypeProperty,
                                         vpn_provider_type);
 
     std::string vpn_provider_host;
-    provider_properties->GetStringWithoutPathExpansion(flimflam::kHostProperty,
+    provider_properties->GetStringWithoutPathExpansion(shill::kHostProperty,
                                                        &vpn_provider_host);
     success &= !vpn_provider_host.empty();
-    dest->SetStringWithoutPathExpansion(flimflam::kProviderHostProperty,
+    dest->SetStringWithoutPathExpansion(shill::kProviderHostProperty,
                                         vpn_provider_host);
-  } else if (type == flimflam::kTypeEthernet ||
-             type == shill::kTypeEthernetEap) {
+  } else if (type == shill::kTypeEthernet || type == shill::kTypeEthernetEap) {
     // Ethernet and EthernetEAP don't have any additional identifying
     // properties.
   } else {
@@ -258,12 +275,12 @@ struct ShillToBitFlagEntry {
   const char* shill_network_type;
   NetworkTypeBitFlag bit_flag;
 } shill_type_to_flag[] = {
-  { flimflam::kTypeEthernet, kNetworkTypeEthernet },
+  { shill::kTypeEthernet, kNetworkTypeEthernet },
   { shill::kTypeEthernetEap, kNetworkTypeEthernetEap },
-  { flimflam::kTypeWifi, kNetworkTypeWifi },
-  { flimflam::kTypeWimax, kNetworkTypeWimax },
-  { flimflam::kTypeCellular, kNetworkTypeCellular },
-  { flimflam::kTypeVPN, kNetworkTypeVPN }
+  { shill::kTypeWifi, kNetworkTypeWifi },
+  { shill::kTypeWimax, kNetworkTypeWimax },
+  { shill::kTypeCellular, kNetworkTypeCellular },
+  { shill::kTypeVPN, kNetworkTypeVPN }
 };
 
 NetworkTypeBitFlag ShillNetworkTypeToFlag(const std::string& shill_type) {

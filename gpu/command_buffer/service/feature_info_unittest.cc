@@ -116,6 +116,7 @@ TEST_F(FeatureInfoTest, Basic) {
   EXPECT_FALSE(info_->feature_flags().native_vertex_array_object);
   EXPECT_FALSE(info_->feature_flags().map_buffer_range);
   EXPECT_FALSE(info_->feature_flags().use_async_readpixels);
+  EXPECT_FALSE(info_->feature_flags().ext_discard_framebuffer);
 
 #define GPU_OP(type, name) EXPECT_FALSE(info_->workarounds().name);
   GPU_DRIVER_BUG_WORKAROUNDS(GPU_OP)
@@ -341,6 +342,8 @@ TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888GLES2) {
       GL_BGRA_EXT));
   EXPECT_TRUE(info_->GetTextureFormatValidator(GL_BGRA_EXT).IsValid(
       GL_UNSIGNED_BYTE));
+  EXPECT_FALSE(info_->validators()->render_buffer_format.IsValid(
+      GL_BGRA8_EXT));
 }
 
 TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888GL) {
@@ -349,6 +352,8 @@ TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888GL) {
               HasSubstr("GL_EXT_texture_format_BGRA8888"));
   EXPECT_THAT(info_->extensions(),
               HasSubstr("GL_EXT_read_format_bgra"));
+  EXPECT_THAT(info_->extensions(),
+              HasSubstr("GL_CHROMIUM_renderbuffer_format_BGRA8888"));
   EXPECT_TRUE(info_->validators()->texture_format.IsValid(
       GL_BGRA_EXT));
   EXPECT_TRUE(info_->validators()->texture_internal_format.IsValid(
@@ -357,6 +362,8 @@ TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888GL) {
       GL_BGRA_EXT));
   EXPECT_TRUE(info_->GetTextureFormatValidator(GL_BGRA_EXT).IsValid(
       GL_UNSIGNED_BYTE));
+  EXPECT_TRUE(info_->validators()->render_buffer_format.IsValid(
+      GL_BGRA8_EXT));
 }
 
 TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888Apple) {
@@ -369,6 +376,8 @@ TEST_F(FeatureInfoTest, InitializeEXT_texture_format_BGRA8888Apple) {
       GL_BGRA_EXT));
   EXPECT_TRUE(info_->GetTextureFormatValidator(GL_BGRA_EXT).IsValid(
       GL_UNSIGNED_BYTE));
+  EXPECT_FALSE(info_->validators()->render_buffer_format.IsValid(
+      GL_BGRA8_EXT));
 }
 
 TEST_F(FeatureInfoTest, InitializeEXT_read_format_bgra) {
@@ -381,6 +390,8 @@ TEST_F(FeatureInfoTest, InitializeEXT_read_format_bgra) {
       GL_BGRA_EXT));
   EXPECT_TRUE(info_->validators()->read_pixel_format.IsValid(
       GL_BGRA_EXT));
+  EXPECT_FALSE(info_->validators()->render_buffer_format.IsValid(
+      GL_BGRA8_EXT));
 }
 
 TEST_F(FeatureInfoTest, InitializeOES_texture_floatGLES2) {
@@ -840,6 +851,12 @@ TEST_F(FeatureInfoTest, InitializeEXT_frag_depth) {
   EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_frag_depth"));
 }
 
+TEST_F(FeatureInfoTest, InitializeEXT_discard_framebuffer) {
+  SetupInitExpectations("GL_EXT_discard_framebuffer");
+  EXPECT_TRUE(info_->feature_flags().ext_discard_framebuffer);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_discard_framebuffer"));
+}
+
 TEST_F(FeatureInfoTest, InitializeSamplersWithARBSamplerObjects) {
   SetupInitExpectationsWithGLVersion("GL_ARB_sampler_objects", "OpenGL 3.0");
   EXPECT_TRUE(info_->feature_flags().enable_samplers);
@@ -849,6 +866,8 @@ TEST_F(FeatureInfoTest, InitializeWithES3) {
   SetupInitExpectationsWithGLVersion("", "OpenGL ES 3.0");
   EXPECT_TRUE(info_->feature_flags().enable_samplers);
   EXPECT_TRUE(info_->feature_flags().map_buffer_range);
+  EXPECT_TRUE(info_->feature_flags().ext_discard_framebuffer);
+  EXPECT_THAT(info_->extensions(), HasSubstr("GL_EXT_discard_framebuffer"));
   EXPECT_FALSE(info_->feature_flags().use_async_readpixels);
 }
 

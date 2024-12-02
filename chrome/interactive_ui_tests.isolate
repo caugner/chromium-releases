@@ -8,8 +8,6 @@
         'command': [
           '../testing/xvfb.py',
           '<(PRODUCT_DIR)',
-          '../tools/swarm_client/googletest/run_test_cases.py',
-          '-j1',
           '<(PRODUCT_DIR)/interactive_ui_tests<(EXECUTABLE_SUFFIX)',
         ],
         'isolate_dependency_tracked': [
@@ -38,7 +36,7 @@
           '../third_party/pyftpdlib/',
           '../third_party/pywebsocket/src/mod_pywebsocket/',
           '../third_party/tlslite/tlslite/',
-          '../tools/swarm_client/',
+          '../tools/swarming_client/',
           'test/data/',
         ],
       },
@@ -67,8 +65,6 @@
       'variables': {
         'command': [
           '../testing/test_env.py',
-          '../tools/swarm_client/googletest/run_test_cases.py',
-          '-j1',
           '<(PRODUCT_DIR)/interactive_ui_tests<(EXECUTABLE_SUFFIX)',
         ],
       },
@@ -87,6 +83,7 @@
         ],
         'isolate_dependency_untracked': [
           '../third_party/python_26/',
+          '<(PRODUCT_DIR)/plugins/npapi_test_plugin.dll',
         ],
       },
     }],

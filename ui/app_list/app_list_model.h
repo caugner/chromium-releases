@@ -13,18 +13,20 @@
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "ui/app_list/app_list_export.h"
+#include "ui/app_list/app_list_item_list.h"
 #include "ui/base/models/list_model.h"
 
 namespace app_list {
 
+class AppListItemList;
 class AppListItemModel;
 class AppListModelObserver;
 class SearchBoxModel;
 class SearchResult;
 
-// Master model of app list that consists of three sub models: Apps,
-// SearchBoxModel and SearchResults. The Apps sub model owns a list of
-// AppListItemModel and is displayed in the grid view. SearchBoxModel is
+// Master model of app list that consists of three sub models: AppListItemList,
+// SearchBoxModel and SearchResults. The AppListItemList sub model owns a list
+// of AppListItemModel and is displayed in the grid view. SearchBoxModel is
 // the model for SearchBoxView. SearchResults owns a list of SearchResult.
 class APP_LIST_EXPORT AppListModel {
  public:
@@ -51,7 +53,6 @@ class APP_LIST_EXPORT AppListModel {
     STATUS_SYNCING,  // Syncing apps or installing synced apps.
   };
 
-  typedef ui::ListModel<AppListItemModel> Apps;
   typedef ui::ListModel<SearchResult> SearchResults;
   typedef std::vector<User> Users;
 
@@ -65,7 +66,7 @@ class APP_LIST_EXPORT AppListModel {
   void SetUsers(const Users& profile_menu_items);
   void SetSignedIn(bool signed_in);
 
-  Apps* apps() { return apps_.get(); }
+  AppListItemList* item_list() { return item_list_.get(); }
   SearchBoxModel* search_box() { return search_box_.get(); }
   SearchResults* results() { return results_.get(); }
   Status status() const { return status_; }
@@ -76,8 +77,7 @@ class APP_LIST_EXPORT AppListModel {
   }
 
  private:
-  scoped_ptr<Apps> apps_;
-
+  scoped_ptr<AppListItemList> item_list_;
   scoped_ptr<SearchBoxModel> search_box_;
   scoped_ptr<SearchResults> results_;
 

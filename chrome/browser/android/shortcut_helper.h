@@ -36,12 +36,20 @@ class GURL;
 //    the shortcut.
 class ShortcutBuilder : public content::WebContentsObserver {
  public:
+  enum ShortcutType {
+    APP_SHORTCUT,
+    APP_SHORTCUT_APPLE,
+    BOOKMARK
+  };
+
   explicit ShortcutBuilder(content::WebContents* web_contents,
-                           const string16& title);
+                           const string16& title,
+                           int launcher_large_icon_size);
   virtual ~ShortcutBuilder() {}
 
   void OnDidRetrieveWebappInformation(bool success,
-                                      bool is_webapp_capable,
+                                      bool is_mobile_webapp_capable,
+                                      bool is_apple_mobile_webapp_capable,
                                       const GURL& expected_url);
 
   void FinishAddingShortcut(const chrome::FaviconBitmapResult& bitmap_result);
@@ -56,7 +64,8 @@ class ShortcutBuilder : public content::WebContentsObserver {
 
   GURL url_;
   string16 title_;
-  bool is_webapp_capable_;
+  int launcher_large_icon_size_;
+  ShortcutType shortcut_type_;
   CancelableTaskTracker cancelable_task_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ShortcutBuilder);
@@ -67,13 +76,14 @@ class ShortcutHelper {
   // Adds a shortcut to the current URL to the Android home screen, firing
   // background tasks to pull all the data required.
   static void AddShortcut(content::WebContents* web_contents,
-                          const string16& title);
+                          const string16& title,
+                          int launcher_larger_icon_size);
 
   // Adds a shortcut to the launcher.  Must be called from a WorkerPool task.
   static void AddShortcutInBackground(
       const GURL& url,
       const base::string16& title,
-      bool is_webapp_capable,
+      ShortcutBuilder::ShortcutType shortcut_type,
       const chrome::FaviconBitmapResult& bitmap_result);
 
   // Registers JNI hooks.

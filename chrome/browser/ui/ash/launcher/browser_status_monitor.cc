@@ -6,6 +6,7 @@
 
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
+#include "base/stl_util.h"
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/browser.h"
@@ -15,11 +16,36 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/screen.h"
+
+BrowserStatusMonitor::LocalWebContentsObserver::LocalWebContentsObserver(
+    content::WebContents* contents,
+    BrowserStatusMonitor* monitor)
+    : content::WebContentsObserver(contents),
+      monitor_(monitor) {
+}
+
+BrowserStatusMonitor::LocalWebContentsObserver::~LocalWebContentsObserver() {
+}
+
+void BrowserStatusMonitor::LocalWebContentsObserver::DidNavigateMainFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  ChromeLauncherController::AppState state =
+      ChromeLauncherController::APP_STATE_INACTIVE;
+  if (browser->window()->IsActive() &&
+      browser->tab_strip_model()->GetActiveWebContents() == web_contents())
+    state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
+  else if (browser->window()->IsActive())
+    state = ChromeLauncherController::APP_STATE_ACTIVE;
+
+  monitor_->UpdateAppItemState(web_contents(), state);
+  monitor_->UpdateBrowserItemState();
+}
 
 BrowserStatusMonitor::BrowserStatusMonitor(
     ChromeLauncherController* launcher_controller)
@@ -62,21 +88,58 @@ BrowserStatusMonitor::~BrowserStatusMonitor() {
        i != browser_list->end(); ++i) {
     OnBrowserRemoved(*i);
   }
+
+  STLDeleteContainerPairSecondPointers(webcontents_to_observer_map_.begin(),
+                                       webcontents_to_observer_map_.end());
+}
+
+void BrowserStatusMonitor::UpdateAppItemState(
+    content::WebContents* contents,
+    ChromeLauncherController::AppState app_state) {
+  DCHECK(contents);
+  // It is possible to come here from Browser::SwapTabContent where the contents
+  // cannot be associated with a browser.
+  Browser* browser = chrome::FindBrowserWithWebContents(contents);
+  if (browser && launcher_controller_->IsBrowserFromActiveUser(browser))
+    launcher_controller_->UpdateAppState(contents, app_state);
+}
+
+void BrowserStatusMonitor::UpdateBrowserItemState() {
+  launcher_controller_->GetBrowserShortcutLauncherItemController()->
+      UpdateBrowserItemState();
 }
 
 void BrowserStatusMonitor::OnWindowActivated(aura::Window* gained_active,
                                              aura::Window* lost_active) {
-  Browser* browser = chrome::FindBrowserWithWindow(lost_active);
-  if (browser) {
-    UpdateAppAndBrowserState(
-        browser->tab_strip_model()->GetActiveWebContents());
+  Browser* browser = NULL;
+  content::WebContents* contents_from_gained = NULL;
+  content::WebContents* contents_from_lost = NULL;
+  // Update active webcontents's app item state of |lost_active|, if existed.
+  if (lost_active) {
+    browser = chrome::FindBrowserWithWindow(lost_active);
+    if (browser)
+      contents_from_lost = browser->tab_strip_model()->GetActiveWebContents();
+    if (contents_from_lost) {
+      UpdateAppItemState(
+          contents_from_lost,
+          ChromeLauncherController::APP_STATE_INACTIVE);
+    }
   }
 
-  browser = chrome::FindBrowserWithWindow(gained_active);
-  if (browser) {
-    UpdateAppAndBrowserState(
-        browser->tab_strip_model()->GetActiveWebContents());
+  // Update active webcontents's app item state of |gained_active|, if existed.
+  if (gained_active) {
+    browser = chrome::FindBrowserWithWindow(gained_active);
+    if (browser)
+      contents_from_gained = browser->tab_strip_model()->GetActiveWebContents();
+    if (contents_from_gained) {
+      UpdateAppItemState(
+          contents_from_gained,
+          ChromeLauncherController::APP_STATE_WINDOW_ACTIVE);
+    }
   }
+
+  if (contents_from_lost || contents_from_gained)
+    UpdateBrowserItemState();
 }
 
 void BrowserStatusMonitor::OnWindowDestroyed(aura::Window* window) {
@@ -90,15 +153,13 @@ void BrowserStatusMonitor::OnBrowserAdded(Browser* browser) {
   if (browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
     return;
 
-  browser->tab_strip_model()->AddObserver(this);
-
   if (browser->is_type_popup() && browser->is_app()) {
-    std::string app_id =
-        web_app::GetExtensionIdFromApplicationName(browser->app_name());
-    if (!app_id.empty()) {
-      browser_to_app_id_map_[browser] = app_id;
-      launcher_controller_->LockV1AppWithID(app_id);
-    }
+    // Note: A V1 application will set the tab strip observer when the app gets
+    // added to the shelf. This makes sure that in the multi user case we will
+    // only set the observer while the app item exists in the shelf.
+    AddV1AppToShelf(browser);
+  } else {
+    browser->tab_strip_model()->AddObserver(this);
   }
 }
 
@@ -106,12 +167,11 @@ void BrowserStatusMonitor::OnBrowserRemoved(Browser* browser) {
   if (browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
     return;
 
-  browser->tab_strip_model()->RemoveObserver(this);
+  if (browser->is_type_popup() && browser->is_app())
+    RemoveV1AppFromShelf(browser);
+  else
+    browser->tab_strip_model()->RemoveObserver(this);
 
-  if (browser_to_app_id_map_.find(browser) != browser_to_app_id_map_.end()) {
-    launcher_controller_->UnlockV1AppWithID(browser_to_app_id_map_[browser]);
-    browser_to_app_id_map_.erase(browser);
-  }
   UpdateBrowserItemState();
 }
 
@@ -122,7 +182,7 @@ void BrowserStatusMonitor::OnDisplayBoundsChanged(
 
 void BrowserStatusMonitor::OnDisplayAdded(const gfx::Display& new_display) {
   // Add a new RootWindow and its ActivationClient to observed list.
-  aura::RootWindow* root_window = ash::Shell::GetInstance()->
+  aura::Window* root_window = ash::Shell::GetInstance()->
       display_controller()->GetRootWindowForDisplayId(new_display.id());
   // When the primary root window's display get removed, the existing root
   // window is taken over by the new display and the observer is already set.
@@ -145,77 +205,113 @@ void BrowserStatusMonitor::ActiveTabChanged(content::WebContents* old_contents,
                                             int index,
                                             int reason) {
   Browser* browser = NULL;
-  if (old_contents)
-    browser = chrome::FindBrowserWithWebContents(old_contents);
+  // Use |new_contents|. |old_contents| could be NULL.
+  DCHECK(new_contents);
+  browser = chrome::FindBrowserWithWebContents(new_contents);
 
   if (browser && browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
     return;
 
+  ChromeLauncherController::AppState state =
+      ChromeLauncherController::APP_STATE_INACTIVE;
+
   // Update immediately on a tab change.
-  if (browser &&
+  if (old_contents &&
       (TabStripModel::kNoTab !=
-           browser->tab_strip_model()->GetIndexOfWebContents(old_contents))) {
-    launcher_controller_->UpdateAppState(
-        old_contents,
-        ChromeLauncherController::APP_STATE_INACTIVE);
+           browser->tab_strip_model()->GetIndexOfWebContents(old_contents)))
+    UpdateAppItemState(old_contents, state);
+
+  if (new_contents) {
+    state = browser->window()->IsActive() ?
+        ChromeLauncherController::APP_STATE_WINDOW_ACTIVE :
+        ChromeLauncherController::APP_STATE_ACTIVE;
+    UpdateAppItemState(new_contents, state);
+    UpdateBrowserItemState();
   }
-
-  UpdateAppAndBrowserState(new_contents);
-}
-
-void BrowserStatusMonitor::TabInsertedAt(content::WebContents* contents,
-                                         int index,
-                                         bool foreground) {
-  UpdateAppAndBrowserState(contents);
-}
-
-void BrowserStatusMonitor::TabDetachedAt(content::WebContents* contents,
-                                         int index) {
-  launcher_controller_->UpdateAppState(
-      contents, ChromeLauncherController::APP_STATE_REMOVED);
-  UpdateBrowserItemState();
-}
-
-void BrowserStatusMonitor::TabChangedAt(
-    content::WebContents* contents,
-    int index,
-    TabStripModelObserver::TabChangeType change_type) {
-  UpdateAppAndBrowserState(contents);
 }
 
 void BrowserStatusMonitor::TabReplacedAt(TabStripModel* tab_strip_model,
                                          content::WebContents* old_contents,
                                          content::WebContents* new_contents,
                                          int index) {
-  launcher_controller_->UpdateAppState(
-      old_contents,
-      ChromeLauncherController::APP_STATE_REMOVED);
-  UpdateAppAndBrowserState(new_contents);
+  DCHECK(old_contents && new_contents);
+  Browser* browser = chrome::FindBrowserWithWebContents(new_contents);
+
+  if (browser && browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
+    return;
+
+  UpdateAppItemState(old_contents,
+                     ChromeLauncherController::APP_STATE_REMOVED);
+  RemoveWebContentsObserver(old_contents);
+
+  ChromeLauncherController::AppState state =
+      ChromeLauncherController::APP_STATE_ACTIVE;
+  if (browser->window()->IsActive() &&
+      (tab_strip_model->GetActiveWebContents() == new_contents))
+    state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
+  UpdateAppItemState(new_contents, state);
+  AddWebContentsObserver(new_contents);
 }
 
-void BrowserStatusMonitor::UpdateAppAndBrowserState(
-    content::WebContents* contents) {
-  if (contents) {
-    ChromeLauncherController::AppState app_state =
-        ChromeLauncherController::APP_STATE_INACTIVE;
+void BrowserStatusMonitor::TabInsertedAt(content::WebContents* contents,
+                                         int index,
+                                         bool foreground) {
+  // An inserted tab is not active - ActiveTabChanged() will be called to
+  // activate. We initialize therefore with |APP_STATE_INACTIVE|.
+  UpdateAppItemState(contents,
+                     ChromeLauncherController::APP_STATE_INACTIVE);
+  AddWebContentsObserver(contents);
+}
 
-    Browser* browser = chrome::FindBrowserWithWebContents(contents);
-    DCHECK(browser);
-    if (browser->host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH)
-      return;
-    if (browser->tab_strip_model()->GetActiveWebContents() == contents) {
-      if (browser->window()->IsActive())
-        app_state = ChromeLauncherController::APP_STATE_WINDOW_ACTIVE;
-      else
-        app_state = ChromeLauncherController::APP_STATE_ACTIVE;
-    }
+void BrowserStatusMonitor::TabClosingAt(TabStripModel* tab_strip_mode,
+                                        content::WebContents* contents,
+                                        int index) {
+  UpdateAppItemState(contents,
+                     ChromeLauncherController::APP_STATE_REMOVED);
+  RemoveWebContentsObserver(contents);
+}
 
-    launcher_controller_->UpdateAppState(contents, app_state);
+void BrowserStatusMonitor::AddV1AppToShelf(Browser* browser) {
+  DCHECK(browser->is_type_popup() && browser->is_app());
+
+  browser->tab_strip_model()->AddObserver(this);
+
+  std::string app_id =
+      web_app::GetExtensionIdFromApplicationName(browser->app_name());
+  if (!app_id.empty()) {
+    browser_to_app_id_map_[browser] = app_id;
+    launcher_controller_->LockV1AppWithID(app_id);
   }
-  UpdateBrowserItemState();
 }
 
-void BrowserStatusMonitor::UpdateBrowserItemState() {
-  launcher_controller_->GetBrowserShortcutLauncherItemController()->
-      UpdateBrowserItemState();
+void BrowserStatusMonitor::RemoveV1AppFromShelf(Browser* browser) {
+  DCHECK(browser->is_type_popup() && browser->is_app());
+
+  browser->tab_strip_model()->RemoveObserver(this);
+
+  if (browser_to_app_id_map_.find(browser) != browser_to_app_id_map_.end()) {
+    launcher_controller_->UnlockV1AppWithID(browser_to_app_id_map_[browser]);
+    browser_to_app_id_map_.erase(browser);
+  }
+}
+
+bool BrowserStatusMonitor::IsV1AppInShelf(Browser* browser) {
+  return browser_to_app_id_map_.find(browser) != browser_to_app_id_map_.end();
+}
+
+void BrowserStatusMonitor::AddWebContentsObserver(
+    content::WebContents* contents) {
+  if (webcontents_to_observer_map_.find(contents) ==
+          webcontents_to_observer_map_.end()) {
+    webcontents_to_observer_map_[contents] =
+        new LocalWebContentsObserver(contents, this);
+  }
+}
+
+void BrowserStatusMonitor::RemoveWebContentsObserver(
+    content::WebContents* contents) {
+  DCHECK(webcontents_to_observer_map_.find(contents) !=
+      webcontents_to_observer_map_.end());
+  delete webcontents_to_observer_map_[contents];
+  webcontents_to_observer_map_.erase(contents);
 }

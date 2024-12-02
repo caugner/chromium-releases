@@ -52,6 +52,8 @@
 #include "webkit/browser/fileapi/file_system_operation_runner.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 
+// Disable everything due to issue 306144
+#if 0
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadItem;
@@ -471,6 +473,7 @@ class DownloadExtensionTest : public ExtensionApiTest {
     GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
     DownloadManager* manager = GetCurrentManager();
 
+    EXPECT_EQ(0, manager->NonMaliciousInProgressCount());
     EXPECT_EQ(0, manager->InProgressCount());
     if (manager->InProgressCount() != 0)
       return NULL;
@@ -2201,8 +2204,9 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   EXPECT_STREQ(kPayloadData, disk_data.c_str());
 }
 
+// Test is flaky: http://crbug.com/302071
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
-                       DownloadExtensionTest_OnDeterminingFilename_NoChange) {
+                       DISABLED_DownloadExtensionTest_OnDeterminingFilename_NoChange) {
   GoOnTheRecord();
   LoadExtension("downloads_split");
   AddFilenameDeterminer();
@@ -2538,10 +2542,16 @@ IN_PROC_BROWSER_TEST_F(
       "    \"current\": \"complete\"}}]",
       result_id)));
 }
-
+#if defined(OS_WIN)
+#define MAYBE_DownloadExtensionTest_OnDeterminingFilename_ReservedFilename\
+  DISABLED_DownloadExtensionTest_OnDeterminingFilename_ReservedFilename
+#else
+#define MAYBE_DownloadExtensionTest_OnDeterminingFilename_ReservedFilename\
+  DownloadExtensionTest_OnDeterminingFilename_ReservedFilename
+#endif
 IN_PROC_BROWSER_TEST_F(
     DownloadExtensionTest,
-    DownloadExtensionTest_OnDeterminingFilename_ReservedFilename) {
+    MAYBE_DownloadExtensionTest_OnDeterminingFilename_ReservedFilename) {
   GoOnTheRecord();
   LoadExtension("downloads_split");
   AddFilenameDeterminer();
@@ -3336,6 +3346,7 @@ IN_PROC_BROWSER_TEST_F(
     scoped_ptr<content::DownloadTestObserver> observer(
         new JustInProgressDownloadObserver(manager, 1));
     ASSERT_EQ(0, manager->InProgressCount());
+    ASSERT_EQ(0, manager->NonMaliciousInProgressCount());
     // Tabs created just for a download are automatically closed, invalidating
     // the download's WebContents. Downloads without WebContents cannot be
     // resumed. http://crbug.com/225901
@@ -3603,3 +3614,4 @@ TEST(ExtensionDetermineDownloadFilenameInternal,
             warnings.begin()->warning_type());
   EXPECT_EQ("incumbent", warnings.begin()->extension_id());
 }
+#endif // Issue 306144

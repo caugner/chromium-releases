@@ -51,6 +51,7 @@ class ScriptBubbleIconView;
 class SelectedKeywordView;
 class StarView;
 class TemplateURLService;
+class TranslateIconView;
 class ZoomView;
 
 namespace views {
@@ -118,11 +119,6 @@ class LocationBarView : public LocationBar,
                                      const GURL& url,
                                      const content::SSLStatus& ssl) = 0;
 
-    // Called by the location bar view when the user starts typing in the edit.
-    // This forces our security style to be UNKNOWN for the duration of the
-    // editing.
-    virtual void OnInputInProgress(bool in_progress) = 0;
-
    protected:
     virtual ~Delegate() {}
   };
@@ -161,11 +157,6 @@ class LocationBarView : public LocationBar,
   SkColor GetColor(ToolbarModel::SecurityLevel security_level,
                    ColorKind kind) const;
 
-  // Updates the location bar.  We also reset the bar's permanent text and
-  // security style, and, if |contents| is non-NULL, also restore saved state
-  // that the tab holds.
-  void Update(const content::WebContents* contents);
-
   // Returns corresponding profile.
   Profile* profile() const { return profile_; }
 
@@ -194,6 +185,10 @@ class LocationBarView : public LocationBar,
 
   // Returns the star view. It may not be visible.
   StarView* star_view() { return star_view_; }
+
+  TranslateIconView* translate_icon_view() {
+    return translate_icon_view_;
+  }
 
   // Shows the bookmark prompt.
   void ShowBookmarkPrompt();
@@ -257,17 +252,9 @@ class LocationBarView : public LocationBar,
   views::View* generated_credit_card_view();
 
   // OmniboxEditController:
-  virtual void OnAutocompleteAccept(const GURL& url,
-                                    WindowOpenDisposition disposition,
-                                    content::PageTransition transition,
-                                    const GURL& alternate_nav_url) OVERRIDE;
+  virtual void Update(const content::WebContents* contents) OVERRIDE;
   virtual void OnChanged() OVERRIDE;
-  virtual void OnSelectionBoundsChanged() OVERRIDE;
-  virtual void OnInputInProgress(bool in_progress) OVERRIDE;
-  virtual void OnKillFocus() OVERRIDE;
   virtual void OnSetFocus() OVERRIDE;
-  virtual gfx::Image GetFavicon() const OVERRIDE;
-  virtual string16 GetTitle() const OVERRIDE;
   virtual InstantController* GetInstant() OVERRIDE;
   virtual content::WebContents* GetWebContents() OVERRIDE;
   virtual ToolbarModel* GetToolbarModel() OVERRIDE;
@@ -297,7 +284,7 @@ class LocationBarView : public LocationBar,
 
   // LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual string16 GetInputString() const OVERRIDE;
+  virtual GURL GetDestinationURL() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual content::PageTransition GetPageTransition() const OVERRIDE;
   virtual void AcceptInput() OVERRIDE;
@@ -397,22 +384,28 @@ class LocationBarView : public LocationBar,
   // after UpdateContentSettingViewsPreLayout() and a subsequent Layout().
   void UpdateContentSettingViewsPostLayout();
 
-  // Delete all page action views that we have created.
+  // Deletes all page action views that we have created.
   void DeletePageActionViews();
 
-  // Update the views for the Page Actions, to reflect state changes for
+  // Updates the views for the Page Actions, to reflect state changes for
   // PageActions.
   void RefreshPageActionViews();
 
   // Returns the number of scripts currently running on the page.
   size_t ScriptBubbleScriptsRunning();
 
-  // Update the Script Bubble Icon, to reflect the number of content scripts
+  // Updates the Script Bubble Icon, to reflect the number of content scripts
   // running on the page.
   void RefreshScriptBubble();
 
-  // Update the view for the zoom icon based on the current tab's zoom.
+  // Updates the view for the zoom icon based on the current tab's zoom.
   void RefreshZoomView();
+
+  // Updates the Translate icon based on the current tab's Translate status.
+  void RefreshTranslateIcon();
+
+  // Sets the visibility of view to new_vis.
+  void ToggleVisibility(bool new_vis, views::View* view);
 
 #if !defined(USE_AURA)
   // Helper for the Mouse event handlers that does all the real work.
@@ -425,7 +418,7 @@ class LocationBarView : public LocationBar,
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal();
 
-  // Draw backgrounds and borders for page actions.  Must be called
+  // Draws backgrounds and borders for page actions.  Must be called
   // after layout, so the |page_action_views_| have their bounds.
   void PaintPageActionBackgrounds(gfx::Canvas* canvas);
 
@@ -445,21 +438,8 @@ class LocationBarView : public LocationBar,
   // The profile which corresponds to this View.
   Profile* profile_;
 
-  // Command updater which corresponds to this View.
-  CommandUpdater* command_updater_;
-
   // Our delegate.
   Delegate* delegate_;
-
-  // This is the string of text from the autocompletion session that the user
-  // entered or selected.
-  string16 location_input_;
-
-  // The user's desired disposition for how their input should be opened
-  WindowOpenDisposition disposition_;
-
-  // The transition type to use for the navigation
-  content::PageTransition transition_;
 
   // An object used to paint the normal-mode background.
   scoped_ptr<views::Painter> background_border_painter_;
@@ -523,7 +503,11 @@ class LocationBarView : public LocationBar,
   // The star.
   StarView* star_view_;
 
-  // Whether we're in popup mode.
+  // The icon for Translate.
+  TranslateIconView* translate_icon_view_;
+
+  // Whether we're in popup mode. This value also controls whether the location
+  // bar is read-only.
   const bool is_popup_mode_;
 
   // True if we should show a focus rect while the location entry field is

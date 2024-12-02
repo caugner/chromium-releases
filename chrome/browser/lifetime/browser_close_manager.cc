@@ -5,17 +5,18 @@
 #include "chrome/browser/lifetime/browser_close_manager.h"
 
 #include "base/command_line.h"
+#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/web_contents.h"
@@ -30,8 +31,10 @@ void BrowserCloseManager::StartClosingBrowsers() {
   // wait for beforeunload dialogs; in the latter, the windows will manage
   // showing their own dialogs.
   if (browser_shutdown::GetShutdownType() == browser_shutdown::END_SESSION ||
-      !CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableBatchedShutdown)) {
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableBatchedShutdown)) {
+    // Tell everyone that we are shutting down.
+    browser_shutdown::SetTryingToQuit(true);
     CloseBrowsers();
     return;
   }
@@ -74,7 +77,7 @@ void BrowserCloseManager::OnBrowserReportCloseable(bool proceed) {
 }
 
 void BrowserCloseManager::CheckForDownloadsInProgress() {
-  int download_count = DownloadService::DownloadCountAllProfiles();
+  int download_count = DownloadService::NonMaliciousDownloadCountAllProfiles();
   if (download_count == 0) {
     CloseBrowsers();
     return;
@@ -113,24 +116,26 @@ void BrowserCloseManager::OnReportDownloadsCancellable(bool proceed) {
        ++it) {
     DownloadService* download_service =
         DownloadServiceFactory::GetForBrowserContext(*it);
-    if (download_service->DownloadCount() > 0) {
-      Browser* browser =
-          chrome::FindOrCreateTabbedBrowser(*it, chrome::GetActiveDesktop());
-      DCHECK(browser);
-      chrome::ShowDownloads(browser);
+    if (download_service->NonMaliciousDownloadCount() > 0) {
+      chrome::ScopedTabbedBrowserDisplayer displayer(
+          *it, chrome::GetActiveDesktop());
+      chrome::ShowDownloads(displayer.browser());
     }
   }
 }
 
 void BrowserCloseManager::CloseBrowsers() {
-  // Tell everyone that we are shutting down.
-  browser_shutdown::SetTryingToQuit(true);
-
 #if defined(ENABLE_SESSION_SERVICE)
   // Before we close the browsers shutdown all session services. That way an
   // exit can restore all browsers open before exiting.
   ProfileManager::ShutdownSessionServices();
 #endif
+  if (!browser_shutdown::IsTryingToQuit()) {
+    BackgroundModeManager* background_mode_manager =
+        g_browser_process->background_mode_manager();
+    if (background_mode_manager)
+      background_mode_manager->SuspendBackgroundMode();
+  }
 
   bool session_ending =
       browser_shutdown::GetShutdownType() == browser_shutdown::END_SESSION;

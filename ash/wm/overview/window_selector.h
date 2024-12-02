@@ -30,6 +30,7 @@ namespace internal {
 class WindowSelectorTest;
 }
 
+class ScopedShowWindow;
 class WindowOverview;
 class WindowSelectorDelegate;
 class WindowSelectorItem;
@@ -73,7 +74,10 @@ class ASH_EXPORT WindowSelector
 
   // aura::WindowObserver:
   virtual void OnWindowAdded(aura::Window* new_window) OVERRIDE;
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
+  virtual void OnWindowBoundsChanged(aura::Window* window,
+                                     const gfx::Rect& old_bounds,
+                                     const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
 
   // Overridden from aura::client::ActivationChangeObserver:
   virtual void OnWindowActivated(aura::Window* gained_active,
@@ -87,9 +91,6 @@ class ASH_EXPORT WindowSelector
 
   // Begins positioning windows such that all windows are visible on the screen.
   void StartOverview();
-
-  // Stores the currently focused window and removes focus from it.
-  void RemoveFocusAndSetRestoreWindow();
 
   // Resets the stored window from RemoveFocusAndSetRestoreWindow to NULL. If
   // |focus|, restores focus to the stored window.
@@ -109,6 +110,11 @@ class ASH_EXPORT WindowSelector
   // cycling.
   scoped_ptr<ui::EventHandler> event_handler_;
 
+  // The currently selected window being shown (temporarily brought to the front
+  // of the stacking order and made visible).
+  scoped_ptr<ScopedShowWindow> showing_window_;
+
+  bool timer_enabled_;
   base::DelayTimer<WindowSelector> start_overview_timer_;
   scoped_ptr<WindowOverview> window_overview_;
 
@@ -119,13 +125,14 @@ class ASH_EXPORT WindowSelector
   // Index of the currently selected window if the mode is CYCLE.
   size_t selected_window_;
 
-  // A weak pointer to the window which was focused on entering overview mode.
-  // If overview mode is canceled the focus should be restored to this window.
+  // A weak pointer to the window which was focused on beginning window
+  // selection. If window selection is canceled the focus should be restored to
+  // this window.
   aura::Window* restore_focus_window_;
 
-  // True when restoring focus to the window. This is used to prevent handling
-  // the resulting activation.
-  bool restoring_focus_;
+  // True when performing operations that may cause window activations. This is
+  // used to prevent handling the resulting expected activation.
+  bool ignore_activations_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelector);
 };

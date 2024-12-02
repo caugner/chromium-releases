@@ -1,5 +1,7 @@
 .. _getting_started:
 
+:orphan:
+
 ####################################################
 Examples of ReST markup for devsite (Document title)
 ####################################################
@@ -28,7 +30,8 @@ Basic markup
 
 In general, follow the rules from http://sphinx-doc.org/rest.html
 
-Some **bold text** and *italic text* and ``fixed-font text``.
+Some **bold text** and *italic text* and ``fixed-font text``. Non marked-up text
+can follow these immediately by using a backslash: **pexe**\s.
 
 For pleasant collaborative editing, please use the accepted coding guidelines:
 wrap at 80 columns, no tabs, etc.
@@ -40,6 +43,15 @@ Quotes (``<blockquote>``) are created by indenting the paragraph:
   -- Linus Torvalds
 
 Here's an en-dash -- and an m-dash --- too.
+
+Unicode samples
+---------------
+
+Copyright sign |copy|, and uacute |Uacute|.
+
+.. |copy| unicode:: 0xA9 .. copyright
+.. |Uacute| unicode:: U+000DA
+
 
 Images
 ======
@@ -59,7 +71,8 @@ document name within the angle brackets is relative to the root dir of the
 devsite doc tree and does not have an extension.
 
 Here's a link to a document in a subdirectory: :doc:`the tutorial
-<devguide/tutorial>`. And a link to a subdirectory index page :doc:`devguide index <devguide/index>`.
+<devguide/tutorial/tutorial-part1>`. And a link to a subdirectory index page
+:doc:`devguide index <devguide/index>`.
 
 To sections inside documents
 ----------------------------
@@ -171,6 +184,20 @@ Sub-sub-subsection heading
 """"""""""""""""""""""""""
 
 It's probably not the best idea to go this far (renders to ``<h5>``).
+
+Expandable sections
+===================
+
+The devsite can render expandable sections when a special ``class`` is applied.
+This can be achieved by specifying the ``rst-class`` immediately before a
+section (or any other element), as follows:
+
+.. rst-class:: expandable
+
+Expandable Section
+------------------
+
+Look, ma! I'm expandable!
 
 Lists
 =====

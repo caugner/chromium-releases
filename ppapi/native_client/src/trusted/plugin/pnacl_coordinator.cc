@@ -233,13 +233,11 @@ PnaclCoordinator* PnaclCoordinator::BitcodeToNative(
                  reinterpret_cast<const void*>(coordinator->manifest_.get()),
                  coordinator->off_the_record_));
 
-  // First check that PNaCl is installed.
-  pp::CompletionCallback pnacl_installed_cb =
-      coordinator->callback_factory_.NewCallback(
-          &PnaclCoordinator::DidCheckPnaclInstalled);
-  plugin->nacl_interface()->EnsurePnaclInstalled(
-      plugin->pp_instance(),
-      pnacl_installed_cb.pp_completion_callback());
+  // First start a network request for the pexe, to tickle the component
+  // updater's On-Demand resource throttler, and to get Last-Modified/ETag
+  // cache information. We can cancel the request later if there's
+  // a bitcode->nexe cache hit.
+  coordinator->OpenBitcodeStream();
   return coordinator;
 }
 
@@ -251,6 +249,7 @@ PnaclCoordinator::PnaclCoordinator(
   : translate_finish_error_(PP_OK),
     plugin_(plugin),
     translate_notify_callback_(translate_notify_callback),
+    translation_finished_reported_(false),
     manifest_(new PnaclManifest()),
     pexe_url_(pexe_url),
     pnacl_options_(pnacl_options),
@@ -277,6 +276,11 @@ PnaclCoordinator::~PnaclCoordinator() {
   // translation_complete_callback_, so no notification will be delivered.
   if (translate_thread_.get() != NULL) {
     translate_thread_->AbortSubprocesses();
+  }
+  if (!translation_finished_reported_) {
+    plugin_->nacl_interface()->ReportTranslationFinished(
+        plugin_->pp_instance(),
+        PP_FALSE);
   }
 }
 
@@ -315,6 +319,10 @@ void PnaclCoordinator::ExitWithError() {
   callback_factory_.CancelAll();
   if (!error_already_reported_) {
     error_already_reported_ = true;
+    translation_finished_reported_ = true;
+    plugin_->nacl_interface()->ReportTranslationFinished(
+        plugin_->pp_instance(),
+        PP_FALSE);
     translate_notify_callback_.Run(PP_ERROR_FAILED);
   } else {
     PLUGIN_PRINTF(("PnaclCoordinator::ExitWithError an earlier error was "
@@ -329,9 +337,6 @@ void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
   // Bail out if there was an earlier error (e.g., pexe load failure),
   // or if there is an error from the translation thread.
   if (translate_finish_error_ != PP_OK || pp_error != PP_OK) {
-    plugin_->nacl_interface()->ReportTranslationFinished(
-        plugin_->pp_instance(),
-        PP_FALSE);
     ExitWithError();
     return;
   }
@@ -389,6 +394,7 @@ void PnaclCoordinator::TranslateFinished(int32_t pp_error) {
 
   // Report to the browser that translation finished. The browser will take
   // care of storing the nexe in the cache.
+  translation_finished_reported_ = true;
   plugin_->nacl_interface()->ReportTranslationFinished(
       plugin_->pp_instance(), PP_TRUE);
 
@@ -420,55 +426,14 @@ void PnaclCoordinator::NexeReadDidOpen(int32_t pp_error) {
   translate_notify_callback_.Run(pp_error);
 }
 
-void PnaclCoordinator::DidCheckPnaclInstalled(int32_t pp_error) {
-  if (pp_error != PP_OK) {
-    ReportNonPpapiError(
-        ERROR_PNACL_RESOURCE_FETCH,
-        nacl::string("The Portable Native Client (pnacl) component is not "
-                     "installed. Please consult chrome://components for more "
-                     "information."));
-    return;
-  }
-
-  // Loading resources (e.g. llc and ld nexes) is done with PnaclResources.
-  resources_.reset(new PnaclResources(plugin_,
-                                      this,
-                                      this->manifest_.get()));
-  CHECK(resources_ != NULL);
-
-  // The first step of loading resources: read the resource info file.
-  pp::CompletionCallback resource_info_read_cb =
-      callback_factory_.NewCallback(
-          &PnaclCoordinator::ResourceInfoWasRead);
-  resources_->ReadResourceInfo(PnaclUrls::GetResourceInfoUrl(),
-                               resource_info_read_cb);
-}
-
-void PnaclCoordinator::ResourceInfoWasRead(int32_t pp_error) {
-  PLUGIN_PRINTF(("PluginCoordinator::ResourceInfoWasRead (pp_error=%"
-                NACL_PRId32 ")\n", pp_error));
-  // Second step of loading resources: call StartLoad.
-  pp::CompletionCallback resources_cb =
-      callback_factory_.NewCallback(&PnaclCoordinator::ResourcesDidLoad);
-  resources_->StartLoad(resources_cb);
-}
-
-void PnaclCoordinator::ResourcesDidLoad(int32_t pp_error) {
-  PLUGIN_PRINTF(("PnaclCoordinator::ResourcesDidLoad (pp_error=%"
-                 NACL_PRId32 ")\n", pp_error));
-  if (pp_error != PP_OK) {
-    // Finer-grained error code should have already been reported by
-    // the PnaclResources class.
-    return;
-  }
-
-  OpenBitcodeStream();
-}
-
 void PnaclCoordinator::OpenBitcodeStream() {
   // Now open the pexe stream.
   streaming_downloader_.reset(new FileDownloader());
   streaming_downloader_->Initialize(plugin_);
+  // Mark the request as requesting a PNaCl bitcode file,
+  // so that component updater can detect this user action.
+  streaming_downloader_->set_request_headers(
+      "Accept: application/x-pnacl, */*");
 
   // Even though we haven't started downloading, create the translation
   // thread object immediately. This ensures that any pieces of the file
@@ -501,12 +466,45 @@ void PnaclCoordinator::BitcodeStreamDidOpen(int32_t pp_error) {
     return;
   }
 
-  // Get the cache key and try to open an existing entry.
+  // The component updater's resource throttles + OnDemand update/install
+  // should block the URL request until the compiler is present. Now we
+  // can load the resources (e.g. llc and ld nexes).
+  resources_.reset(new PnaclResources(plugin_, this, this->manifest_.get()));
+  CHECK(resources_ != NULL);
+
+  // The first step of loading resources: read the resource info file.
+  pp::CompletionCallback resource_info_read_cb =
+      callback_factory_.NewCallback(&PnaclCoordinator::ResourceInfoWasRead);
+  resources_->ReadResourceInfo(PnaclUrls::GetResourceInfoUrl(),
+                               resource_info_read_cb);
+}
+
+void PnaclCoordinator::ResourceInfoWasRead(int32_t pp_error) {
+  PLUGIN_PRINTF(("PluginCoordinator::ResourceInfoWasRead (pp_error=%"
+                NACL_PRId32 ")\n", pp_error));
+  // Second step of loading resources: call StartLoad to load pnacl-llc
+  // and pnacl-ld, based on the filenames found in the resource info file.
+  pp::CompletionCallback resources_cb =
+      callback_factory_.NewCallback(&PnaclCoordinator::ResourcesDidLoad);
+  resources_->StartLoad(resources_cb);
+}
+
+void PnaclCoordinator::ResourcesDidLoad(int32_t pp_error) {
+  PLUGIN_PRINTF(("PnaclCoordinator::ResourcesDidLoad (pp_error=%"
+                 NACL_PRId32 ")\n", pp_error));
+  if (pp_error != PP_OK) {
+    // Finer-grained error code should have already been reported by
+    // the PnaclResources class.
+    return;
+  }
+
+  // Okay, now that we've started the HTTP request for the pexe
+  // and we've ensured that the PNaCl compiler + metadata is installed,
+  // get the cache key from the response headers and from the
+  // compiler's version metadata.
   nacl::string headers = streaming_downloader_->GetResponseHeaders();
   NaClHttpResponseHeaders parser;
   parser.Parse(headers);
-  // TODO(dschuff): honor parser.CacheControlNoStore(). It wasn't handled in
-  // the new cache case before.
 
   temp_nexe_file_.reset(new TempFile(plugin_));
   pp::CompletionCallback cb =
@@ -596,9 +594,6 @@ void PnaclCoordinator::BitcodeStreamDidFinish(int32_t pp_error) {
       ss << "PnaclCoordinator: pexe load failed (pp_error=" << pp_error << ").";
       error_info_.SetReport(ERROR_PNACL_PEXE_FETCH_OTHER, ss.str());
     }
-    plugin_->nacl_interface()->ReportTranslationFinished(
-        plugin_->pp_instance(),
-        PP_FALSE);
     translate_thread_->AbortSubprocesses();
   } else {
     // Compare download completion pct (100% now), to compile completion pct.
@@ -673,9 +668,6 @@ void PnaclCoordinator::ObjectFileDidOpen(int32_t pp_error) {
     ReportPpapiError(ERROR_PNACL_CREATE_TEMP,
                      pp_error,
                      "Failed to open scratch object file.");
-    plugin_->nacl_interface()->ReportTranslationFinished(
-        plugin_->pp_instance(),
-        PP_FALSE);
     return;
   }
   // Open the nexe file for connecting ld and sel_ldr.

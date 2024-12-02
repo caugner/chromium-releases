@@ -44,11 +44,8 @@
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
-#include "content/public/common/url_constants.h"
 #include "grit/component_strings.h"
 #include "third_party/WebKit/public/web/WebAutofillClient.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -60,7 +57,6 @@ namespace autofill {
 typedef PersonalDataManager::GUIDPair GUIDPair;
 
 using base::TimeTicks;
-using content::BrowserThread;
 using content::RenderViewHost;
 using WebKit::WebFormElement;
 
@@ -127,7 +123,9 @@ bool SectionIsAutofilled(const FormStructure& form_structure,
 }
 
 bool FormIsHTTPS(const FormStructure& form) {
-  return form.source_url().SchemeIs(content::kHttpsScheme);
+  // TODO(blundell): Change this to use a constant once crbug.com/306258 is
+  // fixed.
+  return form.source_url().SchemeIs("https");
 }
 
 // Uses the existing personal data in |profiles| and |credit_cards| to determine
@@ -140,8 +138,6 @@ void DeterminePossibleFieldTypesForUpload(
     const std::vector<CreditCard>& credit_cards,
     const std::string& app_locale,
     FormStructure* submitted_form) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-
   // For each field in the |submitted_form|, extract the value.  Then for each
   // profile or credit card, identify any stored types that match the value.
   for (size_t i = 0; i < submitted_form->field_count(); ++i) {
@@ -298,7 +294,7 @@ bool AutofillManager::OnFormSubmitted(const FormData& form,
     // Note that ownership of |submitted_form| is passed to the second task,
     // using |base::Owned|.
     FormStructure* raw_submitted_form = submitted_form.get();
-    BrowserThread::GetBlockingPool()->PostTaskAndReply(
+    driver_->GetBlockingPool()->PostTaskAndReply(
         FROM_HERE,
         base::Bind(&DeterminePossibleFieldTypesForUpload,
                    copied_profiles,
@@ -487,8 +483,10 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
     for (std::vector<FormFieldData>::iterator iter = result.fields.begin();
          iter != result.fields.end(); ++iter) {
       if ((*iter) == field) {
-        data_model->FillFormField(
-            *autofill_field, variant, app_locale_, &(*iter));
+        base::string16 value = data_model->GetInfoForVariant(
+            autofill_field->Type(), variant, app_locale_);
+        AutofillField::FillFormField(*autofill_field, value, app_locale_,
+                                     &(*iter));
         // Mark the cached field as autofilled, so that we can detect when a
         // user edits an autofilled field (for metrics).
         autofill_field->is_autofilled = true;
@@ -522,10 +520,10 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
           field_group_type == initiating_group_type) {
         use_variant = variant;
       }
-      data_model->FillFormField(*cached_field,
-                                use_variant,
-                                app_locale_,
-                                &result.fields[i]);
+      base::string16 value = data_model->GetInfoForVariant(
+          cached_field->Type(), use_variant, app_locale_);
+      AutofillField::FillFormField(*cached_field, value, app_locale_,
+                                   &result.fields[i]);
       // Mark the cached field as autofilled, so that we can detect when a user
       // edits an autofilled field (for metrics).
       form_structure->field(i)->is_autofilled = true;
@@ -606,10 +604,6 @@ void AutofillManager::RemoveAutofillProfileOrCreditCard(int unique_id) {
 void AutofillManager::RemoveAutocompleteEntry(const base::string16& name,
                                               const base::string16& value) {
   autocomplete_history_manager_->OnRemoveAutocompleteEntry(name, value);
-}
-
-content::WebContents* AutofillManager::GetWebContents() const {
-  return driver_->GetWebContents();
 }
 
 const std::vector<FormStructure*>& AutofillManager::GetFormStructures() {

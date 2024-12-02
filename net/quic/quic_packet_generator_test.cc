@@ -33,34 +33,37 @@ class MockDelegate : public QuicPacketGenerator::DelegateInterface {
   MockDelegate() {}
   virtual ~MockDelegate() {}
 
-  MOCK_METHOD3(CanWrite, bool(Retransmission retransmission,
-                              HasRetransmittableData retransmittable,
-                              IsHandshake handshake));
-
+  MOCK_METHOD3(ShouldGeneratePacket,
+               bool(TransmissionType transmission_type,
+                    HasRetransmittableData retransmittable,
+                    IsHandshake handshake));
   MOCK_METHOD0(CreateAckFrame, QuicAckFrame*());
   MOCK_METHOD0(CreateFeedbackFrame, QuicCongestionFeedbackFrame*());
   MOCK_METHOD1(OnSerializedPacket, bool(const SerializedPacket& packet));
   MOCK_METHOD2(CloseConnection, void(QuicErrorCode, bool));
 
   void SetCanWriteAnything() {
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION, _, _))
         .WillRepeatedly(Return(true));
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION,
+                                            NO_RETRANSMITTABLE_DATA, _))
         .WillRepeatedly(Return(true));
   }
 
   void SetCanNotWrite() {
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION, _, _))
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION,
+                                            NO_RETRANSMITTABLE_DATA, _))
         .WillRepeatedly(Return(false));
   }
 
   // Use this when only ack and feedback frames should be allowed to be written.
   void SetCanWriteOnlyNonRetransmittable() {
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, _, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION, _, _))
         .WillRepeatedly(Return(false));
-    EXPECT_CALL(*this, CanWrite(NOT_RETRANSMISSION, NO_RETRANSMITTABLE_DATA, _))
+    EXPECT_CALL(*this, ShouldGeneratePacket(NOT_RETRANSMISSION,
+                                            NO_RETRANSMITTABLE_DATA, _))
         .WillRepeatedly(Return(true));
   }
 
@@ -97,7 +100,7 @@ struct PacketContents {
 class QuicPacketGeneratorTest : public ::testing::Test {
  protected:
   QuicPacketGeneratorTest()
-      : framer_(QuicVersionMax(), QuicTime::Zero(), false),
+      : framer_(QuicSupportedVersions(), QuicTime::Zero(), false),
         creator_(42, &framer_, &random_, false),
         generator_(&delegate_, NULL, &creator_),
         packet_(0, PACKET_1BYTE_SEQUENCE_NUMBER, NULL, 0, NULL),
@@ -310,6 +313,25 @@ TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldNotFlush) {
   EXPECT_TRUE(generator_.HasQueuedFrames());
 }
 
+TEST_F(QuicPacketGeneratorTest, AddControlFrame_NotWritableBatchThenFlush) {
+  delegate_.SetCanNotWrite();
+  generator_.StartBatchOperations();
+
+  generator_.AddControlFrame(QuicFrame(CreateRstStreamFrame()));
+  EXPECT_TRUE(generator_.HasQueuedFrames());
+  generator_.FinishBatchOperations();
+  EXPECT_TRUE(generator_.HasQueuedFrames());
+
+  EXPECT_CALL(delegate_, OnSerializedPacket(_)).WillOnce(
+      DoAll(SaveArg<0>(&packet_), Return(true)));
+  generator_.FlushAllQueuedFrames();
+  EXPECT_FALSE(generator_.HasQueuedFrames());
+
+  PacketContents contents;
+  contents.num_rst_stream_frames = 1;
+  CheckPacketContains(contents, packet_);
+}
+
 TEST_F(QuicPacketGeneratorTest, AddControlFrame_WritableAndShouldFlush) {
   delegate_.SetCanWriteAnything();
 
@@ -412,7 +434,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeDataFEC) {
   }
 
   // Send enough data to create 3 packets: two full and one partial.
-  size_t data_len = 2 * kMaxPacketSize + 100;
+  size_t data_len = 2 * kDefaultMaxPacketSize + 100;
   QuicConsumedData consumed =
       generator_.ConsumeData(3, CreateData(data_len), 0, true, NULL);
   EXPECT_EQ(data_len, consumed.bytes_consumed);
@@ -444,7 +466,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeDataSendsFecAtEnd) {
   }
 
   // Send enough data to create 2 packets: one full and one partial.
-  size_t data_len = 1 * kMaxPacketSize + 100;
+  size_t data_len = 1 * kDefaultMaxPacketSize + 100;
   QuicConsumedData consumed =
       generator_.ConsumeData(3, CreateData(data_len), 0, true, NULL);
   EXPECT_EQ(data_len, consumed.bytes_consumed);
@@ -460,7 +482,7 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_FramesPreviouslyQueued) {
   // Set the packet size be enough for two stream frames with 0 stream offset,
   // but not enough for a stream frame of 0 offset and one with non-zero offset.
   creator_.options()->max_packet_length =
-      NullEncrypter().GetCiphertextSize(0) +
+      NullEncrypter(false).GetCiphertextSize(0) +
       GetPacketHeaderSize(creator_.options()->send_guid_length,
                           true,
                           creator_.options()->send_sequence_number_length,
@@ -562,7 +584,7 @@ TEST_F(QuicPacketGeneratorTest, NotWritableThenBatchOperations2) {
   }
 
   // Send enough data to exceed one packet
-  size_t data_len = kMaxPacketSize + 100;
+  size_t data_len = kDefaultMaxPacketSize + 100;
   QuicConsumedData consumed =
       generator_.ConsumeData(3, CreateData(data_len), 0, true, NULL);
   EXPECT_EQ(data_len, consumed.bytes_consumed);

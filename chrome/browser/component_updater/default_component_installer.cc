@@ -8,6 +8,8 @@
 #include "base/files/file_path.h"
 #include "base/values.h"
 #include "base/version.h"
+// TODO(ddorwin): Find a better place for ReadManifest.
+#include "chrome/browser/component_updater/component_unpacker.h"
 #include "chrome/browser/component_updater/default_component_installer.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -16,6 +18,9 @@ namespace {
 // we represent it as a dotted quad.
 const char kNullVersion[] = "0.0.0.0";
 }  // namespace
+
+ComponentInstallerTraits::~ComponentInstallerTraits() {
+}
 
 DefaultComponentInstaller::DefaultComponentInstaller(
     scoped_ptr<ComponentInstallerTraits> installer_traits)
@@ -32,8 +37,8 @@ void DefaultComponentInstaller::Register(ComponentUpdateService* cus) {
                  << "has no installer traits.";
     return;
   }
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE, FROM_HERE,
+  content::BrowserThread::PostBlockingPoolTask(
+      FROM_HERE,
       base::Bind(&DefaultComponentInstaller::StartRegistration,
                  base::Unretained(this),
                  cus));
@@ -76,7 +81,18 @@ bool DefaultComponentInstaller::Install(const base::DictionaryValue& manifest,
     return false;
   }
   current_version_ = version;
-  installer_traits_->ComponentReady(current_version_, GetInstallDirectory());
+  // TODO(ddorwin): Change the parameter to scoped_ptr<base::DictionaryValue>
+  // so we can avoid this DeepCopy.
+  current_manifest_.reset(manifest.DeepCopy());
+  scoped_ptr<base::DictionaryValue> manifest_copy(
+      current_manifest_->DeepCopy());
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI, FROM_HERE,
+      base::Bind(&ComponentInstallerTraits::ComponentReady,
+                 base::Unretained(installer_traits_.get()),
+                 current_version_,
+                 GetInstallDirectory(),
+                 base::Passed(&manifest_copy)));
   return true;
 }
 
@@ -94,7 +110,6 @@ bool DefaultComponentInstaller::GetInstalledFile(
 
 void DefaultComponentInstaller::StartRegistration(
     ComponentUpdateService* cus) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
   base::FilePath base_dir = installer_traits_->GetBaseDirectory();
   if (!base::PathExists(base_dir) &&
       !file_util::CreateDirectory(base_dir)) {
@@ -133,8 +148,17 @@ void DefaultComponentInstaller::StartRegistration(
 
   if (found) {
     current_version_ = latest_version;
+    // TODO(ddorwin): Remove these members and pass them directly to
+    // FinishRegistration().
     base::ReadFileToString(latest_dir.AppendASCII("manifest.fingerprint"),
                            &current_fingerprint_);
+    current_manifest_= ReadManifest(latest_dir);
+    if (!current_manifest_) {
+      DLOG(ERROR) << "Failed to read manifest for "
+                  << installer_traits_->GetName() << " ("
+                  << base_dir.MaybeAsASCII() << ").";
+      return;
+    }
   }
 
   // Remove older versions of the component. None should be in use during
@@ -159,26 +183,28 @@ base::FilePath DefaultComponentInstaller::GetInstallDirectory() {
 void DefaultComponentInstaller::FinishRegistration(
     ComponentUpdateService* cus) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  CrxComponent crx;
-  crx.name = installer_traits_->GetName();
-  crx.installer = this;
-  crx.version = current_version_;
-  crx.fingerprint = current_fingerprint_;
-  installer_traits_->GetHash(&crx.pk_hash);
-  ComponentUpdateService::Status status = cus->RegisterComponent(crx);
-  if (status != ComponentUpdateService::kOk &&
-      status != ComponentUpdateService::kReplaced) {
-    NOTREACHED() << "Component registration failed for "
-                 << installer_traits_->GetName();
-    return;
+  if (installer_traits_->CanAutoUpdate()) {
+    CrxComponent crx;
+    crx.name = installer_traits_->GetName();
+    crx.installer = this;
+    crx.version = current_version_;
+    crx.fingerprint = current_fingerprint_;
+    installer_traits_->GetHash(&crx.pk_hash);
+    ComponentUpdateService::Status status = cus->RegisterComponent(crx);
+    if (status != ComponentUpdateService::kOk &&
+        status != ComponentUpdateService::kReplaced) {
+      NOTREACHED() << "Component registration failed for "
+                   << installer_traits_->GetName();
+      return;
+    }
   }
 
   if (current_version_.CompareTo(base::Version(kNullVersion)) > 0) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::FILE, FROM_HERE,
-        base::Bind(&ComponentInstallerTraits::ComponentReady,
-                   base::Unretained(installer_traits_.get()),
-                   current_version_,
-                   GetInstallDirectory()));
+    scoped_ptr<base::DictionaryValue> manifest_copy(
+        current_manifest_->DeepCopy());
+    installer_traits_->ComponentReady(
+        current_version_,
+        GetInstallDirectory(),
+        manifest_copy.Pass());
   }
 }

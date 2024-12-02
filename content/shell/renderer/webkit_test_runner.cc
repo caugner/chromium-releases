@@ -50,7 +50,6 @@
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDevToolsAgent.h"
-#include "third_party/WebKit/public/web/WebDeviceOrientation.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
@@ -69,7 +68,6 @@ using WebKit::WebContextMenuData;
 using WebKit::WebDevToolsAgent;
 using WebKit::WebDeviceMotionData;
 using WebKit::WebDeviceOrientationData;
-using WebKit::WebDeviceOrientation;
 using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebGamepads;
@@ -351,8 +349,8 @@ std::string WebKitTestRunner::makeURLErrorDescription(
       domain.c_str(), code, error.unreachableURL.spec().data());
 }
 
-void WebKitTestRunner::setClientWindowRect(const WebRect& rect) {
-  ForceResizeRenderView(render_view(), WebSize(rect.width, rect.height));
+void WebKitTestRunner::useUnfortunateSynchronousResizeMode(bool enable) {
+  UseSynchronousResizeMode(render_view(), enable);
 }
 
 void WebKitTestRunner::enableAutoResizeMode(const WebSize& min_size,
@@ -591,8 +589,6 @@ void WebKitTestRunner::Reset() {
   render_view()->GetWebView()->mainFrame()->clearOpener();
   render_view()->GetWebView()->setPageScaleFactorLimits(-1, -1);
   render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
-  render_view()->GetWebView()->enableFixedLayoutMode(false);
-  render_view()->GetWebView()->setFixedLayoutSize(WebSize(0, 0));
 
   // Resetting the internals object also overrides the WebPreferences, so we
   // have to sync them to WebKit again.

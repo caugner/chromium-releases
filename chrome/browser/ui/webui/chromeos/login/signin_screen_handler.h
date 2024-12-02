@@ -201,6 +201,11 @@ class SigninScreenHandler
   // Required Local State preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  void set_kiosk_enable_flow_aborted_callback_for_test(
+      const base::Closure& callback) {
+    kiosk_enable_flow_aborted_callback_for_test_ = callback;
+  }
+
  private:
   enum UIState {
     UI_STATE_UNKNOWN = 0,
@@ -390,6 +395,11 @@ class SigninScreenHandler
   // Update current input method (namely keyboard layout) to LRU by this user.
   void SetUserInputMethod(const std::string& username);
 
+  // Invoked when auto enrollment check is finished to decide whether to
+  // continue kiosk enable flow. Kiosk enable flow is resumed when
+  // |should_auto_enroll| is false.
+  void ContinueKioskEnableFlow(bool should_auto_enroll);
+
   // Current UI state of the signin screen.
   UIState ui_state_;
 
@@ -473,6 +483,10 @@ class SigninScreenHandler
 
   scoped_ptr<CrosSettings::ObserverSubscription> allow_new_user_subscription_;
   scoped_ptr<CrosSettings::ObserverSubscription> allow_guest_subscription_;
+
+  bool wait_for_auto_enrollment_check_;
+
+  base::Closure kiosk_enable_flow_aborted_callback_for_test_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

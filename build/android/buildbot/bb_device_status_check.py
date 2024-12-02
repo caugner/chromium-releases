@@ -8,17 +8,26 @@
 import logging
 import optparse
 import os
-import smtplib
-import sys
+import psutil
 import re
+import signal
+import smtplib
+import subprocess
+import sys
+import time
 import urllib
 
 import bb_annotations
+import bb_utils
+
+sys.path.append(os.path.join(os.path.dirname(__file__),
+                             os.pardir, os.pardir, 'util', 'lib',
+                             'common'))
+import perf_tests_results_helper  # pylint: disable=F0401
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from pylib import android_commands
 from pylib import constants
-from pylib import perf_tests_helper
 from pylib.cmd_helper import GetCmdOutput
 
 
@@ -103,6 +112,26 @@ def DeviceInfo(serial, options):
   return device_type, device_build, battery_level, full_report, errors, True
 
 
+def GetLastDevices(out_dir):
+  """Returns a list of devices that have been seen on the bot.
+
+  Args:
+    options: out_dir parameter of options argument is used as the base
+             directory to load and update the cache file.
+
+  Returns: List of device serial numbers that were on the bot.
+  """
+  devices_path = os.path.join(out_dir, '.last_devices')
+  devices = []
+  try:
+    with open(devices_path) as f:
+      devices = f.read().splitlines()
+  except IOError:
+    # Ignore error, file might not exist
+    pass
+  return devices
+
+
 def CheckForMissingDevices(options, adb_online_devs):
   """Uses file of previous online devices to detect broken phones.
 
@@ -119,17 +148,6 @@ def CheckForMissingDevices(options, adb_online_devs):
 
   out_dir = os.path.abspath(options.out_dir)
 
-  def ReadDeviceList(file_name):
-    devices_path = os.path.join(out_dir, file_name)
-    devices = []
-    try:
-      with open(devices_path) as f:
-        devices = f.read().splitlines()
-    except IOError:
-      # Ignore error, file might not exist
-      pass
-    return devices
-
   def WriteDeviceList(file_name, device_list):
     path = os.path.join(out_dir, file_name)
     if not os.path.exists(out_dir):
@@ -139,7 +157,7 @@ def CheckForMissingDevices(options, adb_online_devs):
       f.write('\n'.join(set(device_list)))
 
   last_devices_path = os.path.join(out_dir, '.last_devices')
-  last_devices = ReadDeviceList('.last_devices')
+  last_devices = GetLastDevices(out_dir)
   missing_devs = list(set(last_devices) - set(adb_online_devs))
 
   all_known_devices = list(set(adb_online_devs) | set(last_devices))
@@ -199,6 +217,66 @@ def SendDeviceStatusAlert(msg):
     print 'Failed to send alert email. Error: %s' % e
 
 
+def RestartUsb():
+  if not os.path.isfile('/usr/bin/restart_usb'):
+    print ('ERROR: Could not restart usb. /usr/bin/restart_usb not installed '
+           'on host (see BUG=305769).')
+    return 1
+
+  lsusb_proc = bb_utils.SpawnCmd(['lsusb'], stdout=subprocess.PIPE)
+  lsusb_output, _ = lsusb_proc.communicate()
+  if lsusb_proc.returncode:
+    print ('Error: Could not get list of USB ports (i.e. lsusb).')
+    return lsusb_proc.returncode
+
+  usb_devices = [re.findall('Bus (\d\d\d) Device (\d\d\d)', lsusb_line)[0]
+                 for lsusb_line in lsusb_output.strip().split('\n')]
+
+  failed_restart = False
+  # Walk USB devices from leaves up (i.e reverse sorted) restarting the
+  # connection. If a parent node (e.g. usb hub) is restarted before the
+  # devices connected to it, the (bus, dev) for the hub can change, making the
+  # output we have wrong. This way we restart the devices before the hub.
+  for (bus, dev) in reversed(sorted(usb_devices)):
+    # Can not restart root usb connections
+    if dev != '001':
+      return_code = bb_utils.RunCmd(['/usr/bin/restart_usb', bus, dev])
+      if return_code:
+        print 'Error restarting USB device /dev/bus/usb/%s/%s' % (bus, dev)
+        failed_restart = True
+      else:
+        print 'Restarted USB device /dev/bus/usb/%s/%s' % (bus, dev)
+
+  if failed_restart:
+    return 1
+
+  return 0
+
+
+def KillAllAdb():
+  def GetAllAdb():
+    for p in psutil.process_iter():
+      try:
+        if 'adb' in p.name:
+          yield p
+      except psutil.error.NoSuchProcess:
+        pass
+
+  for sig in [signal.SIGTERM, signal.SIGQUIT, signal.SIGKILL]:
+    for p in GetAllAdb():
+      try:
+        print 'kill %d %d (%s [%s])' % (sig, p.pid, p.name,
+            ' '.join(p.cmdline))
+        p.send_signal(sig)
+      except psutil.error.NoSuchProcess:
+        pass
+  for p in GetAllAdb():
+    try:
+      print 'Unable to kill %d (%s [%s])' % (p.pid, p.name, ' '.join(p.cmdline))
+    except psutil.error.NoSuchProcess:
+      pass
+
+
 def main():
   parser = optparse.OptionParser()
   parser.add_option('', '--out-dir',
@@ -208,9 +286,28 @@ def main():
                     help='Will not check if devices are provisioned properly.')
   parser.add_option('--device-status-dashboard', action='store_true',
                     help='Output device status data for dashboard.')
+  parser.add_option('--restart-usb', action='store_true',
+                    help='Restart USB ports before running device check.')
   options, args = parser.parse_args()
   if args:
     parser.error('Unknown options %s' % args)
+
+  if options.restart_usb:
+    expected_devices = GetLastDevices(os.path.abspath(options.out_dir))
+    devices = android_commands.GetAttachedDevices()
+    # Only restart usb if devices are missing
+    if set(expected_devices) != set(devices):
+      KillAllAdb()
+      if RestartUsb():
+        return 1
+      retries = 5
+      while retries:
+        time.sleep(1)
+        devices = android_commands.GetAttachedDevices()
+        if set(expected_devices) == set(devices):
+          break
+        retries -= 1
+
   devices = android_commands.GetAttachedDevices()
   # TODO(navabi): Test to make sure this fails and then fix call
   offline_devices = android_commands.GetAttachedDevices(hardware=False,
@@ -244,14 +341,15 @@ def main():
     SendDeviceStatusAlert(msg)
 
   if options.device_status_dashboard:
-    perf_tests_helper.PrintPerfResult('BotDevices', 'OnlineDevices',
-                                      [len(devices)], 'devices')
-    perf_tests_helper.PrintPerfResult('BotDevices', 'OfflineDevices',
-                                      [len(offline_devices)], 'devices',
-                                      'unimportant')
+    perf_tests_results_helper.PrintPerfResult('BotDevices', 'OnlineDevices',
+                                              [len(devices)], 'devices')
+    perf_tests_results_helper.PrintPerfResult('BotDevices', 'OfflineDevices',
+                                              [len(offline_devices)], 'devices',
+                                              'unimportant')
     for serial, battery in zip(devices, batteries):
-      perf_tests_helper.PrintPerfResult('DeviceBattery', serial, [battery], '%',
-                                        'unimportant')
+      perf_tests_results_helper.PrintPerfResult('DeviceBattery', serial,
+                                                [battery], '%',
+                                                'unimportant')
 
   if False in fail_step_lst:
     # TODO(navabi): Build fails on device status check step if there exists any

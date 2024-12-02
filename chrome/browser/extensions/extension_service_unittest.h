@@ -36,6 +36,7 @@ class ExtensionServiceTestBase : public testing::Test {
     base::FilePath extensions_install_dir;
     bool autoupdate_enabled;
     bool is_first_run;
+    bool profile_is_managed;
 
     ExtensionServiceInitParams();
   };
@@ -57,6 +58,8 @@ class ExtensionServiceTestBase : public testing::Test {
 
   void InitializeExtensionServiceWithUpdater();
 
+  void InitializeExtensionSyncService();
+
   static void SetUpTestCase();
 
   virtual void SetUp() OVERRIDE;
@@ -67,8 +70,7 @@ class ExtensionServiceTestBase : public testing::Test {
   }
 
  protected:
-  void InitializeExtensionServiceHelper(bool autoupdate_enabled,
-                                        bool is_first_run);
+  ExtensionServiceInitParams CreateDefaultInitParams();
 
   // Destroying at_exit_manager_ will delete all LazyInstances, so it must come
   // after thread_bundle_ in the destruction order.
@@ -81,6 +83,7 @@ class ExtensionServiceTestBase : public testing::Test {
   // Managed by extensions::ExtensionSystemFactory.
   ExtensionService* service_;
   extensions::ManagementPolicy* management_policy_;
+  scoped_ptr<ExtensionSyncService> extension_sync_service_;
   size_t expected_extensions_count_;
 
 #if defined OS_CHROMEOS

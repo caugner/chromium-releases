@@ -10,7 +10,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_metadata.h"
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
 #include "chrome/browser/google_apis/base_requests.h"
@@ -120,6 +119,12 @@ typedef base::Callback<void(FileError error,
                             const base::FilePath& file_path)>
     MarkMountedCallback;
 
+// Callback for GetCacheEntryByPath.
+// |success| indicates if the operation was successful.
+// |cache_entry| is the obtained cache entry.
+typedef base::Callback<void(bool success, const FileCacheEntry& cache_entry)>
+    GetCacheEntryCallback;
+
 // The mode of opening a file.
 enum OpenMode {
   // Open the file if exists. If not, failed.
@@ -203,6 +208,9 @@ class FileSystemInterface {
   // |dest_file_path| is expected to be of the same type of |src_file_path|
   // (i.e. if |src_file_path| is a file, |dest_file_path| will be created as
   // a file).
+  // If |preserve_last_modified| is set to true, the last modified time will be
+  // preserved. This feature is only supported on Drive API v2 protocol because
+  // GData WAPI doesn't support updating modification time.
   //
   // This method also has the following assumptions/limitations that may be
   // relaxed or addressed later:
@@ -218,6 +226,7 @@ class FileSystemInterface {
   // |callback| must not be null.
   virtual void Copy(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
+                    bool preserve_last_modified,
                     const FileOperationCallback& callback) = 0;
 
   // Moves |src_file_path| to |dest_file_path| on the file system.
@@ -225,6 +234,9 @@ class FileSystemInterface {
   // |dest_file_path| is expected to be of the same type of |src_file_path|
   // (i.e. if |src_file_path| is a file, |dest_file_path| will be created as
   // a file).
+  // If |preserve_last_modified| is set to true, the last modified time will be
+  // preserved. This feature is only supported on Drive API v2 protocol because
+  // GData WAPI doesn't support updating modification time.
   //
   // This method also has the following assumptions/limitations that may be
   // relaxed or addressed later:
@@ -238,6 +250,7 @@ class FileSystemInterface {
   // |callback| must not be null.
   virtual void Move(const base::FilePath& src_file_path,
                     const base::FilePath& dest_file_path,
+                    bool preserve_last_modified,
                     const FileOperationCallback& callback) = 0;
 
   // Removes |file_path| from the file system.  If |is_recursive| is set and

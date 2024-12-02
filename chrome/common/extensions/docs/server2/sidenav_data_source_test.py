@@ -7,19 +7,13 @@ import json
 import unittest
 
 from compiled_file_system import CompiledFileSystem
+from mock_file_system import MockFileSystem
 from object_store_creator import ObjectStoreCreator
+from server_instance import ServerInstance
 from servlet import Request
-from sidenav_data_source import (
-    SidenavDataSource, _AddLevels, _AddSelected, _QualifyHrefs)
+from sidenav_data_source import SidenavDataSource, _AddLevels, _AddSelected
 from test_file_system import TestFileSystem
 from test_util import CaptureLogging
-
-
-class FakeServerInstance(object):
-  def __init__(self, file_system):
-    self.compiled_host_fs_factory = CompiledFileSystem.Factory(
-        file_system, ObjectStoreCreator.ForTest())
-    self.sidenav_json_base_path = ''
 
 
 class SamplesDataSourceTest(unittest.TestCase):
@@ -68,39 +62,47 @@ class SamplesDataSourceTest(unittest.TestCase):
       }
     ]
 
-    _AddSelected(sidenav_json, 'H3.html')
+    _AddSelected(sidenav_json, '/H3.html')
     self.assertEqual(expected, sidenav_json)
 
-  def testQualifyHrefs(self):
-    sidenav_json = [
-      { 'href': '/qualified/H1.html' },
-      { 'href': 'https://qualified/X1.html' },
-      {
-        'href': 'H2.html',
-        'items': [{
-          'href': 'H3.html'
-        }]
-      }
-    ]
+  def testWithDifferentBasePath(self):
+    file_system = TestFileSystem({
+      'apps_sidenav.json': json.dumps([
+        { 'href': '/H1.html' },
+        { 'href': '/H2.html' },
+        { 'href': '/base/path/H2.html' },
+        { 'href': 'https://qualified/X1.html' },
+        {
+          'href': 'H3.html',
+          'items': [{
+            'href': 'H4.html'
+          }]
+        },
+      ])
+    }, relative_to='docs/templates/json')
 
     expected = [
-      { 'href': '/qualified/H1.html' },
-      { 'href': 'https://qualified/X1.html' },
-      {
-        'href': '/H2.html',
-        'items': [{
-          'href': '/H3.html'
-        }]
-      }
+      {'href': '/base/path/H1.html', 'level': 2},
+      {'href': '/base/path/H2.html', 'level': 2, 'selected': True},
+      {'href': '/base/path/base/path/H2.html', 'level': 2},
+      {'href': 'https://qualified/X1.html', 'level': 2},
+      {'items': [
+        {'href': '/base/path/H4.html', 'level': 3}
+      ],
+      'href': '/base/path/H3.html', 'level': 2}
     ]
 
-    log_output = CaptureLogging(lambda: _QualifyHrefs(sidenav_json))
+    server_instance = ServerInstance.ForTest(file_system,
+                                             base_path='/base/path/')
+    sidenav_data_source = SidenavDataSource(server_instance,
+                                            Request.ForTest('/H2.html'))
 
-    self.assertEqual(expected, sidenav_json)
+    log_output = CaptureLogging(
+        lambda: self.assertEqual(expected, sidenav_data_source.get('apps')))
     self.assertEqual(2, len(log_output))
 
   def testSidenavDataSource(self):
-    file_system = TestFileSystem({
+    file_system = MockFileSystem(TestFileSystem({
       'apps_sidenav.json': json.dumps([{
         'title': 'H1',
         'href': 'H1.html',
@@ -109,7 +111,7 @@ class SamplesDataSourceTest(unittest.TestCase):
           'href': '/H2.html'
         }]
       }])
-    })
+    }, relative_to='docs/templates/json'))
 
     expected = [{
       'level': 2,
@@ -125,7 +127,8 @@ class SamplesDataSourceTest(unittest.TestCase):
     }]
 
     sidenav_data_source = SidenavDataSource(
-        FakeServerInstance(file_system), Request.ForTest('/H2.html'))
+        ServerInstance.ForTest(file_system), Request.ForTest('/H2.html'))
+    self.assertTrue(*file_system.CheckAndReset())
 
     log_output = CaptureLogging(
         lambda: self.assertEqual(expected, sidenav_data_source.get('apps')))
@@ -134,22 +137,27 @@ class SamplesDataSourceTest(unittest.TestCase):
     self.assertTrue(
         log_output[0].msg.startswith('Paths in sidenav must be qualified.'))
 
+    # Test that only a single file is read when creating the sidenav, so that
+    # we can be confident in the compiled_file_system.SingleFile annotation.
+    self.assertTrue(*file_system.CheckAndReset(
+        read_count=1, stat_count=1, read_resolve_count=1))
+
   def testCron(self):
     file_system = TestFileSystem({
       'apps_sidenav.json': '[{ "title": "H1" }]' ,
       'extensions_sidenav.json': '[{ "title": "H2" }]'
-    })
+    }, relative_to='docs/templates/json')
 
     # Ensure Cron doesn't rely on request.
     sidenav_data_source = SidenavDataSource(
-        FakeServerInstance(file_system), request=None)
+        ServerInstance.ForTest(file_system), request=None)
     sidenav_data_source.Cron()
 
     # If Cron fails, apps_sidenav.json will not be cached, and the _cache_data
     # access will fail.
     # TODO(jshumway): Make a non hack version of this check.
     sidenav_data_source._cache._file_object_store.Get(
-        '/apps_sidenav.json').Get()._cache_data
+        'docs/templates/json/apps_sidenav.json').Get()._cache_data
 
 
 if __name__ == '__main__':

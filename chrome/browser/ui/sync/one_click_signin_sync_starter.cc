@@ -47,16 +47,15 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     const std::string& session_index,
     const std::string& email,
     const std::string& password,
+    const std::string& oauth_code,
     StartSyncMode start_mode,
     content::WebContents* web_contents,
     ConfirmationRequired confirmation_required,
-    signin::Source source,
     Callback sync_setup_completed_callback)
     : content::WebContentsObserver(web_contents),
       start_mode_(start_mode),
       desktop_type_(chrome::HOST_DESKTOP_TYPE_NATIVE),
       confirmation_required_(confirmation_required),
-      source_(source),
       sync_setup_completed_callback_(sync_setup_completed_callback),
       weak_pointer_factory_(this) {
   DCHECK(profile);
@@ -64,14 +63,21 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
 
   Initialize(profile, browser);
 
-  // Start the signin process using the cookies in the cookie jar.
+  // If oauth_code is supplied, then start the sign in process using the
+  // oauth_code; otherwise start the signin process using the cookies in the
+  // cookie jar.
   SigninManager* manager = SigninManagerFactory::GetForProfile(profile_);
   SigninManager::OAuthTokenFetchedCallback callback;
   // Policy is enabled, so pass in a callback to do extra policy-related UI
   // before signin completes.
   callback = base::Bind(&OneClickSigninSyncStarter::ConfirmSignin,
                         weak_pointer_factory_.GetWeakPtr());
-  manager->StartSignInWithCredentials(session_index, email, password, callback);
+  if (oauth_code.empty()) {
+    manager->StartSignInWithCredentials(
+        session_index, email, password, callback);
+  } else {
+    manager->StartSignInWithOAuthCode(email, password, oauth_code, callback);
+  }
 }
 
 void OneClickSigninSyncStarter::OnBrowserRemoved(Browser* browser) {
@@ -145,15 +151,18 @@ OneClickSigninSyncStarter::SigninDialogDelegate::~SigninDialogDelegate() {
 }
 
 void OneClickSigninSyncStarter::SigninDialogDelegate::OnCancelSignin() {
-  sync_starter_->CancelSigninAndDelete();
+  if (sync_starter_ != NULL)
+    sync_starter_->CancelSigninAndDelete();
 }
 
 void OneClickSigninSyncStarter::SigninDialogDelegate::OnContinueSignin() {
-  sync_starter_->LoadPolicyWithCachedClient();
+  if (sync_starter_ != NULL)
+    sync_starter_->LoadPolicyWithCachedClient();
 }
 
 void OneClickSigninSyncStarter::SigninDialogDelegate::OnSigninWithNewProfile() {
-  sync_starter_->CreateNewSignedInProfile();
+  if (sync_starter_ != NULL)
+    sync_starter_->CreateNewSignedInProfile();
 }
 
 void OneClickSigninSyncStarter::OnRegisteredForPolicy(
@@ -188,13 +197,6 @@ void OneClickSigninSyncStarter::OnRegisteredForPolicy(
       profile_,
       signin->GetUsernameForAuthInProgress(),
       new SigninDialogDelegate(weak_pointer_factory_.GetWeakPtr()));
-}
-
-void OneClickSigninSyncStarter::CancelSigninAndDelete() {
-  SigninManagerFactory::GetForProfile(profile_)->SignOut();
-  // The statement above results in a call to SigninFailed() which will free
-  // this object, so do not refer to the OneClickSigninSyncStarter object
-  // after this point.
 }
 
 void OneClickSigninSyncStarter::LoadPolicyWithCachedClient() {
@@ -296,6 +298,13 @@ void OneClickSigninSyncStarter::CompleteInitForNewProfile(
   }
 }
 #endif
+
+void OneClickSigninSyncStarter::CancelSigninAndDelete() {
+  SigninManagerFactory::GetForProfile(profile_)->SignOut();
+  // The statement above results in a call to SigninFailed() which will free
+  // this object, so do not refer to the OneClickSigninSyncStarter object
+  // after this point.
+}
 
 void OneClickSigninSyncStarter::ConfirmAndSignin() {
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);

@@ -8,12 +8,13 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/time/time.h"
-#include "cc/debug/test_context_provider.h"
-#include "cc/debug/test_web_graphics_context_3d.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
+#include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/software_output_device.h"
+#include "cc/test/test_context_provider.h"
+#include "cc/test/test_web_graphics_context_3d.h"
 
 namespace cc {
 
@@ -93,9 +94,9 @@ class FakeOutputSurface : public OutputSurface {
 
   virtual void SwapBuffers(CompositorFrame* frame) OVERRIDE;
 
-  virtual void SetNeedsBeginFrame(bool enable) OVERRIDE;
-  bool needs_begin_frame() const {
-    return needs_begin_frame_;
+  virtual void SetNeedsBeginImplFrame(bool enable) OVERRIDE;
+  bool needs_begin_impl_frame() const {
+    return needs_begin_impl_frame_;
   }
 
   void set_forced_draw_to_software_device(bool forced) {
@@ -122,6 +123,9 @@ class FakeOutputSurface : public OutputSurface {
     has_external_stencil_test_ = has_test;
   }
 
+  void SetMemoryPolicyToSetAtBind(
+      scoped_ptr<cc::ManagedMemoryPolicy> memory_policy_to_set_at_bind);
+
  protected:
   FakeOutputSurface(
       scoped_refptr<ContextProvider> context_provider,
@@ -136,16 +140,17 @@ class FakeOutputSurface : public OutputSurface {
       scoped_ptr<SoftwareOutputDevice> software_device,
       bool delegated_rendering);
 
-  void OnBeginFrame();
+  void OnBeginImplFrame();
 
   OutputSurfaceClient* client_;
   CompositorFrame last_sent_frame_;
   size_t num_sent_frames_;
-  bool needs_begin_frame_;
+  bool needs_begin_impl_frame_;
   bool forced_draw_to_software_device_;
   bool has_external_stencil_test_;
-  base::WeakPtrFactory<FakeOutputSurface> fake_weak_ptr_factory_;
   TransferableResourceArray resources_held_by_parent_;
+  base::WeakPtrFactory<FakeOutputSurface> fake_weak_ptr_factory_;
+  scoped_ptr<cc::ManagedMemoryPolicy> memory_policy_to_set_at_bind_;
 };
 
 static inline scoped_ptr<OutputSurface> CreateFakeOutputSurface() {

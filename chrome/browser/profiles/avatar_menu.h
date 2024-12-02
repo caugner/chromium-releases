@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents.h"
@@ -66,6 +67,9 @@ class AvatarMenu : public content::NotificationObserver {
 
     // The index in the |profile_cache| for this profile.
     size_t profile_index;
+
+    // The path of this profile.
+    base::FilePath profile_path;
   };
 
   // Constructor. |observer| can be NULL. |browser| can be NULL and a new one
@@ -86,9 +90,6 @@ class AvatarMenu : public content::NotificationObserver {
 
   // Compare items by name.
   static bool CompareItems(const Item* item1, const Item* item2);
-
-  // Creates a new guest user window.
-  static void SwitchToGuestProfileWindow(Browser* browser);
 
   // Opens a Browser with the specified profile in response to the user
   // selecting an item. If |always_create| is true then a new window is created

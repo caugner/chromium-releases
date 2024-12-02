@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <set>
+
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
@@ -18,7 +20,6 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/url_constants.h"
@@ -319,28 +320,6 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_EQ(orig_site_instance, noref_site_instance);
 }
 
-namespace {
-
-class WebContentsDestroyedObserver : public WebContentsObserver {
- public:
-  WebContentsDestroyedObserver(WebContents* web_contents,
-                               const base::Closure& callback)
-      : WebContentsObserver(web_contents),
-        callback_(callback) {
-  }
-
-  virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE {
-    callback_.Run();
-  }
-
- private:
-  base::Closure callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebContentsDestroyedObserver);
-};
-
-}  // namespace
-
 // Test for crbug.com/116192.  Targeted links should still work after the
 // named target window has swapped processes.
 IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
@@ -411,15 +390,13 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   NavigateToURL(new_shell, https_server.GetURL("files/title1.html"));
   EXPECT_EQ(new_site_instance,
             new_shell->web_contents()->GetSiteInstance());
-  scoped_refptr<MessageLoopRunner> loop_runner(new MessageLoopRunner);
-  WebContentsDestroyedObserver close_observer(new_shell->web_contents(),
-                                              loop_runner->QuitClosure());
+  WebContentsDestroyedWatcher close_watcher(new_shell->web_contents());
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
       shell()->web_contents(),
       "window.domAutomationController.send(testCloseWindow());",
       &success));
   EXPECT_TRUE(success);
-  loop_runner->Run();
+  close_watcher.Wait();
 }
 
 // Test that setting the opener to null in a window affects cross-process
@@ -619,9 +596,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // 3) Post a message from the foo window to the opener.  The opener will
   // reply, causing the foo window to update its own title.
-  WindowedNotificationObserver title_observer(
-      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-      Source<WebContents>(foo_contents));
+  base::string16 expected_title = ASCIIToUTF16("msg");
+  TitleWatcher title_watcher(foo_contents, expected_title);
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
       foo_contents,
       "window.domAutomationController.send(postToOpener('msg','*'));",
@@ -629,7 +605,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_TRUE(success);
   ASSERT_FALSE(
       opener_manager->GetSwappedOutRenderViewHost(orig_site_instance.get()));
-  title_observer.Wait();
+  ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
   // We should have received only 1 message in the opener and "foo" tabs,
   // and updated the title.
@@ -649,16 +625,14 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // 4) Now post a message from the _blank window to the foo window.  The
   // foo window will update its title and will not reply.
-  WindowedNotificationObserver title_observer2(
-      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-      Source<WebContents>(foo_contents));
+  expected_title = ASCIIToUTF16("msg2");
+  TitleWatcher title_watcher2(foo_contents, expected_title);
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
       new_contents,
       "window.domAutomationController.send(postToFoo('msg2'));",
       &success));
   EXPECT_TRUE(success);
-  title_observer2.Wait();
-  EXPECT_EQ(ASCIIToUTF16("msg2"), foo_contents->GetTitle());
+  ASSERT_EQ(expected_title, title_watcher2.WaitAndGetTitle());
 
   // This postMessage should have created a swapped out RVH for the new
   // SiteInstance in the target=_blank window.
@@ -667,6 +641,109 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
 
   // TODO(nasko): Test subframe targeting of postMessage once
   // http://crbug.com/153701 is fixed.
+}
+
+// Test for crbug.com/278336. MessagePorts should work cross-process. I.e.,
+// messages which contain Transferables and get intercepted by
+// RenderViewImpl::willCheckAndDispatchMessageEvent (because the RenderView is
+// swapped out) should work.
+// Specifically:
+// 1) Create 2 windows (opener and "foo") and send "foo" cross-process.
+// 2) Post a message containing a message port from opener to "foo".
+// 3) Post a message from "foo" back to opener via the passed message port.
+// The test will be enabled when the feature implementation lands.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
+                       SupportCrossProcessPostMessageWithMessagePort) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::SpawnedTestServer https_server(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("content/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  NavigateToURL(shell(), test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance and RVHM for later comparison.
+  WebContents* opener_contents = shell()->web_contents();
+  scoped_refptr<SiteInstance> orig_site_instance(
+      opener_contents->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance.get() != NULL);
+  RenderViewHostManager* opener_manager = static_cast<WebContentsImpl*>(
+      opener_contents)->GetRenderManagerForTesting();
+
+  // 1) Open a named target=foo window. We will later post a message between the
+  // opener and the new window.
+  ShellAddedObserver new_shell_observer;
+  bool success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  Shell* new_shell = new_shell_observer.GetShell();
+
+  // Wait for the navigation in the new window to finish, if it hasn't, then
+  // send it to post_message.html on a different site.
+  WebContents* foo_contents = new_shell->web_contents();
+  WaitForLoadStop(foo_contents);
+  EXPECT_EQ("/files/navigate_opener.html",
+            foo_contents->GetLastCommittedURL().path());
+  NavigateToURL(
+      new_shell,
+      https_server.GetURL("files/post_message.html"));
+  scoped_refptr<SiteInstance> foo_site_instance(
+      foo_contents->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, foo_site_instance);
+
+  // We now have two windows. The opener should have a swapped out RVH
+  // for the new SiteInstance.
+  EXPECT_EQ(2u, Shell::windows().size());
+  EXPECT_TRUE(
+      opener_manager->GetSwappedOutRenderViewHost(foo_site_instance.get()));
+
+  // 2) Post a message containing a MessagePort from opener to the the foo
+  // window. The foo window will reply via the passed port, causing the opener
+  // to update its own title.
+  WindowedNotificationObserver title_observer(
+      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
+      Source<WebContents>(opener_contents));
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      opener_contents,
+      "window.domAutomationController.send(postWithPortToFoo());",
+      &success));
+  EXPECT_TRUE(success);
+  ASSERT_FALSE(
+      opener_manager->GetSwappedOutRenderViewHost(orig_site_instance.get()));
+  title_observer.Wait();
+
+  // Check message counts.
+  int opener_received_messages_via_port = 0;
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      opener_contents,
+      "window.domAutomationController.send(window.receivedMessagesViaPort);",
+      &opener_received_messages_via_port));
+  int foo_received_messages = 0;
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      foo_contents,
+      "window.domAutomationController.send(window.receivedMessages);",
+      &foo_received_messages));
+  int foo_received_messages_with_port = 0;
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      foo_contents,
+      "window.domAutomationController.send(window.receivedMessagesWithPort);",
+      &foo_received_messages_with_port));
+  EXPECT_EQ(1, foo_received_messages);
+  EXPECT_EQ(1, foo_received_messages_with_port);
+  EXPECT_EQ(1, opener_received_messages_via_port);
+  EXPECT_EQ(ASCIIToUTF16("msg-with-port"), foo_contents->GetTitle());
+  EXPECT_EQ(ASCIIToUTF16("msg-back-via-port"), opener_contents->GetTitle());
 }
 
 // Test for crbug.com/116192.  Navigations to a window's opener should
@@ -900,17 +977,15 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, ShowLoadingURLUntilSpoof) {
 
   // Now modify the contents of the new window from the opener.  This will also
   // modify the title of the document to give us something to listen for.
-  WindowedNotificationObserver title_observer(
-      NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
-      Source<WebContents>(contents));
+  base::string16 expected_title = ASCIIToUTF16("Modified Title");
+  TitleWatcher title_watcher(contents, expected_title);
   success = false;
   EXPECT_TRUE(ExecuteScriptAndExtractBool(
       orig_contents,
       "window.domAutomationController.send(modifyNewWindow());",
       &success));
   EXPECT_TRUE(success);
-  title_observer.Wait();
-  EXPECT_EQ(ASCIIToUTF16("Modified Title"), contents->GetTitle());
+  ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
   // At this point, we should no longer be showing the destination URL.
   // The visible entry should be null, resulting in about:blank in the address
@@ -1128,50 +1203,27 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_TRUE(success);
 }
 
-// This class holds onto RenderViewHostObservers for as long as their observed
-// RenderViewHosts are alive. This allows us to confirm that all hosts have
-// properly been shutdown.
-class RenderViewHostObserverArray {
+// This class ensures that all the given RenderViewHosts have properly been
+// shutdown.
+class RenderViewHostDestructionObserver : public WebContentsObserver {
  public:
-  ~RenderViewHostObserverArray() {
-    // In case some would be left in there with a dead pointer to us.
-    for (std::list<RVHObserver*>::iterator iter = observers_.begin();
-         iter != observers_.end(); ++iter) {
-      (*iter)->ClearParent();
-    }
+  explicit RenderViewHostDestructionObserver(WebContents* web_contents)
+      : WebContentsObserver(web_contents) {}
+  virtual ~RenderViewHostDestructionObserver() {}
+  void EnsureRVHGetsDestructed(RenderViewHost* rvh) {
+    watched_render_view_hosts_.insert(rvh);
   }
-  void AddObserverToRVH(RenderViewHost* rvh) {
-    observers_.push_back(new RVHObserver(this, rvh));
-  }
-  size_t GetNumObservers() const {
-    return observers_.size();
+  size_t GetNumberOfWatchedRenderViewHosts() const {
+    return watched_render_view_hosts_.size();
   }
 
  private:
-  friend class RVHObserver;
-  class RVHObserver : public RenderViewHostObserver {
-   public:
-    RVHObserver(RenderViewHostObserverArray* parent, RenderViewHost* rvh)
-        : RenderViewHostObserver(rvh),
-          parent_(parent) {
-    }
-    virtual void RenderViewHostDestroyed(RenderViewHost* rvh) OVERRIDE {
-      if (parent_)
-        parent_->RemoveObserver(this);
-      RenderViewHostObserver::RenderViewHostDestroyed(rvh);
-    };
-    void ClearParent() {
-      parent_ = NULL;
-    }
-   private:
-    RenderViewHostObserverArray* parent_;
-  };
-
-  void RemoveObserver(RVHObserver* observer) {
-    observers_.remove(observer);
+  // WebContentsObserver implementation:
+  virtual void RenderViewDeleted(RenderViewHost* rvh) OVERRIDE {
+    watched_render_view_hosts_.erase(rvh);
   }
 
-  std::list<RVHObserver*> observers_;
+  std::set<RenderViewHost*> watched_render_view_hosts_;
 };
 
 // Test for crbug.com/90867. Make sure we don't leak render view hosts since
@@ -1189,7 +1241,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   ASSERT_TRUE(https_server.Start());
 
   // Observe the created render_view_host's to make sure they will not leak.
-  RenderViewHostObserverArray rvh_observers;
+  RenderViewHostDestructionObserver rvh_observers(shell()->web_contents());
 
   GURL navigated_url(test_server()->GetURL("files/title2.html"));
   GURL view_source_url(kViewSourceScheme + std::string(":") +
@@ -1201,7 +1253,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   SiteInstance* blank_site_instance = blank_rvh->GetSiteInstance();
   EXPECT_EQ(shell()->web_contents()->GetLastCommittedURL(), GURL::EmptyGURL());
   EXPECT_EQ(blank_site_instance->GetSiteURL(), GURL::EmptyGURL());
-  rvh_observers.AddObserverToRVH(blank_rvh);
+  rvh_observers.EnsureRVHGetsDestructed(blank_rvh);
 
   // Now navigate to the view-source URL and ensure we got a different
   // SiteInstance and RenderViewHost.
@@ -1209,7 +1261,8 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   EXPECT_NE(blank_rvh, shell()->web_contents()->GetRenderViewHost());
   EXPECT_NE(blank_site_instance, shell()->web_contents()->
       GetRenderViewHost()->GetSiteInstance());
-  rvh_observers.AddObserverToRVH(shell()->web_contents()->GetRenderViewHost());
+  rvh_observers.EnsureRVHGetsDestructed(
+      shell()->web_contents()->GetRenderViewHost());
 
   // Load a random page and then navigate to view-source: of it.
   // This used to cause two RVH instances for the same SiteInstance, which
@@ -1217,10 +1270,12 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   NavigateToURL(shell(), navigated_url);
   SiteInstance* site_instance1 = shell()->web_contents()->
       GetRenderViewHost()->GetSiteInstance();
-  rvh_observers.AddObserverToRVH(shell()->web_contents()->GetRenderViewHost());
+  rvh_observers.EnsureRVHGetsDestructed(
+      shell()->web_contents()->GetRenderViewHost());
 
   NavigateToURL(shell(), view_source_url);
-  rvh_observers.AddObserverToRVH(shell()->web_contents()->GetRenderViewHost());
+  rvh_observers.EnsureRVHGetsDestructed(
+      shell()->web_contents()->GetRenderViewHost());
   SiteInstance* site_instance2 = shell()->web_contents()->
       GetRenderViewHost()->GetSiteInstance();
 
@@ -1229,14 +1284,15 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
 
   // Now navigate to a different instance so that we swap out again.
   NavigateToURL(shell(), https_server.GetURL("files/title2.html"));
-  rvh_observers.AddObserverToRVH(shell()->web_contents()->GetRenderViewHost());
+  rvh_observers.EnsureRVHGetsDestructed(
+      shell()->web_contents()->GetRenderViewHost());
 
   // This used to leak a render view host.
   shell()->Close();
 
   RunAllPendingInMessageLoop();  // Needed on ChromeOS.
 
-  EXPECT_EQ(0U, rvh_observers.GetNumObservers());
+  EXPECT_EQ(0U, rvh_observers.GetNumberOfWatchedRenderViewHosts());
 }
 
 // Test for crbug.com/143155.  Frame tree updates during unload should not

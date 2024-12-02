@@ -5,6 +5,7 @@
 #include "ui/keyboard/keyboard_controller.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
@@ -18,6 +19,8 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/keyboard/keyboard_controller_proxy.h"
+#include "ui/keyboard/keyboard_switches.h"
+#include "ui/keyboard/keyboard_util.h"
 
 namespace {
 
@@ -122,7 +125,6 @@ class KeyboardLayoutManager : public aura::LayoutManager {
 
 KeyboardController::KeyboardController(KeyboardControllerProxy* proxy)
     : proxy_(proxy),
-      container_(NULL),
       input_method_(NULL),
       keyboard_visible_(false),
       weak_factory_(this) {
@@ -132,31 +134,37 @@ KeyboardController::KeyboardController(KeyboardControllerProxy* proxy)
 }
 
 KeyboardController::~KeyboardController() {
-  if (container_)
+  if (container_.get())
     container_->RemoveObserver(this);
   if (input_method_)
     input_method_->RemoveObserver(this);
 }
 
 aura::Window* KeyboardController::GetContainerWindow() {
-  if (!container_) {
-    container_ = new aura::Window(new KeyboardWindowDelegate());
+  if (!container_.get()) {
+    container_.reset(new aura::Window(new KeyboardWindowDelegate()));
     container_->SetName("KeyboardContainer");
+    container_->set_owned_by_parent(false);
     container_->Init(ui::LAYER_NOT_DRAWN);
     container_->AddObserver(this);
-    container_->SetLayoutManager(new KeyboardLayoutManager(container_));
+    container_->SetLayoutManager(new KeyboardLayoutManager(container_.get()));
   }
-  return container_;
+  return container_.get();
 }
 
-void KeyboardController::HideKeyboard() {
+void KeyboardController::HideKeyboard(HideReason reason) {
   keyboard_visible_ = false;
+
+  keyboard::LogKeyboardControlEvent(
+      reason == HIDE_REASON_AUTOMATIC ?
+          keyboard::KEYBOARD_CONTROL_HIDE_AUTO :
+          keyboard::KEYBOARD_CONTROL_HIDE_USER);
 
   FOR_EACH_OBSERVER(KeyboardControllerObserver,
                     observer_list_,
                     OnKeyboardBoundsChanging(gfx::Rect()));
 
-  proxy_->HideKeyboardContainer(container_);
+  proxy_->HideKeyboardContainer(container_.get());
 }
 
 void KeyboardController::AddObserver(KeyboardControllerObserver* observer) {
@@ -169,41 +177,45 @@ void KeyboardController::RemoveObserver(KeyboardControllerObserver* observer) {
 
 void KeyboardController::OnWindowHierarchyChanged(
     const HierarchyChangeParams& params) {
-  if (params.new_parent && params.target == container_)
+  if (params.new_parent && params.target == container_.get())
     OnTextInputStateChanged(proxy_->GetInputMethod()->GetTextInputClient());
-}
-
-void KeyboardController::OnWindowDestroying(aura::Window* window) {
-  DCHECK_EQ(container_, window);
-  container_ = NULL;
 }
 
 void KeyboardController::OnTextInputStateChanged(
     const ui::TextInputClient* client) {
-  if (!container_)
+  if (!container_.get())
     return;
 
   bool was_showing = keyboard_visible_;
   bool should_show = was_showing;
   ui::TextInputType type =
       client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
-  if (type == ui::TEXT_INPUT_TYPE_NONE) {
+  if (type == ui::TEXT_INPUT_TYPE_NONE &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kKeyboardUsabilityTest)) {
     should_show = false;
   } else {
     if (container_->children().empty()) {
+      keyboard::MarkKeyboardLoadStarted();
       aura::Window* keyboard = proxy_->GetKeyboardWindow();
       keyboard->Show();
       container_->AddChild(keyboard);
       container_->layout_manager()->OnWindowResized();
     }
     proxy_->SetUpdateInputType(type);
-    container_->parent()->StackChildAtTop(container_);
+    container_->parent()->StackChildAtTop(container_.get());
     should_show = true;
   }
 
   if (was_showing != should_show) {
     if (should_show) {
       keyboard_visible_ = true;
+
+      // If the controller is in the process of hiding the keyboard, do not log
+      // the stat here since the keyboard will not actually be shown.
+      if (!WillHideKeyboard())
+        keyboard::LogKeyboardControlEvent(keyboard::KEYBOARD_CONTROL_SHOW);
+
       weak_factory_.InvalidateWeakPtrs();
       if (container_->IsVisible())
         return;
@@ -212,7 +224,7 @@ void KeyboardController::OnTextInputStateChanged(
           KeyboardControllerObserver,
           observer_list_,
           OnKeyboardBoundsChanging(container_->children()[0]->bounds()));
-      proxy_->ShowKeyboardContainer(container_);
+      proxy_->ShowKeyboardContainer(container_.get());
     } else {
       // Set the visibility state here so that any queries for visibility
       // before the timer fires returns the correct future value.
@@ -220,7 +232,7 @@ void KeyboardController::OnTextInputStateChanged(
       base::MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&KeyboardController::HideKeyboard,
-                     weak_factory_.GetWeakPtr()),
+                     weak_factory_.GetWeakPtr(), HIDE_REASON_AUTOMATIC),
           base::TimeDelta::FromMilliseconds(kHideKeyboardDelayMs));
     }
   }

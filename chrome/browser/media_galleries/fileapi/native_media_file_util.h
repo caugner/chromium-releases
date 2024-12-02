@@ -63,12 +63,14 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       const CopyFileProgressCallback& progress_callback,
       const StatusCallback& callback) OVERRIDE;
   virtual void MoveFileLocal(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       const StatusCallback& callback) OVERRIDE;
   virtual void CopyInForeignFile(
       scoped_ptr<fileapi::FileSystemOperationContext> context,
@@ -111,6 +113,7 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       scoped_ptr<fileapi::FileSystemOperationContext> context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       bool copy,
       const StatusCallback& callback);
   virtual void CopyInForeignFileOnTaskRunnerThread(
@@ -139,6 +142,7 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       fileapi::FileSystemOperationContext* context,
       const fileapi::FileSystemURL& src_url,
       const fileapi::FileSystemURL& dest_url,
+      CopyOrMoveOption option,
       bool copy);
   virtual base::PlatformFileError CopyInForeignFileSync(
       fileapi::FileSystemOperationContext* context,
@@ -197,10 +201,10 @@ class NativeMediaFileUtil : public fileapi::AsyncFileUtil {
       base::FilePath* local_file_path);
 
 
-  base::WeakPtrFactory<NativeMediaFileUtil> weak_factory_;
-
   // Not owned, owned by the backend which owns this.
   MediaPathFilter* media_path_filter_;
+
+  base::WeakPtrFactory<NativeMediaFileUtil> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeMediaFileUtil);
 };

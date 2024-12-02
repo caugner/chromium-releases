@@ -23,7 +23,6 @@ namespace switches {
 CHROMEOS_EXPORT extern const char kAppOemManifestFile[];
 CHROMEOS_EXPORT extern const char kAshWebUIInit[];
 CHROMEOS_EXPORT extern const char kAuthExtensionPath[];
-CHROMEOS_EXPORT extern const char kChromeOSReleaseBoard[];
 CHROMEOS_EXPORT extern const char kDbusStub[];
 CHROMEOS_EXPORT extern const char kDefaultStubNetworkStateIdle[];
 CHROMEOS_EXPORT extern const char kDisableBootAnimation[];
@@ -41,17 +40,17 @@ CHROMEOS_EXPORT extern const char kDisableStubEthernet[];
 CHROMEOS_EXPORT extern const char kEchoExtensionPath[];
 CHROMEOS_EXPORT extern const char kEnableBackgroundLoader[];
 CHROMEOS_EXPORT extern const char kEnableCarrierSwitching[];
-CHROMEOS_EXPORT extern const char kEnableChromeAudioSwitching[];
 CHROMEOS_EXPORT extern const char kEnableChromeCaptivePortalDetector[];
+CHROMEOS_EXPORT extern const char kEnableEnterpriseUserReporting[];
+CHROMEOS_EXPORT extern const char kEnableIMEModeIndicator[];
 CHROMEOS_EXPORT extern const char kEnableKioskMode[];
 CHROMEOS_EXPORT extern const char kEnableRequestTabletSite[];
-CHROMEOS_EXPORT extern const char kEnableScreensaverExtensions[];
-CHROMEOS_EXPORT extern const char kEnableStaticIPConfig[];
 CHROMEOS_EXPORT extern const char kEnableStubInteractive[];
 CHROMEOS_EXPORT extern const char kEnableStubPortalledWifi[];
 CHROMEOS_EXPORT extern const char kEnableTouchpadThreeFingerClick[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentInitialModulus[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentModulusLimit[];
+CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentSkipRobotAuth[];
 CHROMEOS_EXPORT extern const char kFileManagerShowCheckboxes[];
 CHROMEOS_EXPORT extern const char kFileManagerEnableWebstoreIntegration[];
 CHROMEOS_EXPORT extern const char kFirstExecAfterBoot[];
@@ -66,15 +65,15 @@ CHROMEOS_EXPORT extern const char kLoginPassword[];
 CHROMEOS_EXPORT extern const char kLoginProfile[];
 CHROMEOS_EXPORT extern const char kLoginUser[];
 CHROMEOS_EXPORT extern const char kNaturalScrollDefault[];
-CHROMEOS_EXPORT extern const char kNoDiscardTabs[];
-CHROMEOS_EXPORT extern const char kNoSwapMetrics[];
 CHROMEOS_EXPORT extern const char kOobeSkipPostLogin[];
+CHROMEOS_EXPORT extern const char kDeviceRegistered[];
 CHROMEOS_EXPORT extern const char kSkipHWIDCheck[];
 CHROMEOS_EXPORT extern const char kSmsTestMessages[];
 CHROMEOS_EXPORT extern const char kStubCrosSettings[];
 CHROMEOS_EXPORT extern const char kDisableUserImageSync[];
 CHROMEOS_EXPORT extern const char kEnableFirstRunUI[];
 CHROMEOS_EXPORT extern const char kEnableSamlSignin[];
+CHROMEOS_EXPORT extern const char kTestAutoUpdateUI[];
 
 }  // namespace switches
 }  // namespace chromeos

@@ -96,7 +96,6 @@ static const int kSampleRateMap[4][4] = {
 };
 
 // Frame header field constants.
-static const int kVersion1 = 3;
 static const int kVersion2 = 2;
 static const int kVersionReserved = 1;
 static const int kVersion2_5 = 0;
@@ -164,7 +163,7 @@ bool MP3StreamParser::Parse(const uint8* buf, int size) {
     int data_size;
     queue_.Peek(&data, &data_size);
 
-    if (size < 4)
+    if (data_size < 4)
       break;
 
     uint32 start_code = data[0] << 24 | data[1] << 16 | data[2] << 8 | data[3];

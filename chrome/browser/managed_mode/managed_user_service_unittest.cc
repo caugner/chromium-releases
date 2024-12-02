@@ -4,21 +4,24 @@
 
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
+#include "chrome/browser/managed_mode/custodian_profile_downloader_service.h"
+#include "chrome/browser/managed_mode/custodian_profile_downloader_service_factory.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_builder.h"
+#include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/manifest_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,6 +29,10 @@
 using content::MessageLoopRunner;
 
 namespace {
+
+void OnProfileDownloadedFail(const string16& full_name) {
+  ASSERT_TRUE(false) << "Profile download should not have succeeded.";
+}
 
 class ManagedModeURLFilterObserver : public ManagedModeURLFilter::Observer {
  public:
@@ -60,16 +67,14 @@ class ManagedModeURLFilterObserver : public ManagedModeURLFilter::Observer {
 
 class ManagedUserServiceTest : public ::testing::Test {
  public:
-  ManagedUserServiceTest() : ui_thread_(content::BrowserThread::UI,
-                                        &message_loop_) {
+  ManagedUserServiceTest() {
     managed_user_service_ = ManagedUserServiceFactory::GetForProfile(&profile_);
   }
 
   virtual ~ManagedUserServiceTest() {}
 
  protected:
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   TestingProfile profile_;
   ManagedUserService* managed_user_service_;
 };
@@ -133,18 +138,33 @@ TEST_F(ManagedUserServiceTest, GetManualExceptionsForHost) {
             managed_user_service_->GetManualBehaviorForURL(kMooseURL));
 }
 
-class ManagedUserServiceExtensionTest : public ExtensionServiceTestBase {
+// Ensure that the CustodianProfileDownloaderService shuts down cleanly. If no
+// DCHECK is hit when the service is destroyed, this test passed.
+TEST_F(ManagedUserServiceTest, ShutDownCustodianProfileDownloader) {
+  CustodianProfileDownloaderService* downloader_service =
+      CustodianProfileDownloaderServiceFactory::GetForProfile(
+          &profile_);
+
+  // Emulate being logged in, then start to download a profile so a
+  // ProfileDownloader gets created.
+  profile_.GetPrefs()->SetString(prefs::kGoogleServicesUsername, "Logged In");
+  downloader_service->DownloadProfile(base::Bind(&OnProfileDownloadedFail));
+}
+
+class ManagedUserServiceExtensionTestBase : public ExtensionServiceTestBase {
  public:
-  ManagedUserServiceExtensionTest() {}
-  virtual ~ManagedUserServiceExtensionTest() {}
+  explicit ManagedUserServiceExtensionTestBase(bool is_managed)
+      : is_managed_(is_managed),
+        channel_(chrome::VersionInfo::CHANNEL_DEV) {}
+  virtual ~ManagedUserServiceExtensionTestBase() {}
 
   virtual void SetUp() OVERRIDE {
     ExtensionServiceTestBase::SetUp();
-    InitializeEmptyExtensionService();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    ExtensionServiceTestBase::TearDown();
+    ExtensionServiceTestBase::ExtensionServiceInitParams params =
+        CreateDefaultInitParams();
+    params.profile_is_managed = is_managed_;
+    InitializeExtensionService(params);
+    ManagedUserServiceFactory::GetForProfile(profile_.get())->Init();
   }
 
  protected:
@@ -174,10 +194,27 @@ class ManagedUserServiceExtensionTest : public ExtensionServiceTestBase {
         builder.SetManifest(manifest.Pass()).Build();
     return extension;
   }
+
+  bool is_managed_;
+  extensions::ScopedCurrentChannel channel_;
 };
 
-TEST_F(ManagedUserServiceExtensionTest,
-       ExtensionManagementPolicyProviderUnmanaged) {
+class ManagedUserServiceExtensionTestUnmanaged
+    : public ManagedUserServiceExtensionTestBase {
+ public:
+  ManagedUserServiceExtensionTestUnmanaged()
+      : ManagedUserServiceExtensionTestBase(false) {}
+};
+
+class ManagedUserServiceExtensionTest
+    : public ManagedUserServiceExtensionTestBase {
+ public:
+  ManagedUserServiceExtensionTest()
+      : ManagedUserServiceExtensionTestBase(true) {}
+};
+
+TEST_F(ManagedUserServiceExtensionTestUnmanaged,
+       ExtensionManagementPolicyProvider) {
   ManagedUserService* managed_user_service =
       ManagedUserServiceFactory::GetForProfile(profile_.get());
   EXPECT_FALSE(profile_->IsManaged());
@@ -193,14 +230,12 @@ TEST_F(ManagedUserServiceExtensionTest,
   EXPECT_EQ(string16(), error_2);
 }
 
-TEST_F(ManagedUserServiceExtensionTest,
-       ExtensionManagementPolicyProviderManaged) {
+TEST_F(ManagedUserServiceExtensionTest, ExtensionManagementPolicyProvider) {
   ManagedUserService* managed_user_service =
       ManagedUserServiceFactory::GetForProfile(profile_.get());
-  managed_user_service->InitForTesting();
   ManagedModeURLFilterObserver observer(
       managed_user_service->GetURLFilterForUIThread());
-  EXPECT_TRUE(profile_->IsManaged());
+  ASSERT_TRUE(profile_->IsManaged());
   // Wait for the initial update to finish (otherwise we'll get leaks).
   observer.Wait();
 
@@ -228,11 +263,9 @@ TEST_F(ManagedUserServiceExtensionTest,
 #endif
 }
 
-
 TEST_F(ManagedUserServiceExtensionTest, NoContentPacks) {
   ManagedUserService* managed_user_service =
       ManagedUserServiceFactory::GetForProfile(profile_.get());
-  managed_user_service->Init();
   ManagedModeURLFilter* url_filter =
       managed_user_service->GetURLFilterForUIThread();
 
@@ -247,7 +280,6 @@ TEST_F(ManagedUserServiceExtensionTest, NoContentPacks) {
 TEST_F(ManagedUserServiceExtensionTest, InstallContentPacks) {
   ManagedUserService* managed_user_service =
       ManagedUserServiceFactory::GetForProfile(profile_.get());
-  managed_user_service->InitForTesting();
   ManagedModeURLFilter* url_filter =
       managed_user_service->GetURLFilterForUIThread();
   ManagedModeURLFilterObserver observer(url_filter);

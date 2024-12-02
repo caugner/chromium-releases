@@ -25,6 +25,12 @@ namespace net {
 
 namespace test {
 
+// Upper limit on versions we support.
+QuicVersion QuicVersionMax();
+
+// Lower limit on versions we support.
+QuicVersion QuicVersionMin();
+
 void CompareCharArraysWithHexError(const std::string& description,
                                    const char* actual,
                                    const int actual_len,
@@ -147,6 +153,9 @@ class FramerVisitorCapturingFrames : public NoOpFramerVisitor {
   const std::vector<QuicStreamFrame>* stream_frames() const {
     return &stream_frames_;
   }
+  const std::vector<string*>& stream_data() const {
+    return stream_data_;
+  }
   QuicAckFrame* ack() { return ack_.get(); }
   QuicCongestionFeedbackFrame* feedback() { return feedback_.get(); }
   QuicRstStreamFrame* rst() { return rst_.get(); }
@@ -160,6 +169,7 @@ class FramerVisitorCapturingFrames : public NoOpFramerVisitor {
   size_t frame_count_;
   QuicPacketHeader header_;
   std::vector<QuicStreamFrame> stream_frames_;
+  std::vector<std::string*> stream_data_;
   scoped_ptr<QuicAckFrame> ack_;
   scoped_ptr<QuicCongestionFeedbackFrame> feedback_;
   scoped_ptr<QuicRstStreamFrame> rst_;
@@ -178,11 +188,12 @@ class MockConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD1(OnStreamFrames, bool(const std::vector<QuicStreamFrame>& frame));
   MOCK_METHOD1(OnRstStream, void(const QuicRstStreamFrame& frame));
   MOCK_METHOD1(OnGoAway, void(const QuicGoAwayFrame& frame));
-  MOCK_METHOD2(ConnectionClose, void(QuicErrorCode error, bool from_peer));
+  MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
   MOCK_METHOD0(OnCanWrite, bool());
   MOCK_CONST_METHOD0(HasPendingHandshake, bool());
   MOCK_METHOD1(OnSuccessfulVersionNegotiation,
                void(const QuicVersion& version));
+  MOCK_METHOD0(OnConfigNegotiated, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockConnectionVisitor);
@@ -197,10 +208,6 @@ class MockHelper : public QuicConnectionHelperInterface {
   const QuicClock* GetClock() const;
   QuicRandom* GetRandomGenerator();
   void AdvanceTime(QuicTime::Delta delta);
-  MOCK_METHOD2(WritePacketToWire, int(const QuicEncryptedPacket& packet,
-                                      int* error));
-  MOCK_METHOD0(IsWriteBlockedDataBuffered, bool());
-  MOCK_METHOD1(IsWriteBlocked, bool(int stream_id));
   virtual QuicAlarm* CreateAlarm(QuicAlarm::Delegate* delegate);
 
  private:
@@ -215,6 +222,7 @@ class MockConnection : public QuicConnection {
   MockConnection(QuicGuid guid,
                  IPEndPoint address,
                  QuicConnectionHelperInterface* helper,
+                 QuicPacketWriter* writer,
                  bool is_server);
   virtual ~MockConnection();
 
@@ -248,6 +256,8 @@ class MockConnection : public QuicConnection {
 
  private:
   const bool has_mock_helper_;
+  scoped_ptr<QuicPacketWriter> writer_;
+  scoped_ptr<QuicConnectionHelperInterface> helper_;
 
   DISALLOW_COPY_AND_ASSIGN(MockConnection);
 };
@@ -262,7 +272,9 @@ class PacketSavingConnection : public MockConnection {
       QuicPacketSequenceNumber sequence_number,
       QuicPacket* packet,
       QuicPacketEntropyHash entropy_hash,
+      TransmissionType transmission_type,
       HasRetransmittableData has_retransmittable_data,
+      IsHandshake handshake,
       Force forced) OVERRIDE;
 
   std::vector<QuicPacket*> packets_;
@@ -281,7 +293,7 @@ class MockSession : public QuicSession {
                               const IPEndPoint& peer_address,
                               const QuicPacketHeader& header,
                               const std::vector<QuicStreamFrame>& frame));
-  MOCK_METHOD2(ConnectionClose, void(QuicErrorCode error, bool from_peer));
+  MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
   MOCK_METHOD1(CreateIncomingReliableStream,
                ReliableQuicStream*(QuicStreamId id));
   MOCK_METHOD0(GetCryptoStream, QuicCryptoStream*());
@@ -292,6 +304,7 @@ class MockSession : public QuicSession {
                                             QuicStreamOffset offset,
                                             bool fin));
   MOCK_METHOD0(IsHandshakeComplete, bool());
+  MOCK_METHOD0(IsCryptoHandshakeConfirmed, bool());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSession);
@@ -317,11 +330,26 @@ class TestSession : public QuicSession {
   DISALLOW_COPY_AND_ASSIGN(TestSession);
 };
 
+class MockPacketWriter : public QuicPacketWriter {
+ public:
+  MockPacketWriter();
+  virtual ~MockPacketWriter();
+
+  MOCK_METHOD5(WritePacket,
+               WriteResult(const char* buffer,
+                           size_t buf_len,
+                           const IPAddressNumber& self_address,
+                           const IPEndPoint& peer_address,
+                           QuicBlockedWriterInterface* blocked_writer));
+  MOCK_CONST_METHOD0(IsWriteBlockedDataBuffered, bool());
+};
+
 class MockSendAlgorithm : public SendAlgorithmInterface {
  public:
   MockSendAlgorithm();
   virtual ~MockSendAlgorithm();
 
+  MOCK_METHOD2(SetFromConfig, void(const QuicConfig& config, bool is_server));
   MOCK_METHOD3(OnIncomingQuicCongestionFeedbackFrame,
                void(const QuicCongestionFeedbackFrame&,
                     QuicTime feedback_receive_time,
@@ -329,17 +357,19 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
   MOCK_METHOD3(OnIncomingAck,
                void(QuicPacketSequenceNumber, QuicByteCount, QuicTime::Delta));
   MOCK_METHOD1(OnIncomingLoss, void(QuicTime));
-  MOCK_METHOD5(SentPacket,
+  MOCK_METHOD5(OnPacketSent,
                bool(QuicTime sent_time, QuicPacketSequenceNumber, QuicByteCount,
-                    Retransmission, HasRetransmittableData));
-  MOCK_METHOD2(AbandoningPacket, void(QuicPacketSequenceNumber sequence_number,
+                    TransmissionType, HasRetransmittableData));
+  MOCK_METHOD2(OnPacketAbandoned, void(QuicPacketSequenceNumber sequence_number,
                                       QuicByteCount abandoned_bytes));
-  MOCK_METHOD4(TimeUntilSend, QuicTime::Delta(QuicTime now, Retransmission,
+  MOCK_METHOD4(TimeUntilSend, QuicTime::Delta(QuicTime now, TransmissionType,
                                               HasRetransmittableData,
                                               IsHandshake));
   MOCK_METHOD0(BandwidthEstimate, QuicBandwidth(void));
   MOCK_METHOD0(SmoothedRtt, QuicTime::Delta(void));
   MOCK_METHOD0(RetransmissionDelay, QuicTime::Delta(void));
+  MOCK_METHOD0(GetCongestionWindow, QuicByteCount());
+  MOCK_METHOD1(SetCongestionWindow, void(QuicByteCount));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSendAlgorithm);
@@ -348,11 +378,21 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
 class TestEntropyCalculator :
       public QuicReceivedEntropyHashCalculatorInterface {
  public:
-  TestEntropyCalculator() { }
-  virtual ~TestEntropyCalculator() { }
+  TestEntropyCalculator();
+  virtual ~TestEntropyCalculator();
 
   virtual QuicPacketEntropyHash EntropyHash(
       QuicPacketSequenceNumber sequence_number) const OVERRIDE;
+};
+
+class MockEntropyCalculator : public TestEntropyCalculator {
+ public:
+  MockEntropyCalculator();
+  virtual ~MockEntropyCalculator();
+
+  MOCK_CONST_METHOD1(
+      EntropyHash,
+      QuicPacketEntropyHash(QuicPacketSequenceNumber sequence_number));
 };
 
 class TestDecompressorVisitor : public QuicSpdyDecompressor::Visitor {

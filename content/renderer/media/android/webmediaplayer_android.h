@@ -47,7 +47,6 @@ class WebLayerImpl;
 namespace content {
 class WebMediaPlayerDelegate;
 class RendererMediaPlayerManager;
-class WebMediaPlayerProxyAndroid;
 
 #if defined(GOOGLE_TV)
 class MediaStreamAudioRenderer;
@@ -76,7 +75,6 @@ class WebMediaPlayerAndroid
       WebKit::WebMediaPlayerClient* client,
       base::WeakPtr<WebMediaPlayerDelegate> delegate,
       RendererMediaPlayerManager* manager,
-      WebMediaPlayerProxyAndroid* proxy,
       StreamTextureFactory* factory,
       const scoped_refptr<base::MessageLoopProxy>& media_loop,
       media::MediaLog* media_log);
@@ -161,6 +159,7 @@ class WebMediaPlayerAndroid
                               int height, bool success);
   void OnPlaybackComplete();
   void OnBufferingUpdate(int percentage);
+  void OnSeekRequest(const base::TimeDelta& time_to_seek);
   void OnSeekComplete(const base::TimeDelta& current_time);
   void OnMediaError(int error_type);
   void OnVideoSizeChanged(int width, int height);
@@ -170,10 +169,12 @@ class WebMediaPlayerAndroid
   void OnTimeUpdate(const base::TimeDelta& current_time);
 
   // Functions called when media player status changes.
-  void OnMediaPlayerPlay();
-  void OnMediaPlayerPause();
+  void OnConnectedToRemoteDevice();
+  void OnDisconnectedFromRemoteDevice();
   void OnDidEnterFullscreen();
   void OnDidExitFullscreen();
+  void OnMediaPlayerPlay();
+  void OnMediaPlayerPause();
 
   // Called when the player is released.
   virtual void OnPlayerReleased();
@@ -222,7 +223,6 @@ class WebMediaPlayerAndroid
   void OnMediaSourceOpened(WebKit::WebMediaSource* web_media_source);
 
   void OnNeedKey(const std::string& type,
-                 const std::string& session_id,
                  const std::vector<uint8>& init_data);
 
 #if defined(GOOGLE_TV)
@@ -231,6 +231,12 @@ class WebMediaPlayerAndroid
                          const base::Closure& destroy_demuxer_cb);
 #endif
 
+  // Can be called on any thread.
+  static void OnReleaseRemotePlaybackTexture(
+      const scoped_refptr<base::MessageLoopProxy>& main_loop,
+      const base::WeakPtr<WebMediaPlayerAndroid>& player,
+      uint32 sync_point);
+
  protected:
   // Helper method to update the playing state.
   void UpdatePlayingState(bool is_playing_);
@@ -238,6 +244,9 @@ class WebMediaPlayerAndroid
   // Helper methods for posting task for setting states and update WebKit.
   void UpdateNetworkState(WebKit::WebMediaPlayer::NetworkState state);
   void UpdateReadyState(WebKit::WebMediaPlayer::ReadyState state);
+  void TryCreateStreamTextureProxyIfNeeded();
+  void DoCreateStreamTexture();
+
 
   // Helper method to reestablish the surface texture peer for android
   // media player.
@@ -252,8 +261,11 @@ class WebMediaPlayerAndroid
 #endif
 
  private:
+  void DrawRemotePlaybackIcon();
   void ReallocateVideoFrame();
+  void SetCurrentFrameInternal(scoped_refptr<media::VideoFrame>& frame);
   void DidLoadMediaInfo(MediaInfoLoader::Status status);
+  void DoReleaseRemotePlaybackTexture(uint32 sync_point);
 
   // Actually do the work for generateKeyRequest/addKey so they can easily
   // report results to UMA.
@@ -293,6 +305,9 @@ class WebMediaPlayerAndroid
 
   // The video frame object used for rendering by the compositor.
   scoped_refptr<media::VideoFrame> current_frame_;
+  base::Lock current_frame_lock_;
+
+  base::ThreadChecker main_thread_checker_;
 
   // Message loop for main renderer thread.
   const scoped_refptr<base::MessageLoopProxy> main_loop_;
@@ -311,16 +326,20 @@ class WebMediaPlayerAndroid
   // any subsequent duration value passed to OnMediaMetadataChange().
   bool ignore_metadata_duration_change_;
 
-  // The time android media player is trying to seek.
-  double pending_seek_;
+  // Seek gets pending if another seek is in progress. Only last pending seek
+  // will have effect.
+  bool pending_seek_;
+  base::TimeDelta pending_seek_time_;
 
   // Internal seek state.
   bool seeking_;
+  base::TimeDelta seek_time_;
 
   // Whether loading has progressed since the last call to didLoadingProgress.
   mutable bool did_loading_progress_;
 
-  // Manager for managing this object.
+  // Manager for managing this object and for delegating method calls on
+  // Render Thread.
   RendererMediaPlayerManager* manager_;
 
   // Player ID assigned by the |manager_|.
@@ -329,6 +348,9 @@ class WebMediaPlayerAndroid
   // Current player states.
   WebKit::WebMediaPlayer::NetworkState network_state_;
   WebKit::WebMediaPlayer::ReadyState ready_state_;
+
+  // GL texture ID used to show the remote playback icon.
+  unsigned int remote_playback_texture_id_;
 
   // GL texture ID allocated to the video.
   unsigned int texture_id_;
@@ -343,6 +365,9 @@ class WebMediaPlayerAndroid
 
   // Whether the mediaplayer is playing.
   bool is_playing_;
+
+  // Whether the mediaplayer has already started playing.
+  bool playing_started_;
 
   // Whether media player needs to re-establish the surface texture peer.
   bool needs_establish_peer_;
@@ -398,15 +423,13 @@ class WebMediaPlayerAndroid
 
   MediaPlayerHostMsg_Initialize_Type player_type_;
 
-  // Proxy object that delegates method calls on Render Thread.
-  // This object is created on the Render Thread and is only called in the
-  // destructor.
-  WebMediaPlayerProxyAndroid* proxy_;
-
   // The current playing time. Because the media player is in the browser
   // process, it will regularly update the |current_time_| by calling
   // OnTimeUpdate().
   double current_time_;
+
+  // Whether the browser is currently connected to a remote media player.
+  bool is_remote_;
 
   media::MediaLog* media_log_;
 
@@ -422,6 +445,8 @@ class WebMediaPlayerAndroid
 
   // The decryptor that manages decryption keys and decrypts encrypted frames.
   scoped_ptr<ProxyDecryptor> decryptor_;
+
+  base::WeakPtrFactory<WebMediaPlayerAndroid> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerAndroid);
 };

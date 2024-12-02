@@ -9,7 +9,6 @@
 #include "ui/gfx/rect.h"
 
 namespace aura {
-class RootWindow;
 class Window;
 }
 
@@ -24,7 +23,7 @@ class WindowSelectorItem {
   virtual ~WindowSelectorItem();
 
   // Returns the root window on which this item is shown.
-  virtual aura::RootWindow* GetRootWindow() = 0;
+  virtual aura::Window* GetRootWindow() = 0;
 
   // Returns the targeted window given the event |target| window.
   // Returns NULL if no Window in this item was selected.
@@ -45,21 +44,47 @@ class WindowSelectorItem {
   // calling RemoveWindow for the last contained window).
   virtual bool empty() const = 0;
 
+  // Dispatched before beginning window overview. This will do any necessary
+  // one time actions such as restoring minimized windows.
+  virtual void PrepareForOverview() = 0;
+
   // Sets the bounds of this window selector item to |target_bounds| in the
   // |root_window| root window.
-  void SetBounds(aura::RootWindow* root_window,
+  void SetBounds(aura::Window* root_window,
                  const gfx::Rect& target_bounds);
 
-  // Returns the current bounds of this selector item.
+  // Recomputes the positions for the windows in this selection item. This is
+  // dispatched when the bounds of a window change.
+  void RecomputeWindowTransforms();
+
   const gfx::Rect& bounds() { return bounds_; }
+  const gfx::Rect& target_bounds() { return target_bounds_; }
 
  protected:
-  virtual void SetItemBounds(aura::RootWindow* root_window,
-                             const gfx::Rect& target_bounds) = 0;
+  // Sets the bounds of this selector item to |target_bounds| in |root_window|.
+  // If |animate| the windows are animated from their current location.
+  virtual void SetItemBounds(aura::Window* root_window,
+                             const gfx::Rect& target_bounds,
+                             bool animate) = 0;
+
+  // Sets the bounds used by the selector item's windows.
+  void set_bounds(const gfx::Rect& bounds) { bounds_ = bounds; }
 
  private:
-  // The bounds this item is fit to.
+  // The root window this item is being displayed on.
+  aura::Window* root_window_;
+
+  // The target bounds this selector item is fit within.
+  gfx::Rect target_bounds_;
+
+  // The actual bounds of the window(s) for this item. The aspect ratio of
+  // window(s) are maintained so they may not fill the target_bounds_.
   gfx::Rect bounds_;
+
+  // True if running SetItemBounds. This prevents recursive calls resulting from
+  // the bounds update when calling views::corewm::RecreateWindowLayers to copy
+  // a window layer for display on another monitor.
+  bool in_bounds_update_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowSelectorItem);
 };

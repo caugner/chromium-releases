@@ -26,6 +26,7 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_value_store.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/process/process_info.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -53,13 +54,12 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/message_handler.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/google/google_search_counter.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/gpu/chrome_gpu_util.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/language_usage_metrics.h"
@@ -69,6 +69,7 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/metrics/tracking_synchronizer.h"
+#include "chrome/browser/metrics/variations/variations_http_header_provider.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
@@ -83,14 +84,12 @@
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
 #include "chrome/browser/prefs/pref_metrics_service.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/renderer_host/chrome_render_view_host_observer.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/three_d_api_observer.h"
@@ -116,6 +115,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "components/nacl/browser/nacl_browser.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -152,8 +152,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/settings/cros_settings_names.h"
 #endif
 
 // TODO(port): several win-only methods have been pulled out of this, but
@@ -192,6 +192,10 @@
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/focus/accelerator_handler.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/aura/env.h"
 #endif
 
 using content::BrowserThread;
@@ -309,8 +313,10 @@ base::FilePath GetStartupProfilePath(const base::FilePath& user_data_dir,
 
   // If we are showing the app list then chrome isn't shown so load the app
   // list's profile rather than chrome's.
-  if (command_line.HasSwitch(switches::kShowAppList))
-    return AppListService::Get()->GetProfilePath(user_data_dir);
+  if (command_line.HasSwitch(switches::kShowAppList)) {
+    return AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE)->
+        GetProfilePath(user_data_dir);
+  }
 
   return g_browser_process->profile_manager()->GetLastUsedProfileDir(
       user_data_dir);
@@ -376,6 +382,12 @@ void RegisterComponentsForUpdate(const CommandLine& command_line) {
   RegisterRecoveryComponent(cus, g_browser_process->local_state());
   RegisterPepperFlashComponent(cus);
   RegisterSwiftShaderComponent(cus);
+#endif
+
+  g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(
+      cus, command_line);
+
+#if !defined(OS_CHROMEOS)
   RegisterWidevineCdmComponent(cus);
 
   // CRLSetFetcher attempts to load a CRL set from either the local disk or
@@ -383,9 +395,6 @@ void RegisterComponentsForUpdate(const CommandLine& command_line) {
   if (!command_line.HasSwitch(switches::kDisableCRLSets))
     g_browser_process->crl_set_fetcher()->StartInitialLoad(cus);
 #endif
-
-  g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(
-      cus, command_line);
 
   cus->Start();
 }
@@ -495,17 +504,6 @@ class LoadCompleteListener : public content::NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(LoadCompleteListener);
 };
 
-void RenderViewHostCreated(content::RenderViewHost* render_view_host) {
-  content::SiteInstance* site_instance = render_view_host->GetSiteInstance();
-  Profile* profile = Profile::FromBrowserContext(
-      site_instance->GetBrowserContext());
-
-  new ChromeRenderViewHostObserver(render_view_host,
-                                   profile->GetNetworkPredictor());
-  new extensions::MessageHandler(render_view_host);
-}
-
-
 }  // namespace
 
 namespace chrome_browser {
@@ -531,7 +529,6 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
       shutdown_watcher_(new ShutdownWatcherHelper()),
       startup_timer_(new performance_monitor::StartupTimer()),
       browser_field_trials_(parameters.command_line),
-      rvh_callback_(base::Bind(&RenderViewHostCreated)),
       translate_manager_(NULL),
       profile_(NULL),
       run_message_loop_(true),
@@ -547,13 +544,9 @@ ChromeBrowserMainParts::ChromeBrowserMainParts(
   // a ChromeNetworkDelegate attached that selectively allows cookies again.
   if (!disable_enforcing_cookie_policies_for_tests_)
     net::URLRequest::SetDefaultCookiePolicyToBlock();
-
-  content::RenderViewHost::AddCreatedCallback(rvh_callback_);
 }
 
 ChromeBrowserMainParts::~ChromeBrowserMainParts() {
-  content::RenderViewHost::RemoveCreatedCallback(rvh_callback_);
-
   for (int i = static_cast<int>(chrome_extra_parts_.size())-1; i >= 0; --i)
     delete chrome_extra_parts_[i];
   chrome_extra_parts_.clear();
@@ -597,7 +590,16 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
     CHECK(result) << "Invalid --" << switches::kForceFieldTrials
                   << " list specified.";
   }
-
+  if (command_line->HasSwitch(switches::kForceVariationIds)) {
+    // Create default variation ids which will always be included in the
+    // X-Chrome-Variations request header.
+    chrome_variations::VariationsHttpHeaderProvider* provider =
+        chrome_variations::VariationsHttpHeaderProvider::GetInstance();
+    bool result = provider->SetDefaultVariationIds(
+        command_line->GetSwitchValueASCII(switches::kForceVariationIds));
+    CHECK(result) << "Invalid --" << switches::kForceVariationIds
+                  << " list specified.";
+  }
   chrome_variations::VariationsService* variations_service =
       browser_process_->variations_service();
   if (variations_service)
@@ -840,8 +842,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #if !defined(OS_CHROMEOS)
   // Convert active labs into switches. This needs to be done before
   // ResourceBundle::InitSharedInstanceWithLocale as some loaded resources are
-  // affected by experiment flags (--touch-optimized-ui in particular). Not
-  // needed on Android as there aren't experimental flags.
+  // affected by experiment flags (--touch-optimized-ui in particular).
   // On ChromeOS system level flags are applied from the device settings from
   // the session manager.
   {
@@ -958,7 +959,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
           master_prefs_->suppress_default_browser_prompt_for_version);
     }
 
-    AppListService::Get()->HandleFirstRun();
+    AppListService::Get(chrome::HOST_DESKTOP_TYPE_NATIVE)->HandleFirstRun();
   }
 #endif
 
@@ -1026,6 +1027,26 @@ void ChromeBrowserMainParts::PreMainMessageLoopRun() {
 
 void ChromeBrowserMainParts::PreProfileInit() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreProfileInit");
+
+#if !defined(OS_ANDROID)
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
+  // First check if any ephemeral profiles are left behind because of browser
+  // crash and schedule them for deletion and then proceed with getting the set
+  // of profiles to open.
+  ProfileInfoCache& profile_cache = profile_manager->GetProfileInfoCache();
+  size_t profiles_count = profile_cache.GetNumberOfProfiles();
+  std::vector<base::FilePath> profiles_to_delete;
+  for (size_t i = 0;i < profiles_count; ++i) {
+    if (profile_cache.ProfileIsEphemeralAtIndex(i))
+      profiles_to_delete.push_back(profile_cache.GetPathOfProfileAtIndex(i));
+  }
+  for (size_t i = 0;i < profiles_to_delete.size(); ++i) {
+    profile_manager->ScheduleProfileForDeletion(
+        profiles_to_delete[i], ProfileManager::CreateCallback());
+  }
+#endif  // OS_ANDROID
+
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PreProfileInit();
 }
@@ -1075,6 +1096,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // application is in the foreground or not. Do not start here.
 #if !defined(OS_ANDROID)
   // Now that the file thread has been started, start recording.
+  MetricsService::SetExecutionPhase(MetricsService::START_METRICS_RECORDING);
   StartMetricsRecording();
 #endif
 
@@ -1221,6 +1243,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // calls to GetDefaultProfile().
   ProfileManager::AllowGetDefaultProfile();
 
+  MetricsService::SetExecutionPhase(MetricsService::CREATE_PROFILE);
   profile_ = CreateProfile(parameters(), user_data_dir_, parsed_command_line());
   if (!profile_)
     return content::RESULT_CODE_NORMAL_EXIT;
@@ -1259,6 +1282,14 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // called inside PostProfileInit.
   content::WebUIControllerFactory::RegisterFactory(
       ChromeWebUIControllerFactory::GetInstance());
+
+  // NaClBrowserDelegateImpl is accessed inside PostProfileInit().
+  // So make sure to create it before that.
+#if !defined(DISABLE_NACL)
+  NaClBrowserDelegateImpl* delegate = new NaClBrowserDelegateImpl(
+    extensions::ExtensionSystem::Get(profile_)->info_map());
+  nacl::NaClBrowser::SetDelegate(delegate);
+#endif
 
   // TODO(stevenjb): Move WIN and MACOSX specific code to appropriate Parts.
   // (requires supporting early exit).
@@ -1397,6 +1428,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // Start watching for hangs during startup. We disarm this hang detector when
   // ThreadWatcher takes over or when browser is shutdown or when
   // startup_watcher_ is deleted.
+  MetricsService::SetExecutionPhase(MetricsService::STARTUP_TIMEBOMB_ARM);
   startup_watcher_->Arm(base::TimeDelta::FromSeconds(300));
 
   // On mobile, need for clean shutdown arises only when the application comes
@@ -1418,6 +1450,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif
 
   // Start watching all browser threads for responsiveness.
+  MetricsService::SetExecutionPhase(MetricsService::THREAD_WATCHER_START);
   ThreadWatcherList::StartWatchingAll(parsed_command_line());
 
 #if !defined(DISABLE_NACL)
@@ -1426,7 +1459,11 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
                           parsed_command_line().GetSwitchValuePath(
                               switches::kPnaclDir));
   }
-  NaClProcessHost::EarlyStartup(new NaClBrowserDelegateImpl);
+
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(NaClProcessHost::EarlyStartup));
 #endif
 
   // Make sure initial prefs are recorded
@@ -1465,6 +1502,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   if (!parsed_command_line().HasSwitch(switches::kDisableComponentUpdate))
     RegisterComponentsForUpdate(parsed_command_line());
+
+#if defined(USE_AURA)
+  // Env creates the compositor. Aura widgets need the compositor to be created
+  // before they can be initialized by the browser.
+  aura::Env::CreateInstance();
+#endif
 
   if (browser_creator_->Start(parsed_command_line(), base::FilePath(),
                               profile_, last_opened_profiles, &result_code)) {
@@ -1525,6 +1568,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_creator_.reset();
 #endif  // !defined(OS_ANDROID)
 
+  performance_monitor::PerformanceMonitor::GetInstance()->Initialize();
+
   PostBrowserStart();
 
   if (parameters().ui_task) {
@@ -1575,11 +1620,9 @@ bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
   base::RunLoop run_loop;
 #endif
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kPerformanceMonitorGathering)) {
-    performance_monitor::PerformanceMonitor::GetInstance()->Start();
-  }
+  performance_monitor::PerformanceMonitor::GetInstance()->StartGatherCycle();
 
+  MetricsService::SetExecutionPhase(MetricsService::MAIN_MESSAGE_LOOP_RUN);
   run_loop.Run();
 
   return true;
@@ -1596,6 +1639,7 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
 
   // Start watching for jank during shutdown. It gets disarmed when
   // |shutdown_watcher_| object is destructed.
+  MetricsService::SetExecutionPhase(MetricsService::SHUTDOWN_TIMEBOMB_ARM);
   shutdown_watcher_->Arm(base::TimeDelta::FromSeconds(300));
 
   // Disarm the startup hang detector time bomb if it is still Arm'ed.

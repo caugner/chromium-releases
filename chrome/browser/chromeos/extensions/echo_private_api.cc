@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -18,14 +19,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/chromeos/ui/echo_dialog_view.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/api/echo_private.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/system/statistics_provider.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace echo_api = extensions::api::echo_private;
@@ -183,37 +183,6 @@ bool EchoPrivateGetOobeTimestampFunction::GetOobeTimestampOnFileThread() {
   return true;
 }
 
-EchoPrivateCheckAllowRedeemOffersFunction::
-    EchoPrivateCheckAllowRedeemOffersFunction() {
-}
-
-EchoPrivateCheckAllowRedeemOffersFunction::
-    ~EchoPrivateCheckAllowRedeemOffersFunction() {
-}
-
-void EchoPrivateCheckAllowRedeemOffersFunction::CheckAllowRedeemOffers() {
-  chromeos::CrosSettingsProvider::TrustedStatus status =
-      chromeos::CrosSettings::Get()->PrepareTrustedValues(base::Bind(
-          &EchoPrivateCheckAllowRedeemOffersFunction::CheckAllowRedeemOffers,
-          this));
-  if (status == chromeos::CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
-    return;
-
-  bool allow = true;
-  chromeos::CrosSettings::Get()->GetBoolean(
-      chromeos::kAllowRedeemChromeOsRegistrationOffers, &allow);
-  results_ = echo_api::CheckAllowRedeemOffers::Results::Create(allow);
-  SendResponse(true);
-}
-
-// Check the enterprise policy kAllowRedeemChromeOsRegistrationOffers flag
-// value. This policy is used to control whether user can redeem offers using
-// enterprise device.
-bool EchoPrivateCheckAllowRedeemOffersFunction::RunImpl() {
-  CheckAllowRedeemOffers();
-  return true;
-}
-
 EchoPrivateGetUserConsentFunction::EchoPrivateGetUserConsentFunction()
     : redeem_offers_allowed_(false) {
 }
@@ -244,9 +213,8 @@ void EchoPrivateGetUserConsentFunction::OnCancel() {
 }
 
 void EchoPrivateGetUserConsentFunction::OnMoreInfoLinkClicked() {
-  chrome::NavigateParams params(profile(),
-                                GURL(kMoreInfoLink),
-                                content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(
+      GetProfile(), GURL(kMoreInfoLink), content::PAGE_TRANSITION_LINK);
   // Open the link in a new window. The echo dialog is modal, so the current
   // window is useless until the dialog is closed.
   params.disposition = NEW_WINDOW;

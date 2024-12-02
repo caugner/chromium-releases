@@ -39,19 +39,25 @@ def AddDirToPythonPath(*path_parts):
     sys.path.append(path)
 
 
-def WaitFor(condition,
-            timeout, poll_interval=0.1,
-            pass_time_left_to_func=False):
-  assert isinstance(condition, type(lambda: None))  # is function
+def WaitFor(condition, timeout, pass_time_left_to_func=False):
+  """Waits for up to |timeout| secs for the function |condition| to return True.
+
+  Polling frequency is (elapsed_time / 10), with a min of .1s and max of 5s.
+
+  Returns:
+    Result of |condition| function (if present).
+  """
   start_time = time.time()
   while True:
+    elapsed_time = time.time() - start_time
     if pass_time_left_to_func:
-      res = condition(max((start_time + timeout) - time.time(), 0.0))
+      remaining_time = timeout - elapsed_time
+      res = condition(max(remaining_time, 0.0))
     else:
       res = condition()
     if res:
-      break
-    if time.time() - start_time > timeout:
+      return res
+    if elapsed_time > timeout:
       if condition.__name__ == '<lambda>':
         try:
           condition_string = inspect.getsource(condition).strip()
@@ -61,6 +67,7 @@ def WaitFor(condition,
         condition_string = condition.__name__
       raise TimeoutException('Timed out while waiting %ds for %s.' %
                              (timeout, condition_string))
+    poll_interval = min(max(elapsed_time / 10., .1), 5)
     time.sleep(poll_interval)
 
 
@@ -114,8 +121,7 @@ def CloseConnections(tab):
 def GetBuildDirectories():
   """Yields all combination of Chromium build output directories."""
   build_dirs = ['build',
-                'out',
-                'sconsbuild',
+                os.path.basename(os.environ.get('CHROMIUM_OUT_DIR', 'out')),
                 'xcodebuild']
 
   build_types = ['Debug', 'Debug_x64', 'Release', 'Release_x64']
@@ -124,16 +130,19 @@ def GetBuildDirectories():
     for build_type in build_types:
       yield build_dir, build_type
 
-def FindSupportBinary(binary_name):
+def FindSupportBinary(binary_name, executable=True):
   """Returns the path to the given binary name."""
   # TODO(tonyg/dtu): This should support finding binaries in cloud storage.
   command = None
   command_mtime = 0
+  required_mode = os.R_OK
+  if executable:
+    required_mode = os.X_OK
 
   chrome_root = GetChromiumSrcDir()
   for build_dir, build_type in GetBuildDirectories():
     candidate = os.path.join(chrome_root, build_dir, build_type, binary_name)
-    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+    if os.path.isfile(candidate) and os.access(candidate, required_mode):
       candidate_mtime = os.stat(candidate).st_mtime
       if candidate_mtime > command_mtime:
         command = candidate

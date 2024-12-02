@@ -15,23 +15,13 @@
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 
-struct ThumbnailScore;
-class SkBitmap;
-
 namespace base {
 class FilePath;
 class RefCountedMemory;
 class Time;
 }
 
-namespace gfx {
-class Image;
-}
-
 namespace history {
-
-class ExpireHistoryBackend;
-class HistoryPublisher;
 
 // This database interface is owned by the history backend and runs on the
 // history thread. It is a totally separate component from history partially
@@ -47,16 +37,7 @@ class ThumbnailDatabase {
 
   // Must be called after creation but before any other methods are called.
   // When not INIT_OK, no other functions should be called.
-  sql::InitStatus Init(const base::FilePath& db_name,
-                       const HistoryPublisher* history_publisher,
-                       URLDatabase* url_database);
-
-  // Open database on a given filename. If the file does not exist,
-  // it is created.
-  // |db| is the database to open.
-  // |db_name| is a path to the database file.
-  static sql::InitStatus OpenDatabase(sql::Connection* db,
-                                      const base::FilePath& db_name);
+  sql::InitStatus Init(const base::FilePath& db_name);
 
   // Computes and records various metrics for the database. Should only be
   // called once and only upon successful Init.
@@ -249,32 +230,28 @@ class ThumbnailDatabase {
   bool RetainDataForPageUrls(const std::vector<GURL>& urls_to_keep);
 
  private:
-  friend class ExpireHistoryBackend;
-  FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest,
-                           GetFaviconAfterMigrationToTopSites);
+  FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, RetainDataForPageUrls);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, Version3);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, Version4);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, Version5);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, Version6);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, Version7);
-  FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, RetainDataForPageUrls);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationIconMapping);
+  FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, WildSchema);
 
-  // Creates the thumbnail table, returning true if the table already exists
-  // or was successfully created.
-  bool InitThumbnailTable();
+  // Open database on a given filename. If the file does not exist,
+  // it is created.
+  // |db| is the database to open.
+  // |db_name| is a path to the database file.
+  static sql::InitStatus OpenDatabase(sql::Connection* db,
+                                      const base::FilePath& db_name);
+
+  // Helper function to implement internals of Init().  This allows
+  // Init() to retry in case of failure, since some failures run
+  // recovery code.
+  sql::InitStatus InitImpl(const base::FilePath& db_name);
 
   // Helper function to handle cleanup on upgrade failures.
   sql::InitStatus CantUpgradeToVersion(int cur_version);
-
-  // Adds support for the new metadata on web page thumbnails.
-  bool UpgradeToVersion3();
-
-  // Adds support for the icon_type in favicon table.
-  bool UpgradeToVersion4();
-
-  // Adds support for sizes in favicon table.
-  bool UpgradeToVersion5();
 
   // Adds support for size in favicons table.
   bool UpgradeToVersion6();
@@ -282,59 +259,11 @@ class ThumbnailDatabase {
   // Removes sizes column.
   bool UpgradeToVersion7();
 
-  // Migrates the icon mapping data from URL database to Thumbnail database.
-  // Return whether the migration succeeds.
-  bool MigrateIconMappingData(URLDatabase* url_db);
-
-  // Creates the favicon table, returning true if the table already exists,
-  // or was successfully created.
-  // |db| is the connection to use for initializing the table.
-  // A different connection is used in RenameAndDropThumbnails, when we
-  // need to copy the favicons between two database files.
-  bool InitFaviconsTable(sql::Connection* db);
-
-  // Creates the index over the favicon table. This will be called during
-  // initialization after the table is created. This is a separate function
-  // because it is used by SwapFaviconTables to create an index over the
-  // newly-renamed favicons table (formerly the temporary table with no index).
-  bool InitFaviconsIndex();
-
-  // Creates the favicon_bitmaps table, return true if the table already exists
-  // or was successfully created.
-  bool InitFaviconBitmapsTable(sql::Connection* db);
-
-  // Creates the index over the favicon_bitmaps table. This will be called
-  // during initialization after the table is created. This is a separate
-  // function because it is used by CommitTemporaryTables to create an
-  // index over the newly-renamed favicon_bitmaps table (formerly the temporary
-  // table with no index).
-  bool InitFaviconBitmapsIndex();
-
-  // Creates the icon_map table, return true if the table already exists or was
-  // successfully created.
-  bool InitIconMappingTable(sql::Connection* db);
-
-  // Creates the index over the icon_mapping table, This will be called during
-  // initialization after the table is created. This is a separate function
-  // because it is used by CommitTemporaryIconMappingTable to create an index
-  // over the newly-renamed icon_mapping table (formerly the temporary table
-  // with no index).
-  bool InitIconMappingIndex();
-
   // Returns true if the |favicons| database is missing a column.
   bool IsFaviconDBStructureIncorrect();
 
-  // Returns True if the current database is latest.
-  bool IsLatestVersion();
-
   sql::Connection db_;
   sql::MetaTable meta_table_;
-
-  // This object is created and managed by the history backend. We maintain an
-  // opaque pointer to the object for our use.
-  // This can be NULL if there are no indexers registered to receive indexing
-  // data from us.
-  const HistoryPublisher* history_publisher_;
 };
 
 }  // namespace history

@@ -13,6 +13,7 @@
 #include "base/metrics/histogram.h"
 #include "chrome/browser/google_apis/auth_service_observer.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace google_apis {
 
@@ -207,7 +208,6 @@ void AuthService::OnAuthCompleted(const AuthStatusCallback& callback,
     ClearRefreshToken();
   }
 
-  // TODO(zelidrag): Add retry, back-off logic when things go wrong here.
   callback.Run(error, access_token);
 }
 

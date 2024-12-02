@@ -7,31 +7,37 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/install_tracker.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
+#include "chrome/browser/extensions/webstore_ephemeral_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/search/common/url_icon_source.h"
 #include "chrome/browser/ui/app_list/search/webstore/webstore_installer.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/canvas_image_source.h"
 
+using extensions::WebstoreEphemeralInstaller;
 
 namespace {
 
 const int kIconSize = 32;
+const int kLaunchEphemeralAppAction = 1;
 
 // BadgedImageSource adds a webstore badge to a webstore app icon.
 class BadgedIconSource : public gfx::CanvasImageSource {
@@ -97,8 +103,11 @@ WebstoreResult::~WebstoreResult() {
 }
 
 void WebstoreResult::Open(int event_flags) {
-  const GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
-                       app_id_);
+  const GURL store_url = net::AppendQueryParameter(
+      GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + app_id_),
+      extension_urls::kWebstoreSourceField,
+      extension_urls::kLaunchSourceAppListSearch);
+
   chrome::NavigateParams params(profile_,
                                 store_url,
                                 content::PAGE_TRANSITION_LINK);
@@ -107,8 +116,7 @@ void WebstoreResult::Open(int event_flags) {
 }
 
 void WebstoreResult::InvokeAction(int action_index, int event_flags) {
-  DCHECK_EQ(0, action_index);
-  StartInstall();
+  StartInstall(action_index == kLaunchEphemeralAppAction);
 }
 
 scoped_ptr<ChromeSearchResult> WebstoreResult::Duplicate() {
@@ -124,9 +132,20 @@ void WebstoreResult::UpdateActions() {
       extension_service()->GetInstalledExtension(app_id_);
 
   if (!is_otr && !is_installed && !is_installing()) {
-    actions.push_back(Action(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE),
-        base::string16()));
+    if (CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableEphemeralApps)) {
+      actions.push_back(Action(
+          l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_INSTALL),
+          l10n_util::GetStringUTF16(
+              IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE)));
+      actions.push_back(Action(
+          l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_LAUNCH),
+          l10n_util::GetStringUTF16(IDS_WEBSTORE_RESULT_LAUNCH_APP_TOOLTIP)));
+    } else {
+      actions.push_back(Action(
+          l10n_util::GetStringUTF16(IDS_EXTENSION_INLINE_INSTALL_PROMPT_TITLE),
+          base::string16()));
+    }
   }
 
   SetActions(actions);
@@ -147,7 +166,7 @@ void WebstoreResult::OnIconLoaded() {
   // need to be re-created.
   const std::vector<gfx::ImageSkiaRep>& image_reps = icon_.image_reps();
   for (size_t i = 0; i < image_reps.size(); ++i)
-    icon_.RemoveRepresentation(image_reps[i].scale_factor());
+    icon_.RemoveRepresentation(image_reps[i].scale());
 
   icon_ = gfx::ImageSkia(new BadgedIconSource(icon_),
                          gfx::Size(kIconSize, kIconSize));
@@ -155,9 +174,21 @@ void WebstoreResult::OnIconLoaded() {
   SetIcon(icon_);
 }
 
-void WebstoreResult::StartInstall() {
+void WebstoreResult::StartInstall(bool launch_ephemeral_app) {
   SetPercentDownloaded(0);
   SetIsInstalling(true);
+
+  if (launch_ephemeral_app) {
+    scoped_refptr<WebstoreEphemeralInstaller> installer =
+        WebstoreEphemeralInstaller::CreateForLauncher(
+            app_id_,
+            profile_,
+            controller_->GetAppListWindow(),
+            base::Bind(&WebstoreResult::InstallCallback,
+                       weak_factory_.GetWeakPtr()));
+    installer->BeginInstall();
+    return;
+  }
 
   scoped_refptr<WebstoreInstaller> installer =
       new WebstoreInstaller(

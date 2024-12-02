@@ -334,7 +334,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithMissingSSTFile,
                        DestroyTest) {
   int64 original_size = RequestDiskUsage();
   EXPECT_GT(original_size, 0);
-  SimpleTest(GetTestUrl("indexeddb", "open_bad_db.html"));
+  SimpleTest(GetTestUrl("indexeddb", "open_missing_table.html"));
   int64 new_size = RequestDiskUsage();
   EXPECT_NE(original_size, new_size);
 }
@@ -429,6 +429,18 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ForceCloseEventTest) {
   string16 expected_title16(ASCIIToUTF16("connection closed"));
   TitleWatcher title_watcher(shell()->web_contents(), expected_title16);
   EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
+}
+
+class IndexedDBBrowserTestSingleProcess : public IndexedDBBrowserTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(switches::kSingleProcess);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestSingleProcess,
+                       RenderThreadShutdownTest) {
+  SimpleTest(GetTestUrl("indexeddb", "shutdown_with_requests.html"));
 }
 
 }  // namespace content

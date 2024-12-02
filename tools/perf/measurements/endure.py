@@ -2,11 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import optparse
+import re
+import time
+
 from metrics import v8_object_stats
 from telemetry.page import page_measurement
-
-import optparse
-import time
 
 _V8_BYTES_COMMITTED = [
   'V8.MemoryNewSpaceBytesCommitted',
@@ -35,23 +36,39 @@ _V8_MEMORY_ALLOCATED = [
 class Endure(page_measurement.PageMeasurement):
   def __init__(self):
     super(Endure, self).__init__('endure')
+    # Browser object, saved so that memory stats can be gotten later.
     self._browser = None
-    self._test_start_time = None
 
-    # Timestamp of the last memory retrieval.
-    self._last_mem_dump = 0
+    # Timestamp for the time when the test starts.
+    self._start_time = None
+    # Timestamp of the last statistics sample.
+    self._last_sample_time = 0
+
+    # Number of page repetitions that have currently been done.
+    self._iterations = 0
+    # Number of page repetitions at the point of the last statistics sample.
+    self._last_sample_iterations = 0
+
+    # One of these variables will be set when the perf stats interval option
+    # is parsed, and the other shall remain as None.
+    self._interval_seconds = None
+    self._interval_iterations = None
 
   def AddCommandLineOptions(self, parser):
+    # TODO(tdu): When ProcessCommandLine is added to replace this method,
+    # move the logic in _ParseIntervalOption there to ProcessCommandLine.
     group = optparse.OptionGroup(parser, 'Endure options')
     group.add_option('--perf-stats-interval',
                      dest='perf_stats_interval',
-                     default=20,
-                     type='int',
-                     help='Time interval between perf dumps (secs)')
+                     default='20s',
+                     type='string',
+                     help='Interval between sampling of statistics, either in '
+                          'seconds (specified by appending \'s\') or in number '
+                          'of iterations')
     parser.add_option_group(group)
 
   def DidStartBrowser(self, browser):
-    # Save the browser for memory_stats.
+    # Save the Browser object so that memory_stats can be gotten later.
     self._browser = browser
 
   def CustomizeBrowserOptions(self, options):
@@ -60,78 +77,88 @@ class Endure(page_measurement.PageMeasurement):
   def CanRunForPage(self, page):
     return hasattr(page, 'endure')
 
-  def WillRunPageRepeats(self, page, tab):
-    """Reset the starting time for each new page."""
-    self._test_start_time = time.time()
+  def WillRunPageRepeats(self, page):
+    """Set-up before starting a new page."""
+    # Reset the starting time for each new page.
+    self._start_time = time.time()
 
-    # Prefix the page name so it can be picked up by endure parser.
+    # Prefix the page name so it can be picked up by the buildbot script that
+    # parses Endure output.
     if page.name and not page.display_name.startswith('endure_'):
       page.name = 'endure_' + page.name
 
   def MeasurePage(self, page, tab, results):
-    """Dump perf information if we have gone past our interval time."""
-    now = time.time()
-    if int(round(now - self._last_mem_dump)) > self.options.perf_stats_interval:
-      self._last_mem_dump = now
-      self._GetPerformanceStats(tab, results, now)
+    """Sample perf information if enough seconds or iterations have passed."""
+    # Parse the interval option, setting either or seconds or iterations.
+    # This is done here because self.options is not set when any of the above
+    # methods are run.
+    self._ParseIntervalOption()
 
-  def _GetPerformanceStats(self, tab, results, now):
-    """Record all memory information."""
-    elapsed_time = int(round(now - self._test_start_time))
+    # Check whether the sample interval is specified in seconds or iterations,
+    # and take a sample if it's time.
+    self._iterations += 1
+    if self._interval_seconds:
+      now = time.time()
+      seconds_elapsed = int(round(now - self._last_sample_time))
+      # Note: the time since last sample must be at least as many seconds
+      # as specified; it will usually be more, it will never be less.
+      if seconds_elapsed >= self._interval_seconds:
+        total_seconds = int(round(now - self._start_time))
+        self._SampleStats(tab, results, seconds=total_seconds)
+        self._last_sample_time = now
+    else:
+      iterations_elapsed = self._iterations - self._last_sample_iterations
+      if iterations_elapsed >= self._interval_iterations:
+        self._SampleStats(tab, results, iterations=self._iterations)
+        self._last_sample_iterations = self._iterations
 
-    # DOM Nodes
+  def _ParseIntervalOption(self):
+    """Parse the perf stats interval option that was passed in."""
+    if self._interval_seconds or self._interval_iterations:
+      return
+    interval = self.options.perf_stats_interval
+    match = re.match('([0-9]+)([sS]?)$', interval)
+    assert match, ('Invalid value for --perf-stats-interval: %s' % interval)
+    if match.group(2):
+      self._interval_seconds = int(match.group(1))
+    else:
+      self._interval_iterations = int(match.group(1))
+    assert self._interval_seconds or self._interval_iterations
+
+  def _SampleStats(self, tab, results, seconds=None, iterations=None):
+    """Record memory information and add it to the results."""
+
+    def AddPoint(trace_name, units_y, value_y):
+      """Add one data point to the results object."""
+      if seconds:
+        results.Add(trace_name + '_X', 'seconds', seconds)
+      else:
+        assert iterations, 'Neither seconds nor iterations given.'
+        results.Add(trace_name + '_X', 'iterations', iterations)
+      results.Add(trace_name + '_Y', units_y, value_y)
+
+    # DOM nodes and event listeners
     dom_stats = tab.dom_stats
     dom_node_count = dom_stats['node_count']
-    self._SaveToResults(results, 'TotalDOMNodeCount_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'TotalDOMNodeCount_Y',
-                        'nodes', dom_node_count)
-
-    # Event Listeners
     event_listener_count = dom_stats['event_listener_count']
-    self._SaveToResults(results, 'EventListenerCount_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'EventListenerCount_Y',
-                        'listeners', event_listener_count)
+    AddPoint('dom_nodes', 'count', dom_node_count)
+    AddPoint('event_listeners', 'count', event_listener_count)
 
-    # Memory stats
+    # Browser and renderer virtual memory stats
     memory_stats = self._browser.memory_stats
-    browser_vm = memory_stats['Browser'].get('VM', 0) / 1024.0
-    self._SaveToResults(results, 'BrowserVirtualMemory_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'BrowserVirtualMemory_Y',
-                        'KB', browser_vm)
-    renderer_vm = memory_stats['Renderer'].get('VM', 0) / 1024.0
-    self._SaveToResults(results, 'RendererVirtualMemory_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'RendererVirtualMemory_Y',
-                        'KB', renderer_vm)
+    def BrowserVMStats(statistic_name):
+      """Get VM stats from the Browser object in KB."""
+      return memory_stats[statistic_name].get('VM', 0) / 1024.0
+    AddPoint('browser_vm', 'KB', BrowserVMStats('Browser'))
+    AddPoint('renderer_vm', 'KB', BrowserVMStats('Renderer'))
+    AddPoint('gpu_vm', 'KB', BrowserVMStats('Gpu'))
 
     # V8 stats
-    v8_bytes_committed = v8_object_stats.V8ObjectStatsMetric.GetV8StatsTable(
-                            tab, _V8_BYTES_COMMITTED)
-    v8_bytes_committed = sum(v8_bytes_committed.values()) / 1024.0
-    self._SaveToResults(results, 'V8BytesCommitted_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'V8BytesCommitted_Y',
-                        'KB', v8_bytes_committed)
+    def V8StatsSum(counters):
+      """Given a list of V8 counter names, get the sum of the values in KB."""
+      stats = v8_object_stats.V8ObjectStatsMetric.GetV8StatsTable(tab, counters)
+      return sum(stats.values()) / 1024.0
+    AddPoint('v8_memory_committed', 'KB', V8StatsSum(_V8_BYTES_COMMITTED))
+    AddPoint('v8_memory_used', 'KB', V8StatsSum(_V8_BYTES_USED))
+    AddPoint('v8_memory_allocated', 'KB', V8StatsSum(_V8_MEMORY_ALLOCATED))
 
-    v8_bytes_used = v8_object_stats.V8ObjectStatsMetric.GetV8StatsTable(
-                            tab, _V8_BYTES_USED)
-    v8_bytes_used = sum(v8_bytes_used.values()) / 1024.0
-    self._SaveToResults(results, 'V8BytesUsed_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'V8BytesUsed_Y',
-                        'KB', v8_bytes_used)
-
-    v8_mem_allocated = v8_object_stats.V8ObjectStatsMetric.GetV8StatsTable(
-                            tab, _V8_MEMORY_ALLOCATED)
-    v8_mem_allocated = sum(v8_mem_allocated.values()) / 1024.0
-    self._SaveToResults(results, 'V8MemoryAllocated_X',
-                        'seconds', elapsed_time)
-    self._SaveToResults(results, 'V8MemoryAllocated_Y',
-                        'KB', v8_mem_allocated)
-
-  def _SaveToResults(self, results, trace_name, units, value,
-                     chart_name=None, data_type='default'):
-    results.Add(trace_name, units, value, chart_name, data_type)

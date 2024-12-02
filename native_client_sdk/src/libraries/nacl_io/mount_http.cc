@@ -15,12 +15,12 @@
 
 #include <vector>
 
-#include <ppapi/c/pp_errors.h>
-
+#include "nacl_io/kernel_handle.h"
 #include "nacl_io/mount_node_dir.h"
 #include "nacl_io/mount_node_http.h"
 #include "nacl_io/osinttypes.h"
 #include "nacl_io/osunistd.h"
+#include <ppapi/c/pp_errors.h>
 #include "sdk_util/string_util.h"
 
 namespace nacl_io {
@@ -47,7 +47,7 @@ Error MountHttp::Access(const Path& path, int a_mode) {
     // If we can't find the node in the cache, fetch it
     std::string url = MakeUrl(path);
     ScopedMountNode node(new MountNodeHttp(this, url, cache_content_));
-    Error error = node->Init(O_RDONLY);
+    Error error = node->Init(0);
     if (error)
       return error;
 
@@ -63,7 +63,8 @@ Error MountHttp::Access(const Path& path, int a_mode) {
   return 0;
 }
 
-Error MountHttp::Open(const Path& path, int mode, ScopedMountNode* out_node) {
+Error MountHttp::Open(const Path& path, int open_flags,
+                      ScopedMountNode* out_node) {
   out_node->reset(NULL);
   assert(url_root_.empty() || url_root_[url_root_.length() - 1] == '/');
 
@@ -76,7 +77,7 @@ Error MountHttp::Open(const Path& path, int mode, ScopedMountNode* out_node) {
   // If we can't find the node in the cache, create it
   std::string url = MakeUrl(path);
   ScopedMountNode node(new MountNodeHttp(this, url, cache_content_));
-  Error error = node->Init(mode);
+  Error error = node->Init(open_flags);
   if (error)
     return error;
 
@@ -250,7 +251,7 @@ Error MountHttp::FindOrCreateDir(const Path& path,
 
   // If the node does not exist, create it.
   ScopedMountNode node(new MountNodeDir(this));
-  Error error = node->Init(S_IREAD);
+  Error error = node->Init(0);
   if (error)
     return error;
 
@@ -316,7 +317,7 @@ Error MountHttp::ParseManifest(const char* text) {
         case '-':
           break;
         case 'r':
-          mode |= S_IREAD;
+          mode |= S_IRUSR | S_IRGRP | S_IROTH;
           break;
         default:
           fprintf(stderr, "Unable to parse read %s for %s.\n", modestr.c_str(),
@@ -328,7 +329,7 @@ Error MountHttp::ParseManifest(const char* text) {
         case '-':
           break;
         case 'w':
-          mode |= S_IWRITE;
+          mode |= S_IWUSR | S_IWGRP | S_IWOTH;
           break;
         default:
           fprintf(stderr, "Unable to parse write %s for %s.\n", modestr.c_str(),
@@ -340,9 +341,10 @@ Error MountHttp::ParseManifest(const char* text) {
       std::string url = MakeUrl(path);
 
       MountNodeHttp* http_node = new MountNodeHttp(this, url, cache_content_);
+      http_node->SetMode(mode);
       ScopedMountNode node(http_node);
 
-      Error error = node->Init(mode);
+      Error error = node->Init(0);
       if (error)
         return error;
       http_node->SetCachedSize(atoi(lenstr.c_str()));
@@ -381,7 +383,7 @@ Error MountHttp::LoadManifest(const std::string& manifest_name,
 
   char* text = new char[size + 1];
   int len;
-  error = manifest_node->Read(0, text, size, &len);
+  error = manifest_node->Read(HandleAttr(), text, size, &len);
   if (error)
     return error;
 

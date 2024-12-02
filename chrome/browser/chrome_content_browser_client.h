@@ -60,6 +60,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual content::WebContentsViewDelegate* GetWebContentsViewDelegate(
       content::WebContents* web_contents) OVERRIDE;
   virtual void GuestWebContentsCreated(
+      content::SiteInstance* guest_site_instance,
       content::WebContents* guest_web_contents,
       content::WebContents* opener_web_contents,
       content::BrowserPluginGuestDelegate** guest_delegate,
@@ -267,10 +268,16 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
           const GURL& url) OVERRIDE;
 #endif
 
+  virtual bool IsPluginAllowedToCallRequestOSFileHandle(
+      content::BrowserContext* browser_context,
+      const GURL& url) OVERRIDE;
+
  private:
 #if defined(ENABLE_PLUGINS)
   // Set of origins that can use TCP/UDP private APIs from NaCl.
   std::set<std::string> allowed_socket_origins_;
+  // Set of origins that can get a handle for FileIO from NaCl.
+  std::set<std::string> allowed_file_handle_origins_;
 #endif
   scoped_ptr<extensions::BrowserPermissionsPolicyDelegate>
       permissions_policy_delegate_;

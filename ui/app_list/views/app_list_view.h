@@ -104,6 +104,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 #endif
 
   AppListModel* model() { return model_.get(); }
+  AppListMainView* app_list_main_view() { return app_list_main_view_; }
 
  private:
   void InitAsBubbleInternal(gfx::NativeView parent,
@@ -111,6 +112,11 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                             views::BubbleBorder::Arrow arrow,
                             bool border_accepts_events,
                             const gfx::Vector2d& anchor_offset);
+
+  // Overridden from views::BubbleDelegateView:
+  virtual void OnBeforeBubbleWidgetInit(
+      views::Widget::InitParams* params,
+      views::Widget* widget) const OVERRIDE;
 
   // Overridden from views::WidgetDelegateView:
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;

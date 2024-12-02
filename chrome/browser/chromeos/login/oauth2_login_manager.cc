@@ -9,6 +9,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -91,10 +92,15 @@ void OAuth2LoginManager::OnRefreshTokenAvailable(
     const std::string& account_id) {
   if (state_ == SESSION_RESTORE_NOT_STARTED)
     return;
-
   // TODO(fgorski): Once ProfileOAuth2TokenService supports multi-login, make
   // sure to restore session cookies in the context of the correct account_id.
   LOG(INFO) << "OnRefreshTokenAvailable";
+  // Do not validate tokens for supervised users, as they don't actually have
+  // oauth2 token.
+  if (UserManager::Get()->IsLoggedInAsLocallyManagedUser()) {
+    LOG(WARNING) << "Logged in as managed user, skip token validation.";
+    return;
+  }
   RestoreSessionCookies();
 }
 
@@ -177,12 +183,15 @@ void OAuth2LoginManager::OnOAuthLoginSuccess(
   StartTokenService(gaia_credentials);
 }
 
-void OAuth2LoginManager::OnOAuthLoginFailure() {
-  LOG(ERROR) << "OAuth2 refresh token verification failed!";
+void OAuth2LoginManager::OnOAuthLoginFailure(bool connection_error) {
+  LOG(ERROR) << "OAuth2 refresh token verification failed!"
+             << " connection_error: " << connection_error;
   UMA_HISTOGRAM_ENUMERATION("OAuth2Login.SessionRestore",
                             SESSION_RESTORE_OAUTHLOGIN_FAILED,
                             SESSION_RESTORE_COUNT);
-  SetSessionRestoreState(OAuth2LoginManager::SESSION_RESTORE_FAILED);
+  SetSessionRestoreState(connection_error ?
+      OAuth2LoginManager::SESSION_RESTORE_CONNECTION_FAILED :
+      OAuth2LoginManager::SESSION_RESTORE_FAILED);
 }
 
 void OAuth2LoginManager::OnSessionMergeSuccess() {
@@ -193,12 +202,15 @@ void OAuth2LoginManager::OnSessionMergeSuccess() {
   SetSessionRestoreState(OAuth2LoginManager::SESSION_RESTORE_DONE);
 }
 
-void OAuth2LoginManager::OnSessionMergeFailure() {
-  LOG(ERROR) << "OAuth2 refresh and GAIA token verification failed!";
+void OAuth2LoginManager::OnSessionMergeFailure(bool connection_error) {
+  LOG(ERROR) << "OAuth2 refresh and GAIA token verification failed!"
+             << " connection_error: " << connection_error;
   UMA_HISTOGRAM_ENUMERATION("OAuth2Login.SessionRestore",
                             SESSION_RESTORE_MERGE_SESSION_FAILED,
                             SESSION_RESTORE_COUNT);
-  SetSessionRestoreState(OAuth2LoginManager::SESSION_RESTORE_FAILED);
+  SetSessionRestoreState(connection_error ?
+      OAuth2LoginManager::SESSION_RESTORE_CONNECTION_FAILED :
+      OAuth2LoginManager::SESSION_RESTORE_FAILED);
 }
 
 void OAuth2LoginManager::StartTokenService(

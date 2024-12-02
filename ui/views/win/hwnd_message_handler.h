@@ -5,10 +5,10 @@
 #ifndef UI_VIEWS_WIN_HWND_MESSAGE_HANDLER_H_
 #define UI_VIEWS_WIN_HWND_MESSAGE_HANDLER_H_
 
+#include <windows.h>
 #include <atlbase.h>
 #include <atlapp.h>
 #include <atlmisc.h>
-#include <windows.h>
 
 #include <set>
 #include <vector>
@@ -21,10 +21,10 @@
 #include "base/strings/string16.h"
 #include "base/win/win_util.h"
 #include "ui/base/accessibility/accessibility_types.h"
-#include "ui/events/event.h"
-#include "ui/base/sequential_id_generator.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/events/event.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/sequential_id_generator.h"
 #include "ui/gfx/win/window_impl.h"
 #include "ui/views/ime/input_method_delegate.h"
 #include "ui/views/views_export.h"
@@ -51,6 +51,53 @@ class InputMethod;
 // from happening.
 const int WM_NCUAHDRAWCAPTION = 0xAE;
 const int WM_NCUAHDRAWFRAME = 0xAF;
+
+// IsMsgHandled() and BEGIN_SAFE_MSG_MAP_EX are a modified version of
+// BEGIN_MSG_MAP_EX. The main difference is it adds a WeakPtrFactory member
+// (|weak_factory_|) that is used in _ProcessWindowMessage() and changing
+// IsMsgHandled() from a member function to a define that checks if the weak
+// factory is still valid in addition to the member. Together these allow for
+// |this| to be deleted during dispatch.
+#define IsMsgHandled() !ref.get() || msg_handled_
+
+#define BEGIN_SAFE_MSG_MAP_EX(the_class) \
+ private: \
+  base::WeakPtrFactory<the_class> weak_factory_; \
+  BOOL msg_handled_; \
+\
+ public: \
+  /* "handled" management for cracked handlers */ \
+  void SetMsgHandled(BOOL handled) { \
+    msg_handled_ = handled; \
+  } \
+  BOOL ProcessWindowMessage(HWND hwnd, \
+                            UINT msg, \
+                            WPARAM w_param, \
+                            LPARAM l_param, \
+                            LRESULT& l_result, \
+                            DWORD msg_map_id = 0) { \
+    BOOL old_msg_handled = msg_handled_; \
+    BOOL ret = _ProcessWindowMessage(hwnd, msg, w_param, l_param, l_result, \
+                                     msg_map_id); \
+    msg_handled_ = old_msg_handled; \
+    return ret; \
+  } \
+  BOOL _ProcessWindowMessage(HWND hWnd, \
+                             UINT uMsg, \
+                             WPARAM wParam, \
+                             LPARAM lParam, \
+                             LRESULT& lResult, \
+                             DWORD dwMsgMapID) { \
+    base::WeakPtr<HWNDMessageHandler> ref(weak_factory_.GetWeakPtr()); \
+    BOOL bHandled = TRUE; \
+    hWnd; \
+    uMsg; \
+    wParam; \
+    lParam; \
+    lResult; \
+    bHandled; \
+    switch(dwMsgMapID) { \
+      case 0:
 
 // An object that handles messages for a HWND that implements the views
 // "Custom Frame" look. The purpose of this class is to isolate the windows-
@@ -107,8 +154,9 @@ class VIEWS_EXPORT HWNDMessageHandler :
   bool IsActive() const;
   bool IsMinimized() const;
   bool IsMaximized() const;
+  bool IsAlwaysOnTop() const;
 
-  bool RunMoveLoop(const gfx::Vector2d& drag_offset);
+  bool RunMoveLoop(const gfx::Vector2d& drag_offset, bool hide_on_escape);
   void EndMoveLoop();
 
   // Tells the HWND its client area has changed.
@@ -204,7 +252,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Resets the window region for the current widget bounds if necessary.
   // If |force| is true, the window region is reset to NULL even for native
   // frame windows.
-  void ResetWindowRegion(bool force);
+  void ResetWindowRegion(bool force, bool redraw);
 
   // Calls DefWindowProc, safely wrapping the call in a ScopedRedrawLock to
   // prevent frame flicker. DefWindowProc handling can otherwise render the
@@ -234,7 +282,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
 
   // Message Handlers ----------------------------------------------------------
 
-  BEGIN_MSG_MAP_EX(HWNDMessageHandler)
+  BEGIN_SAFE_MSG_MAP_EX(HWNDMessageHandler)
     // Range handlers must go first!
     MESSAGE_RANGE_HANDLER_EX(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
     MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCXBUTTONDBLCLK, OnMouseRange)
@@ -272,6 +320,10 @@ class VIEWS_EXPORT HWNDMessageHandler :
     MESSAGE_HANDLER_EX(WM_SYSCHAR, OnImeMessages)
     MESSAGE_HANDLER_EX(WM_DEADCHAR, OnImeMessages)
     MESSAGE_HANDLER_EX(WM_SYSDEADCHAR, OnImeMessages)
+
+    // Scroll events
+    MESSAGE_HANDLER_EX(WM_VSCROLL, OnScrollMessage)
+    MESSAGE_HANDLER_EX(WM_HSCROLL, OnScrollMessage)
 
     // Touch Events.
     MESSAGE_HANDLER_EX(WM_TOUCH, OnTouchEvent)
@@ -355,6 +407,7 @@ class VIEWS_EXPORT HWNDMessageHandler :
   LRESULT OnNotify(int w_param, NMHDR* l_param);
   void OnPaint(HDC dc);
   LRESULT OnReflectedMessage(UINT message, WPARAM w_param, LPARAM l_param);
+  LRESULT OnScrollMessage(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnSetCursor(UINT message, WPARAM w_param, LPARAM l_param);
   void OnSetFocus(HWND last_focused_window);
   LRESULT OnSetIcon(UINT size_type, HICON new_icon);
@@ -376,8 +429,6 @@ class VIEWS_EXPORT HWNDMessageHandler :
   HWNDMessageHandlerDelegate* delegate_;
 
   scoped_ptr<FullscreenHandler> fullscreen_handler_;
-
-  base::WeakPtrFactory<HWNDMessageHandler> weak_factory_;
 
   // Set to true in Close() and false is CloseNow().
   bool waiting_for_close_now_;
@@ -476,8 +527,16 @@ class VIEWS_EXPORT HWNDMessageHandler :
   // Generates touch-ids for touch-events.
   ui::SequentialIDGenerator id_generator_;
 
+  // Indicates if the window has the WS_VSCROLL and WS_HSCROLL styles set.
+  bool scroll_styles_set_;
+
   DISALLOW_COPY_AND_ASSIGN(HWNDMessageHandler);
 };
+
+// This window property if set on the window does not activate the window for a
+// touch based WM_MOUSEACTIVATE message.
+const wchar_t kIgnoreTouchMouseActivateForWindow[] =
+    L"Chrome.IgnoreMouseActivate";
 
 }  // namespace views
 

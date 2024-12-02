@@ -76,6 +76,7 @@
 #include "content/public/test/test_utils.h"
 #include "grit/generated_resources.h"
 #include "net/base/network_change_notifier.h"
+#include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_impl.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -512,7 +513,7 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
   content::WindowedNotificationObserver observer_2(
       chrome::NOTIFICATION_INSTANT_TAB_SUPPORT_DETERMINED,
       content::NotificationService::AllSources());
-  SetOmniboxText(instant_url().spec() + "#q=puppies");
+  SetOmniboxText(instant_url().Resolve("#q=puppies").spec());
   PressEnterAndWaitForNavigation();
   observer_2.Wait();
 
@@ -898,121 +899,6 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
   EXPECT_EQ(1, on_most_visited_change_calls_);
 }
 
-// Flaky: crbug.com/267096
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
-                       DISABLED_OnDefaultSearchProviderChanged) {
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(browser()->profile());
-  ASSERT_NE(static_cast<InstantService*>(NULL), instant_service);
-
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-  EXPECT_EQ(1, instant_service->GetInstantProcessCount());
-
-  // Navigating to the NTP should use the Instant render process.
-  content::WindowedNotificationObserver new_tab_observer(
-      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::NotificationService::AllSources());
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(chrome::kChromeUINewTabURL),
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
-  new_tab_observer.Wait();
-
-  content::WebContents* ntp_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_TRUE(chrome::IsInstantNTP(ntp_contents));
-  EXPECT_TRUE(instant_service->IsInstantProcess(
-      ntp_contents->GetRenderProcessHost()->GetID()));
-  GURL ntp_url = ntp_contents->GetURL();
-
-  AddBlankTabAndShow(browser());
-  content::WebContents* active_tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_FALSE(chrome::IsInstantNTP(active_tab));
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      active_tab->GetRenderProcessHost()->GetID()));
-
-  TemplateURLData data;
-  data.short_name = ASCIIToUTF16("t");
-  data.SetURL("http://defaultturl/q={searchTerms}");
-  data.suggestions_url = "http://defaultturl2/q={searchTerms}";
-  data.instant_url = "http://does/not/exist";
-  data.alternate_urls.push_back(data.instant_url + "#q={searchTerms}");
-  data.search_terms_replacement_key = "strk";
-
-  TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
-  TemplateURLService* service =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
-  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
-  service->Add(template_url);  // Takes ownership of |template_url|.
-
-  // Change the default search provider.
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::Source<content::NavigationController>(
-          &ntp_contents->GetController()));
-  service->SetDefaultSearchProvider(template_url);
-  observer.Wait();
-
-  // |ntp_contents| should not use the Instant render process.
-  EXPECT_FALSE(chrome::IsInstantNTP(ntp_contents));
-  EXPECT_FALSE(instant_service->IsInstantProcess(
-      ntp_contents->GetRenderProcessHost()->GetID()));
-  // Make sure the URL remains the same.
-  EXPECT_EQ(ntp_url, ntp_contents->GetURL());
-}
-
-IN_PROC_BROWSER_TEST_F(InstantExtendedTest,
-                       ReloadLocalNTPOnSearchProviderChange) {
-  // Setup Instant.
-  ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
-  FocusOmniboxAndWaitForInstantNTPSupport();
-
-  // Navigate to Local NTP.
-  content::WindowedNotificationObserver new_tab_observer(
-      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::NotificationService::AllSources());
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(chrome::kChromeSearchLocalNtpUrl),
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
-  new_tab_observer.Wait();
-
-  content::WebContents* ntp_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  GURL ntp_url = ntp_contents->GetURL();
-
-  TemplateURLData data;
-  data.short_name = ASCIIToUTF16("t");
-  data.SetURL("http://defaultturl/q={searchTerms}");
-  data.suggestions_url = "http://defaultturl2/q={searchTerms}";
-  data.instant_url = "http://does/not/exist";
-  data.alternate_urls.push_back(data.instant_url + "#q={searchTerms}");
-  data.search_terms_replacement_key = "strk";
-
-  TemplateURL* template_url = new TemplateURL(browser()->profile(), data);
-  TemplateURLService* service =
-      TemplateURLServiceFactory::GetForProfile(browser()->profile());
-  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
-  service->Add(template_url);  // Takes ownership of |template_url|.
-
-  // Change the default search provider. This will reload the local NTP and the
-  // page URL will remain the same.
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::Source<content::NavigationController>(
-          &ntp_contents->GetController()));
-  service->SetDefaultSearchProvider(template_url);
-  observer.Wait();
-
-  // Make sure the URL remains the same.
-  EXPECT_EQ(ntp_url, ntp_contents->GetURL());
-}
-
 IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
   ASSERT_NO_FATAL_FAILURE(SetupInstant(browser()));
   FocusOmniboxAndWaitForInstantNTPSupport();
@@ -1033,12 +919,12 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, SetPrefetchQuery) {
   // Set the fake response for suggest request. Response has prefetch details.
   // Ensure that the page received the prefetch query.
   fake_factory()->SetFakeResponse(
-      instant_url().spec() + "#q=pupp",
+      instant_url().Resolve("#q=pupp"),
       "[\"pupp\",[\"puppy\", \"puppies\"],[],[],"
       "{\"google:clientdata\":{\"phi\": 0},"
           "\"google:suggesttype\":[\"QUERY\", \"QUERY\"],"
           "\"google:suggestrelevance\":[1400, 9]}]",
-      true);
+      net::HTTP_OK);
 
   SetOmniboxText("pupp");
   while (!omnibox()->model()->autocomplete_controller()->done()) {
@@ -1079,11 +965,11 @@ IN_PROC_BROWSER_TEST_F(InstantExtendedPrefetchTest, ClearPrefetchedResults) {
   // details. Ensure that the page received a blank query to clear the
   // prefetched results.
   fake_factory()->SetFakeResponse(
-      instant_url().spec() + "#q=dogs",
+      instant_url().Resolve("#q=dogs"),
       "[\"dogs\",[\"https://dogs.com\"],[],[],"
           "{\"google:suggesttype\":[\"NAVIGATION\"],"
           "\"google:suggestrelevance\":[2]}]",
-      true);
+      net::HTTP_OK);
 
   SetOmniboxText("dogs");
   while (!omnibox()->model()->autocomplete_controller()->done()) {

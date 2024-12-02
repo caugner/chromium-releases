@@ -70,6 +70,11 @@ class NSSSSLInitSingleton {
           enabled = false;
         }
 
+        // We also disable ChaCha20 based cipher suites for now because we
+        // aren't quite ready to use them in M32.
+        if (info.symCipher == ssl_calg_chacha20)
+          enabled = false;
+
         if (ssl_ciphers[i] == TLS_DHE_DSS_WITH_AES_128_CBC_SHA) {
           // Enabled to allow servers with only a DSA certificate to function.
           enabled = true;
@@ -233,6 +238,10 @@ int MapNSSError(PRErrorCode err) {
     case SEC_ERROR_BAD_DER:
     case SEC_ERROR_EXTRA_INPUT:
       return ERR_SSL_BAD_PEER_PUBLIC_KEY;
+    // During renegotiation, the server presented a different certificate than
+    // was used earlier.
+    case SSL_ERROR_WRONG_CERTIFICATE:
+      return ERR_SSL_SERVER_CERT_CHANGED;
 
     default: {
       if (IS_SSL_ERROR(err)) {

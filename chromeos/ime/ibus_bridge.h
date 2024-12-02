@@ -11,18 +11,19 @@
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/ibus/ibus_engine_factory_service.h"
 #include "chromeos/ime/ime_constants.h"
+#include "chromeos/ime/input_method_property.h"
 
 namespace chromeos {
+namespace input_method {
+class CandidateWindow;
+}  // namespace input_method
 
 class IBusText;
-class IBusLookupTable;
-class IBusProperty;
-typedef ScopedVector<IBusProperty> IBusPropertyList;
 
 class CHROMEOS_EXPORT IBusInputContextHandlerInterface {
  public:
   // Called when the engine commit a text.
-  virtual void CommitText(const IBusText& text) = 0;
+  virtual void CommitText(const std::string& text) = 0;
 
   // Called when the engine forward a key event.
   virtual void ForwardKeyEvent(uint32 keyval, uint32 keycode, uint32 state) = 0;
@@ -59,7 +60,7 @@ class CHROMEOS_EXPORT IBusEngineHandlerInterface {
   virtual ~IBusEngineHandlerInterface() {}
 
   // Called when the Chrome input field get the focus.
-  virtual void FocusIn() = 0;
+  virtual void FocusIn(ibus::TextInputType text_input_type) = 0;
 
   // Called when the Chrome input field lose the focus.
   virtual void FocusOut() = 0;
@@ -71,8 +72,7 @@ class CHROMEOS_EXPORT IBusEngineHandlerInterface {
   virtual void Disable() = 0;
 
   // Called when a property is activated or changed.
-  virtual void PropertyActivate(const std::string& property_name,
-                                ibus::IBusPropertyState property_state) = 0;
+  virtual void PropertyActivate(const std::string& property_name) = 0;
 
   // Called when a property is shown.
   virtual void PropertyShow(const std::string& property_name) = 0;
@@ -121,8 +121,9 @@ class CHROMEOS_EXPORT IBusPanelCandidateWindowHandlerInterface {
   virtual ~IBusPanelCandidateWindowHandlerInterface() {}
 
   // Called when the IME updates the lookup table.
-  virtual void UpdateLookupTable(const IBusLookupTable& table,
-                                 bool visible) = 0;
+  virtual void UpdateLookupTable(
+      const input_method::CandidateWindow& candidate_window,
+      bool visible) = 0;
 
   // Called when the IME hides the lookup table.
   virtual void HideLookupTable() = 0;
@@ -156,10 +157,8 @@ class CHROMEOS_EXPORT IBusPanelPropertyHandlerInterface {
   virtual ~IBusPanelPropertyHandlerInterface() {}
 
   // Called when a new property is registered.
-  virtual void RegisterProperties(const IBusPropertyList& properties) = 0;
-
-  // Called when current property is updated.
-  virtual void UpdateProperty(const IBusProperty& property) = 0;
+  virtual void RegisterProperties(
+    const chromeos::input_method::InputMethodPropertyList& properties) = 0;
 
  protected:
   IBusPanelPropertyHandlerInterface() {}

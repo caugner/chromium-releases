@@ -44,6 +44,8 @@ typedef base::Callback<void(const base::FilePath&, int, void*)>
 
 typedef base::Callback<void(void*)> FileSelectionCanceled;
 
+typedef base::Callback<void()> ActivateDesktopCompleted;
+
 // Handles the open file operation for Metro Chrome Ash. The on_success
 // callback passed in is invoked when we receive the opened file name from
 // the metro viewer. The on failure callback is invoked on failure.
@@ -81,6 +83,15 @@ AURA_EXPORT void HandleSelectFolder(const base::string16& title,
                                     const SelectFolderCompletion& on_success,
                                     const FileSelectionCanceled& on_failure);
 
+// Handles the activate desktop command for Metro Chrome Ash. The on_success
+// callback passed in is invoked when activation is completed.
+// The |ash_exit| parameter indicates whether the Ash process would be shutdown
+// after activating the desktop.
+AURA_EXPORT void HandleActivateDesktop(
+    const base::FilePath& shortcut,
+    bool ash_exit,
+    const ActivateDesktopCompleted& on_success);
+
 // RootWindowHost implementaton that receives events from a different
 // process. In the case of Windows this is the Windows 8 (aka Metro)
 // frontend process, which forwards input events to this class.
@@ -103,6 +114,13 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
 
   void HandleOpenURLOnDesktop(const base::FilePath& shortcut,
                               const base::string16& url);
+
+  // The |ash_exit| parameter indicates whether the Ash process would be
+  // shutdown after activating the desktop.
+  void HandleActivateDesktop(
+      const base::FilePath& shortcut,
+      bool ash_exit,
+      const ActivateDesktopCompleted& on_success);
 
   void HandleOpenFile(const base::string16& title,
                       const base::FilePath& default_path,
@@ -154,7 +172,7 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
               uint32 repeat_count,
               uint32 scan_code,
               uint32 flags);
-  void OnVisibilityChanged(bool visible);
+  void OnWindowActivated();
   void OnTouchDown(int32 x, int32 y, uint64 timestamp, uint32 pointer_id);
   void OnTouchUp(int32 x, int32 y, uint64 timestamp, uint32 pointer_id);
   void OnTouchMoved(int32 x, int32 y, uint64 timestamp, uint32 pointer_id);
@@ -167,6 +185,7 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   void OnSelectFolderDone(bool success, const base::FilePath& folder);
   void OnSetCursorPosAck();
   void OnWindowSizeChanged(uint32 width, uint32 height);
+  void OnDesktopActivated();
 
   // RootWindowHost overrides:
   virtual void SetDelegate(RootWindowHostDelegate* delegate) OVERRIDE;
@@ -205,6 +224,22 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
                                uint32 flags,
                                bool is_character);
 
+  // Sets the event flags. |flags| is a bitmask of EventFlags. If there is a
+  // change the system virtual key state is updated as well. This way if chrome
+  // queries for key state it matches that of event being dispatched.
+  void SetEventFlags(uint32 flags);
+
+  uint32 mouse_event_flags() const {
+    return event_flags_ & (ui::EF_LEFT_MOUSE_BUTTON |
+                           ui::EF_MIDDLE_MOUSE_BUTTON |
+                           ui::EF_RIGHT_MOUSE_BUTTON);
+  }
+
+  uint32 key_event_flags() const {
+    return event_flags_ & (ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN |
+                           ui::EF_ALT_DOWN | ui::EF_CAPS_LOCK_DOWN);
+  }
+
   HWND remote_window_;
   RootWindowHostDelegate* delegate_;
   IPC::Sender* host_;
@@ -218,12 +253,20 @@ class AURA_EXPORT RemoteRootWindowHostWin : public RootWindowHost {
   SelectFolderCompletion select_folder_completion_callback_;
   FileSelectionCanceled failure_callback_;
 
+  // Saved callback which informs caller about successful completion of desktop
+  // activation.
+  ActivateDesktopCompleted activate_completed_callback_;
+
   // Set to true if we need to ignore mouse messages until the SetCursorPos
   // operation is acked by the viewer.
   bool ignore_mouse_moves_until_set_cursor_ack_;
 
   // Tracking last click event for synthetically generated mouse events.
   scoped_ptr<ui::MouseEvent> last_mouse_click_event_;
+
+  // State of the keyboard/mouse at the time of the last input event. See
+  // description of SetEventFlags().
+  uint32 event_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoteRootWindowHostWin);
 };

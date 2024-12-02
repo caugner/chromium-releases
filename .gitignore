@@ -42,6 +42,7 @@ Thumbs.db
 v8.log
 /Makefile
 /_out
+/android_emulator_sdk
 /arm-sysroot
 /base/base_unittests_run.xml
 /breakpad/src/
@@ -70,6 +71,7 @@ v8.log
 /chrome/browser/extensions/default_extensions/chromeos
 /chrome/browser/google/linkdoctor_internal
 /chrome/browser/intents/internal/
+/chrome/browser/internal
 /chrome/browser/performance_monitor/performance_monitor.xml
 /chrome/browser/protector/internal
 /chrome/browser/resources/settings_internal/
@@ -133,8 +135,8 @@ v8.log
 /googleurl
 /gpu/gles2_conform_test
 /gyp-mac-tool
-/hideout
 /llvm
+/media/cdm/ppapi/api
 /media/media_asm.xml
 /media/test/data/content
 /media/test/data/security
@@ -303,6 +305,9 @@ v8.log
 /third_party/yasm/yasm.xml
 /tools/deps2git/
 /tools/distcc
+/tools/gn/bin/linux
+/tools/gn/bin/mac
+/tools/gn/bin/win
 /tools/grit
 /tools/gyp
 /tools/histograms
@@ -310,7 +315,7 @@ v8.log
 /tools/page_cycler/acid3
 /tools/perf/data
 /tools/perf/results.html
-/tools/swarm_client
+/tools/swarming_client
 /tools/tryserver
 /tools/win/link_limiter/build
 /ui/surface/surface.xml

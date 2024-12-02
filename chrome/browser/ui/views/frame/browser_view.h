@@ -192,13 +192,17 @@ class BrowserView : public BrowserWindow,
   // incognito.
   bool IsOffTheRecord() const;
 
-  // Returns the resource ID to use for the OTR icon, which depends on
-  // which layout is being shown and whether we are full-screen.
-  int GetOTRIconResourceID() const;
-
   // Returns true if the profile associated with this Browser window is
   // a guest session.
   bool IsGuestSession() const;
+
+  // Returns true if the profile associated with this Browser window is
+  // not off the record or a guest session.
+  bool IsRegularOrGuestSession() const;
+
+  // Returns the resource ID to use for the OTR icon, which depends on
+  // which layout is being shown and whether we are full-screen.
+  int GetOTRIconResourceID() const;
 
   // Returns the resource ID to use for the Guest icon, which may depend on
   // which layout is being shown and whether we are full-screen.
@@ -263,6 +267,7 @@ class BrowserView : public BrowserWindow,
   virtual bool IsActive() const OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
   virtual bool IsAlwaysOnTop() const OVERRIDE;
+  virtual void SetAlwaysOnTop(bool always_on_top) OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
@@ -272,6 +277,10 @@ class BrowserView : public BrowserWindow,
   virtual void UpdateDevTools() OVERRIDE;
   virtual void UpdateLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void SetStarredState(bool is_starred) OVERRIDE;
+  virtual void OnActiveTabChanged(content::WebContents* old_contents,
+                                  content::WebContents* new_contents,
+                                  int index,
+                                  int reason) OVERRIDE;
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
@@ -312,11 +321,13 @@ class BrowserView : public BrowserWindow,
   virtual void DisableInactiveFrame() OVERRIDE;
   virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
-  virtual void ToggleBookmarkBar() OVERRIDE;
   virtual void ShowUpdateChromeDialog() OVERRIDE;
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
   virtual void ShowBookmarkPrompt() OVERRIDE;
+  virtual void ShowTranslateBubble(
+      content::WebContents* contents,
+      TranslateBubbleModel::ViewState view_state) OVERRIDE;
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   virtual void ShowOneClickSigninBubble(
       OneClickSigninBubbleType type,
@@ -346,8 +357,6 @@ class BrowserView : public BrowserWindow,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void ShowCreateChromeAppShortcutsDialog(
-      Profile*, const extensions::Extension* app) OVERRIDE;
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
@@ -376,10 +385,6 @@ class BrowserView : public BrowserWindow,
   virtual void TabDetachedAt(content::WebContents* contents,
                              int index) OVERRIDE;
   virtual void TabDeactivated(content::WebContents* contents) OVERRIDE;
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE;
   virtual void TabStripEmpty() OVERRIDE;
 
   // Overridden from ui::AcceleratorProvider:
@@ -402,6 +407,7 @@ class BrowserView : public BrowserWindow,
   virtual void SaveWindowPlacement(const gfx::Rect& bounds,
                                    ui::WindowShowState show_state) OVERRIDE;
   virtual bool GetSavedWindowPlacement(
+      const views::Widget* widget,
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
@@ -422,7 +428,6 @@ class BrowserView : public BrowserWindow,
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
   // ImmersiveModeController::Delegate overrides:
-  virtual BookmarkBarView* GetBookmarkBar() OVERRIDE;
   virtual FullscreenController* GetFullscreenController() OVERRIDE;
   virtual void FullscreenStateChanged() OVERRIDE;
   virtual void SetImmersiveStyle(bool immersive) OVERRIDE;
@@ -700,9 +705,10 @@ class BrowserView : public BrowserWindow,
   // True if we have already been initialized.
   bool initialized_;
 
-  // True if we should ignore requests to layout.  This is set while toggling
-  // fullscreen mode on and off to reduce jankiness.
-  bool ignore_layout_;
+  // True when in ProcessFullscreen(). The flag is used to avoid reentrance and
+  // to ignore requests to layout while in ProcessFullscreen() to reduce
+  // jankiness.
+  bool in_process_fullscreen_;
 
   scoped_ptr<FullscreenExitBubbleViews> fullscreen_bubble_;
 

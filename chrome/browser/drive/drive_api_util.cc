@@ -28,14 +28,13 @@ namespace {
 // Google Apps MIME types:
 const char kGoogleDocumentMimeType[] = "application/vnd.google-apps.document";
 const char kGoogleDrawingMimeType[] = "application/vnd.google-apps.drawing";
-const char kGoogleFormMimeType[] = "application/vnd.google-apps.form";
 const char kGooglePresentationMimeType[] =
     "application/vnd.google-apps.presentation";
-const char kGoogleScriptMimeType[] = "application/vnd.google-apps.script";
-const char kGoogleSiteMimeType[] = "application/vnd.google-apps.site";
 const char kGoogleSpreadsheetMimeType[] =
     "application/vnd.google-apps.spreadsheet";
 const char kGoogleTableMimeType[] = "application/vnd.google-apps.table";
+const char kGoogleFormMimeType[] = "application/vnd.google-apps.form";
+const char kDriveFolderMimeType[] = "application/vnd.google-apps.folder";
 
 ScopedVector<std::string> CopyScopedVectorString(
     const ScopedVector<std::string>& source) {
@@ -122,6 +121,9 @@ ConvertInstalledAppToAppResource(
 
   return resource.Pass();
 }
+
+// Returns the argument string.
+std::string Identity(const std::string& resource_id) { return resource_id; }
 
 }  // namespace
 
@@ -234,6 +236,10 @@ std::string CanonicalizeResourceId(const std::string& resource_id) {
   return resource_id;
 }
 
+ResourceIdCanonicalizer GetIdentityResourceIdCanonicalizer() {
+  return base::Bind(&Identity);
+}
+
 const char kDocsListScope[] = "https://docs.google.com/feeds/";
 const char kDriveAppsScope[] = "https://www.googleapis.com/auth/drive.apps";
 
@@ -310,13 +316,22 @@ scoped_ptr<google_apis::FileResource> ConvertResourceEntryToFileResource(
   }
 
   file->set_download_url(entry.download_url());
-  file->set_mime_type(entry.content_mime_type());
+  if (entry.is_folder())
+    file->set_mime_type(kDriveFolderMimeType);
+  else
+    file->set_mime_type(entry.content_mime_type());
 
   file->set_md5_checksum(entry.file_md5());
   file->set_file_size(entry.file_size());
 
   file->mutable_labels()->set_trashed(entry.deleted());
   file->set_etag(entry.etag());
+
+  google_apis::ImageMediaMetadata* image_media_metadata =
+    file->mutable_image_media_metadata();
+  image_media_metadata->set_width(entry.image_width());
+  image_media_metadata->set_height(entry.image_height());
+  image_media_metadata->set_rotation(entry.image_rotation());
 
   ScopedVector<google_apis::ParentReference> parents;
   for (size_t i = 0; i < entry.links().size(); ++i) {
@@ -375,6 +390,8 @@ google_apis::DriveEntryKind GetKind(
     return google_apis::ENTRY_KIND_DRAWING;
   if (mime_type == kGoogleTableMimeType)
     return google_apis::ENTRY_KIND_TABLE;
+  if (mime_type == kGoogleFormMimeType)
+    return google_apis::ENTRY_KIND_FORM;
   if (mime_type == "application/pdf")
     return google_apis::ENTRY_KIND_PDF;
   return google_apis::ENTRY_KIND_FILE;
@@ -417,6 +434,11 @@ ConvertFileResourceToResourceEntry(
   // ChangeResource, and is reflected in |removed_|. If file is trashed, the
   // file entry still exists but with its "trashed" label true.
   entry->set_deleted(file_resource.labels().is_trashed());
+
+  // ImageMediaMetadata
+  entry->set_image_width(file_resource.image_media_metadata().width());
+  entry->set_image_height(file_resource.image_media_metadata().height());
+  entry->set_image_rotation(file_resource.image_media_metadata().rotation());
 
   // CommonMetadata
   entry->set_etag(file_resource.etag());

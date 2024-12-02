@@ -22,6 +22,7 @@ class Image;
 namespace views {
 class Link;
 class TextButton;
+class LabelButton;
 }
 
 class Browser;
@@ -55,17 +56,18 @@ class ProfileChooserView : public views::BubbleDelegateView,
   }
 
  private:
-  friend class AvatarMenuButtonTest;
-  FRIEND_TEST_ALL_PREFIXES(AvatarMenuButtonTest, NewSignOut);
-  FRIEND_TEST_ALL_PREFIXES(AvatarMenuButtonTest, LaunchUserManagerScreen);
+  friend class NewAvatarMenuButtonTest;
+  FRIEND_TEST_ALL_PREFIXES(NewAvatarMenuButtonTest, SignOut);
 
   typedef std::vector<size_t> Indexes;
   typedef std::map<views::Button*, int> ButtonIndexes;
 
   // Different views that can be displayed in the bubble.
   enum BubbleViewMode {
-    PROFILE_CHOOSER_VIEW,    // Displays a "fast profile switcher" view.
-    ACCOUNT_MANAGEMENT_VIEW  // Displays a list of accounts for the active user.
+    PROFILE_CHOOSER_VIEW,     // Shows a "fast profile switcher" view.
+    ACCOUNT_MANAGEMENT_VIEW,  // Shows a list of accounts for the active user.
+    GAIA_SIGNIN_VIEW,         // Shows a web view for primary sign in.
+    GAIA_ADD_ACCOUNT_VIEW     // Shows a web view for adding secondary accounts.
   };
 
   ProfileChooserView(views::View* anchor_view,
@@ -86,8 +88,7 @@ class ProfileChooserView : public views::BubbleDelegateView,
   virtual void LinkClicked(views::Link* sender, int event_flags) OVERRIDE;
 
   // AvatarMenuObserver:
-  virtual void OnAvatarMenuChanged(
-      AvatarMenu* avatar_menu) OVERRIDE;
+  virtual void OnAvatarMenuChanged(AvatarMenu* avatar_menu) OVERRIDE;
 
   static ProfileChooserView* profile_bubble_;
   static bool close_on_deactivate_;
@@ -129,7 +130,9 @@ class ProfileChooserView : public views::BubbleDelegateView,
   // Action buttons.
   views::TextButton* guest_button_;
   views::TextButton* end_guest_button_;
+  views::TextButton* add_user_button_;
   views::TextButton* users_button_;
+  views::LabelButton* add_account_button_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserView);
 };

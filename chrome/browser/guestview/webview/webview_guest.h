@@ -26,13 +26,14 @@ class WebViewGuest : public GuestView,
                      public content::NotificationObserver,
                      public content::WebContentsObserver {
  public:
-  explicit WebViewGuest(content::WebContents* guest_web_contents);
+  WebViewGuest(content::WebContents* guest_web_contents,
+               const std::string& extension_id);
 
   static WebViewGuest* From(int embedder_process_id, int instance_id);
+  static WebViewGuest* FromWebContents(content::WebContents* contents);
 
   // GuestView implementation.
   virtual void Attach(content::WebContents* embedder_web_contents,
-                      const std::string& extension_id,
                       const base::DictionaryValue& args) OVERRIDE;
   virtual GuestView::Type GetViewType() const OVERRIDE;
   virtual WebViewGuest* AsWebView() OVERRIDE;
@@ -50,6 +51,7 @@ class WebViewGuest : public GuestView,
   virtual bool HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
   virtual bool IsDragAndDropEnabled() OVERRIDE;
+  virtual bool IsOverridingUserAgent() const OVERRIDE;
   virtual void LoadAbort(bool is_top_level,
                          const GURL& url,
                          const std::string& error_type) OVERRIDE;
@@ -58,7 +60,9 @@ class WebViewGuest : public GuestView,
   virtual bool RequestPermission(
       BrowserPluginPermissionType permission_type,
       const base::DictionaryValue& request_info,
-      const PermissionResponseCallback& callback) OVERRIDE;
+      const PermissionResponseCallback& callback,
+      bool allowed_by_default) OVERRIDE;
+  virtual GURL ResolveURL(const std::string& src) OVERRIDE;
   virtual void SizeChanged(const gfx::Size& old_size, const gfx::Size& new_size)
       OVERRIDE;
 
@@ -74,12 +78,28 @@ class WebViewGuest : public GuestView,
   // Reload the guest.
   void Reload();
 
-  // Responds to the permission request |request_id| with |should_allow| and
+  enum PermissionResponseAction {
+    DENY,
+    ALLOW,
+    DEFAULT
+  };
+
+  enum SetPermissionResult {
+    SET_PERMISSION_INVALID,
+    SET_PERMISSION_ALLOWED,
+    SET_PERMISSION_DENIED
+  };
+
+  // Responds to the permission request |request_id| with |action| and
   // |user_input|. Returns whether there was a pending request for the provided
   // |request_id|.
-  bool SetPermission(int request_id,
-                     bool should_allow,
-                     const std::string& user_input);
+  SetPermissionResult SetPermission(int request_id,
+                                    PermissionResponseAction action,
+                                    const std::string& user_input);
+
+  // Overrides the user agent for this guest.
+  // This affects subsequent guest navigations.
+  void SetUserAgentOverride(const std::string& user_agent_override);
 
   // Stop loading the guest.
   void Stop();
@@ -105,12 +125,14 @@ class WebViewGuest : public GuestView,
   // WebContentsObserver implementation.
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
+      const string16& frame_unique_name,
       bool is_main_frame,
       const GURL& url,
       content::PageTransition transition_type,
       content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
+      const string16& frame_unique_name,
       bool is_main_frame,
       const GURL& validated_url,
       int error_code,
@@ -137,6 +159,8 @@ class WebViewGuest : public GuestView,
                     const GURL& new_url,
                     bool is_top_level);
 
+  static bool AllowChromeExtensionURLs();
+
   void AddWebViewToExtensionRendererState();
   static void RemoveWebViewFromExtensionRendererState(
       content::WebContents* web_contents);
@@ -152,8 +176,19 @@ class WebViewGuest : public GuestView,
   int next_permission_request_id_;
 
   // A map to store the callback for a request keyed by the request's id.
-  typedef std::map<int, PermissionResponseCallback> RequestMap;
+  struct PermissionResponseInfo {
+    PermissionResponseCallback callback;
+    bool allowed_by_default;
+    PermissionResponseInfo();
+    PermissionResponseInfo(const PermissionResponseCallback& callback,
+                           bool allowed_by_default);
+    ~PermissionResponseInfo();
+  };
+  typedef std::map<int, PermissionResponseInfo> RequestMap;
   RequestMap pending_permission_requests_;
+
+  // True if the user agent is overridden.
+  bool is_overriding_user_agent_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewGuest);
 };

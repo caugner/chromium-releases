@@ -32,7 +32,10 @@
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
 #endif
+#if !defined(OS_CHROMEOS)
+#include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #endif
+#endif  // defined(USE_AURA)
 
 namespace app_list {
 
@@ -71,7 +74,7 @@ void AppListView::InitAsBubbleAttachedToAnchor(
     const gfx::Vector2d& anchor_offset,
     views::BubbleBorder::Arrow arrow,
     bool border_accepts_events) {
-  set_anchor_view(anchor);
+  SetAnchorView(anchor);
   InitAsBubbleInternal(
       parent, pagination_model, arrow, border_accepts_events, anchor_offset);
 }
@@ -82,7 +85,7 @@ void AppListView::InitAsBubbleAtFixedLocation(
     const gfx::Point& anchor_point_in_screen,
     views::BubbleBorder::Arrow arrow,
     bool border_accepts_events) {
-  set_anchor_view(NULL);
+  SetAnchorView(NULL);
   set_anchor_rect(gfx::Rect(anchor_point_in_screen, gfx::Size()));
   InitAsBubbleInternal(
       parent, pagination_model, arrow, border_accepts_events, gfx::Vector2d());
@@ -168,7 +171,7 @@ HWND AppListView::GetHWND() const {
 #if defined(USE_AURA)
   gfx::NativeWindow window =
       GetWidget()->GetTopLevelWidget()->GetNativeWindow();
-  return window->GetRootWindow()->GetAcceleratedWidget();
+  return window->GetDispatcher()->GetAcceleratedWidget();
 #else
   return GetWidget()->GetTopLevelWidget()->GetNativeWindow();
 #endif
@@ -237,6 +240,15 @@ void AppListView::InitAsBubbleInternal(gfx::NativeView parent,
   // window manager do not have the SWP_SHOWWINDOW flag set which would cause
   // the border to be shown. See http://crbug.com/231687 .
   GetWidget()->Hide();
+#endif
+}
+
+void AppListView::OnBeforeBubbleWidgetInit(
+    views::Widget::InitParams* params,
+    views::Widget* widget) const {
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  if (delegate_ && delegate_->ForceNativeDesktop())
+    params->native_widget = new views::DesktopNativeWidgetAura(widget);
 #endif
 }
 

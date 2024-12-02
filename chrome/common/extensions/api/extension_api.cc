@@ -18,10 +18,10 @@
 #include "base/values.h"
 #include "chrome/common/extensions/api/generated_schemas.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/permissions/permissions_data.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/permissions/permission_set.h"
 #include "grit/common_resources.h"
 #include "grit/extensions_api_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -224,12 +224,9 @@ ExtensionAPI::~ExtensionAPI() {
 }
 
 void ExtensionAPI::InitDefaultConfiguration() {
-  RegisterDependencyProvider(
-      "api", FeatureProvider::GetByName("api"));
-  RegisterDependencyProvider(
-      "manifest", FeatureProvider::GetByName("manifest"));
-  RegisterDependencyProvider(
-      "permission", FeatureProvider::GetByName("permission"));
+  const char* names[] = {"api", "manifest", "permission"};
+  for (size_t i = 0; i < arraysize(names); ++i)
+    RegisterDependencyProvider(names[i], FeatureProvider::GetByName(names[i]));
 
   // Schemas to be loaded from resources.
   CHECK(unloaded_schemas_.empty());

@@ -5,13 +5,16 @@
 import json
 import logging
 from cStringIO import StringIO
+import posixpath
+import sys
 from zipfile import BadZipfile, ZipFile
 
 import appengine_blobstore as blobstore
 from appengine_url_fetcher import AppEngineUrlFetcher
 from appengine_wrappers import urlfetch
+from docs_server_utils import StringIdentity
 from file_system import FileNotFoundError, FileSystem, StatInfo
-from future import Future
+from future import Future, Gettable
 from object_store_creator import ObjectStoreCreator
 import url_constants
 
@@ -26,19 +29,9 @@ def _LoadCredentials(object_store_creator):
       app_version=None,
       category='password',
       start_empty=False)
-  # return 'test_username', 'test_password'
   password_data = password_store.GetMulti(('username', 'password')).Get()
+
   return password_data.get('username'), password_data.get('password')
-
-
-class _Gettable(object):
-  '''Wrap a callable |f| such that calling .Get on a _Gettable is the same as
-  calling |f| directly.
-  '''
-  def __init__(self, f, *args):
-    self._g = lambda: f(*args)
-  def Get(self):
-    return self._g()
 
 
 class GithubFileSystem(FileSystem):
@@ -50,14 +43,14 @@ class GithubFileSystem(FileSystem):
     specified by |owner| and |repo|.
     '''
     return GithubFileSystem(
-        url_constants.NEW_GITHUB_URL,
+        url_constants.GITHUB_REPOS,
         owner,
         repo,
         object_store_creator,
         AppEngineUrlFetcher)
 
   @staticmethod
-  def ForTest(repo, fake_fetcher, path=None):
+  def ForTest(repo, fake_fetcher, path=None, object_store_creator=None):
     '''Creates a GithubFIleSystem that can be used for testing. It reads zip
     files and commit data from server2/test_data/github_file_system/test_owner
     instead of github.com. It reads from files specified by |repo|.
@@ -66,7 +59,7 @@ class GithubFileSystem(FileSystem):
         path if path is not None else 'test_data/github_file_system',
         'test_owner',
         repo,
-        ObjectStoreCreator.ForTest(),
+        object_store_creator or ObjectStoreCreator.ForTest(),
         fake_fetcher)
 
   def __init__(self, base_url, owner, repo, object_store_creator, Fetcher):
@@ -102,10 +95,14 @@ class GithubFileSystem(FileSystem):
     '''Fetches the current repository version from github.com and returns it.
     The version is a 'sha' hash value.
     '''
+    # TODO(kalman): Do this asynchronously (use FetchAsync).
     result = self._fetcher.Fetch(
         'commits/HEAD', username=self._username, password=self._password)
 
-    return json.loads(result.content)['commit']['tree']['sha']
+    try:
+      return json.loads(result.content)['commit']['tree']['sha']
+    except (KeyError, ValueError):
+      logging.warn('Error parsing JSON from repo %s' % self._repo_url)
 
   def Refresh(self):
     '''Compares the cached and live stat versions to see if the cached
@@ -141,7 +138,7 @@ class GithubFileSystem(FileSystem):
     if version != self._stat_cache.Get('stat').Get():
       fetch = self._fetcher.FetchAsync(
           'zipball', username=self._username, password=self._password)
-      return Future(delegate=_Gettable(lambda: persist_fetch(fetch)))
+      return Future(delegate=Gettable(lambda: persist_fetch(fetch)))
 
     return Future(value=None)
 
@@ -155,14 +152,16 @@ class GithubFileSystem(FileSystem):
     names = self._GetNamelist()
     if not names:
       # No files in this repository.
-      raise FileNotFoundError('No paths can be found, repository is empty')
+      def raise_file_not_found():
+        raise FileNotFoundError('No paths can be found, repository is empty')
+      return Future(delegate=Gettable(raise_file_not_found))
     else:
       prefix = names[0].split('/')[0]
 
     reads = {}
     for path in paths:
-      full_path = prefix + path
-      if path.endswith('/'):  # If path is a directory...
+      full_path = posixpath.join(prefix, path)
+      if path == '' or path.endswith('/'):  # If path is a directory...
         trimmed_paths = []
         for f in filter(lambda s: s.startswith(full_path), names):
           if not '/' in f[len(full_path):-1] and not f == full_path:
@@ -172,7 +171,9 @@ class GithubFileSystem(FileSystem):
         try:
           reads[path] = self._repo_zip.Get().read(full_path)
         except KeyError as error:
-          raise FileNotFoundError(error)
+          return Future(exc_info=(FileNotFoundError,
+                                  FileNotFoundError(error),
+                                  sys.exc_info()[2]))
 
     return Future(value=reads)
 
@@ -188,14 +189,15 @@ class GithubFileSystem(FileSystem):
     stat versions are always 0.
     '''
     # Trim off the zip file's name.
-    trimmed = ['/' + f.split('/', 1)[1] for f in self._GetNamelist()]
+    path = path.lstrip('/')
+    trimmed = [f.split('/', 1)[1] for f in self._GetNamelist()]
 
     if path not in trimmed:
-      raise FileNotFoundError("No stat found for '%s'" % path)
+      raise FileNotFoundError("No stat found for '%s' in %s" % (path, trimmed))
 
     version = self._GetVersion()
     child_paths = {}
-    if path.endswith('/'):
+    if path == '' or path.endswith('/'):
       # Deal with a directory
       for f in filter(lambda s: s.startswith(path), trimmed):
         filename = f[len(path):]
@@ -205,4 +207,9 @@ class GithubFileSystem(FileSystem):
     return StatInfo(version, child_paths or None)
 
   def GetIdentity(self):
-    return '%s(%s)' % (self.__class__.__name__, self._repo_key)
+    return '%s' % StringIdentity(self.__class__.__name__ + self._repo_key)
+
+  def __repr__(self):
+    return '<%s: key=%s, url=%s>' % (type(self).__name__,
+                                     self._repo_key,
+                                     self._repo_url)

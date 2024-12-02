@@ -25,6 +25,19 @@ void TestRtcpPacketBuilder::AddSr(uint32 sender_ssrc,
   big_endian_writer_.WriteU32(kSendOctetCount);
 }
 
+void TestRtcpPacketBuilder::AddSrWithNtp(uint32 sender_ssrc,
+                                         uint32 ntp_high,
+                                         uint32 ntp_low,
+                                         uint32 rtp_timestamp) {
+  AddRtcpHeader(200, 0);
+  big_endian_writer_.WriteU32(sender_ssrc);
+  big_endian_writer_.WriteU32(ntp_high);
+  big_endian_writer_.WriteU32(ntp_low);
+  big_endian_writer_.WriteU32(rtp_timestamp);
+  big_endian_writer_.WriteU32(kSendPacketCount);
+  big_endian_writer_.WriteU32(kSendOctetCount);
+}
+
 void TestRtcpPacketBuilder::AddRr(uint32 sender_ssrc,
                                   int number_of_report_blocks) {
   AddRtcpHeader(201, number_of_report_blocks);
@@ -45,7 +58,10 @@ void TestRtcpPacketBuilder::AddSdesCname(uint32 sender_ssrc,
   AddRtcpHeader(202, 1);
   big_endian_writer_.WriteU32(sender_ssrc);
   big_endian_writer_.WriteU8(1);  // c_name.
-  big_endian_writer_.WriteU8(c_name.size());  // c_name length in bytes.
+
+  DCHECK_LE(c_name.size(), 255u);
+  big_endian_writer_.WriteU8(
+      static_cast<uint8>(c_name.size()));  // c_name length in bytes.
   for (size_t i = 0; i < c_name.size(); ++i) {
     big_endian_writer_.WriteU8(c_name.c_str()[i]);
   }

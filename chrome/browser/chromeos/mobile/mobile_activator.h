@@ -10,6 +10,7 @@
 
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -220,7 +221,7 @@ class MobileActivator
   // Changes internal state.
   virtual void ChangeState(const NetworkState* network,
                            PlanActivationState new_state,
-                           const std::string& error_description);
+                           std::string error_description);
   // Resets network devices after cellular activation process.
   void CompleteActivation();
   // Disables SSL certificate revocation checking mechanism. In the case
@@ -231,8 +232,6 @@ class MobileActivator
   void ReEnableCertRevocationChecking();
   // Return error message for a given code.
   std::string GetErrorMessage(const std::string& code) const;
-
-  static bool ShouldReportDeviceState(std::string* state, std::string* error);
 
   // Performs activation state cellular device evaluation.
   // Returns false if device activation failed. In this case |error|

@@ -72,13 +72,13 @@ void DialAPI::OnListenerRemoved(const EventListenerInfo& details) {
 
 void DialAPI::NotifyListenerAddedOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DVLOG(1) << "DIAL device event listener added.";
+  VLOG(1) << "DIAL device event listener added.";
   dial_registry()->OnListenerAdded();
 }
 
 void DialAPI::NotifyListenerRemovedOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DVLOG(1) << "DIAL device event listener removed";
+  VLOG(1) << "DIAL device event listener removed";
   dial_registry()->OnListenerRemoved();
 }
 
@@ -153,8 +153,8 @@ DialDiscoverNowFunction::DialDiscoverNowFunction()
 
 bool DialDiscoverNowFunction::Prepare() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(profile());
-  dial_ = DialAPIFactory::GetForProfile(profile()).get();
+  DCHECK(GetProfile());
+  dial_ = DialAPIFactory::GetForProfile(GetProfile()).get();
   return true;
 }
 

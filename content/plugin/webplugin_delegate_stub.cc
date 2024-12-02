@@ -87,7 +87,8 @@ WebPluginDelegateStub::~WebPluginDelegateStub() {
   }
 
   // Remove the NPObject owner mapping for this instance.
-  channel_->RemoveMappingForNPObjectOwner(instance_id_);
+  if (delegate_)
+    channel_->RemoveMappingForNPObjectOwner(instance_id_);
 }
 
 bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
@@ -435,7 +436,7 @@ void WebPluginDelegateStub::OnFetchURL(
                       params.first_party_for_cookies,
                       params.method,
                       data,
-                      params.post_data.size(),
+                      static_cast<unsigned int>(params.post_data.size()),
                       params.referrer,
                       params.notify_redirect,
                       params.is_plugin_src_load,

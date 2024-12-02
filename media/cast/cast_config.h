@@ -5,6 +5,7 @@
 #ifndef MEDIA_CAST_CAST_CONFIG_H_
 #define MEDIA_CAST_CAST_CONFIG_H_
 
+#include <list>
 #include <string>
 #include <vector>
 
@@ -172,10 +173,16 @@ struct EncodedAudioFrame {
   std::vector<uint8> data;
 };
 
+typedef std::vector<uint8> Packet;
+typedef std::vector<Packet> PacketList;
+
 class PacketSender {
  public:
-  // All packets to be sent to the network will be delivered via this function.
-  virtual bool SendPacket(const uint8* packet, int length) = 0;
+  // All packets to be sent to the network will be delivered via these
+  // functions.
+  virtual bool SendPackets(const PacketList& packets) = 0;
+
+  virtual bool SendPacket(const Packet& packet) = 0;
 
   virtual ~PacketSender() {}
 };
@@ -184,10 +191,16 @@ class PacketReceiver : public base::RefCountedThreadSafe<PacketReceiver> {
  public:
   // All packets received from the network should be delivered via this
   // function.
-  virtual void ReceivedPacket(const uint8* packet, int length,
+  virtual void ReceivedPacket(const uint8* packet, size_t length,
                               const base::Closure callback) = 0;
 
+  static void DeletePacket(const uint8* packet);
+
+ protected:
   virtual ~PacketReceiver() {}
+
+ private:
+  friend class base::RefCountedThreadSafe<PacketReceiver>;
 };
 
 class VideoEncoderController {

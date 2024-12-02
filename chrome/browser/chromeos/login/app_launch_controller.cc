@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 
+#include "apps/shell_window_registry.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
@@ -39,7 +40,44 @@ const int kAppInstallSplashScreenMinTimeMS = 3000;
 bool AppLaunchController::skip_splash_wait_ = false;
 int AppLaunchController::network_wait_time_ = 10;
 base::Closure* AppLaunchController::network_timeout_callback_ = NULL;
-UserManager* AppLaunchController::test_user_manager_ = NULL;
+AppLaunchController::CanConfigureNetworkCallback*
+    AppLaunchController::can_configure_network_callback_ = NULL;
+
+////////////////////////////////////////////////////////////////////////////////
+// AppLaunchController::AppWindowWatcher
+
+class AppLaunchController::AppWindowWatcher
+    : public apps::ShellWindowRegistry::Observer {
+ public:
+  explicit AppWindowWatcher(AppLaunchController* controller)
+    : controller_(controller),
+      window_registry_(apps::ShellWindowRegistry::Get(controller->profile_)) {
+    window_registry_->AddObserver(this);
+  }
+  virtual ~AppWindowWatcher() {
+    window_registry_->RemoveObserver(this);
+  }
+
+ private:
+  // apps::ShellWindowRegistry::Observer overrides:
+  virtual void OnShellWindowAdded(apps::ShellWindow* shell_window) OVERRIDE {
+    if (controller_) {
+      controller_->OnAppWindowCreated();
+      controller_= NULL;
+    }
+  }
+  virtual void OnShellWindowIconChanged(
+      apps::ShellWindow* shell_window) OVERRIDE {}
+  virtual void OnShellWindowRemoved(apps::ShellWindow* shell_window) OVERRIDE {}
+
+  AppLaunchController* controller_;
+  apps::ShellWindowRegistry* window_registry_;
+
+  DISALLOW_COPY_AND_ASSIGN(AppWindowWatcher);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// AppLaunchController
 
 AppLaunchController::AppLaunchController(const std::string& app_id,
                                          LoginDisplayHost* host,
@@ -93,20 +131,19 @@ void AppLaunchController::SetNetworkWaitForTesting(int wait_time_secs) {
 }
 
 void AppLaunchController::SetNetworkTimeoutCallbackForTesting(
-   base::Closure* callback) {
+    base::Closure* callback) {
   network_timeout_callback_ = callback;
 }
 
-void AppLaunchController::SetUserManagerForTesting(UserManager* user_manager) {
-  test_user_manager_ = user_manager;
-  AppLaunchSigninScreen::SetUserManagerForTesting(user_manager);
+void AppLaunchController::SetCanConfigureNetworkCallbackForTesting(
+    CanConfigureNetworkCallback* can_configure_network_callback) {
+  can_configure_network_callback_ = can_configure_network_callback;
 }
 
 void AppLaunchController::OnConfigureNetwork() {
   DCHECK(profile_);
   showing_network_dialog_ = true;
-  const std::string& owner_email = GetUserManager()->GetOwnerEmail();
-  if (!owner_email.empty()) {
+  if (CanConfigureNetwork()) {
     signin_screen_->Show();
   } else {
     // If kiosk mode was configured through enterprise policy, we may
@@ -161,12 +198,41 @@ void AppLaunchController::OnProfileLoadFailed(
   OnLaunchFailed(error);
 }
 
-void AppLaunchController::Cleanup() {
+void AppLaunchController::CleanUp() {
   kiosk_profile_loader_.reset();
   startup_app_launcher_.reset();
 
   if (host_)
     host_->Finalize();
+}
+
+void AppLaunchController::OnNetworkWaitTimedout() {
+  DCHECK(waiting_for_network_);
+  LOG(WARNING) << "OnNetworkWaitTimedout... connection = "
+               <<  net::NetworkChangeNotifier::GetConnectionType();
+  network_wait_timedout_ = true;
+
+  if (CanConfigureNetwork()) {
+    app_launch_splash_screen_actor_->ToggleNetworkConfig(true);
+  } else {
+    app_launch_splash_screen_actor_->UpdateAppLaunchState(
+        AppLaunchSplashScreenActor::APP_LAUNCH_STATE_NETWORK_WAIT_TIMEOUT);
+  }
+
+  if (network_timeout_callback_)
+    network_timeout_callback_->Run();
+}
+
+void AppLaunchController::OnAppWindowCreated() {
+  DVLOG(1) << "App window created, closing splash screen.";
+  CleanUp();
+}
+
+bool AppLaunchController::CanConfigureNetwork() {
+  if (can_configure_network_callback_)
+    return can_configure_network_callback_->Run();
+
+  return !UserManager::Get()->GetOwnerEmail().empty();
 }
 
 void AppLaunchController::OnLoadingOAuthFile() {
@@ -190,16 +256,6 @@ void AppLaunchController::OnInitializingNetwork() {
       FROM_HERE,
       base::TimeDelta::FromSeconds(network_wait_time_),
       this, &AppLaunchController::OnNetworkWaitTimedout);
-}
-
-void AppLaunchController::OnNetworkWaitTimedout() {
-  DCHECK(waiting_for_network_);
-  LOG(WARNING) << "OnNetworkWaitTimedout... connection = "
-               <<  net::NetworkChangeNotifier::GetConnectionType();
-  network_wait_timedout_ = true;
-  app_launch_splash_screen_actor_->ToggleNetworkConfig(true);
-  if (network_timeout_callback_)
-    network_timeout_callback_->Run();
 }
 
 void AppLaunchController::OnInstallingApp() {
@@ -243,8 +299,12 @@ void AppLaunchController::OnReadyToLaunch() {
 }
 
 void AppLaunchController::OnLaunchSucceeded() {
-  DVLOG(1) << "Kiosk launch succeeded!";
-  Cleanup();
+  DVLOG(1) << "Kiosk launch succeeded, wait for app window.";
+  app_launch_splash_screen_actor_->UpdateAppLaunchState(
+      AppLaunchSplashScreenActor::APP_LAUNCH_STATE_WAITING_APP_WINDOW);
+
+  DCHECK(!app_window_watcher_);
+  app_window_watcher_.reset(new AppWindowWatcher(this));
 }
 
 void AppLaunchController::OnLaunchFailed(KioskAppLaunchError::Error error) {
@@ -254,11 +314,7 @@ void AppLaunchController::OnLaunchFailed(KioskAppLaunchError::Error error) {
   // Saves the error and ends the session to go back to login screen.
   KioskAppLaunchError::Save(error);
   chrome::AttemptUserExit();
-  Cleanup();
-}
-
-UserManager* AppLaunchController::GetUserManager() {
-  return test_user_manager_ ? test_user_manager_ : UserManager::Get();
+  CleanUp();
 }
 
 }   // namespace chromeos

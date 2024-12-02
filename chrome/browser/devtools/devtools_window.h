@@ -67,6 +67,10 @@ class DevToolsWindow : private content::NotificationObserver,
 
   static std::string GetDevToolsWindowPlacementPrefKey();
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  // Return the DevToolsWindow for the given RenderViewHost if one exists,
+  // otherwise NULL.
+  static DevToolsWindow* GetInstanceForInspectedRenderViewHost(
+      content::RenderViewHost* inspected_rvh);
   static DevToolsWindow* GetDockedInstanceForInspectedTab(
       content::WebContents* inspected_tab);
   static bool IsDevToolsWindow(content::RenderViewHost* window_rvh);
@@ -78,7 +82,7 @@ class DevToolsWindow : private content::NotificationObserver,
       content::RenderViewHost* inspected_rvh);
   static DevToolsWindow* ToggleDevToolsWindow(
       Browser* browser,
-      DevToolsToggleAction action);
+      const DevToolsToggleAction& action);
   static void OpenExternalFrontend(Profile* profile,
                                    const std::string& frontend_uri,
                                    content::DevToolsAgentHost* agent_host);
@@ -87,7 +91,8 @@ class DevToolsWindow : private content::NotificationObserver,
   static DevToolsWindow* ToggleDevToolsWindow(
       content::RenderViewHost* inspected_rvh,
       bool force_open,
-      DevToolsToggleAction action);
+      const DevToolsToggleAction& action);
+
   static void InspectElement(
       content::RenderViewHost* inspected_rvh, int x, int y);
 
@@ -123,7 +128,7 @@ class DevToolsWindow : private content::NotificationObserver,
   // Stores preferred devtools window height for this instance.
   void SetHeight(int height);
 
-  void Show(DevToolsToggleAction action);
+  void Show(const DevToolsToggleAction& action);
 
  private:
   friend class DevToolsControllerTest;
@@ -166,6 +171,9 @@ class DevToolsWindow : private content::NotificationObserver,
                               bool user_gesture,
                               bool* was_blocked) OVERRIDE;
   virtual void CloseContents(content::WebContents* source) OVERRIDE;
+  virtual void BeforeUnloadFired(content::WebContents* tab,
+                                 bool proceed,
+                                 bool* proceed_to_fire_unload) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event,
@@ -188,7 +196,9 @@ class DevToolsWindow : private content::NotificationObserver,
 
   // DevToolsEmbedderMessageDispatcher::Delegate overrides:
   virtual void ActivateWindow() OVERRIDE;
+  virtual void ActivateContents(content::WebContents* contents) OVERRIDE;
   virtual void CloseWindow() OVERRIDE;
+  virtual void SetWindowBounds(int x, int y, int width, int height) OVERRIDE;
   virtual void MoveWindow(int x, int y) OVERRIDE;
   virtual void SetDockSide(const std::string& side) OVERRIDE;
   virtual void OpenInNewTab(const std::string& url) OVERRIDE;
@@ -231,8 +241,7 @@ class DevToolsWindow : private content::NotificationObserver,
   BrowserWindow* GetInspectedBrowserWindow();
   bool IsInspectedBrowserPopup();
   void UpdateFrontendDockSide();
-  void Hide();
-  void ScheduleAction(DevToolsToggleAction action);
+  void ScheduleAction(const DevToolsToggleAction& action);
   void DoAction();
   void UpdateTheme();
   void AddDevToolsExtensionsToClient();
@@ -244,10 +253,12 @@ class DevToolsWindow : private content::NotificationObserver,
   bool IsDocked();
   void Restore();
   content::WebContents* GetInspectedWebContents();
+  void DocumentOnLoadCompletedInMainFrame();
 
   class InspectedWebContentsObserver;
   scoped_ptr<InspectedWebContentsObserver> inspected_contents_observer_;
   class FrontendWebContentsObserver;
+  friend class FrontendWebContentsObserver;
   scoped_ptr<FrontendWebContentsObserver> frontend_contents_observer_;
 
   Profile* profile_;
@@ -258,7 +269,6 @@ class DevToolsWindow : private content::NotificationObserver,
   DevToolsToggleAction action_on_load_;
   content::NotificationRegistrar registrar_;
   scoped_ptr<content::DevToolsClientHost> frontend_host_;
-  base::WeakPtrFactory<DevToolsWindow> weak_factory_;
   scoped_ptr<DevToolsFileHelper> file_helper_;
   scoped_refptr<DevToolsFileSystemIndexer> file_system_indexer_;
   typedef std::map<
@@ -271,6 +281,7 @@ class DevToolsWindow : private content::NotificationObserver,
   DevToolsDockSide dock_side_before_minimized_;
 
   scoped_ptr<DevToolsEmbedderMessageDispatcher> embedder_message_dispatcher_;
+  base::WeakPtrFactory<DevToolsWindow> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 

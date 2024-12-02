@@ -36,7 +36,7 @@
 #include "content/public/browser/notification_service.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/chromeos/chromeos_version.h"
+#include "base/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -60,7 +60,8 @@ bool AreAllBrowsersCloseable() {
     return true;
 
   // If there are any downloads active, all browsers are not closeable.
-  if (DownloadService::DownloadCountAllProfiles() > 0)
+  // However, this does not block for malicious downloads.
+  if (DownloadService::NonMaliciousDownloadCountAllProfiles() > 0)
     return false;
 
   // Check TabsNeedBeforeUnloadFired().
@@ -86,7 +87,13 @@ void MarkAsCleanShutdown() {
     it->profile()->SetExitType(Profile::EXIT_NORMAL);
 }
 
-void AttemptExitInternal() {
+void AttemptExitInternal(bool try_to_quit_application) {
+  // On Mac, the platform-specific part handles setting this.
+#if !defined(OS_MACOSX)
+  if (try_to_quit_application)
+    browser_shutdown::SetTryingToQuit(true);
+#endif
+
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
       content::NotificationService::AllSources(),
@@ -95,11 +102,20 @@ void AttemptExitInternal() {
   g_browser_process->platform_part()->AttemptExit();
 }
 
+void CloseAllBrowsersAndQuit() {
+  browser_shutdown::SetTryingToQuit(true);
+  CloseAllBrowsers();
+}
+
 void CloseAllBrowsers() {
-  // If there are no browsers, send the APP_TERMINATING action here. Otherwise,
-  // it will be sent by RemoveBrowser() when the last browser has closed.
+  // If there are no browsers and closing the last browser would quit the
+  // application, send the APP_TERMINATING action here. Otherwise, it will be
+  // sent by RemoveBrowser() when the last browser has closed.
   if (browser_shutdown::ShuttingDownWithoutClosingBrowsers() ||
-      chrome::GetTotalBrowserCount() == 0) {
+      (chrome::GetTotalBrowserCount() == 0 &&
+       (browser_shutdown::IsTryingToQuit() || !chrome::WillKeepAlive() ||
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kDisableBatchedShutdown)))) {
     // Tell everyone that we are shutting down.
     browser_shutdown::SetTryingToQuit(true);
 
@@ -153,7 +169,7 @@ void AttemptUserExit() {
   // request.
   PrefService* pref_service = g_browser_process->local_state();
   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, false);
-  AttemptExitInternal();
+  AttemptExitInternal(false);
 #endif
 }
 
@@ -192,16 +208,6 @@ void AttemptRestart() {
 }
 #endif
 
-#if defined(OS_WIN)
-void AttemptRestartWithModeSwitch() {
-  // The kRestartSwitchMode preference does not exists for Windows 7 and older
-  // operating systems so there is no need for OS version check.
-  PrefService* prefs = g_browser_process->local_state();
-  prefs->SetBoolean(prefs::kRestartSwitchMode, true);
-  AttemptRestart();
-}
-#endif
-
 void AttemptExit() {
   // If we know that all browsers can be closed without blocking,
   // don't notify users of crashes beyond this point.
@@ -212,7 +218,7 @@ void AttemptExit() {
   if (AreAllBrowsersCloseable())
     MarkAsCleanShutdown();
 #endif
-  AttemptExitInternal();
+  AttemptExitInternal(true);
 }
 
 #if defined(OS_CHROMEOS)
@@ -227,7 +233,7 @@ void ExitCleanly() {
   // screen locker.
   if (!AreAllBrowsersCloseable())
     browser_shutdown::OnShutdownStarting(browser_shutdown::END_SESSION);
-  AttemptExitInternal();
+  AttemptExitInternal(true);
 }
 #endif
 
@@ -335,7 +341,7 @@ void NotifyAndTerminate(bool fast_path) {
     NotifyAppTerminating();
 
 #if defined(OS_CHROMEOS)
-  if (base::chromeos::IsRunningOnChromeOS()) {
+  if (base::SysInfo::IsRunningOnChromeOS()) {
     // If we're on a ChromeOS device, reboot if an update has been applied,
     // or else signal the session manager to log out.
     chromeos::UpdateEngineClient* update_engine_client

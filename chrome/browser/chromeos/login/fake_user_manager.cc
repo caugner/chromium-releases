@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/fake_user_manager.h"
 
+#include "chrome/browser/chromeos/login/fake_supervised_user_manager.h"
+
 namespace {
 
 // As defined in /chromeos/dbus/cryptohome_client.cc.
@@ -13,7 +15,9 @@ static const char kUserIdHashSuffix[] = "-hash";
 
 namespace chromeos {
 
-FakeUserManager::FakeUserManager() : primary_user_(NULL) {}
+FakeUserManager::FakeUserManager()
+    : supervised_user_manager_(new FakeSupervisedUserManager),
+      primary_user_(NULL) {}
 
 FakeUserManager::~FakeUserManager() {
   // Can't use STLDeleteElements because of the private destructor of User.
@@ -27,6 +31,12 @@ void FakeUserManager::AddUser(const std::string& email) {
   User* user = User::CreateRegularUser(email);
   user->set_username_hash(email + kUserIdHashSuffix);
   user->SetStubImage(User::kProfileImageIndex, false);
+  user_list_.push_back(user);
+}
+
+void FakeUserManager::AddKioskAppUser(const std::string& kiosk_app_username) {
+  User* user = User::CreateKioskAppUser(kiosk_app_username);
+  user->set_username_hash(kiosk_app_username + kUserIdHashSuffix);
   user_list_.push_back(user);
 }
 
@@ -70,15 +80,30 @@ void FakeUserManager::UserLoggedIn(const std::string& email,
   }
 }
 
+User* FakeUserManager::GetActiveUserInternal() const {
+  if (user_list_.size()) {
+    if (!active_user_id_.empty()) {
+      for (UserList::const_iterator it = user_list_.begin();
+           it != user_list_.end(); ++it) {
+        if ((*it)->email() == active_user_id_)
+          return *it;
+      }
+    }
+    return user_list_[0];
+  }
+  return NULL;
+}
+
 const User* FakeUserManager::GetActiveUser() const {
-  return GetActiveUser();
+  return GetActiveUserInternal();
 }
 
 User* FakeUserManager::GetActiveUser() {
-  // Just return the first user.
-  if (user_list_.size())
-    return user_list_[0];
-  return NULL;
+  return GetActiveUserInternal();
+}
+
+void FakeUserManager::SwitchActiveUser(const std::string& email) {
+  active_user_id_ = email;
 }
 
 void FakeUserManager::SaveUserDisplayName(
@@ -91,6 +116,15 @@ void FakeUserManager::SaveUserDisplayName(
       return;
     }
   }
+}
+
+void FakeUserManager::UpdateUserAccountData(const std::string&, const string16&,
+                           const std::string&) {
+  // Not implemented
+}
+
+SupervisedUserManager* FakeUserManager::GetSupervisedUserManager() {
+  return supervised_user_manager_.get();
 }
 
 UserImageManager* FakeUserManager::GetUserImageManager() {
@@ -109,28 +143,11 @@ const std::string& FakeUserManager::GetOwnerEmail() {
   return owner_email_;
 }
 
-const User* FakeUserManager::CreateLocallyManagedUserRecord(
-    const std::string& manager_id,
-    const std::string& local_user_id,
-    const std::string& sync_user_id,
-    const string16& display_name) {
-  return NULL;
-}
-
-std::string FakeUserManager::GenerateUniqueLocallyManagedUserId() {
-  return std::string();
-}
-
 bool FakeUserManager::IsKnownUser(const std::string& email) const {
   return true;
 }
 
 const User* FakeUserManager::FindUser(const std::string& email) const {
-  return NULL;
-}
-
-const User* FakeUserManager::FindLocallyManagedUser(
-    const string16& display_name) const {
   return NULL;
 }
 
@@ -146,6 +163,21 @@ const User* FakeUserManager::GetPrimaryUser() const {
   return primary_user_;
 }
 
+User* FakeUserManager::GetUserByProfile(Profile* profile) const {
+  const std::string& user_name = profile->GetProfileName();
+  for (UserList::const_iterator it = user_list_.begin();
+       it != user_list_.end(); ++it) {
+    if ((*it)->email() == user_name)
+      return *it;
+  }
+  return primary_user_;
+}
+
+Profile* FakeUserManager::GetProfileByUser(const User* user) const {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 string16 FakeUserManager::GetUserDisplayName(
     const std::string& username) const {
   return string16();
@@ -153,26 +185,6 @@ string16 FakeUserManager::GetUserDisplayName(
 
 std::string FakeUserManager::GetUserDisplayEmail(
     const std::string& username) const {
-  return std::string();
-}
-
-std::string FakeUserManager::GetManagedUserSyncId(
-    const std::string& managed_user_id) const {
-  return std::string();
-}
-
-string16 FakeUserManager::GetManagerDisplayNameForManagedUser(
-    const std::string& managed_user_id) const {
-  return string16();
-}
-
-std::string FakeUserManager::GetManagerUserIdForManagedUser(
-    const std::string& managed_user_id) const {
-  return std::string();
-}
-
-std::string FakeUserManager::GetManagerDisplayEmailForManagedUser(
-    const std::string& managed_user_id) const {
   return std::string();
 }
 
@@ -193,7 +205,7 @@ bool FakeUserManager::CanCurrentUserLock() const {
 }
 
 bool FakeUserManager::IsUserLoggedIn() const {
-  return true;
+  return logged_in_users_.size() > 0;
 }
 
 bool FakeUserManager::IsLoggedInAsRegularUser() const {
@@ -217,7 +229,10 @@ bool FakeUserManager::IsLoggedInAsLocallyManagedUser() const {
 }
 
 bool FakeUserManager::IsLoggedInAsKioskApp() const {
-  return false;
+  const User* active_user = GetActiveUser();
+  return active_user ?
+      active_user->GetType() == User::USER_TYPE_KIOSK_APP :
+      false;
 }
 
 bool FakeUserManager::IsLoggedInAsStub() const {
@@ -262,6 +277,10 @@ bool FakeUserManager::AreLocallyManagedUsersAllowed() const {
 base::FilePath FakeUserManager::GetUserProfileDir(
     const std::string&email) const {
   return base::FilePath();
+}
+
+void FakeUserManager::RespectLocalePreference(Profile* profile,
+                                              const User* user) const {
 }
 
 }  // namespace chromeos

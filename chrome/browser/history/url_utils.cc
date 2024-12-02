@@ -42,18 +42,16 @@ bool CanonicalURLStringCompare(const std::string& s1, const std::string& s2) {
   return (pri_diff != 0) ? pri_diff < 0 : *ch1 < *ch2;
 }
 
-bool UrlIsPrefix(const GURL& url1, const GURL& url2) {
-  if (url1.scheme() != url2.scheme() || url1.host() != url2.host() ||
-      url1.port() != url2.port()) {
-    return false;
-  }
-  // Only need to compare path now. Note that queries are ignored.
-  std::string p1(url1.path());
-  std::string p2(url2.path());
+bool HaveSameSchemeHostAndPort(const GURL&url1, const GURL& url2) {
+  return url1.scheme() == url2.scheme() && url1.host() == url2.host() &&
+      url1.port() == url2.port();
+}
+
+bool IsPathPrefix(const std::string& p1, const std::string& p2) {
   if (p1.length() > p2.length())
     return false;
-  std::pair<std::string::iterator, std::string::iterator> first_diff =
-      std::mismatch(p1.begin(), p1.end(), p2.begin());
+  std::pair<std::string::const_iterator, std::string::const_iterator>
+      first_diff = std::mismatch(p1.begin(), p1.end(), p2.begin());
   // Necessary condition: |p1| is a string prefix of |p2|.
   if (first_diff.first != p1.end())
     return false;  // E.g.: (|p1| = "/test", |p2| = "/exam") => false.
@@ -68,6 +66,21 @@ bool UrlIsPrefix(const GURL& url1, const GURL& url2) {
   // Finally, |p1| does not end in "/": check first extra character in |p2|.
   // E.g.: ("/test", "/test/stuff") => true; ("/test", "/testing") => false.
   return *(first_diff.second) == '/';
+}
+
+GURL ToggleHTTPAndHTTPS(const GURL& url) {
+  std::string new_scheme;
+  if (url.SchemeIs("http"))
+    new_scheme = "https";
+  else if (url.SchemeIs("https"))
+    new_scheme = "http";
+  else
+    return GURL::EmptyGURL();
+  url_parse::Component comp;
+  comp.len = new_scheme.length();
+  GURL::Replacements replacement;
+  replacement.SetScheme(new_scheme.c_str(), comp);
+  return url.ReplaceComponents(replacement);
 }
 
 }  // namespace history

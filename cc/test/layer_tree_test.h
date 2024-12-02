@@ -33,6 +33,10 @@ class TestHooks : public AnimationDelegate {
 
   virtual void WillBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
                                           const BeginFrameArgs& args) {}
+  virtual void DidBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
+                                          const BeginFrameArgs& args) {}
+  virtual void BeginMainFrameAbortedOnThread(LayerTreeHostImpl* host_impl,
+                                             bool did_handle) {}
   virtual void BeginCommitOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) {}
   virtual void WillActivateTreeOnThread(LayerTreeHostImpl* host_impl) {}
@@ -55,8 +59,8 @@ class TestHooks : public AnimationDelegate {
   virtual void ApplyScrollAndScale(gfx::Vector2d scroll_delta,
                                    float scale) {}
   virtual void Animate(base::TimeTicks monotonic_time) {}
-  virtual void WillBeginFrame() {}
-  virtual void DidBeginFrame() {}
+  virtual void WillBeginMainFrame() {}
+  virtual void DidBeginMainFrame() {}
   virtual void Layout() {}
   virtual void DidInitializeOutputSurface(bool succeeded) {}
   virtual void DidFailToInitializeOutputSurface() {}
@@ -76,10 +80,7 @@ class TestHooks : public AnimationDelegate {
   virtual void NotifyAnimationFinished(double time) OVERRIDE {}
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) = 0;
-  virtual scoped_refptr<cc::ContextProvider>
-  OffscreenContextProviderForMainThread() = 0;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() = 0;
+  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() = 0;
 };
 
 class BeginTask;
@@ -118,6 +119,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void PostSetNeedsRedrawToMainThread();
   void PostSetNeedsRedrawRectToMainThread(gfx::Rect damage_rect);
   void PostSetVisibleToMainThread(bool visible);
+  void PostSetNextCommitForcesRedrawToMainThread();
 
   void DoBeginTest();
   void Timeout();
@@ -139,12 +141,14 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   void DispatchSetNeedsRedraw();
   void DispatchSetNeedsRedrawRect(gfx::Rect damage_rect);
   void DispatchSetVisible(bool visible);
+  void DispatchSetNextCommitForcesRedraw();
   void DispatchComposite();
   void DispatchDidAddAnimation();
 
   virtual void RunTest(bool threaded,
                        bool delegating_renderer,
                        bool impl_side_painting);
+  virtual void RunTestWithImplSidePainting();
 
   bool HasImplThread() { return proxy() ? proxy()->HasImplThread() : false; }
   base::SingleThreadTaskRunner* ImplThreadTaskRunner() {
@@ -166,10 +170,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   FakeOutputSurface* output_surface() { return output_surface_; }
 
   virtual scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-  OffscreenContextProviderForMainThread() OVERRIDE;
-  virtual scoped_refptr<cc::ContextProvider>
-      OffscreenContextProviderForCompositorThread() OVERRIDE;
+  virtual scoped_refptr<ContextProvider> OffscreenContextProvider() OVERRIDE;
 
  private:
   LayerTreeSettings settings_;
@@ -191,10 +192,9 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_ptr<base::Thread> impl_thread_;
   base::CancelableClosure timeout_;
+  scoped_refptr<TestContextProvider> compositor_contexts_;
   base::WeakPtr<LayerTreeTest> main_thread_weak_ptr_;
   base::WeakPtrFactory<LayerTreeTest> weak_factory_;
-  scoped_refptr<TestContextProvider> main_thread_contexts_;
-  scoped_refptr<TestContextProvider> compositor_thread_contexts_;
 };
 
 }  // namespace cc
@@ -215,37 +215,61 @@ class LayerTreeTest : public testing::Test, public TestHooks {
   SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);        \
   SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
 
-#define MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)               \
+#define MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)        \
   TEST_F(TEST_FIXTURE_NAME, RunMultiThread_DirectRenderer_MainThreadPaint) { \
     RunTest(true, false, false);                                             \
-  }                                                                          \
+  }
+
+#define MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)               \
+  MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)              \
   TEST_F(TEST_FIXTURE_NAME, RunMultiThread_DirectRenderer_ImplSidePaint) {   \
     RunTest(true, false, true);                                              \
   }                                                                          \
   class MultiThreadDirectNeedsSemicolon##TEST_FIXTURE_NAME {}
 
+#define MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)    \
+  TEST_F(TEST_FIXTURE_NAME,                                                  \
+         RunMultiThread_DelegatingRenderer_MainThreadPaint) {                \
+    RunTest(true, true, false);                                              \
+  }
+
 #define MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
-  TEST_F(TEST_FIXTURE_NAME,                                        \
-         RunMultiThread_DelegatingRenderer_MainThreadPaint) {      \
-    RunTest(true, true, false);                                    \
-  }                                                                \
+  MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)\
   TEST_F(TEST_FIXTURE_NAME,                                        \
          RunMultiThread_DelegatingRenderer_ImplSidePaint) {        \
     RunTest(true, true, true);                                     \
   }                                                                \
   class MultiThreadDelegatingNeedsSemicolon##TEST_FIXTURE_NAME {}
 
+#define MULTI_THREAD_NOIMPL_TEST_F(TEST_FIXTURE_NAME)                   \
+  MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME);        \
+  MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)
+
 #define MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)                   \
   MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);        \
   MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
+
+#define SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F( \
+  TEST_FIXTURE_NAME)                                           \
+  SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);     \
+  MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)
 
 #define SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
   SINGLE_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);                \
   MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME)
 
+#define SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F( \
+  TEST_FIXTURE_NAME)                                               \
+  SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME);     \
+  MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)
+
 #define SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME) \
   SINGLE_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME);                \
   MULTI_THREAD_DELEGATING_RENDERER_TEST_F(TEST_FIXTURE_NAME)
+
+#define SINGLE_AND_MULTI_THREAD_NOIMPL_TEST_F(TEST_FIXTURE_NAME)              \
+  SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME);   \
+  SINGLE_AND_MULTI_THREAD_DELEGATING_RENDERER_NOIMPL_TEST_F(TEST_FIXTURE_NAME)
 
 #define SINGLE_AND_MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME) \
   SINGLE_AND_MULTI_THREAD_DIRECT_RENDERER_TEST_F(TEST_FIXTURE_NAME);    \

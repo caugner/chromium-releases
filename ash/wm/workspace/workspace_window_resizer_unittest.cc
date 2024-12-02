@@ -6,7 +6,7 @@
 
 #include "ash/ash_constants.h"
 #include "ash/ash_switches.h"
-#include "ash/display/display_controller.h"
+#include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shelf/shelf_layout_manager.h"
@@ -107,7 +107,7 @@ class WorkspaceWindowResizerTest : public test::AshTestBase {
     AshTestBase::SetUp();
     UpdateDisplay(base::StringPrintf("800x%d", kRootHeight));
 
-    aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+    aura::Window* root = Shell::GetPrimaryRootWindow();
     gfx::Rect root_bounds(root->bounds());
 #if defined(OS_WIN)
     // RootWindow and Display can't resize on Windows Ash.
@@ -119,25 +119,25 @@ class WorkspaceWindowResizerTest : public test::AshTestBase {
     window_.reset(new aura::Window(&delegate_));
     window_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window_->Init(ui::LAYER_NOT_DRAWN);
-    SetDefaultParentByPrimaryRootWindow(window_.get());
+    ParentWindowInPrimaryRootWindow(window_.get());
     window_->set_id(1);
 
     window2_.reset(new aura::Window(&delegate2_));
     window2_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window2_->Init(ui::LAYER_NOT_DRAWN);
-    SetDefaultParentByPrimaryRootWindow(window2_.get());
+    ParentWindowInPrimaryRootWindow(window2_.get());
     window2_->set_id(2);
 
     window3_.reset(new aura::Window(&delegate3_));
     window3_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window3_->Init(ui::LAYER_NOT_DRAWN);
-    SetDefaultParentByPrimaryRootWindow(window3_.get());
+    ParentWindowInPrimaryRootWindow(window3_.get());
     window3_->set_id(3);
 
     window4_.reset(new aura::Window(&delegate4_));
     window4_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window4_->Init(ui::LAYER_NOT_DRAWN);
-    SetDefaultParentByPrimaryRootWindow(window4_.get());
+    ParentWindowInPrimaryRootWindow(window4_.get());
     window4_->set_id(4);
   }
 
@@ -190,15 +190,14 @@ class WorkspaceWindowResizerTest : public test::AshTestBase {
     touch_resize_window_.reset(
         CreateTestWindowInShellWithDelegate(&touch_resize_delegate_, 0,
                                             bounds));
-    gfx::Insets mouse_insets = gfx::Insets(-ash::kResizeOutsideBoundsSize,
-                                           -ash::kResizeOutsideBoundsSize,
-                                           -ash::kResizeOutsideBoundsSize,
-                                           -ash::kResizeOutsideBoundsSize);
-    gfx::Insets touch_insets = mouse_insets.Scale(
+    gfx::Insets mouse_outer_insets(-ash::kResizeOutsideBoundsSize,
+                                   -ash::kResizeOutsideBoundsSize,
+                                   -ash::kResizeOutsideBoundsSize,
+                                   -ash::kResizeOutsideBoundsSize);
+    gfx::Insets touch_outer_insets = mouse_outer_insets.Scale(
         ash::kResizeOutsideBoundsScaleForTouch);
-    touch_resize_window_->SetHitTestBoundsOverrideOuter(mouse_insets,
-                                                        touch_insets);
-    touch_resize_window_->set_hit_test_bounds_override_inner(mouse_insets);
+    touch_resize_window_->SetHitTestBoundsOverrideOuter(mouse_outer_insets,
+                                                        touch_outer_insets);
   }
 
   // Simulate running the animation.
@@ -463,7 +462,7 @@ TEST_F(WorkspaceWindowResizerTest, AttachedResize_BOTTOM_2) {
 // windows.
 TEST_F(WorkspaceWindowResizerTest, MAYBE_AttachedResize_BOTTOM_3) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   window_->SetBounds(gfx::Rect( 300, 100, 300, 200));
@@ -719,8 +718,25 @@ TEST_F(WorkspaceWindowResizerTest, DontDragOffBottomWithMultiDisplay) {
       Shell::GetPrimaryRootWindow(), gfx::Insets(0, 0, 10, 0));
 
   // Positions the secondary display at the bottom the primary display.
-  Shell::GetInstance()->display_controller()->SetLayoutForCurrentDisplays(
+  Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
       ash::DisplayLayout(ash::DisplayLayout::BOTTOM, 0));
+
+  {
+    window_->SetBounds(gfx::Rect(100, 200, 300, 20));
+    DCHECK_LT(window_->bounds().height(),
+              WorkspaceWindowResizer::kMinOnscreenHeight);
+    scoped_ptr<WorkspaceWindowResizer> resizer(WorkspaceWindowResizer::Create(
+        window_.get(), gfx::Point(), HTCAPTION,
+        aura::client::WINDOW_MOVE_SOURCE_MOUSE, empty_windows()));
+    ASSERT_TRUE(resizer.get());
+    resizer->Drag(CalculateDragPoint(*resizer, 0, 400), 0);
+    int expected_y = kRootHeight - window_->bounds().height() - 10;
+    // When the mouse cursor is in the primary display, the window cannot move
+    // on non-work area but can get all the way towards the bottom,
+    // restricted only by the window height.
+    EXPECT_EQ("100," + base::IntToString(expected_y) + " 300x20",
+              window_->bounds().ToString());
+  }
 
   {
     window_->SetBounds(gfx::Rect(100, 200, 300, 400));
@@ -930,6 +946,22 @@ TEST_F(WorkspaceWindowResizerTest, SnapToEdge) {
   EXPECT_EQ("96,20 320x160", window_->bounds().ToString());
   resizer->Drag(CalculateDragPoint(*resizer, 0, -112 + 7), 0);
   EXPECT_EQ("96,0 320x160", window_->bounds().ToString());
+
+  // And bottom/left should snap too.
+  resizer->Drag(
+      CalculateDragPoint(*resizer, 7 - 96, 600 - 160 - 112 - 3 - 7), 0);
+  EXPECT_EQ("0,437 320x160", window_->bounds().ToString());
+  resizer->Drag(
+      CalculateDragPoint(*resizer, -15 - 96, 600 - 160 - 112 - 3 + 15), 0);
+  EXPECT_EQ("0,437 320x160", window_->bounds().ToString());
+  // should move past snap points.
+  resizer->Drag(
+      CalculateDragPoint(*resizer, -32 - 96, 600 - 160 - 112 - 2 + 32), 0);
+  EXPECT_EQ("-32,470 320x160", window_->bounds().ToString());
+  resizer->Drag(
+      CalculateDragPoint(*resizer, -33 - 96, 600 - 160 - 112 - 2 + 33), 0);
+  EXPECT_EQ("-33,471 320x160", window_->bounds().ToString());
+
   // No need to test dragging < 0 as we force that to 0.
 }
 
@@ -1462,7 +1494,7 @@ TEST_F(WorkspaceWindowResizerTest, PhantomSnapMaxSize) {
 
 TEST_F(WorkspaceWindowResizerTest, DontRewardRightmostWindowForOverflows) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Four 100x100 windows flush against eachother, starting at 100,100.
@@ -1493,7 +1525,7 @@ TEST_F(WorkspaceWindowResizerTest, DontRewardRightmostWindowForOverflows) {
 
 TEST_F(WorkspaceWindowResizerTest, DontExceedMaxWidth) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Four 100x100 windows flush against eachother, starting at 100,100.
@@ -1522,7 +1554,7 @@ TEST_F(WorkspaceWindowResizerTest, DontExceedMaxWidth) {
 
 TEST_F(WorkspaceWindowResizerTest, DontExceedMaxHeight) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Four 100x100 windows flush against eachother, starting at 100,100.
@@ -1558,7 +1590,7 @@ TEST_F(WorkspaceWindowResizerTest, DontExceedMaxHeight) {
 
 TEST_F(WorkspaceWindowResizerTest, MAYBE_DontExceedMinHeight) {
   UpdateDisplay("600x500");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Four 100x100 windows flush against eachother, starting at 100,100.
@@ -1587,7 +1619,7 @@ TEST_F(WorkspaceWindowResizerTest, MAYBE_DontExceedMinHeight) {
 
 TEST_F(WorkspaceWindowResizerTest, DontExpandRightmostPastMaxWidth) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Three 100x100 windows flush against eachother, starting at 100,100.
@@ -1613,7 +1645,7 @@ TEST_F(WorkspaceWindowResizerTest, DontExpandRightmostPastMaxWidth) {
 
 TEST_F(WorkspaceWindowResizerTest, MoveAttachedWhenGrownToMaxSize) {
   UpdateDisplay("600x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Three 100x100 windows flush against eachother, starting at 100,100.
@@ -1647,7 +1679,7 @@ TEST_F(WorkspaceWindowResizerTest, MoveAttachedWhenGrownToMaxSize) {
 
 TEST_F(WorkspaceWindowResizerTest, MAYBE_MainWindowHonoursMaxWidth) {
   UpdateDisplay("400x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Three 100x100 windows flush against eachother, starting at 100,100.
@@ -1674,7 +1706,7 @@ TEST_F(WorkspaceWindowResizerTest, MAYBE_MainWindowHonoursMaxWidth) {
 
 TEST_F(WorkspaceWindowResizerTest, MainWindowHonoursMinWidth) {
   UpdateDisplay("400x800");
-  aura::RootWindow* root = Shell::GetPrimaryRootWindow();
+  aura::Window* root = Shell::GetPrimaryRootWindow();
   Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
 
   // Three 100x100 windows flush against eachother, starting at 100,100.

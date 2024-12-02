@@ -31,7 +31,7 @@ PipelineIntegrationTestBase::PipelineIntegrationTestBase()
                              new MediaLog())),
       ended_(false),
       pipeline_status_(PIPELINE_OK),
-      last_video_frame_format_(VideoFrame::INVALID) {
+      last_video_frame_format_(VideoFrame::UNKNOWN) {
   base::MD5Init(&md5_context_);
   EXPECT_CALL(*this, OnSetOpaque(true)).Times(AnyNumber());
 }
@@ -68,7 +68,7 @@ void PipelineIntegrationTestBase::DemuxerNeedKeyCB(
     const std::vector<uint8>& init_data) {
   DCHECK(!init_data.empty());
   CHECK(!need_key_cb_.is_null());
-  need_key_cb_.Run(std::string(), type, init_data);
+  need_key_cb_.Run(type, init_data);
 }
 
 void PipelineIntegrationTestBase::OnEnded() {

@@ -4,6 +4,7 @@
 
 #include "apps/launcher.h"
 
+#include "apps/apps_client.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
@@ -20,15 +21,15 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/apps/app_metro_infobar_delegate_win.h"
 #include "chrome/common/extensions/api/app_runtime.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/manifest_handlers/kiosk_mode_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "url/gurl.h"
@@ -37,6 +38,7 @@
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
 #if defined(OS_WIN)
@@ -312,16 +314,25 @@ void LaunchPlatformAppWithCommandLine(Profile* profile,
                                       const Extension* extension,
                                       const CommandLine* command_line,
                                       const base::FilePath& current_directory) {
-#if defined(OS_WIN)
-    // On Windows 8's single window Metro mode we can not launch platform apps.
-    // Offer to switch Chrome to desktop mode.
-    if (win8::IsSingleWindowMetroMode()) {
-      AppMetroInfoBarDelegateWin::Create(
-          profile, AppMetroInfoBarDelegateWin::LAUNCH_PACKAGED_APP,
-          extension->id());
+  if (!AppsClient::Get()->CheckAppLaunch(profile, extension))
+    return;
+
+  // An app with "kiosk_only" should not be installed and launched
+  // outside of ChromeOS kiosk mode in the first place. This is a defensive
+  // check in case this scenario does occur.
+  if (extensions::KioskModeInfo::IsKioskOnly(extension)) {
+    bool in_kiosk_mode = false;
+#if defined(OS_CHROMEOS)
+    chromeos::UserManager* user_manager = chromeos::UserManager::Get();
+    in_kiosk_mode = user_manager && user_manager->IsLoggedInAsKioskApp();
+#endif
+    if (!in_kiosk_mode) {
+      LOG(ERROR) << "App with 'kiosk_only' attribute must be run in "
+          << " ChromeOS kiosk mode.";
+      NOTREACHED();
       return;
     }
-#endif
+  }
 
   base::FilePath path;
   if (!GetAbsolutePathFromCommandLine(command_line, current_directory, &path)) {

@@ -19,8 +19,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/signin/token_service.h"
-#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/about_sync_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -32,7 +30,6 @@
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "google_apis/gaia/oauth2_token_service.h"
 #include "grit/generated_resources.h"
 #include "jni/ProfileSyncService_jni.h"
 #include "sync/internal_api/public/read_transaction.h"
@@ -46,7 +43,6 @@ using base::android::ScopedJavaLocalRef;
 using content::BrowserThread;
 
 namespace {
-const char kSyncDisabledStatus[] = "OFFLINE_DISABLED";
 
 enum {
 #define DEFINE_MODEL_TYPE_SELECTION(name,value)  name = value,
@@ -105,8 +101,10 @@ void ProfileSyncServiceAndroid::SendNudgeNotification(
   invalidation::ObjectId object_id(
       object_source,
       str_object_id);
+  syncer::ObjectIdInvalidationMap object_ids_with_states;
   if (version == ipc::invalidation::Constants::UNKNOWN) {
-    version = syncer::Invalidation::kUnknownVersion;
+    object_ids_with_states.Insert(
+        syncer::Invalidation::InitUnknownVersion(object_id));
   } else {
     ObjectIdVersionMap::iterator it =
         max_invalidation_versions_.find(object_id);
@@ -116,12 +114,9 @@ void ProfileSyncServiceAndroid::SendNudgeNotification(
       return;
     }
     max_invalidation_versions_[object_id] = version;
+    object_ids_with_states.Insert(
+        syncer::Invalidation::Init(object_id, version, state));
   }
-
-  syncer::ObjectIdSet object_ids;
-  object_ids.insert(object_id);
-  syncer::ObjectIdInvalidationMap object_ids_with_states =
-      syncer::ObjectIdSetToInvalidationMap(object_ids, version, state);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_SYNC_REFRESH_REMOTE,
@@ -135,13 +130,6 @@ void ProfileSyncServiceAndroid::OnStateChanged() {
   JNIEnv* env = AttachCurrentThread();
   Java_ProfileSyncService_syncStateChanged(
       env, weak_java_profile_sync_service_.get(env).obj());
-}
-
-void ProfileSyncServiceAndroid::TokenAvailable(
-    JNIEnv* env, jobject, jstring username, jstring auth_token) {
-  std::string token = ConvertJavaStringToUTF8(env, auth_token);
-  TokenServiceFactory::GetForProfile(profile_)->OnIssueAuthTokenSuccess(
-      GaiaConstants::kSyncService, token);
 }
 
 void ProfileSyncServiceAndroid::EnableSync(JNIEnv* env, jobject) {

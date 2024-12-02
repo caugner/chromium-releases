@@ -17,9 +17,13 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/async_policy_provider.h"
 #include "chrome/browser/policy/cloud/cloud_policy_client.h"
@@ -32,14 +36,18 @@
 #include "chrome/browser/policy/policy_statistics_collector.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/policy/core/common/policy_pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_client.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "policy/policy_constants.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
+#include "url/gurl.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/policy/policy_loader_win.h"
@@ -62,17 +70,17 @@
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/policy/network_configuration_updater.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/cros_settings_provider.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "chrome/browser/chromeos/system/statistics_provider.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/cryptohome/cryptohome_library.h"
+#include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/onc/onc_certificate_importer_impl.h"
+#include "chromeos/settings/cros_settings_provider.h"
+#include "chromeos/settings/timezone_settings.h"
+#include "chromeos/system/statistics_provider.h"
 #endif
 
 using content::BrowserThread;
@@ -90,9 +98,22 @@ const int64 kServiceInitializationStartupDelay = 5000;
 const char kDefaultDeviceManagementServerUrl[] =
     "https://m.google.com/devicemanagement/data/api";
 
+#if defined(OS_CHROMEOS)
+// Install attributes for tests.
+EnterpriseInstallAttributes* g_testing_install_attributes = NULL;
+#endif  // defined(OS_CHROMEOS)
+
 // Used in BrowserPolicyConnector::SetPolicyProviderForTesting.
 ConfigurationPolicyProvider* g_testing_provider = NULL;
 
+// Helper that returns a new SequencedTaskRunner backed by the blocking pool.
+// Each SequencedTaskRunner returned is independent from the others.
+scoped_refptr<base::SequencedTaskRunner> GetBackgroundTaskRunner() {
+  base::SequencedWorkerPool* pool = BrowserThread::GetBlockingPool();
+  CHECK(pool);
+  return pool->GetSequencedTaskRunnerWithShutdownBehavior(
+      pool->GetSequenceToken(), base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
+}
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 base::FilePath GetManagedPolicyPath() {
@@ -117,11 +138,74 @@ base::FilePath GetManagedPolicyPath() {
 }
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
+class DeviceManagementServiceConfiguration
+    : public DeviceManagementService::Configuration {
+ public:
+  DeviceManagementServiceConfiguration() {}
+  virtual ~DeviceManagementServiceConfiguration() {}
+
+  virtual std::string GetServerUrl() OVERRIDE {
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kDeviceManagementUrl))
+      return command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl);
+    else
+      return kDefaultDeviceManagementServerUrl;
+  }
+
+  virtual std::string GetUserAgent() OVERRIDE {
+    return content::GetUserAgent(GURL(GetServerUrl()));
+  }
+
+  virtual std::string GetAgentParameter() OVERRIDE {
+    chrome::VersionInfo version_info;
+    return base::StringPrintf("%s %s(%s)",
+                              version_info.Name().c_str(),
+                              version_info.Version().c_str(),
+                              version_info.LastChange().c_str());
+  }
+
+  virtual std::string GetPlatformParameter() OVERRIDE {
+    std::string os_name = base::SysInfo::OperatingSystemName();
+    std::string os_hardware = base::SysInfo::OperatingSystemArchitecture();
+
+#if defined(OS_CHROMEOS)
+    chromeos::system::StatisticsProvider* provider =
+        chromeos::system::StatisticsProvider::GetInstance();
+
+    std::string hwclass;
+    if (!provider->GetMachineStatistic(chromeos::system::kHardwareClassKey,
+                                       &hwclass)) {
+      LOG(ERROR) << "Failed to get machine information";
+    }
+    os_name += ",CrOS," + base::SysInfo::GetLsbReleaseBoard();
+    os_hardware += "," + hwclass;
+#endif
+
+    std::string os_version("-");
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+    int32 os_major_version = 0;
+    int32 os_minor_version = 0;
+    int32 os_bugfix_version = 0;
+    base::SysInfo::OperatingSystemVersionNumbers(&os_major_version,
+                                                 &os_minor_version,
+                                                 &os_bugfix_version);
+    os_version = base::StringPrintf("%d.%d.%d",
+                                    os_major_version,
+                                    os_minor_version,
+                                    os_bugfix_version);
+#endif
+
+    return base::StringPrintf(
+        "%s|%s|%s", os_name.c_str(), os_hardware.c_str(), os_version.c_str());
+  }
+};
+
 }  // namespace
 
 BrowserPolicyConnector::BrowserPolicyConnector()
     : is_initialized_(false),
       local_state_(NULL),
+      handler_list_(BuildHandlerList().Pass()),
       weak_ptr_factory_(this) {
   // GetPolicyService() must be ready after the constructor is done.
   // The connector is created very early during startup, when the browser
@@ -131,15 +215,21 @@ BrowserPolicyConnector::BrowserPolicyConnector()
   platform_provider_.reset(CreatePlatformProvider());
 
 #if defined(OS_CHROMEOS)
-  // CryptohomeLibrary or DBusThreadManager may be uninitialized on unit tests.
-  if (chromeos::CryptohomeLibrary::IsInitialized() &&
+  if (g_testing_install_attributes)
+    install_attributes_.reset(g_testing_install_attributes);
+
+  // SystemSaltGetter or DBusThreadManager may be uninitialized on unit tests.
+
+  // TODO(satorux): Remove SystemSaltGetter::IsInitialized() when it's ready
+  // (removing it now breaks tests). crbug.com/141016.
+  if (chromeos::SystemSaltGetter::IsInitialized() &&
       chromeos::DBusThreadManager::IsInitialized()) {
-    chromeos::CryptohomeLibrary* cryptohome =
-        chromeos::CryptohomeLibrary::Get();
     chromeos::CryptohomeClient* cryptohome_client =
         chromeos::DBusThreadManager::Get()->GetCryptohomeClient();
-    install_attributes_.reset(
-        new EnterpriseInstallAttributes(cryptohome, cryptohome_client));
+    if (!g_testing_install_attributes) {
+      install_attributes_.reset(
+          new EnterpriseInstallAttributes(cryptohome_client));
+    }
     base::FilePath install_attrs_file;
     CHECK(PathService::Get(chromeos::FILE_INSTALL_ATTRIBUTES,
                            &install_attrs_file));
@@ -148,11 +238,13 @@ BrowserPolicyConnector::BrowserPolicyConnector()
     scoped_ptr<DeviceCloudPolicyStoreChromeOS> device_cloud_policy_store(
         new DeviceCloudPolicyStoreChromeOS(
             chromeos::DeviceSettingsService::Get(),
-            install_attributes_.get()));
+            install_attributes_.get(),
+            GetBackgroundTaskRunner()));
     device_cloud_policy_manager_.reset(
         new DeviceCloudPolicyManagerChromeOS(
             device_cloud_policy_store.Pass(),
             base::MessageLoopProxy::current(),
+            GetBackgroundTaskRunner(),
             install_attributes_.get()));
   }
 #endif
@@ -170,19 +262,19 @@ BrowserPolicyConnector::~BrowserPolicyConnector() {
 
 void BrowserPolicyConnector::Init(
     PrefService* local_state,
-    scoped_refptr<net::URLRequestContextGetter> system_request_context) {
+    scoped_refptr<net::URLRequestContextGetter> request_context) {
   // Initialization of some of the providers requires the FILE thread; make
   // sure that threading is ready at this point.
   DCHECK(BrowserThread::IsThreadInitialized(BrowserThread::FILE));
   DCHECK(!is_initialized()) << "BrowserPolicyConnector::Init() called twice.";
 
   local_state_ = local_state;
-  system_request_context_ = system_request_context;
+  request_context_ = request_context;
 
-  device_management_service_.reset(new DeviceManagementService(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-      system_request_context,
-      GetDeviceManagementUrl()));
+  scoped_ptr<DeviceManagementService::Configuration> configuration(
+      new DeviceManagementServiceConfiguration);
+  device_management_service_.reset(
+      new DeviceManagementService(configuration.Pass(), request_context));
   device_management_service_->ScheduleInitialization(
       kServiceInitializationStartupDelay);
 
@@ -213,7 +305,9 @@ void BrowserPolicyConnector::Init(
         new DeviceLocalAccountPolicyService(
             chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
             chromeos::DeviceSettingsService::Get(),
-            chromeos::CrosSettings::Get()));
+            chromeos::CrosSettings::Get(),
+            GetBackgroundTaskRunner(),
+            GetBackgroundTaskRunner()));
     device_local_account_policy_service_->Connect(
         device_management_service_.get());
   }
@@ -270,7 +364,7 @@ void BrowserPolicyConnector::Shutdown() {
 
   device_management_service_.reset();
 
-  system_request_context_ = NULL;
+  request_context_ = NULL;
 }
 
 PolicyService* BrowserPolicyConnector::GetPolicyService() {
@@ -332,7 +426,7 @@ scoped_ptr<PolicyService> BrowserPolicyConnector::CreatePolicyService(
 
 const ConfigurationPolicyHandlerList*
     BrowserPolicyConnector::GetHandlerList() const {
-  return &handler_list_;
+  return handler_list_.get();
 }
 
 UserAffiliation BrowserPolicyConnector::GetUserAffiliation(
@@ -347,7 +441,7 @@ UserAffiliation BrowserPolicyConnector::GetUserAffiliation(
   if (install_attributes_ &&
       (gaia::ExtractDomainName(gaia::CanonicalizeEmail(user_name)) ==
            install_attributes_->GetDomain() ||
-       policy::IsDeviceLocalAccountUser(user_name))) {
+       policy::IsDeviceLocalAccountUser(user_name, NULL))) {
     return USER_AFFILIATION_MANAGED;
   }
 #endif
@@ -357,10 +451,10 @@ UserAffiliation BrowserPolicyConnector::GetUserAffiliation(
 
 #if defined(OS_CHROMEOS)
 AppPackUpdater* BrowserPolicyConnector::GetAppPackUpdater() {
-  // system_request_context_ is NULL in unit tests.
-  if (!app_pack_updater_ && system_request_context_.get()) {
-    app_pack_updater_.reset(new AppPackUpdater(system_request_context_.get(),
-                                               install_attributes_.get()));
+  // request_context_ is NULL in unit tests.
+  if (!app_pack_updater_ && request_context_.get()) {
+    app_pack_updater_.reset(
+        new AppPackUpdater(request_context_.get(), install_attributes_.get()));
   }
   return app_pack_updater_.get();
 }
@@ -368,6 +462,12 @@ AppPackUpdater* BrowserPolicyConnector::GetAppPackUpdater() {
 void BrowserPolicyConnector::SetUserPolicyDelegate(
     ConfigurationPolicyProvider* user_policy_provider) {
   global_user_cloud_policy_provider_.SetDelegate(user_policy_provider);
+}
+
+void BrowserPolicyConnector::SetInstallAttributesForTesting(
+    EnterpriseInstallAttributes* attributes) {
+  DCHECK(!g_testing_install_attributes);
+  g_testing_install_attributes = attributes;
 }
 #endif
 
@@ -377,15 +477,6 @@ void BrowserPolicyConnector::SetPolicyProviderForTesting(
   CHECK(!g_browser_process) << "Must be invoked before the browser is created";
   DCHECK(!g_testing_provider);
   g_testing_provider = provider;
-}
-
-// static
-std::string BrowserPolicyConnector::GetDeviceManagementUrl() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDeviceManagementUrl))
-    return command_line->GetSwitchValueASCII(switches::kDeviceManagementUrl);
-  else
-    return kDefaultDeviceManagementServerUrl;
 }
 
 namespace {
@@ -443,7 +534,7 @@ bool BrowserPolicyConnector::IsNonEnterpriseUser(const std::string& username) {
 // static
 void BrowserPolicyConnector::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(
-      prefs::kUserPolicyRefreshRate,
+      policy_prefs::kUserPolicyRefreshRate,
       CloudPolicyRefreshScheduler::kDefaultRefreshDelayMs);
 #if defined(OS_CHROMEOS)
   registry->RegisterIntegerPref(

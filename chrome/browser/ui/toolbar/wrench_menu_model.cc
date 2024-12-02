@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/send_feedback_experiment.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -65,6 +64,8 @@
 #include "base/win/windows_version.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
 #include "chrome/browser/ui/metro_pin_tab_helper_win.h"
+#include "content/public/browser/gpu_data_manager.h"
+#include "ui/gfx/win/dpi.h"
 #include "win8/util/win8_util.h"
 #endif
 
@@ -190,10 +191,17 @@ ToolsMenuModel::ToolsMenuModel(ui::SimpleMenuModel::Delegate* delegate,
 ToolsMenuModel::~ToolsMenuModel() {}
 
 void ToolsMenuModel::Build(Browser* browser) {
-#if !defined(OS_CHROMEOS) && !defined(OS_MACOSX)
-  AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  bool show_create_shortcuts = true;
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
+  show_create_shortcuts = false;
+#elif defined(USE_ASH)
+  if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+    show_create_shortcuts = false;
 #endif
+  if (show_create_shortcuts) {
+    AddItemWithStringId(IDC_CREATE_SHORTCUTS, IDS_CREATE_SHORTCUTS);
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 
   AddItemWithStringId(IDC_MANAGE_EXTENSIONS, IDS_SHOW_EXTENSIONS);
 
@@ -207,17 +215,8 @@ void ToolsMenuModel::Build(Browser* browser) {
 #if defined(GOOGLE_CHROME_BUILD)
 #if !defined(OS_CHROMEOS)
   // Show IDC_FEEDBACK in "Tools" menu for non-ChromeOS platforms.
-  if (!chrome::UseAlternateSendFeedbackLocation()) {
-    AddItemWithStringId(IDC_FEEDBACK,
-                        chrome::GetSendFeedbackMenuLabelID());
-    AddSeparator(ui::NORMAL_SEPARATOR);
-  }
-#else
-  if (chrome::UseAlternateSendFeedbackLocation()) {
-    AddItemWithStringId(IDC_FEEDBACK,
-                        chrome::GetSendFeedbackMenuLabelID());
-    AddSeparator(ui::NORMAL_SEPARATOR);
-  }
+  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
+  AddSeparator(ui::NORMAL_SEPARATOR);
 #endif
 #endif // GOOGLE_CHROME_BUILD
 
@@ -227,6 +226,7 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
   AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
+  AddItemWithStringId(IDC_DEV_TOOLS_DEVICES, IDS_DEV_TOOLS_DEVICES);
 
 #if defined(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
   AddSeparator(ui::NORMAL_SEPARATOR);
@@ -243,14 +243,14 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
     : ui::SimpleMenuModel(this),
       provider_(provider),
       browser_(browser),
-      tab_strip_model_(browser_->tab_strip_model()),
-      zoom_callback_(base::Bind(&WrenchMenuModel::OnZoomLevelChanged,
-                                base::Unretained(this))) {
+      tab_strip_model_(browser_->tab_strip_model()) {
   Build(is_new_menu);
   UpdateZoomControls();
 
-  HostZoomMap::GetForBrowserContext(
-      browser->profile())->AddZoomLevelChangedCallback(zoom_callback_);
+  zoom_subscription_ = HostZoomMap::GetForBrowserContext(
+      browser->profile())->AddZoomLevelChangedCallback(
+          base::Bind(&WrenchMenuModel::OnZoomLevelChanged,
+                     base::Unretained(this)));
 
   tab_strip_model_->AddObserver(this);
 
@@ -261,11 +261,6 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
 WrenchMenuModel::~WrenchMenuModel() {
   if (tab_strip_model_)
     tab_strip_model_->RemoveObserver(this);
-
-  if (browser()) {
-    HostZoomMap::GetForBrowserContext(
-        browser()->profile())->RemoveZoomLevelChangedCallback(zoom_callback_);
-  }
 }
 
 bool WrenchMenuModel::DoesCommandIdDismissMenu(int command_id) const {
@@ -547,16 +542,36 @@ void WrenchMenuModel::Build(bool is_new_menu) {
                            recent_tabs_sub_menu_model_.get());
   }
 
-#if defined(OS_WIN) && !defined(USE_ASH)
+#if defined(OS_WIN)
+
+#if defined(USE_AURA)
+ if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+     content::GpuDataManager::GetInstance()->CanUseGpuBrowserCompositor() &&
+     gfx::win::GetUndocumentedDPIScale() == 1.0f &&
+     gfx::GetDPIScale() == 1.0 &&
+     gfx::GetModernUIScale() == 1.0f) {
+    if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH) {
+      // Metro mode, add the 'Relaunch Chrome in desktop mode'.
+      AddSeparator(ui::NORMAL_SEPARATOR);
+      AddItemWithStringId(IDC_WIN8_DESKTOP_RESTART, IDS_WIN8_DESKTOP_RESTART);
+    } else {
+      // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
+      AddSeparator(ui::NORMAL_SEPARATOR);
+      AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
+    }
+  }
+#else
   if (base::win::IsMetroProcess()) {
     // Metro mode, add the 'Relaunch Chrome in desktop mode'.
-    AddSeparator(ui::SPACING_SEPARATOR);
+    AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(IDC_WIN8_DESKTOP_RESTART, IDS_WIN8_DESKTOP_RESTART);
-  } else if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+  } else {
     // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
-    AddSeparator(ui::SPACING_SEPARATOR);
+    AddSeparator(ui::NORMAL_SEPARATOR);
     AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
   }
+#endif
+
 #endif
 
   // Append the full menu including separators. The final separator only gets
@@ -636,11 +651,9 @@ void WrenchMenuModel::Build(bool is_new_menu) {
   }
 
 #if defined(GOOGLE_CHROME_BUILD)
-  if (browser_defaults::kShowFeedbackMenuItem &&
-      !chrome::UseAlternateSendFeedbackLocation()) {
-    AddItemWithStringId(IDC_FEEDBACK,
-                        chrome::GetSendFeedbackMenuLabelID());
-  }
+#if defined(OS_CHROMEOS)
+  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
+#endif
 #endif
 
   AddGlobalErrorMenuItems();
@@ -649,13 +662,6 @@ void WrenchMenuModel::Build(bool is_new_menu) {
     AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_MORE_TOOLS_MENU,
                            tools_menu_model_.get());
   }
-
-#if !defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
-  // For Send Feedback Link experiment (crbug.com/169339).
-  if (chrome::UseAlternateSendFeedbackLocation())
-    AddItemWithStringId(IDC_FEEDBACK,
-                        chrome::GetSendFeedbackMenuLabelID());
-#endif
 
   bool show_exit_menu = browser_defaults::kShowExitMenuItem;
 #if defined(OS_WIN) && defined(USE_AURA)
@@ -685,9 +691,7 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
   for (GlobalErrorService::GlobalErrorList::const_iterator
        it = errors.begin(); it != errors.end(); ++it) {
     GlobalError* error = *it;
-    // Verify that we're not getting NULL errors. TODO(sail) Make this a DCHECK
-    // once crbug.com/278543 is fixed.
-    CHECK(error);
+    DCHECK(error);
     if (error->HasMenuItem()) {
 #if !defined(OS_CHROMEOS)
       // Don't add a signin error if it's already being displayed elsewhere.

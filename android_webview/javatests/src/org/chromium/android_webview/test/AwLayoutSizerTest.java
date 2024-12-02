@@ -20,6 +20,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
         public int measuredHeight;
         public int fixedLayoutWidth;
         public int fixedLayoutHeight;
+        public boolean heightWrapContent;
 
         @Override
         public void requestLayout() {
@@ -38,6 +39,11 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
             fixedLayoutWidth = widthDip;
             fixedLayoutHeight = heightDip;
         }
+
+        @Override
+        public boolean isLayoutParamsHeightWrapContent() {
+            return heightWrapContent;
+        }
     }
 
     private static final int FIRST_CONTENT_WIDTH = 101;
@@ -49,7 +55,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
     private static final int AT_MOST_MEASURE_SIZE = 50;
     private static final int TOO_LARGE_CONTENT_SIZE = 100;
 
-    private static final double INITIAL_PAGE_SCALE = 1.0;
+    private static final float INITIAL_PAGE_SCALE = 1.0f;
     private static final double DIP_SCALE = 1.0;
 
     @SmallTest
@@ -227,7 +233,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
                 MeasureSpec.makeMeasureSpec(AT_MOST_MEASURE_SIZE, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
         final int requestLayoutCallCount = delegate.requestLayoutCallCount;
-        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE + 0.5);
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE + 0.5f);
 
         assertEquals(requestLayoutCallCount + 1, delegate.requestLayoutCallCount);
     }
@@ -245,7 +251,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
         layoutSizer.onMeasure(MeasureSpec.makeMeasureSpec(50, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
         final int requestLayoutCallCount = delegate.requestLayoutCallCount;
-        layoutSizer.onPageScaleChanged(DIP_SCALE);
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE);
 
         assertEquals(requestLayoutCallCount, delegate.requestLayoutCallCount);
     }
@@ -258,7 +264,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
         layoutSizer.setDelegate(delegate);
         layoutSizer.setDIPScale(DIP_SCALE);
 
-        final double tooLargePageScale = 3.00;
+        final float tooLargePageScale = 3.00f;
 
         layoutSizer.onContentSizeChanged(SMALLER_CONTENT_SIZE, SMALLER_CONTENT_SIZE);
         layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE);
@@ -382,7 +388,7 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
-    public void testViewportWithWrapContentMeasureSpec() {
+    public void testViewportWithUnspecifiedMeasureSpec() {
         AwLayoutSizer layoutSizer = new AwLayoutSizer();
         LayoutSizerDelegate delegate = new LayoutSizerDelegate();
         layoutSizer.setDelegate(delegate);
@@ -390,7 +396,6 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
         final float dipScale = 1.5f;
         final int pageScale = 2;
         final int dipAndPageScale = (int) (dipScale * pageScale);
-
 
         int contentWidth = 800;
         int contentHeight = 400;
@@ -431,6 +436,41 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    public void testViewportWithAtMostMeasureSpec() {
+        AwLayoutSizer layoutSizer = new AwLayoutSizer();
+        LayoutSizerDelegate delegate = new LayoutSizerDelegate();
+        delegate.heightWrapContent = true;
+        layoutSizer.setDelegate(delegate);
+
+        final float dipScale = 1.5f;
+        final int pageScale = 2;
+        final int dipAndPageScale = (int) (dipScale * pageScale);
+
+        int contentWidth = 800;
+        int contentHeight = 400;
+        int contentWidthPix = contentWidth * dipAndPageScale;
+        int contentHeightPix = contentHeight * dipAndPageScale;
+
+        layoutSizer.setDIPScale(dipScale);
+        layoutSizer.onContentSizeChanged(contentWidth, contentHeight);
+        layoutSizer.onPageScaleChanged(pageScale);
+        layoutSizer.onMeasure(MeasureSpec.makeMeasureSpec(contentWidthPix, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(contentHeightPix * 2, MeasureSpec.AT_MOST));
+
+        assertTrue(delegate.setMeasuredDimensionCalled);
+        int measuredWidth = delegate.measuredWidth & View.MEASURED_SIZE_MASK;
+        int measuredHeight = delegate.measuredHeight & View.MEASURED_SIZE_MASK;
+
+        int sizeWidth = measuredWidth;
+        int sizeHeight = measuredHeight;
+        layoutSizer.onSizeChanged(sizeWidth, sizeHeight, 0, 0);
+
+        assertEquals(contentWidth, delegate.fixedLayoutWidth);
+        assertEquals(AwLayoutSizer.FIXED_LAYOUT_HEIGHT, delegate.fixedLayoutHeight);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
     public void testFixedLayoutViewportGoesBackToZeroWithWrapContentMeasureSpec() {
         AwLayoutSizer layoutSizer = new AwLayoutSizer();
         LayoutSizerDelegate delegate = new LayoutSizerDelegate();
@@ -457,6 +497,82 @@ public class AwLayoutSizerTest extends InstrumentationTestCase {
         layoutSizer.onSizeChanged((int) (FIRST_CONTENT_WIDTH * DIP_SCALE),
                 (int) (FIRST_CONTENT_HEIGHT * DIP_SCALE), 0, 0);
         assertTrue(delegate.fixedLayoutWidth != 0);
+        assertEquals(0, delegate.fixedLayoutHeight);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testFixedLayoutSizeUpdatedOnPageScaleChangeItNoLayoutRequest() {
+        AwLayoutSizer layoutSizer = new AwLayoutSizer();
+        LayoutSizerDelegate delegate = new LayoutSizerDelegate();
+        delegate.heightWrapContent = true;
+        layoutSizer.setDelegate(delegate);
+        layoutSizer.setDIPScale(DIP_SCALE);
+
+        layoutSizer.onContentSizeChanged(TOO_LARGE_CONTENT_SIZE, TOO_LARGE_CONTENT_SIZE);
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE);
+        layoutSizer.onMeasure(
+                MeasureSpec.makeMeasureSpec(AT_MOST_MEASURE_SIZE, MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(AT_MOST_MEASURE_SIZE, MeasureSpec.AT_MOST));
+        layoutSizer.onSizeChanged(AT_MOST_MEASURE_SIZE, AT_MOST_MEASURE_SIZE, 0, 0);
+
+        assertTrue(delegate.fixedLayoutWidth != 0);
+        final int fixedLayoutWidth = delegate.fixedLayoutWidth;
+        final int requestLayoutCallCount = delegate.requestLayoutCallCount;
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE * 2f);
+        assertEquals(requestLayoutCallCount, delegate.requestLayoutCallCount);
+        assertEquals(fixedLayoutWidth / 2, delegate.fixedLayoutWidth);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testFixedLayoutSizeUpdatedIfNoSizeChangeAfterLayoutRequested() {
+        AwLayoutSizer layoutSizer = new AwLayoutSizer();
+        LayoutSizerDelegate delegate = new LayoutSizerDelegate();
+        layoutSizer.setDelegate(delegate);
+        layoutSizer.setDIPScale(DIP_SCALE);
+
+        layoutSizer.onContentSizeChanged(FIRST_CONTENT_WIDTH, FIRST_CONTENT_HEIGHT);
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE);
+        layoutSizer.onMeasure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+
+        layoutSizer.onSizeChanged((int) (FIRST_CONTENT_WIDTH * DIP_SCALE),
+                (int) (FIRST_CONTENT_HEIGHT * DIP_SCALE), 0, 0);
+
+        assertTrue(delegate.fixedLayoutWidth != 0);
+        final int fixedLayoutWidth = delegate.fixedLayoutWidth;
+        final int requestLayoutCallCount = delegate.requestLayoutCallCount;
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE * 0.5f);
+        assertEquals(requestLayoutCallCount + 1, delegate.requestLayoutCallCount);
+        assertEquals(fixedLayoutWidth, delegate.fixedLayoutWidth);
+
+        // onMeasure and onLayoutChange should always be called as a result of the AwLayoutSizer
+        // calling Delegate.requestLayout.
+        layoutSizer.onMeasure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+        layoutSizer.onLayoutChange();
+
+        assertEquals(fixedLayoutWidth * 2, delegate.fixedLayoutWidth);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testFixedLayoutSizeDoesNotDependOnMeasureSpec() {
+        AwLayoutSizer layoutSizer = new AwLayoutSizer();
+        LayoutSizerDelegate delegate = new LayoutSizerDelegate();
+        delegate.heightWrapContent = false;
+        layoutSizer.setDelegate(delegate);
+        layoutSizer.setDIPScale(DIP_SCALE);
+
+        layoutSizer.onContentSizeChanged(TOO_LARGE_CONTENT_SIZE, TOO_LARGE_CONTENT_SIZE);
+        layoutSizer.onPageScaleChanged(INITIAL_PAGE_SCALE);
+        layoutSizer.onMeasure(
+                MeasureSpec.makeMeasureSpec(AT_MOST_MEASURE_SIZE, MeasureSpec.AT_MOST),
+                MeasureSpec.makeMeasureSpec(AT_MOST_MEASURE_SIZE, MeasureSpec.AT_MOST));
+        layoutSizer.onSizeChanged(AT_MOST_MEASURE_SIZE, AT_MOST_MEASURE_SIZE, 0, 0);
+
+        assertEquals(0, delegate.fixedLayoutWidth);
         assertEquals(0, delegate.fixedLayoutHeight);
     }
 }

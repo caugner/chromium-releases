@@ -41,16 +41,30 @@ class Gtk2UI : public views::LinuxUI {
     const std::vector<views::FrameButton>& leading_buttons,
     const std::vector<views::FrameButton>& trailing_buttons);
 
+  // ui::LinuxInputMethodContextFactory:
+  virtual scoped_ptr<ui::LinuxInputMethodContext> CreateInputMethodContext(
+      ui::LinuxInputMethodContextDelegate* delegate) const OVERRIDE;
+
   // ui::LinuxShellDialog:
   virtual ui::SelectFileDialog* CreateSelectFileDialog(
       ui::SelectFileDialog::Listener* listener,
       ui::SelectFilePolicy* policy) const OVERRIDE;
 
   // ui::LinuxUI:
+  virtual void Initialize() OVERRIDE;
   virtual bool UseNativeTheme() const OVERRIDE;
   virtual gfx::Image GetThemeImageNamed(int id) const OVERRIDE;
   virtual bool GetColor(int id, SkColor* color) const OVERRIDE;
   virtual bool HasCustomImage(int id) const OVERRIDE;
+  virtual SkColor GetFocusRingColor() const OVERRIDE;
+  virtual SkColor GetThumbActiveColor() const OVERRIDE;
+  virtual SkColor GetThumbInactiveColor() const OVERRIDE;
+  virtual SkColor GetTrackColor() const OVERRIDE;
+  virtual SkColor GetActiveSelectionBgColor() const OVERRIDE;
+  virtual SkColor GetActiveSelectionFgColor() const OVERRIDE;
+  virtual SkColor GetInactiveSelectionBgColor() const OVERRIDE;
+  virtual SkColor GetInactiveSelectionFgColor() const OVERRIDE;
+  virtual double GetCursorBlinkInterval() const OVERRIDE;
   virtual ui::NativeTheme* GetNativeTheme() const OVERRIDE;
   virtual bool GetDefaultUsesSystemTheme() const OVERRIDE;
   virtual void SetDownloadCount(int count) const OVERRIDE;

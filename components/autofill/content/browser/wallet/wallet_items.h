@@ -239,6 +239,11 @@ class WalletItems {
   // Whether or not |action| is in |required_actions_|.
   bool HasRequiredAction(RequiredAction action) const;
 
+  // Checks whether |card_number| is supported by Wallet for this merchant and
+  // if not, fills in |message| with a user-visible explanation.
+  bool SupportsCard(const base::string16& card_number,
+                    base::string16* message) const;
+
   const std::vector<RequiredAction>& required_actions() const {
     return required_actions_;
   }
@@ -257,12 +262,14 @@ class WalletItems {
   const std::vector<LegalDocument*>& legal_documents() const {
     return legal_documents_.get();
   }
-  bool is_amex_allowed() const { return amex_permission_ == AMEX_ALLOWED; }
 
  private:
   friend class WalletItemsTest;
-  friend scoped_ptr<WalletItems> GetTestWalletItemsWithDefaultIds(
+  friend scoped_ptr<WalletItems> GetTestWalletItems(
+      const std::vector<RequiredAction>&,
       const std::string&, const std::string&, AmexPermission);
+  friend scoped_ptr<WalletItems> GetTestWalletItemsWithDefaultIds(
+      RequiredAction action);
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest, CreateWalletItems);
   FRIEND_TEST_ALL_PREFIXES(WalletItemsTest,
                            CreateWalletItemsWithRequiredActions);

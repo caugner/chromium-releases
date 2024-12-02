@@ -9,7 +9,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/shell_observer.h"
-#include "ash/wm/window_state.h"
+#include "ash/wm/window_state_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/client/activation_change_observer.h"
@@ -19,7 +19,6 @@
 #include "ui/events/event_handler.h"
 
 namespace aura {
-class RootWindow;
 class Window;
 }
 
@@ -40,11 +39,11 @@ class ASH_EXPORT BaseLayoutManager
       public aura::WindowObserver,
       public aura::client::ActivationChangeObserver,
       public ShellObserver,
-      public wm::WindowState::Observer {
+      public wm::WindowStateObserver {
  public:
   typedef std::set<aura::Window*> WindowSet;
 
-  explicit BaseLayoutManager(aura::RootWindow* root_window);
+  explicit BaseLayoutManager(aura::Window* root_window);
   virtual ~BaseLayoutManager();
 
   const WindowSet& windows() const { return windows_; }
@@ -66,9 +65,6 @@ class ASH_EXPORT BaseLayoutManager
                               const gfx::Rect& requested_bounds) OVERRIDE;
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE;
   virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
   virtual void OnWindowBoundsChanged(aura::Window* window,
                                      const gfx::Rect& old_bounds,
@@ -80,6 +76,10 @@ class ASH_EXPORT BaseLayoutManager
 
   // ash::ShellObserver overrides:
   virtual void OnDisplayWorkAreaInsetsChanged() OVERRIDE;
+
+  // wm::WindowStateObserver overrides:
+  virtual void OnWindowShowTypeChanged(wm::WindowState* window_state,
+                                       wm::WindowShowType type) OVERRIDE;
 
  protected:
   enum AdjustWindowReason {
@@ -108,7 +108,7 @@ class ASH_EXPORT BaseLayoutManager
       wm::WindowState* window_state,
       AdjustWindowReason reason);
 
-  aura::RootWindow* root_window() { return root_window_; }
+  aura::Window* root_window() { return root_window_; }
 
  private:
   // Update window bounds based on a change in show state.
@@ -117,7 +117,7 @@ class ASH_EXPORT BaseLayoutManager
   // Set of windows we're listening to.
   WindowSet windows_;
 
-  aura::RootWindow* root_window_;
+  aura::Window* root_window_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseLayoutManager);
 };

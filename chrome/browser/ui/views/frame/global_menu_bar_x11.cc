@@ -7,6 +7,7 @@
 #include <dlfcn.h>
 #include <glib-object.h>
 
+#include "base/debug/leak_annotations.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
@@ -127,8 +128,7 @@ const int MENU_SEPARATOR =-1;
 const int MENU_END = -2;
 const int MENU_DISABLED_ID = -3;
 
-// These tag values are used to refer to menu itesm.
-const int TAG_NORMAL = 0;
+// These tag values are used to refer to menu items.
 const int TAG_MOST_VISITED = 1;
 const int TAG_RECENTLY_CLOSED = 2;
 const int TAG_MOST_VISITED_HEADER = 3;
@@ -228,6 +228,7 @@ GlobalMenuBarCommand tools_menu[] = {
   { IDS_VIEW_SOURCE, IDC_VIEW_SOURCE },
   { IDS_DEV_TOOLS, IDC_DEV_TOOLS },
   { IDS_DEV_TOOLS_CONSOLE, IDC_DEV_TOOLS_CONSOLE },
+  { IDS_DEV_TOOLS_DEVICES, IDC_DEV_TOOLS_DEVICES },
 
   { MENU_END, MENU_END }
 };
@@ -367,7 +368,10 @@ DbusmenuMenuitem* GlobalMenuBarX11::BuildMenuItem(
 
 void GlobalMenuBarX11::InitServer(unsigned long xid) {
   std::string path = GetPathForWindow(xid);
-  server_ = server_new(path.c_str());
+  {
+    ANNOTATE_SCOPED_MEMORY_LEAK; // http://crbug.com/314087
+    server_ = server_new(path.c_str());
+  }
 
   root_item_ = menuitem_new();
   menuitem_property_set(root_item_, kPropertyLabel, "Root");

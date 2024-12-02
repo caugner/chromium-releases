@@ -64,6 +64,15 @@ const base::FilePath::CharType kInternalNaClPluginFileName[] =
     FILE_PATH_LITERAL("libppGoogleNaClPluginChrome.so");
 #endif
 
+const base::FilePath::CharType kEffectsPluginFileName[] =
+#if defined(OS_WIN)
+    FILE_PATH_LITERAL("pepper/libppeffects.dll");
+#elif defined(OS_MACOSX)
+    FILE_PATH_LITERAL("pepper/libppeffects.plugin");
+#else  // Linux and Chrome OS
+    FILE_PATH_LITERAL("pepper/libppeffects.so");
+#endif
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 
 const base::FilePath::CharType kO3DPluginFileName[] =
@@ -277,6 +286,11 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!GetInternalPluginsDirectory(&cur))
         return false;
       cur = cur.Append(kInternalPDFPluginFileName);
+      break;
+    case chrome::FILE_EFFECTS_PLUGIN:
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
+      cur = cur.Append(kEffectsPluginFileName);
       break;
     case chrome::FILE_NACL_PLUGIN:
       if (!GetInternalPluginsDirectory(&cur))

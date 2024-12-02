@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
@@ -15,7 +16,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/gaia_info_update_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
@@ -30,6 +30,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/webui/options/options_handlers_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,7 +38,7 @@
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/webui/web_ui_util.h"
+#include "ui/base/webui/web_ui_util.h"
 
 #if defined(ENABLE_SETTINGS_APP)
 #include "chrome/browser/ui/app_list/app_list_service.h"
@@ -195,17 +196,15 @@ void ManageProfileHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
+void ManageProfileHandler::Uninitialize() {
+  registrar_.RemoveAll();
+}
+
 void ManageProfileHandler::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED) {
-    // If the browser shuts down during supervised-profile creation, deleting
-    // the unregistered supervised-user profile triggers this notification,
-    // but the RenderViewHost the profile info would be sent to has already been
-    // destroyed.
-    if (!web_ui()->GetWebContents()->GetRenderViewHost())
-      return;
     SendProfileNames();
     base::StringValue value(kManageProfileIconGridName);
     SendProfileIcons(value);
@@ -332,7 +331,9 @@ void ManageProfileHandler::SetProfileIconAndName(const ListValue* args) {
   if (!args->GetString(2, &new_profile_name))
     return;
 
-  if (new_profile_name == cache.GetGAIANameOfProfileAtIndex(profile_index)) {
+  if ((new_profile_name ==
+           cache.GetGAIAGivenNameOfProfileAtIndex(profile_index)) ||
+      (new_profile_name == cache.GetGAIANameOfProfileAtIndex(profile_index))) {
     // Set the profile to use the GAIA name as the profile name. Note, this
     // is a little weird if the user typed their GAIA name manually but
     // it's not a big deal.
@@ -363,7 +364,8 @@ void ManageProfileHandler::SwitchAppListProfile(const ListValue* args) {
       !base::GetValueAsFilePath(*file_path_value, &profile_file_path))
     return;
 
-  AppListService* app_list_service = AppListService::Get();
+  AppListService* app_list_service = AppListService::Get(
+      options::helper::GetDesktopType(web_ui()));
   app_list_service->SetProfilePath(profile_file_path);
   app_list_service->Show();
 
@@ -391,14 +393,15 @@ void ManageProfileHandler::ProfileIconSelectionChanged(
   if (icon_url != gaia_picture_url_)
     return;
 
-  // If the selection is the GAIA picture then also show the GAIA name in the
-  // text field.
+  // If the selection is the GAIA picture then also show the profile name in the
+  // text field. This will display either the GAIA given name, if available,
+  // or the first name.
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   size_t profile_index = cache.GetIndexOfProfileWithPath(profile_file_path);
   if (profile_index == std::string::npos)
     return;
-  string16 gaia_name = cache.GetGAIANameOfProfileAtIndex(profile_index);
+  string16 gaia_name = cache.GetNameOfProfileAtIndex(profile_index);
   if (gaia_name.empty())
     return;
 

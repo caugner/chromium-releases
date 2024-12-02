@@ -116,6 +116,7 @@ class GDataWapiService : public DriveServiceInterface,
       const std::string& resource_id,
       const std::string& parent_resource_id,
       const std::string& new_title,
+      const base::Time& last_modified,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback CopyHostedDocument(
       const std::string& resource_id,
@@ -125,6 +126,7 @@ class GDataWapiService : public DriveServiceInterface,
       const std::string& resource_id,
       const std::string& parent_resource_id,
       const std::string& new_title,
+      const base::Time& last_modified,
       const google_apis::GetResourceEntryCallback& callback) OVERRIDE;
   virtual google_apis::CancelCallback RenameResource(
       const std::string& resource_id,
@@ -188,7 +190,7 @@ class GDataWapiService : public DriveServiceInterface,
   virtual void OnOAuth2RefreshTokenChanged() OVERRIDE;
 
   OAuth2TokenService* oauth2_token_service_;  // Not owned.
-  net::URLRequestContextGetter* url_request_context_getter_;  // Not owned.
+  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
   scoped_ptr<google_apis::RequestSender> sender_;
   ObserverList<DriveServiceObserver> observers_;

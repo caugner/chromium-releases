@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu_controller.h"
@@ -28,8 +29,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 
-namespace {
-const CGFloat kAnimationDuration = 0.12;
 const CGFloat kBottomBorderHeightPx = 1.0;
 const CGFloat kButtonHeightPx = 26.0;
 const CGFloat kButtonLeftMarginPx = 2.0;
@@ -37,7 +36,6 @@ const CGFloat kButtonWidthPx = 34.0;
 const CGFloat kDropArrowLeftMarginPx = 3.0;
 const CGFloat kToolbarMinHeightPx = 36.0;
 const CGFloat kToolbarMaxHeightPx = 72.0;
-}  // namespace
 
 @interface ExtensionInfoBarController(Private)
 // Called when the extension's hosted NSView has been resized.
@@ -109,7 +107,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver {
     scoped_ptr<gfx::Canvas> canvas(
         new gfx::Canvas(
             gfx::Size(image_size + kDropArrowLeftMarginPx + drop_image->width(),
-                      image_size), ui::SCALE_FACTOR_100P, false));
+                      image_size), 1.0f, false));
     canvas->DrawImageInt(*icon,
                          0, 0, icon->width(), icon->height(),
                          0, 0, image_size, image_size,

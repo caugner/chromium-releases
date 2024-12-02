@@ -19,7 +19,6 @@
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -45,7 +44,6 @@
 #import "chrome/browser/ui/cocoa/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -103,13 +101,6 @@ NSPoint GetPointForBubble(content::WebContents* web_contents,
   point = [view convertPoint:point toView:nil];
   point = [[view window] convertBaseToScreen:point];
   return point;
-}
-
-void CreateShortcuts(const ShellIntegration::ShortcutInfo& shortcut_info) {
-  // creation_locations will be ignored by CreatePlatformShortcuts on Mac.
-  ShellIntegration::ShortcutLocations creation_locations;
-  web_app::CreateShortcuts(shortcut_info, creation_locations,
-                           web_app::SHORTCUT_CREATION_BY_USER);
 }
 
 }  // namespace
@@ -259,6 +250,11 @@ bool BrowserWindowCocoa::IsAlwaysOnTop() const {
   return false;
 }
 
+void BrowserWindowCocoa::SetAlwaysOnTop(bool always_on_top) {
+  // Not implemented for browser windows.
+  NOTIMPLEMENTED();
+}
+
 bool BrowserWindowCocoa::IsActive() const {
   return [window() isKeyWindow];
 }
@@ -303,6 +299,17 @@ void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
 
 void BrowserWindowCocoa::SetStarredState(bool is_starred) {
   [controller_ setStarredState:is_starred ? YES : NO];
+}
+
+void BrowserWindowCocoa::OnActiveTabChanged(content::WebContents* old_contents,
+                                            content::WebContents* new_contents,
+                                            int index,
+                                            int reason) {
+  // TODO(pkasting): Perhaps the code in
+  // TabStripController::activateTabWithContents should move here?  Or this
+  // should call that (instead of TabStripModelObserverBridge doing so)?  It's
+  // not obvious to me why Mac doesn't handle tab changes in BrowserWindow the
+  // way views and GTK do.
 }
 
 void BrowserWindowCocoa::ZoomChangedForActiveTab(bool can_show_bubble) {
@@ -471,14 +478,6 @@ gfx::Rect BrowserWindowCocoa::GetRootWindowResizerRect() const {
   return gfx::Rect(NSRectToCGRect(tabRect));
 }
 
-// This is called from Browser, which in turn is called directly from
-// a menu option.  All we do here is set a preference.  The act of
-// setting the preference sends notifications to all windows who then
-// know what to do.
-void BrowserWindowCocoa::ToggleBookmarkBar() {
-  chrome::ToggleBookmarkBarWhenVisible(browser_->profile());
-}
-
 void BrowserWindowCocoa::AddFindBar(
     FindBarCocoaController* find_bar_cocoa_controller) {
   [controller_ addFindBar:find_bar_cocoa_controller];
@@ -492,6 +491,11 @@ void BrowserWindowCocoa::ShowBookmarkBubble(const GURL& url,
                                             bool already_bookmarked) {
   [controller_ showBookmarkBubbleForURL:url
                       alreadyBookmarked:(already_bookmarked ? YES : NO)];
+}
+
+void BrowserWindowCocoa::ShowTranslateBubble(
+      content::WebContents* contents,
+      TranslateBubbleModel::ViewState view_state) {
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -589,14 +593,6 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   if ([BrowserWindowUtils shouldHandleKeyboardEvent:event])
     [BrowserWindowUtils handleKeyboardEvent:event.os_event inWindow:window()];
-}
-
-void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
-    Profile* profile, const extensions::Extension* app) {
-  // Normally we would show a dialog, but since we always create the app
-  // shortcut in /Applications there are no options for the user to choose.
-  web_app::UpdateShortcutInfoAndIconForApp(*app, profile,
-                                           base::Bind(&CreateShortcuts));
 }
 
 void BrowserWindowCocoa::Cut() {

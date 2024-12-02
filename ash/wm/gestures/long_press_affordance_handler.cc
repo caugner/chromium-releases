@@ -5,8 +5,8 @@
 #include "ash/wm/gestures/long_press_affordance_handler.h"
 
 #include "ash/display/display_controller.h"
-#include "ash/shell.h"
 #include "ash/root_window_controller.h"
+#include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -16,9 +16,9 @@
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/base/gestures/gesture_configuration.h"
-#include "ui/base/gestures/gesture_util.h"
 #include "ui/compositor/layer.h"
+#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gestures/gesture_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform.h"
@@ -59,7 +59,7 @@ const SkColor kAffordanceGlowEndColor = SkColorSetARGB(0, 255, 255, 255);
 const SkColor kAffordanceArcColor = SkColorSetARGB(80, 0, 0, 0);
 const int kAffordanceFrameRateHz = 60;
 
-views::Widget* CreateAffordanceWidget(aura::RootWindow* root_window) {
+views::Widget* CreateAffordanceWidget(aura::Window* root_window) {
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params;
   params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
@@ -140,7 +140,7 @@ class LongPressAffordanceHandler::LongPressAffordanceView
     : public views::View {
  public:
   LongPressAffordanceView(const gfx::Point& event_location,
-                          aura::RootWindow* root_window)
+                          aura::Window* root_window)
       : views::View(),
         widget_(CreateAffordanceWidget(root_window)),
         current_angle_(kAffordanceAngleStartValue),
@@ -272,6 +272,7 @@ void LongPressAffordanceHandler::ProcessEvent(aura::Window* target,
           event->root_location(), tap_down_location_))
         StopAnimation();
       break;
+    case ui::ET_GESTURE_SHOW_PRESS:
     case ui::ET_TOUCH_CANCELLED:
     case ui::ET_GESTURE_END:
       // We will stop the animation on TOUCH_RELEASED.
@@ -291,7 +292,7 @@ void LongPressAffordanceHandler::ProcessEvent(aura::Window* target,
 // LongPressAffordanceHandler, private
 
 void LongPressAffordanceHandler::StartAnimation() {
-  aura::RootWindow* root_window = NULL;
+  aura::Window* root_window = NULL;
   switch (current_animation_type_) {
     case GROW_ANIMATION:
       root_window = Shell::GetInstance()->display_controller()->

@@ -49,7 +49,7 @@ class ViewIDTest : public InProcessBrowserTest {
     // Make sure docked devtools is created to test VIEW_ID_DEV_TOOLS_DOCKED
     browser()->profile()->GetPrefs()->SetString(prefs::kDevToolsDockSide,
                                                 "dock_bottom");
-    chrome::ToggleDevToolsWindow(browser(), DEVTOOLS_TOGGLE_ACTION_INSPECT);
+    chrome::ToggleDevToolsWindow(browser(), DevToolsToggleAction::Inspect());
 
     // Make sure download shelf is created to test VIEW_ID_DOWNLOAD_SHELF
     browser()->window()->GetDownloadShelf()->Show();
@@ -71,7 +71,8 @@ class ViewIDTest : public InProcessBrowserTest {
           i == VIEW_ID_CONTENTS_SPLIT ||
           i == VIEW_ID_FEEDBACK_BUTTON ||
           i == VIEW_ID_SCRIPT_BUBBLE ||
-          i == VIEW_ID_MIC_SEARCH_BUTTON) {
+          i == VIEW_ID_MIC_SEARCH_BUTTON ||
+          i == VIEW_ID_TRANSLATE_BUTTON) {
         continue;
       }
 
