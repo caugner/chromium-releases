@@ -13,7 +13,7 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -223,9 +223,15 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
   ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
 }
 
+- (BOOL)isCtrlPressed {
+  return [NSEvent modifierFlags] & NSControlKeyMask ? YES : NO;
+}
+
 - (IBAction)buttonClicked:(id)sender {
   BrowserWindow::AvatarBubbleMode mode =
       BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+  if ([self isCtrlPressed])
+    mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
 
   [self showAvatarBubbleAnchoredAt:button_
                           withMode:mode

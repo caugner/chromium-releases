@@ -14,26 +14,9 @@
 /** @suppress {duplicate} */
 var base = base || {};
 
-base.debug = function() {};
-
 /**
- * @return {string} The callstack of the current method.
+ * @interface
  */
-base.debug.callstack = function() {
-  try {
-    throw new Error();
-  } catch (/** @type {Error} */ error) {
-    var callstack = error.stack
-      .replace(/^\s+(at eval )?at\s+/gm, '') // Remove 'at' and indentation.
-      .split('\n');
-    callstack.splice(0,2); // Remove the stack of the current function.
-  }
-  return callstack.join('\n');
-};
-
-/**
-  * @interface
-  */
 base.Disposable = function() {};
 base.Disposable.prototype.dispose = function() {};
 
@@ -368,16 +351,18 @@ base.Promise = function() {};
 
 /**
  * @param {number} delay
- * @return {Promise} a Promise that will be fulfilled after |delay| ms.
+ * @param {*=} opt_value
+ * @return {!Promise} a Promise that will be fulfilled with |opt_value|
+ *     after |delay| ms.
  */
-base.Promise.sleep = function(delay) {
+base.Promise.sleep = function(delay, opt_value) {
   return new Promise(
-    /** @param {function(*):void} fulfill */
-    function(fulfill) {
-      window.setTimeout(fulfill, delay);
+    function(resolve) {
+      window.setTimeout(function() {
+        resolve(opt_value);
+      }, delay);
     });
 };
-
 
 /**
  * @param {Promise} promise
@@ -394,6 +379,29 @@ base.Promise.negate = function(promise) {
       function() {
         return Promise.resolve();
       });
+};
+
+/**
+ * Creates a promise that will be fulfilled within a certain timeframe.
+ *
+ * This function creates a result promise |R| that will be resolved to
+ * either |promise| or |opt_defaultValue|.  If |promise| is fulfulled
+ * (i.e. resolved or rejected) within |delay| milliseconds, then |R|
+ * is resolved with |promise|.  Otherwise, |R| is resolved with
+ * |opt_defaultValue|.
+ *
+ * Avoid passing a promise as |opt_defaultValue|, as this could result
+ * in |R| remaining unfulfilled after |delay| milliseconds.
+ *
+ * @param {!Promise<T>} promise The promise to wrap.
+ * @param {number} delay The number of milliseconds to wait.
+ * @param {*=} opt_defaultValue The default value used to resolve the
+ *     result.
+ * @return {!Promise<T>} A new promise.
+ * @template T
+ */
+base.Promise.withTimeout = function(promise, delay, opt_defaultValue) {
+  return Promise.race([promise, base.Promise.sleep(delay, opt_defaultValue)]);
 };
 
 /**

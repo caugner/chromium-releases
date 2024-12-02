@@ -19,7 +19,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -51,7 +51,7 @@
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
@@ -66,7 +66,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
+#include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
 #include "ui/resources/grit/ui_resources.h"
 
 using base::UserMetricsAction;
@@ -614,7 +614,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   TabContentsController* controller = [tabContentsArray_ objectAtIndex:index];
 
   // Make sure we do not draw any transient arrangements of views.
-  gfx::ScopedNSDisableScreenUpdates ns_disabler;
+  gfx::ScopedCocoaDisableScreenUpdates cocoa_disabler;
   // Make sure that any layers that move are not animated to their new
   // positions.
   ScopedCAActionDisabler ca_disabler;
@@ -833,8 +833,8 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
   if (!tabStripModel_->ContainsIndex(index))
     return;
   WebContents* contents = tabStripModel_->GetWebContentsAt(index);
-  chrome::SetTabAudioMuted(contents, !chrome::IsTabAudioMuted(contents),
-                           chrome::kMutedToggleCauseUser);
+  chrome::SetTabAudioMuted(contents, !contents->IsAudioMuted(),
+                           TAB_MUTED_REASON_AUDIO_INDICATOR, std::string());
 }
 
 // Called when the user closes a tab. Asks the model to close the tab. |sender|
@@ -2093,7 +2093,7 @@ NSImage* Overlay(NSImage* ground, NSImage* overlay, CGFloat alpha) {
     NOTIMPLEMENTED();
 
   // Get the first URL and fix it up.
-  GURL url(GURL(url_fixer::FixupURL(
+  GURL url(GURL(url_formatter::FixupURL(
       base::SysNSStringToUTF8([urls objectAtIndex:0]), std::string())));
 
   [self openURL:&url inView:view at:point];

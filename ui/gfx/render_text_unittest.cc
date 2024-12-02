@@ -1506,11 +1506,10 @@ TEST_F(RenderTextTest, StringSizeRespectsFontListMetrics) {
   // Check that Arial and Symbol have different font metrics.
   Font arial_font("Arial", 16);
   ASSERT_EQ("arial",
-            base::StringToLowerASCII(arial_font.GetActualFontNameForTesting()));
+            base::ToLowerASCII(arial_font.GetActualFontNameForTesting()));
   Font symbol_font("Symbol", 16);
   ASSERT_EQ("symbol",
-            base::StringToLowerASCII(
-                symbol_font.GetActualFontNameForTesting()));
+            base::ToLowerASCII(symbol_font.GetActualFontNameForTesting()));
   EXPECT_NE(arial_font.GetHeight(), symbol_font.GetHeight());
   EXPECT_NE(arial_font.GetBaseline(), symbol_font.GetBaseline());
   // "a" should be rendered with Arial, not with Symbol.
@@ -2313,8 +2312,9 @@ TEST_F(RenderTextTest, Multiline_HorizontalAlignment) {
       EXPECT_EQ(0, render_text.GetAlignmentOffset(0).x());
       EXPECT_EQ(0, render_text.GetAlignmentOffset(1).x());
     } else {
-      std::vector<base::string16> lines;
-      base::SplitString(base::WideToUTF16(kTestStrings[i].text), '\n', &lines);
+      std::vector<base::string16> lines = base::SplitString(
+          base::WideToUTF16(kTestStrings[i].text),
+          base::string16(1, '\n'), base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
       ASSERT_EQ(2u, lines.size());
       int difference = (lines[0].length() - lines[1].length()) * kGlyphSize;
       EXPECT_EQ(render_text.GetAlignmentOffset(0).x() + difference,
@@ -2896,9 +2896,9 @@ TEST_F(RenderTextTest, HarfBuzz_FontListFallback) {
   const std::vector<Font>& fonts = font_list.GetFonts();
   ASSERT_EQ(2u, fonts.size());
   ASSERT_EQ("arial",
-            base::StringToLowerASCII(fonts[0].GetActualFontNameForTesting()));
+            base::ToLowerASCII(fonts[0].GetActualFontNameForTesting()));
   ASSERT_EQ("symbol",
-            base::StringToLowerASCII(fonts[1].GetActualFontNameForTesting()));
+            base::ToLowerASCII(fonts[1].GetActualFontNameForTesting()));
 
   // "⊕" (CIRCLED PLUS) should be rendered with Symbol rather than falling back
   // to some other font that's present on the system.

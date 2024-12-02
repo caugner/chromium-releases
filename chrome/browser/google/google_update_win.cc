@@ -60,6 +60,7 @@ const int64_t kGoogleUpdatePollIntervalMs = 250;
 
 // Constants from Google Update.
 const HRESULT GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY = 0x80040813;
+const HRESULT GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL = 0x8004081f;
 const HRESULT GOOPDATEINSTALL_E_INSTALLER_FAILED = 0x80040902;
 
 // Check if the currently running instance can be updated by Google Update.
@@ -527,6 +528,8 @@ bool UpdateCheckDriver::IsErrorState(
     LONG code = 0;
     if (*hresult == GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY) {
       *error_code = GOOGLE_UPDATE_DISABLED_BY_POLICY;
+    } else if (*hresult == GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY_MANUAL) {
+      *error_code = GOOGLE_UPDATE_DISABLED_BY_POLICY_AUTO_ONLY;
     } else if (*hresult == GOOPDATEINSTALL_E_INSTALLER_FAILED &&
                SUCCEEDED(current_state->get_installerResultCode(&code))) {
       *installer_exit_code = code;

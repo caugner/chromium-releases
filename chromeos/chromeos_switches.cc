@@ -185,10 +185,6 @@ const char kGuestSession[] = "bwsi";
 const char kGuestWallpaperLarge[] = "guest-wallpaper-large";
 const char kGuestWallpaperSmall[] = "guest-wallpaper-small";
 
-// If true, the Chromebook has a Chrome OS keyboard. Don't use the flag for
-// Chromeboxes.
-const char kHasChromeOSKeyboard[] = "has-chromeos-keyboard";
-
 // If true, the Chromebook has a keyboard with a diamond key.
 const char kHasChromeOSDiamondKey[] = "has-chromeos-diamond-key";
 
@@ -310,9 +306,6 @@ const char kDisableCaptivePortalBypassProxy[] =
 // Disable automatic timezone update.
 const char kDisableTimeZoneTrackingOption[] =
     "disable-timezone-tracking-option";
-
-// Disable new GAIA sign-in flow.
-const char kDisableWebviewSigninFlow[] = "disable-webview-signin-flow";
 
 // Switches and optional value for Data Saver prompt on cellular networks.
 const char kDisableDataSaverPrompt[] = "disable-datasaver-prompt";

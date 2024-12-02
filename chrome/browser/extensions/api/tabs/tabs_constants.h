@@ -13,6 +13,7 @@ namespace tabs_constants {
 // Keys used in serializing tab data & events.
 extern const char kActiveKey[];
 extern const char kAllFramesKey[];
+extern const char kAllWindowTypesKey[];
 extern const char kAlwaysOnTopKey[];
 extern const char kBypassCache[];
 extern const char kCodeKey[];
@@ -37,7 +38,7 @@ extern const char kOpenerTabIdKey[];
 extern const char kPinnedKey[];
 extern const char kAudibleKey[];
 extern const char kMutedKey[];
-extern const char kMutedCauseKey[];
+extern const char kMutedInfoKey[];
 extern const char kQualityKey[];
 extern const char kRunAtKey[];
 extern const char kSelectedKey[];
@@ -72,6 +73,7 @@ extern const char kWindowTypeValuePopup[];
 extern const char kWindowTypeValuePanel[];
 extern const char kWindowTypeValueDetachedPanel[];
 extern const char kWindowTypeValueApp[];
+extern const char kWindowTypeValueDevTools[];
 
 // Error messages.
 extern const char kCannotZoomDisabledTabError[];
@@ -94,6 +96,8 @@ extern const char kSupportedInWindowsOnlyError[];
 extern const char kInvalidWindowTypeError[];
 extern const char kInvalidWindowStateError[];
 extern const char kScreenshotsDisabled[];
+extern const char kCannotUpdateMuteDisabled[];
+extern const char kCannotUpdateMuteCaptured[];
 
 extern const char kCannotDetermineLanguageOfUnloadedTab[];
 

@@ -40,6 +40,7 @@ MediaCodecDecoder::MediaCodecDecoder(
     const char* decoder_thread_name)
     : media_task_runner_(media_task_runner),
       decoder_thread_(decoder_thread_name),
+      needs_reconfigure_(false),
       external_request_data_cb_(external_request_data_cb),
       starvation_cb_(starvation_cb),
       stop_done_cb_(stop_done_cb),
@@ -50,6 +51,9 @@ MediaCodecDecoder::MediaCodecDecoder(
       last_frame_posted_(false),
       is_data_request_in_progress_(false),
       is_incoming_data_invalid_(false),
+#ifndef NDEBUG
+      verify_next_frame_is_key_(false),
+#endif
       weak_factory_(this) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
@@ -79,8 +83,12 @@ void MediaCodecDecoder::ReleaseDecoderResources() {
 
   DVLOG(1) << class_name() << "::" << __FUNCTION__;
 
+  // Set [kInEmergencyStop| state to block already posted ProcessNextFrame().
+  SetState(kInEmergencyStop);
+
   decoder_thread_.Stop();  // synchronous
-  state_ = kStopped;
+
+  SetState(kStopped);
   media_codec_bridge_.reset();
 }
 
@@ -99,6 +107,15 @@ void MediaCodecDecoder::Flush() {
   eos_enqueued_ = false;
   completed_ = false;
   au_queue_.Flush();
+
+#ifndef NDEBUG
+  // We check and reset |verify_next_frame_is_key_| on Decoder thread.
+  // This DCHECK ensures we won't need to lock this variable.
+  DCHECK(!decoder_thread_.IsRunning());
+
+  // For video the first frame after flush must be key frame.
+  verify_next_frame_is_key_ = true;
+#endif
 
   if (media_codec_bridge_) {
     // MediaCodecBridge::Reset() performs MediaCodecBridge.flush()
@@ -168,19 +185,41 @@ MediaCodecDecoder::ConfigStatus MediaCodecDecoder::Configure() {
 
   if (GetState() == kError) {
     DVLOG(0) << class_name() << "::" << __FUNCTION__ << ": wrong state kError";
-    return CONFIG_FAILURE;
+    return kConfigFailure;
   }
 
-  // Here I assume that OnDemuxerConfigsAvailable won't come
-  // in the middle of demuxer data.
+  if (needs_reconfigure_) {
+    DVLOG(1) << class_name() << "::" << __FUNCTION__
+             << ": needs reconfigure, deleting MediaCodec";
+    needs_reconfigure_ = false;
+    media_codec_bridge_.reset();
 
+    // No need to release these buffers since the MediaCodec is deleted, just
+    // remove their indexes from |delayed_buffers_|.
+
+    ClearDelayedBuffers(false);
+  }
+
+  MediaCodecDecoder::ConfigStatus result;
   if (media_codec_bridge_) {
     DVLOG(1) << class_name() << "::" << __FUNCTION__
              << ": reconfiguration is not required, ignoring";
-    return CONFIG_OK;
+    result = kConfigOk;
+  } else {
+    result = ConfigureInternal();
+
+#ifndef NDEBUG
+    // We check and reset |verify_next_frame_is_key_| on Decoder thread.
+    // This DCHECK ensures we won't need to lock this variable.
+    DCHECK(!decoder_thread_.IsRunning());
+
+    // For video the first frame after reconfiguration must be key frame.
+    if (result == kConfigOk)
+      verify_next_frame_is_key_ = true;
+#endif
   }
 
-  return ConfigureInternal();
+  return result;
 }
 
 bool MediaCodecDecoder::Start(base::TimeDelta current_time) {
@@ -197,7 +236,7 @@ bool MediaCodecDecoder::Start(base::TimeDelta current_time) {
 
   if (state != kPrefetched) {
     DVLOG(0) << class_name() << "::" << __FUNCTION__ << ": wrong state "
-             << AsString(state) << " ignoring";
+             << AsString(state) << ", ignoring";
     return false;
   }
 
@@ -217,10 +256,12 @@ bool MediaCodecDecoder::Start(base::TimeDelta current_time) {
 
   // Start the decoder thread
   if (!decoder_thread_.Start()) {
-    DVLOG(1) << class_name() << "::" << __FUNCTION__
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
              << ": cannot start decoder thread";
     return false;
   }
+
+  DVLOG(0) << class_name() << "::" << __FUNCTION__ << " decoder thread started";
 
   SetState(kRunning);
 
@@ -244,11 +285,14 @@ void MediaCodecDecoder::SyncStop() {
 
   // After this method returns, decoder thread will not be running.
 
-  decoder_thread_.Stop();  // synchronous
-  state_ = kStopped;
+  // Set [kInEmergencyStop| state to block already posted ProcessNextFrame().
+  SetState(kInEmergencyStop);
 
-  // Shall we move |delayed_buffers_| from VideoDecoder to Decoder class?
-  ReleaseDelayedBuffers();
+  decoder_thread_.Stop();  // synchronous
+
+  SetState(kStopped);
+
+  ClearDelayedBuffers(true);  // release prior to clearing  |delayed_buffers_|.
 }
 
 void MediaCodecDecoder::RequestToStop() {
@@ -284,11 +328,12 @@ void MediaCodecDecoder::RequestToStop() {
 void MediaCodecDecoder::OnLastFrameRendered(bool completed) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
-  DVLOG(1) << class_name() << "::" << __FUNCTION__
+  DVLOG(0) << class_name() << "::" << __FUNCTION__
            << " completed:" << completed;
 
   decoder_thread_.Stop();  // synchronous
-  state_ = kStopped;
+
+  SetState(kStopped);
   completed_ = completed;
 
   media_task_runner_->PostTask(FROM_HERE, stop_done_cb_);
@@ -297,25 +342,32 @@ void MediaCodecDecoder::OnLastFrameRendered(bool completed) {
 void MediaCodecDecoder::OnDemuxerDataAvailable(const DemuxerData& data) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
 
-  const char* explain_if_skipped =
-      is_incoming_data_invalid_ ? " skipped as invalid" : "";
+  // If |data| contains an aborted data, the last AU will have kAborted status.
+  bool aborted_data =
+      !data.access_units.empty() &&
+      data.access_units.back().status == DemuxerStream::kAborted;
 
-  DVLOG(2) << class_name() << "::" << __FUNCTION__ << explain_if_skipped
-           << " #AUs:" << data.access_units.size()
-           << " #Configs:" << data.demuxer_configs.size();
-#if !defined(NDEBUG)
+#ifndef NDEBUG
+  const char* explain_if_skipped =
+      is_incoming_data_invalid_ ? " skipped as invalid"
+                                : (aborted_data ? " skipped as aborted" : "");
+
   for (const auto& unit : data.access_units)
     DVLOG(2) << class_name() << "::" << __FUNCTION__ << explain_if_skipped
              << " au: " << unit;
+  for (const auto& configs : data.demuxer_configs)
+    DVLOG(2) << class_name() << "::" << __FUNCTION__ << " configs: " << configs;
 #endif
 
-  if (!is_incoming_data_invalid_)
+  if (!is_incoming_data_invalid_ && !aborted_data)
     au_queue_.PushBack(data);
 
   is_incoming_data_invalid_ = false;
   is_data_request_in_progress_ = false;
 
-  if (state_ == kPrefetching)
+  // Do not request data if we got kAborted. There is no point to request the
+  // data after kAborted and before the OnDemuxerSeekDone.
+  if (GetState() == kPrefetching && !aborted_data)
     PrefetchNextChunk();
 }
 
@@ -339,6 +391,14 @@ void MediaCodecDecoder::CheckLastFrame(bool eos_encountered,
 
 void MediaCodecDecoder::OnCodecError() {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
+
+  // Ignore codec errors from the moment surface is changed till the
+  // |media_codec_bridge_| is deleted.
+  if (needs_reconfigure_) {
+    DVLOG(1) << class_name() << "::" << __FUNCTION__
+             << ": needs reconfigure, ignoring";
+    return;
+  }
 
   SetState(kError);
   error_cb_.Run();
@@ -405,15 +465,8 @@ void MediaCodecDecoder::ProcessNextFrame() {
   if (!EnqueueInputBuffer())
     return;
 
-  bool eos_encountered = false;
-  if (!DepleteOutputBufferQueue(&eos_encountered))
+  if (!DepleteOutputBufferQueue())
     return;
-
-  if (eos_encountered) {
-    DVLOG(1) << class_name() << "::" << __FUNCTION__
-             << " EOS dequeued, stopping frame processing";
-    return;
-  }
 
   // We need a small delay if we want to stop this thread by
   // decoder_thread_.Stop() reliably.
@@ -472,6 +525,15 @@ bool MediaCodecDecoder::EnqueueInputBuffer() {
     return false;
   }
 
+  // We are ready to enqueue the front unit.
+
+#ifndef NDEBUG
+  if (verify_next_frame_is_key_) {
+    verify_next_frame_is_key_ = false;
+    VerifyUnitIsKeyFrame(au_info.front_unit);
+  }
+#endif
+
   // Dequeue input buffer
 
   base::TimeDelta timeout =
@@ -490,6 +552,9 @@ bool MediaCodecDecoder::EnqueueInputBuffer() {
       return false;
 
     case MEDIA_CODEC_DEQUEUE_INPUT_AGAIN_LATER:
+      DVLOG(0)
+          << class_name() << "::" << __FUNCTION__
+          << ": DequeueInputBuffer returned MediaCodec.INFO_TRY_AGAIN_LATER.";
       return true;
 
     default:
@@ -528,7 +593,7 @@ bool MediaCodecDecoder::EnqueueInputBuffer() {
 }
 
 // Returns false if there was MediaCodec error.
-bool MediaCodecDecoder::DepleteOutputBufferQueue(bool* eos_encountered) {
+bool MediaCodecDecoder::DepleteOutputBufferQueue() {
   DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
 
   DVLOG(2) << class_name() << "::" << __FUNCTION__;
@@ -538,6 +603,7 @@ bool MediaCodecDecoder::DepleteOutputBufferQueue(bool* eos_encountered) {
   size_t size = 0;
   base::TimeDelta pts;
   MediaCodecStatus status;
+  bool eos_encountered = false;
 
   base::TimeDelta timeout =
       base::TimeDelta::FromMilliseconds(kOutputBufferTimeout);
@@ -547,7 +613,8 @@ bool MediaCodecDecoder::DepleteOutputBufferQueue(bool* eos_encountered) {
   // MEDIA_CODEC_OUTPUT_BUFFERS_CHANGED or MEDIA_CODEC_OUTPUT_FORMAT_CHANGED.
   do {
     status = media_codec_bridge_->DequeueOutputBuffer(
-        timeout, &buffer_index, &offset, &size, &pts, eos_encountered, nullptr);
+        timeout, &buffer_index, &offset, &size, &pts, &eos_encountered,
+        nullptr);
 
     // Reset the timeout to 0 for the subsequent DequeueOutputBuffer() calls
     // to quickly break the loop after we got all currently available buffers.
@@ -566,7 +633,7 @@ bool MediaCodecDecoder::DepleteOutputBufferQueue(bool* eos_encountered) {
 
       case MEDIA_CODEC_OK:
         // We got the decoded frame
-        Render(buffer_index, size, true, pts, *eos_encountered);
+        Render(buffer_index, offset, size, true, pts, eos_encountered);
         break;
 
       case MEDIA_CODEC_DEQUEUE_OUTPUT_AGAIN_LATER:
@@ -585,9 +652,21 @@ bool MediaCodecDecoder::DepleteOutputBufferQueue(bool* eos_encountered) {
     }
 
   } while (status != MEDIA_CODEC_DEQUEUE_OUTPUT_AGAIN_LATER &&
-           status != MEDIA_CODEC_ERROR && !*eos_encountered);
+           status != MEDIA_CODEC_ERROR && !eos_encountered);
 
-  return status != MEDIA_CODEC_ERROR;
+  if (eos_encountered) {
+    DVLOG(1) << class_name() << "::" << __FUNCTION__
+             << " EOS dequeued, stopping frame processing";
+    return false;
+  }
+
+  if (status == MEDIA_CODEC_ERROR) {
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
+             << " MediaCodec error, stopping frame processing";
+    return false;
+  }
+
+  return true;
 }
 
 MediaCodecDecoder::DecoderState MediaCodecDecoder::GetState() const {
@@ -596,7 +675,7 @@ MediaCodecDecoder::DecoderState MediaCodecDecoder::GetState() const {
 }
 
 void MediaCodecDecoder::SetState(DecoderState state) {
-  DVLOG(1) << class_name() << "::" << __FUNCTION__ << " " << state;
+  DVLOG(1) << class_name() << "::" << __FUNCTION__ << " " << AsString(state);
 
   base::AutoLock lock(state_lock_);
   state_ = state;
@@ -614,6 +693,7 @@ const char* MediaCodecDecoder::AsString(DecoderState state) {
     RETURN_STRING(kPrefetched);
     RETURN_STRING(kRunning);
     RETURN_STRING(kStopping);
+    RETURN_STRING(kInEmergencyStop);
     RETURN_STRING(kError);
     default:
       return "Unknown DecoderState";

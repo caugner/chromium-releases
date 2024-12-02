@@ -32,6 +32,7 @@
       'debug/frame_timing_tracker_unittest.cc',
       'debug/micro_benchmark_controller_unittest.cc',
       'debug/rendering_stats_unittest.cc',
+      'input/scroll_state_unittest.cc',
       'input/top_controls_manager_unittest.cc',
       'layers/delegated_frame_provider_unittest.cc',
       'layers/delegated_frame_resource_collection_unittest.cc',
@@ -96,6 +97,7 @@
       'resources/platform_color_unittest.cc',
       'resources/resource_pool_unittest.cc',
       'resources/resource_provider_unittest.cc',
+      'resources/resource_util_unittest.cc',
       'resources/scoped_resource_unittest.cc',
       'resources/video_resource_updater_unittest.cc',
       'scheduler/begin_frame_source_unittest.cc',
@@ -146,6 +148,7 @@
       'surfaces/surface_aggregator_unittest.cc',
       'surfaces/surface_display_output_surface_unittest.cc',
       'surfaces/surface_factory_unittest.cc',
+      'surfaces/surface_hittest_unittest.cc',
       'surfaces/surface_unittest.cc',
       'surfaces/surfaces_pixeltest.cc',
     ],
@@ -241,8 +244,6 @@
       'test/pixel_test_software_output_device.h',
       'test/pixel_test_utils.cc',
       'test/pixel_test_utils.h',
-      'test/render_pass_test_common.cc',
-      'test/render_pass_test_common.h',
       'test/render_pass_test_utils.cc',
       'test/render_pass_test_utils.h',
       'test/scheduler_test_common.cc',
@@ -415,6 +416,7 @@
         '../ui/gfx/gfx.gyp:gfx_geometry',
         '../ui/gfx/gfx.gyp:gfx_test_support',
         '../ui/gl/gl.gyp:gl',
+        '../ui/gl/gl.gyp:gl_test_support',
       ],
       'sources': [
         '<@(cc_tests_support_files)',
@@ -467,7 +469,7 @@
           'conditions': [
             # crbug.com/464062 xdisplaycheck is used to run cc_unittests_run on
             # the linux try bots when using X11.
-            ['OS=="linux" and use_ozone==0',
+            ['use_x11==1',
               {
                 'dependencies': [
                   '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',

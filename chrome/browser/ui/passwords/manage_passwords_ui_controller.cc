@@ -97,7 +97,16 @@ base::TimeDelta ManagePasswordsUIController::Elapsed() const {
 
 void ManagePasswordsUIController::OnPasswordSubmitted(
     scoped_ptr<PasswordFormManager> form_manager) {
+  bool blacklisted = form_manager->IsBlacklisted();
   passwords_data_.OnPendingPassword(form_manager.Pass());
+  timer_.reset(new base::ElapsedTimer);
+  base::AutoReset<bool> resetter(&should_pop_up_bubble_, !blacklisted);
+  UpdateBubbleAndIconVisibility();
+}
+
+void ManagePasswordsUIController::OnUpdatePasswordSubmitted(
+    scoped_ptr<PasswordFormManager> form_manager) {
+  passwords_data_.OnUpdatePassword(form_manager.Pass());
   timer_.reset(new base::ElapsedTimer);
   base::AutoReset<bool> resetter(&should_pop_up_bubble_, true);
   UpdateBubbleAndIconVisibility();
@@ -199,8 +208,16 @@ void ManagePasswordsUIController::NavigateToSmartLockPage() {
 }
 
 void ManagePasswordsUIController::SavePassword() {
-  DCHECK(PasswordPendingUserDecision());
+  DCHECK_EQ(password_manager::ui::PENDING_PASSWORD_STATE, state());
   SavePasswordInternal();
+  passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
+  UpdateBubbleAndIconVisibility();
+}
+
+void ManagePasswordsUIController::UpdatePassword(
+    const autofill::PasswordForm& password_form) {
+  DCHECK_EQ(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE, state());
+  UpdatePasswordInternal(password_form);
   passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
   UpdateBubbleAndIconVisibility();
 }
@@ -246,17 +263,29 @@ void ManagePasswordsUIController::ChooseCredential(
 }
 
 void ManagePasswordsUIController::SavePasswordInternal() {
+  password_manager::PasswordStore* password_store =
+      GetPasswordStore(web_contents());
   password_manager::PasswordFormManager* form_manager =
       passwords_data_.form_manager();
-  DCHECK(form_manager);
+  for (const autofill::PasswordForm* form :
+       form_manager->blacklisted_matches()) {
+    password_store->RemoveLogin(*form);
+  }
+
   form_manager->Save();
 }
 
+void ManagePasswordsUIController::UpdatePasswordInternal(
+    const autofill::PasswordForm& password_form) {
+  password_manager::PasswordFormManager* form_manager =
+      passwords_data_.form_manager();
+  form_manager->Update(password_form);
+}
+
 void ManagePasswordsUIController::NeverSavePassword() {
-  DCHECK(PasswordPendingUserDecision());
+  DCHECK_EQ(password_manager::ui::PENDING_PASSWORD_STATE, state());
   NeverSavePasswordInternal();
-  passwords_data_.TransitionToState(password_manager::ui::BLACKLIST_STATE);
-  UpdateBubbleAndIconVisibility();
+  // The state stays the same.
 }
 
 void ManagePasswordsUIController::NeverSavePasswordInternal() {
@@ -264,25 +293,6 @@ void ManagePasswordsUIController::NeverSavePasswordInternal() {
       passwords_data_.form_manager();
   DCHECK(form_manager);
   form_manager->PermanentlyBlacklist();
-}
-
-void ManagePasswordsUIController::UnblacklistSite() {
-  // We're in one of two states: either the user _just_ blacklisted the site
-  // by clicking "Never save" in the pending bubble, or the user is visiting
-  // a blacklisted site.
-  //
-  // Either way, |passwords_data_| has been populated with the relevant form. We
-  // can safely pull it out, send it over to the password store for removal, and
-  // update our internal state.
-  DCHECK(!passwords_data_.GetCurrentForms().empty());
-  DCHECK_EQ(password_manager::ui::BLACKLIST_STATE, state());
-  password_manager::PasswordStore* password_store =
-      GetPasswordStore(web_contents());
-  DCHECK(GetCurrentForms().front()->blacklisted_by_user);
-  if (password_store)
-    password_store->RemoveLogin(*GetCurrentForms().front());
-  passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
-  UpdateBubbleAndIconVisibility();
 }
 
 void ManagePasswordsUIController::ManageAccounts() {
@@ -321,11 +331,19 @@ void ManagePasswordsUIController::WasHidden() {
 const autofill::PasswordForm& ManagePasswordsUIController::
     PendingPassword() const {
   DCHECK(state() == password_manager::ui::PENDING_PASSWORD_STATE ||
-         state() == password_manager::ui::CONFIRMATION_STATE) << state();
+         state() == password_manager::ui::PENDING_PASSWORD_UPDATE_STATE ||
+         state() == password_manager::ui::CONFIRMATION_STATE)
+      << state();
   password_manager::PasswordFormManager* form_manager =
       passwords_data_.form_manager();
   DCHECK(form_manager);
   return form_manager->pending_credentials();
+}
+
+bool ManagePasswordsUIController::PasswordOverridden() const {
+  const password_manager::PasswordFormManager* form_manager =
+      passwords_data_.form_manager();
+  return form_manager ? form_manager->password_overridden() : false;
 }
 
 void ManagePasswordsUIController::UpdateIconAndBubbleState(

@@ -406,6 +406,8 @@ source_set("sync_core") {
     "util/time.h",
   ]
 
+  configs += [ "//build/config:precompiled_headers" ]
+
   public_deps = [
     "//sync/internal_api/attachments/proto",
   ]
@@ -422,6 +424,16 @@ source_set("sync_core") {
     "//url",
     "//sync/protocol",
   ]
+
+  if (is_android) {
+    deps += [ "//sync/android:jni_headers" ]
+    sources += [
+      "android/model_type_helper.cc",
+      "android/model_type_helper.h",
+      "android/sync_jni_registrar.cc",
+      "android/sync_jni_registrar.h",
+    ]
+  }
 
   if (is_chromeos) {
     # Required by get_session_name.cc on Chrome OS.
@@ -567,6 +579,15 @@ static_library("test_support_sync_api") {
   ]
 }
 
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("sync_unit_tests_run") {
+  testonly = true
+  deps = [
+    ":sync_unit_tests",
+  ]
+}
+
 # GYP version: sync/sync_tests.gypi:sync_unit_tests
 test("sync_unit_tests") {
   sources = [
@@ -651,6 +672,21 @@ test("sync_unit_tests") {
     "util/protobuf_unittest.cc",
   ]
 
+  configs += [ "//build/config:precompiled_headers" ]
+
+  data = [
+    "//chrome/test/data/sync/",
+    "//net/tools/testserver/",
+    "//third_party/pyftpdlib/",
+    "//third_party/pywebsocket/",
+    "//third_party/tlslite/",
+    "$root_out_dir/pyproto/google/",
+  ]
+
+  if (is_android) {
+    data += [ "$root_out_dir/locales/en-US.pak" ]
+  }
+
   deps = [
     ":test_support_sync_core",
     ":test_support_sync_internal_api",
@@ -669,6 +705,7 @@ test("sync_unit_tests") {
     "//testing/gtest",
     "//third_party/leveldatabase",
     "//third_party/protobuf:protobuf_lite",
+    "//third_party/zlib",
   ]
 
   if (is_android) {

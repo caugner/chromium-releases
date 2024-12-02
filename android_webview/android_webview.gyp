@@ -24,8 +24,16 @@
             'arch_suffix':'64'
           }],
         ],
+        'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/android_webview',
       },
       'actions': [
+        {
+          'action_name': 'generate_aw_resources',
+          'variables': {
+            'grit_grd_file': 'ui/aw_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
         {
           'action_name': 'repack_android_webview_pack',
           'variables': {
@@ -36,26 +44,34 @@
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_resources_100_percent.pak',
+              '<(grit_out_dir)/aw_resources.pak',
             ],
             'pak_output': '<(PRODUCT_DIR)/android_webview_assets/webviewchromium.pak',
           },
          'includes': [ '../build/repack_action.gypi' ],
         },
         {
-          'action_name': 'android_webview_locales_rename_paks',
+          'action_name': 'generate_aw_strings',
           'variables': {
-            'rename_locales': 'tools/webview_locales_rename_paks.py',
+            'grit_grd_file': 'ui/aw_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'android_webview_repack_locales',
+          'variables': {
+            'repack_locales': 'tools/webview_repack_locales.py',
           },
           'inputs': [
-            '<(rename_locales)',
-            '<!@pymod_do_main(webview_locales_rename_paks -i -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
+            '<(repack_locales)',
+            '<!@pymod_do_main(webview_repack_locales -i -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
           ],
           'outputs': [
-            '<!@pymod_do_main(webview_locales_rename_paks -o -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
+            '<!@pymod_do_main(webview_repack_locales -o -p <(PRODUCT_DIR) -s <(SHARED_INTERMEDIATE_DIR) <(locales))'
           ],
           'action': [
             'python',
-            '<(rename_locales)',
+            '<(repack_locales)',
             '-p', '<(PRODUCT_DIR)',
             '-s', '<(SHARED_INTERMEDIATE_DIR)',
             '<@(locales)',
@@ -172,6 +188,7 @@
         '../components/components.gyp:devtools_discovery',
         '../components/components.gyp:navigation_interception',
         '../components/components.gyp:printing_common',
+        '../components/components.gyp:printing_browser',
         '../components/components.gyp:printing_renderer',
         '../components/components.gyp:visitedlink_browser',
         '../components/components.gyp:visitedlink_renderer',
@@ -228,6 +245,7 @@
         'browser/aw_http_auth_handler_base.h',
         'browser/aw_javascript_dialog_manager.cc',
         'browser/aw_javascript_dialog_manager.h',
+        'browser/aw_locale_manager.h',
         'browser/aw_login_delegate.cc',
         'browser/aw_login_delegate.h',
         'browser/aw_media_client_android.cc',
@@ -239,6 +257,8 @@
         'browser/aw_permission_manager.h',
         'browser/aw_pref_store.cc',
         'browser/aw_pref_store.h',
+        'browser/aw_print_manager.cc',
+        'browser/aw_print_manager.h',
         'browser/aw_printing_message_filter.cc',
         'browser/aw_printing_message_filter.h',
         'browser/aw_quota_manager_bridge.cc',
@@ -277,6 +297,8 @@
         'browser/gl_view_renderer_manager.h',
         'browser/net/android_stream_reader_url_request_job.cc',
         'browser/net/android_stream_reader_url_request_job.h',
+        'browser/net/aw_http_user_agent_settings.h',
+        'browser/net/aw_http_user_agent_settings.cc',
         'browser/net/aw_network_delegate.cc',
         'browser/net/aw_network_delegate.h',
         'browser/net/aw_url_request_context_getter.cc',
@@ -296,8 +318,6 @@
         'browser/renderer_host/aw_render_view_host_ext.h',
         'browser/renderer_host/aw_resource_dispatcher_host_delegate.cc',
         'browser/renderer_host/aw_resource_dispatcher_host_delegate.h',
-        'browser/renderer_host/print_manager.cc',
-        'browser/renderer_host/print_manager.h',
         'browser/scoped_allow_wait_for_legacy_web_view_api.h',
         'browser/scoped_app_gl_state_restore.cc',
         'browser/scoped_app_gl_state_restore.h',
@@ -357,6 +377,7 @@
       'target_name': 'android_webview_java',
       'type': 'none',
       'dependencies': [
+        '../android_webview/native/webview_native.gyp:android_webview_aw_permission_request_resource',
         '../components/components.gyp:external_video_surface_java',
         '../components/components.gyp:navigation_interception_java',
         '../components/components.gyp:web_contents_delegate_android_java',
@@ -378,7 +399,7 @@
       'target_name': 'system_webview_apk',
       'variables': {
         'apk_name': 'SystemWebView',
-        'android_sdk_jar': '../third_party/android_platform/webview/frameworks_5.1.0_r1.jar',
+        'android_sdk_jar': '../third_party/android_platform/webview/frameworks_6.0.jar',
         'java_in_dir': 'glue/java',
         'resource_dir': 'apk/java/res',
       },

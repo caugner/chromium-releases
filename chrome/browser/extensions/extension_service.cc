@@ -65,6 +65,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
+#include "extensions/browser/app_sorting.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
@@ -116,8 +117,6 @@ using extensions::ManagementPolicy;
 using extensions::Manifest;
 using extensions::PermissionID;
 using extensions::PermissionIDSet;
-using extensions::PermissionMessage;
-using extensions::PermissionMessageIDs;
 using extensions::PermissionSet;
 using extensions::SharedModuleInfo;
 using extensions::SharedModuleService;
@@ -278,7 +277,6 @@ ExtensionService::ExtensionService(Profile* profile,
       system_(extensions::ExtensionSystem::Get(profile)),
       extension_prefs_(extension_prefs),
       blacklist_(blacklist),
-      extension_sync_service_(NULL),
       registry_(extensions::ExtensionRegistry::Get(profile)),
       pending_extension_manager_(profile),
       install_directory_(install_directory),
@@ -411,28 +409,19 @@ void ExtensionService::Init() {
   DCHECK(!is_ready());  // Can't redo init.
   DCHECK_EQ(registry_->enabled_extensions().size(), 0u);
 
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kInstallEphemeralAppFromWebstore)) {
-    // The sole purpose of this launch is to install a new extension from CWS
-    // and immediately terminate: loading already installed extensions is
-    // unnecessary and may interfere with the inline install dialog (e.g. if an
-    // extension listens to onStartup and opens a window).
-    SetReadyAndNotifyListeners();
-  } else {
-    // LoadAllExtensions() calls OnLoadedInstalledExtensions().
-    component_loader_->LoadAll();
-    extensions::InstalledLoader(this).LoadAllExtensions();
+  // LoadAllExtensions() calls OnLoadedInstalledExtensions().
+  component_loader_->LoadAll();
+  extensions::InstalledLoader(this).LoadAllExtensions();
 
-    EnabledReloadableExtensions();
-    MaybeFinishShutdownDelayed();
-    SetReadyAndNotifyListeners();
+  EnabledReloadableExtensions();
+  MaybeFinishShutdownDelayed();
+  SetReadyAndNotifyListeners();
 
-    // TODO(erikkay): this should probably be deferred to a future point
-    // rather than running immediately at startup.
-    CheckForExternalUpdates();
+  // TODO(erikkay): this should probably be deferred to a future point
+  // rather than running immediately at startup.
+  CheckForExternalUpdates();
 
-    LoadGreylistFromPrefs();
-  }
+  LoadGreylistFromPrefs();
 }
 
 void ExtensionService::EnabledReloadableExtensions() {
@@ -743,15 +732,6 @@ bool ExtensionService::UninstallExtension(
     return false;
   }
 
-  syncer::SyncData sync_data;
-  // Don't sync the uninstall if we're going to reinstall the extension
-  // momentarily.
-  if (extension_sync_service_ &&
-      reason != extensions::UNINSTALL_REASON_REINSTALL) {
-    sync_data = extension_sync_service_->PrepareToSyncUninstallExtension(
-        *extension);
-  }
-
   InstallVerifier::Get(GetBrowserContext())->Remove(extension->id());
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UninstallType",
@@ -783,9 +763,10 @@ bool ExtensionService::UninstallExtension(
   ExtensionRegistry::Get(profile_)
       ->TriggerOnUninstalled(extension.get(), reason);
 
-  if (sync_data.IsValid()) {
-    extension_sync_service_->ProcessSyncUninstallExtension(extension->id(),
-                                                           sync_data);
+  // Don't sync the uninstall if we're going to reinstall the extension
+  // momentarily.
+  if (reason != extensions::UNINSTALL_REASON_REINSTALL) {
+    ExtensionSyncService::Get(profile_)->SyncUninstallExtension(*extension);
   }
 
   delayed_installs_.Remove(extension->id());
@@ -873,8 +854,7 @@ void ExtensionService::EnableExtension(const std::string& extension_id) {
       content::Source<Profile>(profile_),
       content::Details<const Extension>(extension));
 
-  if (extension_sync_service_)
-    extension_sync_service_->SyncEnableExtension(*extension);
+  ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(*extension);
 }
 
 void ExtensionService::DisableExtension(const std::string& extension_id,
@@ -924,8 +904,7 @@ void ExtensionService::DisableExtension(const std::string& extension_id,
     registry_->RemoveTerminated(extension->id());
   }
 
-  if (extension_sync_service_)
-    extension_sync_service_->SyncDisableExtension(*extension);
+  ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(*extension);
 }
 
 void ExtensionService::DisableUserExtensions(
@@ -1045,7 +1024,10 @@ void ExtensionService::NotifyExtensionLoaded(const Extension* extension) {
   // that the request context doesn't yet know about. The profile is responsible
   // for ensuring its URLRequestContexts appropriately discover the loaded
   // extension.
-  system_->RegisterExtensionWithRequestContexts(extension);
+  system_->RegisterExtensionWithRequestContexts(
+      extension,
+      base::Bind(&ExtensionService::OnExtensionRegisteredWithRequestContexts,
+                 AsWeakPtr(), make_scoped_refptr(extension)));
 
   // Tell renderers about the new extension, unless it's a theme (renderers
   // don't need to know about themes).
@@ -1118,6 +1100,13 @@ void ExtensionService::NotifyExtensionLoaded(const Extension* extension) {
     ThumbnailSource* thumbnail_source = new ThumbnailSource(profile_, false);
     content::URLDataSource::Add(profile_, thumbnail_source);
   }
+}
+
+void ExtensionService::OnExtensionRegisteredWithRequestContexts(
+    scoped_refptr<const extensions::Extension> extension) {
+  registry_->AddReady(extension);
+  if (registry_->enabled_extensions().Contains(extension->id()))
+    registry_->TriggerOnReady(extension.get());
 }
 
 void ExtensionService::NotifyExtensionUnloaded(
@@ -1517,8 +1506,8 @@ void ExtensionService::AddExtension(const Extension* extension) {
   } else if (!reloading &&
              extension_prefs_->IsExtensionDisabled(extension->id())) {
     registry_->AddDisabled(extension);
-    if (extension_sync_service_)
-      extension_sync_service_->SyncExtensionChangeIfNeeded(*extension);
+    ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(
+        *extension);
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
         content::Source<Profile>(profile_),
@@ -1555,8 +1544,8 @@ void ExtensionService::AddExtension(const Extension* extension) {
     }
 
     registry_->AddEnabled(extension);
-    if (extension_sync_service_)
-      extension_sync_service_->SyncExtensionChangeIfNeeded(*extension);
+    ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(
+        *extension);
     NotifyExtensionLoaded(extension);
   }
   system_->runtime_data()->SetBeingUpgraded(extension->id(), false);
@@ -1678,9 +1667,10 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
 
 #if defined(ENABLE_SUPERVISED_USERS)
     // If a custodian-installed extension is disabled for a supervised user due
-    // to a permissions increase, send a request to the custodian, since the
+    // to a permissions increase, send a request to the custodian if the
     // supervised user themselves can't re-enable the extension.
-    if (extensions::util::IsExtensionSupervised(extension, profile_)) {
+    if (extensions::util::IsExtensionSupervised(extension, profile_) &&
+        extensions::util::NeedCustodianApprovalForPermissionIncrease()) {
       SupervisedUserService* supervised_user_service =
           SupervisedUserServiceFactory::GetForProfile(profile_);
       supervised_user_service->AddExtensionUpdateRequest(
@@ -2069,8 +2059,10 @@ void ExtensionService::PromoteEphemeralApp(
 
   registry_->TriggerOnInstalled(extension, true);
 
-  if (!is_from_sync && extension_sync_service_)
-    extension_sync_service_->SyncExtensionChangeIfNeeded(*extension);
+  if (!is_from_sync) {
+    ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(
+        *extension);
+  }
 }
 
 const Extension* ExtensionService::GetPendingExtensionUpdate(
@@ -2115,7 +2107,7 @@ void ExtensionService::TerminateExtension(const std::string& extension_id) {
 }
 
 void ExtensionService::UntrackTerminatedExtension(const std::string& id) {
-  std::string lowercase_id = base::StringToLowerASCII(id);
+  std::string lowercase_id = base::ToLowerASCII(id);
   const Extension* extension =
       registry_->terminated_extensions().GetByID(lowercase_id);
   registry_->RemoveTerminated(lowercase_id);

@@ -12,6 +12,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.graphics.Point;
 import android.net.ConnectivityManager;
 import android.net.Uri;
@@ -23,9 +24,11 @@ import android.os.IBinder;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.SystemClock;
+import android.support.customtabs.CustomTabsIntent;
 import android.support.customtabs.ICustomTabsCallback;
 import android.support.customtabs.ICustomTabsService;
 import android.text.TextUtils;
+import android.util.SparseArray;
 import android.view.WindowManager;
 
 import org.chromium.base.FieldTrialList;
@@ -39,29 +42,41 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.WarmupManager;
+import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.prerender.ExternalPrerenderHandler;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.content.browser.ChildProcessLauncher;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.common.Referrer;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Implementation of the ICustomTabsConnectionService interface.
+ *
+ * Note: This class is meant to be package private, and is public to be
+ * accessible from {@link ChromeApplication}.
  */
-class CustomTabsConnection extends ICustomTabsService.Stub {
+public class CustomTabsConnection extends ICustomTabsService.Stub {
     private static final String TAG = "cr.ChromeConnection";
+    private static final String NO_PRERENDERING_KEY =
+            "android.support.customtabs.maylaunchurl.NO_PRERENDERING";
 
     // Values for the "CustomTabs.PredictionStatus" UMA histogram. Append-only.
     private static final int NO_PREDICTION = 0;
@@ -69,8 +84,8 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
     private static final int BAD_PREDICTION = 2;
     private static final int PREDICTION_STATUS_COUNT = 3;
 
-    private static final Object sConstructionLock = new Object();
-    private static CustomTabsConnection sInstance;
+    private static AtomicReference<CustomTabsConnection> sInstance =
+            new AtomicReference<CustomTabsConnection>();
 
     private static final class PrerenderedUrlParams {
         public final IBinder mSession;
@@ -89,21 +104,58 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
         }
     }
 
-    private final Application mApplication;
+    private static final class PredictionStats {
+        private static final long MIN_DELAY = 100;
+        private static final long MAX_DELAY = 10000;
+        private long mLastRequestTimestamp = -1;
+        private long mDelayMs = MIN_DELAY;
+
+        /**
+         * Updates the prediction stats and return whether prediction is allowed.
+         *
+         * The policy is:
+         * 1. If the client does not wait more than mDelayMs, decline the request.
+         * 2. If the client waits for more than mDelayMs but less than 2*mDelayMs,
+         *    accept the request and double mDelayMs.
+         * 3. If the client waits for more than 2*mDelayMs, accept the request
+         *    and reset mDelayMs.
+         *
+         * And: 100ms <= mDelayMs <= 10s.
+         *
+         * This way, if an application sends a burst of requests, it is quickly
+         * seriously throttled. If it stops being this way, back to normal.
+         */
+        public boolean updateStatsAndReturnIfAllowed() {
+            long now = SystemClock.elapsedRealtime();
+            long deltaMs = now - mLastRequestTimestamp;
+            if (deltaMs < mDelayMs) return false;
+            mLastRequestTimestamp = now;
+            if (deltaMs < 2 * mDelayMs) {
+                mDelayMs = Math.min(MAX_DELAY, mDelayMs * 2);
+            } else {
+                mDelayMs = MIN_DELAY;
+            }
+            return true;
+        }
+    }
+
+    protected final Application mApplication;
     private final AtomicBoolean mWarmupHasBeenCalled = new AtomicBoolean();
     private ExternalPrerenderHandler mExternalPrerenderHandler;
     private PrerenderedUrlParams mPrerender;
+    private WebContents mSpareWebContents;
 
     /** Per-session values. */
     private static class SessionParams {
         public final int mUid;
+        public final String mPackageName;
         public final ICustomTabsCallback mCallback;
         public final IBinder.DeathRecipient mDeathRecipient;
         private ServiceConnection mServiceConnection;
         private String mPredictedUrl;
         private long mLastMayLaunchUrlTimestamp;
 
-        public SessionParams(int uid, ICustomTabsCallback callback,
+        public SessionParams(Context context, int uid, ICustomTabsCallback callback,
                 IBinder.DeathRecipient deathRecipient) {
             mUid = uid;
             mCallback = callback;
@@ -111,6 +163,14 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
             mServiceConnection = null;
             mPredictedUrl = null;
             mLastMayLaunchUrlTimestamp = 0;
+            mPackageName = getPackageName(context);
+        }
+
+        private String getPackageName(Context context) {
+            PackageManager packageManager = context.getPackageManager();
+            String[] packageList = packageManager.getPackagesForUid(mUid);
+            if (packageList.length != 1 || TextUtils.isEmpty(packageList[0])) return null;
+            return packageList[0];
         }
 
         public ServiceConnection getServiceConnection() {
@@ -137,8 +197,16 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
 
     private final Object mLock = new Object();
     private final Map<IBinder, SessionParams> mSessionParams = new HashMap<>();
+    // Prediction tracking is done by UID and not by session, since a
+    // mis-behaving application can create a large number of sessions.
+    private SparseArray<PredictionStats> mUidToPredictionsStats = new SparseArray<>();
 
-    private CustomTabsConnection(Application application) {
+    /**
+     * <strong>DO NOT CALL</strong>
+     * Public to be instanciable from {@link ChromeApplication}. This is however
+     * intended to be private.
+     */
+    public CustomTabsConnection(Application application) {
         super();
         mApplication = application;
     }
@@ -146,11 +214,13 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
     /**
      * @return The unique instance of ChromeCustomTabsConnection.
      */
+    @SuppressFBWarnings("BC_UNCONFIRMED_CAST")
     public static CustomTabsConnection getInstance(Application application) {
-        synchronized (sConstructionLock) {
-            if (sInstance == null) sInstance = new CustomTabsConnection(application);
+        if (sInstance.get() == null) {
+            ChromeApplication chromeApplication = (ChromeApplication) application;
+            sInstance.compareAndSet(null, chromeApplication.createCustomTabsConnection());
         }
-        return sInstance;
+        return sInstance.get();
     }
 
     @Override
@@ -172,7 +242,8 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
                         });
                     }
                 };
-        SessionParams sessionParams = new SessionParams(uid, callback, deathRecipient);
+        SessionParams sessionParams =
+                new SessionParams(mApplication, uid, callback, deathRecipient);
         synchronized (mLock) {
             if (mSessionParams.containsKey(session)) return false;
             try {
@@ -183,6 +254,9 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
                 return false;
             }
             mSessionParams.put(session, sessionParams);
+            if (mUidToPredictionsStats.get(uid) == null) {
+                mUidToPredictionsStats.put(uid, new PredictionStats());
+            }
         }
         return true;
     }
@@ -199,7 +273,6 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
             public void run() {
                 ChromeApplication app = (ChromeApplication) mApplication;
                 try {
-                    // TODO(lizeb): Warm up more of the browser.
                     app.startBrowserProcessesAndLoadLibrariesSync(true);
                 } catch (ProcessInitException e) {
                     Log.e(TAG, "ProcessInitException while starting the browser process.");
@@ -216,9 +289,30 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
                     }
                 }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
                 ChromeBrowserInitializer.initNetworkChangeNotifier(context);
+                WarmupManager.getInstance().initializeViewHierarchy(app.getApplicationContext(),
+                        R.style.MainTheme, R.layout.main, R.id.control_container_stub,
+                        R.layout.custom_tabs_control_container);
             }
         });
         return true;
+    }
+
+    /**
+     * Creates a spare {@link WebContents}, if none exists.
+     *
+     * Navigating to "about:blank" forces a lot of initialization to take place
+     * here. This improves PLT. This navigation is never registered in the history, as
+     * "about:blank" is filtered by CanAddURLToHistory.
+     *
+     * TODO(lizeb): Replace this with a cleaner method. See crbug.com/521729.
+     */
+    private void createSpareWebContents() {
+        ThreadUtils.assertOnUiThread();
+        if (mSpareWebContents != null) return;
+        mSpareWebContents = WebContentsFactory.createWebContents(false, false);
+        if (mSpareWebContents != null) {
+            mSpareWebContents.getNavigationController().loadUrl(new LoadUrlParams("about:blank"));
+        }
     }
 
     @Override
@@ -235,11 +329,14 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
 
         final IBinder session = callback.asBinder();
         final String urlString = url.toString();
+        final boolean noPrerendering =
+                extras != null ? extras.getBoolean(NO_PRERENDERING_KEY, false) : false;
         int uid = Binder.getCallingUid();
         synchronized (mLock) {
             SessionParams sessionParams = mSessionParams.get(session);
             if (sessionParams == null || sessionParams.mUid != uid) return false;
             sessionParams.setPredictionMetrics(urlString, SystemClock.elapsedRealtime());
+            if (!mUidToPredictionsStats.get(uid).updateStatsAndReturnIfAllowed()) return false;
         }
         ThreadUtils.postOnUiThread(new Runnable() {
             @Override
@@ -251,11 +348,61 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
                     warmupManager.maybePreconnectUrlAndSubResources(
                             Profile.getLastUsedProfile(), urlString);
                 }
-                // Calling with a null or empty url cancels a current prerender.
-                prerenderUrl(session, urlString, extras);
+                if (!noPrerendering && mayPrerender()) {
+                    // Calling with a null or empty url cancels a current prerender.
+                    prerenderUrl(session, urlString, extras);
+                } else {
+                    createSpareWebContents();
+                }
             }
         });
         return true;
+    }
+
+    @Override
+    public Bundle extraCommand(String commandName, Bundle args) {
+        return null;
+    }
+
+    /**
+     * @return a spare WebContents, or null.
+     *
+     * This WebContents has already navigated to "about:blank". You have to call
+     * {@link LoadUrlParams.setShouldReplaceCurrentEntry(true)} for the next
+     * navigation to ensure that a back navigation doesn't lead to about:blank.
+     *
+     * TODO(lizeb): Update this when crbug.com/521729 is fixed.
+     */
+    WebContents takeSpareWebContents() {
+        ThreadUtils.assertOnUiThread();
+        WebContents result = mSpareWebContents;
+        mSpareWebContents = null;
+        return result;
+    }
+
+    @Override
+    public boolean updateVisuals(final ICustomTabsCallback callback, Bundle bundle) {
+        final Bundle actionButtonBundle = IntentUtils.safeGetBundle(bundle,
+                CustomTabsIntent.EXTRA_ACTION_BUTTON_BUNDLE);
+        if (actionButtonBundle == null) return false;
+
+        final Bitmap bitmap = ActionButtonParams.tryParseBitmapFromBundle(mApplication,
+                actionButtonBundle);
+        final String description = ActionButtonParams
+                .tryParseDescriptionFromBundle(actionButtonBundle);
+        if (bitmap == null || description == null) return false;
+
+        try {
+            return ThreadUtils.runOnUiThreadBlocking(new Callable<Boolean>() {
+                @Override
+                public Boolean call() throws Exception {
+                    return CustomTabActivity.updateActionButton(callback.asBinder(), bitmap,
+                            description);
+                }
+            });
+        } catch (ExecutionException e) {
+            return false;
+        }
     }
 
     /**
@@ -277,6 +424,11 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
                 elapsedTimeMs = SystemClock.elapsedRealtime()
                         - sessionParams.getLastMayLaunchUrlTimestamp();
                 sessionParams.setPredictionMetrics(null, 0);
+                if (outcome == GOOD_PREDICTION) {
+                    // If the prediction was correct, back to the smallest
+                    // throttling level.
+                    mUidToPredictionsStats.put(sessionParams.mUid, new PredictionStats());
+                }
             }
         }
         RecordHistogram.recordEnumeratedHistogram(
@@ -332,12 +484,23 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
         return null;
     }
 
+    public Referrer getReferrerForSession(IBinder session) {
+        if (!mSessionParams.containsKey(session)) return null;
+        return IntentHandler.constructValidReferrerForAuthority(
+                mSessionParams.get(session).mPackageName);
+    }
+
     private ICustomTabsCallback getCallbackForSession(IBinder session) {
         synchronized (mLock) {
             SessionParams sessionParams = mSessionParams.get(session);
             if (sessionParams == null) return null;
             return sessionParams.mCallback;
         }
+    }
+
+    public String getClientPackageNameForSession(IBinder session) {
+        if (!mSessionParams.containsKey(session)) return null;
+        return mSessionParams.get(session).mPackageName;
     }
 
     /**
@@ -496,7 +659,7 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
     void cleanupAll() {
         ThreadUtils.assertOnUiThread();
         synchronized (mLock) {
-            Set<IBinder> sessions = mSessionParams.keySet();
+            List<IBinder> sessions = new ArrayList<>(mSessionParams.keySet());
             for (IBinder session : sessions) cleanupAlreadyLocked(session);
         }
     }
@@ -550,6 +713,9 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
         Point contentSize = estimateContentSize();
         Context context = mApplication.getApplicationContext();
         String referrer = IntentHandler.getReferrerUrlIncludingExtraHeaders(extrasIntent, context);
+        if (referrer == null && getReferrerForSession(session) != null) {
+            referrer = getReferrerForSession(session).getUrl();
+        }
         if (referrer == null) referrer = "";
         WebContents webContents = mExternalPrerenderHandler.addPrerender(
                 Profile.getLastUsedProfile(), url, referrer, contentSize.x, contentSize.y);
@@ -574,15 +740,23 @@ class CustomTabsConnection extends ICustomTabsService.Stub {
         wm.getDefaultDisplay().getSize(screenSize);
         Resources resources = mApplication.getResources();
         int statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android");
-        int navigationBarId = resources.getIdentifier("navigation_bar_height", "dimen", "android");
         try {
             screenSize.y -=
                     resources.getDimensionPixelSize(R.dimen.custom_tabs_control_container_height);
             screenSize.y -= resources.getDimensionPixelSize(statusBarId);
-            screenSize.y -= resources.getDimensionPixelSize(navigationBarId);
         } catch (Resources.NotFoundException e) {
             // Nothing, this is just a best effort estimate.
         }
+        float density = resources.getDisplayMetrics().density;
+        screenSize.x /= density;
+        screenSize.y /= density;
         return screenSize;
+    }
+
+    @VisibleForTesting
+    void resetThrottling(int uid) {
+        synchronized (mLock) {
+            mUidToPredictionsStats.put(uid, new PredictionStats());
+        }
     }
 }

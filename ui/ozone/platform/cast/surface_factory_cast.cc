@@ -188,8 +188,8 @@ const int32* SurfaceFactoryCast::GetEGLSurfaceProperties(
 scoped_refptr<NativePixmap> SurfaceFactoryCast::CreateNativePixmap(
     gfx::AcceleratedWidget w,
     gfx::Size size,
-    BufferFormat format,
-    BufferUsage usage) {
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage) {
   class CastPixmap : public NativePixmap {
    public:
     CastPixmap() {}
@@ -210,6 +210,9 @@ scoped_refptr<NativePixmap> SurfaceFactoryCast::CreateNativePixmap(
     void SetScalingCallback(const ScalingCallback& scaling_callback) override {}
     scoped_refptr<NativePixmap> GetScaledPixmap(gfx::Size new_size) override {
       return nullptr;
+    }
+    gfx::NativePixmapHandle ExportHandle() override {
+      return gfx::NativePixmapHandle();
     }
 
    private:

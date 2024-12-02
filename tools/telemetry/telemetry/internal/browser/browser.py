@@ -2,18 +2,24 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
+import sys
+
+from catapult_base import cloud_storage
 
 from telemetry.core import exceptions
 from telemetry.core import local_server
 from telemetry.core import memory_cache_http_server
-from telemetry.core.platform import profiling_controller
+from telemetry.core import profiling_controller
 from telemetry import decorators
 from telemetry.internal import app
 from telemetry.internal.backends import browser_backend
 from telemetry.internal.browser import browser_credentials
 from telemetry.internal.browser import extension_dict
 from telemetry.internal.browser import tab_list
+from telemetry.internal.browser import web_contents
+from telemetry.internal.util import exception_formatter
 
 
 class Browser(app.App):
@@ -39,22 +45,32 @@ class Browser(app.App):
     self.credentials.credentials_path = credentials_path
     self._platform_backend.DidCreateBrowser(self, self._browser_backend)
 
-    browser_options = self._browser_backend.browser_options
-    self.platform.FlushDnsCache()
-    if browser_options.clear_sytem_cache_for_browser_and_profile_on_start:
-      if self.platform.CanFlushIndividualFilesFromSystemCache():
-        self.platform.FlushSystemCacheForDirectory(
-            self._browser_backend.profile_directory)
-        self.platform.FlushSystemCacheForDirectory(
-            self._browser_backend.browser_directory)
-      else:
-        self.platform.FlushEntireSystemCache()
+    try:
+      browser_options = self._browser_backend.browser_options
+      self.platform.FlushDnsCache()
+      if browser_options.clear_sytem_cache_for_browser_and_profile_on_start:
+        if self.platform.CanFlushIndividualFilesFromSystemCache():
+          self.platform.FlushSystemCacheForDirectory(
+              self._browser_backend.profile_directory)
+          self.platform.FlushSystemCacheForDirectory(
+              self._browser_backend.browser_directory)
+        else:
+          self.platform.FlushEntireSystemCache()
 
-    self._browser_backend.SetBrowser(self)
-    self._browser_backend.Start()
-    self._platform_backend.DidStartBrowser(self, self._browser_backend)
-    self._profiling_controller = profiling_controller.ProfilingController(
-        self._browser_backend.profiling_controller_backend)
+      self._browser_backend.SetBrowser(self)
+      self._browser_backend.Start()
+      self._platform_backend.DidStartBrowser(self, self._browser_backend)
+      self._profiling_controller = profiling_controller.ProfilingController(
+          self._browser_backend.profiling_controller_backend)
+    except Exception:
+      exc_info = sys.exc_info()
+      logging.exception('Failure while starting browser backend.')
+      try:
+        self._platform_backend.WillCloseBrowser(self, self._browser_backend)
+      except Exception:
+        exception_formatter.PrintFormattedException(
+            msg='Exception raised while closing platform backend')
+      raise exc_info[0], exc_info[1], exc_info[2]
 
   @property
   def profiling_controller(self):
@@ -217,6 +233,11 @@ class Browser(app.App):
 
     self._local_server_controller.Close()
     self._browser_backend.profiling_controller_backend.WillCloseBrowser()
+    if self._browser_backend.supports_uploading_logs:
+      try:
+        self._browser_backend.UploadLogsToCloudStorage()
+      except cloud_storage.CloudStorageError as e:
+        logging.error('Cannot upload browser log: %s' % str(e))
     self._browser_backend.Close()
     self.credentials = None
 
@@ -281,3 +302,22 @@ class Browser(app.App):
 
        See the documentation of the SystemInfo class for more details."""
     return self._browser_backend.GetSystemInfo()
+
+  @property
+  def supports_memory_dumping(self):
+    return self._browser_backend.supports_memory_dumping
+
+  def DumpMemory(self, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
+    return self._browser_backend.DumpMemory(timeout)
+
+  @property
+  def supports_cpu_metrics(self):
+    return self._browser_backend.supports_cpu_metrics
+
+  @property
+  def supports_memory_metrics(self):
+    return self._browser_backend.supports_memory_metrics
+
+  @property
+  def supports_power_metrics(self):
+    return self._browser_backend.supports_power_metrics

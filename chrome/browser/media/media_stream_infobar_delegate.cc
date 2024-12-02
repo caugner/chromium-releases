@@ -13,6 +13,7 @@
 #include "components/google/core/browser/google_util.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/origin_util.h"
 #include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -123,7 +124,7 @@ base::string16 MediaStreamInfoBarDelegate::GetButtonLabel(
 
 bool MediaStreamInfoBarDelegate::Accept() {
   GURL origin(controller_->GetSecurityOriginSpec());
-  if (origin.SchemeIsSecure()) {
+  if (content::IsOriginSecure(origin)) {
     UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
                               kAllowHttps, kPermissionActionsMax);
   } else {
@@ -142,7 +143,7 @@ bool MediaStreamInfoBarDelegate::Cancel() {
 }
 
 base::string16 MediaStreamInfoBarDelegate::GetLinkText() const {
-  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
+  return base::string16();
 }
 
 bool MediaStreamInfoBarDelegate::LinkClicked(

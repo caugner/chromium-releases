@@ -12,8 +12,10 @@
 #include "components/view_manager/server_view.h"
 #include "components/view_manager/window_manager_access_policy.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
+#include "mojo/converters/ime/ime_type_converters.h"
 #include "mojo/converters/input_events/input_events_type_converters.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
+#include "ui/platform_window/text_input_state.h"
 
 using mojo::Array;
 using mojo::Callback;
@@ -432,6 +434,7 @@ void ViewManagerServiceImpl::RemoveRoot() {
   if (root_id.connection_id == id_)
     return;
 
+  client()->OnUnembed();
   client()->OnViewDeleted(ViewIdToTransportId(root_id));
   connection_manager_->OnConnectionMessagedClient(id_);
 
@@ -711,6 +714,27 @@ void ViewManagerServiceImpl::SetViewProperty(
   callback.Run(success);
 }
 
+void ViewManagerServiceImpl::SetViewTextInputState(
+    uint32_t view_id,
+    mojo::TextInputStatePtr state) {
+  ServerView* view = GetView(ViewIdFromTransportId(view_id));
+  bool success = view && access_policy_->CanSetViewTextInputState(view);
+  if (success)
+    view->SetTextInputState(state.To<ui::TextInputState>());
+}
+
+void ViewManagerServiceImpl::SetImeVisibility(uint32_t view_id,
+                                              bool visible,
+                                              mojo::TextInputStatePtr state) {
+  ServerView* view = GetView(ViewIdFromTransportId(view_id));
+  bool success = view && access_policy_->CanSetViewTextInputState(view);
+  if (success) {
+    if (!state.is_null())
+      view->SetTextInputState(state.To<ui::TextInputState>());
+    connection_manager_->SetImeVisibility(view, visible);
+  }
+}
+
 void ViewManagerServiceImpl::SetEmbedRoot() {
   is_embed_root_ = true;
 }
@@ -756,8 +780,8 @@ bool ViewManagerServiceImpl::IsViewRootOfAnotherConnectionForAccessPolicy(
   return connection && connection != this;
 }
 
-bool ViewManagerServiceImpl::IsEmbedRootForAccessPolicy() {
-  return is_embed_root_;
+bool ViewManagerServiceImpl::IsDescendantOfEmbedRoot(const ServerView* view) {
+  return is_embed_root_ && root_ && GetView(*root_)->Contains(view);
 }
 
 }  // namespace view_manager

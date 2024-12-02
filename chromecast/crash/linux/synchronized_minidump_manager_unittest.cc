@@ -22,6 +22,7 @@
 #include "base/test/scoped_path_override.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
+#include "chromecast/crash/linux/crash_testing_utils.h"
 #include "chromecast/crash/linux/dump_info.h"
 #include "chromecast/crash/linux/synchronized_minidump_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,20 +31,8 @@ namespace chromecast {
 namespace {
 
 const char kLockfileName[] = "lockfile";
+const char kMetadataName[] = "metadata";
 const char kMinidumpSubdir[] = "minidumps";
-
-ScopedVector<DumpInfo> GetCurrentDumps(const std::string& logfile_path) {
-  ScopedVector<DumpInfo> dumps;
-  std::string entry;
-
-  std::ifstream in(logfile_path);
-  DCHECK(in.is_open());
-  while (std::getline(in, entry)) {
-    scoped_ptr<DumpInfo> info(new DumpInfo(entry));
-    dumps.push_back(info.Pass());
-  }
-  return dumps.Pass();
-}
 
 // A trivial implementation of SynchronizedMinidumpManager, which does no work
 // to the
@@ -121,6 +110,7 @@ class SynchronizedMinidumpManagerTest : public testing::Test {
         new base::ScopedPathOverride(base::DIR_HOME, fake_home_dir_));
     minidump_dir_ = fake_home_dir_.Append(kMinidumpSubdir);
     lockfile_ = minidump_dir_.Append(kLockfileName);
+    metadata_ = minidump_dir_.Append(kMetadataName);
 
     // Create a minidump directory.
     ASSERT_TRUE(base::CreateDirectory(minidump_dir_));
@@ -142,6 +132,7 @@ class SynchronizedMinidumpManagerTest : public testing::Test {
   base::FilePath fake_home_dir_;  // Path to the test home directory.
   base::FilePath minidump_dir_;   // Path the the minidump directory.
   base::FilePath lockfile_;       // Path to the lockfile in |minidump_dir_|.
+  base::FilePath metadata_;       // Path to the metadata in |minidump_dir_|.
 
  private:
   scoped_ptr<base::ScopedPathOverride> path_override_;
@@ -198,14 +189,18 @@ TEST_F(SynchronizedMinidumpManagerTest,
 
 TEST_F(SynchronizedMinidumpManagerTest,
        AddEntryToLockFile_FailsWithInvalidEntry) {
+  // Create invalid dump info value
+  base::DictionaryValue val;
+
   // Test that the manager tried to log the entry and failed.
   SynchronizedMinidumpManagerSimple manager;
-  manager.SetDumpInfoToWrite(make_scoped_ptr(new DumpInfo("")));
+  manager.SetDumpInfoToWrite(make_scoped_ptr(new DumpInfo(&val)));
   ASSERT_EQ(0, manager.DoWorkLocked());
   ASSERT_EQ(-1, manager.add_entry_return_code());
 
   // Verify the lockfile is untouched.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   ASSERT_EQ(0u, dumps.size());
 }
 
@@ -224,7 +219,8 @@ TEST_F(SynchronizedMinidumpManagerTest,
   ASSERT_EQ(0, manager.add_entry_return_code());
 
   // Test that the manager was successful in logging the entry.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   ASSERT_EQ(1u, dumps.size());
 
   // Write the second entry.
@@ -234,15 +230,13 @@ TEST_F(SynchronizedMinidumpManagerTest,
   ASSERT_EQ(0, manager.add_entry_return_code());
 
   // Test that the second entry is also valid.
-  dumps = GetCurrentDumps(lockfile_.value());
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   ASSERT_EQ(2u, dumps.size());
-
-  // TODO(slan): Weird time incosistencies making this fail.
-  // ASSERT_EQ(dumps[0]->entry(), DumpInfo("dump", "log", now, params).entry());
 }
 
 TEST_F(SynchronizedMinidumpManagerTest,
        AcquireLockFile_FailsWhenNonBlockingAndFileLocked) {
+  ASSERT_TRUE(CreateFiles(lockfile_.value(), metadata_.value()));
   // Lock the lockfile here. Note that the Chromium base::File tools permit
   // multiple locks on the same process to succeed, so we must use POSIX system
   // calls to accomplish this.
@@ -256,7 +250,8 @@ TEST_F(SynchronizedMinidumpManagerTest,
   ASSERT_FALSE(manager.work_done());
 
   // Test that the manager was not able to log the crash dump.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   ASSERT_EQ(0u, dumps.size());
 }
 
@@ -303,7 +298,8 @@ TEST_F(SynchronizedMinidumpManagerTest,
   EXPECT_TRUE(sleepy_manager.work_done());
 
   // Test that both entries were logged.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   EXPECT_EQ(2u, dumps.size());
 }
 
@@ -334,7 +330,8 @@ TEST_F(SynchronizedMinidumpManagerTest,
   ASSERT_FALSE(manager.work_done());
 
   // Test that the manager was not able to log the crash dump.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   ASSERT_EQ(0u, dumps.size());
 }
 
@@ -381,8 +378,78 @@ TEST_F(SynchronizedMinidumpManagerTest,
   EXPECT_TRUE(manager.work_done());
 
   // Test that both entries were logged.
-  ScopedVector<DumpInfo> dumps = GetCurrentDumps(lockfile_.value());
+  ScopedVector<DumpInfo> dumps;
+  ASSERT_TRUE(FetchDumps(lockfile_.value(), &dumps));
   EXPECT_EQ(2u, dumps.size());
+}
+
+TEST_F(SynchronizedMinidumpManagerTest,
+       AddEntryFailsWhenTooManyRecentDumpsPresent) {
+  // Sample parameters.
+  time_t now = time(0);
+  MinidumpParams params;
+  params.process_name = "process";
+
+  SynchronizedMinidumpManagerSimple manager;
+  manager.SetDumpInfoToWrite(
+      make_scoped_ptr(new DumpInfo("dump1", "log1", now, params)));
+
+  for (int i = 0; i < SynchronizedMinidumpManager::kMaxLockfileDumps; ++i) {
+    // Adding these should succeed
+    ASSERT_EQ(0, manager.DoWorkLocked());
+    ASSERT_EQ(0, manager.add_entry_return_code());
+  }
+
+  ASSERT_EQ(0, manager.DoWorkLocked());
+
+  // This one should fail
+  ASSERT_GT(0, manager.add_entry_return_code());
+}
+
+TEST_F(SynchronizedMinidumpManagerTest,
+       AddEntryFailsWhenRatelimitPeriodExceeded) {
+  // Sample parameters.
+  time_t now = time(0);
+  MinidumpParams params;
+  params.process_name = "process";
+
+  SynchronizedMinidumpManagerSimple manager;
+  manager.SetDumpInfoToWrite(
+      make_scoped_ptr(new DumpInfo("dump1", "log1", now, params)));
+
+  // Multiple iters to make sure period resets work correctly
+  for (int iter = 0; iter < 3; ++iter) {
+    time_t now = time(nullptr);
+
+    // Write dump logs to the lockfile.
+    size_t too_many_recent_dumps =
+        SynchronizedMinidumpManager::kRatelimitPeriodMaxDumps;
+    for (size_t i = 0; i < too_many_recent_dumps; ++i) {
+      // Adding these should succeed
+      ASSERT_EQ(0, manager.DoWorkLocked());
+      ASSERT_EQ(0, manager.add_entry_return_code());
+
+      // Clear dumps so we don't reach max dumps in lockfile
+      ASSERT_TRUE(ClearDumps(lockfile_.value()));
+    }
+
+    ASSERT_EQ(0, manager.DoWorkLocked());
+    // Should fail with too many dumps
+    ASSERT_GT(0, manager.add_entry_return_code());
+
+    int64 period = SynchronizedMinidumpManager::kRatelimitPeriodSeconds;
+
+    // Half period shouldn't trigger reset
+    SetRatelimitPeriodStart(metadata_.value(), now - period / 2);
+    ASSERT_EQ(0, manager.DoWorkLocked());
+    ASSERT_GT(0, manager.add_entry_return_code());
+
+    // Set period starting time to trigger a reset
+    SetRatelimitPeriodStart(metadata_.value(), now - period);
+  }
+
+  ASSERT_EQ(0, manager.DoWorkLocked());
+  ASSERT_EQ(0, manager.add_entry_return_code());
 }
 
 }  // namespace chromecast

@@ -45,6 +45,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   // WebContentsTester implementation.
   void CommitPendingNavigation() override;
   TestRenderFrameHost* GetPendingMainFrame() const override;
+  void StartNavigation(const GURL& url) override;
   void NavigateAndCommit(const GURL& url) override;
   void TestSetIsLoading(bool value) override;
   void ProceedWithCrossSiteNavigation() override;
@@ -116,7 +117,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
  private:
   // WebContentsImpl overrides
   void CreateNewWindow(
-      int render_process_id,
+      SiteInstance* source_site_instance,
       int route_id,
       int main_frame_route_id,
       const ViewHostMsg_CreateWindow_Params& params,

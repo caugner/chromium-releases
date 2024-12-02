@@ -515,11 +515,21 @@ bool RenderWidgetHostViewMac::AcceleratedWidgetShouldIgnoreBackpressure()
   return false;
 }
 
+void RenderWidgetHostViewMac::AcceleratedWidgetGetVSyncParameters(
+    base::TimeTicks* timebase, base::TimeDelta* interval) const {
+  if (display_link_ &&
+      display_link_->GetVSyncParameters(timebase, interval))
+    return;
+  *timebase = base::TimeTicks();
+  *interval = base::TimeDelta();
+}
+
 void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted(
     const std::vector<ui::LatencyInfo>& all_latency_info) {
   if (!render_widget_host_)
     return;
   base::TimeTicks swap_time = base::TimeTicks::Now();
+
   for (auto latency_info : all_latency_info) {
     latency_info.AddLatencyNumberWithTimestamp(
         ui::INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT, 0, 0, swap_time, 1);
@@ -528,6 +538,9 @@ void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted(
         swap_time, 1);
     render_widget_host_->FrameSwapped(latency_info);
   }
+
+  if (display_link_)
+    display_link_->NotifyCurrentTime(swap_time);
 }
 
 void RenderWidgetHostViewMac::AcceleratedWidgetHitError() {
@@ -1043,15 +1056,12 @@ void RenderWidgetHostViewMac::SetIsLoading(bool is_loading) {
   // like Chrome does on Windows, call |UpdateCursor()| here.
 }
 
-void RenderWidgetHostViewMac::TextInputTypeChanged(
-    ui::TextInputType type,
-    ui::TextInputMode input_mode,
-    bool can_compose_inline,
-    int flags) {
-  if (text_input_type_ != type
-      || can_compose_inline_ != can_compose_inline) {
-    text_input_type_ = type;
-    can_compose_inline_ = can_compose_inline;
+void RenderWidgetHostViewMac::TextInputStateChanged(
+const ViewHostMsg_TextInputState_Params& params) {
+  if (text_input_type_ != params.type
+      || can_compose_inline_ != params.can_compose_inline) {
+    text_input_type_ = params.type;
+    can_compose_inline_ = params.can_compose_inline;
     if (HasFocus()) {
       SetTextInputActive(true);
 
@@ -2101,6 +2111,7 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   // Clear them here so that we can know whether they have changed afterwards.
   textToBeInserted_.clear();
   markedText_.clear();
+  markedTextSelectedRange_ = NSMakeRange(NSNotFound, 0);
   underlines_.clear();
   unmarkTextCalled_ = NO;
   hasEditCommands_ = NO;
@@ -2184,11 +2195,11 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   if (hasMarkedText_ && markedText_.length()) {
     // Sends the updated marked text to the renderer so it can update the
     // composition node in WebKit.
-    // When marked text is available, |selectedRange_| will be the range being
-    // selected inside the marked text.
+    // When marked text is available, |markedTextSelectedRange_| will be the
+    // range being selected inside the marked text.
     widgetHost->ImeSetComposition(markedText_, underlines_,
-                                  selectedRange_.location,
-                                  NSMaxRange(selectedRange_));
+                                  markedTextSelectedRange_.location,
+                                  NSMaxRange(markedTextSelectedRange_));
   } else if (oldHasMarkedText && !hasMarkedText_ && !textInserted) {
     if (unmarkTextCalled_) {
       widgetHost->ImeConfirmComposition(
@@ -2554,7 +2565,6 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     return NO;
 
   renderWidgetHostView_->render_widget_host_->Focus();
-  renderWidgetHostView_->render_widget_host_->SetInputMethodActive(true);
   renderWidgetHostView_->SetTextInputActive(true);
 
   // Cancel any onging composition text which was left before we lost focus.
@@ -2584,7 +2594,6 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
   if (closeOnDeactivate_)
     renderWidgetHostView_->KillSelf();
 
-  renderWidgetHostView_->render_widget_host_->SetInputMethodActive(false);
   renderWidgetHostView_->render_widget_host_->Blur();
 
   // We should cancel any onging composition whenever RWH's Blur() method gets
@@ -2922,6 +2931,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   // input method calls this method.
   hasMarkedText_ = NO;
   markedText_.clear();
+  markedTextSelectedRange_ = NSMakeRange(NSNotFound, 0);
   underlines_.clear();
 
   // If we are handling a key down event, then ConfirmComposition() will be
@@ -2946,7 +2956,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   int length = [im_text length];
 
   // |markedRange_| will get set on a callback from ImeSetComposition().
-  selectedRange_ = newSelRange;
+  markedTextSelectedRange_ = newSelRange;
   markedText_ = base::SysNSStringToUTF16(im_text);
   hasMarkedText_ = (length > 0);
 
@@ -2991,7 +3001,8 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
     // We ignore commands that insert characters, because this was causing
     // strange behavior (e.g. tab always inserted a tab rather than moving to
     // the next field on the page).
-    if (!base::StartsWithASCII(command, "insert", false))
+    if (!base::StartsWith(command, "insert",
+                          base::CompareCase::INSENSITIVE_ASCII))
       editCommands_.push_back(EditCommand(command, ""));
   } else {
     RenderWidgetHostImpl* rwh = renderWidgetHostView_->render_widget_host_;

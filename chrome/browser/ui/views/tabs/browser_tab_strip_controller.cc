@@ -12,7 +12,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
@@ -269,7 +269,7 @@ bool BrowserTabStripController::IsNewTabPage(int model_index) const {
 
   const WebContents* contents = model_->GetWebContentsAt(model_index);
   return contents && (contents->GetURL() == GURL(chrome::kChromeUINewTabURL) ||
-      chrome::IsInstantNTP(contents));
+                      search::IsInstantNTP(contents));
 }
 
 void BrowserTabStripController::SelectTab(int model_index) {
@@ -301,8 +301,8 @@ void BrowserTabStripController::CloseTab(int model_index,
 
 void BrowserTabStripController::ToggleTabAudioMute(int model_index) {
   content::WebContents* const contents = model_->GetWebContentsAt(model_index);
-  chrome::SetTabAudioMuted(contents, !chrome::IsTabAudioMuted(contents),
-                           chrome::kMutedToggleCauseUser);
+  chrome::SetTabAudioMuted(contents, !contents->IsAudioMuted(),
+                           TAB_MUTED_REASON_AUDIO_INDICATOR, std::string());
 }
 
 void BrowserTabStripController::ShowContextMenuForTab(

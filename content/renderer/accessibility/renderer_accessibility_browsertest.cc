@@ -4,7 +4,9 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "content/common/accessibility_messages.h"
 #include "content/common/frame_messages.h"
+#include "content/common/site_isolation_policy.h"
 #include "content/common/view_message_enums.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/render_view_test.h"
@@ -170,7 +172,7 @@ TEST_F(RendererAccessibilityTest,
   // the main frame and it cannot be further navigated.
   // TODO(nasko): Figure out what this behavior looks like when swapped out
   // no longer exists.
-  if (RenderFrameProxy::IsSwappedOutStateForbidden()) {
+  if (SiteIsolationPolicy::IsSwappedOutStateForbidden()) {
     return;
   }
   std::string html =
@@ -248,10 +250,10 @@ TEST_F(RendererAccessibilityTest, HideAccessibilityObject) {
   WebAXObject node_c = node_b.childAt(0);
 
   // Hide node 'B' ('C' stays visible).
-  ExecuteJavaScript(
+  ExecuteJavaScriptForTests(
       "document.getElementById('B').style.visibility = 'hidden';");
   // Force layout now.
-  ExecuteJavaScript("document.getElementById('B').offsetLeft;");
+  ExecuteJavaScriptForTests("document.getElementById('B').offsetLeft;");
 
   // Send a childrenChanged on 'A'.
   sink_->ClearMessages();
@@ -294,9 +296,9 @@ TEST_F(RendererAccessibilityTest, ShowAccessibilityObject) {
   EXPECT_EQ(3, CountAccessibilityNodesSentToBrowser());
 
   // Show node 'B', then send a childrenChanged on 'A'.
-  ExecuteJavaScript(
+  ExecuteJavaScriptForTests(
       "document.getElementById('B').style.visibility = 'visible';");
-  ExecuteJavaScript("document.getElementById('B').offsetLeft;");
+  ExecuteJavaScriptForTests("document.getElementById('B').offsetLeft;");
 
   sink_->ClearMessages();
   WebDocument document = view()->GetWebView()->mainFrame()->document();
@@ -355,10 +357,10 @@ TEST_F(RendererAccessibilityTest, DetachAccessibilityObject) {
 
   // Change the display of the second 'span' back to inline, which causes the
   // anonymous block to be destroyed.
-  ExecuteJavaScript(
+  ExecuteJavaScriptForTests(
       "document.querySelectorAll('span')[1].style.display = 'inline';");
   // Force layout now.
-  ExecuteJavaScript("document.body.offsetLeft;");
+  ExecuteJavaScriptForTests("document.body.offsetLeft;");
 
   // Send a childrenChanged on the body.
   sink_->ClearMessages();

@@ -16,22 +16,16 @@ class TestKeyedServiceProvider : public KeyedServiceProvider {
   ~TestKeyedServiceProvider() override;
 
   // KeyedServiceProvider implementation:
-  void AssertKeyedFactoriesBuilt() override;
-  KeyedServiceBaseFactory* GetBookmarkModelFactory() override;
-  bookmarks::BookmarkModel* GetBookmarkModelForBrowserState(
-      ChromeBrowserState* browser_state) override;
-  KeyedServiceBaseFactory* GetProfileOAuth2TokenServiceFactory() override;
-  ProfileOAuth2TokenService* GetProfileOAuth2TokenServiceForBrowserState(
-      ChromeBrowserState* browser_state) override;
-  KeyedServiceBaseFactory* GetSigninManagerFactory() override;
-  SigninManager* GetSigninManagerForBrowserState(
-      ChromeBrowserState* browser_state) override;
-  KeyedServiceBaseFactory* GetPersonalDataManagerFactory() override;
-  autofill::PersonalDataManager* GetPersonalDataManagerForBrowserState(
+  KeyedServiceBaseFactory* GetManagedBookmarkServiceFactory() override;
+  bookmarks::ManagedBookmarkService* GetManagedBookmarkServiceForBrowserState(
       ChromeBrowserState* browser_state) override;
   KeyedServiceBaseFactory* GetSyncServiceFactory() override;
   sync_driver::SyncService* GetSyncServiceForBrowserState(
       ChromeBrowserState* browser_state) override;
+  KeyedServiceBaseFactory* GetProfileInvalidationProviderFactory() override;
+  invalidation::ProfileInvalidationProvider*
+  GetProfileInvalidationProviderForBrowserState(
+      ios::ChromeBrowserState* browser_state) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestKeyedServiceProvider);

@@ -11,6 +11,7 @@
 #include "base/thread_task_runner_handle.h"
 #include "device/bluetooth/android/wrappers.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
+#include "device/bluetooth/bluetooth_device_android.h"
 #include "jni/ChromeBluetoothAdapter_jni.h"
 
 using base::android::AttachCurrentThread;
@@ -27,11 +28,12 @@ base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
 
 // static
 base::WeakPtr<BluetoothAdapterAndroid> BluetoothAdapterAndroid::Create(
-    jobject java_bluetooth_adapter_wrapper) {
+    jobject bluetooth_adapter_wrapper) {  // Java Type: bluetoothAdapterWrapper
   BluetoothAdapterAndroid* adapter = new BluetoothAdapterAndroid();
 
   adapter->j_adapter_.Reset(Java_ChromeBluetoothAdapter_create(
-      AttachCurrentThread(), java_bluetooth_adapter_wrapper));
+      AttachCurrentThread(), reinterpret_cast<intptr_t>(adapter),
+      bluetooth_adapter_wrapper));
 
   return adapter->weak_ptr_factory_.GetWeakPtr();
 }
@@ -126,30 +128,71 @@ void BluetoothAdapterAndroid::RegisterAdvertisement(
   error_callback.Run(BluetoothAdvertisement::ERROR_UNSUPPORTED_PLATFORM);
 }
 
+void BluetoothAdapterAndroid::OnScanFailed(JNIEnv* env, jobject caller) {
+  MarkDiscoverySessionsAsInactive();
+}
+
+void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
+    JNIEnv* env,
+    jobject caller,
+    const jstring& address,
+    jobject bluetooth_device_wrapper,  // Java Type: bluetoothDeviceWrapper
+    jobject advertised_uuids) {        // Java Type: List<ParcelUuid>
+  BluetoothDevice*& device = devices_[ConvertJavaStringToUTF8(env, address)];
+  if (!device) {
+    device = BluetoothDeviceAndroid::Create(bluetooth_device_wrapper);
+    static_cast<BluetoothDeviceAndroid*>(device)
+        ->UpdateAdvertisedUUIDs(advertised_uuids);
+    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                      DeviceAdded(this, device));
+  } else {
+    if (static_cast<BluetoothDeviceAndroid*>(device)
+            ->UpdateAdvertisedUUIDs(advertised_uuids)) {
+      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
+                        DeviceChanged(this, device));
+    }
+  }
+}
+
 BluetoothAdapterAndroid::BluetoothAdapterAndroid() : weak_ptr_factory_(this) {
 }
 
 BluetoothAdapterAndroid::~BluetoothAdapterAndroid() {
+  Java_ChromeBluetoothAdapter_onBluetoothAdapterAndroidDestruction(
+      AttachCurrentThread(), j_adapter_.obj());
 }
 
 void BluetoothAdapterAndroid::AddDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run();
+  // TODO(scheib): Support filters crbug.com/490401
+  if (Java_ChromeBluetoothAdapter_addDiscoverySession(AttachCurrentThread(),
+                                                      j_adapter_.obj())) {
+    callback.Run();
+  } else {
+    error_callback.Run();
+  }
 }
 
 void BluetoothAdapterAndroid::RemoveDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run();
+  if (Java_ChromeBluetoothAdapter_removeDiscoverySession(AttachCurrentThread(),
+                                                         j_adapter_.obj())) {
+    callback.Run();
+  } else {
+    error_callback.Run();
+  }
 }
 
 void BluetoothAdapterAndroid::SetDiscoveryFilter(
     scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
+  // TODO(scheib): Support filters crbug.com/490401
+  NOTIMPLEMENTED();
   error_callback.Run();
 }
 

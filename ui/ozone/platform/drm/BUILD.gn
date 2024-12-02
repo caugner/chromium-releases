@@ -8,6 +8,10 @@ import("//ui/ozone/ozone.gni")
 declare_args() {
   use_mesa_platform_null = false
   use_drm_atomic = false
+
+  # TODO(dshwang): remove this flag when all gbm hardware supports vgem map.
+  # crbug.com/519587
+  use_vgem_map = false
 }
 
 pkg_config("libdrm") {
@@ -16,6 +20,8 @@ pkg_config("libdrm") {
 
 source_set("drm_common") {
   sources = [
+    "common/client_native_pixmap_factory_drm.cc",
+    "common/client_native_pixmap_factory_drm.h",
     "common/drm_util.cc",
     "common/drm_util.h",
     "common/scoped_drm_types.cc",
@@ -116,7 +122,7 @@ source_set("drm_common") {
   public_configs = [ ":libdrm" ]
 }
 
-if (ozone_platform_dri || ozone_platform_drm) {
+if (ozone_platform_drm) {
   source_set("drm") {
     sources = [
       "ozone_platform_drm.cc",
@@ -161,6 +167,8 @@ if (ozone_platform_gbm) {
 
   source_set("gbm") {
     sources = [
+      "common/client_native_pixmap_factory_gbm.cc",
+      "common/client_native_pixmap_factory_gbm.h",
       "gpu/gbm_buffer.cc",
       "gpu/gbm_buffer.h",
       "gpu/gbm_buffer_base.cc",
@@ -192,6 +200,15 @@ if (ozone_platform_gbm) {
 
     if (use_mesa_platform_null) {
       defines += [ "USE_MESA_PLATFORM_NULL" ]
+    }
+
+    if (use_vgem_map) {
+      defines += [ "USE_VGEM_MAP" ]
+
+      sources = [
+        "gpu/client_native_pixmap_vgem.cc",
+        "gpu/client_native_pixmap_vgem.h",
+      ]
     }
   }
 }

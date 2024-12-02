@@ -106,6 +106,7 @@ def processJinjaTemplate(input_file, include_paths, output_file, context):
   rendered = template.render(context)
   io.open(output_file, 'w', encoding='utf-8').write(rendered)
 
+
 def buildWebApp(buildtype, version, destination, zip_path,
                 manifest_template, webapp_type, appid, app_client_id, app_name,
                 app_description, app_capabilities, manifest_key, files,
@@ -121,7 +122,7 @@ def buildWebApp(buildtype, version, destination, zip_path,
              contents of |destination|.
     manifest_template: jinja2 template file for manifest.
     webapp_type: webapp type:
-                 For DesktopRemoting: "v1", "v2" or "v2_pnacl"
+                 For DesktopRemoting: "desktop"
                  For AppRemoting: "app_remoting" or "shared_module"
     appid: A string with the Remoting Application Id (only used for app
            remoting webapps). If supplied, it defaults to using the
@@ -221,13 +222,6 @@ def buildWebApp(buildtype, version, destination, zip_path,
                                 service_environment == 'prod' or \
                                 service_environment == 'prod-testing'
   is_desktop_remoting = not is_app_remoting
-
-  # Set client plugin type.
-  # TODO(wez): Use 'native' in app_remoting until b/17441659 is resolved.
-  if not is_app_remoting_webapp:
-    client_plugin = 'pnacl' if webapp_type == 'v2_pnacl' else 'native'
-    findAndReplace(os.path.join(destination, 'plugin_settings.js'),
-                   "'CLIENT_PLUGIN_TYPE'", "'" + client_plugin + "'")
 
   # Allow host names for google services/apis to be overriden via env vars.
   oauth2AccountsHost = os.environ.get(
@@ -342,7 +336,7 @@ def buildWebApp(buildtype, version, destination, zip_path,
 
   # Use a wildcard in the manifest.json host specs if the prefixes differ.
   talkGadgetHostJs = talkGadgetHostPrefix + talkGadgetHostSuffix
-  talkGadgetBaseUrl = talkGadgetHostJs + '/talkgadget/'
+  talkGadgetBaseUrl = talkGadgetHostJs + '/talkgadget'
   if talkGadgetHostPrefix == oauth2RedirectHostPrefix:
     talkGadgetHostJson = talkGadgetHostJs
   else:
@@ -371,9 +365,12 @@ def buildWebApp(buildtype, version, destination, zip_path,
                    "'OAUTH2_REDIRECT_URL'", oauth2RedirectUrlJs)
 
     # Configure xmpp server and directory bot settings in the plugin.
+    xmpp_server_user_tls = getenvBool('XMPP_SERVER_USE_TLS', True)
+    if (buildtype != 'Dev' and not xmpp_server_user_tls):
+      raise Exception('TLS can must be enabled in non Dev builds.')
+
     replaceBool(
-        destination, 'XMPP_SERVER_USE_TLS',
-        getenvBool('XMPP_SERVER_USE_TLS', True))
+        destination, 'XMPP_SERVER_USE_TLS', xmpp_server_user_tls)
     replaceString(destination, 'XMPP_SERVER', xmppServer)
     replaceString(destination, 'DIRECTORY_BOT_JID',
                   os.environ.get('DIRECTORY_BOT_JID',
@@ -393,7 +390,9 @@ def buildWebApp(buildtype, version, destination, zip_path,
           app_client_id + '"')
     apiClientIdV2 = app_client_id + '.apps.googleusercontent.com'
   else:
-    apiClientIdV2 = google_api_keys.GetClientID('REMOTING_IDENTITY_API')
+    apiClientIdV2 = os.environ.get(
+        'REMOTING_IDENTITY_API_CLIENT_ID',
+        google_api_keys.GetClientID('REMOTING_IDENTITY_API'))
 
   if not is_app_remoting_webapp:
     replaceString(destination, 'API_CLIENT_ID', apiClientId)
@@ -407,29 +406,22 @@ def buildWebApp(buildtype, version, destination, zip_path,
     findAndReplace(os.path.join(destination, 'arv_main.js'),
                    "'APPLICATION_CAPABILITIES'", appCapabilities)
 
-  # Use a consistent extension id for dev builds.
-  # AppRemoting builds always use the dev app id - the correct app id gets
-  # written into the manifest later.
-  if is_app_remoting_webapp:
-    if buildtype != 'Dev':
-      if not manifest_key:
-        raise Exception('Invalid manifest_key passed in: "' +
-            manifest_key + '"')
-      manifestKey = '"key": "' + manifest_key + '",'
-    else:
-      manifestKey = '"key": "remotingdevbuild",'
-  elif buildtype != 'Official':
-    # TODO(joedow): Update the chromoting webapp GYP entries to include keys.
-    manifestKey = '"key": "remotingdevbuild",'
+  # Official AppRemoting builds get the key from the gyp/gn build file. All
+  # other builds use a fixed key. For dev builds, this ensures that the app
+  # can be run directly from the output directory. For official CRD builds,
+  # it allows QA to test the app without uploading it to Chrome Web Store.
+  if is_app_remoting_webapp and buildtype != 'Dev':
+    if not manifest_key:
+      raise Exception('No manifest_key passed in')
   else:
-    manifestKey = ''
+      manifest_key = 'remotingdevbuild'
 
   # Generate manifest.
   if manifest_template:
     context = {
         'webapp_type': webapp_type,
         'FULL_APP_VERSION': version,
-        'MANIFEST_KEY_FOR_UNOFFICIAL_BUILD': manifestKey,
+        'MANIFEST_KEY': manifest_key,
         'OAUTH2_REDIRECT_URL': oauth2RedirectUrlJson,
         'TALK_GADGET_HOST': talkGadgetHostJson,
         'THIRD_PARTY_AUTH_REDIRECT_URL': thirdPartyAuthUrlJson,
@@ -439,14 +431,22 @@ def buildWebApp(buildtype, version, destination, zip_path,
         'DIRECTORY_API_BASE_URL': directoryApiBaseUrl,
         'TELEMETRY_API_BASE_URL':telemetryApiBaseUrl ,
         'APP_REMOTING_API_BASE_URL': appRemotingApiBaseUrl,
+        'CLOUD_PRINT_URL': '',
         'OAUTH2_ACCOUNTS_HOST': oauth2AccountsHost,
         'GOOGLE_API_HOSTS': googleApiHosts,
         'APP_NAME': app_name,
         'APP_DESCRIPTION': app_description,
+        'OAUTH_CLOUD_PRINT_SCOPE': '',
         'OAUTH_GDRIVE_SCOPE': '',
         'USE_GCD': use_gcd,
         'XMPP_SERVER': xmppServer,
+        # An URL match pattern that is added to the |permissions| section of the
+        # manifest in case some URLs are redirected by corporate proxies.
+        'PROXY_URL' : os.environ.get('PROXY_URL', ''),
     }
+    if 'CLOUD_PRINT' in app_capabilities:
+      context['OAUTH_CLOUD_PRINT_SCOPE'] = ('"https://www.googleapis.com/auth/cloudprint",')
+      context['CLOUD_PRINT_URL'] = ('"https://www.google.com/cloudprint/*",')
     if 'GOOGLE_DRIVE' in app_capabilities:
       context['OAUTH_GDRIVE_SCOPE'] = ('"https://docs.google.com/feeds/", '
                                        '"https://www.googleapis.com/auth/drive",')

@@ -20,6 +20,17 @@
 
 namespace extensions {
 
+namespace {
+
+ContentVerifier::TestObserver* g_test_observer = NULL;
+
+}  // namespace
+
+// static
+void ContentVerifier::SetObserverForTests(TestObserver* observer) {
+  g_test_observer = observer;
+}
+
 ContentVerifier::ContentVerifier(content::BrowserContext* context,
                                  ContentVerifierDelegate* delegate)
     : shutdown_(false),
@@ -124,7 +135,8 @@ static base::FilePath MakeImagePathRelative(const base::FilePath& path) {
 
   // Note that elsewhere we always normalize path separators to '/' so this
   // should work for all platforms.
-  return base::FilePath(JoinString(parts, '/'));
+  return base::FilePath(
+      base::JoinString(parts, base::FilePath::StringType(1, '/')));
 }
 
 void ContentVerifier::OnExtensionLoaded(
@@ -187,6 +199,9 @@ void ContentVerifier::OnFetchComplete(
     bool success,
     bool was_force_check,
     const std::set<base::FilePath>& hash_mismatch_paths) {
+  if (g_test_observer)
+    g_test_observer->OnFetchComplete(extension_id, success);
+
   if (shutdown_)
     return;
 

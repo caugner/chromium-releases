@@ -19,11 +19,13 @@ goog.require('cursors.Cursor');
 goog.require('cvox.BrailleKeyCommand');
 goog.require('cvox.ChromeVoxEditableTextBase');
 goog.require('cvox.ExtensionBridge');
+goog.require('cvox.NavBraille');
 
 goog.scope(function() {
 var AutomationNode = chrome.automation.AutomationNode;
 var Dir = AutomationUtil.Dir;
 var EventType = chrome.automation.EventType;
+var RoleType = chrome.automation.RoleType;
 
 /**
  * All possible modes ChromeVox can run.
@@ -89,6 +91,25 @@ Background = function() {
   };
 
   chrome.automation.getDesktop(this.onGotDesktop);
+
+  // Handle messages directed to the Next background page.
+  cvox.ExtensionBridge.addMessageListener(function(msg, port) {
+    var target = msg['target'];
+    var action = msg['action'];
+
+    switch (target) {
+      case 'next':
+        if (action == 'getIsClassicEnabled') {
+          var url = msg['url'];
+          var isClassicEnabled = this.shouldEnableClassicForUrl_(url);
+          port.postMessage({
+            target: 'next',
+            isClassicEnabled: isClassicEnabled
+          });
+        }
+        break;
+    }
+  }.bind(this));
 };
 
 Background.prototype = {
@@ -110,10 +131,10 @@ Background.prototype = {
     chrome.automation.addTreeChangeObserver(this.onTreeChange);
 
     // The focused state gets set on the containing webView node.
-    var webView = desktop.find({role: chrome.automation.RoleType.webView,
+    var webView = desktop.find({role: RoleType.webView,
                                 state: {focused: true}});
     if (webView) {
-      var root = webView.find({role: chrome.automation.RoleType.rootWebArea});
+      var root = webView.find({role: RoleType.rootWebArea});
       if (root) {
         this.onLoadComplete(
             {target: root,
@@ -256,16 +277,16 @@ Background.prototype = {
         current = current.move(cursors.Unit.NODE, Dir.BACKWARD);
         break;
       case 'goToBeginning':
-      var node =
-          AutomationUtil.findNodePost(current.getStart().getNode().root,
-                                      Dir.FORWARD,
-                                      AutomationPredicate.leaf);
+        var node =
+            AutomationUtil.findNodePost(current.start.node.root,
+                                        Dir.FORWARD,
+                                        AutomationPredicate.leaf);
         if (node)
           current = cursors.Range.fromNode(node);
         break;
       case 'goToEnd':
         var node =
-            AutomationUtil.findNodePost(current.getStart().getNode().root,
+            AutomationUtil.findNodePost(current.start.node.root,
                                         Dir.BACKWARD,
                                         AutomationPredicate.leaf);
         if (node)
@@ -273,8 +294,8 @@ Background.prototype = {
         break;
       case 'doDefault':
         if (this.currentRange_) {
-          var actionNode = this.currentRange_.getStart().getNode();
-          if (actionNode.role == chrome.automation.RoleType.inlineTextBox)
+          var actionNode = this.currentRange_.start.node;
+          if (actionNode.role == RoleType.inlineTextBox)
             actionNode = actionNode.parent;
           actionNode.doDefault();
         }
@@ -303,18 +324,22 @@ Background.prototype = {
         return;
       case 'showContextMenu':
         if (this.currentRange_) {
-          var actionNode = this.currentRange_.getStart().getNode();
-          if (actionNode.role == chrome.automation.RoleType.inlineTextBox)
+          var actionNode = this.currentRange_.start.node;
+          if (actionNode.role == RoleType.inlineTextBox)
             actionNode = actionNode.parent;
           actionNode.showContextMenu();
           return;
         }
         break;
+      case 'showOptionsPage':
+        var optionsPage = {url: 'chromevox/background/options.html'};
+        chrome.tabs.create(optionsPage);
+        break;
     }
 
     if (pred) {
       var node = AutomationUtil.findNextNode(
-          current.getBound(dir).getNode(), dir, pred);
+          current.getBound(dir).node, dir, pred);
 
       if (node) {
         current = cursors.Range.fromNode(node);
@@ -329,8 +354,8 @@ Background.prototype = {
 
     if (current) {
       // TODO(dtseng): Figure out what it means to focus a range.
-      var actionNode = current.getStart().getNode();
-      if (actionNode.role == chrome.automation.RoleType.inlineTextBox)
+      var actionNode = current.start.node;
+      if (actionNode.role == RoleType.inlineTextBox)
         actionNode = actionNode.parent;
       actionNode.focus();
 
@@ -346,9 +371,10 @@ Background.prototype = {
   /**
    * Handles a braille command.
    * @param {!cvox.BrailleKeyEvent} evt
+   * @param {!cvox.NavBraille} content
    * @return {boolean} True if evt was processed.
    */
-  onGotBrailleCommand: function(evt) {
+  onBrailleKeyEvent: function(evt, content) {
     if (this.mode_ === ChromeVoxMode.CLASSIC)
       return false;
 
@@ -370,6 +396,12 @@ Background.prototype = {
         break;
       case cvox.BrailleKeyCommand.BOTTOM:
         this.onGotCommand('goToEnd', true);
+        break;
+      case cvox.BrailleKeyCommand.ROUTING:
+        this.brailleRoutingCommand_(
+            content.text,
+            // Cast ok since displayPosition is always defined in this case.
+            /** @type {number} */ (evt.displayPosition));
         break;
       default:
         return false;
@@ -395,12 +427,11 @@ Background.prototype = {
     // are not within web content.
     if (node.root.role == 'desktop' ||
         !prevRange ||
-        (prevRange.getStart().getNode().root != node.root &&
-        node.state.focused))
+        prevRange.start.node.root != node.root)
       this.setupChromeVoxVariants_(node.root.docUrl || '');
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
-    if (node.root.role != chrome.automation.RoleType.desktop &&
+    if (node.root.role != RoleType.desktop &&
         this.mode_ === ChromeVoxMode.CLASSIC) {
       chrome.accessibilityPrivate.setFocusRing([]);
       return;
@@ -422,19 +453,21 @@ Background.prototype = {
    * @param {Object} evt
    */
   onFocus: function(evt) {
-    // Don't process nodes inside of web content if ChromeVox Next is inactive.
-    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
-        this.mode_ === ChromeVoxMode.CLASSIC)
-      return;
-
     var node = evt.target;
 
-    // It doesn't make sense to focus the containing web area if a descendant
-    // has focused state.
-    if (node.role == 'rootWebArea') {
+    // It almost never makes sense to place focus directly on a rootWebArea.
+    if (node.role == RoleType.rootWebArea) {
+      // Try to find a focusable descendant.
       node = AutomationUtil.findNodePost(node,
                                          Dir.FORWARD,
                                          AutomationPredicate.focused) || node;
+
+      // Fall back to the first leaf node in the document.
+      if (node.role == RoleType.rootWebArea) {
+        node = AutomationUtil.findNodePost(node,
+                                           Dir.FORWARD,
+                                           AutomationPredicate.leaf);
+      }
     }
     this.onEventDefault({target: node, type: 'focus'});
   },
@@ -447,16 +480,21 @@ Background.prototype = {
     this.setupChromeVoxVariants_(evt.target.docUrl);
 
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
-    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
+    if (evt.target.root.role != RoleType.desktop &&
         this.mode_ === ChromeVoxMode.CLASSIC)
       return;
 
-    if (this.currentRange_)
+    // If initial focus was already placed on this page (e.g. if a user starts
+    // tabbing before load complete), then don't move ChromeVox's position on
+    // the page.
+    if (this.currentRange_ &&
+        this.currentRange_.start.node.role != RoleType.rootWebArea &&
+        this.currentRange_.start.node.root.docUrl == evt.target.docUrl)
       return;
 
     var root = evt.target;
     var webView = root;
-    while (webView && webView.role != chrome.automation.RoleType.webView)
+    while (webView && webView.role != RoleType.webView)
       webView = webView.parent;
 
     if (!webView || !webView.state.focused)
@@ -481,7 +519,7 @@ Background.prototype = {
    */
   onTextOrTextSelectionChanged: function(evt) {
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
-    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
+    if (evt.target.root.role != RoleType.desktop &&
         this.mode_ === ChromeVoxMode.CLASSIC)
       return;
 
@@ -499,7 +537,7 @@ Background.prototype = {
         evt.target.textSelEnd,
         true);  // triggered by user
     if (!this.editableTextHandler ||
-        evt.target != this.currentRange_.getStart().getNode()) {
+        evt.target != this.currentRange_.start.node) {
       this.editableTextHandler =
           new cvox.ChromeVoxEditableTextBase(
               textChangeEvent.value,
@@ -521,7 +559,7 @@ Background.prototype = {
    */
   onValueChanged: function(evt) {
     // Don't process nodes inside of web content if ChromeVox Next is inactive.
-    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
+    if (evt.target.root.role != RoleType.desktop &&
         this.mode_ === ChromeVoxMode.CLASSIC)
       return;
 
@@ -531,7 +569,7 @@ Background.prototype = {
     // Value change events fire on web text fields and text areas when pressing
     // enter; suppress them.
     if (!this.currentRange_ ||
-        evt.target.role != chrome.automation.RoleType.textField) {
+        evt.target.role != RoleType.textField) {
       this.onEventDefault(evt);
       this.currentRange_ = cursors.Range.fromNode(evt.target);
     }
@@ -574,6 +612,17 @@ Background.prototype = {
     }
     output.withSpeech(range, null, Output.EventType.NAVIGATE);
     output.go();
+  },
+
+  /**
+   * Returns true if the url should have Classic running.
+   * @return {boolean}
+   * @private
+   */
+  shouldEnableClassicForUrl_: function(url) {
+    return this.mode_ != ChromeVoxMode.FORCE_NEXT &&
+        !this.isWhitelistedForCompat_(url) &&
+        !this.isWhitelistedForNext_(url);
   },
 
   /**
@@ -637,7 +686,7 @@ Background.prototype = {
         mode === ChromeVoxMode.COMPAT ||
         mode === ChromeVoxMode.FORCE_NEXT) {
       if (!chrome.commands.onCommand.hasListener(this.onGotCommand))
-          chrome.commands.onCommand.addListener(this.onGotCommand);
+        chrome.commands.onCommand.addListener(this.onGotCommand);
     } else {
       if (chrome.commands.onCommand.hasListener(this.onGotCommand))
         chrome.commands.onCommand.removeListener(this.onGotCommand);
@@ -652,7 +701,7 @@ Background.prototype = {
       } else {
         // When in compat mode, if the focus is within the desktop tree proper,
         // then do not disable content scripts.
-        if (this.currentRange_.getStart().getNode().root.role == 'desktop')
+        if (this.currentRange_.start.node.root.role == 'desktop')
           return;
 
         this.disableClassicChromeVox_();
@@ -660,6 +709,36 @@ Background.prototype = {
     }.bind(this));
 
     this.mode_ = mode;
+  },
+
+  /**
+   * @param {!cvox.Spannable} text
+   * @param {number} position
+   * @private
+   */
+  brailleRoutingCommand_: function(text, position) {
+    var actionNode = null;
+    var selectionSpan = null;
+    text.getSpans(position).forEach(function(span) {
+      if (span instanceof Output.SelectionSpan) {
+        selectionSpan = span;
+      } else if (span instanceof Output.NodeSpan) {
+        if (!actionNode ||
+            (text.getSpanEnd(actionNode) - text.getSpanStart(actionNode) >
+            text.getSpanEnd(span) - text.getSpanStart(span))) {
+          actionNode = span.node;
+        }
+      }
+    });
+    if (!actionNode)
+      return;
+    if (actionNode.role === RoleType.inlineTextBox)
+      actionNode = actionNode.parent;
+    actionNode.doDefault();
+    if (selectionSpan) {
+      var start = text.getSpanStart(selectionSpan);
+      actionNode.setSelection(position - start, position - start);
+    }
   }
 };
 

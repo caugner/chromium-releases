@@ -11,7 +11,6 @@
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
 #include "chrome/browser/sync/sessions/notification_service_sessions_router.h"
-#include "chrome/browser/sync/sessions/sessions_util.h"
 #include "chrome/browser/sync/sessions/synced_window_delegates_getter.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -201,7 +200,7 @@ void AddTabsToSyncDataList(const std::vector<sync_pb::SessionSpecifics> tabs,
     list->push_back(SyncData::CreateRemoteData(
         i + 2,
         entity,
-        base::Time(),
+        base::Time::FromInternalValue(i + 1),
         syncer::AttachmentIdList(),
         syncer::AttachmentServiceProxyForTest::Create()));
   }
@@ -420,10 +419,6 @@ class SyncedTabDelegateFake : public SyncedTabDelegate {
   int GetSyncId() const override { return sync_id_; }
   void SetSyncId(int sync_id) override { sync_id_ = sync_id; }
 
-  bool ShouldSync() const override {
-    return sessions_util::ShouldSyncTab(*this);
-  }
-
   void reset() {
     current_entry_index_ = 0;
     pending_entry_index_ = -1;
@@ -441,39 +436,6 @@ class SyncedTabDelegateFake : public SyncedTabDelegate {
 };
 
 }  // namespace
-
-// Test that we exclude tabs with only chrome:// and file:// schemed navigations
-// from ShouldSyncTab(..).
-TEST_F(SessionsSyncManagerTest, ValidTabs) {
-  SyncedTabDelegateFake tab;
-
-  // A null entry shouldn't crash.
-  tab.AppendEntry(NULL);
-  EXPECT_FALSE(tab.ShouldSync());
-  tab.reset();
-
-  // A chrome:// entry isn't valid.
-  scoped_ptr<content::NavigationEntry> entry(
-      content::NavigationEntry::Create());
-  entry->SetVirtualURL(GURL("chrome://preferences/"));
-  tab.AppendEntry(entry.Pass());
-  EXPECT_FALSE(tab.ShouldSync());
-
-
-  // A file:// entry isn't valid, even in addition to another entry.
-  scoped_ptr<content::NavigationEntry> entry2(
-      content::NavigationEntry::Create());
-  entry2->SetVirtualURL(GURL("file://bla"));
-  tab.AppendEntry(entry2.Pass());
-  EXPECT_FALSE(tab.ShouldSync());
-
-  // Add a valid scheme entry to tab, making the tab valid.
-  scoped_ptr<content::NavigationEntry> entry3(
-      content::NavigationEntry::Create());
-  entry3->SetVirtualURL(GURL("http://www.google.com"));
-  tab.AppendEntry(entry3.Pass());
-  EXPECT_FALSE(tab.ShouldSync());
-}
 
 // Make sure GetCurrentVirtualURL() returns the virtual URL of the pending
 // entry if the current entry is pending.
@@ -2125,6 +2087,113 @@ TEST_F(SessionsSyncManagerTest, ReceiveDuplicateUnassociatedTabs) {
   ASSERT_EQ(1, window_tabs[1]->tab_visual_index);
   // duplicating_tab2 wins due to the later timestamp.
   ASSERT_EQ(3, window_tabs[2]->tab_visual_index);
+}
+
+// Verify that GetAllForeignSessions returns all sessions sorted by recency.
+TEST_F(SessionsSyncManagerTest, GetAllForeignSessions) {
+  SessionID::id_type ids[] = {5, 10, 13, 17};
+  std::vector<SessionID::id_type> tab_list(ids, ids + arraysize(ids));
+
+  const std::string kTag = "tag1";
+  std::vector<sync_pb::SessionSpecifics> tabs1;
+  sync_pb::SessionSpecifics meta1(helper()->BuildForeignSession(
+      kTag, tab_list, &tabs1));
+
+  const std::string kTag2 = "tag2";
+  std::vector<sync_pb::SessionSpecifics> tabs2;
+  sync_pb::SessionSpecifics meta2(helper()->BuildForeignSession(
+      kTag2, tab_list, &tabs2));
+
+  sync_pb::EntitySpecifics entity1;
+  entity1.mutable_session()->CopyFrom(meta1);
+  sync_pb::EntitySpecifics entity2;
+  entity2.mutable_session()->CopyFrom(meta2);
+
+  syncer::SyncDataList initial_data;
+  initial_data.push_back(SyncData::CreateRemoteData(
+      1,
+      entity1,
+      base::Time::FromInternalValue(10),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
+  AddTabsToSyncDataList(tabs1, &initial_data);
+  initial_data.push_back(SyncData::CreateRemoteData(
+      2,
+      entity2,
+      base::Time::FromInternalValue(200),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
+  AddTabsToSyncDataList(tabs2, &initial_data);
+
+  syncer::SyncChangeList output;
+  InitWithSyncDataTakeOutput(initial_data, &output);
+
+  std::vector<const SyncedSession*> foreign_sessions;
+  ASSERT_TRUE(manager()->GetAllForeignSessions(&foreign_sessions));
+  ASSERT_EQ(2U, foreign_sessions.size());
+  ASSERT_GT(foreign_sessions[0]->modified_time,
+            foreign_sessions[1]->modified_time);
+}
+
+// Verify that GetForeignSessionTabs returns all tabs for a session sorted
+// by recency.
+TEST_F(SessionsSyncManagerTest, GetForeignSessionTabs) {
+  const std::string kTag = "tag1";
+
+  SessionID::id_type n1[] = {5, 10, 13, 17};
+  std::vector<SessionID::id_type> tab_list1(n1, n1 + arraysize(n1));
+  std::vector<sync_pb::SessionSpecifics> tabs1;
+  sync_pb::SessionSpecifics meta(helper()->BuildForeignSession(
+      kTag, tab_list1, &tabs1));
+  // Add a second window.
+  SessionID::id_type n2[] = {7, 15, 18, 20};
+  std::vector<SessionID::id_type> tab_list2(n2, n2 + arraysize(n2));
+  helper()->AddWindowSpecifics(1, tab_list2, &meta);
+
+  // Set up initial data.
+  syncer::SyncDataList initial_data;
+  sync_pb::EntitySpecifics entity;
+  entity.mutable_session()->CopyFrom(meta);
+  initial_data.push_back(SyncData::CreateRemoteData(
+      1,
+      entity,
+      base::Time(),
+      syncer::AttachmentIdList(),
+      syncer::AttachmentServiceProxyForTest::Create()));
+
+  // Add the first window's tabs.
+  AddTabsToSyncDataList(tabs1, &initial_data);
+
+  // Add the second window's tabs.
+  for (size_t i = 0; i < tab_list2.size(); ++i) {
+    sync_pb::EntitySpecifics entity;
+    helper()->BuildTabSpecifics(kTag, 0, tab_list2[i],
+                                entity.mutable_session());
+    // Order the tabs oldest to most ReceiveDuplicateUnassociatedTabs and
+    // left to right visually.
+    initial_data.push_back(SyncData::CreateRemoteData(
+        i + 10,
+        entity,
+        base::Time::FromInternalValue(i + 1),
+        syncer::AttachmentIdList(),
+        syncer::AttachmentServiceProxyForTest::Create()));
+  }
+
+  syncer::SyncChangeList output;
+  InitWithSyncDataTakeOutput(initial_data, &output);
+
+  std::vector<const sessions::SessionTab*> tabs;
+  ASSERT_TRUE(manager()->GetForeignSessionTabs(kTag, &tabs));
+  // Assert that the size matches the total number of tabs and that the order
+  // is from most recent to least.
+  ASSERT_EQ(tab_list1.size() + tab_list2.size(), tabs.size());
+  base::Time last_time;
+  for (size_t i = 0; i < tabs.size(); ++i) {
+    base::Time this_time = tabs[i]->timestamp;
+    if (i > 0)
+      ASSERT_GE(last_time, this_time);
+    last_time = tabs[i]->timestamp;
+  }
 }
 
 }  // namespace browser_sync

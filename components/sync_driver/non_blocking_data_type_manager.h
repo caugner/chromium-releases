@@ -15,10 +15,10 @@ namespace base {
 class SequencedTaskRunner;
 }  // namespace base
 
-namespace syncer {
+namespace syncer_v2 {
 class ModelTypeSyncProxyImpl;
 class SyncContextProxy;
-}  //namespace syncer
+}  // namespace syncer_v2
 
 namespace sync_driver {
 
@@ -45,11 +45,11 @@ class NonBlockingDataTypeManager {
   void InitializeType(
       syncer::ModelType type,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      const base::WeakPtr<syncer::ModelTypeSyncProxyImpl>& type_sync_proxy);
+      const base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl>& type_sync_proxy);
 
   // Connects the sync backend, as represented by a SyncContextProxy, to the
   // NonBlockingDataTypeController on the UI thread.
-  void ConnectSyncBackend(scoped_ptr<syncer::SyncContextProxy> proxy);
+  void ConnectSyncBackend(scoped_ptr<syncer_v2::SyncContextProxy> proxy);
 
   // Disconnects the sync backend from the UI thread.  Should be called
   // early on during shutdown, but the whole procedure is asynchronous so

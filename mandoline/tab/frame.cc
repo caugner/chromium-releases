@@ -6,6 +6,9 @@
 
 #include <algorithm>
 
+#include "base/auto_reset.h"
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/stl_util.h"
 #include "components/view_manager/public/cpp/view.h"
 #include "components/view_manager/public/cpp/view_property.h"
@@ -28,9 +31,11 @@ const uint32_t kNoParentId = 0u;
 
 FrameDataPtr FrameToFrameData(const Frame* frame) {
   FrameDataPtr frame_data(FrameData::New());
-  frame_data->frame_id = frame->view()->id();
-  frame_data->parent_id =
-      frame->parent() ? frame->parent()->view()->id() : kNoParentId;
+  frame_data->frame_id = frame->id();
+  frame_data->parent_id = frame->parent() ? frame->parent()->id() : kNoParentId;
+  frame_data->client_properties =
+      mojo::Map<mojo::String, mojo::Array<uint8_t>>::From(
+          frame->client_properties());
   return frame_data.Pass();
 }
 
@@ -38,18 +43,25 @@ FrameDataPtr FrameToFrameData(const Frame* frame) {
 
 Frame::Frame(FrameTree* tree,
              View* view,
+             uint32_t id,
              ViewOwnership view_ownership,
              FrameTreeClient* frame_tree_client,
-             scoped_ptr<FrameUserData> user_data)
+             scoped_ptr<FrameUserData> user_data,
+             const ClientPropertyMap& client_properties)
     : tree_(tree),
-      view_(view),
+      view_(nullptr),
+      id_(id),
       parent_(nullptr),
       view_ownership_(view_ownership),
       user_data_(user_data.Pass()),
       frame_tree_client_(frame_tree_client),
-      frame_tree_server_binding_(this) {
-  view_->SetLocalProperty(kFrame, this);
-  view_->AddObserver(this);
+      loading_(false),
+      progress_(0.f),
+      client_properties_(client_properties),
+      frame_tree_server_binding_(this),
+      weak_factory_(this) {
+  if (view)
+    SetView(view);
 }
 
 Frame::~Frame() {
@@ -59,27 +71,24 @@ Frame::~Frame() {
     delete children_[0];
   if (parent_)
     parent_->Remove(this);
-  if (view_)
+  if (view_) {
     view_->ClearLocalProperty(kFrame);
-  if (view_ownership_ == ViewOwnership::OWNS_VIEW)
-    view_->Destroy();
+    if (view_ownership_ == ViewOwnership::OWNS_VIEW)
+      view_->Destroy();
+  }
 }
 
 void Frame::Init(Frame* parent) {
-  if (parent)
-    parent->Add(this);
+  {
+    // Set the FrameTreeClient to null so that we don't notify the client of the
+    // add before OnConnect().
+    base::AutoReset<FrameTreeClient*> frame_tree_client_resetter(
+        &frame_tree_client_, nullptr);
+    if (parent)
+      parent->Add(this);
+  }
 
-  std::vector<const Frame*> frames;
-  tree_->root()->BuildFrameTree(&frames);
-
-  mojo::Array<FrameDataPtr> array(frames.size());
-  for (size_t i = 0; i < frames.size(); ++i)
-    array[i] = FrameToFrameData(frames[i]).Pass();
-
-  // TODO(sky): error handling.
-  FrameTreeServerPtr frame_tree_server_ptr;
-  frame_tree_server_binding_.Bind(GetProxy(&frame_tree_server_ptr).Pass());
-  frame_tree_client_->OnConnect(frame_tree_server_ptr.Pass(), array.Pass());
+  InitClient();
 }
 
 // static
@@ -90,7 +99,7 @@ Frame* Frame::FindFirstFrameAncestor(View* view) {
 }
 
 const Frame* Frame::FindFrame(uint32_t id) const {
-  if (id == view_->id())
+  if (id == id_)
     return this;
 
   for (const Frame* child : children_) {
@@ -108,6 +117,75 @@ bool Frame::HasAncestor(const Frame* frame) const {
   return current == frame;
 }
 
+bool Frame::IsLoading() const {
+  if (loading_)
+    return true;
+  for (const Frame* child : children_) {
+    if (child->IsLoading())
+      return true;
+  }
+  return false;
+}
+
+double Frame::GatherProgress(int* frame_count) const {
+  ++(*frame_count);
+  double progress = progress_;
+  for (const Frame* child : children_)
+    progress += child->GatherProgress(frame_count);
+  return progress_;
+}
+
+void Frame::InitClient() {
+  std::vector<const Frame*> frames;
+  tree_->root()->BuildFrameTree(&frames);
+
+  mojo::Array<FrameDataPtr> array(frames.size());
+  for (size_t i = 0; i < frames.size(); ++i)
+    array[i] = FrameToFrameData(frames[i]).Pass();
+
+  // TODO(sky): error handling.
+  FrameTreeServerPtr frame_tree_server_ptr;
+  frame_tree_server_binding_.Bind(GetProxy(&frame_tree_server_ptr).Pass());
+  if (frame_tree_client_) {
+    frame_tree_client_->OnConnect(frame_tree_server_ptr.Pass(),
+                                  tree_->change_id(), array.Pass());
+    tree_->delegate_->DidStartNavigation(this);
+  }
+}
+
+void Frame::OnWillNavigateAck(FrameTreeClient* frame_tree_client,
+                              scoped_ptr<FrameUserData> user_data,
+                              mojo::ViewManagerClientPtr view_manager_client) {
+  while (!children_.empty())
+    delete children_[0];
+
+  user_data_ = user_data.Pass();
+  frame_tree_client_ = frame_tree_client;
+  frame_tree_server_binding_.Close();
+  loading_ = false;
+  progress_ = 0.f;
+
+  view_->Embed(view_manager_client.Pass());
+  InitClient();
+}
+
+void Frame::SetView(mojo::View* view) {
+  DCHECK(!view_);
+  DCHECK_EQ(id_, view->id());
+  view_ = view;
+  view_->SetLocalProperty(kFrame, this);
+  view_->AddObserver(this);
+  if (pending_navigate_.get())
+    StartNavigate(pending_navigate_.Pass());
+}
+
+Frame* Frame::GetAncestorWithFrameTreeClient() {
+  Frame* frame = this;
+  while (frame && !frame->frame_tree_client_)
+    frame = frame->parent_;
+  return frame;
+}
+
 void Frame::BuildFrameTree(std::vector<const Frame*>* frames) const {
   frames->push_back(this);
   for (const Frame* frame : children_)
@@ -120,7 +198,7 @@ void Frame::Add(Frame* node) {
   node->parent_ = this;
   children_.push_back(node);
 
-  tree_->root()->NotifyAdded(this, node);
+  tree_->root()->NotifyAdded(this, node, tree_->AdvanceChangeID());
 }
 
 void Frame::Remove(Frame* node) {
@@ -130,29 +208,130 @@ void Frame::Remove(Frame* node) {
   node->parent_ = nullptr;
   children_.erase(iter);
 
-  tree_->root()->NotifyRemoved(this, node);
+  tree_->root()->NotifyRemoved(this, node, tree_->AdvanceChangeID());
 }
 
-void Frame::NotifyAdded(const Frame* source, const Frame* added_node) {
-  if (added_node == this)
+void Frame::StartNavigate(mojo::URLRequestPtr request) {
+  pending_navigate_.reset();
+
+  // We need a View to navigate. When we get the View we'll complete the
+  // navigation.
+  // TODO(sky): consider state and what is not legal while waiting.
+  if (!view_) {
+    pending_navigate_ = request.Pass();
     return;
+  }
 
-  if (source != this)
-    frame_tree_client_->OnFrameAdded(FrameToFrameData(added_node));
+  FrameTreeClient* frame_tree_client = nullptr;
+  scoped_ptr<FrameUserData> user_data;
+  mojo::ViewManagerClientPtr view_manager_client;
+  if (!tree_->delegate_->CanNavigateFrame(this, request.Pass(),
+                                          &frame_tree_client, &user_data,
+                                          &view_manager_client)) {
+    return;
+  }
 
-  for (Frame* child : children_)
-    child->NotifyAdded(source, added_node);
+  // TODO(sky): consider what state this should correspond to. Should we
+  // disallow certain operations until we get the ack?
+  Frame* ancestor_with_frame_tree_client = GetAncestorWithFrameTreeClient();
+  DCHECK(ancestor_with_frame_tree_client);
+  ancestor_with_frame_tree_client->frame_tree_client_->OnWillNavigate(
+      id_, base::Bind(&Frame::OnWillNavigateAck, weak_factory_.GetWeakPtr(),
+                      frame_tree_client, base::Passed(&user_data),
+                      base::Passed(&view_manager_client)));
 }
 
-void Frame::NotifyRemoved(const Frame* source, const Frame* removed_node) {
-  if (removed_node == this)
-    return;
+void Frame::LoadingStartedImpl() {
+  DCHECK(!loading_);
+  loading_ = true;
+  progress_ = 0.f;
+  tree_->LoadingStateChanged();
+}
 
-  if (source != this)
-    frame_tree_client_->OnFrameRemoved(removed_node->view_->id());
+void Frame::LoadingStoppedImpl() {
+  DCHECK(loading_);
+  loading_ = false;
+  tree_->LoadingStateChanged();
+}
+
+void Frame::ProgressChangedImpl(double progress) {
+  DCHECK(loading_);
+  progress_ = progress;
+  tree_->ProgressChanged();
+}
+
+void Frame::SetClientPropertyImpl(const mojo::String& name,
+                                  mojo::Array<uint8_t> value) {
+  auto iter = client_properties_.find(name);
+  const bool already_in_map = (iter != client_properties_.end());
+  if (value.is_null()) {
+    if (!already_in_map)
+      return;
+    client_properties_.erase(iter);
+  } else {
+    std::vector<uint8_t> as_vector(value.To<std::vector<uint8_t>>());
+    if (already_in_map && iter->second == as_vector)
+      return;
+    client_properties_[name] = as_vector;
+  }
+  tree_->ClientPropertyChanged(this, name, value);
+}
+
+Frame* Frame::FindTargetFrame(uint32_t frame_id) {
+  if (frame_id == id_)
+    return this;  // Common case.
+
+  // TODO(sky): I need a way to sanity check frame_id here, but the connection
+  // id isn't known to us.
+
+  Frame* frame = FindFrame(frame_id);
+  if (frame->frame_tree_client_) {
+    // The frame has it's own client/server pair. It should make requests using
+    // the server it has rather than an ancestor.
+    DVLOG(1) << "ignore request for a frame that has its own client.";
+    return nullptr;
+  }
+
+  return frame;
+}
+
+void Frame::NotifyAdded(const Frame* source,
+                        const Frame* added_node,
+                        uint32_t change_id) {
+  if (frame_tree_client_)
+    frame_tree_client_->OnFrameAdded(change_id, FrameToFrameData(added_node));
 
   for (Frame* child : children_)
-    child->NotifyRemoved(source, removed_node);
+    child->NotifyAdded(source, added_node, change_id);
+}
+
+void Frame::NotifyRemoved(const Frame* source,
+                          const Frame* removed_node,
+                          uint32_t change_id) {
+  if (frame_tree_client_)
+    frame_tree_client_->OnFrameRemoved(change_id, removed_node->id());
+
+  for (Frame* child : children_)
+    child->NotifyRemoved(source, removed_node, change_id);
+}
+
+void Frame::NotifyClientPropertyChanged(const Frame* source,
+                                        const mojo::String& name,
+                                        const mojo::Array<uint8_t>& value) {
+  if (this != source && frame_tree_client_)
+    frame_tree_client_->OnFrameClientPropertyChanged(source->id(), name,
+                                                     value.Clone());
+
+  for (Frame* child : children_)
+    child->NotifyClientPropertyChanged(source, name, value);
+}
+
+void Frame::OnTreeChanged(const TreeChangeParams& params) {
+  if (params.new_parent && this == tree_->root()) {
+    Frame* child_frame = FindFrame(params.target->id());
+    if (child_frame && !child_frame->view_)
+      child_frame->SetView(params.target);
+  }
 }
 
 void Frame::OnViewDestroying(mojo::View* view) {
@@ -163,8 +342,6 @@ void Frame::OnViewDestroying(mojo::View* view) {
   // destructor.
   view_ownership_ = ViewOwnership::DOESNT_OWN_VIEW;
 
-  // Assume the view associated with the root is never deleted out from under
-  // us.
   // TODO(sky): Change browser to create a child for each FrameTree.
   if (tree_->root() == this) {
     view_->RemoveObserver(this);
@@ -175,20 +352,96 @@ void Frame::OnViewDestroying(mojo::View* view) {
   delete this;
 }
 
-void Frame::PostMessageEventToFrame(uint32_t frame_id, MessageEventPtr event) {
-  Frame* target = tree_->root()->FindFrame(frame_id);
-  if (!target ||
-      !tree_->delegate_->CanPostMessageEventToFrame(this, target, event.get()))
+void Frame::PostMessageEventToFrame(uint32_t source_frame_id,
+                                    uint32_t target_frame_id,
+                                    HTMLMessageEventPtr event) {
+  Frame* source = tree_->root()->FindFrame(source_frame_id);
+  Frame* target = tree_->root()->FindFrame(target_frame_id);
+  if (!target || !source || source == target || !tree_->delegate_ ||
+      !tree_->delegate_->CanPostMessageEventToFrame(source, target,
+                                                    event.get()))
     return;
 
-  NOTIMPLEMENTED();
+  DCHECK(target->GetAncestorWithFrameTreeClient());
+  target->GetAncestorWithFrameTreeClient()
+      ->frame_tree_client_->OnPostMessageEvent(source_frame_id, target_frame_id,
+                                               event.Pass());
 }
 
-void Frame::NavigateFrame(uint32_t frame_id) {
-  NOTIMPLEMENTED();
+void Frame::LoadingStarted(uint32_t frame_id) {
+  Frame* target_frame = FindTargetFrame(frame_id);
+  if (target_frame)
+    target_frame->LoadingStartedImpl();
 }
 
-void Frame::ReloadFrame(uint32_t frame_id) {
+void Frame::LoadingStopped(uint32_t frame_id) {
+  Frame* target_frame = FindTargetFrame(frame_id);
+  if (target_frame)
+    target_frame->LoadingStoppedImpl();
+}
+
+void Frame::ProgressChanged(uint32_t frame_id, double progress) {
+  Frame* target_frame = FindTargetFrame(frame_id);
+  if (target_frame)
+    target_frame->ProgressChangedImpl(progress);
+}
+
+void Frame::SetClientProperty(uint32_t frame_id,
+                              const mojo::String& name,
+                              mojo::Array<uint8_t> value) {
+  Frame* target_frame = FindTargetFrame(frame_id);
+  if (target_frame)
+    target_frame->SetClientPropertyImpl(name, value.Pass());
+}
+
+void Frame::OnCreatedFrame(
+    uint32_t parent_id,
+    uint32_t frame_id,
+    mojo::Map<mojo::String, mojo::Array<uint8_t>> client_properties) {
+  // TODO(sky): I need a way to verify the id. Unfortunately the code here
+  // doesn't know the connection id of the embedder, so it's not possible to
+  // do it.
+
+  if (FindFrame(frame_id)) {
+    // TODO(sky): kill connection here?
+    DVLOG(1) << "OnCreatedLocalFrame supplied id of existing frame.";
+    return;
+  }
+
+  Frame* parent_frame = FindFrame(parent_id);
+  if (!parent_frame) {
+    DVLOG(1) << "OnCreatedLocalFrame supplied invalid parent_id.";
+    return;
+  }
+
+  if (parent_frame != this && parent_frame->frame_tree_client_) {
+    DVLOG(1) << "OnCreatedLocalFrame supplied parent from another connection.";
+    return;
+  }
+
+  tree_->CreateSharedFrame(parent_frame, frame_id,
+                           client_properties.To<ClientPropertyMap>());
+}
+
+void Frame::RequestNavigate(mandoline::NavigationTargetType target_type,
+                            uint32_t target_frame_id,
+                            mojo::URLRequestPtr request) {
+  if (target_type == NAVIGATION_TARGET_TYPE_EXISTING_FRAME) {
+    Frame* target_frame = tree_->root()->FindFrame(target_frame_id);
+    if (!target_frame) {
+      DVLOG(1) << "RequestNavigate EXIT_FRAME with no matching frame";
+      return;
+    }
+    if (target_frame != tree_->root()) {
+      target_frame->StartNavigate(request.Pass());
+      return;
+    }
+    // Else case if |target_frame| == root. Treat at top level request.
+  }
+  tree_->delegate_->NavigateTopLevel(this, request.Pass());
+}
+
+void Frame::DidNavigateLocally(uint32_t frame_id, const mojo::String& url) {
   NOTIMPLEMENTED();
 }
 

@@ -5,7 +5,6 @@
 #include "chrome/browser/signin/chrome_signin_client.h"
 
 #include "base/command_line.h"
-#include "base/guid.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -16,12 +15,14 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
-#include "chrome/common/chrome_version_info.h"
+#include "chrome/common/channel_info.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/metrics/metrics_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_cookie_changed_subscription.h"
+#include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/core/common/signin_switches.h"
@@ -43,10 +44,6 @@
 #if !defined(OS_ANDROID)
 #include "chrome/browser/first_run/first_run.h"
 #endif
-
-namespace {
-const char kEphemeralUserDeviceIDPrefix[] = "t_";
-}
 
 ChromeSigninClient::ChromeSigninClient(
     Profile* profile, SigninErrorController* signin_error_controller)
@@ -104,24 +101,7 @@ void ChromeSigninClient::DoFinalInit() {
 bool ChromeSigninClient::ProfileAllowsSigninCookies(Profile* profile) {
   content_settings::CookieSettings* cookie_settings =
       CookieSettingsFactory::GetForProfile(profile).get();
-  return SettingsAllowSigninCookies(cookie_settings);
-}
-
-// static
-bool ChromeSigninClient::SettingsAllowSigninCookies(
-    content_settings::CookieSettings* cookie_settings) {
-  GURL gaia_url = GaiaUrls::GetInstance()->gaia_url();
-  GURL google_url = GaiaUrls::GetInstance()->google_url();
-  return cookie_settings &&
-         cookie_settings->IsSettingCookieAllowed(gaia_url, gaia_url) &&
-         cookie_settings->IsSettingCookieAllowed(google_url, google_url);
-}
-
-// static
-std::string ChromeSigninClient::GenerateSigninScopedDeviceID(
-    bool for_ephemeral) {
-  std::string guid = base::GenerateGUID();
-  return for_ephemeral ? kEphemeralUserDeviceIDPrefix + guid : guid;
+  return signin::SettingsAllowSigninCookies(cookie_settings);
 }
 
 PrefService* ChromeSigninClient::GetPrefs() { return profile_->GetPrefs(); }
@@ -161,16 +141,7 @@ std::string ChromeSigninClient::GetSigninScopedDeviceId() {
   }
 
 #if !defined(OS_CHROMEOS)
-  std::string signin_scoped_device_id =
-      GetPrefs()->GetString(prefs::kGoogleServicesSigninScopedDeviceId);
-  if (signin_scoped_device_id.empty()) {
-    // If device_id doesn't exist then generate new and save in prefs.
-    signin_scoped_device_id = GenerateSigninScopedDeviceID(false);
-    DCHECK(!signin_scoped_device_id.empty());
-    GetPrefs()->SetString(prefs::kGoogleServicesSigninScopedDeviceId,
-                          signin_scoped_device_id);
-  }
-  return signin_scoped_device_id;
+  return SigninClient::GetOrCreateScopedDeviceIdPref(GetPrefs());
 #else
   // UserManager may not exist in unit_tests.
   if (!user_manager::UserManager::IsInitialized())
@@ -190,7 +161,6 @@ std::string ChromeSigninClient::GetSigninScopedDeviceId() {
 }
 
 void ChromeSigninClient::OnSignedOut() {
-  GetPrefs()->ClearPref(prefs::kGoogleServicesSigninScopedDeviceId);
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   size_t index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
@@ -214,8 +184,7 @@ bool ChromeSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
 }
 
 std::string ChromeSigninClient::GetProductVersion() {
-  chrome::VersionInfo chrome_version;
-  return chrome_version.CreateVersionString();
+  return chrome::GetVersionString();
 }
 
 bool ChromeSigninClient::IsFirstRun() const {
@@ -311,8 +280,6 @@ void ChromeSigninClient::OnGetTokenInfoResponse(
           g_browser_process->profile_manager()->GetProfileInfoCache();
       size_t index = info_cache.GetIndexOfProfileWithPath(profile_->GetPath());
       info_cache.SetPasswordChangeDetectionTokenAtIndex(index, handle);
-    } else {
-      NOTREACHED();
     }
   }
   oauth_request_.reset();
@@ -395,17 +362,19 @@ void ChromeSigninClient::MaybeFetchSigninTokenHandle() {
   if (profiles::IsLockAvailable(profile_)) {
     ProfileInfoCache& info_cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
-    size_t index = info_cache.GetIndexOfProfileWithPath(profile_->GetPath());
-    std::string token = info_cache.GetPasswordChangeDetectionTokenAtIndex(
-        index);
-    std::string account = profile_->GetProfileUserName();
-    if (token.empty() && !oauth_request_) {
-      // If we don't have a token for detecting a password change, create one.
-      ProfileOAuth2TokenService* token_service =
-          ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
-      OAuth2TokenService::ScopeSet scopes;
-      scopes.insert(GaiaConstants::kGoogleUserInfoEmail);
-      oauth_request_ = token_service->StartRequest(account, scopes, this);
+    ProfileAttributesEntry* entry;
+    // If we don't have a token for detecting a password change, create one.
+    if (info_cache.GetProfileAttributesWithPath(profile_->GetPath(), &entry) &&
+        entry->GetPasswordChangeDetectionToken().empty() && !oauth_request_) {
+      std::string account_id = SigninManagerFactory::GetForProfile(profile_)
+          ->GetAuthenticatedAccountId();
+      if (!account_id.empty()) {
+        ProfileOAuth2TokenService* token_service =
+            ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+        OAuth2TokenService::ScopeSet scopes;
+        scopes.insert(GaiaConstants::kGoogleUserInfoEmail);
+        oauth_request_ = token_service->StartRequest(account_id, scopes, this);
+      }
     }
   }
 #endif

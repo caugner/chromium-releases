@@ -15,7 +15,7 @@ import sys
 import tempfile
 import time
 
-from catapult_base import support_binaries
+from telemetry.internal.util import binary_manager
 from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.internal.backends import browser_backend
@@ -68,8 +68,22 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     self._port = None
     self._tmp_minidump_dir = tempfile.mkdtemp()
     self._crash_service = None
+    if self.browser_options.enable_logging:
+      self._log_file_path = os.path.join(tempfile.mkdtemp(), 'chrome.log')
+    else:
+      self._log_file_path = None
 
     self._SetupProfile()
+
+  @property
+  def log_file_path(self):
+    return self._log_file_path
+
+  @property
+  def supports_uploading_logs(self):
+    return (self.browser_options.logs_cloud_bucket and
+            self.browser_options.logs_cloud_remote_path and
+            os.path.isfile(self.log_file_path))
 
   def _SetupProfile(self):
     if not self.browser_options.dont_override_profile:
@@ -104,23 +118,37 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   def _GetCrashServicePipeName(self):
     # Ensure a unique pipe name by using the name of the temp dir.
-    return r'\\.\pipe\%s_service' % os.path.basename(self._tmp_minidump_dir)
+    pipe = r'\\.\pipe\%s_service' % os.path.basename(self._tmp_minidump_dir)
+    return pipe
 
   def _StartCrashService(self):
     os_name = self.browser.platform.GetOSName()
     if os_name != 'win':
       return None
     arch_name = self.browser.platform.GetArchName()
-    command = support_binaries.FindPath('crash_service', arch_name, os_name)
+    command = binary_manager.FetchPath('crash_service', arch_name, os_name)
     if not command:
       logging.warning('crash_service.exe not found for %s %s',
                       arch_name, os_name)
       return None
-    return subprocess.Popen([
-        command,
-        '--no-window',
-        '--dumps-dir=%s' % self._tmp_minidump_dir,
-        '--pipe-name=%s' % self._GetCrashServicePipeName()])
+    if not os.path.exists(command):
+      logging.warning('crash_service.exe not found for %s %s',
+                      arch_name, os_name)
+      return None
+
+    try:
+      crash_service = subprocess.Popen([
+          command,
+          '--no-window',
+          '--dumps-dir=%s' % self._tmp_minidump_dir,
+          '--pipe-name=%s' % self._GetCrashServicePipeName()])
+    except:
+      logging.error(
+          'Failed to run %s --no-window --dump-dir=%s --pip-name=%s' % (
+            command, self._tmp_minidump_dir, self._GetCrashServicePipeName()))
+      logging.error('Running on platform: %s and arch: %s.' %os_name, arch_name)
+      raise
+    return crash_service
 
   def _GetCdbPath(self):
     possible_paths = (
@@ -200,8 +228,12 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     env['CHROME_HEADLESS'] = '1'  # Don't upload minidumps.
     env['BREAKPAD_DUMP_LOCATION'] = self._tmp_minidump_dir
     env['CHROME_BREAKPAD_PIPE_NAME'] = self._GetCrashServicePipeName()
+    if self.browser_options.enable_logging:
+      sys.stderr.write(
+        'Chrome log file will be saved in %s\n' % self.log_file_path)
+      env['CHROME_LOG_FILE'] = self.log_file_path
     self._crash_service = self._StartCrashService()
-    logging.debug('Starting Chrome %s', args)
+    logging.info('Starting Chrome %s', args)
     if not self.browser_options.show_stdout:
       self._tmp_output_file = tempfile.NamedTemporaryFile('w', 0)
       self._proc = subprocess.Popen(
@@ -253,7 +285,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   def _GetMostRecentCrashpadMinidump(self):
     os_name = self.browser.platform.GetOSName()
     arch_name = self.browser.platform.GetArchName()
-    crashpad_database_util = support_binaries.FindPath(
+    crashpad_database_util = binary_manager.FetchPath(
         'crashpad_database_util', arch_name, os_name)
     if not crashpad_database_util:
       return None
@@ -355,7 +387,7 @@ class DesktopBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       return output[stack_start:stack_end]
 
     arch_name = self.browser.platform.GetArchName()
-    stackwalk = support_binaries.FindPath(
+    stackwalk = binary_manager.FetchPath(
         'minidump_stackwalk', arch_name, os_name)
     if not stackwalk:
       logging.warning('minidump_stackwalk binary not found.')

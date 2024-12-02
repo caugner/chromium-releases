@@ -13,26 +13,24 @@
 #include "base/timer/timer.h"
 #include "components/view_manager/public/interfaces/command_buffer.mojom.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/native_widget_types.h"
 
 namespace gpu {
 class CommandBufferService;
 class GpuScheduler;
 class GpuControlService;
-class SyncPointManager;
 namespace gles2 {
 class GLES2Decoder;
-class MailboxManager;
 }
 }
 
 namespace gfx {
 class GLContext;
-class GLShareGroup;
 class GLSurface;
 }
 
 namespace gles2 {
+
+class GpuState;
 
 // This class receives CommandBuffer messages on the same thread as the native
 // viewport.
@@ -41,21 +39,10 @@ class CommandBufferDriver {
   class Client {
    public:
     virtual ~Client();
-    virtual void UpdateVSyncParameters(base::TimeTicks timebase,
-                                       base::TimeDelta interval) = 0;
     virtual void DidLoseContext() = 0;
   };
-  // Offscreen.
-  CommandBufferDriver(gfx::GLShareGroup* share_group,
-                      gpu::gles2::MailboxManager* mailbox_manager,
-                      gpu::SyncPointManager* sync_point_manager);
-  // Onscreen.
-  CommandBufferDriver(
-      gfx::AcceleratedWidget widget,
-      gfx::GLShareGroup* share_group,
-      gpu::gles2::MailboxManager* mailbox_manager,
-      gpu::SyncPointManager* sync_point_manager,
-      const base::Callback<void(CommandBufferDriver*)>& destruct_callback);
+  explicit CommandBufferDriver(scoped_refptr<GpuState> gpu_state);
+
   ~CommandBufferDriver();
 
   void set_client(scoped_ptr<Client> client) { client_ = client.Pass(); }
@@ -79,10 +66,6 @@ class CommandBufferDriver {
                    int32_t internal_format);
   void DestroyImage(int32_t id);
 
-  // Called at shutdown to destroy the X window. This is needed when the parent
-  // window is being destroyed. Otherwise X calls for this window will fail.
-  void DestroyWindow();
-
  private:
   bool MakeCurrent();
   bool DoInitialize(mojo::ScopedSharedBufferHandle shared_state);
@@ -91,27 +74,20 @@ class CommandBufferDriver {
   void OnSyncPointRetired();
   void OnParseError();
   void OnContextLost(uint32_t reason);
-  void OnUpdateVSyncParameters(const base::TimeTicks timebase,
-                               const base::TimeDelta interval);
   void DestroyDecoder();
 
   scoped_ptr<Client> client_;
   mojo::CommandBufferSyncClientPtr sync_client_;
   mojo::CommandBufferLostContextObserverPtr loss_observer_;
-  gfx::AcceleratedWidget widget_;
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
   scoped_ptr<gpu::GpuScheduler> scheduler_;
   scoped_refptr<gfx::GLContext> context_;
   scoped_refptr<gfx::GLSurface> surface_;
-  scoped_refptr<gfx::GLShareGroup> share_group_;
-  scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
-  scoped_refptr<gpu::SyncPointManager> sync_point_manager_;
+  scoped_refptr<GpuState> gpu_state_;
 
   scoped_refptr<base::SingleThreadTaskRunner> context_lost_task_runner_;
   base::Callback<void(int32_t)> context_lost_callback_;
-
-  base::Callback<void(CommandBufferDriver*)> destruct_callback_;
 
   base::WeakPtrFactory<CommandBufferDriver> weak_factory_;
 

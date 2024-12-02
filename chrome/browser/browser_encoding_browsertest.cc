@@ -222,14 +222,15 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, DISABLED_TestOverrideEncoding) {
 // For Hebrew, the expected encoding value is ISO-8859-8-I. See
 // http://crbug.com/2927 for more details.
 //
-// This test fails frequently on the win_rel trybot. See http://crbug.com/122053
-// It also times out frequently on Mac dbg. See http://crbug.com/351325
-#if defined(OS_WIN) || defined(OS_MACOSX)
+// This test is failing consistently on ChromeOS, see http://crbug.com/512996.
+#if defined(OS_CHROMEOS)
 #define MAYBE_TestEncodingAutoDetect DISABLED_TestEncodingAutoDetect
 #else
 #define MAYBE_TestEncodingAutoDetect TestEncodingAutoDetect
 #endif
 // TODO(phajdan.jr): See if fix for http://crbug.com/122053 would help here.
+// Disabled to revert a depending Blink CL. crbug.com/328354, and
+// crbug.com/510422.
 IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, DISABLED_TestEncodingAutoDetect) {
   struct EncodingAutoDetectTestData {
     const char* test_file_name;   // File name of test data.

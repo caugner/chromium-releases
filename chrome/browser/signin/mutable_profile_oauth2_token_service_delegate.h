@@ -7,19 +7,23 @@
 
 #include "base/memory/scoped_vector.h"
 #include "base/threading/thread_checker.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
 #include "net/base/backoff_entry.h"
+#include "net/base/network_change_notifier.h"
 
 class MutableProfileOAuth2TokenServiceDelegate
     : public OAuth2TokenServiceDelegate,
-      public WebDataServiceConsumer {
+      public WebDataServiceConsumer,
+      public net::NetworkChangeNotifier::NetworkChangeObserver {
  public:
   MutableProfileOAuth2TokenServiceDelegate(
       SigninClient* client,
-      SigninErrorController* signin_error_controller);
+      SigninErrorController* signin_error_controller,
+      AccountTrackerService* account_tracker_service);
   ~MutableProfileOAuth2TokenServiceDelegate() override;
 
   // OAuth2TokenServiceDelegate overrides.
@@ -48,6 +52,10 @@ class MutableProfileOAuth2TokenServiceDelegate
 
   // Overridden from OAuth2TokenServiceDelegate.
   void Shutdown() override;
+
+  // Overridden from NetworkChangeObserver.
+  void OnNetworkChanged(net::NetworkChangeNotifier::ConnectionType type)
+      override;
 
  private:
   friend class MutableProfileOAuth2TokenServiceDelegateTest;
@@ -147,6 +155,7 @@ class MutableProfileOAuth2TokenServiceDelegate
 
   SigninClient* client_;
   SigninErrorController* signin_error_controller_;
+  AccountTrackerService* account_tracker_service_;
 
   DISALLOW_COPY_AND_ASSIGN(MutableProfileOAuth2TokenServiceDelegate);
 };

@@ -4,8 +4,8 @@
 
 package org.chromium.chrome.browser.sync;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.FragmentTransaction;
 import android.content.Context;
@@ -14,6 +14,7 @@ import android.preference.CheckBoxPreference;
 import android.preference.Preference;
 import android.preference.SwitchPreference;
 import android.preference.TwoStatePreference;
+import android.support.v7.app.AlertDialog;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.view.View;
 import android.widget.Button;
@@ -32,12 +33,12 @@ import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.sync.AndroidSyncSettings;
+import org.chromium.sync.ModelType;
 import org.chromium.sync.internal_api.pub.PassphraseType;
-import org.chromium.sync.internal_api.pub.base.ModelType;
 
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -45,6 +46,7 @@ import java.util.concurrent.Callable;
 /**
  * Tests for SyncCustomizationFragment.
  */
+@SuppressLint("UseSparseArrays")
 public class SyncCustomizationFragmentTest extends SyncTestBase {
     private static final String TAG = "SyncCustomizationFragmentTest";
 
@@ -72,17 +74,17 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
     /**
      * Maps ModelTypes to their UI element IDs.
      */
-    private static final Map<ModelType, String> UI_DATATYPES;
+    private static final Map<Integer, String> UI_DATATYPES;
 
     static {
-        UI_DATATYPES = new HashMap<ModelType, String>();
+        UI_DATATYPES = new HashMap<Integer, String>();
         UI_DATATYPES.put(ModelType.AUTOFILL, SyncCustomizationFragment.PREFERENCE_SYNC_AUTOFILL);
-        UI_DATATYPES.put(ModelType.BOOKMARK, SyncCustomizationFragment.PREFERENCE_SYNC_BOOKMARKS);
-        UI_DATATYPES.put(ModelType.TYPED_URL, SyncCustomizationFragment.PREFERENCE_SYNC_OMNIBOX);
-        UI_DATATYPES.put(ModelType.PASSWORD, SyncCustomizationFragment.PREFERENCE_SYNC_PASSWORDS);
+        UI_DATATYPES.put(ModelType.BOOKMARKS, SyncCustomizationFragment.PREFERENCE_SYNC_BOOKMARKS);
+        UI_DATATYPES.put(ModelType.TYPED_URLS, SyncCustomizationFragment.PREFERENCE_SYNC_OMNIBOX);
+        UI_DATATYPES.put(ModelType.PASSWORDS, SyncCustomizationFragment.PREFERENCE_SYNC_PASSWORDS);
         UI_DATATYPES.put(ModelType.PROXY_TABS,
                 SyncCustomizationFragment.PREFERENCE_SYNC_RECENT_TABS);
-        UI_DATATYPES.put(ModelType.PREFERENCE,
+        UI_DATATYPES.put(ModelType.PREFERENCES,
                 SyncCustomizationFragment.PREFERENCE_SYNC_SETTINGS);
     }
 
@@ -123,6 +125,24 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         closeFragment(fragment);
         assertFalse(AndroidSyncSettings.isChromeSyncEnabled(mContext));
+    }
+
+    /**
+     * This is a regression test for http://crbug.com/467600.
+     */
+    @SmallTest
+    @Feature({"Sync"})
+    public void testOpeningSettingsDoesntStartBackend() throws Exception {
+        setupTestAccountAndSignInToSync(CLIENT_ID);
+        stopSync();
+        startSyncCustomizationFragment();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                assertFalse(mProfileSyncService.isSyncRequested());
+                assertFalse(mProfileSyncService.isSyncInitialized());
+            }
+        });
     }
 
     @SmallTest
@@ -180,7 +200,7 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         SyncTestUtil.waitForSyncActive(mContext);
         SyncCustomizationFragment fragment = startSyncCustomizationFragment();
         SwitchPreference syncEverything = getSyncEverything(fragment);
-        Map<ModelType, CheckBoxPreference> dataTypes = getDataTypes(fragment);
+        Map<Integer, CheckBoxPreference> dataTypes = getDataTypes(fragment);
 
         assertDefaultSyncOnState(fragment);
         togglePreference(syncEverything);
@@ -189,19 +209,19 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
             assertTrue(dataType.isEnabled());
         }
 
-        Set<ModelType> expectedTypes = EnumSet.copyOf(dataTypes.keySet());
+        Set<Integer> expectedTypes = new HashSet<Integer>(dataTypes.keySet());
         // TODO(zea): update this once preferences are supported.
-        expectedTypes.remove(ModelType.PREFERENCE);
-        expectedTypes.add(ModelType.PRIORITY_PREFERENCE);
+        expectedTypes.remove(ModelType.PREFERENCES);
+        expectedTypes.add(ModelType.PRIORITY_PREFERENCES);
         assertDataTypesAre(expectedTypes);
         togglePreference(dataTypes.get(ModelType.AUTOFILL));
-        togglePreference(dataTypes.get(ModelType.PASSWORD));
+        togglePreference(dataTypes.get(ModelType.PASSWORDS));
         // Nothing should have changed before the fragment closes.
         assertDataTypesAre(expectedTypes);
 
         closeFragment(fragment);
         expectedTypes.remove(ModelType.AUTOFILL);
-        expectedTypes.remove(ModelType.PASSWORD);
+        expectedTypes.remove(ModelType.PASSWORDS);
         assertDataTypesAre(expectedTypes);
     }
 
@@ -236,6 +256,51 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
         assertTrue(customView.isEnabled());
         assertTrue(keystoreView.isEnabled());
         assertEquals(keystoreView, listView.getSelectedView());
+    }
+
+    /**
+     * Test that choosing a passphrase type while sync is off doesn't crash.
+     *
+     * This is a regression test for http://crbug.com/507557.
+     */
+    @SmallTest
+    @Feature({"Sync"})
+    public void testChoosePassphraseTypeWhenSyncIsOff() throws Exception {
+        setupTestAccountAndSignInToSync(CLIENT_ID);
+        SyncTestUtil.waitForSyncActive(mContext);
+        SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        Preference encryption = getEncryption(fragment);
+        clickPreference(encryption);
+
+        final PassphraseTypeDialogFragment typeFragment = getPassphraseTypeDialogFragment();
+        stopSync();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                typeFragment.onItemClick(
+                        null, null, 0, PassphraseType.CUSTOM_PASSPHRASE.internalValue());
+            }
+        });
+        // No crash means we passed.
+    }
+
+    /**
+     * Test that entering a passphrase while sync is off doesn't crash.
+     */
+    @SmallTest
+    @Feature({"Sync"})
+    public void testEnterPassphraseWhenSyncIsOff() throws Exception {
+        setupTestAccountAndSignInToSync(CLIENT_ID);
+        SyncTestUtil.waitForSyncActive(mContext);
+        final SyncCustomizationFragment fragment = startSyncCustomizationFragment();
+        stopSync();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                fragment.onPassphraseEntered("passphrase");
+            }
+        });
+        // No crash means we passed.
     }
 
     /**
@@ -373,11 +438,12 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
                 SyncCustomizationFragment.PREFERENCE_SYNC_EVERYTHING);
     }
 
-    private Map<ModelType, CheckBoxPreference> getDataTypes(SyncCustomizationFragment fragment) {
-        Map<ModelType, CheckBoxPreference> dataTypes =
-                new HashMap<ModelType, CheckBoxPreference>();
-        for (ModelType modelType : UI_DATATYPES.keySet()) {
-            String prefId = UI_DATATYPES.get(modelType);
+    private Map<Integer, CheckBoxPreference> getDataTypes(SyncCustomizationFragment fragment) {
+        Map<Integer, CheckBoxPreference> dataTypes =
+                new HashMap<Integer, CheckBoxPreference>();
+        for (Map.Entry<Integer, String> uiDataType : UI_DATATYPES.entrySet()) {
+            Integer modelType = uiDataType.getKey();
+            String prefId = uiDataType.getValue();
             dataTypes.put(modelType, (CheckBoxPreference) fragment.findPreference(prefId));
         }
         return dataTypes;
@@ -395,17 +461,17 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
 
     private PassphraseDialogFragment getPassphraseDialogFragment() {
         return (PassphraseDialogFragment) mActivity.getFragmentManager().findFragmentByTag(
-                SyncCustomizationFragment.FRAGMENT_ENTER_PASSWORD);
+                SyncCustomizationFragment.FRAGMENT_ENTER_PASSPHRASE);
     }
 
     private PassphraseTypeDialogFragment getPassphraseTypeDialogFragment() {
         return (PassphraseTypeDialogFragment) mActivity.getFragmentManager()
-                .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_PASSWORD_TYPE);
+                .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_PASSPHRASE_TYPE);
     }
 
     private PassphraseCreationDialogFragment getPassphraseCreationDialogFragment() {
         return (PassphraseCreationDialogFragment) mActivity.getFragmentManager()
-                .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_CUSTOM_PASSWORD);
+                .findFragmentByTag(SyncCustomizationFragment.FRAGMENT_CUSTOM_PASSPHRASE);
     }
 
     private void assertDefaultSyncOnState(SyncCustomizationFragment fragment) {
@@ -442,16 +508,16 @@ public class SyncCustomizationFragmentTest extends SyncTestBase {
                 getManageData(fragment).isEnabled());
     }
 
-    private void assertDataTypesAre(final Set<ModelType> enabledDataTypes) {
-        final Set<ModelType> disabledDataTypes = EnumSet.copyOf(UI_DATATYPES.keySet());
+    private void assertDataTypesAre(final Set<Integer> enabledDataTypes) {
+        final Set<Integer> disabledDataTypes = new HashSet<Integer>(UI_DATATYPES.keySet());
         disabledDataTypes.removeAll(enabledDataTypes);
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                Set<ModelType> actualDataTypes = mProfileSyncService.getPreferredDataTypes();
+                Set<Integer> actualDataTypes = mProfileSyncService.getPreferredDataTypes();
                 assertTrue(actualDataTypes.containsAll(enabledDataTypes));
                 // There is no Set.containsNone(), sadly.
-                for (ModelType disabledDataType : disabledDataTypes) {
+                for (Integer disabledDataType : disabledDataTypes) {
                     assertFalse(actualDataTypes.contains(disabledDataType));
                 }
             }

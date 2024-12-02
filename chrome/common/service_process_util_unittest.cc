@@ -23,7 +23,7 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/version_info/version_info.h"
 #include "testing/multiprocess_func_list.h"
 
 #if defined(OS_WIN)
@@ -62,9 +62,10 @@ void ShutdownTask(base::MessageLoop* loop) {
 TEST(ServiceProcessUtilTest, ScopedVersionedName) {
   std::string test_str = "test";
   std::string scoped_name = GetServiceProcessScopedVersionedName(test_str);
-  chrome::VersionInfo version_info;
-  EXPECT_TRUE(base::EndsWith(scoped_name, test_str, true));
-  EXPECT_NE(std::string::npos, scoped_name.find(version_info.Version()));
+  EXPECT_TRUE(base::EndsWith(scoped_name, test_str,
+                             base::CompareCase::SENSITIVE));
+  EXPECT_NE(std::string::npos,
+            scoped_name.find(version_info::GetVersionNumber()));
 }
 
 class ServiceProcessStateTest : public base::MultiProcessTest {
@@ -149,8 +150,9 @@ TEST_F(ServiceProcessStateTest, AutoRun) {
   ASSERT_EQ(std::string::npos, exec_value.find('"'));
   ASSERT_EQ(std::string::npos, exec_value.find('\''));
 
-  base::CommandLine::StringVector argv;
-  base::SplitString(exec_value, ' ', &argv);
+  base::CommandLine::StringVector argv = base::SplitString(
+      exec_value, base::CommandLine::StringType(1, ' '),
+      base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   ASSERT_GE(argv.size(), 2U)
       << "Expected at least one command-line option in: " << exec_value;
   autorun_command_line.reset(new base::CommandLine(argv));

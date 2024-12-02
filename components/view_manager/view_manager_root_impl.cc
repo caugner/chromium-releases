@@ -16,15 +16,15 @@ ViewManagerRootImpl::ViewManagerRootImpl(
     ConnectionManager* connection_manager,
     bool is_headless,
     mojo::ApplicationImpl* app_impl,
-    const scoped_refptr<gles2::GpuState>& gpu_state)
+    const scoped_refptr<gles2::GpuState>& gpu_state,
+    const scoped_refptr<surfaces::SurfacesState>& surfaces_state)
     : delegate_(nullptr),
       connection_manager_(connection_manager),
-      root_(connection_manager->CreateServerView(
-         RootViewId(connection_manager->GetAndAdvanceNextRootId()))),
       display_manager_(
-          DisplayManager::Create(is_headless, app_impl, gpu_state)) {
-  root_->SetBounds(gfx::Rect(800, 600));
-  root_->SetVisible(true);
+          DisplayManager::Create(is_headless,
+                                 app_impl,
+                                 gpu_state,
+                                 surfaces_state)) {
   display_manager_->Init(this);
 }
 
@@ -33,6 +33,8 @@ ViewManagerRootImpl::~ViewManagerRootImpl() {
 
 void ViewManagerRootImpl::Init(ViewManagerRootDelegate* delegate) {
   delegate_ = delegate;
+  if (delegate_ && root_)
+    delegate_->OnDisplayInitialized();
 }
 
 ViewManagerServiceImpl* ViewManagerRootImpl::GetViewManagerService() {
@@ -54,6 +56,15 @@ bool ViewManagerRootImpl::SchedulePaintIfInViewport(const ServerView* view,
 
 const mojo::ViewportMetrics& ViewManagerRootImpl::GetViewportMetrics() const {
   return display_manager_->GetViewportMetrics();
+}
+
+void ViewManagerRootImpl::UpdateTextInputState(
+    const ui::TextInputState& state) {
+  display_manager_->UpdateTextInputState(state);
+}
+
+void ViewManagerRootImpl::SetImeVisibility(bool visible) {
+  display_manager_->SetImeVisibility(visible);
 }
 
 void ViewManagerRootImpl::SetViewManagerRootClient(
@@ -96,8 +107,18 @@ void ViewManagerRootImpl::OnDisplayClosed() {
 void ViewManagerRootImpl::OnViewportMetricsChanged(
     const mojo::ViewportMetrics& old_metrics,
     const mojo::ViewportMetrics& new_metrics) {
-  // TODO(fsamuel: We shouldn't broadcast this to all connections but only those
-  // within a window root.
+  if (!root_) {
+    root_.reset(connection_manager_->CreateServerView(
+        RootViewId(connection_manager_->GetAndAdvanceNextRootId())));
+    root_->SetBounds(gfx::Rect(new_metrics.size_in_pixels.To<gfx::Size>()));
+    root_->SetVisible(true);
+    if (delegate_)
+      delegate_->OnDisplayInitialized();
+  } else {
+    root_->SetBounds(gfx::Rect(new_metrics.size_in_pixels.To<gfx::Size>()));
+  }
+  // TODO(fsamuel): We shouldn't broadcast this to all connections but only
+  // those within a window root.
   connection_manager_->ProcessViewportMetricsChanged(old_metrics, new_metrics);
 }
 

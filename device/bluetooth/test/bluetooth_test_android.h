@@ -22,9 +22,13 @@ class BluetoothTestAndroid : public BluetoothTestBase {
   void SetUp() override;
 
   // BluetoothTestBase overrides:
+  bool PlatformSupportsLowEnergy() override;
   void InitWithDefaultAdapter() override;
   void InitWithoutDefaultAdapter() override;
   void InitWithFakeAdapter() override;
+  void DiscoverLowEnergyDevice(int device_ordinal) override;
+
+  base::android::ScopedJavaGlobalRef<jobject> j_fake_bluetooth_adapter_;
 };
 
 // Defines common test fixture name. Use TEST_F(BluetoothTest, YourTestName).

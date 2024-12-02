@@ -32,6 +32,9 @@ class AppBannerManager : public content::WebContentsObserver,
  public:
   static void DisableSecureSchemeCheckForTesting();
 
+  static void SetEngagementWeights(double direct_engagement,
+                                   double indirect_engagement);
+
   // Returns whether or not the URLs match for everything except for the ref.
   static bool URLsAreForTheSamePage(const GURL& first, const GURL& second);
 
@@ -39,6 +42,11 @@ class AppBannerManager : public content::WebContentsObserver,
   ~AppBannerManager() override;
 
   // WebContentsObserver overrides.
+  void DidCommitProvisionalLoadForFrame(
+      content::RenderFrameHost* render_frame_host,
+      const GURL& url,
+      ui::PageTransition transition_type) override;
+
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
 
@@ -76,6 +84,9 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // Ideal icon size to use.
   const int ideal_icon_size_;
+
+  // The type of navigation made to the page
+  ui::PageTransition last_transition_type_;
 
   // Fetches the data required to display a banner for the current page.
   scoped_refptr<AppBannerDataFetcher> data_fetcher_;

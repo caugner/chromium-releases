@@ -10,6 +10,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/test/simple_test_clock.h"
 #include "components/proximity_auth/cryptauth/base64url.h"
+#include "components/proximity_auth/cryptauth/fake_cryptauth_gcm_manager.h"
 #include "components/proximity_auth/cryptauth/mock_cryptauth_client.h"
 #include "components/proximity_auth/cryptauth/mock_sync_scheduler.h"
 #include "components/proximity_auth/cryptauth/pref_names.h"
@@ -104,9 +105,11 @@ class TestCryptAuthDeviceManager : public CryptAuthDeviceManager {
  public:
   TestCryptAuthDeviceManager(scoped_ptr<base::Clock> clock,
                              scoped_ptr<CryptAuthClientFactory> client_factory,
+                             CryptAuthGCMManager* gcm_manager,
                              PrefService* pref_service)
       : CryptAuthDeviceManager(clock.Pass(),
                                client_factory.Pass(),
+                               gcm_manager,
                                pref_service),
         scoped_sync_scheduler_(new NiceMock<MockSyncScheduler>()),
         weak_sync_scheduler_factory_(scoped_sync_scheduler_.get()) {}
@@ -147,8 +150,10 @@ class ProximityAuthCryptAuthDeviceManagerTest
       : clock_(new base::SimpleTestClock()),
         client_factory_(new MockCryptAuthClientFactory(
             MockCryptAuthClientFactory::MockType::MAKE_STRICT_MOCKS)),
+        gcm_manager_("existing gcm registration id"),
         device_manager_(make_scoped_ptr(clock_),
                         make_scoped_ptr(client_factory_),
+                        &gcm_manager_,
                         &pref_service_) {
     client_factory_->AddObserver(this);
   }
@@ -239,6 +244,12 @@ class ProximityAuthCryptAuthDeviceManagerTest
 
     EXPECT_EQ(expected_invocation_reason,
               get_my_devices_request_.invocation_reason());
+
+    // The allow_stale_read flag is set if the sync was not forced.
+    bool allow_stale_read =
+        pref_service_.GetInteger(prefs::kCryptAuthDeviceSyncReason) !=
+        cryptauth::INVOCATION_REASON_UNKNOWN;
+    EXPECT_EQ(allow_stale_read, get_my_devices_request_.allow_stale_read());
   }
 
   // MockCryptAuthClientFactory::Observer:
@@ -260,6 +271,8 @@ class ProximityAuthCryptAuthDeviceManagerTest
   MockCryptAuthClientFactory* client_factory_;
 
   TestingPrefServiceSimple pref_service_;
+
+  FakeCryptAuthGCMManager gcm_manager_;
 
   TestCryptAuthDeviceManager device_manager_;
 
@@ -323,7 +336,7 @@ TEST_F(ProximityAuthCryptAuthDeviceManagerTest, InitWithDefaultPrefs) {
       clock.Pass(),
       make_scoped_ptr(new MockCryptAuthClientFactory(
           MockCryptAuthClientFactory::MockType::MAKE_STRICT_MOCKS)),
-      &pref_service);
+      &gcm_manager_, &pref_service);
 
   EXPECT_CALL(
       *(device_manager.GetSyncScheduler()),
@@ -437,6 +450,44 @@ TEST_F(ProximityAuthCryptAuthDeviceManagerTest, ForceSyncFailsThenSucceeds) {
       prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure));
 }
 
+TEST_F(ProximityAuthCryptAuthDeviceManagerTest, PeriodicSyncFailsThenSucceeds) {
+  device_manager_.Start();
+  base::Time old_sync_time = device_manager_.GetLastSyncTime();
+
+  // The first periodic sync fails.
+  FireSchedulerForSync(cryptauth::INVOCATION_REASON_PERIODIC);
+  clock_->SetNow(base::Time::FromDoubleT(kLaterTimeNowSeconds));
+  EXPECT_CALL(*this,
+              OnSyncFinishedProxy(
+                  CryptAuthDeviceManager::SyncResult::FAILURE,
+                  CryptAuthDeviceManager::DeviceChangeResult::UNCHANGED));
+  error_callback_.Run("401");
+  EXPECT_EQ(old_sync_time, device_manager_.GetLastSyncTime());
+  EXPECT_TRUE(pref_service_.GetBoolean(
+      prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure));
+
+  // The second recovery sync succeeds.
+  ON_CALL(*sync_scheduler(), GetStrategy())
+      .WillByDefault(Return(SyncScheduler::Strategy::AGGRESSIVE_RECOVERY));
+  FireSchedulerForSync(cryptauth::INVOCATION_REASON_FAILURE_RECOVERY);
+  clock_->SetNow(base::Time::FromDoubleT(kLaterTimeNowSeconds + 30));
+  EXPECT_CALL(*this, OnSyncFinishedProxy(
+                         CryptAuthDeviceManager::SyncResult::SUCCESS,
+                         CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+  success_callback_.Run(get_my_devices_response_);
+  EXPECT_EQ(clock_->Now(), device_manager_.GetLastSyncTime());
+
+  ExpectUnlockKeysAndPrefAreEqual(std::vector<cryptauth::ExternalDeviceInfo>(
+                                      1, get_my_devices_response_.devices(0)),
+                                  device_manager_.unlock_keys(), pref_service_);
+
+  EXPECT_FLOAT_EQ(
+      clock_->Now().ToDoubleT(),
+      pref_service_.GetDouble(prefs::kCryptAuthDeviceSyncLastSyncTimeSeconds));
+  EXPECT_FALSE(pref_service_.GetBoolean(
+      prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure));
+}
+
 TEST_F(ProximityAuthCryptAuthDeviceManagerTest, SyncSameDevice) {
   // Set the same unlock key in the user prefs as the one that would be synced.
   {
@@ -522,6 +573,24 @@ TEST_F(ProximityAuthCryptAuthDeviceManagerTest, SyncTwoUnlockKeys) {
   success_callback_.Run(response);
 
   ExpectUnlockKeysAndPrefAreEqual(expected_unlock_keys,
+                                  device_manager_.unlock_keys(), pref_service_);
+}
+
+TEST_F(ProximityAuthCryptAuthDeviceManagerTest, SyncOnGCMPushMessage) {
+  device_manager_.Start();
+
+  EXPECT_CALL(*sync_scheduler(), ForceSync());
+  gcm_manager_.PushResyncMessage();
+
+  FireSchedulerForSync(cryptauth::INVOCATION_REASON_SERVER_INITIATED);
+
+  EXPECT_CALL(*this, OnSyncFinishedProxy(
+                         CryptAuthDeviceManager::SyncResult::SUCCESS,
+                         CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+  success_callback_.Run(get_my_devices_response_);
+
+  ExpectUnlockKeysAndPrefAreEqual(std::vector<cryptauth::ExternalDeviceInfo>(
+                                      1, get_my_devices_response_.devices(0)),
                                   device_manager_.unlock_keys(), pref_service_);
 }
 

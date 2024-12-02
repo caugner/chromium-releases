@@ -77,9 +77,12 @@ ToolbarActionView::ToolbarActionView(
           ThemeServiceFactory::GetForProfile(profile_)));
 
   // If the button is within a menu, we need to make it focusable in order to
-  // have it accessible via keyboard navigation.
-  if (delegate_->ShownInsideMenu())
+  // have it accessible via keyboard navigation, but it shouldn't request focus
+  // (because that would close the menu).
+  if (delegate_->ShownInsideMenu()) {
+    set_request_focus_on_press(false);
     SetFocusable(true);
+  }
 
   UpdateState();
 }
@@ -191,6 +194,11 @@ bool ToolbarActionView::Activate() {
   // widget/view, and true will grab it right back and try to send events
   // to us.
   return false;
+}
+
+void ToolbarActionView::OnMouseEntered(const ui::MouseEvent& event) {
+  delegate_->OnMouseEnteredToolbarActionView();
+  views::MenuButton::OnMouseEntered(event);
 }
 
 bool ToolbarActionView::OnMousePressed(const ui::MouseEvent& event) {

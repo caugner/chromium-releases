@@ -42,7 +42,6 @@
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_switches.h"
 #include "sandbox/linux/services/credentials.h"
-#include "sandbox/linux/services/libc_urandom_override.h"
 #include "sandbox/linux/services/namespace_sandbox.h"
 
 #if defined(OS_NACL_NONSFI)
@@ -50,6 +49,10 @@
 #else
 #include <link.h>
 #include "components/nacl/loader/nonsfi/irt_exception_handling.h"
+#endif
+
+#if !defined(USE_OPENSSL)
+#include "sandbox/linux/services/libc_urandom_override.h"
 #endif
 
 namespace {
@@ -123,17 +126,11 @@ void BecomeNaClLoader(base::ScopedFD browser_fd,
   nacl::nonsfi::NonSfiListener listener;
   listener.Listen();
 #else
-  // TODO(hidehiko): Drop Non-SFI supporting from nacl_helper after the
-  // nacl_helper_nonsfi switching is done.
-  if (uses_nonsfi_mode) {
-    nacl::nonsfi::NonSfiListener listener;
-    listener.Listen();
-  } else {
-    NaClListener listener;
-    listener.set_prereserved_sandbox_size(system_info.prereserved_sandbox_size);
-    listener.set_number_of_cores(system_info.number_of_cores);
-    listener.Listen();
-  }
+  CHECK(!uses_nonsfi_mode);
+  NaClListener listener;
+  listener.set_prereserved_sandbox_size(system_info.prereserved_sandbox_size);
+  listener.set_number_of_cores(system_info.number_of_cores);
+  listener.Listen();
 #endif
   _exit(0);
 }
@@ -443,11 +440,10 @@ int main(int argc, char* argv[]) {
   base::AtExitManager exit_manager;
   base::RandUint64();  // acquire /dev/urandom fd before sandbox is raised
 
-#if !defined(OS_NACL_NONSFI)
   // NSS is only needed for SFI NaCl.
+#if !defined(OS_NACL_NONSFI) && !defined(USE_OPENSSL)
   // Allows NSS to fopen() /dev/urandom.
   sandbox::InitLibcUrandomOverrides();
-#if !defined(USE_OPENSSL)
   // Configure NSS for use inside the NaCl process.
   // The fork check has not caused problems for NaCl, but this appears to be
   // best practice (see other places LoadNSSLibraries is called.)
@@ -459,8 +455,7 @@ int main(int argc, char* argv[]) {
   // Load shared libraries before sandbox is raised.
   // NSS is needed to perform hashing for validation caching.
   crypto::LoadNSSLibraries();
-#endif  // !defined(USE_OPENSSL)
-#endif  // defined(OS_NACL_NONSFI)
+#endif  // !defined(OS_NACL_NONSFI) && !defined(USE_OPENSSL)
   const NaClLoaderSystemInfo system_info = {
 #if !defined(OS_NACL_NONSFI)
     // These are not used by nacl_helper_nonsfi.

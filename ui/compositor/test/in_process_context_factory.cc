@@ -23,7 +23,7 @@
 #include "ui/compositor/reflector.h"
 #include "ui/compositor/test/in_process_context_provider.h"
 #include "ui/gl/gl_implementation.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 
 namespace ui {
 namespace {
@@ -41,9 +41,11 @@ class FakeReflector : public Reflector {
 // GL surface.
 class DirectOutputSurface : public cc::OutputSurface {
  public:
-  explicit DirectOutputSurface(
-      const scoped_refptr<cc::ContextProvider>& context_provider)
-      : cc::OutputSurface(context_provider), weak_ptr_factory_(this) {}
+  DirectOutputSurface(
+      const scoped_refptr<cc::ContextProvider>& context_provider,
+      const scoped_refptr<cc::ContextProvider>& worker_context_provider)
+      : cc::OutputSurface(context_provider, worker_context_provider),
+        weak_ptr_factory_(this) {}
 
   ~DirectOutputSurface() override {}
 
@@ -83,7 +85,7 @@ InProcessContextFactory::InProcessContextFactory(
       surface_manager_(surface_manager) {
   DCHECK_NE(gfx::GetGLImplementation(), gfx::kGLImplementationNone)
       << "If running tests, ensure that main() is calling "
-      << "gfx::GLSurface::InitializeOneOffForTests()";
+      << "gfx::GLSurfaceTestSupport::InitializeOneOff()";
 
   Layer::InitializeUILayerSettings();
 }
@@ -105,23 +107,24 @@ void InProcessContextFactory::CreateOutputSurface(
   attribs.sample_buffers = 0;
   attribs.fail_if_major_perf_caveat = false;
   attribs.bind_generates_resource = false;
-  bool lose_context_when_out_of_memory = true;
 
   scoped_refptr<InProcessContextProvider> context_provider =
       InProcessContextProvider::Create(attribs, &gpu_memory_buffer_manager_,
                                        &image_factory_,
-                                       lose_context_when_out_of_memory,
                                        compositor->widget(), "UICompositor");
+  scoped_refptr<InProcessContextProvider> worker_context_provider =
+      InProcessContextProvider::CreateOffscreen(&gpu_memory_buffer_manager_,
+                                                &image_factory_);
 
   scoped_ptr<cc::OutputSurface> real_output_surface;
 
   if (use_test_surface_) {
     bool flipped_output_surface = false;
     real_output_surface = make_scoped_ptr(new cc::PixelTestOutputSurface(
-        context_provider, flipped_output_surface));
+        context_provider, worker_context_provider, flipped_output_surface));
   } else {
-    real_output_surface =
-        make_scoped_ptr(new DirectOutputSurface(context_provider));
+    real_output_surface = make_scoped_ptr(
+        new DirectOutputSurface(context_provider, worker_context_provider));
   }
 
   if (surface_manager_) {
@@ -131,9 +134,9 @@ void InProcessContextFactory::CreateOutputSurface(
             GetSharedBitmapManager(), GetGpuMemoryBufferManager(),
             compositor->GetRendererSettings(), compositor->task_runner()));
     scoped_ptr<cc::SurfaceDisplayOutputSurface> surface_output_surface(
-        new cc::SurfaceDisplayOutputSurface(surface_manager_,
-                                            compositor->surface_id_allocator(),
-                                            context_provider));
+        new cc::SurfaceDisplayOutputSurface(
+            surface_manager_, compositor->surface_id_allocator(),
+            context_provider, worker_context_provider));
     display_client->set_surface_output_surface(surface_output_surface.get());
     surface_output_surface->set_display_client(display_client.get());
 
@@ -161,10 +164,8 @@ InProcessContextFactory::SharedMainThreadContextProvider() {
       !shared_main_thread_contexts_->DestroyedOnMainThread())
     return shared_main_thread_contexts_;
 
-  bool lose_context_when_out_of_memory = false;
   shared_main_thread_contexts_ = InProcessContextProvider::CreateOffscreen(
-      &gpu_memory_buffer_manager_, &image_factory_,
-      lose_context_when_out_of_memory);
+      &gpu_memory_buffer_manager_, &image_factory_);
   if (shared_main_thread_contexts_.get() &&
       !shared_main_thread_contexts_->BindToCurrentThread())
     shared_main_thread_contexts_ = NULL;
@@ -183,9 +184,8 @@ bool InProcessContextFactory::DoesCreateTestContexts() {
   return context_factory_for_test_;
 }
 
-uint32 InProcessContextFactory::GetImageTextureTarget(
-    gfx::GpuMemoryBuffer::Format format,
-    gfx::GpuMemoryBuffer::Usage usage) {
+uint32 InProcessContextFactory::GetImageTextureTarget(gfx::BufferFormat format,
+                                                      gfx::BufferUsage usage) {
   return GL_TEXTURE_2D;
 }
 

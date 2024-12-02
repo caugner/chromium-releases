@@ -32,6 +32,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/ssl/connection_security.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
 #include "chrome/browser/translate/cld_data_harness_factory.h"
@@ -126,6 +127,8 @@ using content::WebContentsObserver;
 using extensions::Extension;
 
 namespace {
+
+enum CertificateStatus { VALID_CERTIFICATE, INVALID_CERTIFICATE };
 
 const char* kBeforeUnloadHTML =
     "<html><head><title>beforeunload</title></head><body>"
@@ -371,8 +374,7 @@ class SecurityStyleTestObserver : public WebContentsObserver {
 
   void ClearLatestSecurityStyleAndExplanations() {
     latest_security_style_ = content::SECURITY_STYLE_UNKNOWN;
-    latest_explanations_.warning_explanations.clear();
-    latest_explanations_.broken_explanations.clear();
+    latest_explanations_ = content::SecurityStyleExplanations();
   }
 
  private:
@@ -384,7 +386,8 @@ class SecurityStyleTestObserver : public WebContentsObserver {
 
 // Check that |observer|'s latest event was for an expired certificate
 // and that it saw the proper SecurityStyle and explanations.
-void CheckExpiredSecurityStyle(const SecurityStyleTestObserver& observer) {
+void CheckBrokenSecurityStyle(const SecurityStyleTestObserver& observer,
+                              int error) {
   EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
             observer.latest_security_style());
 
@@ -397,11 +400,27 @@ void CheckExpiredSecurityStyle(const SecurityStyleTestObserver& observer) {
   EXPECT_EQ(l10n_util::GetStringUTF8(IDS_CERTIFICATE_CHAIN_ERROR),
             expired_explanation.broken_explanations[0].summary);
 
-  base::string16 error_string =
-      base::UTF8ToUTF16(net::ErrorToString(net::ERR_CERT_DATE_INVALID));
+  base::string16 error_string = base::UTF8ToUTF16(net::ErrorToString(error));
   EXPECT_EQ(l10n_util::GetStringFUTF8(
                 IDS_CERTIFICATE_CHAIN_ERROR_DESCRIPTION_FORMAT, error_string),
             expired_explanation.broken_explanations[0].description);
+}
+
+// Checks that the given |secure_explanations| contains appropriate
+// an appropriate explanation if the certificate status is valid.
+void CheckSecureExplanations(
+    const std::vector<content::SecurityStyleExplanation>& secure_explanations,
+    CertificateStatus cert_status) {
+  if (cert_status != VALID_CERTIFICATE) {
+    EXPECT_EQ(0u, secure_explanations.size());
+    return;
+  }
+
+  EXPECT_EQ(1u, secure_explanations.size());
+  EXPECT_EQ(l10n_util::GetStringUTF8(IDS_VALID_SERVER_CERTIFICATE),
+            secure_explanations[0].summary);
+  EXPECT_EQ(l10n_util::GetStringUTF8(IDS_VALID_SERVER_CERTIFICATE_DESCRIPTION),
+            secure_explanations[0].description);
 }
 
 }  // namespace
@@ -544,7 +563,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, JavascriptAlertActivatesTab) {
   EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
   WebContents* second_tab = browser()->tab_strip_model()->GetWebContentsAt(1);
   ASSERT_TRUE(second_tab);
-  second_tab->GetMainFrame()->ExecuteJavaScript(
+  second_tab->GetMainFrame()->ExecuteJavaScriptForTests(
       ASCIIToUTF16("alert('Activate!');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   alert->CloseModalDialog();
@@ -601,7 +620,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ClearPendingOnFailUnlessNTP) {
   ASSERT_TRUE(test_server()->Start());
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  GURL ntp_url(chrome::GetNewTabPageURL(browser()->profile()));
+  GURL ntp_url(search::GetNewTabPageURL(browser()->profile()));
   ui_test_utils::NavigateToURL(browser(), ntp_url);
 
   // Navigate to a 204 URL (aborts with no content) on the NTP and make sure it
@@ -651,7 +670,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DISABLED_CrossProcessNavCancelsDialogs) {
   // even if the renderer tries to synchronously create more.
   // See http://crbug.com/312490.
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  contents->GetMainFrame()->ExecuteJavaScript(
+  contents->GetMainFrame()->ExecuteJavaScriptForTests(
       ASCIIToUTF16("alert('one'); alert('two');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(alert->IsValid());
@@ -677,7 +696,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SadTabCancelsDialogs) {
 
   // Start a navigation to trigger the beforeunload dialog.
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  contents->GetMainFrame()->ExecuteJavaScript(
+  contents->GetMainFrame()->ExecuteJavaScriptForTests(
       ASCIIToUTF16("window.location.href = 'data:text/html,foo'"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(alert->IsValid());
@@ -703,7 +722,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SadTabCancelsDialogs) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, SadTabCancelsSubframeDialogs) {
   // Navigate to an iframe that opens an alert dialog.
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  contents->GetMainFrame()->ExecuteJavaScript(
+  contents->GetMainFrame()->ExecuteJavaScriptForTests(
       ASCIIToUTF16("window.location.href = 'data:text/html,"
                    "<iframe srcdoc=\"<script>alert(1)</script>\">'"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
@@ -767,7 +786,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
 
   // Clear the beforeunload handler so the test can easily exit.
   browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame()->
-      ExecuteJavaScript(ASCIIToUTF16("onbeforeunload=null;"));
+      ExecuteJavaScriptForTests(ASCIIToUTF16("onbeforeunload=null;"));
 }
 
 class RedirectObserver : public content::WebContentsObserver {
@@ -928,7 +947,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CancelBeforeUnloadResetsURL) {
 
   // Clear the beforeunload handler so the test can easily exit.
   browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame()->
-      ExecuteJavaScript(ASCIIToUTF16("onbeforeunload=null;"));
+      ExecuteJavaScriptForTests(ASCIIToUTF16("onbeforeunload=null;"));
 }
 
 // Test for crbug.com/11647.  A page closed with window.close() should not have
@@ -1497,7 +1516,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
   // If the new bookmark app flow is enabled, the app should open as an tab.
   // Otherwise the app should open as an app window.
   EXPECT_EQ(!new_bookmark_apps_enabled,
-            launch.OpenApplicationWindow(browser()->profile(), NULL));
+            launch.OpenApplicationWindow(browser()->profile()));
   EXPECT_EQ(new_bookmark_apps_enabled,
             launch.OpenApplicationTab(browser()->profile()));
 
@@ -2068,7 +2087,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialClosesDialogs) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
-  contents->GetMainFrame()->ExecuteJavaScript(
+  contents->GetMainFrame()->ExecuteJavaScriptForTests(
       ASCIIToUTF16("alert('Dialog showing!');"));
   AppModalDialog* alert = ui_test_utils::WaitForAppModalDialog();
   EXPECT_TRUE(alert->IsValid());
@@ -2941,14 +2960,10 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
             observer.latest_security_style());
   EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
   EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
-
-  // Visit a valid HTTPS url.
-  GURL valid_https_url(https_test_server.GetURL(std::string()));
-  ui_test_utils::NavigateToURL(browser(), valid_https_url);
-  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
-            observer.latest_security_style());
-  EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
-  EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
+  EXPECT_EQ(0u, observer.latest_explanations().secure_explanations.size());
+  EXPECT_FALSE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
 
   // Visit an (otherwise valid) HTTPS page that displays mixed content.
   std::string replacement_path;
@@ -2958,16 +2973,22 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
 
   GURL mixed_content_url(https_test_server.GetURL(replacement_path));
   ui_test_utils::NavigateToURL(browser(), mixed_content_url);
-  EXPECT_EQ(content::SECURITY_STYLE_WARNING, observer.latest_security_style());
+  EXPECT_EQ(content::SECURITY_STYLE_UNAUTHENTICATED,
+            observer.latest_security_style());
 
   const content::SecurityStyleExplanations& mixed_content_explanation =
       observer.latest_explanations();
-  ASSERT_EQ(1u, mixed_content_explanation.warning_explanations.size());
-  EXPECT_EQ(l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT),
-            mixed_content_explanation.warning_explanations[0].summary);
-  EXPECT_EQ(l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT_DESCRIPTION),
-            mixed_content_explanation.warning_explanations[0].description);
-  EXPECT_EQ(0u, mixed_content_explanation.broken_explanations.size());
+  ASSERT_EQ(0u, mixed_content_explanation.warning_explanations.size());
+  ASSERT_EQ(0u, mixed_content_explanation.broken_explanations.size());
+  CheckSecureExplanations(mixed_content_explanation.secure_explanations,
+                          VALID_CERTIFICATE);
+  EXPECT_TRUE(mixed_content_explanation.scheme_is_cryptographic);
+  EXPECT_TRUE(mixed_content_explanation.displayed_insecure_content);
+  EXPECT_FALSE(mixed_content_explanation.ran_insecure_content);
+  EXPECT_EQ(content::SECURITY_STYLE_UNAUTHENTICATED,
+            mixed_content_explanation.displayed_insecure_content_style);
+  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATION_BROKEN,
+            mixed_content_explanation.ran_insecure_content_style);
 
   // Visit a broken HTTPS url.
   GURL expired_url(https_test_server_expired.GetURL(std::string()));
@@ -2977,31 +2998,127 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserver) {
   // interstitial should fire.
   content::WaitForInterstitialAttach(web_contents);
   EXPECT_TRUE(web_contents->ShowingInterstitialPage());
-  CheckExpiredSecurityStyle(observer);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          INVALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
 
   // Before clicking through, navigate to a different page, and then go
   // back to the interstitial.
+  GURL valid_https_url(https_test_server.GetURL(std::string()));
   ui_test_utils::NavigateToURL(browser(), valid_https_url);
   EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
             observer.latest_security_style());
   EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
   EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          VALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
 
   // After going back to the interstitial, an event for a broken lock
   // icon should fire again.
   ui_test_utils::NavigateToURL(browser(), expired_url);
   content::WaitForInterstitialAttach(web_contents);
   EXPECT_TRUE(web_contents->ShowingInterstitialPage());
-  CheckExpiredSecurityStyle(observer);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          INVALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
 
   // Since the next expected style is the same as the previous, clear
   // the observer (to make sure that the event fires twice and we don't
   // just see the previous event's style).
   observer.ClearLatestSecurityStyleAndExplanations();
 
-  // Other conditions cannot be tested after clicking through because
-  // once the interstitial is clicked through, all URLs for this host
-  // will remain in a broken state.
+  // Other conditions cannot be tested on this host after clicking
+  // through because once the interstitial is clicked through, all URLs
+  // for this host will remain in a broken state.
   ProceedThroughInterstitial(web_contents);
-  CheckExpiredSecurityStyle(observer);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_DATE_INVALID);
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          INVALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
+}
+
+// Visit a valid HTTPS page, then a broken HTTPS page, and then go back,
+// and test that the observed security style matches.
+IN_PROC_BROWSER_TEST_F(BrowserTest, SecurityStyleChangedObserverGoBack) {
+  net::SpawnedTestServer https_test_server(net::SpawnedTestServer::TYPE_HTTPS,
+                                           net::SpawnedTestServer::kLocalhost,
+                                           base::FilePath(kDocRoot));
+
+  // Use a separate server to work around a mysterious SSL handshake
+  // timeout when both requests go to the same server. See
+  // https://crbug.com/515906.
+  net::SpawnedTestServer https_test_server_expired(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
+      base::FilePath(kDocRoot));
+
+  ASSERT_TRUE(https_test_server.Start());
+  ASSERT_TRUE(https_test_server_expired.Start());
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  SecurityStyleTestObserver observer(web_contents);
+
+  // Visit a valid HTTPS url.
+  GURL valid_https_url(https_test_server.GetURL(std::string()));
+  ui_test_utils::NavigateToURL(browser(), valid_https_url);
+  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+            observer.latest_security_style());
+  EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
+  EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          VALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
+
+  // Navigate to a bad HTTPS page on a different host, and then click
+  // Back to verify that the previous good security style is seen again.
+  GURL expired_https_url(https_test_server_expired.GetURL(std::string()));
+  host_resolver()->AddRule("www.example_broken.test", "127.0.0.1");
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr("www.example_broken.test");
+  GURL https_url_different_host =
+      expired_https_url.ReplaceComponents(replace_host);
+
+  ui_test_utils::NavigateToURL(browser(), https_url_different_host);
+
+  content::WaitForInterstitialAttach(web_contents);
+  EXPECT_TRUE(web_contents->ShowingInterstitialPage());
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID);
+  ProceedThroughInterstitial(web_contents);
+  CheckBrokenSecurityStyle(observer, net::ERR_CERT_COMMON_NAME_INVALID);
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          INVALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
+
+  content::WindowedNotificationObserver back_nav_load_observer(
+      content::NOTIFICATION_LOAD_STOP,
+      content::Source<NavigationController>(&web_contents->GetController()));
+  chrome::GoBack(browser(), CURRENT_TAB);
+  back_nav_load_observer.Wait();
+
+  EXPECT_EQ(content::SECURITY_STYLE_AUTHENTICATED,
+            observer.latest_security_style());
+  EXPECT_EQ(0u, observer.latest_explanations().warning_explanations.size());
+  EXPECT_EQ(0u, observer.latest_explanations().broken_explanations.size());
+  CheckSecureExplanations(observer.latest_explanations().secure_explanations,
+                          VALID_CERTIFICATE);
+  EXPECT_TRUE(observer.latest_explanations().scheme_is_cryptographic);
+  EXPECT_FALSE(observer.latest_explanations().displayed_insecure_content);
+  EXPECT_FALSE(observer.latest_explanations().ran_insecure_content);
 }

@@ -133,11 +133,13 @@ v8.log
 /chrome/test/data/perf/third_party/
 /chrome/test/data/plugin/
 /chrome/test/data/webrtc/resources
+/chrome/test/media_router/internal
 /chrome/tools/memory
 /chrome/tools/test/reference_build
 /chrome/unit_tests_run.xml
 /chrome/web_ui_mojo_bindings.xml
 /chrome_elf/chrome_elf_resources.xml
+/chromecast/internal
 /clank
 /cloud_print/cloud_print_version_resources.xml
 /components/chrome_settings_proto_generated_compile.xml
@@ -166,6 +168,7 @@ v8.log
 /gpu/gles2_conform_test
 /gyp-mac-tool
 /internal_gyp
+/ios/build/util/CANARY_VERSION
 /ios/third_party/gcdwebserver/src
 /llvm
 /media/cast/logging/cast_logging_proto_lib.xml
@@ -257,6 +260,7 @@ v8.log
 /tools/luci-go/linux64/isolate
 /tools/luci-go/mac64/isolate
 /tools/luci-go/win64/isolate.exe
+/third_party/__START__
 /third_party/accessibility-developer-tools/
 /third_party/adobe/flash/binaries
 /third_party/adobe/flash/symbols
@@ -280,6 +284,7 @@ v8.log
 /third_party/boringssl/src
 /third_party/cacheinvalidation/cacheinvalidation_unittests_run.xml
 /third_party/cardboard-java/src
+/third_party/catapult
 /third_party/chromeos_login_manager
 /third_party/chromeos_text_input
 /third_party/chromite
@@ -358,7 +363,6 @@ v8.log
 /third_party/perl
 /third_party/platformsdk_win7
 /third_party/platformsdk_win8
-/third_party/polymer
 /third_party/ppapi
 /third_party/psyco_win32
 /third_party/pthreads-win32
@@ -383,7 +387,6 @@ v8.log
 /third_party/swiftshader/include/
 /third_party/syzygy
 /third_party/syzygy/binaries
-/third_party/trace-viewer
 /third_party/tsan/
 /third_party/ub-uiautomator/lib
 /third_party/usb_ids
@@ -391,12 +394,10 @@ v8.log
 /third_party/v8-i18n
 /third_party/valgrind
 /third_party/v4l2capture
-/third_party/web-animations-js
 /third_party/webdriver/pylib
 /third_party/webdriver/python/selenium
 /third_party/webgl
 /third_party/webgl/src
-/third_party/WebKit
 /third_party/webpagereplay/
 /third_party/webrtc
 /third_party/webrtc/internal

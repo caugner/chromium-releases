@@ -33,7 +33,7 @@ namespace mandoline {
 class WindowTreeHostMojo;
 
 class NativeWidgetViewManager : public views::NativeWidgetAura,
-                                       public mojo::ViewObserver {
+                                public mojo::ViewObserver {
  public:
   NativeWidgetViewManager(views::internal::NativeWidgetDelegate* delegate,
                           mojo::Shell* shell,
@@ -50,6 +50,8 @@ class NativeWidgetViewManager : public views::NativeWidgetAura,
   void OnViewBoundsChanged(mojo::View* view,
                            const mojo::Rect& old_bounds,
                            const mojo::Rect& new_bounds) override;
+  void OnViewFocusChanged(mojo::View* gained_focus,
+                          mojo::View* lost_focus) override;
   void OnViewInputEvent(mojo::View* view, const mojo::EventPtr& event) override;
 
   scoped_ptr<WindowTreeHostMojo> window_tree_host_;

@@ -81,10 +81,10 @@
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pepper_permission_util.h"
@@ -108,8 +108,9 @@
 #include "components/rappor/rappor_utils.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/common/translate_switches.h"
-#include "components/url_fixer/url_fixer.h"
+#include "components/url_formatter/url_fixer.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_ppapi_host.h"
@@ -150,7 +151,6 @@
 #include "sandbox/win/src/sandbox_policy.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/chrome_browser_main_mac.h"
-#include "chrome/browser/spellchecker/spellcheck_message_filter_mac.h"
 #elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/attestation/platform_verification_impl.h"
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
@@ -220,12 +220,12 @@
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/accessibility/animation_policy_prefs.h"
 #include "chrome/browser/extensions/chrome_content_browser_client_extensions_part.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/media/cast_transport_host_filter.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
 #include "components/guest_view/browser/guest_view_base.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
@@ -245,6 +245,10 @@
 
 #if defined(ENABLE_SPELLCHECK)
 #include "chrome/browser/spellchecker/spellcheck_message_filter.h"
+#endif
+
+#if defined(USE_BROWSER_SPELLCHECKER)
+#include "chrome/browser/spellchecker/spellcheck_message_filter_platform.h"
 #endif
 
 #if defined(ENABLE_WEBRTC)
@@ -841,8 +845,8 @@ void ChromeContentBrowserClient::RenderProcessWillLaunch(
 #if defined(ENABLE_SPELLCHECK)
   host->AddFilter(new SpellCheckMessageFilter(id));
 #endif
-#if defined(OS_MACOSX)
-  host->AddFilter(new SpellCheckMessageFilterMac(id));
+#if defined(USE_BROWSER_SPELLCHECKER)
+  host->AddFilter(new SpellCheckMessageFilterPlatform(id));
 #endif
   host->AddFilter(new ChromeNetBenchmarkingMessageFilter(profile, context));
   host->AddFilter(new prerender::PrerenderMessageFilter(id, profile));
@@ -898,8 +902,8 @@ GURL ChromeContentBrowserClient::GetEffectiveURL(
 
   // If the input |url| should be assigned to the Instant renderer, make its
   // effective URL distinct from other URLs on the search provider's domain.
-  if (chrome::ShouldAssignURLToInstantRenderer(url, profile))
-    return chrome::GetEffectiveURLForInstant(url, profile);
+  if (search::ShouldAssignURLToInstantRenderer(url, profile))
+    return search::GetEffectiveURLForInstant(url, profile);
 
 #if defined(ENABLE_EXTENSIONS)
   return ChromeContentBrowserClientExtensionsPart::GetEffectiveURL(
@@ -920,7 +924,7 @@ bool ChromeContentBrowserClient::ShouldUseProcessPerSite(
   if (!profile)
     return false;
 
-  if (chrome::ShouldUseProcessPerSiteForInstantURL(effective_url, profile))
+  if (search::ShouldUseProcessPerSiteForInstantURL(effective_url, profile))
     return true;
 
 #if defined(ENABLE_EXTENSIONS)
@@ -989,6 +993,18 @@ bool ChromeContentBrowserClient::CanCommitURL(
 #endif
 }
 
+bool ChromeContentBrowserClient::IsIllegalOrigin(
+    content::ResourceContext* resource_context,
+    int child_process_id,
+    const GURL& origin) {
+#if defined(ENABLE_EXTENSIONS)
+  return ChromeContentBrowserClientExtensionsPart::IsIllegalOrigin(
+      resource_context, child_process_id, origin);
+#else
+  return false;
+#endif
+}
+
 bool ChromeContentBrowserClient::ShouldAllowOpenURL(
     content::SiteInstance* site_instance, const GURL& url) {
   GURL from_url = site_instance->GetSiteURL();
@@ -1031,7 +1047,7 @@ bool ChromeContentBrowserClient::IsSuitableHost(
     bool is_instant_process = instant_service->IsInstantProcess(
         process_host->GetID());
     bool should_be_in_instant_process =
-        chrome::ShouldAssignURLToInstantRenderer(site_url, profile);
+        search::ShouldAssignURLToInstantRenderer(site_url, profile);
     if (is_instant_process || should_be_in_instant_process)
       return is_instant_process && should_be_in_instant_process;
   }
@@ -1088,8 +1104,8 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
 
   // Remember the ID of the Instant process to signal the renderer process
   // on startup in |AppendExtraCommandLineSwitches| below.
-  if (chrome::ShouldAssignURLToInstantRenderer(
-          site_instance->GetSiteURL(), profile)) {
+  if (search::ShouldAssignURLToInstantRenderer(site_instance->GetSiteURL(),
+                                               profile)) {
     InstantService* instant_service =
         InstantServiceFactory::GetForProfile(profile);
     if (instant_service)
@@ -1215,13 +1231,48 @@ void MaybeAppendBlinkSettingsSwitchForFieldTrial(
       }
     }
   }
+
+  // Flags for the ResourcePriorities field trial. The settings are
+  // encoded in the field trial group name instead of as variations
+  // because the variations code is not accessible from the loader.
+  //
+  // The group name encoding looks like this:
+  //  <descriptiveName>_ABCDE_E2_F_G
+  //    A - fetchDeferLateScripts (1 for true, 0 for false)
+  //    B - fetchIncreaseFontPriority (1 for true, 0 for false)
+  //    C - fetchIncreaseAsyncScriptPriority (1 for true, 0 for false)
+  //    D - fetchIncreasePriorities (1 for true, 0 for false)
+  //    E - fetchEnableLayoutBlockingThreshold (1 for true, 0 for false)
+  //    E2 - fetchLayoutBlockingThreshold (Numeric)
+  //    F - fetchMaxNumDelayableWhileLayoutBlocking (Numeric)
+  //    G - fetchMaxNumDelayableRequests (Numeric)
+  //
+  // Only A-D are relevant to blink and exposed as settings
+  // Any group names (Control, Default, etc) will not match the pattern or
+  // flags and will get the default settings which is the expected behavior.
+  std::string resource_priorities_trial_group =
+      base::FieldTrialList::FindFullName("ResourcePriorities");
+  std::vector<std::string> split_group(
+      base::SplitString(resource_priorities_trial_group, "_",
+                        base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL));
+  if (split_group.size() == 5 && split_group[1].length() == 5) {
+    if (split_group[1].at(0) == '1')
+      blink_settings.push_back("fetchDeferLateScripts=true");
+    if (split_group[1].at(1) == '1')
+      blink_settings.push_back("fetchIncreaseFontPriority=true");
+    if (split_group[1].at(2) == '1')
+      blink_settings.push_back("fetchIncreaseAsyncScriptPriority=true");
+    if (split_group[1].at(3) == '1')
+      blink_settings.push_back("fetchIncreasePriorities=true");
+  }
+
   if (blink_settings.empty()) {
     return;
   }
 
   if (browser_command_line.HasSwitch(switches::kBlinkSettings) ||
       command_line->HasSwitch(switches::kBlinkSettings)) {
-    // The field trial is configured to force users that specify the
+    // The field trials should be configured to force users that specify the
     // blink-settings flag into a group with no params, and we return
     // above if no params were specified, so it's an error if we reach
     // this point.
@@ -1231,7 +1282,7 @@ void MaybeAppendBlinkSettingsSwitchForFieldTrial(
   }
 
   command_line->AppendSwitchASCII(switches::kBlinkSettings,
-                                  JoinString(blink_settings, ','));
+                                  base::JoinString(blink_settings, ","));
 }
 
 }  // namespace
@@ -1317,7 +1368,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
 #if defined(ENABLE_WEBRTC)
     MaybeCopyDisableWebRtcEncryptionSwitch(command_line,
                                            browser_command_line,
-                                           VersionInfo::GetChannel());
+                                           chrome::GetChannel());
 #endif
 
     if (process) {
@@ -1409,12 +1460,12 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       autofill::switches::kEnableFillOnAccountSelectNoHighlighting,
       autofill::switches::kEnablePasswordGeneration,
       autofill::switches::kEnableSingleClickAutofill,
+      autofill::switches::kEnableSuggestionsWithSubstringMatch,
       autofill::switches::kIgnoreAutocompleteOffForAutofill,
       autofill::switches::kLocalHeuristicsOnlyForPasswordGeneration,
 #if defined(ENABLE_EXTENSIONS)
       extensions::switches::kAllowHTTPBackgroundPage,
       extensions::switches::kAllowLegacyExtensionManifests,
-      extensions::switches::kEnableSurfaceWorker,
       extensions::switches::kEnableAppWindowControls,
       extensions::switches::kEnableEmbeddedExtensionOptions,
       extensions::switches::kEnableExperimentalExtensionApis,
@@ -1422,7 +1473,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       extensions::switches::kWhitelistedExtensionID,
 #endif
       switches::kAllowInsecureLocalhost,
-      switches::kAppsCheckoutURL,
       switches::kAppsGalleryURL,
       switches::kCloudPrintURL,
       switches::kCloudPrintXmppEndpoint,
@@ -1430,6 +1480,9 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kDisableCastStreamingHWEncoding,
       switches::kDisableJavaScriptHarmonyShipping,
       switches::kDisableNewBookmarkApps,
+#if defined(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
+      switches::kEnableAndroidSpellChecker,
+#endif
       switches::kEnableBenchmarking,
       switches::kEnableNaCl,
 #if !defined(DISABLE_NACL)
@@ -2175,8 +2228,8 @@ void ChromeContentBrowserClient::BrowserURLHandlerCreated(
                           BrowserURLHandler::null_handler());
 #else
   // Handler to rewrite chrome://newtab for InstantExtended.
-  handler->AddHandlerPair(&chrome::HandleNewTabURLRewrite,
-                          &chrome::HandleNewTabURLReverseRewrite);
+  handler->AddHandlerPair(&search::HandleNewTabURLRewrite,
+                          &search::HandleNewTabURLReverseRewrite);
 #endif
 
   // chrome: & friends.
@@ -2209,6 +2262,13 @@ base::FilePath ChromeContentBrowserClient::GetDefaultDownloadDirectory() {
 
 std::string ChromeContentBrowserClient::GetDefaultDownloadName() {
   return l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME);
+}
+
+base::FilePath ChromeContentBrowserClient::GetShaderDiskCacheDirectory() {
+  base::FilePath user_data_dir;
+  PathService::Get(DIR_USER_DATA, &user_data_dir);
+  DCHECK(!user_data_dir.empty());
+  return user_data_dir.Append(FILE_PATH_LITERAL("ShaderCache"));
 }
 
 void ChromeContentBrowserClient::DidCreatePpapiPlugin(
@@ -2354,12 +2414,11 @@ base::string16 ChromeContentBrowserClient::GetAppContainerSidForSandboxType(
   base::string16 sid;
 
 #if defined(GOOGLE_CHROME_BUILD)
-  const chrome::VersionInfo::Channel channel =
-      chrome::VersionInfo::GetChannel();
+  const version_info::Channel channel = chrome::GetChannel();
 
   // It's possible to have a SxS installation running at the same time as a
   // non-SxS so isolate them from each other.
-  if (channel == chrome::VersionInfo::CHANNEL_CANARY) {
+  if (channel == version_info::Channel::CANARY) {
     sid.assign(
         L"S-1-15-2-3251537155-1984446955-2931258699-841473695-1938553385-"
         L"924012150-");
@@ -2383,7 +2442,7 @@ base::string16 ChromeContentBrowserClient::GetAppContainerSidForSandboxType(
     case content::SANDBOX_TYPE_GPU:
       return base::string16();
     case content::SANDBOX_TYPE_PPAPI:
-      return base::string16();
+      return sid + L"129201925";
 #if !defined(DISABLE_NACL)
     case PROCESS_TYPE_NACL_LOADER:
       return base::string16();
@@ -2425,7 +2484,7 @@ void ChromeContentBrowserClient::PreSpawnRenderer(
 }
 #endif
 
-void ChromeContentBrowserClient::OverrideFrameMojoShellServices(
+void ChromeContentBrowserClient::RegisterFrameMojoShellServices(
     content::ServiceRegistry* registry,
     content::RenderFrameHost* render_frame_host) {
 #if defined(OS_CHROMEOS)
@@ -2435,7 +2494,7 @@ void ChromeContentBrowserClient::OverrideFrameMojoShellServices(
 #endif
 }
 
-void ChromeContentBrowserClient::RegisterMojoApplications(
+void ChromeContentBrowserClient::RegisterInProcessMojoApplications(
     StaticMojoApplicationMap* apps) {
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   apps->insert(std::make_pair(GURL(device::kDevicesMojoAppUrl),
@@ -2471,7 +2530,8 @@ content::PresentationServiceDelegate*
 ChromeContentBrowserClient::GetPresentationServiceDelegate(
       content::WebContents* web_contents) {
 #if defined(ENABLE_MEDIA_ROUTER)
-  if (switches::MediaRouterEnabled()) {
+  if (switches::MediaRouterEnabled() &&
+      !web_contents->GetBrowserContext()->IsOffTheRecord()) {
     return media_router::PresentationServiceDelegateImpl::
         GetOrCreateForWebContents(web_contents);
   }
@@ -2547,13 +2607,13 @@ void ChromeContentBrowserClient::OverridePageVisibilityState(
 void ChromeContentBrowserClient::MaybeCopyDisableWebRtcEncryptionSwitch(
     base::CommandLine* to_command_line,
     const base::CommandLine& from_command_line,
-    VersionInfo::Channel channel) {
+    version_info::Channel channel) {
 #if defined(OS_ANDROID)
-  const VersionInfo::Channel kMaxDisableEncryptionChannel =
-      VersionInfo::CHANNEL_BETA;
+  const version_info::Channel kMaxDisableEncryptionChannel =
+      version_info::Channel::BETA;
 #else
-  const VersionInfo::Channel kMaxDisableEncryptionChannel =
-      VersionInfo::CHANNEL_DEV;
+  const version_info::Channel kMaxDisableEncryptionChannel =
+      version_info::Channel::DEV;
 #endif
   if (channel <= kMaxDisableEncryptionChannel) {
     static const char* const kWebRtcDevSwitchNames[] = {

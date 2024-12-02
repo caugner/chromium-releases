@@ -111,10 +111,6 @@
 #include "components/gcm_driver/gcm_client_factory.h"
 #endif
 
-#if defined(USE_AURA)
-#include "ui/aura/env.h"
-#endif
-
 #if defined(ENABLE_BACKGROUND)
 #include "chrome/browser/background/background_mode_manager.h"
 #endif
@@ -147,7 +143,7 @@
 #include "chrome/browser/media/webrtc_log_uploader.h"
 #endif
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 #include "chrome/browser/memory/oom_priority_manager.h"
 #endif
 
@@ -314,12 +310,6 @@ void BrowserProcessImpl::StartTearDown() {
 
   // Stop the watchdog thread before stopping other threads.
   watchdog_thread_.reset();
-
-#if defined(USE_AURA)
-  // Delete aura after the metrics service has been deleted as it accesses
-  // monitor information.
-  aura::Env::DeleteInstance();
-#endif
 
   platform_part()->StartTearDown();
 
@@ -774,7 +764,7 @@ gcm::GCMDriver* BrowserProcessImpl::gcm_driver() {
 
 memory::OomPriorityManager* BrowserProcessImpl::GetOomPriorityManager() {
   DCHECK(CalledOnValidThread());
-#if defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   if (!oom_priority_manager_.get())
     oom_priority_manager_.reset(new memory::OomPriorityManager());
   return oom_priority_manager_.get();

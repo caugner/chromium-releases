@@ -12,9 +12,7 @@
 #include "ash/accelerators/debug_commands.h"
 #include "ash/ash_switches.h"
 #include "ash/debug.h"
-#include "ash/display/display_controller.h"
-#include "ash/display/display_manager.h"
-#include "ash/display/display_util.h"
+#include "ash/display/window_tree_host_manager.h"
 #include "ash/focus_cycler.h"
 #include "ash/gpu_support.h"
 #include "ash/ime_control_delegate.h"
@@ -258,6 +256,9 @@ gfx::Display::Rotation GetNextRotation(gfx::Display::Rotation current) {
 
 // Rotates the screen.
 void HandleRotateScreen() {
+  if (Shell::GetInstance()->display_manager()->IsInUnifiedMode())
+    return;
+
   base::RecordAction(UserMetricsAction("Accel_Rotate_Window"));
   gfx::Point point = Shell::GetScreen()->GetCursorScreenPoint();
   gfx::Display display = Shell::GetScreen()->GetDisplayNearestPoint(point);
@@ -283,42 +284,6 @@ void HandleRotateActiveWindow() {
         new ui::LayerAnimationSequence(
             new ash::WindowRotation(360, active_window->layer())));
   }
-}
-
-bool CanHandleScaleReset() {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  return (display_id != gfx::Display::kInvalidDisplayID &&
-          display_manager->GetDisplayInfo(display_id).configured_ui_scale() !=
-              1.0f);
-}
-
-void HandleScaleReset() {
-  base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Reset"));
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  display_manager->SetDisplayUIScale(display_id, 1.0f);
-}
-
-bool CanHandleScaleUI() {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-  return display_id != gfx::Display::kInvalidDisplayID;
-}
-
-void HandleScaleUI(bool up) {
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  int64 display_id = display_manager->GetDisplayIdForUIScaling();
-
-  if (up) {
-    base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Up"));
-  } else {
-    base::RecordAction(UserMetricsAction("Accel_Scale_Ui_Down"));
-  }
-
-  const DisplayInfo& display_info = display_manager->GetDisplayInfo(display_id);
-  float next_scale = GetNextUIScale(display_info, up);
-  display_manager->SetDisplayUIScale(display_id, next_scale);
 }
 
 void HandleShowKeyboardOverlay() {
@@ -549,7 +514,7 @@ void HandleSilenceSpokenFeedback() {
 
 void HandleSwapPrimaryDisplay() {
   base::RecordAction(UserMetricsAction("Accel_Swap_Primary_Display"));
-  Shell::GetInstance()->display_controller()->SwapPrimaryDisplay();
+  Shell::GetInstance()->window_tree_host_manager()->SwapPrimaryDisplay();
 }
 
 bool CanHandleCycleUser() {
@@ -598,7 +563,7 @@ void HandleToggleCapsLock() {
 
 void HandleToggleMirrorMode() {
   base::RecordAction(UserMetricsAction("Accel_Toggle_Mirror_Mode"));
-  Shell::GetInstance()->display_controller()->ToggleMirrorMode();
+  Shell::GetInstance()->window_tree_host_manager()->ToggleMirrorMode();
 }
 
 void HandleToggleSpokenFeedback() {
@@ -870,10 +835,9 @@ bool AcceleratorController::CanPerformAction(
     case PREVIOUS_IME:
       return CanHandlePreviousIme(ime_control_delegate_.get());
     case SCALE_UI_RESET:
-      return CanHandleScaleReset();
     case SCALE_UI_UP:
     case SCALE_UI_DOWN:
-      return CanHandleScaleUI();
+      return accelerators::IsInternalDisplayZoomEnabled();
     case SHOW_MESSAGE_CENTER_BUBBLE:
       return CanHandleShowMessageCenterBubble();
     case SWITCH_IME:
@@ -887,6 +851,7 @@ bool AcceleratorController::CanPerformAction(
       return CanHandlePositionCenter();
 #if defined(OS_CHROMEOS)
     case DEBUG_ADD_REMOVE_DISPLAY:
+    case DEBUG_TOGGLE_UNIFIED_DESKTOP:
       return debug::DebugAcceleratorsEnabled();
     case DISABLE_CAPS_LOCK:
       return CanHandleDisableCapsLock(previous_accelerator);
@@ -1082,13 +1047,13 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
       HandleRotateActiveWindow();
       break;
     case SCALE_UI_DOWN:
-      HandleScaleUI(false /* down */);
+      accelerators::ZoomInternalDisplay(false /* down */);
       break;
     case SCALE_UI_RESET:
-      HandleScaleReset();
+      accelerators::ResetInternalDisplayZoom();
       break;
     case SCALE_UI_UP:
-      HandleScaleUI(true /* up */);
+      accelerators::ZoomInternalDisplay(true /* up */);
       break;
     case SHOW_KEYBOARD_OVERLAY:
       HandleShowKeyboardOverlay();
@@ -1141,6 +1106,9 @@ void AcceleratorController::PerformAction(AcceleratorAction action,
       HandleBrightnessUp(brightness_control_delegate_.get(), accelerator);
       break;
     case DEBUG_ADD_REMOVE_DISPLAY:
+      debug::PerformDebugActionIfEnabled(action);
+      break;
+    case DEBUG_TOGGLE_UNIFIED_DESKTOP:
       debug::PerformDebugActionIfEnabled(action);
       break;
     case DISABLE_CAPS_LOCK:

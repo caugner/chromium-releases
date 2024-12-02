@@ -11,7 +11,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/sessions/session_id.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -68,6 +67,9 @@ class AppWindowContents {
 
   // Called in tests when the window is shown
   virtual void DispatchWindowShownForTests() const = 0;
+
+  // Called when the renderer notifies the browser that the window is ready.
+  virtual void OnWindowReady() = 0;
 
   virtual content::WebContents* GetWebContents() const = 0;
 
@@ -342,6 +344,10 @@ class AppWindow : public content::WebContentsDelegate,
   // app.
   void WindowEventsReady();
 
+  // Notifies the window's contents that the render view is ready and it can
+  // unblock resource requests.
+  void NotifyRenderViewReady();
+
   // Whether the app window wants to be alpha enabled.
   bool requested_alpha_enabled() const { return requested_alpha_enabled_; }
 
@@ -423,11 +429,6 @@ class AppWindow : public content::WebContentsDelegate,
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
                            const Extension* extension,
                            UnloadedExtensionInfo::Reason reason) override;
-  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
-                                  const Extension* extension,
-                                  bool is_update,
-                                  bool from_ephemeral,
-                                  const std::string& old_name) override;
 
   // web_modal::WebContentsModalDialogManagerDelegate implementation.
   void SetWebContentsBlocked(content::WebContents* web_contents,
@@ -513,10 +514,6 @@ class AppWindow : public content::WebContentsDelegate,
 
   // The initial url this AppWindow was navigated to.
   GURL initial_url_;
-
-  // Manages popup windows (bubbles, tab-modals) visible overlapping the
-  // app window.
-  scoped_ptr<web_modal::PopupManager> popup_manager_;
 
   // Bit field of FullscreenType.
   int fullscreen_types_;

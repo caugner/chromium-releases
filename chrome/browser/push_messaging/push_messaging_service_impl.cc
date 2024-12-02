@@ -164,9 +164,8 @@ void PushMessagingServiceImpl::ShutdownHandler() {
 
 // OnMessage methods -----------------------------------------------------------
 
-void PushMessagingServiceImpl::OnMessage(
-    const std::string& app_id,
-    const gcm::GCMClient::IncomingMessage& message) {
+void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
+                                         const gcm::IncomingMessage& message) {
   in_flight_message_deliveries_.insert(app_id);
 
   base::Closure message_handled_closure =
@@ -212,9 +211,8 @@ void PushMessagingServiceImpl::OnMessage(
   std::string data;
   // TODO(peter): Message payloads are disabled pending mandatory encryption.
   // https://crbug.com/449184
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnablePushMessagePayload)) {
-    gcm::GCMClient::MessageData::const_iterator it = message.data.find("data");
+  if (AreMessagePayloadsEnabled()) {
+    gcm::MessageData::const_iterator it = message.data.find("data");
     if (it != message.data.end())
       data = it->second;
   }
@@ -235,7 +233,7 @@ void PushMessagingServiceImpl::DeliverMessageCallback(
     const std::string& app_id,
     const GURL& requesting_origin,
     int64 service_worker_registration_id,
-    const gcm::GCMClient::IncomingMessage& message,
+    const gcm::IncomingMessage& message,
     const base::Closure& message_handled_closure,
     content::PushDeliveryStatus status) {
   // Remove a single in-flight delivery for |app_id|. This has to be done using
@@ -332,8 +330,8 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
 
   if (push_subscription_count_ + pending_push_subscription_count_ >=
       kMaxRegistrations) {
-    SubscribeEnd(callback, std::string(),
-                 content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
+    SubscribeEndWithError(callback,
+                          content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
     return;
   }
 
@@ -349,14 +347,12 @@ void PushMessagingServiceImpl::SubscribeFromDocument(
         content::CONSOLE_MESSAGE_LEVEL_ERROR,
         kSilentPushUnsupportedMessage);
 
-    SubscribeEnd(callback,
-                 std::string(),
-                 content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
+    SubscribeEndWithError(callback,
+                          content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
     return;
   }
 
-  // TODO(miguelg) need to send this over IPC when bubble support is
-  // implemented.
+  // Push does not allow permission requests from iframes.
   int request_id = -1;
 
   profile_->GetPermissionManager()->RequestPermission(
@@ -379,13 +375,10 @@ void PushMessagingServiceImpl::SubscribeFromWorker(
 
   if (profile_->GetPrefs()->GetInteger(
           prefs::kPushMessagingRegistrationCount) >= kMaxRegistrations) {
-    SubscribeEnd(register_callback, std::string(),
-                 content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
+    SubscribeEndWithError(register_callback,
+                          content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
     return;
   }
-
-  // TODO(peter): Consider |user_visible| when getting the permission status
-  // for registering from a worker.
 
   GURL embedding_origin = requesting_origin;
   blink::WebPushPermissionStatus permission_status =
@@ -393,8 +386,8 @@ void PushMessagingServiceImpl::SubscribeFromWorker(
                                                     embedding_origin,
                                                     user_visible);
   if (permission_status != blink::WebPushPermissionStatusGranted) {
-    SubscribeEnd(register_callback, std::string(),
-                 content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
+    SubscribeEndWithError(register_callback,
+                          content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
     return;
   }
 
@@ -410,7 +403,8 @@ blink::WebPushPermissionStatus PushMessagingServiceImpl::GetPermissionStatus(
     const GURL& requesting_origin,
     const GURL& embedding_origin,
     bool user_visible) {
-  // TODO(peter): Consider |user_visible| when checking Push permission.
+  if (!user_visible)
+    return blink::WebPushPermissionStatusDenied;
 
   return ToPushPermission(profile_->GetPermissionManager()->GetPermissionStatus(
       content::PermissionType::PUSH_MESSAGING, requesting_origin,
@@ -424,8 +418,16 @@ bool PushMessagingServiceImpl::SupportNonVisibleMessages() {
 void PushMessagingServiceImpl::SubscribeEnd(
     const content::PushMessagingService::RegisterCallback& callback,
     const std::string& subscription_id,
+    const std::vector<uint8_t>& curve25519dh,
     content::PushRegistrationStatus status) {
-  callback.Run(subscription_id, status);
+  callback.Run(subscription_id, curve25519dh, status);
+}
+
+void PushMessagingServiceImpl::SubscribeEndWithError(
+    const content::PushMessagingService::RegisterCallback& callback,
+    content::PushRegistrationStatus status) {
+  SubscribeEnd(callback, std::string() /* subscription_id */,
+               std::vector<uint8_t>() /* curve25519dh */, status);
 }
 
 void PushMessagingServiceImpl::DidSubscribe(
@@ -433,14 +435,32 @@ void PushMessagingServiceImpl::DidSubscribe(
     const content::PushMessagingService::RegisterCallback& callback,
     const std::string& subscription_id,
     gcm::GCMClient::Result result) {
+  DecreasePushSubscriptionCount(1, true /* was_pending */);
+
   content::PushRegistrationStatus status =
       content::PUSH_REGISTRATION_STATUS_SERVICE_ERROR;
+
   switch (result) {
     case gcm::GCMClient::SUCCESS:
-      status = content::PUSH_REGISTRATION_STATUS_SUCCESS_FROM_PUSH_SERVICE;
-      app_identifier.PersistToPrefs(profile_);
-      IncreasePushSubscriptionCount(1, false /* is_pending */);
-      break;
+      // Do not get a certificate if message payloads have not been enabled.
+      if (!AreMessagePayloadsEnabled()) {
+        DidSubscribeWithPublicKey(
+            app_identifier, callback, subscription_id,
+            std::string() /* public_key */);
+        return;
+      }
+
+      // Make sure that this subscription has associated encryption keys prior
+      // to returning it to the developer - they'll need this information in
+      // order to send payloads to the user.
+      GetGCMDriver()->GetPublicKey(
+          app_identifier.app_id(),
+          base::Bind(
+              &PushMessagingServiceImpl::DidSubscribeWithPublicKey,
+              weak_factory_.GetWeakPtr(), app_identifier, callback,
+              subscription_id));
+
+      return;
     case gcm::GCMClient::INVALID_PARAMETER:
     case gcm::GCMClient::GCM_DISABLED:
     case gcm::GCMClient::ASYNC_OPERATION_PENDING:
@@ -453,8 +473,28 @@ void PushMessagingServiceImpl::DidSubscribe(
       status = content::PUSH_REGISTRATION_STATUS_NETWORK_ERROR;
       break;
   }
-  SubscribeEnd(callback, subscription_id, status);
-  DecreasePushSubscriptionCount(1, true /* was_pending */);
+
+  SubscribeEndWithError(callback, status);
+}
+
+void PushMessagingServiceImpl::DidSubscribeWithPublicKey(
+    const PushMessagingAppIdentifier& app_identifier,
+    const content::PushMessagingService::RegisterCallback& callback,
+    const std::string& subscription_id,
+    const std::string& public_key) {
+  if (!public_key.size() && AreMessagePayloadsEnabled()) {
+    SubscribeEndWithError(
+        callback, content::PUSH_REGISTRATION_STATUS_PUBLIC_KEY_UNAVAILABLE);
+    return;
+  }
+
+  app_identifier.PersistToPrefs(profile_);
+
+  IncreasePushSubscriptionCount(1, false /* is_pending */);
+
+  SubscribeEnd(callback, subscription_id,
+               std::vector<uint8_t>(public_key.begin(), public_key.end()),
+               content::PUSH_REGISTRATION_STATUS_SUCCESS_FROM_PUSH_SERVICE);
 }
 
 void PushMessagingServiceImpl::DidRequestPermission(
@@ -463,9 +503,8 @@ void PushMessagingServiceImpl::DidRequestPermission(
     const content::PushMessagingService::RegisterCallback& register_callback,
     content::PermissionStatus permission_status) {
   if (permission_status != content::PERMISSION_STATUS_GRANTED) {
-    SubscribeEnd(register_callback,
-                 std::string(),
-                 content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
+    SubscribeEndWithError(register_callback,
+                          content::PUSH_REGISTRATION_STATUS_PERMISSION_DENIED);
     return;
   }
 
@@ -475,6 +514,40 @@ void PushMessagingServiceImpl::DidRequestPermission(
                            base::Bind(&PushMessagingServiceImpl::DidSubscribe,
                                       weak_factory_.GetWeakPtr(),
                                       app_identifier, register_callback));
+}
+
+// GetPublicEncryptionKey methods ----------------------------------------------
+
+void PushMessagingServiceImpl::GetPublicEncryptionKey(
+    const GURL& origin,
+    int64_t service_worker_registration_id,
+    const PushMessagingService::PublicKeyCallback& callback) {
+  // An empty public key will be returned if payloads are not enabled.
+  if (!AreMessagePayloadsEnabled()) {
+    callback.Run(true /* success */, std::vector<uint8_t>());
+    return;
+  }
+
+  PushMessagingAppIdentifier app_identifier =
+      PushMessagingAppIdentifier::FindByServiceWorker(
+          profile_, origin, service_worker_registration_id);
+
+  DCHECK(!app_identifier.is_null());
+
+  GetGCMDriver()->GetPublicKey(
+      app_identifier.app_id(),
+      base::Bind(&PushMessagingServiceImpl::DidGetPublicKey,
+                 weak_factory_.GetWeakPtr(), callback));
+}
+
+void PushMessagingServiceImpl::DidGetPublicKey(
+    const PushMessagingService::PublicKeyCallback& callback,
+    const std::string& public_key) const {
+  // I/O errors might prevent the GCM Driver from retrieving a key-pair.
+  const bool success = !!public_key.size();
+
+  callback.Run(success, std::vector<uint8_t>(public_key.begin(),
+                                             public_key.end()));
 }
 
 // Unsubscribe methods ---------------------------------------------------------
@@ -651,6 +724,11 @@ void PushMessagingServiceImpl::Shutdown() {
 bool PushMessagingServiceImpl::IsPermissionSet(const GURL& origin) {
   return GetPermissionStatus(origin, origin, true /* user_visible */) ==
          blink::WebPushPermissionStatusGranted;
+}
+
+bool PushMessagingServiceImpl::AreMessagePayloadsEnabled() const {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnablePushMessagePayload);
 }
 
 gcm::GCMDriver* PushMessagingServiceImpl::GetGCMDriver() const {

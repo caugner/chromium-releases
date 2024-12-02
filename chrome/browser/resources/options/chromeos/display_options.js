@@ -203,8 +203,9 @@ cr.define('options', function() {
     initializePage: function() {
       Page.prototype.initializePage.call(this);
 
-      $('display-options-toggle-mirroring').onclick = (function() {
-        this.mirroring_ = !this.mirroring_;
+      $('display-options-select-mirroring').onchange = (function() {
+        this.mirroring_ =
+            $('display-options-select-mirroring').value == 'mirroring';
         chrome.send('setMirroring', [this.mirroring_]);
       }).bind(this);
 
@@ -636,7 +637,7 @@ cr.define('options', function() {
     updateSelectedDisplaySectionMirroring_: function() {
       $('display-configuration-arrow').hidden = true;
       $('display-options-set-primary').disabled = true;
-      $('display-options-toggle-mirroring').disabled = false;
+      $('display-options-select-mirroring').disabled = false;
       $('selected-display-start-calibrating-overscan').disabled = true;
       var display = this.displays_[0];
       var orientation = $('display-options-orientation-selection');
@@ -661,7 +662,7 @@ cr.define('options', function() {
     updateSelectedDisplaySectionNoSelected_: function() {
       $('display-configuration-arrow').hidden = true;
       $('display-options-set-primary').disabled = true;
-      $('display-options-toggle-mirroring').disabled = true;
+      $('display-options-select-mirroring').disabled = true;
       $('selected-display-start-calibrating-overscan').disabled = true;
       $('display-options-orientation-selection').disabled = true;
       $('selected-display-name').textContent = '';
@@ -687,13 +688,14 @@ cr.define('options', function() {
           display.div.offsetWidth / 2 - arrow.offsetWidth / 2 + 'px';
 
       $('display-options-set-primary').disabled = display.isPrimary;
-      $('display-options-toggle-mirroring').disabled =
-          (this.displays_.length <= 1);
+      $('display-options-select-mirroring').disabled =
+          (this.displays_.length <= 1 && !this.unifiedDesktopEnabled_);
       $('selected-display-start-calibrating-overscan').disabled =
           display.isInternal;
 
       var orientation = $('display-options-orientation-selection');
-      orientation.disabled = false;
+      orientation.disabled = this.unifiedDesktopEnabled_;
+
       var orientationOptions = orientation.getElementsByTagName('option');
       orientationOptions[display.orientation].selected = true;
 
@@ -994,13 +996,9 @@ cr.define('options', function() {
       var mirroring = mode == options.MultiDisplayMode.MIRRORING;
       var unifiedDesktopEnabled = mode == options.MultiDisplayMode.UNIFIED;
 
-      $('display-options-toggle-mirroring').textContent =
-          loadTimeData.getString(
-              mirroring ? 'stopMirroring' : 'startMirroring');
-
       // Focus to the first display next to the primary one when |displays| list
       // is updated.
-      if (mirroring || unifiedDesktopEnabled) {
+      if (mirroring) {
         this.focusedIndex_ = null;
       } else if (this.mirroring_ != mirroring ||
                  this.unifiedDesktopEnabled_ != unifiedDesktopEnabled ||

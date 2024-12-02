@@ -48,10 +48,8 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
-#include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/extensions/api/tabs/tabs_event_router.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/browser_extension_window_controller.h"
@@ -136,6 +134,7 @@
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
+#include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/toolbar/toolbar_model_impl.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/validation_message_bubble.h"
@@ -160,17 +159,13 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
-#include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/search/search.h"
 #include "components/sessions/session_types.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/zoom_controller.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/download_item.h"
-#include "content/public/browser/download_manager.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
@@ -189,6 +184,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/renderer_preferences.h"
+#include "content/public/common/ssl_status.h"
 #include "content/public/common/webplugininfo.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -419,7 +415,7 @@ Browser::Browser(const CreateParams& params)
   encoding_auto_detect_.Init(prefs::kWebKitUsesUniversalDetector,
                              profile_->GetPrefs());
 
-  if (chrome::IsInstantExtendedAPIEnabled() && is_type_tabbed())
+  if (search::IsInstantExtendedAPIEnabled() && is_type_tabbed())
     instant_controller_.reset(new BrowserInstantController(this));
 
   if (extensions::HostedAppBrowserController::IsForHostedApp(this)) {
@@ -456,12 +452,6 @@ Browser::Browser(const CreateParams& params)
 
   exclusive_access_manager_.reset(
       new ExclusiveAccessManager(window_->GetExclusiveAccessContext()));
-
-  // Must be initialized after window_.
-  // Also: surprise! a modal dialog host is not necessary to host modal dialogs
-  // without a modal dialog host, so that value may be null.
-  popup_manager_.reset(new web_modal::PopupManager(
-      GetWebContentsModalDialogHost()));
 
   // TODO(beng): Move BrowserList::AddBrowser() to the end of this function and
   //             replace uses of this with BL's notifications.
@@ -942,9 +932,6 @@ void Browser::TabInsertedAt(WebContents* contents,
                             bool foreground) {
   SetAsDelegate(contents, true);
 
-  if (popup_manager_)
-    popup_manager_->RegisterWith(contents);
-
   SessionTabHelper* session_tab_helper =
       SessionTabHelper::FromWebContents(contents);
   session_tab_helper->SetWindowID(session_id());
@@ -986,9 +973,6 @@ void Browser::TabClosingAt(TabStripModel* tab_strip_model,
       content::Source<NavigationController>(&contents->GetController()),
       content::NotificationService::NoDetails());
 
-  if (popup_manager_)
-    popup_manager_->UnregisterWith(contents);
-
   // Sever the WebContents' connection back to us.
   SetAsDelegate(contents, false);
 }
@@ -1004,9 +988,6 @@ void Browser::TabDetachedAt(WebContents* contents, int index) {
       session_service->SetSelectedTabInWindow(session_id(),
                                               old_active_index - 1);
   }
-
-  if (popup_manager_)
-    popup_manager_->UnregisterWith(contents);
 
   TabDetachedAtImpl(contents, index, DETACH_TYPE_DETACH);
 }
@@ -1058,7 +1039,7 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   // Propagate the profile to the location bar.
   UpdateToolbar((reason & CHANGE_REASON_REPLACED) == 0);
 
-  if (chrome::IsInstantExtendedAPIEnabled())
+  if (search::IsInstantExtendedAPIEnabled())
     search_delegate_->OnTabActivated(new_contents);
 
   // Update reload/stop state.
@@ -1214,7 +1195,7 @@ bool Browser::ShouldPreserveAbortedURLs(WebContents* source) {
   if (!profile || !source->GetController().GetLastCommittedEntry())
     return false;
   GURL committed_url(source->GetController().GetLastCommittedEntry()->GetURL());
-  return chrome::IsNTPURL(committed_url, profile);
+  return search::IsNTPURL(committed_url, profile);
 }
 
 void Browser::SetFocusToLocationBar(bool select_all) {
@@ -1312,8 +1293,24 @@ content::SecurityStyle Browser::GetSecurityStyle(
   connection_security::GetSecurityInfoForWebContents(web_contents,
                                                      &security_info);
 
-  if (security_info.security_style == content::SECURITY_STYLE_UNKNOWN)
+  security_style_explanations->ran_insecure_content_style =
+      connection_security::kRanInsecureContentStyle;
+  security_style_explanations->displayed_insecure_content_style =
+      connection_security::kDisplayedInsecureContentStyle;
+
+  // Check if the page is HTTP; if so, no explanations are needed. Note
+  // that SECURITY_STYLE_UNAUTHENTICATED does not necessarily mean that
+  // the page is loaded over HTTP, because the security style merely
+  // represents how the embedder wishes to display the security state of
+  // the page, and the embedder can choose to display HTTPS page as HTTP
+  // if it wants to (for example, displaying deprecated crypto
+  // algorithms with the same UI treatment as HTTP pages).
+  security_style_explanations->scheme_is_cryptographic =
+      security_info.scheme_is_cryptographic;
+  if (!security_info.scheme_is_cryptographic ||
+      security_info.security_style == content::SECURITY_STYLE_UNKNOWN) {
     return security_info.security_style;
+  }
 
   if (security_info.sha1_deprecation_status ==
       connection_security::DEPRECATED_SHA1_BROKEN) {
@@ -1329,19 +1326,16 @@ content::SecurityStyle Browser::GetSecurityStyle(
             l10n_util::GetStringUTF8(IDS_WARNING_SHA1_DESCRIPTION)));
   }
 
-  if (security_info.mixed_content_status ==
-      connection_security::RAN_MIXED_CONTENT) {
-    security_style_explanations->broken_explanations.push_back(
-        content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_ACTIVE_MIXED_CONTENT),
-            l10n_util::GetStringUTF8(IDS_ACTIVE_MIXED_CONTENT_DESCRIPTION)));
-  } else if (security_info.mixed_content_status ==
-             connection_security::DISPLAYED_MIXED_CONTENT) {
-    security_style_explanations->warning_explanations.push_back(
-        content::SecurityStyleExplanation(
-            l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT),
-            l10n_util::GetStringUTF8(IDS_PASSIVE_MIXED_CONTENT_DESCRIPTION)));
-  }
+  security_style_explanations->ran_insecure_content =
+      security_info.mixed_content_status ==
+          connection_security::RAN_MIXED_CONTENT ||
+      security_info.mixed_content_status ==
+          connection_security::RAN_AND_DISPLAYED_MIXED_CONTENT;
+  security_style_explanations->displayed_insecure_content =
+      security_info.mixed_content_status ==
+          connection_security::DISPLAYED_MIXED_CONTENT ||
+      security_info.mixed_content_status ==
+          connection_security::RAN_AND_DISPLAYED_MIXED_CONTENT;
 
   if (net::IsCertStatusError(security_info.cert_status)) {
     base::string16 error_string = base::UTF8ToUTF16(net::ErrorToString(
@@ -1356,6 +1350,18 @@ content::SecurityStyle Browser::GetSecurityStyle(
       security_style_explanations->warning_explanations.push_back(explanation);
     else
       security_style_explanations->broken_explanations.push_back(explanation);
+  } else {
+    // If the certificate does not have errors and is not using
+    // deprecated SHA1, then add an explanation that the certificate is
+    // valid.
+    if (security_info.sha1_deprecation_status ==
+        connection_security::NO_DEPRECATED_SHA1) {
+      security_style_explanations->secure_explanations.push_back(
+          content::SecurityStyleExplanation(
+              l10n_util::GetStringUTF8(IDS_VALID_SERVER_CERTIFICATE),
+              l10n_util::GetStringUTF8(
+                  IDS_VALID_SERVER_CERTIFICATE_DESCRIPTION)));
+    }
   }
 
   return security_info.security_style;
@@ -1403,32 +1409,6 @@ void Browser::OnWindowDidShow() {
 
 void Browser::ShowFirstRunBubble() {
   window()->GetLocationBar()->ShowFirstRunBubble();
-}
-
-void Browser::ShowDownload(content::DownloadItem* download) {
-  if (!window())
-    return;
-
-  // If the download occurs in a new tab, and it's not a save page
-  // download (started before initial navigation completed) close it.
-  // Avoid calling CloseContents if the tab is not in this browser's tab strip
-  // model; this can happen if the download was initiated by something internal
-  // to Chrome, such as by the app list.
-  WebContents* source = download->GetWebContents();
-  if (source && source->GetController().IsInitialNavigation() &&
-      tab_strip_model_->count() > 1 &&
-      tab_strip_model_->GetIndexOfWebContents(source) !=
-          TabStripModel::kNoTab &&
-      !download->IsSavePackageDownload()) {
-    CloseContents(source);
-  }
-
-  // Some (app downloads) are not supposed to appear on the shelf.
-  if (!DownloadItemModel(download).ShouldShowInShelf())
-    return;
-
-  // GetDownloadShelf creates the download shelf if it was not yet created.
-  window()->GetDownloadShelf()->AddDownload(download);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1638,7 +1618,7 @@ bool Browser::ShouldFocusLocationBarByDefault(WebContents* source) {
     }
   }
 
-  return chrome::NavEntryIsInstantNTP(source, entry);
+  return search::NavEntryIsInstantNTP(source, entry);
 }
 
 void Browser::ViewSourceForTab(WebContents* source, const GURL& page_url) {
@@ -1720,13 +1700,6 @@ void Browser::RendererUnresponsive(WebContents* source) {
 
 void Browser::RendererResponsive(WebContents* source) {
   TabDialogs::FromWebContents(source)->HideHungRendererDialog();
-}
-
-void Browser::WorkerCrashed(WebContents* source) {
-  SimpleAlertInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(source),
-      infobars::InfoBarDelegate::kNoIconID,
-      l10n_util::GetStringUTF16(IDS_WEBWORKER_CRASHED_PROMPT), true);
 }
 
 void Browser::DidNavigateMainFramePostCommit(WebContents* web_contents) {
@@ -1913,7 +1886,7 @@ gfx::Size Browser::GetSizeForNewRenderView(WebContents* web_contents) const {
   const NavigationEntry* pending_entry =
       web_contents->GetController().GetPendingEntry();
   if (pending_entry &&
-      !chrome::IsNTPURL(pending_entry->GetVirtualURL(), profile_)) {
+      !search::IsNTPURL(pending_entry->GetVirtualURL(), profile_)) {
     size.Enlarge(
         0, window()->GetRenderViewHeightInsetWithDetachedBookmarkBar());
   }
@@ -2130,6 +2103,7 @@ void Browser::OnExtensionUnloaded(
 
   // Close any tabs from the unloaded extension, unless it's terminated,
   // in which case let the sad tabs remain.
+  // Also, if tab is muted and the cause is the unloaded extension, unmute it.
   if (reason != extensions::UnloadedExtensionInfo::REASON_TERMINATE) {
     // Iterate backwards as we may remove items while iterating.
     for (int i = tab_strip_model_->count() - 1; i >= 0; --i) {
@@ -2146,6 +2120,8 @@ void Browser::OnExtensionUnloaded(
           (extensions::TabHelper::FromWebContents(web_contents)
                ->extension_app() == extension)) {
         tab_strip_model_->CloseWebContentsAt(i, TabStripModel::CLOSE_NONE);
+      } else {
+        chrome::UnmuteIfMutedByExtension(web_contents, extension->id());
       }
     }
   }

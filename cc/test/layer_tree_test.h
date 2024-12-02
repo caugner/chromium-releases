@@ -25,6 +25,25 @@ class TestContextProvider;
 class TestGpuMemoryBufferManager;
 class TestWebGraphicsContext3D;
 
+// Creates the virtual viewport layer hierarchy under the given root_layer.
+// Convenient overload of the method below that creates a scrolling layer as
+// the outer viewport scroll layer.
+void CreateVirtualViewportLayers(Layer* root_layer,
+                                 const gfx::Size& inner_bounds,
+                                 const gfx::Size& outer_bounds,
+                                 const gfx::Size& scroll_bounds,
+                                 LayerTreeHost* host,
+                                 const LayerSettings& layer_settings);
+
+// Creates the virtual viewport layer hierarchy under the given root_layer.
+// Uses the given scroll layer as the content "outer viewport scroll layer".
+void CreateVirtualViewportLayers(Layer* root_layer,
+                                 scoped_refptr<Layer> outer_scroll_layer,
+                                 const gfx::Size& outer_bounds,
+                                 const gfx::Size& scroll_bounds,
+                                 LayerTreeHost* host,
+                                 const LayerSettings& layer_settings);
+
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public AnimationDelegate {
  public:
@@ -36,8 +55,7 @@ class TestHooks : public AnimationDelegate {
   virtual void CreateResourceAndTileTaskWorkerPool(
       LayerTreeHostImpl* host_impl,
       scoped_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
-      scoped_ptr<ResourcePool>* resource_pool,
-      scoped_ptr<ResourcePool>* staging_resource_pool);
+      scoped_ptr<ResourcePool>* resource_pool);
   virtual void WillBeginImplFrameOnThread(LayerTreeHostImpl* host_impl,
                                           const BeginFrameArgs& args) {}
   virtual void DidFinishImplFrameOnThread(LayerTreeHostImpl* host_impl) {}
@@ -87,6 +105,7 @@ class TestHooks : public AnimationDelegate {
   virtual void DidSetVisibleOnImplTree(LayerTreeHostImpl* host_impl,
                                        bool visible) {}
   virtual void ScheduleComposite() {}
+  virtual void DidSetNeedsUpdateLayers() {}
 
   // Hooks for SchedulerClient.
   virtual void ScheduledActionWillSendBeginMainFrame() {}

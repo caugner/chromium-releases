@@ -18,6 +18,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/chrome_fallback_icon_client_factory.h"
@@ -28,8 +29,6 @@
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -101,8 +100,11 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/event_router_factory.h"
+#include "extensions/browser/extension_pref_value_map.h"
+#include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_prefs_factory.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_system.h"
 #endif
 
@@ -179,14 +181,6 @@ class TestExtensionURLRequestContextGetter
   scoped_ptr<net::URLRequestContext> context_;
 };
 
-#if defined(ENABLE_NOTIFICATIONS)
-scoped_ptr<KeyedService> CreateTestDesktopNotificationService(
-    content::BrowserContext* profile) {
-  return make_scoped_ptr(
-      new DesktopNotificationService(static_cast<Profile*>(profile)));
-}
-#endif
-
 scoped_ptr<KeyedService> BuildHistoryService(content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
   return make_scoped_ptr(new history::HistoryService(
@@ -210,7 +204,7 @@ scoped_ptr<KeyedService> BuildInMemoryURLIndex(
 }
 
 scoped_ptr<KeyedService> BuildBookmarkModel(content::BrowserContext* context) {
-  Profile* profile = static_cast<Profile*>(context);
+  Profile* profile = Profile::FromBrowserContext(context);
   ChromeBookmarkClient* bookmark_client =
       ChromeBookmarkClientFactory::GetForProfile(profile);
   scoped_ptr<BookmarkModel> bookmark_model(new BookmarkModel(bookmark_client));
@@ -222,12 +216,6 @@ scoped_ptr<KeyedService> BuildBookmarkModel(content::BrowserContext* context) {
                        content::BrowserThread::GetMessageLoopProxyForThread(
                            content::BrowserThread::UI));
   return bookmark_model.Pass();
-}
-
-scoped_ptr<KeyedService> BuildChromeBookmarkClient(
-    content::BrowserContext* context) {
-  return make_scoped_ptr(
-      new ChromeBookmarkClient(static_cast<Profile*>(context)));
 }
 
 void TestProfileErrorCallback(WebDataServiceWrapper::ErrorType error_type,
@@ -436,17 +424,23 @@ void TestingProfile::Init() {
   extensions_path_ = profile_path_.AppendASCII("Extensions");
 
 #if defined(ENABLE_EXTENSIONS)
-  extensions::ExtensionSystemFactory::GetInstance()->SetTestingFactory(
-      this, extensions::TestExtensionSystem::Build);
-
-  extensions::TestExtensionSystem* test_extension_system =
-      static_cast<extensions::TestExtensionSystem*>(
-          extensions::ExtensionSystem::Get(this));
-  scoped_ptr<extensions::ExtensionPrefs> extension_prefs =
-      test_extension_system->CreateExtensionPrefs(
-          base::CommandLine::ForCurrentProcess(), extensions_path_);
+  // Note that the GetPrefs() creates a TestingPrefService, therefore
+  // the extension controlled pref values set in ExtensionPrefs
+  // are not reflected in the pref service. One would need to
+  // inject a new ExtensionPrefStore(extension_pref_value_map, false).
+  bool extensions_disabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableExtensions);
+  scoped_ptr<extensions::ExtensionPrefs> extension_prefs(
+      extensions::ExtensionPrefs::Create(
+          this, GetPrefs(), extensions_path_,
+          ExtensionPrefValueMapFactory::GetForBrowserContext(this),
+          extensions_disabled,
+          std::vector<extensions::ExtensionPrefsObserver*>()));
   extensions::ExtensionPrefsFactory::GetInstance()->SetInstanceForTesting(
       this, extension_prefs.Pass());
+
+  extensions::ExtensionSystemFactory::GetInstance()->SetTestingFactory(
+      this, extensions::TestExtensionSystem::Build);
 
   extensions::EventRouterFactory::GetInstance()->SetTestingFactory(this,
                                                                    nullptr);
@@ -465,12 +459,6 @@ void TestingProfile::Init() {
 
   browser_context_dependency_manager_->CreateBrowserContextServicesForTest(
       this);
-
-#if defined(ENABLE_NOTIFICATIONS)
-  // Install profile keyed service factory hooks for dummy/test services
-  DesktopNotificationServiceFactory::GetInstance()->SetTestingFactory(
-      this, CreateTestDesktopNotificationService);
-#endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
   if (!IsOffTheRecord()) {
@@ -592,8 +580,10 @@ void TestingProfile::CreateBookmarkModel(bool delete_file) {
     base::FilePath path = GetPath().Append(bookmarks::kBookmarksFileName);
     base::DeleteFile(path, false);
   }
+  ManagedBookmarkServiceFactory::GetInstance()->SetTestingFactory(
+      this, ManagedBookmarkServiceFactory::GetDefaultFactory());
   ChromeBookmarkClientFactory::GetInstance()->SetTestingFactory(
-      this, BuildChromeBookmarkClient);
+      this, ChromeBookmarkClientFactory::GetDefaultFactory());
   // This creates the BookmarkModel.
   ignore_result(BookmarkModelFactory::GetInstance()->SetTestingFactoryAndUse(
       this, BuildBookmarkModel));
@@ -699,11 +689,11 @@ void TestingProfile::SetSupervisedUserId(const std::string& id) {
     GetPrefs()->ClearPref(prefs::kSupervisedUserId);
 }
 
-bool TestingProfile::IsSupervised() {
+bool TestingProfile::IsSupervised() const {
   return !supervised_user_id_.empty();
 }
 
-bool TestingProfile::IsChild() {
+bool TestingProfile::IsChild() const {
 #if defined(ENABLE_SUPERVISED_USERS)
   return supervised_user_id_ == supervised_users::kChildAccountSUID;
 #else
@@ -711,7 +701,7 @@ bool TestingProfile::IsChild() {
 #endif
 }
 
-bool TestingProfile::IsLegacySupervised() {
+bool TestingProfile::IsLegacySupervised() const {
   return IsSupervised() && !IsChild();
 }
 
@@ -938,7 +928,8 @@ chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
   return NULL;
 }
 
-DevToolsNetworkController* TestingProfile::GetDevToolsNetworkController() {
+DevToolsNetworkControllerHandle*
+TestingProfile::GetDevToolsNetworkControllerHandle() {
   return NULL;
 }
 

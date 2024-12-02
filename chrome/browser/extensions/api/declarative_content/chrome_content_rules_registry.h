@@ -11,16 +11,15 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/api/declarative_content/content_action.h"
-#include "chrome/browser/extensions/api/declarative_content/content_condition.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_condition_tracker_delegate.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_css_condition_tracker.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_is_bookmarked_condition_tracker.h"
 #include "chrome/browser/extensions/api/declarative_content/declarative_content_page_url_condition_tracker.h"
-#include "chrome/browser/extensions/api/declarative_content/declarative_content_rule.h"
 #include "components/url_matcher/url_matcher.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -46,14 +45,58 @@ class URLRequest;
 
 namespace extensions {
 
+class Extension;
+
+// Representation of a condition in the Declarative Content API. A condition
+// consists of a set of predicates on the page state, all of which must be
+// satisified for the condition to be fulfilled.
+struct ContentCondition {
+ public:
+  ContentCondition(
+      scoped_ptr<DeclarativeContentPageUrlPredicate> page_url_predicate,
+      scoped_ptr<DeclarativeContentCssPredicate> css_predicate,
+      scoped_ptr<DeclarativeContentIsBookmarkedPredicate>
+          is_bookmarked_predicate);
+  ~ContentCondition();
+
+  scoped_ptr<DeclarativeContentPageUrlPredicate> page_url_predicate;
+  scoped_ptr<DeclarativeContentCssPredicate> css_predicate;
+  scoped_ptr<DeclarativeContentIsBookmarkedPredicate> is_bookmarked_predicate;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ContentCondition);
+};
+
+// Defines the interface for a predicate factory. Temporary, until we can
+// introduce an interface to be implemented by the trackers that returns a
+// ContentPredicate.
+template <class T>
+using PredicateFactory =
+    base::Callback<scoped_ptr<T>(const Extension* extension,
+                                 const base::Value& value,
+                                 std::string* error)>;
+
+// Factory function that instantiates a ContentCondition according to the
+// description |condition| passed by the extension API.  |condition| should be
+// an instance of declarativeContent.PageStateMatcher.
+scoped_ptr<ContentCondition> CreateContentCondition(
+    const Extension* extension,
+    const PredicateFactory<DeclarativeContentCssPredicate>&
+        css_predicate_factory,
+    const PredicateFactory<DeclarativeContentIsBookmarkedPredicate>&
+        is_bookmarked_predicate_factory,
+    const PredicateFactory<DeclarativeContentPageUrlPredicate>&
+        page_url_predicate_factory,
+    const base::Value& condition,
+    std::string* error);
+
 // The ChromeContentRulesRegistry is responsible for managing
 // the internal representation of rules for the Declarative Content API.
 //
 // Here is the high level overview of this functionality:
 //
-// RulesRegistry::Rule consists of Conditions and Actions, these are
-// represented as a DeclarativeContentRule with ContentConditions and
-// ContentRuleActions.
+// api::events::Rule consists of conditions and actions, these are
+// represented as a ContentRule with ContentConditions and ContentRuleActions.
 //
 // The evaluation of URL related condition attributes (host_suffix, path_prefix)
 // is delegated to a URLMatcher, because this is capable of evaluating many
@@ -86,7 +129,7 @@ class ChromeContentRulesRegistry
   // RulesRegistry:
   std::string AddRulesImpl(
       const std::string& extension_id,
-      const std::vector<linked_ptr<RulesRegistry::Rule>>& rules) override;
+      const std::vector<linked_ptr<api::events::Rule>>& rules) override;
   std::string RemoveRulesImpl(
       const std::string& extension_id,
       const std::vector<std::string>& rule_identifiers) override;
@@ -121,6 +164,25 @@ class ChromeContentRulesRegistry
   ~ChromeContentRulesRegistry() override;
 
  private:
+  // The internal declarative rule representation. Corresponds to a declarative
+  // API rule: https://developer.chrome.com/extensions/events.html#declarative.
+  struct ContentRule {
+   public:
+    ContentRule(const Extension* extension,
+                ScopedVector<const ContentCondition> conditions,
+                ScopedVector<const ContentAction> actions,
+                int priority);
+    ~ContentRule();
+
+    const Extension* extension;
+    ScopedVector<const ContentCondition> conditions;
+    ScopedVector<const ContentAction> actions;
+    int priority;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ContentRule);
+  };
+
   // Specifies what to do with evaluation requests.
   // TODO(wittman): Try to eliminate the need for IGNORE after refactoring to
   // treat all condition evaluation consistently. Currently RemoveRulesImpl only
@@ -134,12 +196,27 @@ class ChromeContentRulesRegistry
 
   class EvaluationScope;
 
+  // Creates a ContentRule for |extension| given a json definition.  The format
+  // of each condition and action's json is up to the specific ContentCondition
+  // and ContentAction.  |extension| may be NULL in tests.  If |error| is empty,
+  // the translation was successful and the returned rule is internally
+  // consistent.
+  scoped_ptr<const ContentRule> CreateRule(
+      const Extension* extension,
+      const PredicateFactory<DeclarativeContentCssPredicate>&
+          css_predicate_factory,
+      const PredicateFactory<DeclarativeContentIsBookmarkedPredicate>&
+          is_bookmarked_predicate_factory,
+      const PredicateFactory<DeclarativeContentPageUrlPredicate>&
+          page_url_predicate_factory,
+      const api::events::Rule& api_rule,
+      std::string* error);
+
   // True if this object is managing the rules for |context|.
   bool ManagingRulesForBrowserContext(content::BrowserContext* context);
 
-  std::set<const DeclarativeContentRule*> GetMatches(
-      const RendererContentMatchData& renderer_data,
-      bool is_incognito_renderer) const;
+  std::set<const ContentRule*> GetMatchingRules(
+      content::WebContents* tab) const;
 
   // Updates the condition evaluator with the current watched CSS selectors.
   void UpdateCssSelectorsFromRules();
@@ -148,20 +225,17 @@ class ChromeContentRulesRegistry
   // selectors.
   void EvaluateConditionsForTab(content::WebContents* tab);
 
-  // Evaluates the conditions for tabs in each browser window.
-  void EvaluateConditionsForAllTabs();
+  // Returns true if a rule created by |extension| should be evaluated for an
+  // incognito renderer.
+  bool ShouldEvaluateExtensionRulesForIncognitoRenderer(
+      const Extension* extension) const;
 
-  using ExtensionRuleIdPair = std::pair<const Extension*, std::string>;
+  using ExtensionIdRuleIdPair = std::pair<extensions::ExtensionId, std::string>;
   using RuleAndConditionForURLMatcherId =
       std::map<url_matcher::URLMatcherConditionSet::ID,
-               std::pair<const DeclarativeContentRule*,
-                         const ContentCondition*>>;
-  using RulesMap = std::map<ExtensionRuleIdPair,
-                            linked_ptr<const DeclarativeContentRule>>;
-
-  // Map that tells us which DeclarativeContentRules and ContentConditions may
-  // match for a URLMatcherConditionSet::ID returned by the |url_matcher_|.
-  RuleAndConditionForURLMatcherId rule_and_conditions_for_match_id_;
+               std::pair<const ContentRule*, const ContentCondition*>>;
+  using RulesMap = std::map<ExtensionIdRuleIdPair,
+                            linked_ptr<const ContentRule>>;
 
   RulesMap content_rules_;
 
@@ -169,8 +243,7 @@ class ChromeContentRulesRegistry
   // This lets us call Revert as appropriate. Note that this is expected to have
   // a key-value pair for every WebContents the registry is tracking, even if
   // the value is the empty set.
-  std::map<content::WebContents*,
-           std::set<const DeclarativeContentRule*>> active_rules_;
+  std::map<content::WebContents*, std::set<const ContentRule*>> active_rules_;
 
   // Responsible for tracking declarative content page URL condition state.
   DeclarativeContentPageUrlConditionTracker page_url_condition_tracker_;

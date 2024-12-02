@@ -276,11 +276,9 @@ class MockConnectionVisitor : public QuicConnectionVisitorInterface {
   MockConnectionVisitor();
   ~MockConnectionVisitor() override;
 
-  MOCK_METHOD1(OnStreamFrames, void(const std::vector<QuicStreamFrame>& frame));
-  MOCK_METHOD1(OnWindowUpdateFrames,
-               void(const std::vector<QuicWindowUpdateFrame>& frame));
-  MOCK_METHOD1(OnBlockedFrames,
-               void(const std::vector<QuicBlockedFrame>& frame));
+  MOCK_METHOD1(OnStreamFrame, void(const QuicStreamFrame& frame));
+  MOCK_METHOD1(OnWindowUpdateFrame, void(const QuicWindowUpdateFrame& frame));
+  MOCK_METHOD1(OnBlockedFrame, void(const QuicBlockedFrame& frame));
   MOCK_METHOD1(OnRstStream, void(const QuicRstStreamFrame& frame));
   MOCK_METHOD1(OnGoAway, void(const QuicGoAwayFrame& frame));
   MOCK_METHOD2(OnConnectionClosed, void(QuicErrorCode error, bool from_peer));
@@ -382,7 +380,7 @@ class MockConnection : public QuicConnection {
 
   MOCK_METHOD1(OnSendConnectionState, void(const CachedNetworkParameters&));
   MOCK_METHOD2(ResumeConnectionState,
-               bool(const CachedNetworkParameters&, bool));
+               void(const CachedNetworkParameters&, bool));
 
   MOCK_METHOD1(OnError, void(QuicFramer* framer));
   void QuicConnection_OnError(QuicFramer* framer) {
@@ -397,6 +395,12 @@ class MockConnection : public QuicConnection {
 
   bool OnProtocolVersionMismatch(QuicVersion version) override {
     return false;
+  }
+
+  void ReallySendGoAway(QuicErrorCode error,
+                        QuicStreamId last_good_stream_id,
+                        const std::string& reason) {
+    QuicConnection::SendGoAway(error, last_good_stream_id, reason);
   }
 
  private:
@@ -556,7 +560,7 @@ class MockSendAlgorithm : public SendAlgorithmInterface {
   MOCK_CONST_METHOD0(GetSlowStartThreshold, QuicByteCount());
   MOCK_CONST_METHOD0(GetCongestionControlType, CongestionControlType());
   MOCK_METHOD2(ResumeConnectionState,
-               bool(const CachedNetworkParameters&, bool));
+               void(const CachedNetworkParameters&, bool));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSendAlgorithm);

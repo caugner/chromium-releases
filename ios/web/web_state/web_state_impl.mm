@@ -17,6 +17,7 @@
 #include "ios/web/public/web_state/credential.h"
 #include "ios/web/public/web_state/ui/crw_content_view.h"
 #include "ios/web/public/web_state/web_state_observer.h"
+#include "ios/web/public/web_state/web_state_policy_decider.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_controller_container_view.h"
 #include "ios/web/web_state/web_state_facade_delegate.h"
@@ -46,6 +47,9 @@ WebStateImpl::~WebStateImpl() {
 
   FOR_EACH_OBSERVER(WebStateObserver, observers_, WebStateDestroyed());
   FOR_EACH_OBSERVER(WebStateObserver, observers_, ResetWebState());
+  FOR_EACH_OBSERVER(WebStatePolicyDecider, policy_deciders_,
+                    WebStateDestroyed());
+  FOR_EACH_OBSERVER(WebStatePolicyDecider, policy_deciders_, ResetWebState());
   DCHECK(script_command_callbacks_.empty());
   if (request_tracker_.get())
     CloseRequestTracker();
@@ -59,6 +63,22 @@ void WebStateImpl::AddObserver(WebStateObserver* observer) {
 void WebStateImpl::RemoveObserver(WebStateObserver* observer) {
   DCHECK(observers_.HasObserver(observer));
   observers_.RemoveObserver(observer);
+}
+
+void WebStateImpl::AddPolicyDecider(WebStatePolicyDecider* decider) {
+  // Despite the name, ObserverList is actually generic, so it is used for
+  // deciders. This makes the call here odd looking, but it's really just
+  // managing the list, not setting observers on deciders.
+  DCHECK(!policy_deciders_.HasObserver(decider));
+  policy_deciders_.AddObserver(decider);
+}
+
+void WebStateImpl::RemovePolicyDecider(WebStatePolicyDecider* decider) {
+  // Despite the name, ObserverList is actually generic, so it is used for
+  // deciders. This makes the call here odd looking, but it's really just
+  // managing the list, not setting observers on deciders.
+  DCHECK(policy_deciders_.HasObserver(decider));
+  policy_deciders_.RemoveObserver(decider);
 }
 
 bool WebStateImpl::Configured() const {
@@ -149,14 +169,6 @@ void WebStateImpl::OnFormActivityRegistered(const std::string& form_name,
   FOR_EACH_OBSERVER(WebStateObserver, observers_,
                     FormActivityRegistered(form_name, field_name, type, value,
                                            key_code, input_missing));
-}
-
-void WebStateImpl::OnAutocompleteRequested(const GURL& source_url,
-                                           const std::string& form_name,
-                                           bool user_initiated) {
-  FOR_EACH_OBSERVER(
-      WebStateObserver, observers_,
-      AutocompleteRequested(source_url, form_name, user_initiated));
 }
 
 void WebStateImpl::OnFaviconUrlUpdated(
@@ -385,6 +397,26 @@ void WebStateImpl::ExecuteJavaScriptAsync(const base::string16& javascript) {
   DCHECK(Configured());
   [web_controller_ evaluateJavaScript:base::SysUTF16ToNSString(javascript)
                   stringResultHandler:nil];
+}
+
+bool WebStateImpl::ShouldAllowRequest(NSURLRequest* request) {
+  base::ObserverListBase<WebStatePolicyDecider>::Iterator it(&policy_deciders_);
+  WebStatePolicyDecider* policy_decider = nullptr;
+  while ((policy_decider = it.GetNext()) != nullptr) {
+    if (!policy_decider->ShouldAllowRequest(request))
+      return false;
+  }
+  return true;
+}
+
+bool WebStateImpl::ShouldAllowResponse(NSURLResponse* response) {
+  base::ObserverListBase<WebStatePolicyDecider>::Iterator it(&policy_deciders_);
+  WebStatePolicyDecider* policy_decider = nullptr;
+  while ((policy_decider = it.GetNext()) != nullptr) {
+    if (!policy_decider->ShouldAllowResponse(response))
+      return false;
+  }
+  return true;
 }
 
 #pragma mark - RequestTracker management

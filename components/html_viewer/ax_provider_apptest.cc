@@ -30,23 +30,30 @@ bool AxTreeContainsText(const Array<AxNodePtr>& tree, const String& text) {
   return false;
 }
 
-// Switch to enable out of process iframes.
-const char kOOPIF[] = "oopifs";
-
-bool EnableOOPIFs() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(kOOPIF);
-}
-
 class TestFrameTreeServer : public mandoline::FrameTreeServer {
  public:
   TestFrameTreeServer() {}
   ~TestFrameTreeServer() override {}
 
   // mandoline::FrameTreeServer:
-  void PostMessageEventToFrame(uint32_t frame_id,
-                               mandoline::MessageEventPtr event) override {}
-  void NavigateFrame(uint32_t frame_id) override {}
-  void ReloadFrame(uint32_t frame_id) override {}
+  void PostMessageEventToFrame(uint32_t source_frame_id,
+                               uint32_t target_frame_id,
+                               mandoline::HTMLMessageEventPtr event) override {}
+  void LoadingStarted(uint32_t frame_id) override {}
+  void LoadingStopped(uint32_t frame_id) override {}
+  void ProgressChanged(uint32_t frame_id, double progress) override {}
+  void SetClientProperty(uint32_t frame_id,
+                         const mojo::String& name,
+                         mojo::Array<uint8_t> value) override {}
+  void OnCreatedFrame(uint32_t parent_id,
+                      uint32_t frame_id,
+                      mojo::Map<mojo::String, mojo::Array<uint8_t>>
+                          client_properties) override {}
+  void RequestNavigate(mandoline::NavigationTargetType target_type,
+                       uint32_t target_frame_id,
+                       mojo::URLRequestPtr request) override {}
+  void DidNavigateLocally(uint32_t frame_id, const mojo::String& url) override {
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestFrameTreeServer);
@@ -57,10 +64,6 @@ class TestFrameTreeServer : public mandoline::FrameTreeServer {
 using AXProviderTest = ViewManagerTestBase;
 
 TEST_F(AXProviderTest, HelloWorld) {
-  // TODO(msw|sky): Fix flaky timeouts without oopifs; http://crbug.com/504917
-  if (!EnableOOPIFs())
-    return;
-
   // Start a test server for net/data/test.html access.
   net::SpawnedTestServer server(
       net::SpawnedTestServer::TYPE_HTTP, net::SpawnedTestServer::kLocalhost,
@@ -72,8 +75,8 @@ TEST_F(AXProviderTest, HelloWorld) {
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From(
       base::StringPrintf("http://127.0.0.1:%u/files/test.html", assigned_port));
-  ApplicationConnection* connection = application_impl()->ConnectToApplication(
-      request.Pass());
+  scoped_ptr<ApplicationConnection> connection =
+      application_impl()->ConnectToApplication(request.Pass());
 
   // Embed the html_viewer in a View.
   ViewManagerClientPtr view_manager_client;
@@ -81,22 +84,21 @@ TEST_F(AXProviderTest, HelloWorld) {
   View* embed_view = window_manager()->CreateView();
   embed_view->Embed(view_manager_client.Pass());
 
-  if (EnableOOPIFs()) {
-    TestFrameTreeServer frame_tree_server;
-    mandoline::FrameTreeServerPtr frame_tree_server_ptr;
-    mojo::Binding<mandoline::FrameTreeServer> frame_tree_server_binding(
-        &frame_tree_server);
-    frame_tree_server_binding.Bind(GetProxy(&frame_tree_server_ptr).Pass());
+  TestFrameTreeServer frame_tree_server;
+  mandoline::FrameTreeServerPtr frame_tree_server_ptr;
+  mojo::Binding<mandoline::FrameTreeServer> frame_tree_server_binding(
+      &frame_tree_server);
+  frame_tree_server_binding.Bind(GetProxy(&frame_tree_server_ptr).Pass());
 
-    mojo::Array<mandoline::FrameDataPtr> array(1u);
-    array[0] = mandoline::FrameData::New().Pass();
-    array[0]->frame_id = embed_view->id();
-    array[0]->parent_id = 0u;
+  mojo::Array<mandoline::FrameDataPtr> array(1u);
+  array[0] = mandoline::FrameData::New().Pass();
+  array[0]->frame_id = embed_view->id();
+  array[0]->parent_id = 0u;
 
-    mandoline::FrameTreeClientPtr frame_tree_client;
-    connection->ConnectToService(&frame_tree_client);
-    frame_tree_client->OnConnect(frame_tree_server_ptr.Pass(), array.Pass());
-  }
+  mandoline::FrameTreeClientPtr frame_tree_client;
+  connection->ConnectToService(&frame_tree_client);
+  frame_tree_client->OnConnect(frame_tree_server_ptr.Pass(), 1u,
+                               array.Pass());
 
   // Connect to the AxProvider of the HTML document and get the AxTree.
   AxProviderPtr ax_provider;

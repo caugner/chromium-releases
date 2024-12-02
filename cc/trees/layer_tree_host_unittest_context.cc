@@ -33,7 +33,7 @@
 #include "cc/test/fake_scrollbar.h"
 #include "cc/test/fake_video_frame_provider.h"
 #include "cc/test/layer_tree_test.h"
-#include "cc/test/render_pass_test_common.h"
+#include "cc/test/render_pass_test_utils.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_web_graphics_context_3d.h"
@@ -857,7 +857,7 @@ class LayerTreeHostContextTestDontUseLostResources
 
     scoped_ptr<DelegatedFrameData> frame_data(new DelegatedFrameData);
 
-    scoped_ptr<TestRenderPass> pass_for_quad = TestRenderPass::Create();
+    scoped_ptr<RenderPass> pass_for_quad = RenderPass::Create();
     pass_for_quad->SetNew(
         // AppendOneOfEveryQuadType() makes a RenderPass quad with this id.
         RenderPassId(2, 1),
@@ -865,13 +865,14 @@ class LayerTreeHostContextTestDontUseLostResources
         gfx::Rect(0, 0, 10, 10),
         gfx::Transform());
 
-    scoped_ptr<TestRenderPass> pass = TestRenderPass::Create();
+    scoped_ptr<RenderPass> pass = RenderPass::Create();
     pass->SetNew(RenderPassId(1, 1),
                  gfx::Rect(0, 0, 10, 10),
                  gfx::Rect(0, 0, 10, 10),
                  gfx::Transform());
-    pass->AppendOneOfEveryQuadType(child_resource_provider_.get(),
-                                   RenderPassId(2, 1));
+    uint32_t mailbox_sync_point;
+    AddOneOfEveryQuadType(pass.get(), child_resource_provider_.get(),
+                          RenderPassId(2, 1), &mailbox_sync_point);
 
     frame_data->render_pass_list.push_back(pass_for_quad.Pass());
     frame_data->render_pass_list.push_back(pass.Pass());
@@ -950,12 +951,12 @@ class LayerTreeHostContextTestDontUseLostResources
     color_video_frame_ = VideoFrame::CreateColorFrame(
         gfx::Size(4, 4), 0x80, 0x80, 0x80, base::TimeDelta());
     hw_video_frame_ = VideoFrame::WrapNativeTexture(
-        media::VideoFrame::ARGB,
+        media::PIXEL_FORMAT_ARGB,
         gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
         gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta());
     scaled_hw_video_frame_ = VideoFrame::WrapNativeTexture(
-        media::VideoFrame::ARGB,
+        media::PIXEL_FORMAT_ARGB,
         gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
         gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta());

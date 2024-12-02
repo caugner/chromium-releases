@@ -4,7 +4,6 @@
 
 #include "components/guest_view/browser/guest_view_base.h"
 
-#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/guest_view/browser/guest_view_event.h"
@@ -19,7 +18,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
+#include "content/public/common/browser_plugin_guest_mode.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -76,11 +75,6 @@ class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
   void RenderProcessGone(base::TerminationStatus status) override {
     if (destroyed_)
       return;
-
-    GuestViewManager::FromBrowserContext(web_contents()->GetBrowserContext())
-        ->EmbedderWillBeDestroyed(
-            web_contents()->GetRenderProcessHost()->GetID());
-
     // If the embedder process is destroyed, then destroy the guest.
     Destroy();
   }
@@ -322,7 +316,9 @@ void GuestViewBase::SetSize(const SetSizeParams& params) {
 }
 
 // static
-void GuestViewBase::CleanUp(int embedder_process_id, int view_instance_id) {
+void GuestViewBase::CleanUp(content::BrowserContext* browser_context,
+                            int embedder_process_id,
+                            int view_instance_id) {
   // TODO(paulmeyer): Add in any general GuestView cleanup work here.
 }
 
@@ -411,6 +407,24 @@ void GuestViewBase::DidDetach() {
   element_instance_id_ = kInstanceIDNone;
 }
 
+bool GuestViewBase::Find(int request_id,
+                         const base::string16& search_text,
+                         const blink::WebFindOptions& options) {
+  if (ShouldHandleFindRequestsForEmbedder()) {
+    web_contents()->Find(request_id, search_text, options);
+    return true;
+  }
+  return false;
+}
+
+bool GuestViewBase::StopFinding(content::StopFindAction action) {
+  if (ShouldHandleFindRequestsForEmbedder()) {
+    web_contents()->StopFinding(action);
+    return true;
+  }
+  return false;
+}
+
 WebContents* GuestViewBase::GetOwnerWebContents() const {
   return owner_web_contents_;
 }
@@ -485,10 +499,12 @@ void GuestViewBase::WillAttach(content::WebContents* embedder_web_contents,
                                int element_instance_id,
                                bool is_full_page_plugin,
                                const base::Closure& callback) {
+  // Stop tracking the old embedder's zoom level.
+  if (owner_web_contents())
+    StopTrackingEmbedderZoomLevel();
+
   if (owner_web_contents_ != embedder_web_contents) {
     DCHECK_EQ(owner_contents_observer_->web_contents(), owner_web_contents_);
-    // Stop tracking the old embedder's zoom level.
-    StopTrackingEmbedderZoomLevel();
     owner_web_contents_ = embedder_web_contents;
     owner_contents_observer_.reset(
         new OwnerContentsObserver(this, embedder_web_contents));
@@ -513,6 +529,10 @@ void GuestViewBase::SignalWhenReady(const base::Closure& callback) {
   // The default behavior is to call the |callback| immediately. Derived classes
   // can implement an alternative signal for readiness.
   callback.Run();
+}
+
+bool GuestViewBase::ShouldHandleFindRequestsForEmbedder() const {
+  return false;
 }
 
 int GuestViewBase::LogicalPixelsToPhysicalPixels(double logical_pixels) const {
@@ -560,8 +580,7 @@ void GuestViewBase::DidNavigateMainFrame(
   // TODO(lazyboy): This breaks guest visibility in --site-per-process because
   // we do not take the widget's visibility into account.  We need to also
   // stay hidden during "visibility:none" state.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSitePerProcess)) {
+  if (content::BrowserPluginGuestMode::UseCrossProcessFramesForGuests()) {
     web_contents()->WasShown();
   }
 }
@@ -672,6 +691,23 @@ void GuestViewBase::UpdateTargetURL(content::WebContents* source,
 
 bool GuestViewBase::ShouldResumeRequestsForCreatedWindow() {
   return false;
+}
+
+void GuestViewBase::FindReply(WebContents* source,
+                              int request_id,
+                              int number_of_matches,
+                              const gfx::Rect& selection_rect,
+                              int active_match_ordinal,
+                              bool final_update) {
+  if (ShouldHandleFindRequestsForEmbedder() &&
+      attached() && embedder_web_contents()->GetDelegate()) {
+    embedder_web_contents()->GetDelegate()->FindReply(embedder_web_contents(),
+                                                      request_id,
+                                                      number_of_matches,
+                                                      selection_rect,
+                                                      active_match_ordinal,
+                                                      final_update);
+  }
 }
 
 GuestViewBase::~GuestViewBase() {

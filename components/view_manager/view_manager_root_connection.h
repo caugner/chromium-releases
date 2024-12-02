@@ -10,7 +10,6 @@
 #include "components/view_manager/view_manager_root_delegate.h"
 #include "components/view_manager/view_manager_root_impl.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/error_handler.h"
 
 namespace view_manager {
 
@@ -47,11 +46,12 @@ class ViewManagerRootConnection : public ViewManagerRootDelegate {
  protected:
   ~ViewManagerRootConnection() override;
 
- private:
   // ViewManagerRootDelegate:
-  ViewManagerServiceImpl* GetViewManagerService() override;
+  void OnDisplayInitialized() override;
   void OnDisplayClosed() override;
+  ViewManagerServiceImpl* GetViewManagerService() override;
 
+ private:
   scoped_ptr<ViewManagerRootImpl> root_;
   ViewManagerServiceImpl* service_;
   ConnectionManager* connection_manager_;
@@ -61,8 +61,7 @@ class ViewManagerRootConnection : public ViewManagerRootDelegate {
 };
 
 // Live implementation of ViewManagerRootConnection.
-class ViewManagerRootConnectionImpl : public mojo::ErrorHandler,
-                                      public ViewManagerRootConnection {
+class ViewManagerRootConnectionImpl : public ViewManagerRootConnection {
  public:
   ViewManagerRootConnectionImpl(
       mojo::InterfaceRequest<mojo::ViewManagerRoot> request,
@@ -73,10 +72,11 @@ class ViewManagerRootConnectionImpl : public mojo::ErrorHandler,
  private:
   ~ViewManagerRootConnectionImpl() override;
 
-  // ErrorHandler:
-  void OnConnectionError() override;
+  // ViewManagerRootDelegate:
+  void OnDisplayInitialized() override;
 
   mojo::Binding<mojo::ViewManagerRoot> binding_;
+  mojo::ViewManagerClientPtr client_;
 
   DISALLOW_COPY_AND_ASSIGN(ViewManagerRootConnectionImpl);
 };

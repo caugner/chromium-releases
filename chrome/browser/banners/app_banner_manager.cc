@@ -31,6 +31,7 @@ AppBannerManager::AppBannerManager(int icon_size)
     : ideal_icon_size_(icon_size),
       data_fetcher_(nullptr),
       weak_factory_(this) {
+  AppBannerSettingsHelper::UpdateFromFieldTrial();
 }
 
 AppBannerManager::AppBannerManager(content::WebContents* web_contents,
@@ -39,10 +40,18 @@ AppBannerManager::AppBannerManager(content::WebContents* web_contents,
       ideal_icon_size_(icon_size),
       data_fetcher_(nullptr),
       weak_factory_(this) {
+  AppBannerSettingsHelper::UpdateFromFieldTrial();
 }
 
 AppBannerManager::~AppBannerManager() {
   CancelActiveFetcher();
+}
+
+void AppBannerManager::DidCommitProvisionalLoadForFrame(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& url,
+    ui::PageTransition transition_type) {
+  last_transition_type_ = transition_type;
 }
 
 void AppBannerManager::DidFinishLoad(
@@ -67,7 +76,7 @@ void AppBannerManager::DidFinishLoad(
   // Kick off the data retrieval pipeline.
   data_fetcher_ = CreateAppBannerDataFetcher(weak_factory_.GetWeakPtr(),
                                              ideal_icon_size_);
-  data_fetcher_->Start(validated_url);
+  data_fetcher_->Start(validated_url, last_transition_type_);
 }
 
 bool AppBannerManager::HandleNonWebApp(const std::string& platform,
@@ -95,6 +104,12 @@ bool AppBannerManager::IsFetcherActive() {
 
 void AppBannerManager::DisableSecureSchemeCheckForTesting() {
   gDisableSecureCheckForTesting = true;
+}
+
+void AppBannerManager::SetEngagementWeights(double direct_engagement,
+                                            double indirect_engagement) {
+  AppBannerSettingsHelper::SetEngagementWeights(direct_engagement,
+                                                indirect_engagement);
 }
 
 }  // namespace banners

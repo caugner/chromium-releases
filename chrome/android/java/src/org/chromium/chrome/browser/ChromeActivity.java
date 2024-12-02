@@ -15,6 +15,8 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
@@ -22,7 +24,6 @@ import android.os.Bundle;
 import android.os.Looper;
 import android.os.MessageQueue;
 import android.os.Process;
-import android.os.StrictMode;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.support.v7.app.AlertDialog;
@@ -35,6 +36,7 @@ import android.view.ViewStub;
 import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnPreDrawListener;
 import android.view.Window;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityManager;
 import android.view.accessibility.AccessibilityManager.AccessibilityStateChangeListener;
 import android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener;
@@ -43,6 +45,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.Log;
+import org.chromium.base.SysUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
@@ -69,13 +72,12 @@ import org.chromium.chrome.browser.contextualsearch.ContextualSearchFieldTrial;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager.ContextualSearchTabPromotionDelegate;
 import org.chromium.chrome.browser.customtabs.CustomTab;
-import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.dom_distiller.DistilledPagePrefsView;
 import org.chromium.chrome.browser.dom_distiller.ReaderModeActivityDelegate;
 import org.chromium.chrome.browser.dom_distiller.ReaderModeManager;
-import org.chromium.chrome.browser.enhanced_bookmarks.EnhancedBookmarksModel;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkUtils;
+import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarksModel;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.gsa.ContextReporter;
 import org.chromium.chrome.browser.gsa.GSAServiceClient;
@@ -88,18 +90,21 @@ import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.nfc.BeamController;
 import org.chromium.chrome.browser.nfc.BeamProvider;
-import org.chromium.chrome.browser.omaha.OmahaClient;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
-import org.chromium.chrome.browser.policy.PolicyManager.PolicyChangeListener;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.snackbar.LoFiBarPopupController;
+import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
+import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.ChromeTabCreator;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
@@ -120,6 +125,7 @@ import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.readback_types.ReadbackResponse;
+import org.chromium.policy.CombinedPolicyProvider.PolicyChangeListener;
 import org.chromium.printing.PrintManagerDelegateImpl;
 import org.chromium.printing.PrintingController;
 import org.chromium.ui.base.ActivityWindowAndroid;
@@ -136,6 +142,17 @@ import java.util.concurrent.TimeUnit;
 public abstract class ChromeActivity extends AsyncInitializationActivity
         implements TabCreatorManager, AccessibilityStateChangeListener, PolicyChangeListener,
         ContextualSearchTabPromotionDelegate, SnackbarManageable, SceneChangeObserver {
+    /**
+     * Factory which creates the AppMenuHandler.
+     */
+    public interface AppMenuHandlerFactory {
+        /**
+         * @return AppMenuHandler for the given activity and menu resource id.
+         */
+        public AppMenuHandler get(Activity activity,
+                AppMenuPropertiesDelegate delegate, int menuResourceId);
+    }
+
     /**
      * No control container to inflate during initialization.
      */
@@ -201,12 +218,31 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     private AssistStatusHandler mAssistStatusHandler;
 
+    private static AppMenuHandlerFactory sAppMenuHandlerFactory = new AppMenuHandlerFactory() {
+        @Override
+        public AppMenuHandler get(
+                Activity activity, AppMenuPropertiesDelegate delegate, int menuResourceId) {
+            return new AppMenuHandler(activity, delegate, menuResourceId);
+        }
+    };
+
+    // See enableHardwareAcceleration()
+    private boolean mSetWindowHWA;
+
+    /**
+     * @param The {@link AppMenuHandlerFactory} for creating {@link mAppMenuHandler}
+     */
+    @VisibleForTesting
+    public static void setAppMenuHandlerFactoryForTesting(AppMenuHandlerFactory factory) {
+        sAppMenuHandlerFactory = factory;
+    }
+
     @Override
     public void preInflationStartup() {
         super.preInflationStartup();
         ApplicationInitialization.enableFullscreenFlags(
                 getResources(), this, getControlContainerHeightResource());
-        getWindow().setBackgroundDrawableResource(R.color.light_background_color);
+        getWindow().setBackgroundDrawable(getBackgroundDrawable());
     }
 
     @SuppressLint("NewApi")
@@ -228,19 +264,9 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             mAssistStatusHandler.updateAssistState();
         }
 
-        // Low end device UI should be allowed only after a fresh install or when the data has
-        // been cleared. This must happen before anyone calls SysUtils.isLowEndDevice() or
-        // SysUtils.isLowEndDevice() will always return the wrong value.
-        // Temporarily allowing disk access. TODO: Fix. See http://crbug.com/473352
-        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
-        try {
-            if (OmahaClient.isFreshInstallOrDataHasBeenCleared(this)) {
-                ChromePreferenceManager.getInstance(this).setAllowLowEndDeviceUi();
-            }
-        } finally {
-            StrictMode.setThreadPolicy(oldPolicy);
-        }
-
+        // If a user had ALLOW_LOW_END_DEVICE_UI explicitly set to false then we manually override
+        // SysUtils.isLowEndDevice() with a switch so that they continue to see the normal UI. This
+        // is only the case for grandfathered-in svelte users. We no longer do so for newer users.
         if (!ChromePreferenceManager.getInstance(this).getAllowLowEndDeviceUi()) {
             CommandLine.getInstance().appendSwitch(
                     BaseSwitches.DISABLE_LOW_END_DEVICE_MODE);
@@ -294,6 +320,10 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     protected final void setContentView() {
         final long begin = SystemClock.elapsedRealtime();
         TraceEvent.begin("onCreate->setContentView()");
+
+        enableHardwareAcceleration();
+        setLowEndTheme();
+
         if (WarmupManager.getInstance().hasBuiltViewHierarchy()) {
             View placeHolderView = new View(this);
             setContentView(placeHolderView);
@@ -330,8 +360,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         assert controlContainer != null;
         ToolbarControlContainer toolbarContainer = (ToolbarControlContainer) controlContainer;
         mAppMenuPropertiesDelegate = createAppMenuPropertiesDelegate();
-        mAppMenuHandler = new AppMenuHandler(this,
-                mAppMenuPropertiesDelegate, getAppMenuLayoutId());
+        mAppMenuHandler = sAppMenuHandlerFactory.get(this, mAppMenuPropertiesDelegate,
+                getAppMenuLayoutId());
         mToolbarManager = new ToolbarManager(this, toolbarContainer, mAppMenuHandler,
                 mAppMenuPropertiesDelegate, getCompositorViewHolder().getInvalidator());
         mAppMenuHandler.addObserver(new AppMenuObserver() {
@@ -411,7 +441,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                 DeviceClassManager.enableSnapshots()));
         mCompositorViewHolder.onNativeLibraryReady(mWindowAndroid, getTabContentManager());
 
-        if (isContextualSearchAllowed() && ContextualSearchFieldTrial.isEnabled(this)) {
+        if (isContextualSearchAllowed() && ContextualSearchFieldTrial.isEnabled()) {
             mContextualSearchManager = new ContextualSearchManager(this, mWindowAndroid, this);
         }
 
@@ -469,6 +499,27 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             }
 
             @Override
+            public void onPageLoadStarted(Tab tab, String url) {
+                // If an offline page is being opened, show the hint.
+                // TODO(jianli): Show a reload button when there is a network.
+                if (tab.isOfflinePage()) {
+                    getSnackbarManager().showSnackbar(Snackbar.make(
+                            getString(R.string.enhanced_bookmark_viewing_offline_page),
+                            new SnackbarController() {
+                                @Override
+                                public void onAction(Object actionData) {}
+
+                                @Override
+                                public void onDismissNoAction(Object actionData) {}
+
+                                @Override
+                                public void onDismissForEachType(boolean isTimeout) {}
+                            }
+                    ));
+                }
+            }
+
+            @Override
             public void onPageLoadFinished(Tab tab) {
                 postDeferredStartupIfNeeded();
                 showUpdateInfoBarIfNecessary();
@@ -477,6 +528,18 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             @Override
             public void onCrash(Tab tab, boolean sadTabShown) {
                 postDeferredStartupIfNeeded();
+            }
+
+            @Override
+            public void onDidChangeThemeColor(Tab tab, int color) {
+                if (getToolbarManager() == null) return;
+                if (getActivityTab() != tab) return;
+
+                getToolbarManager().updatePrimaryColor(color);
+
+                ControlContainer controlContainer =
+                        (ControlContainer) findViewById(R.id.control_container);
+                controlContainer.getToolbarResourceAdapter().invalidate(null);
             }
         };
 
@@ -583,8 +646,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     /**
      * @return Whether the given activity contains a {@link CustomTab}.
      */
-    private boolean isCustomTab() {
-        return this instanceof CustomTabActivity;
+    public boolean isCustomTab() {
+        return false;
     }
 
     @Override
@@ -679,36 +742,50 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @SuppressLint("NewApi")
     @Override
     protected final void onDestroy() {
-        if (mReaderModeActivityDelegate != null) mReaderModeActivityDelegate.destroy();
-        if (mContextualSearchManager != null) mContextualSearchManager.destroy();
-        if (mTabModelSelectorTabObserver != null) mTabModelSelectorTabObserver.destroy();
+        if (mReaderModeActivityDelegate != null) {
+            mReaderModeActivityDelegate.destroy();
+            mReaderModeActivityDelegate = null;
+        }
+
+        if (mContextualSearchManager != null) {
+            mContextualSearchManager.destroy();
+            mContextualSearchManager = null;
+        }
+
+        if (mTabModelSelectorTabObserver != null) {
+            mTabModelSelectorTabObserver.destroy();
+            mTabModelSelectorTabObserver = null;
+        }
+
         if (mCompositorViewHolder != null) {
             if (mCompositorViewHolder.getLayoutManager() != null) {
                 mCompositorViewHolder.getLayoutManager().removeSceneChangeObserver(this);
             }
             mCompositorViewHolder.shutDown();
+            mCompositorViewHolder = null;
         }
+
         onDestroyInternal();
+
+        if (mToolbarManager != null) {
+            mToolbarManager.destroy();
+            mToolbarManager = null;
+        }
 
         TabModelSelector selector = getTabModelSelector();
         if (selector != null) selector.destroy();
 
-        if (mWindowAndroid != null) mWindowAndroid.destroy();
-        if (!Locale.getDefault().equals(mCurrentLocale)) {
-            // This is a hack to relaunch renderer processes. Killing the main process also kills
-            // its dependent (renderer) processes, and Android's activity manager service seems to
-            // still relaunch the activity even when process dies in onDestroy().
-            // This shouldn't be moved to ChromeActivity since it may cause a crash if
-            // you kill the process from EmbedContentViewActivity since Preferences looks up
-            // ChildAccountManager#hasChildAccount() when it is not set.
-            // TODO(changwan): Implement a more generic and safe relaunch mechanism such as
-            // killing dependent processes on onDestroy and launching them at onCreate().
-            Log.w(TAG, "Forcefully killing process...");
-            Process.killProcess(Process.myPid());
+        if (mWindowAndroid != null) {
+            mWindowAndroid.destroy();
+            mWindowAndroid = null;
         }
+
         getChromeApplication().removePolicyChangeListener(this);
-        if (mTabContentManager != null) mTabContentManager.destroy();
-        if (mTabModelSelectorTabObserver != null) mTabModelSelectorTabObserver.destroy();
+
+        if (mTabContentManager != null) {
+            mTabContentManager.destroy();
+            mTabContentManager = null;
+        }
 
         AccessibilityManager manager = (AccessibilityManager)
                 getBaseContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
@@ -716,7 +793,18 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             manager.removeTouchExplorationStateChangeListener(mTouchExplorationStateChangeListener);
         }
+
         super.onDestroy();
+
+        if (!Locale.getDefault().equals(mCurrentLocale)) {
+            // This is a hack to relaunch renderer processes. Killing the main process also kills
+            // its dependent (renderer) processes, and Android's activity manager service seems to
+            // still relaunch the activity even when process dies in onDestroy().
+            // TODO(changwan): Implement a more generic and safe relaunch mechanism, like killing
+            //                 dependent processes in onDestroy() and launching them at onCreate().
+            Log.w(TAG, "Forcefully killing process...");
+            Process.killProcess(Process.myPid());
+        }
     }
 
     /**
@@ -728,7 +816,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
      * by the {@link WindowAndroid}.
      */
     protected void onDestroyInternal() {
-        if (mToolbarManager != null) mToolbarManager.destroy();
     }
 
     /**
@@ -762,6 +849,10 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public SnackbarManager getSnackbarManager() {
         return mSnackbarManager;
+    }
+
+    protected Drawable getBackgroundDrawable() {
+        return new ColorDrawable(getResources().getColor(R.color.light_background_color));
     }
 
     /**
@@ -861,7 +952,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             @Override
             public void processUrlViewIntent(String url, String referer, String headers,
                     TabOpenType tabOpenType, String externalAppId, int tabIdToBringToFront,
-                    Intent intent) {
+                    boolean hasUserGesture, Intent intent) {
             }
         };
     }
@@ -869,7 +960,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     /**
      * @return The resource id that contains how large the top controls are.
      */
-    protected int getControlContainerHeightResource() {
+    public int getControlContainerHeightResource() {
         return R.dimen.control_container_height;
     }
 
@@ -906,11 +997,15 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             return;
         }
 
-        // Managed bookmarks can't be edited. If the current URL is only bookmarked by managed
-        // bookmarks then fall back on adding a new bookmark instead.
+        assert mToolbarManager.getBookmarksBridge().isEditBookmarksEnabled();
+
+        // Note the use of getUserBookmarkId() over getBookmarkId() here: Managed bookmarks can't be
+        // edited. If the current URL is only bookmarked by managed bookmarks, this will return
+        // INVALID_BOOKMARK_ID, so the code below will fall back on adding a new bookmark instead.
+        // TODO(bauerb): This does not take partner bookmarks into account.
         final long bookmarkId = tabToBookmark.getUserBookmarkId();
 
-        if (EnhancedBookmarkUtils.isEnhancedBookmarkEnabled(tabToBookmark.getProfile())) {
+        if (EnhancedBookmarkUtils.isEnhancedBookmarkEnabled()) {
             final EnhancedBookmarksModel bookmarkModel = new EnhancedBookmarksModel();
             if (bookmarkModel.isBookmarkModelLoaded()) {
                 EnhancedBookmarkUtils.addOrEditBookmark(bookmarkId, bookmarkModel,
@@ -924,16 +1019,13 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                     public void bookmarkModelLoaded() {
                         EnhancedBookmarkUtils.addOrEditBookmark(bookmarkId, bookmarkModel,
                                 tabToBookmark, getSnackbarManager(), ChromeActivity.this);
-                        bookmarkModel.removeModelObserver(this);
+                        bookmarkModel.removeObserver(this);
                     }
                 };
-                bookmarkModel.addModelObserver(mBookmarkObserver);
+                bookmarkModel.addObserver(mBookmarkObserver);
             }
         } else {
             Intent intent = new Intent(this, ManageBookmarkActivity.class);
-            // Managed bookmarks can't be edited. Fallback on adding a new bookmark if the current
-            // URL is bookmarked by a managed bookmark.
-
             if (bookmarkId == ChromeBrowserProviderClient.INVALID_BOOKMARK_ID) {
                 intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_IS_FOLDER, false);
                 intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_TITLE,
@@ -1423,4 +1515,45 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     @Override
     public void onSceneChange(Layout layout) { }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+
+        // See enableHardwareAcceleration()
+        if (mSetWindowHWA) {
+            mSetWindowHWA = false;
+            getWindow().setWindowManager(
+                    getWindow().getWindowManager(),
+                    getWindow().getAttributes().token,
+                    getComponentName().flattenToString(),
+                    true /* hardwareAccelerated */);
+        }
+    }
+
+    private void enableHardwareAcceleration() {
+        // HW acceleration is disabled in the manifest. Enable it only on high-end devices.
+        if (!SysUtils.isLowEndDevice()) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
+
+            // When HW acceleration is enabled manually for an activity, child windows (e.g.
+            // dialogs) don't inherit HW acceleration state. However, when HW acceleration is
+            // enabled in the manifest, child windows do inherit HW acceleration state. That
+            // looks like a bug, so I filed b/23036374
+            //
+            // In the meanwhile the workaround is to call
+            //   window.setWindowManager(..., hardwareAccelerated=true)
+            // to let the window know that it's HW accelerated. However, since there is no way
+            // to know 'appToken' argument until window's view is attached to the window (!!),
+            // we have to do the workaround in onAttachedToWindow()
+            mSetWindowHWA = true;
+        }
+    }
+
+    private void setLowEndTheme() {
+        if (SysUtils.isLowEndDevice()
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            setTheme(R.style.MainTheme_LowEnd);
+        }
+    }
 }

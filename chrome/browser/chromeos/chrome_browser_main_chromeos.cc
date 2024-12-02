@@ -75,12 +75,11 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/audio/audio_devices_pref_handler_impl.h"
@@ -128,6 +127,10 @@
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/touch/touch_device.h"
 #include "ui/events/event_utils.h"
+
+#if defined(ENABLE_RLZ)
+#include "components/rlz/rlz_tracker.h"
+#endif
 
 // Exclude X11 dependents for ozone
 #if defined(USE_X11)
@@ -293,7 +296,7 @@ void ChromeBrowserMainPartsChromeos::PreEarlyInitialization() {
   const char kChromeOSReleaseTrack[] = "CHROMEOS_RELEASE_TRACK";
   std::string channel;
   if (base::SysInfo::GetLsbReleaseValue(kChromeOSReleaseTrack, &channel))
-    chrome::VersionInfo::SetChannel(channel);
+    chrome::SetChannel(channel);
 #endif
 
   ChromeBrowserMainPartsLinux::PreEarlyInitialization();
@@ -734,6 +737,9 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // Clean up dependency on CrosSettings and stop pending data fetches.
   KioskAppManager::Shutdown();
 
+  // Make sure that there is no pending URLRequests.
+  UserSessionManager::GetInstance()->Shutdown();
+
   // Give BrowserPolicyConnectorChromeOS a chance to unregister any observers
   // on services that are going to be deleted later but before its Shutdown()
   // is called.
@@ -759,9 +765,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   NetworkPortalDetector::Shutdown();
 
   g_browser_process->platform_part()->DestroyChromeUserManager();
-
-  // Make sure that there is no pending URLRequests.
-  UserSessionManager::GetInstance()->Shutdown();
 
   g_browser_process->platform_part()->ShutdownSessionManager();
 }

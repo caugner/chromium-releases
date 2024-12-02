@@ -67,7 +67,9 @@ class CommandBufferClientImpl::SyncClientImpl
   }
 
   gpu::Capabilities GetCapabilities() {
-    return capabilities_.To<gpu::Capabilities>();
+    if (capabilities_)
+      return capabilities_.To<gpu::Capabilities>();
+    return gpu::Capabilities();
   }
 
  private:
@@ -128,7 +130,8 @@ CommandBufferClientImpl::CommandBufferClientImpl(
   command_buffer_.Bind(mojo::InterfacePtrInfo<mojo::CommandBuffer>(
                            command_buffer_handle.Pass(), 0u),
                        async_waiter);
-  command_buffer_.set_error_handler(this);
+  command_buffer_.set_connection_error_handler(
+      [this]() { DidLoseContext(gpu::error::kUnknown); });
 }
 
 CommandBufferClientImpl::~CommandBufferClientImpl() {}
@@ -223,8 +226,11 @@ scoped_refptr<gpu::Buffer> CommandBufferClientImpl::CreateTransferBuffer(
   void* memory = NULL;
   mojo::ScopedSharedBufferHandle handle;
   mojo::ScopedSharedBufferHandle duped;
-  if (!CreateMapAndDupSharedBuffer(size, &memory, &handle, &duped))
+  if (!CreateMapAndDupSharedBuffer(size, &memory, &handle, &duped)) {
+    if (last_state_.error == gpu::error::kNoError)
+      last_state_.error = gpu::error::kLostContext;
     return NULL;
+  }
 
   *id = ++next_transfer_buffer_id_;
 
@@ -283,12 +289,9 @@ int32_t CommandBufferClientImpl::CreateImage(ClientBuffer buffer,
   }
   mojo::ScopedHandle scoped_handle;
   scoped_handle.reset(mojo::Handle(mojo_handle));
-  command_buffer_->CreateImage(new_id,
-                               scoped_handle.Pass(),
-                               handle.type,
-                               size.Pass(),
-                               gpu_memory_buffer->GetFormat(),
-                               internalformat);
+  command_buffer_->CreateImage(
+      new_id, scoped_handle.Pass(), handle.type, size.Pass(),
+      static_cast<int32_t>(gpu_memory_buffer->GetFormat()), internalformat);
   if (requires_sync_point) {
     NOTIMPLEMENTED();
     // TODO(jam): need to support this if we support types other than
@@ -311,7 +314,7 @@ int32_t CommandBufferClientImpl::CreateGpuMemoryBufferImage(
     unsigned usage) {
   scoped_ptr<gfx::GpuMemoryBuffer> buffer(MojoGpuMemoryBufferImpl::Create(
       gfx::Size(static_cast<int>(width), static_cast<int>(height)),
-      gpu::ImageFactory::ImageFormatToGpuMemoryBufferFormat(internalformat),
+      gpu::ImageFactory::DefaultBufferFormatForImageFormat(internalformat),
       gpu::ImageFactory::ImageUsageToGpuMemoryBufferUsage(usage)));
   if (!buffer)
     return -1;
@@ -360,10 +363,6 @@ void CommandBufferClientImpl::DidLoseContext(int32_t lost_reason) {
   last_state_.context_lost_reason =
       static_cast<gpu::error::ContextLostReason>(lost_reason);
   delegate_->ContextLost();
-}
-
-void CommandBufferClientImpl::OnConnectionError() {
-  DidLoseContext(gpu::error::kUnknown);
 }
 
 void CommandBufferClientImpl::TryUpdateState() {

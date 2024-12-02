@@ -28,6 +28,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "components/url_formatter/url_formatter.h"
 #import "ios/net/nsurlrequest_util.h"
 #include "ios/public/provider/web/web_ui_ios.h"
 #import "ios/web/history_state_util.h"
@@ -49,6 +50,7 @@
 #include "ios/web/public/url_util.h"
 #include "ios/web/public/user_metrics.h"
 #include "ios/web/public/web_client.h"
+#include "ios/web/public/web_kit_constants.h"
 #include "ios/web/public/web_state/credential.h"
 #import "ios/web/public/web_state/crw_web_controller_observer.h"
 #import "ios/web/public/web_state/crw_web_view_scroll_view_proxy.h"
@@ -79,7 +81,6 @@
 #import "ios/web/web_state/web_state_impl.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #import "ui/base/ios/cru_context_menu_holder.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
@@ -130,6 +131,15 @@ namespace {
 // of exposing a getter (and deliberately not exposed in the header) to make it
 // *very* clear that this is a hack which should only be used as a last resort.
 const NSUInteger kWebViewTag = 0x3eb71e3;
+
+// States for external URL requests. This enum is used in UMA and
+// entries should not be re-ordered or deleted.
+enum ExternalURLRequestStatus {
+  MAIN_FRAME_ALLOWED = 0,
+  SUBFRAME_ALLOWED,
+  SUBFRAME_BLOCKED,
+  NUM_EXTERNAL_URL_REQUEST_STATUS
+};
 
 // Cancels touch events for the given gesture recognizer.
 void CancelTouches(UIGestureRecognizer* gesture_recognizer) {
@@ -224,6 +234,8 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
   BOOL _clickInProgress;
   // Data on the recorded last user interaction.
   scoped_ptr<web::UserInteractionEvent> _lastUserInteraction;
+  // YES if there has been user interaction with views owned by this controller.
+  BOOL _userInteractedWithWebController;
   // The time of the last page transfer start, measured in seconds since Jan 1
   // 2001.
   CFAbsoluteTime _lastTransferTimeInSeconds;
@@ -301,19 +313,13 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 // Internal implementation of reload. Reloads without notifying the delegate.
 // Most callers should use -reload instead.
 - (void)reloadInternal;
-// If YES, the page can be closed if the loading of the initial URL requires
-// it (for example when an external URL is detected). After the initial URL is
-// loaded, the page is not cancellable anymore.
-- (BOOL)cancellable;
+// If YES, the page should be closed if it successfully redirects to a native
+// application, for example if a new tab redirects to the App Store.
+- (BOOL)shouldClosePageOnNativeApplicationLoad;
 // Called after URL is finished loading and _loadPhase is set to PAGE_LOADED.
 - (void)didFinishWithURL:(const GURL&)currentURL loadSuccess:(BOOL)loadSuccess;
 // Informs the native controller if web usage is allowed or not.
 - (void)setNativeControllerWebUsageEnabled:(BOOL)webUsageEnabled;
-// Compares the two URLs being navigated between during a history navigation to
-// determine if a # needs to be appended to endURL to trigger a hashchange
-// event. If so, also saves the new endURL in the current CRWSessionEntry.
-- (GURL)updateURLForHistoryNavigationFromURL:(const GURL&)startURL
-                                       toURL:(const GURL&)endURL;
 // Evaluates the supplied JavaScript in the web view. Calls |handler| with
 // results of the evaluation (which may be nil if the implementing object has no
 // way to run the evaluation or the evaluation returns a nil value) or an
@@ -383,21 +389,6 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 - (void)replaceStateWithPageURL:(const GURL&)pageUrl
                     stateObject:(NSString*)stateObject;
 
-// Returns the current entry from the underlying session controller.
-// TODO(stuartmorgan): Audit all calls to these methods; these are just wrappers
-// around the same logic as GetActiveEntry, so should probably not be used for
-// the same reason that GetActiveEntry is deprecated. (E.g., page operations
-// should generally be dealing with the last commited entry, not a pending
-// entry).
-- (CRWSessionEntry*)currentSessionEntry;
-- (web::NavigationItem*)currentNavItem;
-// Returns the referrer for currentURL as a string. May return nil.
-- (web::Referrer)currentSessionEntryReferrer;
-// The data and HTTP headers associated to the current entry. These are nil
-// unless the request was a POST.
-- (NSData*)currentPOSTData;
-- (NSDictionary*)currentHttpHeaders;
-
 // Finds all the scrollviews in the view hierarchy and makes sure they do not
 // interfere with scroll to top when tapping the statusbar.
 - (void)optOutScrollsToTopForSubviews;
@@ -411,6 +402,11 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 // Returns YES if the url was succesfully opened in the native app.
 - (BOOL)urlTriggersNativeAppLaunch:(const GURL&)url
                          sourceURL:(const GURL&)sourceURL;
+// Best guess as to whether the request is a main frame request. This method
+// should not be assumed correct for security evaluations, as it is possible to
+// spoof.
+- (BOOL)isPutativeMainFrameRequest:(NSURLRequest*)request
+                       targetFrame:(const web::FrameInfo*)targetFrame;
 // Returns whether external URL request should be opened.
 - (BOOL)shouldOpenExternalURLRequest:(NSURLRequest*)request
                          targetFrame:(const web::FrameInfo*)targetFrame;
@@ -448,9 +444,6 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 // Handles 'form.activity' message.
 - (BOOL)handleFormActivityMessage:(base::DictionaryValue*)message
                           context:(NSDictionary*)context;
-// Handles 'form.requestAutocomplete' message.
-- (BOOL)handleFormRequestAutocompleteMessage:(base::DictionaryValue*)message
-                                     context:(NSDictionary*)context;
 // Handles 'navigator.credentials.request' message.
 - (BOOL)handleCredentialsRequestedMessage:(base::DictionaryValue*)message
                                   context:(NSDictionary*)context;
@@ -503,19 +496,6 @@ const CGFloat kLongPressMoveDeltaPixels = 10.0;
 // The duration of the period following a screen touch during which the user is
 // still considered to be interacting with the page.
 const NSTimeInterval kMaximumDelayForUserInteractionInSeconds = 2;
-
-// Define missing symbols from WebKit.
-// See WebKitErrors.h on Mac SDK.
-NSString* const WebKitErrorDomain = @"WebKitErrorDomain";
-
-enum {
-  WebKitErrorCannotShowMIMEType = 100,
-  WebKitErrorCannotShowURL = 101,
-  WebKitErrorFrameLoadInterruptedByPolicyChange = 102,
-  // iOS-specific WebKit error that isn't documented but seen on 4.0
-  // devices.
-  WebKitErrorPlugInLoadFailed = 204,
-};
 
 // URLs that are fed into UIWebView as history push/replace get escaped,
 // potentially changing their format. Code that attempts to determine whether a
@@ -1314,8 +1294,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 }
 
 // Load the current URL in a web view, first ensuring the web view is visible.
-// If a native controller is present, remove it and swap a new web view in
-// its place.
 - (void)loadCurrentURLInWebView {
   [self willLoadCurrentURLInWebView];
 
@@ -1335,15 +1313,25 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // JavaScript should never be evaluated here. User-entered JS should be
   // evaluated via stringByEvaluatingUserJavaScriptFromString.
   DCHECK(!targetURL.SchemeIs(url::kJavaScriptScheme));
+
   [self ensureWebViewCreated];
 
-  DCHECK(self.webView && !self.nativeController);
-  NSMutableURLRequest* request =
-      [NSMutableURLRequest requestWithURL:net::NSURLWithGURL(targetURL)];
+  [self loadRequestForCurrentNavigationItem];
+}
+
+- (void)loadRequestForCurrentNavigationItem {
+  // Handled differently by UIWebView and WKWebView subclasses.
+  NOTIMPLEMENTED();
+}
+
+- (NSMutableURLRequest*)requestForCurrentNavigationItem {
+  const GURL currentNavigationURL([self currentNavigationURL]);
+  NSMutableURLRequest* request = [NSMutableURLRequest
+      requestWithURL:net::NSURLWithGURL(currentNavigationURL)];
   const web::Referrer referrer([self currentSessionEntryReferrer]);
   if (referrer.url.is_valid()) {
     std::string referrerValue =
-        web::ReferrerHeaderValueForNavigation(targetURL, referrer);
+        web::ReferrerHeaderValueForNavigation(currentNavigationURL, referrer);
     if (!referrerValue.empty()) {
       [request setValue:base::SysUTF8ToNSString(referrerValue)
           forHTTPHeaderField:kReferrerHeaderName];
@@ -1353,7 +1341,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // If there are headers in the current session entry add them to |request|.
   // Headers that would overwrite fields already present in |request| are
   // skipped.
-  NSDictionary* headers = [self currentHttpHeaders];
+  NSDictionary* headers = [self currentHTTPHeaders];
   for (NSString* headerName in headers) {
     if (![request valueForHTTPHeaderField:headerName]) {
       [request setValue:[headers objectForKey:headerName]
@@ -1361,47 +1349,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     }
   }
 
-  NSData* postData = [self currentPOSTData];
-  if (postData) {
-    web::NavigationItemImpl* currentItem =
-        [self currentSessionEntry].navigationItemImpl;
-    if ([postData length] > 0 &&
-        !(currentItem && currentItem->ShouldSkipResubmitDataConfirmation())) {
-      id cancelBlock = ^{
-        [self registerLoadRequest:[self currentNavigationURL]
-                         referrer:[self currentSessionEntryReferrer]
-                       transition:[self currentTransition]];
-        [self loadRequest:request];
-      };
-      id continueBlock = ^{
-        [request setHTTPMethod:@"POST"];
-        [request setHTTPBody:[self currentPOSTData]];
-        [request setAllHTTPHeaderFields:[self currentHttpHeaders]];
-        [self registerLoadRequest:[self currentNavigationURL]
-                         referrer:[self currentSessionEntryReferrer]
-                       transition:[self currentTransition]];
-        [self loadRequest:request];
-      };
-      [_delegate webController:self
-          onFormResubmissionForRequest:request
-                         continueBlock:continueBlock
-                           cancelBlock:cancelBlock];
-      return;
-    } else {
-      // The user does not need to confirm if POST data is empty.
-      [request setHTTPMethod:@"POST"];
-      [request setHTTPBody:postData];
-      [request setAllHTTPHeaderFields:[self currentHttpHeaders]];
-    }
-  }
-
-  // registerLoadRequest will be called when load is about to begin.
-  // The phase at that point is guaranteed to be web::LOAD_REQUESTED.
-  // However the delegate is not immediately called.
-  [self registerLoadRequest:targetURL
-                   referrer:referrer
-                 transition:[self currentTransition]];
-  [self loadRequest:request];
+  return request;
 }
 
 - (void)loadNativeViewWithSuccess:(BOOL)loadSuccess {
@@ -1430,7 +1378,13 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   [self removeWebViewAllowingCachedReconstruction:NO];
 
   const GURL currentUrl = [self currentNavigationURL];
-  BOOL isPost = [self currentPOSTData] != nil;
+
+  // TODO(bhnascar): Fix POST data check for WKWebView here and elsewhere.
+  // See crbug.com/517911.
+  DCHECK([self currentSessionEntry]);
+  NSData* currentPOSTData =
+      [self currentSessionEntry].navigationItemImpl->GetPostData();
+  BOOL isPost = currentPOSTData != nil;
 
   error = web::NetErrorFromError(error);
   [self setNativeController:[_nativeProvider controllerForURL:currentUrl
@@ -1626,6 +1580,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 // Reload either the web view or the native content depending on which is
 // displayed.
 - (void)reloadInternal {
+  // Clear last user interaction.
+  // TODO(jyquinn): Move to after the load commits, in the subclass
+  // implementation. This will be inaccurate if the reload fails or is
+  // cancelled.
+  _lastUserInteraction.reset();
   web::RecordAction(UserMetricsAction("Reload"));
   if (self.webView) {
     // Just as we don't use the WebView native back and forward navigation
@@ -1816,12 +1775,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     [self finishPushStateNavigationToURL:[self currentNavigationURL]
                          withStateObject:state];
   } else {
-    GURL activeURL = [self currentNavigationURL];
-    GURL fromURL = fromEntry.navigationItem->GetURL();
-    GURL endURL =
-        [self updateURLForHistoryNavigationFromURL:fromURL toURL:activeURL];
     web::NavigationItem* currentItem =
         _webStateImpl->GetNavigationManagerImpl().GetVisibleItem();
+    GURL endURL = [self URLForHistoryNavigationFromItem:fromEntry.navigationItem
+                                                 toItem:currentItem];
     ui::PageTransition transition = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_RELOAD | ui::PAGE_TRANSITION_FORWARD_BACK);
 
@@ -1834,8 +1791,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   }
 }
 
-- (GURL)updateURLForHistoryNavigationFromURL:(const GURL&)startURL
-                                       toURL:(const GURL&)endURL {
+- (GURL)URLForHistoryNavigationFromItem:(web::NavigationItem*)fromItem
+                                 toItem:(web::NavigationItem*)toItem {
+  const GURL& startURL = fromItem->GetURL();
+  const GURL& endURL = toItem->GetURL();
+
   // Check the state of the fragments on both URLs (aka, is there a '#' in the
   // url or not).
   if (!startURL.has_ref() || endURL.has_ref()) {
@@ -1853,10 +1813,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   url::StringPieceReplacements<std::string> emptyRef;
   emptyRef.SetRefStr("");
   GURL newEndURL = endURL.ReplaceComponents(emptyRef);
-  web::NavigationItem* item =
-      _webStateImpl->GetNavigationManagerImpl().GetVisibleItem();
-  if (item)
-    item->SetURL(newEndURL);
+  toItem->SetURL(newEndURL);
   return newEndURL;
 }
 
@@ -1911,9 +1868,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   return _jsInjectionReceiver;
 }
 
-- (BOOL)cancellable {
+- (BOOL)shouldClosePageOnNativeApplicationLoad {
+  // The page should be closed if it was initiated by the DOM and there has been
+  // no user interaction with the page since the web view was created.
   return self.sessionController.openedByDOM &&
-         !self.sessionController.lastCommittedEntry;
+         !_userInteractedWithWebController;
 }
 
 - (BOOL)isBeingDestroyed {
@@ -2035,8 +1994,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
         @selector(handleExternalRequestMessage:context:);
     (*handlers)["form.activity"] =
         @selector(handleFormActivityMessage:context:);
-    (*handlers)["form.requestAutocomplete"] =
-        @selector(handleFormRequestAutocompleteMessage:context:);
     (*handlers)["navigator.credentials.request"] =
         @selector(handleCredentialsRequestedMessage:context:);
     (*handlers)["navigator.credentials.notifySignedIn"] =
@@ -2271,20 +2228,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     keyCode = web::WebStateObserver::kInvalidFormKeyCode;
   _webStateImpl->OnFormActivityRegistered(formName, fieldName, type, value,
                                           keyCode, inputMissing);
-  return YES;
-}
-
-- (BOOL)handleFormRequestAutocompleteMessage:(base::DictionaryValue*)message
-                                     context:(NSDictionary*)context {
-  std::string formName;
-  if (!message->GetString("formName", &formName)) {
-    DLOG(WARNING) << "JS message parameter not found: formName";
-    return NO;
-  }
-  DCHECK(context[web::kUserIsInteractingKey]);
-  _webStateImpl->OnAutocompleteRequested(
-      net::GURLWithNSURL(context[web::kOriginURLKey]), formName,
-      [context[web::kUserIsInteractingKey] boolValue]);
   return YES;
 }
 
@@ -2755,7 +2698,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     return NO;
   }
 
-  BOOL shouldCheckNativeApp = [self cancellable];
+  BOOL shouldCheckNativeApp = [self shouldClosePageOnNativeApplicationLoad];
 
   // Check if the link navigation leads to a launch of an external app.
   // TODO(shreyasv): Change this such that handling/stealing of link navigations
@@ -2768,7 +2711,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       // External app has been launched successfully. Stop the current page
       // load operation (e.g. notifying all observers) and record the URL so
       // that errors reported following the 'NO' reply can be safely ignored.
-      if ([self cancellable])
+      if ([self shouldClosePageOnNativeApplicationLoad])
         [_delegate webPageOrderedClose];
       [self abortLoad];
       [_openedApplicationURL addObject:request.URL];
@@ -2795,19 +2738,15 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       return NO;
     }
 
-    // Abort load if navigation is hapenning on the main frame. If |targetFrame|
-    // is unknown use heuristic to guess the target frame by comparing
-    // documentURL and navigation URL. This heuristic may have false positives.
-    bool shouldAbortLoad = targetFrame ? targetFrame->is_main_frame
-                                       : requestURL == mainDocumentURL;
-    if (shouldAbortLoad)
+    // Abort load if navigation is believed to be happening on the main frame.
+    if ([self isPutativeMainFrameRequest:request targetFrame:targetFrame])
       [self abortLoad];
 
     if ([_delegate openExternalURL:requestURL]) {
       // Record the URL so that errors reported following the 'NO' reply can be
       // safely ignored.
       [_openedApplicationURL addObject:request.URL];
-      if ([self cancellable])
+      if ([self shouldClosePageOnNativeApplicationLoad])
         [_delegate webPageOrderedClose];
     }
     return NO;
@@ -2842,9 +2781,9 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   if ([error code] == NSURLErrorUnsupportedURL)
     return;
   // In cases where a Plug-in handles the load do not take any further action.
-  if ([[error domain] isEqual:WebKitErrorDomain] &&
-      ([error code] == WebKitErrorPlugInLoadFailed ||
-       [error code] == WebKitErrorCannotShowURL))
+  if ([error.domain isEqual:base::SysUTF8ToNSString(web::kWebKitErrorDomain)] &&
+      (error.code == web::kWebKitErrorPlugInLoadFailed ||
+       error.code == web::kWebKitErrorCannotShowUrl))
     return;
 
   // Continue processing only if the error is on the main request or is the
@@ -2882,8 +2821,8 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   const GURL errorGURL = net::GURLWithNSURL(errorURL);
 
   // Handles Frame Load Interrupted errors from WebView.
-  if ([[error domain] isEqualToString:WebKitErrorDomain] &&
-      [error code] == WebKitErrorFrameLoadInterruptedByPolicyChange) {
+  if ([error.domain isEqual:base::SysUTF8ToNSString(web::kWebKitErrorDomain)] &&
+      error.code == web::kWebKitErrorFrameLoadInterruptedByPolicyChange) {
     // See if the delegate wants to handle this case.
     if (errorGURL.is_valid() &&
         [_delegate
@@ -2926,34 +2865,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   }
 
   if ([error code] == NSURLErrorCancelled) {
-    if ([self shouldAbortLoadForCancelledError:error]) {
-      NSError* underlyingError =
-          base::ios::GetFinalUnderlyingErrorFromError(error);
-      DCHECK([underlyingError.domain
-          isEqualToString:base::SysUTF8ToNSString(net::kErrorDomain)]);
-
-      // NSURLCancelled errors with underlying errors are generated from the
-      // Chrome network stack.  Abort the load in this case.
-      [self abortLoad];
-
-      switch ([underlyingError code]) {
-        case net::ERR_ABORTED:
-          // |NSURLErrorCancelled| errors with underlying net error code
-          // |net::ERR_ABORTED| are used by the Chrome network stack to
-          // indicate that the current load should be aborted and the pending
-          // entry should be discarded.
-          [[self sessionController] discardNonCommittedEntries];
-          break;
-        case net::ERR_BLOCKED_BY_CLIENT:
-          // |NSURLErrorCancelled| errors with underlying net error code
-          // |net::ERR_BLOCKED_BY_CLIENT| are used by the Chrome network stack
-          // to indicate that the current load should be aborted and the pending
-          // entry should be kept.
-          break;
-        default:
-          NOTREACHED();
-      }
-    }
+    [self handleCancelledError:error];
     // NSURLErrorCancelled errors that aren't handled by aborting the load will
     // automatically be retried by the web view, so early return in this case.
     return;
@@ -2963,10 +2875,9 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   [self loadErrorInNativeView:error];
 }
 
-- (BOOL)shouldAbortLoadForCancelledError:(NSError*)cancelledError {
+- (void)handleCancelledError:(NSError*)cancelledError {
   // Subclasses must implement this method.
   NOTREACHED();
-  return YES;
 }
 
 #pragma mark -
@@ -3150,6 +3061,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   _clickInProgress = touched;
   if (touched) {
     _userInteractionRegistered = YES;
+    _userInteractedWithWebController = YES;
     if (_isBeingDestroyed)
       return;
     const web::NavigationManagerImpl& navigationManager =
@@ -3336,12 +3248,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   return currentItem ? currentItem->GetReferrer() : web::Referrer();
 }
 
-- (NSData*)currentPOSTData {
-  DCHECK([self currentSessionEntry]);
-  return [self currentSessionEntry].navigationItemImpl->GetPostData();
-}
-
-- (NSDictionary*)currentHttpHeaders {
+- (NSDictionary*)currentHTTPHeaders {
   DCHECK([self currentSessionEntry]);
   return [self currentSessionEntry].navigationItem->GetHttpRequestHeaders();
 }
@@ -3358,10 +3265,14 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 #pragma mark Page State
 
 - (void)recordStateInHistory {
-  // Check that the url in the web view matches the url in the history entry.
+  // Only record the state if:
+  // - the current NavigationItem's URL matches the current URL, and
+  // - the user has interacted with the page.
   CRWSessionEntry* current = [self currentSessionEntry];
-  if (current && [current navigationItem]->GetURL() == [self currentURL])
+  if (current && [current navigationItem]->GetURL() == [self currentURL] &&
+      _userInteractionRegistered) {
     [current navigationItem]->SetPageDisplayState(self.pageDisplayState);
+  }
 }
 
 - (void)restoreStateFromHistory {
@@ -3597,7 +3508,8 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       DCHECK(web::GetWebClient());
       const std::string& acceptLangs = web::GetWebClient()->GetAcceptLangs(
           self.webStateImpl->GetBrowserState());
-      base::string16 urlText = net::FormatUrl(GURL(href), acceptLangs);
+      base::string16 urlText =
+          url_formatter::FormatUrl(GURL(href), acceptLangs);
       title = base::SysUTF16ToNSString(urlText);
     }
   }
@@ -3662,36 +3574,50 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
                       linkClicked:linkClicked];
 }
 
+- (BOOL)isPutativeMainFrameRequest:(NSURLRequest*)request
+                       targetFrame:(const web::FrameInfo*)targetFrame {
+  // Determine whether the request is for the main frame using frame info if
+  // available. In the case of missing frame info, the request is considered to
+  // have originated from the main frame if either of the following is true:
+  //   (a) The request's URL matches the request's main document URL
+  //   (b) The request's URL resourceSpecifier matches the request's
+  //       mainDocumentURL specifier, as is the case upon redirect from http
+  //       App Store links to a URL with itms-apps scheme. This appears to be is
+  //       App Store specific behavior, specially handled by web view.
+  // Note: These heuristics are not guaranteed to be correct, and should not be
+  // used for any decisions with security implications.
+  return targetFrame
+             ? targetFrame->is_main_frame
+             : [request.URL isEqual:request.mainDocumentURL] ||
+                   [request.URL.resourceSpecifier
+                       isEqual:request.mainDocumentURL.resourceSpecifier];
+}
+
 - (BOOL)shouldOpenExternalURLRequest:(NSURLRequest*)request
                          targetFrame:(const web::FrameInfo*)targetFrame {
-  // If targetFrame information is not provided, the request originated from the
-  // main frame if (a) the request's URL matches the request's main document URL
-  // or (b) if the current pending entry matches the request's main document
-  // URL, as this is a redirect from an in-progress main frame load.
-  BOOL isMainFrame = targetFrame
-                         ? targetFrame->is_main_frame
-                         : [request.URL isEqual:request.mainDocumentURL];
-  if (!targetFrame && !isMainFrame) {
-    web::NavigationItem* pendingItem =
-        [self webStateImpl]->GetNavigationManager()->GetPendingItem();
-    if (pendingItem) {
-      isMainFrame =
-          pendingItem->GetURL() == net::GURLWithNSURL(request.mainDocumentURL);
-    }
+  ExternalURLRequestStatus requestStatus = NUM_EXTERNAL_URL_REQUEST_STATUS;
+  if ([self isPutativeMainFrameRequest:request targetFrame:targetFrame]) {
+    requestStatus = MAIN_FRAME_ALLOWED;
+  } else {
+    // If the request's main document URL differs from that at the time of the
+    // last user interaction, then the page has changed since the user last
+    // interacted.
+    BOOL userInteractedWithRequestMainFrame =
+        [self userClickedRecently] &&
+        net::GURLWithNSURL(request.mainDocumentURL) ==
+            _lastUserInteraction->main_document_url;
+    // Prevent subframe requests from opening an external URL if the user has
+    // not interacted with the request's main frame.
+    requestStatus = userInteractedWithRequestMainFrame ? SUBFRAME_ALLOWED
+                                                       : SUBFRAME_BLOCKED;
   }
-
-  // If the request's main document URL differs from that at the time of the
-  // last user interaction, then the page has changed since the user last
-  // interacted.
-  BOOL userHasInteractedWithCurrentPage =
-      _lastUserInteraction &&
-      net::GURLWithNSURL(request.mainDocumentURL) ==
-          _lastUserInteraction->main_document_url;
-
-  // Prevent subframe requests from opening an external URL if the user has not
-  // interacted with the page.
-  if (!isMainFrame && !userHasInteractedWithCurrentPage)
+  DCHECK_NE(requestStatus, NUM_EXTERNAL_URL_REQUEST_STATUS);
+  UMA_HISTOGRAM_ENUMERATION("WebController.ExternalURLRequestBlocking",
+                            requestStatus, NUM_EXTERNAL_URL_REQUEST_STATUS);
+  if (requestStatus == SUBFRAME_BLOCKED &&
+      web::GetWebClient()->IsExternalURLBlockingEnabled()) {
     return NO;
+  }
 
   GURL requestURL = net::GURLWithNSURL(request.URL);
   return [_delegate respondsToSelector:@selector(webController:

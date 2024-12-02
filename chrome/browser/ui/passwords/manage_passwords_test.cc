@@ -57,6 +57,9 @@ void ManagePasswordsTest::SetupPendingPassword() {
   scoped_ptr<password_manager::PasswordFormManager> test_form_manager(
       new password_manager::PasswordFormManager(
           NULL, &client, driver.AsWeakPtr(), *test_form(), false));
+  test_form_manager->SimulateFetchMatchingLoginsFromPasswordStore();
+  ScopedVector<autofill::PasswordForm> best_matches;
+  test_form_manager->OnGetPasswordStoreResults(best_matches.Pass());
   GetController()->OnPasswordSubmitted(test_form_manager.Pass());
 }
 
@@ -96,12 +99,11 @@ void ManagePasswordsTest::SetupAutoSignin(
   GetController()->OnAutoSignin(local_credentials.Pass());
 }
 
-base::HistogramSamples* ManagePasswordsTest::GetSamples(
+scoped_ptr<base::HistogramSamples> ManagePasswordsTest::GetSamples(
     const char* histogram) {
   // Ensure that everything has been properly recorded before pulling samples.
   content::RunAllPendingInMessageLoop();
-  return histogram_tester_.GetHistogramSamplesSinceCreation(histogram)
-      .release();
+  return histogram_tester_.GetHistogramSamplesSinceCreation(histogram).Pass();
 }
 
 ManagePasswordsUIController* ManagePasswordsTest::GetController() {

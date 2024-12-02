@@ -8,7 +8,6 @@
 
 #include "base/json/json_writer.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/memory/scoped_vector.h"
 #include "base/values.h"
 #import "ios/testing/ocmock_complex_type_helper.h"
 #include "ios/web/public/test/web_test_util.h"
@@ -44,11 +43,11 @@ class CRWWebControllerObserverTest : public WebTestT {
 };
 
 // Concrete test fixture to test UIWebView-based web controller observing.
-typedef CRWWebControllerObserverTest<web::UIWebViewWebTest>
+typedef CRWWebControllerObserverTest<web::WebTestWithUIWebViewWebController>
     CRWUIWebViewWebControllerObserverTest;
 
 // Concrete test fixture to test WKWebView-based web controller observing.
-typedef CRWWebControllerObserverTest<web::WKWebViewWebTest>
+typedef CRWWebControllerObserverTest<web::WebTestWithWKWebViewWebController>
     CRWWKWebViewWebControllerObserverTest;
 
 WEB_TEST_F(CRWUIWebViewWebControllerObserverTest,

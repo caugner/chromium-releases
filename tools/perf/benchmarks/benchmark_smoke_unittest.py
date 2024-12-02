@@ -22,12 +22,14 @@ from benchmarks import image_decoding
 from benchmarks import indexeddb_perf
 from benchmarks import jetstream
 from benchmarks import kraken
+from benchmarks import memory
 from benchmarks import octane
 from benchmarks import rasterize_and_record_micro
 from benchmarks import repaint
 from benchmarks import spaceport
 from benchmarks import speedometer
 from benchmarks import sunspider
+from benchmarks import text_selection
 
 
 def SmokeTestGenerator(benchmark):
@@ -83,13 +85,15 @@ _BLACK_LIST_TEST_MODULES = {
     spaceport,  # Takes 451 seconds.
     speedometer,  # Takes 101 seconds.
     jetstream,  # Take 206 seconds.
+    text_selection, # Always fails on cq bot.
+    memory  # Flaky on bots, crbug.com/513767
 }
 
 # Some smoke benchmark tests that run quickly on desktop platform can be very
 # slow on Android. So we create a separate set of black list only for Android.
 _ANDROID_BLACK_LIST_MODULES = {
     kraken,  # Takes 275 seconds on Android.
-    sunspider  # Takes 163 seconds on Android.
+    sunspider,  # Takes 163 seconds on Android.
 }
 
 

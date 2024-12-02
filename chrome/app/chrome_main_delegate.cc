@@ -16,17 +16,18 @@
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event_impl.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/profiling.h"
@@ -39,6 +40,7 @@
 #include "components/component_updater/component_updater_paths.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/version_info/version_info.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "extensions/common/constants.h"
@@ -116,10 +118,6 @@
 #include "components/nacl/renderer/plugin/ppapi_entrypoints.h"
 #endif
 
-#if defined(ENABLE_REMOTING)
-#include "remoting/client/plugin/pepper_entrypoints.h"
-#endif
-
 #if defined(ENABLE_PLUGINS) && (defined(CHROME_MULTIPLE_DLL_CHILD) || \
     !defined(CHROME_MULTIPLE_DLL_BROWSER))
 #include "pdf/pdf.h"
@@ -155,13 +153,11 @@ namespace {
 // Early versions of Chrome incorrectly registered a chromehtml: URL handler,
 // which gives us nothing but trouble. Avoid launching chrome this way since
 // some apps fail to properly escape arguments.
-bool HasDeprecatedArguments(const std::wstring& command_line) {
+bool HasDeprecatedArguments(const base::string16& command_line) {
   const wchar_t kChromeHtml[] = L"chromehtml:";
-  std::wstring command_line_lower = command_line;
+  base::string16 command_line_lower = base::ToLowerASCII(command_line);
   // We are only searching for ASCII characters so this is OK.
-  base::StringToLowerASCII(&command_line_lower);
-  std::wstring::size_type pos = command_line_lower.find(kChromeHtml);
-  return (pos != std::wstring::npos);
+  return (command_line_lower.find(kChromeHtml) != base::string16::npos);
 }
 
 // If we try to access a path that is not currently available, we want the call
@@ -272,20 +268,18 @@ bool SubprocessNeedsResourceBundle(const std::string& process_type) {
 // Check for --version and --product-version; return true if we encountered
 // one of these switches and should exit now.
 bool HandleVersionSwitches(const base::CommandLine& command_line) {
-  const chrome::VersionInfo version_info;
-
 #if !defined(OS_MACOSX)
   if (command_line.HasSwitch(switches::kProductVersion)) {
-    printf("%s\n", version_info.Version().c_str());
+    printf("%s\n", version_info::GetVersionNumber().c_str());
     return true;
   }
 #endif
 
   if (command_line.HasSwitch(switches::kVersion)) {
     printf("%s %s %s\n",
-           version_info.Name().c_str(),
-           version_info.Version().c_str(),
-           chrome::VersionInfo::GetVersionStringModifier().c_str());
+           version_info::GetProductName().c_str(),
+           version_info::GetVersionNumber().c_str(),
+           chrome::GetChannelString().c_str());
     return true;
   }
 
@@ -396,14 +390,13 @@ void InitializeUserDataDir() {
 }  // namespace
 
 ChromeMainDelegate::ChromeMainDelegate() {
-#if defined(OS_ANDROID)
 // On Android the main entry point time is the time when the Java code starts.
 // This happens before the shared library containing this code is even loaded.
 // The Java startup code has recorded that time, but the C++ code can't fetch it
 // from the Java side until it has initialized the JNI. See
 // ChromeMainDelegateAndroid.
-#else
-  startup_metric_utils::RecordMainEntryPointTime();
+#if !defined(OS_ANDROID)
+  startup_metric_utils::RecordMainEntryPointTime(base::Time::Now());
 #endif
 }
 
@@ -465,7 +458,7 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
     return true;
   }
 
-  InstallCloseHandleHooks();
+  InstallHandleHooks();
 #endif
 
   chrome::RegisterPathProvider();
@@ -818,12 +811,6 @@ void ChromeMainDelegate::SandboxInitialized(const std::string& process_type) {
 #endif
 
 #if defined(CHROME_MULTIPLE_DLL_CHILD) || !defined(CHROME_MULTIPLE_DLL_BROWSER)
-#if defined(ENABLE_REMOTING)
-  ChromeContentClient::SetRemotingEntryFunctions(
-      remoting::PPP_GetInterface,
-      remoting::PPP_InitializeModule,
-      remoting::PPP_ShutdownModule);
-#endif
 #if !defined(DISABLE_NACL)
   ChromeContentClient::SetNaClEntryFunctions(
       nacl_plugin::PPP_GetInterface,
@@ -886,7 +873,7 @@ void ChromeMainDelegate::ProcessExiting(const std::string& process_type) {
 #endif  // !defined(OS_ANDROID)
 
 #if defined(OS_WIN)
-  RemoveCloseHandleHooks();
+  RemoveHandleHooks();
 #endif
 }
 
@@ -980,13 +967,13 @@ ChromeMainDelegate::CreateContentUtilityClient() {
 }
 
 bool ChromeMainDelegate::ShouldEnableProfilerRecording() {
-  switch (chrome::VersionInfo::GetChannel()) {
-    case chrome::VersionInfo::CHANNEL_UNKNOWN:
-    case chrome::VersionInfo::CHANNEL_CANARY:
+  switch (chrome::GetChannel()) {
+    case version_info::Channel::UNKNOWN:
+    case version_info::Channel::CANARY:
       return true;
-    case chrome::VersionInfo::CHANNEL_DEV:
-    case chrome::VersionInfo::CHANNEL_BETA:
-    case chrome::VersionInfo::CHANNEL_STABLE:
+    case version_info::Channel::DEV:
+    case version_info::Channel::BETA:
+    case version_info::Channel::STABLE:
     default:
       // Don't enable instrumentation.
       return false;

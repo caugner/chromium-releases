@@ -16,6 +16,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -44,23 +45,6 @@ const char kKWalletInterface[] = "org.kde.KWallet";
 const char kKLauncherServiceName[] = "org.kde.klauncher";
 const char kKLauncherPath[] = "/KLauncher";
 const char kKLauncherInterface[] = "org.kde.KLauncher";
-
-// Compares two PasswordForms and returns true if they are the same.
-// If |update_check| is false, we only check the fields that are checked by
-// LoginDatabase::UpdateLogin() when updating logins; otherwise, we check the
-// fields that are checked by LoginDatabase::RemoveLogin() for removing them.
-bool CompareForms(const autofill::PasswordForm& a,
-                  const autofill::PasswordForm& b,
-                  bool update_check) {
-  // An update check doesn't care about the submit element.
-  if (!update_check && a.submit_element != b.submit_element)
-    return false;
-  return a.origin           == b.origin &&
-         a.password_element == b.password_element &&
-         a.signon_realm     == b.signon_realm &&
-         a.username_element == b.username_element &&
-         a.username_value   == b.username_value;
-}
 
 // Checks a serialized list of PasswordForms for sanity. Returns true if OK.
 // Note that |realm| is only used for generating a useful warning message.
@@ -203,7 +187,7 @@ bool DeserializeValueSize(const std::string& signon_realm,
 
     if (version > 3) {
       if (!iter.ReadString16(&form->display_name) ||
-          !ReadGURL(&iter, warn_only, &form->avatar_url) ||
+          !ReadGURL(&iter, warn_only, &form->icon_url) ||
           !ReadGURL(&iter, warn_only, &form->federation_url) ||
           !iter.ReadBool(&form->skip_zero_click)) {
         LogDeserializationWarning(version, signon_realm, false);
@@ -262,7 +246,7 @@ void SerializeValue(const std::vector<autofill::PasswordForm*>& forms,
     autofill::SerializeFormData(form->form_data, pickle);
     pickle->WriteInt64(form->date_synced.ToInternalValue());
     pickle->WriteString16(form->display_name);
-    pickle->WriteString(form->avatar_url.spec());
+    pickle->WriteString(form->icon_url.spec());
     pickle->WriteString(form->federation_url.spec());
     pickle->WriteBool(form->skip_zero_click);
     pickle->WriteInt(form->generation_upload_status);
@@ -457,23 +441,19 @@ password_manager::PasswordStoreChangeList NativeBackendKWallet::AddLogin(
   if (!GetLoginsList(form.signon_realm, wallet_handle, &forms))
     return password_manager::PasswordStoreChangeList();
 
-  // We search for a login to update, rather than unconditionally appending the
-  // login, because in some cases (especially involving sync) we can be asked to
-  // add a login that already exists. In these cases we want to just update.
-  bool updated = false;
+  auto it = std::partition(forms.begin(), forms.end(),
+                           [&form](const PasswordForm* current_form) {
+    return !ArePasswordFormUniqueKeyEqual(form, *current_form);
+  });
   password_manager::PasswordStoreChangeList changes;
-  for (size_t i = 0; i < forms.size(); ++i) {
-    // Use the more restrictive removal comparison, so that we never have
-    // duplicate logins that would all be removed together by RemoveLogin().
-    if (CompareForms(form, *forms[i], false)) {
-      changes.push_back(password_manager::PasswordStoreChange(
-          password_manager::PasswordStoreChange::REMOVE, *forms[i]));
-      *forms[i] = form;
-      updated = true;
-    }
+  if (it != forms.end()) {
+    // It's an update.
+    changes.push_back(password_manager::PasswordStoreChange(
+        password_manager::PasswordStoreChange::REMOVE, **it));
+    forms.erase(it, forms.end());
   }
-  if (!updated)
-    forms.push_back(new PasswordForm(form));
+
+  forms.push_back(new PasswordForm(form));
   changes.push_back(password_manager::PasswordStoreChange(
       password_manager::PasswordStoreChange::ADD, form));
 
@@ -488,7 +468,6 @@ bool NativeBackendKWallet::UpdateLogin(
     const PasswordForm& form,
     password_manager::PasswordStoreChangeList* changes) {
   DCHECK(changes);
-  changes->clear();
   int wallet_handle = WalletHandle();
   if (wallet_handle == kInvalidKWalletHandle)
     return false;
@@ -497,16 +476,16 @@ bool NativeBackendKWallet::UpdateLogin(
   if (!GetLoginsList(form.signon_realm, wallet_handle, &forms))
     return false;
 
-  bool updated = false;
-  for (size_t i = 0; i < forms.size(); ++i) {
-    if (CompareForms(form, *forms[i], true)) {
-      *forms[i] = form;
-      updated = true;
-    }
-  }
-  if (!updated)
+  auto it = std::partition(forms.begin(), forms.end(),
+                           [&form](const PasswordForm* current_form) {
+    return !ArePasswordFormUniqueKeyEqual(form, *current_form);
+  });
+
+  if (it == forms.end())
     return true;
 
+  forms.erase(it, forms.end());
+  forms.push_back(new PasswordForm(form));
   if (SetLoginsList(forms.get(), form.signon_realm, wallet_handle)) {
     changes->push_back(password_manager::PasswordStoreChange(
         password_manager::PasswordStoreChange::UPDATE, form));
@@ -516,7 +495,10 @@ bool NativeBackendKWallet::UpdateLogin(
   return false;
 }
 
-bool NativeBackendKWallet::RemoveLogin(const PasswordForm& form) {
+bool NativeBackendKWallet::RemoveLogin(
+    const PasswordForm& form,
+    password_manager::PasswordStoreChangeList* changes) {
+  DCHECK(changes);
   int wallet_handle = WalletHandle();
   if (wallet_handle == kInvalidKWalletHandle)
     return false;
@@ -528,14 +510,19 @@ bool NativeBackendKWallet::RemoveLogin(const PasswordForm& form) {
   ScopedVector<autofill::PasswordForm> kept_forms;
   kept_forms.reserve(all_forms.size());
   for (auto& saved_form : all_forms) {
-    if (!CompareForms(form, *saved_form, false)) {
+    if (!ArePasswordFormUniqueKeyEqual(form, *saved_form)) {
       kept_forms.push_back(saved_form);
       saved_form = nullptr;
     }
   }
 
-  // Update the entry in the wallet, possibly deleting it.
-  return SetLoginsList(kept_forms.get(), form.signon_realm, wallet_handle);
+  if (kept_forms.size() != all_forms.size()) {
+    changes->push_back(password_manager::PasswordStoreChange(
+        password_manager::PasswordStoreChange::REMOVE, form));
+    return SetLoginsList(kept_forms.get(), form.signon_realm, wallet_handle);
+  }
+
+  return true;
 }
 
 bool NativeBackendKWallet::RemoveLoginsCreatedBetween(
@@ -660,6 +647,30 @@ bool NativeBackendKWallet::GetLoginsList(
   if (!GetAllLogins(wallet_handle, &all_forms))
     return false;
 
+  // Remove the duplicate sync tags.
+  ScopedVector<autofill::PasswordForm> duplicates;
+  password_manager_util::FindDuplicates(&all_forms, &duplicates, nullptr);
+  if (!duplicates.empty()) {
+    // Fill the signon realms to be updated.
+    std::map<std::string, std::vector<autofill::PasswordForm*>> update_forms;
+    for (autofill::PasswordForm* form : duplicates) {
+      update_forms.insert(std::make_pair(
+          form->signon_realm, std::vector<autofill::PasswordForm*>()));
+    }
+
+    // Fill the actual forms to be saved.
+    for (autofill::PasswordForm* form : all_forms) {
+      auto it = update_forms.find(form->signon_realm);
+      if (it != update_forms.end())
+        it->second.push_back(form);
+    }
+
+    // Update the backend.
+    for (const auto& forms : update_forms) {
+      if (!SetLoginsList(forms.second, forms.first, wallet_handle))
+        return false;
+    }
+  }
   // We have to read all the entries, and then filter them here.
   forms->reserve(all_forms.size());
   for (auto& saved_form : all_forms) {

@@ -8,7 +8,6 @@
 #include "base/location.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
@@ -57,15 +56,15 @@ scoped_ptr<Event> MakeDeviceStateChangedEvent(
   scoped_ptr<base::ListValue> params =
       gcd_private::OnDeviceStateChanged::Create(device);
   scoped_ptr<Event> event(
-      new Event(events::UNKNOWN, gcd_private::OnDeviceStateChanged::kEventName,
-                params.Pass()));
+      new Event(events::GCD_PRIVATE_ON_DEVICE_STATE_CHANGED,
+                gcd_private::OnDeviceStateChanged::kEventName, params.Pass()));
   return event.Pass();
 }
 
 scoped_ptr<Event> MakeDeviceRemovedEvent(const std::string& device) {
   scoped_ptr<base::ListValue> params =
       gcd_private::OnDeviceRemoved::Create(device);
-  scoped_ptr<Event> event(new Event(events::UNKNOWN,
+  scoped_ptr<Event> event(new Event(events::GCD_PRIVATE_ON_DEVICE_REMOVED,
                                     gcd_private::OnDeviceRemoved::kEventName,
                                     params.Pass()));
   return event.Pass();

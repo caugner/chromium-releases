@@ -179,8 +179,12 @@ void TabLayer::SetProperties(int id,
     //--------------------------------------------------------------------------
     // Update Resource Ids For Layers That Impact Layout
     //--------------------------------------------------------------------------
-    toolbar_layer_->PushResource(toolbar_resource, nullptr, anonymize_toolbar,
-                                 incognito_, false);
+
+    // TODO(kkimlabs): Tab switcher doesn't show the progress bar.
+    toolbar_layer_->PushResource(toolbar_resource, anonymize_toolbar,
+                                 incognito_, false, 1.f);
+    toolbar_layer_->UpdateProgressBar(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
     if (show_toolbar && !back_visible)
       toolbar_impact_height = toolbar_resource->padding.height();
   }
@@ -367,7 +371,7 @@ void TabLayer::SetProperties(int id,
 
     content_->SetProperties(id, can_use_live_layer, can_use_ntp_fallback,
                             static_to_view_blend, true, alpha, saturation,
-                            brightness, rounded_descaled_content_area,
+                            rounded_descaled_content_area,
                             gfx::Size(content_width, content_height));
   } else if (back_logo_resource) {
     back_logo_->SetUIResourceId(back_logo_resource->ui_resource->id());

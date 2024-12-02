@@ -4,13 +4,14 @@
 
 package org.chromium.chrome.browser.enhancedbookmarks;
 
-import android.os.Build;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.WindowManager;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
+import org.chromium.components.bookmarks.BookmarkId;
 
 /**
  * The activity that wraps all enhanced bookmark UI on the phone. It keeps a
@@ -23,13 +24,14 @@ public class EnhancedBookmarkActivity extends EnhancedBookmarkActivityBase imple
 
     private EnhancedBookmarkManager mBookmarkManager;
     private SnackbarManager mSnackbarManager;
+    static final int EDIT_BOOKMARK_REQUEST_CODE = 14;
+    public static final String INTENT_VISIT_BOOKMARK_ID =
+            "EnhancedBookmarkEditActivity.VisitBookmarkId";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-        }
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         mSnackbarManager = new SnackbarManager(getWindow());
         mBookmarkManager = new EnhancedBookmarkManager(this);
         setContentView(mBookmarkManager.getView());
@@ -54,5 +56,15 @@ public class EnhancedBookmarkActivity extends EnhancedBookmarkActivityBase imple
     @Override
     public void onBackPressed() {
         if (!mBookmarkManager.onBackPressed()) super.onBackPressed();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EDIT_BOOKMARK_REQUEST_CODE && resultCode == RESULT_OK) {
+            BookmarkId bookmarkId = BookmarkId.getBookmarkIdFromString(data.getStringExtra(
+                    INTENT_VISIT_BOOKMARK_ID));
+            mBookmarkManager.openBookmark(bookmarkId, LaunchLocation.BOOKMARK_EDITOR);
+        }
     }
 }

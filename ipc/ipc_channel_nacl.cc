@@ -211,7 +211,10 @@ bool ChannelNacl::Send(Message* message) {
   Logging::GetInstance()->OnSendMessage(message_ptr.get(), "");
 #endif  // IPC_MESSAGE_LOG_ENABLED
 
-  message->TraceMessageBegin();
+  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"),
+                         "ChannelNacl::Send",
+                         message->header()->flags,
+                         TRACE_EVENT_FLAG_FLOW_OUT);
   output_queue_.push_back(linked_ptr<Message>(message_ptr.release()));
   if (!waiting_connect_)
     return ProcessOutgoingMessages();
@@ -350,7 +353,11 @@ ChannelNacl::ReadState ChannelNacl::ReadData(
   return READ_SUCCEEDED;
 }
 
-bool ChannelNacl::WillDispatchInputMessage(Message* msg) {
+bool ChannelNacl::ShouldDispatchInputMessage(Message* msg) {
+  return true;
+}
+
+bool ChannelNacl::GetNonBrokeredAttachments(Message* msg) {
   uint16 header_fds = msg->header()->num_fds;
   CHECK(header_fds == input_fds_.size());
   if (header_fds == 0)
@@ -373,6 +380,16 @@ void ChannelNacl::HandleInternalMessage(const Message& msg) {
   // The trusted side IPC::Channel should handle the "hello" handshake; we
   // should not receive the "Hello" message.
   NOTREACHED();
+}
+
+base::ProcessId ChannelNacl::GetSenderPID() {
+  // The untrusted side of the IPC::Channel should never have to worry about
+  // sender's process id.
+  return base::kNullProcessId;
+}
+
+bool ChannelNacl::IsAttachmentBrokerEndpoint() {
+  return is_attachment_broker_endpoint();
 }
 
 // Channel's methods

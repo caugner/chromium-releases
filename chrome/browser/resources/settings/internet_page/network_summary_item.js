@@ -108,6 +108,15 @@ Polymer({
 
   /**
    * @param {?DeviceStateProperties} deviceState The state of a device.
+   * @return {boolean} Whether or not the scanning spinner should be shown.
+   * @private
+   */
+  showScanning_: function(deviceState) {
+    return this.expanded && deviceState.Scanning;
+  },
+
+  /**
+   * @param {?DeviceStateProperties} deviceState The state of a device.
    * @return {boolean} Whether or not the device state is enabled.
    * @private
    */
@@ -122,7 +131,8 @@ Polymer({
    */
   getDeviceEnabledButtonClass_: function(deviceState) {
     var visible = deviceState &&
-        deviceState.Type != 'Ethernet' && deviceState.Type != 'VPN';
+        deviceState.Type != CrOnc.Type.ETHERNET &&
+        deviceState.Type != CrOnc.Type.VPN;
     return visible ? '' : 'invisible';
   },
 
@@ -146,7 +156,7 @@ Polymer({
   expandIsVisible_: function(deviceState, networkList) {
     if (!this.deviceIsEnabled_(deviceState))
       return false;
-    var minLength = (this.type == 'WiFi') ? 1 : 2;
+    var minLength = (this.type == CrOnc.Type.WI_FI) ? 1 : 2;
     return networkList.length >= minLength;
   },
 
@@ -172,7 +182,7 @@ Polymer({
 
   /**
    * Event triggered when a network-list-item is the network list is selected.
-   * @param {!{detail: NetworkListItem}} event
+   * @param {!{detail: !CrOnc.NetworkStateProperties}} event
    * @private
    */
   onListItemSelected_: function(event) {

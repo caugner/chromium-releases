@@ -20,15 +20,18 @@
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 #include "net/tools/quic/test_tools/mock_epoll_server.h"
-#include "net/tools/quic/test_tools/quic_test_utils.h"
+#include "net/tools/quic/test_tools/mock_quic_server_session_visitor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using net::test::kTestPort;
 using net::test::BuildUnsizedDataPacket;
 using net::test::NoOpFramerVisitor;
 using net::test::QuicVersionMax;
 using net::test::QuicVersionMin;
 using net::test::ValueRestore;
+using net::test::MockPacketWriter;
+
 using testing::Args;
 using testing::Assign;
 using testing::DoAll;
@@ -223,8 +226,7 @@ class ValidatePublicResetPacketPredicate
   QuicPacketSequenceNumber sequence_number_;
 };
 
-
-Matcher<const std::tr1::tuple<const char*, int> > PublicResetPacketEq(
+Matcher<const std::tr1::tuple<const char*, int>> PublicResetPacketEq(
     QuicConnectionId connection_id,
     QuicPacketSequenceNumber sequence_number) {
   return MakeMatcher(new ValidatePublicResetPacketPredicate(connection_id,

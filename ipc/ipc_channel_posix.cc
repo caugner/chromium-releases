@@ -511,7 +511,10 @@ bool ChannelPosix::Send(Message* message) {
   Logging::GetInstance()->OnSendMessage(message, "");
 #endif  // IPC_MESSAGE_LOG_ENABLED
 
-  message->TraceMessageBegin();
+  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("ipc.flow"),
+                         "ChannelPosix::Send",
+                         message->flags(),
+                         TRACE_EVENT_FLAG_FLOW_OUT);
   output_queue_.push(message);
   if (!is_blocked_on_write_ && !waiting_connect_) {
     return ProcessOutgoingMessages();
@@ -652,7 +655,7 @@ void ChannelPosix::OnFileCanReadWithoutBlocking(int fd) {
     if (waiting_connect_ && (mode_ & MODE_SERVER_FLAG)) {
       waiting_connect_ = false;
     }
-    if (!ProcessIncomingMessages()) {
+    if (ProcessIncomingMessages() == DISPATCH_ERROR) {
       // ClosePipeOnError may delete this object, so we mustn't call
       // ProcessOutgoingMessages.
       ClosePipeOnError();
@@ -799,12 +802,16 @@ ChannelPosix::ReadState ChannelPosix::ReadData(
   return READ_SUCCEEDED;
 }
 
+bool ChannelPosix::ShouldDispatchInputMessage(Message* msg) {
+  return true;
+}
+
 // On Posix, we need to fix up the file descriptors before the input message
 // is dispatched.
 //
 // This will read from the input_fds_ (READWRITE mode only) and read more
 // handles from the FD pipe if necessary.
-bool ChannelPosix::WillDispatchInputMessage(Message* msg) {
+bool ChannelPosix::GetNonBrokeredAttachments(Message* msg) {
   uint16 header_fds = msg->header()->num_fds;
   if (!header_fds)
     return true;  // Nothing to do.
@@ -945,6 +952,14 @@ void ChannelPosix::HandleInternalMessage(const Message& msg) {
       break;
 #endif
   }
+}
+
+base::ProcessId ChannelPosix::GetSenderPID() {
+  return GetPeerPID();
+}
+
+bool ChannelPosix::IsAttachmentBrokerEndpoint() {
+  return is_attachment_broker_endpoint();
 }
 
 void ChannelPosix::Close() {

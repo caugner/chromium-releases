@@ -103,10 +103,22 @@ if (enable_webrtc || !is_android) {
       "notifier/listener/fake_push_client_observer.cc",
       "notifier/listener/fake_push_client_observer.h",
     ]
-    deps = [
+    public_deps = [
+      ":jingle_glue",
       ":notifier",
+    ]
+    deps = [
       "//base",
       "//testing/gmock",
+    ]
+  }
+
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("jingle_unittests_run") {
+    testonly = true
+    deps = [
+      ":jingle_unittests",
     ]
   }
 

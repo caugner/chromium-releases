@@ -85,9 +85,9 @@ class DataReductionProxyProtocolTest : public testing::Test {
   }
 
   void SetUp() override {
+    net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
     test_context_ = DataReductionProxyTestContext::Builder().Build();
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
-    net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
     test_context_->RunUntilIdle();
   }
 
@@ -135,8 +135,7 @@ class DataReductionProxyProtocolTest : public testing::Test {
                          bool expect_response_body) {
     std::string m(method);
     std::string trailer =
-        (m == "HEAD" || m == "PUT" || m == "POST") ?
-            "Content-Length: 0\r\n" : "";
+        (m == "PUT" || m == "POST") ? "Content-Length: 0\r\n" : "";
 
     std::string request1 =
         base::StringPrintf("%s http://www.google.com/ HTTP/1.1\r\n"

@@ -5,19 +5,15 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_SYSTEM_IMPL_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SYSTEM_IMPL_H_
 
-#include "base/memory/scoped_vector.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/one_shot_event.h"
 
-class DeclarativeUserScriptManager;
 class Profile;
 
 namespace extensions {
 
-class ContentVerifier;
 class ExtensionSystemSharedFactory;
 class NavigationObserver;
-class SharedUserScriptMaster;
 class StateStoreNotificationObserver;
 
 // The ExtensionSystem for ProfileImpl and OffTheRecordProfileImpl.
@@ -43,9 +39,11 @@ class ExtensionSystemImpl : public ExtensionSystem {
   StateStore* rules_store() override;                              // shared
   InfoMap* info_map() override;                                    // shared
   QuotaService* quota_service() override;  // shared
+  AppSorting* app_sorting() override;  // shared
 
   void RegisterExtensionWithRequestContexts(
-      const Extension* extension) override;
+      const Extension* extension,
+      const base::Closure& callback) override;
 
   void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
@@ -83,6 +81,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
     SharedUserScriptMaster* shared_user_script_master();
     InfoMap* info_map();
     QuotaService* quota_service();
+    AppSorting* app_sorting();
     const OneShotEvent& ready() const { return ready_; }
     ContentVerifier* content_verifier();
 
@@ -106,6 +105,7 @@ class ExtensionSystemImpl : public ExtensionSystem {
     // extension_info_map_ needs to outlive process_manager_.
     scoped_refptr<InfoMap> extension_info_map_;
     scoped_ptr<QuotaService> quota_service_;
+    scoped_ptr<AppSorting> app_sorting_;
 
     // For verifying the contents of extensions read from disk.
     scoped_refptr<ContentVerifier> content_verifier_;

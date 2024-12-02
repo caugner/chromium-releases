@@ -59,6 +59,7 @@ class DownloadItemNotification : public DownloadNotification,
 
   // Set preview image of the notification. Must be called on IO thread.
   void OnImageLoaded(const std::string& image_data);
+  void OnImageCropped(const SkBitmap& image);
 
   // ImageDecoder::ImageRequest overrides:
   void OnImageDecoded(const SkBitmap& decoded_image) override;
@@ -70,9 +71,16 @@ class DownloadItemNotification : public DownloadNotification,
   // Returns a short one-line status string for a download command.
   base::string16 GetCommandLabel(DownloadCommands::Command command) const;
 
-  // Get the warning test to notify a dangerous download. Should only be called
+  // Get the warning text to notify a dangerous download. Should only be called
   // if IsDangerous() is true.
-  base::string16 GetWarningText() const;
+  base::string16 GetWarningStatusString() const;
+
+  // Get the sub status text of the current in-progress download status. Should
+  // be called only for downloads in progress.
+  base::string16 GetInProgressSubStatusString() const;
+
+  // Get the status text.
+  base::string16 GetStatusString() const;
 
   bool IsNotificationVisible() const;
 
@@ -91,6 +99,7 @@ class DownloadItemNotification : public DownloadNotification,
   int image_resource_id_ = 0;
   content::DownloadItem::DownloadState previous_download_state_ =
       content::DownloadItem::MAX_DOWNLOAD_STATE;  // As uninitialized state
+  bool previous_dangerous_state_ = false;
   scoped_ptr<Notification> notification_;
   content::DownloadItem* item_;
   scoped_ptr<std::vector<DownloadCommands::Command>> button_actions_;

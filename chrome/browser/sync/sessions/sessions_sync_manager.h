@@ -12,18 +12,17 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/sync/glue/favicon_cache.h"
 #include "chrome/browser/sync/glue/synced_session_tracker.h"
-#include "chrome/browser/sync/sessions/tab_node_pool.h"
 #include "components/sessions/session_id.h"
 #include "components/sessions/session_types.h"
 #include "components/sync_driver/device_info.h"
 #include "components/sync_driver/glue/synced_session.h"
 #include "components/sync_driver/open_tabs_ui_delegate.h"
 #include "components/sync_driver/sync_prefs.h"
+#include "components/sync_driver/tab_node_pool.h"
 #include "components/variations/variations_associated_data.h"
 #include "sync/api/syncable_service.h"
 
@@ -117,6 +116,9 @@ class SessionsSyncManager : public syncer::SyncableService,
   bool GetForeignTab(const std::string& tag,
                      const SessionID::id_type tab_id,
                      const sessions::SessionTab** tab) override;
+  bool GetForeignSessionTabs(
+      const std::string& tag,
+      std::vector<const sessions::SessionTab*>* tabs) override;
   void DeleteForeignSession(const std::string& tag) override;
   bool GetLocalSession(
       const sync_driver::SyncedSession** local_session) override;
@@ -358,7 +360,7 @@ class SessionsSyncManager : public syncer::SyncableService,
 
   sync_driver::SyncPrefs sync_prefs_;
 
-  const Profile* const profile_;
+  Profile* const profile_;
 
   scoped_ptr<syncer::SyncErrorFactory> error_handler_;
   scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;

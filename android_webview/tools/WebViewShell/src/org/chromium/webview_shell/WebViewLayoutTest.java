@@ -16,6 +16,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -31,8 +33,12 @@ public class WebViewLayoutTest
             Environment.getExternalStorageDirectory().getAbsolutePath() + "/";
     private static final String BASE_WEBVIEW_TEST_PATH = "android_webview/tools/WebViewShell/test/";
     private static final String BASE_BLINK_TEST_PATH = "third_party/WebKit/LayoutTests/";
+    private static final String BASE_BLINK_STABLE_TEST_PATH =
+            BASE_BLINK_TEST_PATH + "virtual/stable/";
     private static final String PATH_WEBVIEW_PREFIX = EXTERNAL_PREFIX + BASE_WEBVIEW_TEST_PATH;
     private static final String PATH_BLINK_PREFIX = EXTERNAL_PREFIX + BASE_BLINK_TEST_PATH;
+    private static final String PATH_BLINK_STABLE_PREFIX =
+            EXTERNAL_PREFIX + BASE_BLINK_STABLE_TEST_PATH;
 
     private static final long TIMEOUT_SECONDS = 20;
 
@@ -67,6 +73,67 @@ public class WebViewLayoutTest
     public void testGlobalInterface() throws Exception {
         runBlinkLayoutTest("webexposed/global-interface-listing.html",
                            "webexposed/global-interface-listing-expected.txt");
+    }
+
+    public void testWebViewExcludedInterfaces() throws Exception {
+        ensureJsTestCopied();
+        loadUrlWebViewAsync("file://" + PATH_BLINK_PREFIX
+                + "webexposed/global-interface-listing.html", mTestActivity);
+        String blinkExpected = readFile(PATH_BLINK_PREFIX
+                + "webexposed/global-interface-listing-expected.txt");
+        String webviewExcluded = readFile(PATH_WEBVIEW_PREFIX
+                + "webexposed/not-webview-exposed.txt");
+        mTestActivity.waitForFinish(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        String result = mTestActivity.getTestResult();
+
+        HashMap<String, HashSet<String>> webviewExcludedInterfacesMap =
+                buildHashMap(webviewExcluded);
+        HashMap<String, HashSet<String>> webviewInterfacesMap = buildHashMap(result);
+        HashMap<String, HashSet<String>> blinkInterfacesMap = buildHashMap(blinkExpected);
+        StringBuilder unexpected = new StringBuilder();
+
+        // Check that each excluded interface is present in blinkInterfacesMap but not
+        // in webviewInterfacesMap.
+        for (String interfaceS : webviewExcludedInterfacesMap.keySet()) {
+            assertNotNull("Interface " + interfaceS + " not exposed in blink",
+                    blinkInterfacesMap.get(interfaceS));
+            if (webviewInterfacesMap.get(interfaceS) != null) {
+                unexpected.append(interfaceS + "\n");
+            }
+        }
+        assertEquals("Unexpected webview interfaces found", "", unexpected.toString());
+    }
+
+    public void testWebViewIncludedStableInterfaces() throws Exception {
+        ensureJsTestCopied();
+        loadUrlWebViewAsync("file://" + PATH_BLINK_PREFIX
+                + "webexposed/global-interface-listing.html", mTestActivity);
+        String blinkStableExpected = readFile(PATH_BLINK_STABLE_PREFIX
+                + "webexposed/global-interface-listing-expected.txt");
+        String webviewExcluded = readFile(PATH_WEBVIEW_PREFIX
+                + "webexposed/not-webview-exposed.txt");
+        mTestActivity.waitForFinish(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        String result = mTestActivity.getTestResult();
+
+        HashMap<String, HashSet<String>> webviewExcludedInterfacesMap =
+                buildHashMap(webviewExcluded);
+        HashMap<String, HashSet<String>> webviewInterfacesMap = buildHashMap(result);
+        HashMap<String, HashSet<String>> blinkStableInterfacesMap =
+                buildHashMap(blinkStableExpected);
+        StringBuilder missing = new StringBuilder();
+
+        // Check that each stable blink interface is present in webview except the excluded
+        // interfaces.
+        for (String interfaceS : blinkStableInterfacesMap.keySet()) {
+            // TODO(timvolodine): consider implementing matching of subsets as well.
+            HashSet<String> subsetExcluded = webviewExcludedInterfacesMap.get(interfaceS);
+            if (subsetExcluded != null && subsetExcluded.isEmpty()) continue;
+
+            if (webviewInterfacesMap.get(interfaceS) == null) {
+                missing.append(interfaceS + "\n");
+            }
+        }
+        assertEquals("Missing webview interfaces found", "", missing.toString());
     }
 
     // test helper methods
@@ -169,4 +236,33 @@ public class WebViewLayoutTest
             outputStream.close();
         }
     }
+
+    private HashMap<String, HashSet<String>> buildHashMap(String contents) {
+        String[] lineByLine = contents.split("\\n");
+
+        HashSet subset = null;
+        HashMap<String, HashSet<String>> interfaces = new HashMap<String, HashSet<String>>();
+        for (String line : lineByLine) {
+            String s = trimAndRemoveComments(line);
+            if (s.startsWith("interface")) {
+                subset = new HashSet();
+                interfaces.put(s, subset);
+            } else if (interfaceProperty(s) && subset != null) {
+                subset.add(s);
+            }
+        }
+        return interfaces;
+    }
+
+    private String trimAndRemoveComments(String line) {
+        String s = line.trim();
+        int commentIndex = s.indexOf("#"); // remove any potential comments
+        return (commentIndex >= 0) ? s.substring(0, commentIndex).trim() : s;
+    }
+
+    private boolean interfaceProperty(String s) {
+        return s.startsWith("getter") || s.startsWith("setter")
+                || s.startsWith("method") || s.startsWith("attribute");
+    }
+
 }

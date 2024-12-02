@@ -17,19 +17,19 @@
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/url_formatter/url_formatter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/browser/notification_event_dispatcher.h"
 #include "content/public/browser/platform_notification_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/platform_notification_data.h"
-#include "net/base/net_util.h"
 #include "ui/message_center/notifier_settings.h"
 #include "url/url_constants.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/browser/notifications/desktop_notification_service.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
@@ -85,13 +85,15 @@ PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() {}
 void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
     BrowserContext* browser_context,
     int64_t persistent_notification_id,
-    const GURL& origin) const {
+    const GURL& origin,
+    int action_index) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
             browser_context,
             persistent_notification_id,
             origin,
+            action_index,
             base::Bind(&OnEventDispatchComplete));
 }
 
@@ -142,12 +144,12 @@ PlatformNotificationServiceImpl::CheckPermissionOnUIThread(
         extension->permissions_data()->HasAPIPermission(
             extensions::APIPermission::kNotifications) &&
         process_map->Contains(extension->id(), render_process_id)) {
-      DesktopNotificationService* desktop_notification_service =
-          DesktopNotificationServiceFactory::GetForProfile(profile);
-      DCHECK(desktop_notification_service);
+      NotifierStateTracker* notifier_state_tracker =
+          NotifierStateTrackerFactory::GetForProfile(profile);
+      DCHECK(notifier_state_tracker);
 
       NotifierId notifier_id(NotifierId::APPLICATION, extension->id());
-      if (desktop_notification_service->IsNotifierEnabled(notifier_id))
+      if (notifier_state_tracker->IsNotifierEnabled(notifier_id))
         return blink::WebNotificationPermissionAllowed;
     }
   }
@@ -321,19 +323,25 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
     const SkBitmap& icon,
     const content::PlatformNotificationData& notification_data,
     NotificationDelegate* delegate) const {
-  base::string16 display_source = DisplayNameForOrigin(profile, origin);
-
   // TODO(peter): Icons for Web Notifications are currently always requested for
   // 1x scale, whereas the displays on which they can be displayed can have a
   // different pixel density. Be smarter about this when the API gets updated
   // with a way for developers to specify images of different resolutions.
-  Notification notification(origin, notification_data.title,
-      notification_data.body, gfx::Image::CreateFrom1xBitmap(icon),
-      display_source, notification_data.tag, delegate);
+  Notification notification(
+      origin, notification_data.title, notification_data.body,
+      gfx::Image::CreateFrom1xBitmap(icon), base::UTF8ToUTF16(origin.host()),
+      notification_data.tag, delegate);
 
-  notification.set_context_message(display_source);
+  notification.set_context_message(
+      DisplayNameForContextMessage(profile, origin));
   notification.set_vibration_pattern(notification_data.vibration_pattern);
   notification.set_silent(notification_data.silent);
+
+  std::vector<message_center::ButtonInfo> buttons;
+  for (const auto& action : notification_data.actions)
+    buttons.push_back(message_center::ButtonInfo(action.title));
+
+  notification.set_buttons(buttons);
 
   // Web Notifications do not timeout.
   notification.set_never_timeout(true);
@@ -354,7 +362,7 @@ void PlatformNotificationServiceImpl::SetNotificationUIManagerForTesting(
   notification_ui_manager_for_tests_ = manager;
 }
 
-base::string16 PlatformNotificationServiceImpl::DisplayNameForOrigin(
+base::string16 PlatformNotificationServiceImpl::DisplayNameForContextMessage(
     Profile* profile,
     const GURL& origin) const {
 #if defined(ENABLE_EXTENSIONS)
@@ -369,37 +377,5 @@ base::string16 PlatformNotificationServiceImpl::DisplayNameForOrigin(
   }
 #endif
 
-  std::string languages =
-      profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-
-  return WebOriginDisplayName(origin, languages);
-}
-
-// static
-// TODO(palmer): It might be good to replace this with a call to
-// |FormatUrlForSecurityDisplay|. crbug.com/496965
-base::string16 PlatformNotificationServiceImpl::WebOriginDisplayName(
-    const GURL& origin,
-    const std::string& languages) {
-  if (origin.SchemeIsHTTPOrHTTPS()) {
-    base::string16 formatted_origin;
-    if (origin.SchemeIs(url::kHttpScheme)) {
-      const url::Parsed& parsed = origin.parsed_for_possibly_invalid_spec();
-      const std::string& spec = origin.possibly_invalid_spec();
-      formatted_origin.append(
-          spec.begin(),
-          spec.begin() +
-              parsed.CountCharactersBefore(url::Parsed::USERNAME, true));
-    }
-    formatted_origin.append(net::IDNToUnicode(origin.host(), languages));
-    if (origin.has_port()) {
-      formatted_origin.push_back(':');
-      formatted_origin.append(base::UTF8ToUTF16(origin.port()));
-    }
-    return formatted_origin;
-  }
-
-  // TODO(dewittj): Once file:// URLs are passed in to the origin
-  // GURL here, begin returning the path as the display name.
-  return net::FormatUrl(origin, languages);
+  return base::string16();
 }

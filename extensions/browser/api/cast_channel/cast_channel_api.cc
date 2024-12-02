@@ -11,7 +11,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time/default_tick_clock.h"
+#include "base/time/default_clock.h"
 #include "base/values.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/cast_channel/cast_auth_ica.h"
@@ -107,9 +107,8 @@ bool IsValidConnectInfoIpAddress(const ConnectInfo& connect_info) {
 
 CastChannelAPI::CastChannelAPI(content::BrowserContext* context)
     : browser_context_(context),
-      logger_(
-          new Logger(scoped_ptr<base::TickClock>(new base::DefaultTickClock),
-                     base::TimeTicks::UnixEpoch())) {
+      logger_(new Logger(make_scoped_ptr<base::Clock>(new base::DefaultClock),
+                         base::Time::UnixEpoch())) {
   DCHECK(browser_context_);
 }
 
@@ -319,14 +318,14 @@ void CastChannelOpenFunction::AsyncWorkStart() {
   api_->GetLogger()->LogNewSocketEvent(*socket);
 
   // Construct read delegates.
-  scoped_ptr<core_api::cast_channel::CastTransport::Delegate> delegate(
+  scoped_ptr<api::cast_channel::CastTransport::Delegate> delegate(
       make_scoped_ptr(new CastMessageHandler(
           base::Bind(&CastChannelAPI::SendEvent, api_->AsWeakPtr()), socket,
           api_->GetLogger())));
   if (socket->keep_alive()) {
     // Wrap read delegate in a KeepAliveDelegate for timeout handling.
-    core_api::cast_channel::KeepAliveDelegate* keep_alive =
-        new core_api::cast_channel::KeepAliveDelegate(
+    api::cast_channel::KeepAliveDelegate* keep_alive =
+        new api::cast_channel::KeepAliveDelegate(
             socket, api_->GetLogger(), delegate.Pass(), ping_interval_,
             liveness_timeout_);
     scoped_ptr<base::Timer> injected_timer =
@@ -511,8 +510,8 @@ void CastChannelOpenFunction::CastMessageHandler::OnError(
 
   scoped_ptr<base::ListValue> results =
       OnError::Create(channel_info, error_info);
-  scoped_ptr<Event> event(
-      new Event(events::UNKNOWN, OnError::kEventName, results.Pass()));
+  scoped_ptr<Event> event(new Event(events::CAST_CHANNEL_ON_ERROR,
+                                    OnError::kEventName, results.Pass()));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(ui_dispatch_cb_, socket_->owner_extension_id(),
@@ -532,8 +531,8 @@ void CastChannelOpenFunction::CastMessageHandler::OnMessage(
 
   scoped_ptr<base::ListValue> results =
       OnMessage::Create(channel_info, message_info);
-  scoped_ptr<Event> event(
-      new Event(events::UNKNOWN, OnMessage::kEventName, results.Pass()));
+  scoped_ptr<Event> event(new Event(events::CAST_CHANNEL_ON_MESSAGE,
+                                    OnMessage::kEventName, results.Pass()));
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(ui_dispatch_cb_, socket_->owner_extension_id(),

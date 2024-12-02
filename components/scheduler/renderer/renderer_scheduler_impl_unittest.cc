@@ -8,8 +8,8 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/test/ordered_simple_task_runner.h"
-#include "components/scheduler/child/nestable_task_runner_for_test.h"
-#include "components/scheduler/child/scheduler_message_loop_delegate.h"
+#include "components/scheduler/child/scheduler_task_runner_delegate_for_test.h"
+#include "components/scheduler/child/scheduler_task_runner_delegate_impl.h"
 #include "components/scheduler/child/test_time_source.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -138,6 +138,7 @@ void AnticipationTestTask(RendererSchedulerImpl* scheduler,
   }
   *is_anticipated_after = scheduler->IsHighPriorityWorkAnticipated();
 }
+
 };  // namespace
 
 class RendererSchedulerImplForTest : public RendererSchedulerImpl {
@@ -148,7 +149,7 @@ class RendererSchedulerImplForTest : public RendererSchedulerImpl {
   using RendererSchedulerImpl::PolicyToString;
 
   RendererSchedulerImplForTest(
-      scoped_refptr<NestableSingleThreadTaskRunner> main_task_runner)
+      scoped_refptr<SchedulerTaskRunnerDelegate> main_task_runner)
       : RendererSchedulerImpl(main_task_runner), update_policy_count_(0) {}
 
   void UpdatePolicyLocked(UpdateType update_type) override {
@@ -197,16 +198,16 @@ class RendererSchedulerImplTest : public testing::Test {
 
   void SetUp() override {
     if (message_loop_) {
-      nestable_task_runner_ =
-          SchedulerMessageLoopDelegate::Create(message_loop_.get());
+      main_task_runner_ =
+          SchedulerTaskRunnerDelegateImpl::Create(message_loop_.get());
     } else {
       mock_task_runner_ = make_scoped_refptr(
           new cc::OrderedSimpleTaskRunner(clock_.get(), false));
-      nestable_task_runner_ =
-          NestableTaskRunnerForTest::Create(mock_task_runner_);
+      main_task_runner_ =
+          SchedulerTaskRunnerDelegateForTest::Create(mock_task_runner_);
     }
-    Initialize(make_scoped_ptr(
-        new RendererSchedulerImplForTest(nestable_task_runner_)));
+    Initialize(
+        make_scoped_ptr(new RendererSchedulerImplForTest(main_task_runner_)));
   }
 
   void Initialize(scoped_ptr<RendererSchedulerImplForTest> scheduler) {
@@ -333,13 +334,6 @@ class RendererSchedulerImplTest : public testing::Test {
     }
   }
 
-  static void CheckAllTaskQueueIdToString() {
-    CallForEachEnumValue<RendererSchedulerImpl::QueueId>(
-        RendererSchedulerImpl::FIRST_QUEUE_ID,
-        RendererSchedulerImpl::TASK_QUEUE_COUNT,
-        &RendererSchedulerImpl::TaskQueueIdToString);
-  }
-
   static void CheckAllPolicyToString() {
     CallForEachEnumValue<RendererSchedulerImpl::Policy>(
         RendererSchedulerImpl::Policy::FIRST_POLICY,
@@ -352,7 +346,7 @@ class RendererSchedulerImplTest : public testing::Test {
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
   scoped_ptr<base::MessageLoop> message_loop_;
 
-  scoped_refptr<NestableSingleThreadTaskRunner> nestable_task_runner_;
+  scoped_refptr<SchedulerTaskRunnerDelegate> main_task_runner_;
   scoped_ptr<RendererSchedulerImplForTest> scheduler_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
@@ -625,33 +619,36 @@ TEST_F(RendererSchedulerImplTest, TestCompositorPolicy_DidAnimateForInput) {
                                    std::string("I1")));
 }
 
-TEST_F(RendererSchedulerImplTest,
-       TestCompositorPolicy_TimersOnlyRunWhenIdle_MainThreadOnCriticalPath) {
+// TODO(skyostil): Re-enable once timer blocking is re-enabled.
+TEST_F(
+    RendererSchedulerImplTest,
+    DISABLED_TestCompositorPolicy_ExpensiveTimersDontRunWhenMainThreadOnCriticalPath) {
   std::vector<std::string> run_order;
-  PostTestTasks(&run_order, "C1 T1");
 
-  scheduler_->DidAnimateForInputOnCompositorThread();
-  scheduler_->WillBeginFrame(cc::BeginFrameArgs::Create(
-      BEGINFRAME_FROM_HERE, clock_->NowTicks(), base::TimeTicks(),
-      base::TimeDelta::FromMilliseconds(16), cc::BeginFrameArgs::NORMAL));
-  scheduler_->DidCommitFrameToCompositor();  // Starts Idle Period
+  // Simulate a bunch of expensive timer tasks
+  for (int i = 0; i < 10; i++) {
+    timer_task_runner_->PostTask(
+        FROM_HERE, base::Bind(&base::SimpleTestTickClock::Advance,
+                              base::Unretained(clock_.get()),
+                              base::TimeDelta::FromMilliseconds(500)));
+  }
   RunUntilIdle();
 
-  EXPECT_THAT(run_order,
-              testing::ElementsAre(std::string("C1"), std::string("T1")));
+  // Timers should now be disabled during main thread user userinteractions.
+  PostTestTasks(&run_order, "C1 T1");
 
-  // End the idle period.
-  clock_->Advance(base::TimeDelta::FromMilliseconds(500));
   scheduler_->DidAnimateForInputOnCompositorThread();
   scheduler_->WillBeginFrame(cc::BeginFrameArgs::Create(
       BEGINFRAME_FROM_HERE, clock_->NowTicks(), base::TimeTicks(),
       base::TimeDelta::FromMilliseconds(16), cc::BeginFrameArgs::NORMAL));
-
-  run_order.clear();
-  PostTestTasks(&run_order, "C1 T1");
   RunUntilIdle();
 
   EXPECT_THAT(run_order, testing::ElementsAre(std::string("C1")));
+  clock_->Advance(priority_escalation_after_input_duration() * 2);
+
+  run_order.clear();
+  RunUntilIdle();
+  EXPECT_THAT(run_order, testing::ElementsAre(std::string("T1")));
 }
 
 TEST_F(RendererSchedulerImplTest,
@@ -722,8 +719,10 @@ TEST_F(RendererSchedulerImplTest, TestTouchstartPolicy_Compositor) {
               testing::ElementsAre(std::string("C1"), std::string("C2"),
                                    std::string("D1"), std::string("D2")));
 
-  // Meta events like TapDown/FlingCancel shouldn't affect the priority.
+  // Animation or meta events like TapDown/FlingCancel shouldn't affect the
+  // priority.
   run_order.clear();
+  scheduler_->DidAnimateForInputOnCompositorThread();
   scheduler_->DidHandleInputEventOnCompositorThread(
       FakeInputEvent(blink::WebInputEvent::GestureFlingCancel),
       RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
@@ -1204,9 +1203,9 @@ class RendererSchedulerImplWithMockSchedulerTest
   void SetUp() override {
     mock_task_runner_ = make_scoped_refptr(
         new cc::OrderedSimpleTaskRunner(clock_.get(), false));
-    nestable_task_runner_ =
-        NestableTaskRunnerForTest::Create(mock_task_runner_);
-    mock_scheduler_ = new RendererSchedulerImplForTest(nestable_task_runner_);
+    main_task_runner_ =
+        SchedulerTaskRunnerDelegateForTest::Create(mock_task_runner_);
+    mock_scheduler_ = new RendererSchedulerImplForTest(main_task_runner_);
     Initialize(make_scoped_ptr(mock_scheduler_));
   }
 
@@ -1756,12 +1755,8 @@ TEST_F(RendererSchedulerImplTest, MultipleSuspendsNeedMultipleResumes) {
               testing::ElementsAre(std::string("T1"), std::string("T2")));
 }
 
-TEST_F(RendererSchedulerImplTest, TaskQueueIdToString) {
-  CheckAllTaskQueueIdToString();
-}
-
 TEST_F(RendererSchedulerImplTest, PolicyToString) {
-  CheckAllTaskQueueIdToString();
+  CheckAllPolicyToString();
 }
 
 TEST_F(RendererSchedulerImplTest, MismatchedDidHandleInputEventOnMainThread) {

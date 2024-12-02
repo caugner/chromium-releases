@@ -11,15 +11,14 @@
 #include "sync/internal_api/public/sync_context_proxy.h"
 #include "sync/syncable/syncable_util.h"
 
-namespace syncer {
+namespace syncer_v2 {
 
-ModelTypeSyncProxyImpl::ModelTypeSyncProxyImpl(ModelType type)
+ModelTypeSyncProxyImpl::ModelTypeSyncProxyImpl(syncer::ModelType type)
     : type_(type),
       is_preferred_(false),
       is_connected_(false),
       weak_ptr_factory_for_ui_(this),
-      weak_ptr_factory_for_sync_(this) {
-}
+      weak_ptr_factory_for_sync_(this) {}
 
 ModelTypeSyncProxyImpl::~ModelTypeSyncProxyImpl() {
 }
@@ -34,7 +33,7 @@ bool ModelTypeSyncProxyImpl::IsConnected() const {
   return is_connected_;
 }
 
-ModelType ModelTypeSyncProxyImpl::GetModelType() const {
+syncer::ModelType ModelTypeSyncProxyImpl::GetModelType() const {
   DCHECK(CalledOnValidThread());
   return type_;
 }
@@ -100,10 +99,10 @@ void ModelTypeSyncProxyImpl::OnConnect(scoped_ptr<ModelTypeSyncWorker> worker) {
 
 void ModelTypeSyncProxyImpl::Put(const std::string& client_tag,
                                  const sync_pb::EntitySpecifics& specifics) {
-  DCHECK_EQ(type_, GetModelTypeFromSpecifics(specifics));
+  DCHECK_EQ(type_, syncer::GetModelTypeFromSpecifics(specifics));
 
   const std::string client_tag_hash(
-      syncable::GenerateSyncableHash(type_, client_tag));
+      syncer::syncable::GenerateSyncableHash(type_, client_tag));
 
   EntityMap::const_iterator it = entities_.find(client_tag_hash);
   if (it == entities_.end()) {
@@ -120,7 +119,7 @@ void ModelTypeSyncProxyImpl::Put(const std::string& client_tag,
 
 void ModelTypeSyncProxyImpl::Delete(const std::string& client_tag) {
   const std::string client_tag_hash(
-      syncable::GenerateSyncableHash(type_, client_tag));
+      syncer::syncable::GenerateSyncableHash(type_, client_tag));
 
   EntityMap::const_iterator it = entities_.find(client_tag_hash);
   if (it == entities_.end()) {
@@ -168,8 +167,7 @@ void ModelTypeSyncProxyImpl::OnCommitCompleted(
   data_type_state_ = type_state;
 
   for (CommitResponseDataList::const_iterator list_it = response_list.begin();
-       list_it != response_list.end();
-       ++list_it) {
+       list_it != response_list.end(); ++list_it) {
     const CommitResponseData& response_data = *list_it;
     const std::string& client_tag_hash = response_data.client_tag_hash;
 
@@ -197,8 +195,7 @@ void ModelTypeSyncProxyImpl::OnUpdateReceived(
   data_type_state_ = data_type_state;
 
   for (UpdateResponseDataList::const_iterator list_it = response_list.begin();
-       list_it != response_list.end();
-       ++list_it) {
+       list_it != response_list.end(); ++list_it) {
     const UpdateResponseData& response_data = *list_it;
     const std::string& client_tag_hash = response_data.client_tag_hash;
 
@@ -245,8 +242,7 @@ void ModelTypeSyncProxyImpl::OnUpdateReceived(
 
   // Save pending updates in the appropriate data structure.
   for (UpdateResponseDataList::const_iterator list_it = pending_updates.begin();
-       list_it != pending_updates.end();
-       ++list_it) {
+       list_it != pending_updates.end(); ++list_it) {
     const UpdateResponseData& update = *list_it;
     const std::string& client_tag_hash = update.client_tag_hash;
 

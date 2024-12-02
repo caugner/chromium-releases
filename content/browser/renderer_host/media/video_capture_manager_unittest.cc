@@ -15,7 +15,7 @@
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_options.h"
-#include "media/video/capture/fake_video_capture_device_factory.h"
+#include "media/capture/video/fake_video_capture_device_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -101,7 +101,7 @@ class VideoCaptureManagerTest : public testing::Test {
   VideoCaptureControllerID StartClient(int session_id, bool expect_success) {
     media::VideoCaptureParams params;
     params.requested_format = media::VideoCaptureFormat(
-        gfx::Size(320, 240), 30, media::PIXEL_FORMAT_I420);
+        gfx::Size(320, 240), 30, media::VIDEO_CAPTURE_PIXEL_FORMAT_I420);
 
     VideoCaptureControllerID client_id(next_client_id_++);
     base::RunLoop run_loop;

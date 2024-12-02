@@ -3,32 +3,25 @@
 // found in the LICENSE file.
 
 cr.define('downloads', function() {
-  /**
-   * Class to own and manage download items.
-   * @constructor
-   */
-  function Manager() {}
+  var Manager = Polymer({
+    is: 'downloads-manager',
 
-  cr.addSingletonGetter(Manager);
+    created: function() {
+      /** @private {!downloads.ActionService} */
+      this.actionService_ = new downloads.ActionService;
+    },
 
-  Manager.prototype = {
-    /** @private {string} */
-    searchText_: '',
+    properties: {
+      hasDownloads_: {
+        type: Boolean,
+        value: false,
+      },
+    },
 
-    /**
-     * Sets the search text, updates related UIs, and tells the browser.
-     * @param {string} searchText Text we're searching for.
-     * @private
-     */
-    setSearchText_: function(searchText) {
-      this.searchText_ = searchText;
-
-      $('downloads-summary-text').textContent = this.searchText_ ?
-          loadTimeData.getStringF('searchResultsFor', this.searchText_) : '';
-
-      // Split quoted terms (e.g., 'The "lazy" dog' => ['The', 'lazy', 'dog']).
-      function trim(s) { return s.trim(); }
-      chrome.send('getDownloads', searchText.split(/"([^"]*)"/).map(trim));
+    ready: function() {
+      window.addEventListener('resize', this.onResize_.bind(this));
+      // onResize_() doesn't need to be called immediately here because it's
+      // guaranteed to be called again shortly when items are received.
     },
 
     /**
@@ -36,10 +29,65 @@ cr.define('downloads', function() {
      * @private
      */
     guesstimateNumberOfVisibleItems_: function() {
-      var toolbarHeight = $('downloads-toolbar').offsetHeight;
-      var summaryHeight = $('downloads-summary').offsetHeight;
-      var nonItemSpace = toolbarHeight + summaryHeight;
-      return Math.floor((window.innerHeight - nonItemSpace) / 46) + 1;
+      var toolbarHeight = this.$.toolbar.offsetHeight;
+      return Math.floor((window.innerHeight - toolbarHeight) / 46) + 1;
+    },
+
+    /**
+     * @param {Event} e
+     * @private
+     */
+    onCanExecute_: function(e) {
+      e = /** @type {cr.ui.CanExecuteEvent} */(e);
+      switch (e.command.id) {
+        case 'undo-command':
+          e.canExecute = this.$.toolbar.canUndo();
+          break;
+        case 'clear-all-command':
+          e.canExecute = this.$.toolbar.canClearAll();
+          break;
+      }
+    },
+
+    /**
+     * @param {Event} e
+     * @private
+     */
+    onCommand_: function(e) {
+      if (e.command.id == 'clear-all-command')
+        this.actionService_.clearAll();
+      else if (e.command.id == 'undo-command')
+        this.actionService_.undo();
+    },
+
+    /** @private */
+    onLoad_: function() {
+      this.$.toolbar.setActionService(this.actionService_);
+
+      cr.ui.decorate('command', cr.ui.Command);
+      document.addEventListener('canExecute', this.onCanExecute_.bind(this));
+      document.addEventListener('command', this.onCommand_.bind(this));
+
+      // Shows all downloads.
+      this.actionService_.search('');
+    },
+
+    /** @private */
+    onResize_: function() {
+      // TODO(dbeam): expose <paper-header-panel>'s #mainContainer in Polymer.
+      var container = this.$.panel.$.mainContainer;
+      var scrollbarWidth = container.offsetWidth - container.clientWidth;
+      this.items_.forEach(function(item) {
+        item.scrollbarWidth = scrollbarWidth;
+      });
+    },
+
+    /**
+     * @return {number} The number of downloads shown on the page.
+     * @private
+     */
+    size_: function() {
+      return this.items_.length;
     },
 
     /**
@@ -50,10 +98,10 @@ cr.define('downloads', function() {
     updateAll_: function(list) {
       var oldIdMap = this.idMap_ || {};
 
-      /** @private {!Object<!downloads.ItemView>} */
+      /** @private {!Object<!downloads.Item>} */
       this.idMap_ = {};
 
-      /** @private {!Array<!downloads.ItemView>} */
+      /** @private {!Array<!downloads.Item>} */
       this.items_ = [];
 
       if (!this.iconLoader_) {
@@ -67,7 +115,8 @@ cr.define('downloads', function() {
         var id = data.id;
 
         // Re-use old items when possible (saves work, preserves focus).
-        var item = oldIdMap[id] || new downloads.ItemView(this.iconLoader_);
+        var item = oldIdMap[id] ||
+            new downloads.Item(this.iconLoader_, this.actionService_);
 
         this.idMap_[id] = item;  // Associated by ID for fast lookup.
         this.items_.push(item);  // Add to sorted list for order.
@@ -102,19 +151,16 @@ cr.define('downloads', function() {
             before = this.items_[j];
         }
         // If |before| is null, |item| will just get added at the end.
-        this.node_.insertBefore(item, before);
+        this.$['downloads-list'].insertBefore(item, before);
       }
 
-      var noDownloadsOrResults = $('no-downloads-or-results');
-      noDownloadsOrResults.textContent = loadTimeData.getString(
-          this.searchText_ ? 'noSearchResults' : 'noDownloads');
-
-      var hasDownloads = this.size_() > 0;
-      this.node_.hidden = !hasDownloads;
-      noDownloadsOrResults.hidden = hasDownloads;
+      this.hasDownloads_ = this.size_() > 0;
 
       if (loadTimeData.getBoolean('allowDeletingHistory'))
-        $('clear-all').hidden = !hasDownloads || this.searchText_.length > 0;
+        this.$.toolbar.downloadsShowing = this.hasDownloads_;
+
+      this.onResize_();
+      this.$.panel.classList.remove('loading');
     },
 
     /**
@@ -123,109 +169,24 @@ cr.define('downloads', function() {
      */
     updateItem_: function(data) {
       this.idMap_[data.id].update(data);
+      this.onResize_();
     },
+  });
 
-    /**
-     * @return {number} The number of downloads shown on the page.
-     * @private
-     */
-    size_: function() {
-      return this.items_.length;
-    },
-
-    /** @private */
-    clearAll_: function() {
-      if (loadTimeData.getBoolean('allowDeletingHistory')) {
-        chrome.send('clearAll');
-        this.setSearchText_('');
-      }
-    },
-
-    /** @private */
-    onLoad_: function() {
-      this.node_ = $('downloads-display');
-
-      $('clear-all').onclick = function() {
-        this.clearAll_();
-      }.bind(this);
-
-      $('open-downloads-folder').onclick = function() {
-        chrome.send('openDownloadsFolder');
-      };
-
-      $('search-button').onclick = function() {
-        if (!$('search-term').hidden)
-          return;
-        $('clear-search').hidden = false;
-        $('search-term').hidden = false;
-      };
-
-      $('clear-search').onclick = function() {
-        $('clear-search').hidden = true;
-        $('search-term').hidden = true;
-        $('search-term').value = '';
-        this.setSearchText_('');
-      }.bind(this);
-
-      // TODO(dbeam): this previously used onsearch, which batches keystrokes
-      // together. This should probably be re-instated eventually.
-      $('search-term').oninput = function(e) {
-        this.setSearchText_($('search-term').value);
-      }.bind(this);
-
-      cr.ui.decorate('command', cr.ui.Command);
-      document.addEventListener('canExecute', this.onCanExecute_.bind(this));
-      document.addEventListener('command', this.onCommand_.bind(this));
-
-      this.setSearchText_('');
-    },
-
-    /**
-     * @param {Event} e
-     * @private
-     */
-    onCanExecute_: function(e) {
-      e = /** @type {cr.ui.CanExecuteEvent} */(e);
-      switch (e.command.id) {
-        case 'undo-command':
-          e.canExecute = !$('search-term').contains(document.activeElement);
-          break;
-        case 'clear-all-command':
-          e.canExecute = true;
-          break;
-      }
-    },
-
-    /**
-     * @param {Event} e
-     * @private
-     */
-    onCommand_: function(e) {
-      if (e.command.id == 'undo-command')
-        chrome.send('undo');
-      else if (e.command.id == 'clear-all-command')
-        this.clearAll_();
-    },
+  Manager.size = function() {
+    return document.querySelector('downloads-manager').size_();
   };
 
   Manager.updateAll = function(list) {
-    Manager.getInstance().updateAll_(list);
+    document.querySelector('downloads-manager').updateAll_(list);
   };
 
   Manager.updateItem = function(item) {
-    Manager.getInstance().updateItem_(item);
-  };
-
-  Manager.setSearchText = function(searchText) {
-    Manager.getInstance().setSearchText_(searchText);
+    document.querySelector('downloads-manager').updateItem_(item);
   };
 
   Manager.onLoad = function() {
-    Manager.getInstance().onLoad_();
-  };
-
-  Manager.size = function() {
-    return Manager.getInstance().size_();
+    document.querySelector('downloads-manager').onLoad_();
   };
 
   return {Manager: Manager};

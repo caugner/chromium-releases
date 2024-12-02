@@ -9,13 +9,17 @@ namespace gles2 {
 
 GpuState::GpuState()
     : control_thread_("gpu_command_buffer_control"),
-      sync_point_manager_(gpu::SyncPointManager::Create(true)),
+      sync_point_manager_(new gpu::SyncPointManager(true)),
       share_group_(new gfx::GLShareGroup),
       mailbox_manager_(new gpu::gles2::MailboxManagerImpl) {
   control_thread_.Start();
 }
 
 GpuState::~GpuState() {
+}
+
+void GpuState::StopControlThread() {
+  control_thread_.Stop();
 }
 
 }  // namespace gles2

@@ -55,6 +55,7 @@ Polymer({
 
     /**
      * Array of properties to pass to the property list.
+     * @type {!Array<string>}
      */
     ipConfigFields_: {
       type: Array,
@@ -106,13 +107,14 @@ Polymer({
   automaticChanged_: function() {
     if (this.automatic === undefined || this.ipConfig === undefined)
       return;
-    console.debug('IP.automaticChanged: ' + this.automatic);
     if (this.automatic || !this.savedStaticIp_) {
       // Save the static IP configuration when switching to automatic.
       this.savedStaticIp_ = this.ipConfig.ipv4;
-      this.fire('changed', {
+      var configType =
+          this.automatic ? CrOnc.IPConfigType.DHCP : CrOnc.IPConfigType.STATIC;
+      this.fire('ip-change', {
         field: 'IPAddressConfigType',
-        value: this.automatic ? 'DHCP' : 'Static'
+        value: configType
       });
     } else {
       // Restore the saved static IP configuration.
@@ -122,7 +124,7 @@ Polymer({
         RoutingPrefix: this.savedStaticIp_.RoutingPrefix,
         Type: this.savedStaticIp_.Type
       };
-      this.fire('changed', {
+      this.fire('ip-change', {
         field: 'StaticIPConfig',
         value: this.getIPConfigProperties_(ipconfig)
       });
@@ -188,18 +190,15 @@ Polymer({
   /**
    * Event triggered when the network property list changes.
    * @param {!{detail: { field: string, value: string}}} event The
-   *     network-property-list changed event.
+   *     network-property-list change event.
    * @private
    */
-  onIPChanged_: function(event) {
-    event.stopPropagation();
-
+  onIPChange_: function(event) {
     var field = event.detail.field;
     var value = event.detail.value;
-    console.debug('IP.onIPChanged: ' + field + ' -> ' + value);
     // Note: |field| includes the 'ipv4.' prefix.
     this.set('ipConfig.' + field, value);
-    this.fire('changed', {
+    this.fire('ip-change', {
       field: 'StaticIPConfig',
       value: this.getIPConfigProperties_(this.ipConfig.ipv4)
     });

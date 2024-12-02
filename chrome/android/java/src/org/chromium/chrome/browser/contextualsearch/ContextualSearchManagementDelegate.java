@@ -4,9 +4,10 @@
 
 package org.chromium.chrome.browser.contextualsearch;
 
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanelDelegate;
+import org.chromium.chrome.browser.customtabs.CustomTab;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.common.TopControlsState;
 
@@ -112,4 +113,14 @@ public interface ContextualSearchManagementDelegate {
      * @return Contextual Search Panel's {@code ContentViewCore}.
      */
     ContentViewCore getSearchContentViewCore();
+
+    /**
+     * @return The resource id that contains how large the top controls are.
+     */
+    int getControlContainerHeightResource();
+
+    /**
+     * @return Whether the current activity contains a {@link CustomTab}.
+     */
+    boolean isCustomTab();
 }

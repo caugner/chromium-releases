@@ -87,7 +87,12 @@ void ExtensionMessageBubbleView::OnWidgetDestroying(views::Widget* widget) {
 ExtensionMessageBubbleView::~ExtensionMessageBubbleView() {}
 
 void ExtensionMessageBubbleView::ShowBubble() {
-  GetWidget()->Show();
+  // Since we delay in showing the bubble, the applicable extension(s) may
+  // have been removed.
+  if (controller_->ShouldShow())
+    GetWidget()->Show();
+  else
+    GetWidget()->Close();
 }
 
 void ExtensionMessageBubbleView::Init() {
@@ -174,7 +179,7 @@ void ExtensionMessageBubbleView::Init() {
   layout->AddView(learn_more_);
 
   if (!action_button.empty()) {
-    action_button_ = new views::LabelButton(this, action_button.c_str());
+    action_button_ = new views::LabelButton(this, action_button);
     action_button_->SetStyle(views::Button::STYLE_BUTTON);
     layout->AddView(action_button_);
   }

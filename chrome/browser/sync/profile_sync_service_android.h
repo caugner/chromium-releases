@@ -55,10 +55,9 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   void GetAllNodes(JNIEnv* env, jobject obj, jobject callback);
 
   // Called from Java early during startup to ensure we use the correct
-  // unique machine tag in session sync. Returns true if the machine tag was
-  // succesfully set.
+  // unique machine tag in session sync.
   // This must be called before the |SessionModelAssociator| is initialized.
-  jboolean SetSyncSessionsId(JNIEnv* env, jobject obj, jstring tag);
+  void SetSyncSessionsId(JNIEnv* env, jobject obj, jstring tag);
 
   // Returns true if the sync backend is initialized.
   jboolean IsSyncInitialized(JNIEnv* env, jobject obj);
@@ -96,13 +95,10 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
                                    jobject obj,
                                    jstring passphrase);
 
-  // Encrypts the user's data with the passed passphrase. If |is_gaia| == true
-  // then the passphrase is treated as a google (GAIA) passphrase, otherwise
-  // it's treated like an explicit/custom passphrase.
+  // Encrypts the user's data with the passed custom passphrase.
   void SetEncryptionPassphrase(JNIEnv* env,
                                jobject obj,
-                               jstring passphrase,
-                               jboolean is_gaia);
+                               jstring passphrase);
 
   // Returns whether the cryptographer is ready (i.e. encrypted types can be
   // handled).
@@ -141,25 +137,28 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   // Get the set of active data types. These are the types currently being
   // synced. Note that control types are always included here.
   // Returns a bit map of the values from
-  // profile_sync_service_model_type_selection_android.h.
-  jlong GetActiveDataTypes(JNIEnv* env, jobject obj);
+  // profile_sync_service_android.cc.
+  base::android::ScopedJavaLocalRef<jintArray> GetActiveDataTypes(JNIEnv* env,
+                                                                  jobject obj);
 
   // Get the set of preferred data types. These are the types that the user
   // has requested be synced.
   // Returns a bit map of the values from
-  // profile_sync_service_model_type_selection_android.h.
-  jlong GetPreferredDataTypes(JNIEnv* env, jobject obj);
+  // profile_sync_service_android.cc.
+  base::android::ScopedJavaLocalRef<jintArray> GetPreferredDataTypes(
+      JNIEnv* env,
+      jobject obj);
 
   // Enables the passed data types.
   // If |sync_everything| is true, then all data types are enabled and the
   // contents of |model_type_selection| is
   // ignored.
   // Otherwise, the values of |model_type_selection| must contain a bit map of
-  // values from profile_sync_service_model_type_selection_android.h.
+  // values from profile_sync_service_android.cc.
   void SetPreferredDataTypes(JNIEnv* env,
                              jobject obj,
                              jboolean sync_everything,
-                             jlong model_type_selection);
+                             jintArray model_type_selection);
 
   // Tells sync that we're currently configuring so no data types should be
   // downloaded yet.
@@ -214,12 +213,8 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
                                        jlong network_resources);
 
   // Public for tests.
-  static jlong ModelTypeSetToSelection(syncer::ModelTypeSet model_types);
-
-  // Converts a bitmap of model types to a set of Java ModelTypes, and returns
-  // their string descriptions separated by commas.
-  static std::string ModelTypeSelectionToStringForTest(
-      jlong model_type_selection);
+  static base::android::ScopedJavaLocalRef<jintArray>
+  ModelTypeSetToJavaIntArray(JNIEnv* env, syncer::ModelTypeSet model_types);
 
   static ProfileSyncServiceAndroid* GetProfileSyncServiceAndroid();
 

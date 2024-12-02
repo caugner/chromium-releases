@@ -15,11 +15,13 @@
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/pdf/pdf_extension_test_util.h"
 #include "chrome/browser/prerender/prerender_link_manager.h"
 #include "chrome/browser/prerender/prerender_link_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
+#include "chrome/browser/task_management/task_management_browsertest_util.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -27,6 +29,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_delegate.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/gpu_data_manager.h"
@@ -44,8 +47,8 @@
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/declarative/test_rules_registry.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
+#include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/app_window/native_app_window.h"
-#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
@@ -55,6 +58,7 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "ui/aura/window.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/events/event_switches.h"
@@ -80,7 +84,7 @@
 #endif
 
 using extensions::ContextMenuMatcher;
-using extensions::ExtensionsGuestViewManagerDelegate;
+using extensions::ExtensionsAPIClient;
 using extensions::MenuItem;
 using guest_view::GuestViewManager;
 using guest_view::TestGuestViewManager;
@@ -683,9 +687,8 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
       manager = static_cast<TestGuestViewManager*>(
           GuestViewManager::CreateWithDelegate(
               browser()->profile(),
-              scoped_ptr<guest_view::GuestViewManagerDelegate>(
-                  new ExtensionsGuestViewManagerDelegate(
-                      browser()->profile()))));
+              ExtensionsAPIClient::Get()->CreateGuestViewManagerDelegate(
+                  browser()->profile())));
     }
     return manager;
   }
@@ -1088,6 +1091,15 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestNavigateAfterResize) {
   TestHelper("testNavigateAfterResize", "web_view/shim", NO_TEST_SERVER);
 }
 
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestNestedCrossOriginSubframes) {
+  TestHelper("testNestedCrossOriginSubframes",
+             "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestNestedSubframes) {
+  TestHelper("testNestedSubframes", "web_view/shim", NO_TEST_SERVER);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestRemoveSrcAttribute) {
   TestHelper("testRemoveSrcAttribute", "web_view/shim", NO_TEST_SERVER);
 }
@@ -1362,6 +1374,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, NoPrerenderer) {
 // Verify that existing <webview>'s are detected when the task manager starts
 // up.
 IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagerExistingWebView) {
+  // This test is for the old implementation of the task manager. We must
+  // explicitly disable the new one.
+  task_manager::browsertest_util::EnableOldTaskManager();
+
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   LoadGuest("/extensions/platform_apps/web_view/task_manager/guest.html",
@@ -1384,6 +1400,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagerExistingWebView) {
 
 // Verify that the task manager notices the creation of new <webview>'s.
 IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagerNewWebView) {
+  // This test is for the old implementation of the task manager. We must
+  // explicitly disable the new one.
+  task_manager::browsertest_util::EnableOldTaskManager();
+
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   chrome::ShowTaskManager(browser());  // Show task manager BEFORE guest loads.
@@ -1603,13 +1623,11 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, OpenURLFromTab_CurrentTab_Succeed) {
   ExtensionTestMessageListener load_listener("WebViewTest.LOADSTOP", false);
 
   GURL test_url("http://www.google.com");
-  content::OpenURLParams params(test_url,
-                                content::Referrer(),
-                                CURRENT_TAB,
+  content::OpenURLParams params(test_url, content::Referrer(), CURRENT_TAB,
                                 ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
                                 false /* is_renderer_initiated */);
-  GetGuestWebContents()->GetDelegate()->OpenURLFromTab(
-      GetGuestWebContents(), params);
+  GetGuestWebContents()->GetDelegate()->OpenURLFromTab(GetGuestWebContents(),
+                                                       params);
 
   ASSERT_TRUE(load_listener.WaitUntilSatisfied());
 
@@ -1892,8 +1910,11 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasNoAccessDeny) {
 // Also note that these are run separately because OverrideGeolocation() doesn't
 // mock out geolocation for multiple navigator.geolocation calls properly and
 // the tests become flaky.
+//
 // GeolocationAPI* test 1 of 3.
-IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasAccessAllow) {
+// Currently disabled until crbug.com/526788 is fixed.
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       DISABLED_GeolocationAPIEmbedderHasAccessAllow) {
   TestHelper("testAllow",
              "web_view/geolocation/embedder_has_permission",
              NEEDS_TEST_SERVER);
@@ -1907,8 +1928,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, GeolocationAPIEmbedderHasAccessDeny) {
 }
 
 // GeolocationAPI* test 3 of 3.
-IN_PROC_BROWSER_TEST_F(WebViewTest,
-                       GeolocationAPIEmbedderHasAccessMultipleBridgeIdAllow) {
+// Currently disabled until crbug.com/526788 is fixed.
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    DISABLED_GeolocationAPIEmbedderHasAccessMultipleBridgeIdAllow) {
   TestHelper("testMultipleBridgeIdAllow",
              "web_view/geolocation/embedder_has_permission",
              NEEDS_TEST_SERVER);
@@ -2424,7 +2447,7 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_WebViewInBackgroundPage) {
       << message_;
 }
 
-// This test verifies that the allowtransparency attribute properly propagates
+// This test verifies that the allowtransparency attribute properly propagates.
 IN_PROC_BROWSER_TEST_F(WebViewTest, AllowTransparencyAndAllowScalingPropagate) {
   LoadAppWithGuest("web_view/simple");
 
@@ -2452,6 +2475,47 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestCloseNewWindowCleanup) {
   auto gvm = GetGuestViewManager();
   gvm->WaitForLastGuestDeleted();
   ASSERT_EQ(gvm->num_embedder_processes_destroyed(), 0);
+}
+
+// Ensure that focusing a WebView while it is already focused does not blur the
+// guest content.
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestFocusWhileFocused) {
+  TestHelper("testFocusWhileFocused", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, NestedGuestContainerBounds) {
+  TestHelper("testPDFInWebview", "web_view/shim", NO_TEST_SERVER);
+
+  std::vector<content::WebContents*> guest_web_contents_list;
+  GetGuestViewManager()->WaitForNumGuestsCreated(2u);
+  GetGuestViewManager()->GetGuestWebContentsList(&guest_web_contents_list);
+  ASSERT_EQ(2u, guest_web_contents_list.size());
+
+  content::WebContents* web_view_contents = guest_web_contents_list[0];
+  content::WebContents* mime_handler_view_contents = guest_web_contents_list[1];
+
+  // Make sure we've completed loading |mime_handler_view_guest|.
+  bool load_success = pdf_extension_test_util::EnsurePDFHasLoaded(
+      web_view_contents);
+  EXPECT_TRUE(load_success);
+
+  gfx::Rect web_view_container_bounds = web_view_contents->GetContainerBounds();
+  gfx::Rect mime_handler_view_container_bounds =
+      mime_handler_view_contents->GetContainerBounds();
+  EXPECT_EQ(web_view_container_bounds.origin(),
+            mime_handler_view_container_bounds.origin());
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestMailtoLink) {
+  TestHelper("testMailtoLink", "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+// Tests that a renderer navigation from an unattached guest that results in a
+// server redirect works properly.
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestRendererNavigationRedirectWhileUnattached) {
+  TestHelper("testRendererNavigationRedirectWhileUnattached",
+             "web_view/shim", NEEDS_TEST_SERVER);
 }
 
 #if defined(USE_AURA)
@@ -2591,3 +2655,92 @@ IN_PROC_BROWSER_TEST_F(WebViewFocusTest, TouchFocusesEmbedder) {
   waiter.Wait();
 }
 #endif
+
+#if defined(ENABLE_TASK_MANAGER)
+
+namespace {
+
+base::string16 GetExpectedPrefix(content::WebContents* web_contents) {
+  DCHECK(web_contents);
+  guest_view::GuestViewBase* guest =
+      guest_view::GuestViewBase::FromWebContents(web_contents);
+  DCHECK(guest);
+
+  return l10n_util::GetStringFUTF16(guest->GetTaskPrefix(), base::string16());
+}
+
+const std::vector<task_management::WebContentsTag*>& GetTrackedTags() {
+  return task_management::WebContentsTagsManager::GetInstance()->
+      tracked_tags();
+}
+
+}  // namespace
+
+// Tests that the pre-existing WebViews are provided to the task manager.
+IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagementPreExistingWebViews) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  // Browser tests start with a single tab.
+  EXPECT_EQ(1U, GetTrackedTags().size());
+
+  content::WebContents* guest_contents =
+      LoadGuest("/extensions/platform_apps/web_view/task_manager/guest.html",
+                "web_view/task_manager");
+
+  task_management::MockWebContentsTaskManager task_manager;
+  task_manager.StartObserving();
+
+  // The pre-existing tab and guest tasks are provided.
+  // 4 tasks expected in the following order:
+  // Tab: about:blank,
+  // Background Page: <webview> task manager test,
+  // App: <webview> task manager test,
+  // Webview: WebViewed test content.
+  EXPECT_EQ(4U, task_manager.tasks().size());
+
+  const task_management::Task* task = task_manager.tasks().back();
+  EXPECT_EQ(task_management::Task::GUEST, task->GetType());
+  const base::string16 title = task->title();
+  const base::string16 expected_prefix = GetExpectedPrefix(guest_contents);
+  EXPECT_TRUE(base::StartsWith(title,
+                               expected_prefix,
+                               base::CompareCase::INSENSITIVE_ASCII));
+}
+
+// Tests that the post-existing WebViews are provided to the task manager.
+IN_PROC_BROWSER_TEST_F(WebViewTest, TaskManagementPostExistingWebViews) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  // Browser tests start with a single tab.
+  EXPECT_EQ(1U, GetTrackedTags().size());
+
+  task_management::MockWebContentsTaskManager task_manager;
+  task_manager.StartObserving();
+
+  // Only the "about:blank" tab shows at the moment.
+  EXPECT_EQ(1U, task_manager.tasks().size());
+  const task_management::Task* about_blank_task = task_manager.tasks().back();
+  EXPECT_EQ(task_management::Task::RENDERER, about_blank_task->GetType());
+  EXPECT_EQ(base::UTF8ToUTF16("Tab: about:blank"), about_blank_task->title());
+
+  // Now load a guest web view.
+  content::WebContents* guest_contents =
+      LoadGuest("/extensions/platform_apps/web_view/task_manager/guest.html",
+                "web_view/task_manager");
+  // 4 tasks expected in the following order:
+  // Tab: about:blank,
+  // Background Page: <webview> task manager test,
+  // App: <webview> task manager test,
+  // Webview: WebViewed test content.
+  EXPECT_EQ(4U, task_manager.tasks().size());
+
+  const task_management::Task* task = task_manager.tasks().back();
+  EXPECT_EQ(task_management::Task::GUEST, task->GetType());
+  const base::string16 title = task->title();
+  const base::string16 expected_prefix = GetExpectedPrefix(guest_contents);
+  EXPECT_TRUE(base::StartsWith(title,
+                               expected_prefix,
+                               base::CompareCase::INSENSITIVE_ASCII));
+}
+
+#endif  // defined(ENABLE_TASK_MANAGER)

@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_vector.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -142,9 +143,6 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
       TranslateService::GetTargetLanguage(prefs);
   localized_strings->SetString("defaultTargetLanguage",
                                default_target_language);
-  localized_strings->SetBoolean(
-      "enableMultilingualSpellChecker",
-      chrome::spellcheck_common::IsMultilingualSpellcheckEnabled());
 
   std::vector<std::string> languages;
   translate::TranslateDownloadManager::GetSupportedLanguages(&languages);
@@ -159,7 +157,7 @@ void LanguageOptionsHandlerCommon::GetLocalizedValues(
 }
 
 void LanguageOptionsHandlerCommon::Uninitialize() {
-  if (hunspell_dictionary_.get())
+  if (hunspell_dictionary_)
     hunspell_dictionary_->RemoveObserver(this);
   hunspell_dictionary_.reset();
 }
@@ -232,6 +230,8 @@ void LanguageOptionsHandlerCommon::LanguageOptionsOpenCallback(
     const base::ListValue* args) {
   content::RecordAction(UserMetricsAction("LanguageOptions_Open"));
   RefreshHunspellDictionary();
+  if (!hunspell_dictionary_)
+    return;
   if (hunspell_dictionary_->IsDownloadInProgress())
     OnHunspellDictionaryDownloadBegin();
   else if (hunspell_dictionary_->IsDownloadFailure())
@@ -292,18 +292,22 @@ void LanguageOptionsHandlerCommon::RetrySpellcheckDictionaryDownload(
 }
 
 void LanguageOptionsHandlerCommon::RefreshHunspellDictionary() {
-  if (hunspell_dictionary_.get())
+  if (hunspell_dictionary_)
     hunspell_dictionary_->RemoveObserver(this);
   hunspell_dictionary_.reset();
   SpellcheckService* service = SpellcheckServiceFactory::GetForContext(
       Profile::FromWebUI(web_ui()));
-  hunspell_dictionary_ = service->GetHunspellDictionary()->AsWeakPtr();
-  hunspell_dictionary_->AddObserver(this);
+  const ScopedVector<SpellcheckHunspellDictionary>& dictionaries(
+      service->GetHunspellDictionaries());
+  if (!dictionaries.empty()) {
+    hunspell_dictionary_ = dictionaries.front()->AsWeakPtr();
+    hunspell_dictionary_->AddObserver(this);
+  }
 }
 
 base::WeakPtr<SpellcheckHunspellDictionary>&
     LanguageOptionsHandlerCommon::GetHunspellDictionary() {
-  if (!hunspell_dictionary_.get())
+  if (!hunspell_dictionary_)
     RefreshHunspellDictionary();
   return hunspell_dictionary_;
 }

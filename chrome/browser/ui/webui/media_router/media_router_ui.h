@@ -31,11 +31,13 @@ namespace media_router {
 class IssuesObserver;
 class MediaRoute;
 class MediaRouter;
+class MediaRouterDialogCallbacks;
+class MediaRouterMojoImpl;
 class MediaRouterWebUIMessageHandler;
 class MediaRoutesObserver;
 class MediaSink;
 class MediaSinksObserver;
-class CreateSessionRequest;
+class CreatePresentationSessionRequest;
 
 // Implements the chrome://media-router user interface.
 class MediaRouterUI
@@ -48,24 +50,35 @@ class MediaRouterUI
   ~MediaRouterUI() override;
 
   // Initializes internal state (e.g. starts listening for MediaSinks) for
-  // targeting the default MediaSource (if any) of the tab. The contents of the
-  // UI will change as the default MediaSource changes. If there is a default
-  // MediaSource, then DEFAULT MediaCastMode will be added to |cast_modes_|.
-  // |source_manager|: PresentationServiceDelegateImpl of the initiator tab.
-  // Must not be null.
-  // Can only be called once.
+  // targeting the default MediaSource (if any) of the initiator tab that owns
+  // |delegate|, as well as mirroring sources of that tab.
+  // The contents of the UI will change as the default MediaSource changes.
+  // If there is a default MediaSource, then DEFAULT MediaCastMode will be
+  // added to |cast_modes_|.
+  // Init* methods can only be called once.
+  // |delegate|: PresentationServiceDelegateImpl of the initiator tab.
+  //             Must not be null.
   // TODO(imcheng): Replace use of impl with an intermediate abstract
   // interface.
-  void InitWithDefaultMediaSource(PresentationServiceDelegateImpl* delegate);
+  void InitWithDefaultMediaSource(
+      const base::WeakPtr<PresentationServiceDelegateImpl>& delegate);
 
   // Initializes internal state targeting the presentation specified in
   // |request|. Also sets up mirroring sources based on |initiator|.
   // This is different from |InitWithDefaultMediaSource| in that it does not
   // listen for default media source changes, as the UI is fixed to the source
   // in |request|.
+  // Init* methods can only be called once.
+  // |initiator|: Reference to the WebContents that initiated the dialog.
+  //              Must not be null.
+  // |delegate|: PresentationServiceDelegateImpl of the initiator tab.
+  //             Must not be null.
+  // |presentation_request|: The presentation request. This instance will take
+  //                         ownership of it. Must not be null.
   void InitWithPresentationSessionRequest(
-      const content::WebContents* initiator,
-      scoped_ptr<CreateSessionRequest> request);
+      content::WebContents* initiator,
+      const base::WeakPtr<PresentationServiceDelegateImpl>& delegate,
+      scoped_ptr<CreatePresentationSessionRequest> presentation_request);
 
   // Closes the media router UI.
   void Close();
@@ -98,6 +111,11 @@ class MediaRouterUI
   // initially loaded. The header text is determined by the preferred cast mode.
   std::string GetInitialHeaderText() const;
 
+  // Returns the tooltip text for the header that should be displayed
+  // in the UI when it is initially loaded. At present, this text is
+  // just the full hostname of the current site.
+  std::string GetInitialHeaderTextTooltip() const;
+
   // Returns the hostname of the default source's parent frame URL.
   std::string GetFrameURLHost() const;
   bool has_pending_route_request() const { return has_pending_route_request_; }
@@ -106,6 +124,9 @@ class MediaRouterUI
   const std::vector<MediaRoute>& routes() const { return routes_; }
   const std::set<MediaCastMode>& cast_modes() const { return cast_modes_; }
   const content::WebContents* initiator() const { return initiator_; }
+
+  // Marked virtual for tests.
+  virtual const std::string& GetRouteProviderExtensionId() const;
 
  private:
   class UIIssuesObserver;
@@ -125,7 +146,9 @@ class MediaRouterUI
 
   // Callback passed to MediaRouter to receive response to route creation
   // requests.
-  void OnRouteResponseReceived(scoped_ptr<MediaRoute> route,
+  void OnRouteResponseReceived(const MediaSink::Id& sink_id,
+                               const MediaRoute* route,
+                               const std::string& presentation_id,
                                const std::string& error);
 
   bool DoCreateRoute(const MediaSink::Id& sink_id, MediaCastMode cast_mode);
@@ -137,14 +160,9 @@ class MediaRouterUI
 
   // Initializes the dialog with mirroring sources derived from |initiator|,
   // and optional |default_source| and |default_frame_url| if any.
-  void InitCommon(const content::WebContents* initiator,
+  void InitCommon(content::WebContents* initiator,
                   const MediaSource& default_source,
                   const GURL& default_frame_url);
-
-  // Invoke presentation callbacks based on |route| and |error| if the dialog
-  // was created for Presentation API.
-  void HandleRouteResponseForPresentation(const MediaRoute* route,
-                                          const std::string& error);
 
   // PresentationServiceDelegateImpl::DefaultMediaSourceObserver
   void OnDefaultMediaSourceChanged(const MediaSource& source,
@@ -174,8 +192,9 @@ class MediaRouterUI
 
   scoped_ptr<QueryResultManager> query_result_manager_;
 
-  // Only set if the UI is created as a result of Presentation API.
-  scoped_ptr<CreateSessionRequest> presentation_session_request_;
+  // If set, then the result of the next presentation route request will
+  // be handled by this object.
+  scoped_ptr<CreatePresentationSessionRequest> presentation_request_;
 
   // It's possible for PresentationServiceDelegateImpl to be destroyed before
   // this class.
@@ -186,10 +205,10 @@ class MediaRouterUI
   // TODO(imcheng): hold a weak ptr to an abstract type instead.
   base::WeakPtr<PresentationServiceDelegateImpl> presentation_service_delegate_;
 
-  const content::WebContents* initiator_;
+  content::WebContents* initiator_;
 
-  // Cached pointer to the MediaRouter for this instance's BrowserContext.
-  MediaRouter* router_;
+  // Pointer to the MediaRouter for this instance's BrowserContext.
+  MediaRouterMojoImpl* router_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   // Therefore |weak_factory_| must be placed at the end.

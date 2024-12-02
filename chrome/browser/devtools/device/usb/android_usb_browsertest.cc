@@ -166,6 +166,10 @@ class MockUsbDeviceHandle : public UsbDeviceHandle {
     NOTIMPLEMENTED();
   }
 
+  void ClearHalt(uint8 endpoint, const ResultCallback& callback) override {
+    NOTIMPLEMENTED();
+  }
+
   // Async IO. Can be called on any thread.
   void ControlTransfer(UsbEndpointDirection direction,
                        TransferRequestType request_type,
@@ -415,7 +419,7 @@ class MockUsbDevice : public UsbDevice {
                                             new MockUsbDeviceHandle<T>(this))));
   }
 
-  const UsbConfigDescriptor* GetConfiguration() override {
+  const UsbConfigDescriptor* GetActiveConfiguration() override {
     return T::kConfigured ? &config_desc_ : nullptr;
   }
 
@@ -520,9 +524,15 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
   AndroidUsbDiscoveryTest()
       : scheduler_invoked_(0) {
   }
-  void SetUpOnMainThread() override {
-    mock_usb_service_.reset(CreateMockService());
 
+  void SetUp() override {
+    // This must happen before profile creation as there are KeyedServices that
+    // may trigger the creation of a non-mock instance of UsbService.
+    mock_usb_service_.reset(CreateMockService());
+    InProcessBrowserTest::SetUp();
+  }
+
+  void SetUpOnMainThread() override {
     adb_bridge_ =
         DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile());
     DCHECK(adb_bridge_);

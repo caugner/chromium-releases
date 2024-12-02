@@ -11,14 +11,15 @@
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
 
-namespace ios {
+class AccountTrackerService;
 class ProfileOAuth2TokenServiceIOSProvider;
-}
 
 class ProfileOAuth2TokenServiceIOSDelegate : public OAuth2TokenServiceDelegate {
  public:
   ProfileOAuth2TokenServiceIOSDelegate(
       SigninClient* client,
+      ProfileOAuth2TokenServiceIOSProvider* provider,
+      AccountTrackerService* account_tracker_service,
       SigninErrorController* signin_error_controller);
   ~ProfileOAuth2TokenServiceIOSDelegate() override;
 
@@ -68,6 +69,16 @@ class ProfileOAuth2TokenServiceIOSDelegate : public OAuth2TokenServiceDelegate {
   // this change to be effective.
   void ExcludeAllSecondaryAccounts();
 
+ protected:
+  // Adds |account_id| to |accounts_| if it does not exist or udpates
+  // the auth error state of |account_id| if it exists. Fires
+  // |OnRefreshTokenAvailable| if the account info is updated.
+  virtual void AddOrUpdateAccount(const std::string& account_id);
+
+  // Removes |account_id| from |accounts_|. Fires |OnRefreshTokenRevoked|
+  // if the account info is removed.
+  virtual void RemoveAccount(const std::string& account_id);
+
  private:
   friend class ProfileOAuth2TokenServiceIOSDelegateTest;
   FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceIOSDelegateTest,
@@ -85,35 +96,17 @@ class ProfileOAuth2TokenServiceIOSDelegate : public OAuth2TokenServiceDelegate {
     std::string GetAccountId() const override;
     GoogleServiceAuthError GetAuthStatus() const override;
 
-    bool marked_for_removal() const { return marked_for_removal_; }
-    void set_marked_for_removal(bool marked_for_removal) {
-      marked_for_removal_ = marked_for_removal;
-    }
-
    private:
     SigninErrorController* signin_error_controller_;
     std::string account_id_;
     GoogleServiceAuthError last_auth_error_;
-    bool marked_for_removal_;
 
     DISALLOW_COPY_AND_ASSIGN(AccountInfo);
   };
 
-  // Adds |account_id| to |accounts_| if it does not exist or udpates
-  // the auth error state of |account_id| if it exists. Fires
-  // |OnRefreshTokenAvailable| if the account info is updated.
-  void AddOrUpdateAccount(const std::string& account_id);
-
-  // Removes |account_id| from |accounts_|. Fires |OnRefreshTokenRevoked|
-  // if the account info is removed.
-  void RemoveAccount(const std::string& account_id);
-
   // Maps the |account_id| of accounts known to ProfileOAuth2TokenService
   // to information about the account.
   typedef std::map<std::string, linked_ptr<AccountInfo>> AccountInfoMap;
-
-  // Returns the iOS provider;
-  ios::ProfileOAuth2TokenServiceIOSProvider* GetProvider();
 
   // Returns the account ids that should be ignored by this token service.
   std::set<std::string> GetExcludedSecondaryAccounts();
@@ -123,6 +116,15 @@ class ProfileOAuth2TokenServiceIOSDelegate : public OAuth2TokenServiceDelegate {
 
   // Clears exclude secondary accounts preferences.
   void ClearExcludedSecondaryAccounts();
+
+  // Returns true if the account having GAIA id |gaia| and email |email| is
+  // excluded.
+  bool IsAccountExcluded(const std::string& gaia,
+                         const std::string& email,
+                         const std::set<std::string>& excluded_account_ids);
+
+  // Migrates the excluded secondary accounts from emails to account ids.
+  void MigrateExcludedSecondaryAccountIds();
 
   // The primary account id.
   std::string primary_account_id_;
@@ -137,6 +139,8 @@ class ProfileOAuth2TokenServiceIOSDelegate : public OAuth2TokenServiceDelegate {
 
   // The client with which this instance was initialied, or NULL.
   SigninClient* client_;
+  ProfileOAuth2TokenServiceIOSProvider* provider_;
+  AccountTrackerService* account_tracker_service_;
 
   // The error controller with which this instance was initialized, or NULL.
   SigninErrorController* signin_error_controller_;

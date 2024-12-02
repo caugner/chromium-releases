@@ -35,7 +35,7 @@ bool AppBannerDataFetcherAndroid::ContinueFetching(
   set_app_title(app_title);
   native_app_package_ = app_package;
   native_app_data_.Reset(app_data);
-  return FetchIcon(image_url);
+  return FetchAppIcon(GetWebContents(), image_url);
 }
 
 std::string AppBannerDataFetcherAndroid::GetAppIdentifier() {
@@ -44,7 +44,8 @@ std::string AppBannerDataFetcherAndroid::GetAppIdentifier() {
 }
 
 void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
-                                             const base::string16& title) {
+                                             const base::string16& title,
+                                             const std::string& referrer) {
   content::WebContents* web_contents = GetWebContents();
   DCHECK(web_contents);
 
@@ -64,7 +65,7 @@ void AppBannerDataFetcherAndroid::ShowBanner(const SkBitmap* icon,
     scoped_ptr<AppBannerInfoBarDelegateAndroid> delegate(
         new AppBannerInfoBarDelegateAndroid(
             event_request_id(), title, new SkBitmap(*icon), native_app_data_,
-            native_app_package_));
+            native_app_package_, referrer));
     infobar = new AppBannerInfoBarAndroid(delegate.Pass(), native_app_data_);
     if (infobar) {
       RecordDidShowBanner("AppBanner.NativeApp.Shown");

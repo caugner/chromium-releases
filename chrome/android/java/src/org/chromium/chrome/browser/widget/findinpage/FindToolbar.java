@@ -25,12 +25,12 @@ import android.widget.TextView;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeWebContentsDelegateAndroid;
-import org.chromium.chrome.browser.EmptyTabObserver;
-import org.chromium.chrome.browser.FindMatchRectsDetails;
-import org.chromium.chrome.browser.FindNotificationDetails;
-import org.chromium.chrome.browser.Tab;
-import org.chromium.chrome.browser.TabObserver;
 import org.chromium.chrome.browser.findinpage.FindInPageBridge;
+import org.chromium.chrome.browser.findinpage.FindMatchRectsDetails;
+import org.chromium.chrome.browser.findinpage.FindNotificationDetails;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -201,7 +201,7 @@ public class FindToolbar extends LinearLayout
                     mFindInPageBridge.startFinding(s.toString(), true, false);
                 } else {
                     clearResults();
-                    mFindInPageBridge.stopFinding();
+                    mFindInPageBridge.stopFinding(true);
                 }
 
                 if (!mCurrentTab.isIncognito()) {
@@ -500,8 +500,18 @@ public class FindToolbar extends LinearLayout
         if (mObserver != null) mObserver.onFindToolbarShown();
     }
 
-    /** Call this just before closing the find toolbar. */
+    /**
+     * Call this just before closing the find toolbar. The selection on the page will be cleared.
+     */
     public void deactivate() {
+        deactivate(true);
+    }
+
+    /**
+     * Call this just before closing the find toolbar.
+     * @param clearSelection Whether the selection on the page should be cleared.
+     */
+    public void deactivate(boolean clearSelection) {
         if (!mActive) return;
 
         if (mObserver != null) mObserver.onFindToolbarHidden();
@@ -520,7 +530,7 @@ public class FindToolbar extends LinearLayout
         UiUtils.hideKeyboard(mFindQuery);
         if (mFindQuery.getText().length() > 0) {
             clearResults();
-            mFindInPageBridge.stopFinding();
+            mFindInPageBridge.stopFinding(clearSelection);
         }
 
         mFindInPageBridge.destroy();

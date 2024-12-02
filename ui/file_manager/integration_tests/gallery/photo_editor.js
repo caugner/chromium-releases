@@ -89,25 +89,23 @@ function cropImage(testVolumeName, volumeType) {
                                        '.gallery:not([locked]) button.crop').
         then(function() {
           return Promise.all([
-            gallery.waitForPressEnterMessage(appId),
             gallery.waitForElement(appId, '.crop-overlay')
           ]);
         }).
         then(function() {
-          return gallery.fakeKeyDown(appId, 'body', 'Enter', false);
+          return gallery.fakeKeyDown(appId, 'body', 'Enter', false, false);
         }).
         then(function(ret) {
           chrome.test.assertTrue(ret);
           return Promise.all([
-            gallery.waitForElementLost(appId, '.prompt-wrapper .prompt'),
             gallery.waitForElementLost(appId, '.crop-overlay')
           ]);
         }).
         then(function() {
           return gallery.waitForSlideImage(
               appId,
-              533,
-              400,
+              532,
+              398,
               'My Desktop Background');
         }).
         then(function() {
@@ -145,23 +143,22 @@ function exposureImage(testVolumeName, volumeType) {
     return gallery.waitAndClickElement(appId, buttonQuery).then(function() {
       // Wait until the edit controls appear.
       return Promise.all([
-        gallery.waitForPressEnterMessage(appId),
-        gallery.waitForElement(appId, 'input.range[name="brightness"]'),
-        gallery.waitForElement(appId, 'input.range[name="contrast"]'),
+        gallery.waitForElement(appId, '.brightness > paper-slider'),
+        gallery.waitForElement(appId, '.contrast > paper-slider'),
       ]);
     }).then(function() {
       return gallery.callRemoteTestUtil(
-          'changeValue', appId, ['input.range[name="brightness"]', 20]);
+          'changeValue', appId, ['.brightness > paper-slider', 20]);
     }).then(function() {
       return gallery.callRemoteTestUtil(
-          'changeValue', appId, ['input.range[name="contrast"]', -20]);
+          'changeValue', appId, ['.contrast > paper-slider', -20]);
     }).then(function() {
       return gallery.callRemoteTestUtil('getMetadata', null, [url]);
     }).then(function(metadata) {
       origMetadata = metadata;
 
       // Push the Enter key.
-      return gallery.fakeKeyDown(appId, 'body', 'Enter', false);
+      return gallery.fakeKeyDown(appId, 'body', 'Enter', false, false);
     }).then(function() {
       // Wait until the image is updated.
       return repeatUntil(function() {

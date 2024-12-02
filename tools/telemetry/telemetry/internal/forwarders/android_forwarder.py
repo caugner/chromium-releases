@@ -9,20 +9,19 @@ import socket
 import struct
 import subprocess
 
-from catapult_base import support_binaries
+from telemetry.internal.util import binary_manager
 from telemetry.core import platform
-from telemetry.core.platform import android_device
 from telemetry.core import util
 from telemetry.internal import forwarders
+from telemetry.internal.platform import android_device
 
-util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
 try:
-  from pylib import forwarder  # pylint: disable=import-error
+  from pylib import forwarder
 except ImportError:
   forwarder = None
 
-from pylib.device import device_errors  # pylint: disable=import-error
-from pylib.device import device_utils  # pylint: disable=import-error
+from pylib.device import device_errors
+from pylib.device import device_utils
 
 
 class AndroidForwarderFactory(forwarders.ForwarderFactory):
@@ -35,10 +34,29 @@ class AndroidForwarderFactory(forwarders.ForwarderFactory):
       self._rndis_configurator = AndroidRndisConfigurator(self._device)
 
   def Create(self, port_pairs):
-    if self._rndis_configurator:
-      return AndroidRndisForwarder(self._device, self._rndis_configurator,
-                                   port_pairs)
-    return AndroidForwarder(self._device, port_pairs)
+    try:
+      if self._rndis_configurator:
+        return AndroidRndisForwarder(self._device, self._rndis_configurator,
+                                     port_pairs)
+      return AndroidForwarder(self._device, port_pairs)
+    except Exception:
+      try:
+        logging.warning('Failed to create forwarder. '
+                        'Currently forwarded connections:')
+        for line in self._device.adb.ForwardList().splitlines():
+          logging.warning('  %s', line)
+      except Exception:
+        logging.warning('Exception raised while listing forwarded connections.')
+
+      logging.warning('Device tcp sockets in use:')
+      try:
+        for line in self._device.ReadFile('/proc/net/tcp', as_root=True,
+                                          force_pull=True).splitlines():
+          logging.warning('  %s', line)
+      except Exception:
+        logging.warning('Exception raised while listing tcp sockets.')
+
+      raise
 
   @property
   def host_ip(self):
@@ -184,8 +202,8 @@ class AndroidRndisConfigurator(object):
   _INTERFACES_INCLUDE = 'source /etc/network/interfaces.d/*.conf'
   _TELEMETRY_INTERFACE_FILE = '/etc/network/interfaces.d/telemetry-{}.conf'
 
-  def __init__(self, adb):
-    self._device = adb.device()
+  def __init__(self, device):
+    self._device = device
 
     try:
       self._device.EnableRoot()
@@ -214,10 +232,14 @@ class AndroidRndisConfigurator(object):
 
   def _FindDeviceRndisInterface(self):
     """Returns the name of the RNDIS network interface if present."""
-    config = self._device.RunShellCommand('netcfg')
-    interfaces = [line.split()[0] for line in config]
+    config = self._device.RunShellCommand('ip -o link show')
+    interfaces = [line.split(':')[1].strip() for line in config]
     candidates = [iface for iface in interfaces if re.match('rndis|usb', iface)]
     if candidates:
+      candidates.sort()
+      if len(candidates) == 2 and candidates[0].startswith('rndis') and \
+          candidates[1].startswith('usb'):
+        return candidates[0]
       assert len(candidates) == 1, 'Found more than one rndis device!'
       return candidates[0]
 
@@ -271,7 +293,7 @@ class AndroidRndisConfigurator(object):
       logging.info('HoRNDIS kext loaded successfully.')
       return
     logging.info('Installing HoRNDIS...')
-    pkg_path = support_binaries.FindPath('HoRNDIS-rel5.pkg', arch_name, 'mac')
+    pkg_path = binary_manager.FetchPath('HoRNDIS-rel5.pkg', arch_name, 'mac')
     subprocess.check_call(
         ['/usr/bin/sudo', 'installer', '-pkg', pkg_path, '-target', '/'])
 
@@ -312,7 +334,7 @@ function doit() {
   # For some combinations of devices and host kernels, adb won't work unless the
   # interface is up, but if we bring it up immediately, it will break adb.
   #sleep 1
-  #ifconfig rndis0 192.168.42.2 netmask 255.255.255.0 up
+  #ifconfig rndis0 192.168.123.2 netmask 255.255.255.0 up
   echo DONE >> %(prefix)s.log
 }
 
@@ -394,8 +416,8 @@ doit &
         excluded = excluded_iface
       else:
         excluded = 'no interfaces excluded on other devices'
-      addresses += [line.split()[2]
-                    for line in device.RunShellCommand('netcfg')
+      addresses += [line.split()[3]
+                    for line in device.RunShellCommand('ip -o -4 addr')
                     if excluded not in line]
     return addresses
 
