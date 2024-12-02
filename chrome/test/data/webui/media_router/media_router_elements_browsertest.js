@@ -83,12 +83,20 @@ MediaRouterElementsBrowserTest.prototype = {
         document.dispatchEvent(event);
       }
 
+      function setHangoutsLocalPresent(localPresent) {
+        const event = new CustomEvent(
+            'mock-set-hangouts-local-present',
+            {detail: {localPresent: localPresent}});
+        document.dispatchEvent(event);
+      }
+
       return {
         pauseCurrentMedia: pauseCurrentMedia,
         playCurrentMedia: playCurrentMedia,
         seekCurrentMedia: seekCurrentMedia,
         setCurrentMediaMute: setCurrentMediaMute,
         setCurrentMediaVolume: setCurrentMediaVolume,
+        setHangoutsLocalPresent: setHangoutsLocalPresent
       };
     });
   },
@@ -144,8 +152,14 @@ TEST_F('MediaRouterElementsBrowserTest',
   mocha.run();
 });
 
+// This test is flaky on Windows. See https://crbug.com/760288.
+GEN('#if defined(OS_WIN)');
+GEN('#define MAYBE_MediaRouterContainerSearch DISABLED_MediaRouterContainerSearch');
+GEN('#else');
+GEN('#define MAYBE_MediaRouterContainerSearch MediaRouterContainerSearch');
+GEN('#endif');
 TEST_F('MediaRouterElementsBrowserTest',
-    'MediaRouterContainerSearch',
+    'MAYBE_MediaRouterContainerSearch',
     function() {
   media_router_container_search.registerTests();
   mocha.run();

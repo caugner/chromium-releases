@@ -66,6 +66,11 @@ var CrExtensionsBrowserTestWithInstalledExtension =
 
 var CrExtensionsSidebarTest = class extends CrExtensionsBrowserTest {
   /** @override */
+  get browsePreload() {
+    return 'chrome://extensions/sidebar.html';
+  }
+
+  /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
       'extension_sidebar_test.js',
@@ -76,6 +81,10 @@ var CrExtensionsSidebarTest = class extends CrExtensionsBrowserTest {
 TEST_F('CrExtensionsSidebarTest', 'LayoutAndClickHandlers', function() {
   mocha.grep(assert(extension_sidebar_tests.TestNames.LayoutAndClickHandlers))
       .run();
+});
+
+TEST_F('CrExtensionsSidebarTest', 'UpdateSelected', function() {
+  mocha.grep(assert(extension_sidebar_tests.TestNames.UpdateSelected)).run();
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -150,6 +159,11 @@ TEST_F('CrExtensionsItemsTest', 'RemoveButton', function() {
 
 var CrExtensionsDetailViewTest = class extends CrExtensionsBrowserTest {
   /** @override */
+  get browsePreload() {
+    return 'chrome://extensions/detail_view.html';
+  }
+
+  /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
       'extension_detail_view_test.js',
@@ -176,10 +190,23 @@ TEST_F(
           .run();
     });
 
+TEST_F(
+    'CrExtensionsDetailViewTest', 'Warnings',
+    function() {
+      mocha
+          .grep(assert(extension_detail_view_tests.TestNames.Warnings))
+          .run();
+    });
+
 ////////////////////////////////////////////////////////////////////////////////
 // Extension Item List Tests
 
 var CrExtensionsItemListTest = class extends CrExtensionsBrowserTest {
+  /** @override */
+  get browsePreload() {
+    return 'chrome://extensions/item_list.html';
+  }
+
   /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
@@ -188,11 +215,23 @@ var CrExtensionsItemListTest = class extends CrExtensionsBrowserTest {
   }
 };
 
-TEST_F('CrExtensionsItemListTest', 'Filtering', function() {
+// This test is flaky on Mac10.9 Tests (dbg). See https://crbug.com/771099.
+GEN('#if defined(OS_MACOSX)');
+GEN('#define MAYBE_Filtering DISABLED_Filtering');
+GEN('#else');
+GEN('#define MAYBE_Filtering Filtering');
+GEN('#endif');
+TEST_F('CrExtensionsItemListTest', 'MAYBE_Filtering', function() {
   mocha.grep(assert(extension_item_list_tests.TestNames.Filtering)).run();
 });
 
-TEST_F('CrExtensionsItemListTest', 'NoItems', function() {
+// This test is flaky on Mac10.9 Tests (dbg). See https://crbug.com/771099.
+GEN('#if defined(OS_MACOSX)');
+GEN('#define MAYBE_NoItems DISABLED_NoItems');
+GEN('#else');
+GEN('#define MAYBE_NoItems NoItems');
+GEN('#endif');
+TEST_F('CrExtensionsItemListTest', 'MAYBE_NoItems', function() {
   mocha.grep(assert(extension_item_list_tests.TestNames.NoItemsMsg)).run();
 });
 
@@ -321,6 +360,13 @@ TEST_F(
     });
 
 TEST_F(
+    'CrExtensionsManagerTestWithMultipleExtensionTypesInstalled',
+    'SidebarHighlighting', function() {
+      mocha.grep(assert(extension_manager_tests.TestNames.SidebarHighlighting))
+          .run();
+    });
+
+TEST_F(
     'CrExtensionsManagerTestWithIdQueryParam', 'NavigationToDetails',
     function() {
       mocha
@@ -433,6 +479,11 @@ TEST_F('CrExtensionsErrorPageTest', 'ErrorSelection', function() {
 
 var CrExtensionsCodeSectionTest = class extends CrExtensionsBrowserTest {
   /** @override */
+  get browsePreload() {
+    return 'chrome://extensions/code_section.html';
+  }
+
+  /** @override */
   get extraLibraries() {
     return super.extraLibraries.concat([
       'extension_code_section_test.js',
@@ -474,6 +525,12 @@ TEST_F('CrExtensionsNavigationHelperTest', 'PushAndReplaceState', function() {
   mocha
       .grep(assert(
           extension_navigation_helper_tests.TestNames.PushAndReplaceState))
+      .run();
+});
+
+TEST_F('CrExtensionsNavigationHelperTest', 'SupportedRoutes', function() {
+  mocha
+      .grep(assert(extension_navigation_helper_tests.TestNames.SupportedRoutes))
       .run();
 });
 

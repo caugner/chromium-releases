@@ -12,16 +12,21 @@
     },
     {
       "name": "LayoutBlockFlow DIV id='foo'",
-      "position": [8, 8],
       "bounds": [200, 1000],
       "contentsOpaque": true,
-      "backgroundColor": "#D3D3D3"
+      "backgroundColor": "#D3D3D3",
+      "transform": 1
     },
     {
       "name": "Squashing Layer (first squashed layer: LayoutBlockFlow (positioned) DIV)",
       "position": [8, 0],
       "bounds": [300, 654],
       "paintInvalidations": [
+        {
+          "object": "LayoutView #document",
+          "rect": [0, 500, 300, 150],
+          "reason": "style change"
+        },
         {
           "object": "LayoutBlockFlow BODY",
           "rect": [8, 508, 284, 20],
@@ -40,14 +45,21 @@
         {
           "object": "LayoutView #document",
           "rect": [285, 500, 15, 150],
-          "reason": "incremental"
-        },
-        {
-          "object": "LayoutView #document",
-          "rect": [285, 500, 15, 150],
           "reason": "scroll control"
         }
       ]
+    }
+  ],
+  "transforms": [
+    {
+      "id": 1,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [8, 8, 0, 1]
+      ],
+      "flattenInheritedTransform": false
     }
   ],
   "objectPaintInvalidations": [
@@ -61,7 +73,7 @@
     },
     {
       "object": "LayoutView #document",
-      "reason": "incremental"
+      "reason": "style change"
     },
     {
       "object": "LayoutBlockFlow BODY",

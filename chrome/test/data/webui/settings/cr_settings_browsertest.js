@@ -448,29 +448,6 @@ TEST_F('CrSettingsPeoplePageSyncPageTest', 'All', function() {
 });
 
 /**
- * @constructor
- * @extends {CrSettingsBrowserTest}
- */
-function CrSettingsRtlTest() {}
-
-CrSettingsRtlTest.prototype = {
-  __proto__: CrSettingsBrowserTest.prototype,
-
-  /** @override */
-  browsePreload: 'chrome://settings/settings_ui/settings_ui.html',
-
-  /** @override */
-  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
-    'rtl_tests.js',
-  ]),
-};
-
-TEST_F('CrSettingsRtlTest', 'All', function() {
-  settingsHidePagesByDefaultForTest = true;
-  mocha.run();
-});
-
-/**
  * Test fixture for chrome/browser/resources/settings/reset_page/.
  * @constructor
  * @extends {CrSettingsBrowserTest}
@@ -802,7 +779,7 @@ CrSettingsSiteDataDetailsTest.prototype = {
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
     '../test_browser_proxy.js',
-    'test_site_settings_prefs_browser_proxy.js',
+    'test_local_data_browser_proxy.js',
     'site_data_details_subpage_tests.js',
   ]),
 };
@@ -1057,8 +1034,9 @@ CrSettingsSiteDataTest.prototype = {
   browsePreload: 'chrome://settings/site_settings/site_data.html',
 
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'test_util.js',
     '../test_browser_proxy.js',
-    'test_site_settings_prefs_browser_proxy.js',
+    'test_local_data_browser_proxy.js',
     'site_data_test.js',
   ]),
 };
@@ -1157,9 +1135,10 @@ CrSettingsInternetPageTest.prototype = {
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    ROOT_PATH + 'ui/webui/resources/js/promise_resolver.js',
     ROOT_PATH + 'ui/webui/resources/js/assert.js',
     '../fake_chrome_event.js',
-    'fake_networking_private.js',
+    '../chromeos/fake_networking_private.js',
     'internet_page_tests.js',
   ]),
 };
@@ -1401,9 +1380,6 @@ CrSettingsNonExistentRouteTest.prototype = {
 
   /** @override */
   browsePreload: 'chrome://settings/non/existent/route',
-
-  /** @override */
-  runAccessibilityChecks: false,
 };
 
 // Failing on ChromiumOS dbg. https://crbug.com/709442
@@ -1433,9 +1409,6 @@ CrSettingsRouteDynamicParametersTest.prototype = {
 
   /** @override */
   browsePreload: 'chrome://settings/search?guid=a%2Fb&foo=42',
-
-  /** @override */
-  runAccessibilityChecks: false,
 };
 
 TEST_F('CrSettingsRouteDynamicParametersTest', 'All', function() {
@@ -1599,7 +1572,7 @@ CrSettingsPrintingPageTest.prototype = {
   __proto__: CrSettingsBrowserTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://settings/printing_page/cups_add_printer_dialog.html',
+  browsePreload: 'chrome://settings/printing_page/cups_printers.html',
 
   /** @override */
   extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
@@ -1700,7 +1673,7 @@ CrSettingsGoogleAssistantPageTest.prototype = {
 
   /** @override */
   browsePreload:
-      'chrome://md-settings/google_assistant_page/google_assistant_page.html',
+      'chrome://settings/google_assistant_page/google_assistant_page.html',
 
   /** @override */
   commandLineSwitches: [{
@@ -1742,5 +1715,29 @@ CrSettingsExtensionControlledIndicatorTest.prototype = {
 };
 
 TEST_F('CrSettingsExtensionControlledIndicatorTest', 'All', function() {
+  mocha.run();
+});
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsChangePasswordPageTest() {}
+
+CrSettingsChangePasswordPageTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload:
+      'chrome://settings/change_password_page/change_password_page.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    '../test_browser_proxy.js',
+    'change_password_page_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsChangePasswordPageTest', 'All', function() {
   mocha.run();
 });

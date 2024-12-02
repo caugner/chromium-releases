@@ -64,6 +64,7 @@
 #include "extensions/common/manifest_handlers/web_accessible_resources_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
+#include "url/origin.h"
 
 #if defined(OS_CHROMEOS)
 #include "extensions/browser/api/vpn_provider/vpn_service.h"
@@ -263,7 +264,9 @@ ChromeContentBrowserClientExtensionsPart::
 
 // static
 GURL ChromeContentBrowserClientExtensionsPart::GetEffectiveURL(
-    Profile* profile, const GURL& url) {
+    Profile* profile,
+    const GURL& url,
+    bool is_isolated_origin) {
   // If the input |url| is part of an installed app, the effective URL is an
   // extension URL with the ID of that extension as the host. This has the
   // effect of grouping apps together in a common SiteInstance.
@@ -279,6 +282,13 @@ GURL ChromeContentBrowserClientExtensionsPart::GetEffectiveURL(
   // Bookmark apps do not use the hosted app process model, and should be
   // treated as normal URLs.
   if (extension->from_bookmark())
+    return url;
+
+  // If |url| corresponds to an isolated origin, don't resolve effective URLs,
+  // since isolated origins should take precedence over hosted apps.  One
+  // exception is a URL for Chrome Web Store, which should always be resolved
+  // to its effective URL, so that the CWS process gets proper bindings.
+  if (is_isolated_origin && extension->id() != kWebStoreAppId)
     return url;
 
   // If the URL is part of an extension's web extent, convert it to an
@@ -366,6 +376,14 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldLockToOrigin(
       return false;
   }
   return true;
+}
+
+bool ChromeContentBrowserClientExtensionsPart::ShouldBypassDocumentBlocking(
+    const url::Origin& initiator) {
+  // Don't block responses for extension processes or for content scripts.
+  // TODO(creis): This check can be made stricter by checking what the extension
+  // has access to.
+  return initiator.scheme() == extensions::kExtensionScheme;
 }
 
 // static
