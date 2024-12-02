@@ -152,6 +152,22 @@ TEST_F(AmbientPhotoControllerTest, ShouldUpdatePhotoPeriodically) {
   photo_controller()->StopScreenUpdate();
 }
 
+// Tests that image details is correctly set.
+TEST_F(AmbientPhotoControllerTest, ShouldSetDetailsCorrectly) {
+  // Start to refresh images.
+  photo_controller()->StartScreenUpdate();
+  FastForwardToNextImage();
+  PhotoWithDetails image =
+      photo_controller()->ambient_backend_model()->GetNextImage();
+  EXPECT_FALSE(image.IsNull());
+
+  // Fake details defined in fake_ambient_backend_controller_impl.cc.
+  EXPECT_EQ(image.details, "fake-photo-attribution");
+
+  // Stop to refresh images.
+  photo_controller()->StopScreenUpdate();
+}
+
 // Test that image is saved.
 TEST_F(AmbientPhotoControllerTest, ShouldSaveImagesOnDisk) {
   // Start to refresh images. It will download two images immediately and write
@@ -253,6 +269,28 @@ TEST_F(AmbientPhotoControllerTest, ShouldReadCacheWhenImageDownloadingFailed) {
   task_environment()->FastForwardBy(0.2 * kTopicFetchInterval);
   image = photo_controller()->ambient_backend_model()->GetCurrentImage();
   EXPECT_FALSE(image.IsNull());
+}
+
+// Test that image details is read from disk.
+TEST_F(AmbientPhotoControllerTest, ShouldPopulateDetailsWhenReadFromCache) {
+  FetchImage();
+  FastForwardToNextImage();
+  // Topics is empty. Will read from cache, which is empty.
+  auto image = photo_controller()->ambient_backend_model()->GetCurrentImage();
+  EXPECT_TRUE(image.IsNull());
+
+  // Save a file to check if it gets read for display.
+  std::string data("cached image");
+  std::string details("image details");
+  WriteCacheDataBlocking(/*cache_index=*/0, &data, &details);
+
+  // Reset variables in photo controller.
+  photo_controller()->StopScreenUpdate();
+  FetchImage();
+  FastForwardToNextImage();
+  image = photo_controller()->ambient_backend_model()->GetCurrentImage();
+  EXPECT_FALSE(image.IsNull());
+  EXPECT_EQ(image.details, details);
 }
 
 // Test that image is read from disk when image decoding failed.
@@ -361,9 +399,9 @@ TEST_F(AmbientPhotoControllerTest,
 TEST_F(AmbientPhotoControllerTest, ShouldNotLoadDuplicateImages) {
   testing::NiceMock<MockAmbientBackendModelObserver> mock_backend_observer;
   base::ScopedObservation<AmbientBackendModel, AmbientBackendModelObserver>
-      scoped_observer{&mock_backend_observer};
+      scoped_observation{&mock_backend_observer};
 
-  scoped_observer.Observe(photo_controller()->ambient_backend_model());
+  scoped_observation.Observe(photo_controller()->ambient_backend_model());
 
   // All images downloaded will be identical.
   SetDownloadPhotoData("image data");
