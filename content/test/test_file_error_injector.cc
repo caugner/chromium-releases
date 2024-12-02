@@ -11,6 +11,7 @@
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_impl.h"
 #include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_interrupt_reasons_impl.h"
 #include "content/browser/power_save_blocker.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/public/browser/browser_thread.h"
@@ -51,16 +52,25 @@ class DownloadFileWithErrors: public DownloadFileImpl {
   ~DownloadFileWithErrors();
 
   // DownloadFile interface.
-  virtual net::Error Initialize() OVERRIDE;
-  virtual net::Error AppendDataToFile(const char* data,
-                                      size_t data_len) OVERRIDE;
-  virtual net::Error Rename(const FilePath& full_path) OVERRIDE;
+  virtual content::DownloadInterruptReason Initialize() OVERRIDE;
+  virtual content::DownloadInterruptReason AppendDataToFile(
+      const char* data, size_t data_len) OVERRIDE;
+  virtual void Rename(const FilePath& full_path,
+                      bool overwrite_existing_file,
+                      const RenameCompletionCallback& callback) OVERRIDE;
 
  private:
   // Error generating helper.
-  net::Error ShouldReturnError(
+  content::DownloadInterruptReason ShouldReturnError(
       content::TestFileErrorInjector::FileOperationCode code,
-      net::Error original_net_error);
+      content::DownloadInterruptReason original_error);
+
+  // Used in place of original rename callback to intercept with
+  // ShouldReturnError.
+  void RenameErrorCallback(
+    const RenameCompletionCallback& original_callback,
+    content::DownloadInterruptReason original_error,
+    const FilePath& path_result);
 
   // Source URL for the file being downloaded.
   GURL source_url_;
@@ -103,48 +113,65 @@ DownloadFileWithErrors::~DownloadFileWithErrors() {
   destruction_callback_.Run(source_url_);
 }
 
-net::Error DownloadFileWithErrors::Initialize() {
+content::DownloadInterruptReason DownloadFileWithErrors::Initialize() {
   return ShouldReturnError(
-      content::TestFileErrorInjector::FILE_OPERATION_INITIALIZE,
-      DownloadFileImpl::Initialize());
+          content::TestFileErrorInjector::FILE_OPERATION_INITIALIZE,
+          DownloadFileImpl::Initialize());
 }
 
-net::Error DownloadFileWithErrors::AppendDataToFile(const char* data,
-                                                    size_t data_len) {
+content::DownloadInterruptReason DownloadFileWithErrors::AppendDataToFile(
+    const char* data, size_t data_len) {
   return ShouldReturnError(
       content::TestFileErrorInjector::FILE_OPERATION_WRITE,
       DownloadFileImpl::AppendDataToFile(data, data_len));
 }
 
-net::Error DownloadFileWithErrors::Rename(const FilePath& full_path) {
-  return ShouldReturnError(
-      content::TestFileErrorInjector::FILE_OPERATION_RENAME,
-      DownloadFileImpl::Rename(full_path));
+void DownloadFileWithErrors::Rename(
+    const FilePath& full_path,
+    bool overwrite_existing_file,
+    const RenameCompletionCallback& callback) {
+  DownloadFileImpl::Rename(
+      full_path, overwrite_existing_file,
+      base::Bind(&DownloadFileWithErrors::RenameErrorCallback,
+                 // Unretained since this'll only be called from
+                 // the DownloadFileImpl slice of the same object.
+                 base::Unretained(this), callback));
 }
 
-net::Error DownloadFileWithErrors::ShouldReturnError(
+content::DownloadInterruptReason DownloadFileWithErrors::ShouldReturnError(
     content::TestFileErrorInjector::FileOperationCode code,
-    net::Error original_net_error) {
+    content::DownloadInterruptReason original_error) {
   int counter = operation_counter_[code];
   ++operation_counter_[code];
 
   if (code != error_info_.code)
-    return original_net_error;
+    return original_error;
 
   if (counter != error_info_.operation_instance)
-    return original_net_error;
+    return original_error;
 
   VLOG(1) << " " << __FUNCTION__ << "()"
           << " url = '" << source_url_.spec() << "'"
           << " code = " << content::TestFileErrorInjector::DebugString(code)
           << " (" << code << ")"
           << " counter = " << counter
-          << " original_error = " << net::ErrorToString(original_net_error)
-          << " (" << original_net_error << ")"
-          << " new error = " << net::ErrorToString(error_info_.net_error)
-          << " (" << error_info_.net_error << ")";
+          << " original_error = "
+          << content::InterruptReasonDebugString(original_error)
+          << " (" << original_error << ")"
+          << " new error = "
+          << content::InterruptReasonDebugString(error_info_.error)
+          << " (" << error_info_.error << ")";
 
-  return error_info_.net_error;
+  return error_info_.error;
+}
+
+void DownloadFileWithErrors::RenameErrorCallback(
+    const RenameCompletionCallback& original_callback,
+    content::DownloadInterruptReason original_error,
+    const FilePath& path_result) {
+  original_callback.Run(ShouldReturnError(
+      content::TestFileErrorInjector::FILE_OPERATION_RENAME,
+      original_error), path_result);
 }
 
 }  // namespace
@@ -162,7 +189,7 @@ class DownloadFileWithErrorsFactory
   virtual ~DownloadFileWithErrorsFactory();
 
   // DownloadFileFactory interface.
-  virtual content::DownloadFile* CreateFile(
+  virtual DownloadFile* CreateFile(
       DownloadCreateInfo* info,
       scoped_ptr<content::ByteStreamReader> stream,
       content::DownloadManager* download_manager,
@@ -207,7 +234,7 @@ content::DownloadFile* DownloadFileWithErrorsFactory::CreateFile(
       url,
       TestFileErrorInjector::FILE_OPERATION_INITIALIZE,
       -1,
-      net::OK
+      content::DOWNLOAD_INTERRUPT_REASON_NONE
     };
     injected_errors_[url] = err_info;
   }

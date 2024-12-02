@@ -11,10 +11,10 @@
 #include "chrome/browser/protector/protector_service_factory.h"
 #include "chrome/browser/protector/settings_change_global_error.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/global_error.h"
-#include "chrome/browser/ui/global_error_bubble_view_base.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error.h"
+#include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -73,7 +73,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ChangeInitError) {
       WillOnce(Return(false));
   protector_service_->ShowChange(mock_change_);
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
@@ -83,11 +83,11 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndDismiss) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
   protector_service_->DismissChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
@@ -97,11 +97,11 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndApply) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_CALL(*mock_change_, Apply(browser()));
   protector_service_->ApplyChange(mock_change_, browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 }
 
@@ -109,23 +109,8 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndApply) {
 // bots. http://crbug.com/130590
 #if defined(OS_WIN)
 #define MAYBE_ShowAndApplyManually DISABLED_ShowAndApplyManually
-// These are failing on "win beta" buildbots.
-#define MAYBE_BubbleClosedInsideApply DISABLED_BubbleClosedInsideApply
-#define MAYBE_ShowAndDiscardManually DISABLED_ShowAndDiscardManually
-#define MAYBE_ShowCompositeAndDismiss DISABLED_ShowCompositeAndDismiss
-#define MAYBE_ShowMultipleChangesAndApplyManuallyBeforeOther \
-  DISABLED_ShowMultipleChangesAndApplyManuallyBeforeOther
-#define MAYBE_ShowMultipleChangesAndApplyManually \
-  DISABLED_ShowMultipleChangesAndApplyManually
 #else
 #define MAYBE_ShowAndApplyManually ShowAndApplyManually
-#define MAYBE_BubbleClosedInsideApply BubbleClosedInsideApply
-#define MAYBE_ShowAndDiscardManually ShowAndDiscardManually
-#define MAYBE_ShowCompositeAndDismiss ShowCompositeAndDismiss
-#define MAYBE_ShowMultipleChangesAndApplyManuallyBeforeOther \
-  ShowMultipleChangesAndApplyManuallyBeforeOther
-#define MAYBE_ShowMultipleChangesAndApplyManually \
-  ShowMultipleChangesAndApplyManually
 #endif
 
 IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, MAYBE_ShowAndApplyManually) {
@@ -133,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, MAYBE_ShowAndApplyManually) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_CALL(*mock_change_, Apply(browser()));
   // Pressing Cancel applies the change.
@@ -141,7 +126,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, MAYBE_ShowAndApplyManually) {
   ASSERT_TRUE(error);
   error->BubbleViewCancelButtonPressed(browser());
   error->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 }
 
@@ -150,11 +135,11 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndDiscard) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_CALL(*mock_change_, Discard(browser()));
   protector_service_->DiscardChange(mock_change_, browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 }
 
@@ -163,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndDiscardManually) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_CALL(*mock_change_, Discard(browser()));
   // Pressing Apply discards the change.
@@ -171,7 +156,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowAndDiscardManually) {
   ASSERT_TRUE(error);
   error->BubbleViewAcceptButtonPressed(browser());
   error->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 }
 
@@ -179,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, BubbleClosedInsideApply) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
 
   GlobalError* error = GetGlobalError(mock_change_);
@@ -190,7 +175,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, BubbleClosedInsideApply) {
       bubble_view, &GlobalErrorBubbleViewBase::CloseBubbleView));
   // Pressing Cancel applies the change.
   error->BubbleViewCancelButtonPressed(browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 }
 
@@ -199,7 +184,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleChangesAndApply) {
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -210,7 +195,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleChangesAndApply) {
       WillOnce(Return(true));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(false));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
   EXPECT_EQ(mock_change2, protector_service_->GetLastChange());
@@ -218,7 +203,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleChangesAndApply) {
   // Apply the first change, the second should still be active.
   EXPECT_CALL(*mock_change_, Apply(browser()));
   protector_service_->ApplyChange(mock_change_, browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
   EXPECT_EQ(mock_change2, protector_service_->GetLastChange());
@@ -226,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleChangesAndApply) {
   // Finally apply the second change.
   EXPECT_CALL(*mock_change2, Apply(browser()));
   protector_service_->ApplyChange(mock_change2, browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_FALSE(IsGlobalErrorActive(mock_change2));
   EXPECT_FALSE(protector_service_->GetLastChange());
@@ -238,7 +223,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
 
   // ProtectService will own this change instance as well.
@@ -248,20 +233,20 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
       WillOnce(Return(true));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(false));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
 
   // Dismiss the first change, the second should still be active.
   protector_service_->DismissChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
 
   // Finally apply the second change.
   EXPECT_CALL(*mock_change2, Apply(browser()));
   protector_service_->ApplyChange(mock_change2, browser());
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_FALSE(IsGlobalErrorActive(mock_change2));
 }
@@ -272,7 +257,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
 
   // The first bubble view has been displayed.
@@ -287,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
       WillOnce(Return(true));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(false));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
 
@@ -302,7 +287,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change_, Apply(browser()));
   error->BubbleViewCancelButtonPressed(browser());
   error->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
 
@@ -313,7 +298,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change2, Apply(browser()));
   error2->BubbleViewCancelButtonPressed(browser());
   error2->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
   EXPECT_FALSE(IsGlobalErrorActive(mock_change2));
 }
@@ -324,7 +309,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change_, MockInit(browser()->profile())).
       WillOnce(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
 
   // The first bubble view has been displayed.
@@ -336,7 +321,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change_, Apply(browser()));
   error->BubbleViewCancelButtonPressed(browser());
   error->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
 
   // ProtectService will own this change instance as well.
@@ -346,7 +331,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
       WillOnce(Return(true));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(false));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change2));
 
   // The second bubble view has been displayed.
@@ -358,7 +343,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest,
   EXPECT_CALL(*mock_change2, Apply(browser()));
   error2->BubbleViewCancelButtonPressed(browser());
   error2->GetBubbleView()->CloseBubbleView();
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change2));
 }
 
@@ -372,7 +357,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleDifferentURLs) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -384,7 +369,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleDifferentURLs) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url2));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Both changes are shown separately, not composited.
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
@@ -393,7 +378,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowMultipleDifferentURLs) {
 
   protector_service_->DismissChange(mock_change_);
   protector_service_->DismissChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
 
@@ -406,7 +391,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismiss) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -423,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismiss) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Now ProtectorService should be showing a single composite change.
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
@@ -439,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismiss) {
   EXPECT_TRUE(error2->HasShownBubbleView());
 
   protector_service_->DismissChange(composite_change);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(composite_change));
   EXPECT_FALSE(protector_service_->GetLastChange());
 
@@ -450,14 +435,14 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismiss) {
   EXPECT_CALL(*mock_change3, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change3, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change3);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // The third change should not be composed with the previous.
   EXPECT_TRUE(IsGlobalErrorActive(mock_change3));
   EXPECT_EQ(mock_change3, protector_service_->GetLastChange());
 
   protector_service_->DismissChange(mock_change3);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change3));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
@@ -472,7 +457,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndOther) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -484,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndOther) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Now ProtectorService should be showing a single composite change.
   BaseSettingChange* composite_change = protector_service_->GetLastChange();
@@ -498,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndOther) {
   EXPECT_CALL(*mock_change3, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change3, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change3);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // The third change should be composed with the previous.
   EXPECT_FALSE(IsGlobalErrorActive(mock_change3));
@@ -512,7 +497,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndOther) {
   EXPECT_CALL(*mock_change4, GetNewSettingURL()).WillRepeatedly(Return(url2));
   EXPECT_CALL(*mock_change4, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change4);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // The 4th change is shown independently.
   EXPECT_TRUE(IsGlobalErrorActive(composite_change));
@@ -521,7 +506,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndOther) {
 
   protector_service_->DismissChange(composite_change);
   protector_service_->DismissChange(mock_change4);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(composite_change));
   EXPECT_FALSE(IsGlobalErrorActive(mock_change4));
   EXPECT_FALSE(protector_service_->GetLastChange());
@@ -537,7 +522,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismissSingle) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -549,7 +534,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismissSingle) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Now ProtectorService should be showing a single composite change.
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
@@ -566,7 +551,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismissSingle) {
   EXPECT_CALL(*mock_change3, GetNewSettingURL()).WillRepeatedly(Return(url2));
   EXPECT_CALL(*mock_change3, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change3);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // The third change should not be composed with the previous.
   EXPECT_TRUE(IsGlobalErrorActive(mock_change3));
@@ -575,7 +560,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismissSingle) {
 
   // Now dismiss the first change.
   protector_service_->DismissChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // This should effectively dismiss the whole composite change.
   EXPECT_FALSE(IsGlobalErrorActive(composite_change));
@@ -583,7 +568,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, ShowCompositeAndDismissSingle) {
   EXPECT_EQ(mock_change3, protector_service_->GetLastChange());
 
   protector_service_->DismissChange(mock_change3);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(mock_change3));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
@@ -599,7 +584,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, SameDomainDifferentURLs) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -611,7 +596,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, SameDomainDifferentURLs) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url2));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Changes should be merged.
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
@@ -622,7 +607,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, SameDomainDifferentURLs) {
   EXPECT_TRUE(IsGlobalErrorActive(composite_change));
 
   protector_service_->DismissChange(composite_change);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(composite_change));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }
@@ -638,7 +623,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, DifferentGoogleDomains) {
   EXPECT_CALL(*mock_change_, GetNewSettingURL()).WillRepeatedly(Return(url1));
   EXPECT_CALL(*mock_change_, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change_);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(IsGlobalErrorActive(mock_change_));
   EXPECT_EQ(mock_change_, protector_service_->GetLastChange());
 
@@ -650,7 +635,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, DifferentGoogleDomains) {
   EXPECT_CALL(*mock_change2, GetNewSettingURL()).WillRepeatedly(Return(url2));
   EXPECT_CALL(*mock_change2, CanBeMerged()).WillRepeatedly(Return(true));
   protector_service_->ShowChange(mock_change2);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   // Changes should be merged.
   EXPECT_FALSE(IsGlobalErrorActive(mock_change_));
@@ -661,7 +646,7 @@ IN_PROC_BROWSER_TEST_F(ProtectorServiceTest, DifferentGoogleDomains) {
   EXPECT_TRUE(IsGlobalErrorActive(composite_change));
 
   protector_service_->DismissChange(composite_change);
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(IsGlobalErrorActive(composite_change));
   EXPECT_FALSE(protector_service_->GetLastChange());
 }

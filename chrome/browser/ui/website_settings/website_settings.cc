@@ -13,17 +13,20 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
+#include "chrome/browser/ui/website_settings/website_settings_infobar_delegate.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "content/public/browser/browser_thread.h"
@@ -33,7 +36,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/cert_status_flags.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/x509_certificate.h"
@@ -44,11 +47,17 @@ using content::BrowserThread;
 
 namespace {
 
+// The list of content settings types to display on the Website Settings UI.
 ContentSettingsType kPermissionType[] = {
-  CONTENT_SETTINGS_TYPE_POPUPS,
+  CONTENT_SETTINGS_TYPE_IMAGES,
+  CONTENT_SETTINGS_TYPE_JAVASCRIPT,
   CONTENT_SETTINGS_TYPE_PLUGINS,
-  CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+  CONTENT_SETTINGS_TYPE_POPUPS,
   CONTENT_SETTINGS_TYPE_GEOLOCATION,
+  CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+  CONTENT_SETTINGS_TYPE_FULLSCREEN,
+  CONTENT_SETTINGS_TYPE_MOUSELOCK,
+  CONTENT_SETTINGS_TYPE_MEDIASTREAM,
 };
 
 }  // namespace
@@ -57,12 +66,15 @@ WebsiteSettings::WebsiteSettings(
     WebsiteSettingsUI* ui,
     Profile* profile,
     TabSpecificContentSettings* tab_specific_content_settings,
+    InfoBarTabHelper* infobar_tab_helper,
     const GURL& url,
     const content::SSLStatus& ssl,
     content::CertStore* cert_store)
     : TabSpecificContentSettings::SiteDataObserver(
           tab_specific_content_settings),
       ui_(ui),
+      infobar_helper_(infobar_tab_helper),
+      show_info_bar_(false),
       site_url_(url),
       site_identity_status_(SITE_IDENTITY_STATUS_UNKNOWN),
       cert_id_(0),
@@ -71,8 +83,8 @@ WebsiteSettings::WebsiteSettings(
       content_settings_(profile->GetHostContentSettingsMap()) {
   Init(profile, url, ssl);
 
-  HistoryService* history_service =
-      profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+      profile, Profile::EXPLICIT_ACCESS);
   if (history_service) {
     history_service->GetVisibleVisitCountToHost(
         site_url_,
@@ -105,8 +117,13 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
       primary_pattern = ContentSettingsPattern::FromURLNoWildcard(site_url_);
       secondary_pattern = ContentSettingsPattern::Wildcard();
       break;
+    case CONTENT_SETTINGS_TYPE_IMAGES:
+    case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
     case CONTENT_SETTINGS_TYPE_PLUGINS:
     case CONTENT_SETTINGS_TYPE_POPUPS:
+    case CONTENT_SETTINGS_TYPE_FULLSCREEN:
+    case CONTENT_SETTINGS_TYPE_MOUSELOCK:
+    case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
       primary_pattern = ContentSettingsPattern::FromURL(site_url_);
       secondary_pattern = ContentSettingsPattern::Wildcard();
       break;
@@ -145,6 +162,7 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
     value = Value::CreateIntegerValue(setting);
   content_settings_->SetWebsiteSetting(
       primary_pattern, secondary_pattern, type, "", value);
+  show_info_bar_ = true;
 }
 
 void WebsiteSettings::OnGotVisitCountToHost(HistoryService::Handle handle,
@@ -163,6 +181,13 @@ void WebsiteSettings::OnGotVisitCountToHost(HistoryService::Handle handle,
 
 void WebsiteSettings::OnSiteDataAccessed() {
   PresentSiteData();
+}
+
+void WebsiteSettings::OnUIClosing() {
+  if (show_info_bar_) {
+    infobar_helper_->AddInfoBar(
+        new WebsiteSettingsInfobarDelegate(infobar_helper_));
+  }
 }
 
 void WebsiteSettings::Init(Profile* profile,
@@ -401,19 +426,18 @@ void WebsiteSettings::PresentSitePermissions() {
     DCHECK(value.get());
     permission_info.setting =
         content_settings::ValueToContentSetting(value.get());
+    permission_info.source = info.source;
 
-    if (permission_info.setting != CONTENT_SETTING_ASK) {
-      if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&
-          info.secondary_pattern == ContentSettingsPattern::Wildcard()) {
-        permission_info.default_setting = permission_info.setting;
-        permission_info.setting = CONTENT_SETTING_DEFAULT;
-      } else {
-        permission_info.default_setting =
-            content_settings_->GetDefaultContentSetting(permission_info.type,
-                                                        NULL);
-      }
-      permission_info_list.push_back(permission_info);
+    if (info.primary_pattern == ContentSettingsPattern::Wildcard() &&
+        info.secondary_pattern == ContentSettingsPattern::Wildcard()) {
+      permission_info.default_setting = permission_info.setting;
+      permission_info.setting = CONTENT_SETTING_DEFAULT;
+    } else {
+      permission_info.default_setting =
+          content_settings_->GetDefaultContentSetting(permission_info.type,
+                                                      NULL);
     }
+    permission_info_list.push_back(permission_info);
   }
 
   ui_->SetPermissionInfo(permission_info_list);

@@ -5,13 +5,16 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_nsobject.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
-#include "net/cookies/cookie_monster.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "webkit/appcache/appcache_service.h"
 
 class CookieTreeNode;
+
+namespace net {
+class CanonicalCookie;
+}
 
 // This enum specifies the type of information contained in the
 // cookie details.
@@ -161,8 +164,7 @@ enum CocoaCookieDetailsType {
 - (id)initAsFolder;
 
 // Used for cookie details in both the cookie tree and the cookie prompt dialog.
-- (id)initWithCookie:(const net::CookieMonster::CanonicalCookie*)treeNode
-              origin:(NSString*)origin
+- (id)initWithCookie:(const net::CanonicalCookie*)treeNode
    canEditExpiration:(BOOL)canEditExpiration;
 
 // Used for database details in the cookie tree.

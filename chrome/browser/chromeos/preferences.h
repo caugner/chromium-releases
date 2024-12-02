@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_PREFERENCES_H_
 #define CHROME_BROWSER_CHROMEOS_PREFERENCES_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -94,6 +93,8 @@ class Preferences : public content::NotificationObserver {
   // underlying XKB API requires it.
   void UpdateAutoRepeatRate();
 
+  PrefService* prefs_;
+
   input_method::InputMethodManager* input_method_manager_;
 
   BooleanPrefMember tap_to_click_enabled_;
@@ -142,6 +143,8 @@ class Preferences : public content::NotificationObserver {
   IntegerPrefMember xkb_auto_repeat_interval_pref_;
 
   BooleanPrefMember enable_screen_lock_;
+
+  IntegerPrefMember secondary_display_layout_;
 
   BooleanPrefMember enable_drm_;
 

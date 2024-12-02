@@ -47,6 +47,7 @@
 #include "chrome/renderer/page_click_tracker.h"
 #include "chrome/renderer/page_load_histograms.h"
 #include "chrome/renderer/pepper/chrome_ppapi_interfaces.h"
+#include "chrome/renderer/pepper/pepper_helper.h"
 #include "chrome/renderer/playback_extension.h"
 #include "chrome/renderer/plugins/plugin_placeholder.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
@@ -55,7 +56,6 @@
 #include "chrome/renderer/prerender/prerender_webmediaplayer.h"
 #include "chrome/renderer/prerender/prerenderer_client.h"
 #include "chrome/renderer/print_web_view_helper.h"
-#include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/safe_browsing/malware_dom_details.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/search_extension.h"
@@ -155,7 +155,6 @@ ChromeContentRendererClient::~ChromeContentRendererClient() {
 void ChromeContentRendererClient::RenderThreadStarted() {
   chrome_observer_.reset(new ChromeRenderProcessObserver(this));
   extension_dispatcher_.reset(new ExtensionDispatcher());
-  histogram_snapshots_.reset(new RendererHistogramSnapshots());
   net_predictor_.reset(new RendererNetPredictor());
   spellcheck_.reset(new SpellCheck());
   visited_link_slave_.reset(new VisitedLinkSlave());
@@ -168,7 +167,6 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   thread->AddObserver(chrome_observer_.get());
   thread->AddObserver(extension_dispatcher_.get());
-  thread->AddObserver(histogram_snapshots_.get());
 #if defined(ENABLE_SAFE_BROWSING)
   thread->AddObserver(phishing_classifier_.get());
 #endif
@@ -253,7 +251,7 @@ void ChromeContentRendererClient::RenderViewCreated(
         chrome_observer_->content_setting_rules());
   }
   new ExtensionHelper(render_view, extension_dispatcher_.get());
-  new PageLoadHistograms(render_view, histogram_snapshots_.get());
+  new PageLoadHistograms(render_view);
 #if defined(ENABLE_PRINTING)
   new PrintWebViewHelper(render_view);
 #endif
@@ -284,6 +282,8 @@ void ChromeContentRendererClient::RenderViewCreated(
       render_view, content_settings, chrome_observer_.get(),
       extension_dispatcher_.get(), translate);
 
+  new PepperHelper(render_view);
+
   // Used only for testing/automation.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDomAutomationController)) {
@@ -313,12 +313,8 @@ bool ChromeContentRendererClient::OverrideCreatePlugin(
   std::string actual_mime_type;
   std::string orig_mime_type = params.mimeType.utf8();
 
-  std::string browser_plugin_switch = CommandLine::ForCurrentProcess()->
-      GetSwitchValueASCII(switches::kBrowserPlugin);
   if (orig_mime_type == content::kBrowserPluginMimeType &&
-      (browser_plugin_switch == switches::kBrowserPluginEnabled ||
-       (browser_plugin_switch == switches::kBrowserPluginPlatformApps &&
-        ExtensionHelper::Get(render_view)->view_type() == VIEW_TYPE_APP_SHELL)))
+      ExtensionHelper::Get(render_view)->view_type() == VIEW_TYPE_APP_SHELL)
       return false;
 
   render_view->Send(new ChromeViewHostMsg_GetPluginInfo(
@@ -601,10 +597,21 @@ bool ChromeContentRendererClient::IsNaClAllowed(
   // under development, invocations from whitelisted URLs, and all invocations
   // if --enable-nacl is set.
   bool is_nacl_allowed =
-      is_extension_from_webstore ||
-      is_extension_unrestricted ||
-      is_whitelisted_url ||
-      is_nacl_unrestricted;
+#if defined(__arm__)
+    // The ARM ABI is not quite stable, so only allow NaCl for
+    // unrestricted extensions (i.e. built-in and under development),
+    // and for the QuickOffice webstore app.
+    // See http://crbug.com/145694
+    // TODO(dschuff): remove this when the ABI is stable
+    (is_extension_from_webstore &&
+     manifest_url.SchemeIs("chrome-extension") &&
+     manifest_url.host() == "gbkeegbaiigmenfmjfclcdgdpimamgkj") ||
+#else
+    is_extension_from_webstore ||
+    is_whitelisted_url ||
+#endif
+    is_extension_unrestricted ||
+    is_nacl_unrestricted;
   if (is_nacl_allowed) {
     bool app_can_use_dev_interfaces =
         // NaCl PDF viewer extension

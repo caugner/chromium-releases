@@ -11,6 +11,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -120,7 +121,7 @@ bool BookmarkEditorView::Accept() {
   if (!IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK)) {
     if (details_.GetNodeType() != BookmarkNode::FOLDER) {
       // The url is invalid, focus the url field.
-      url_tf_->SelectAll();
+      url_tf_->SelectAll(true);
       url_tf_->RequestFocus();
     }
     return false;
@@ -259,7 +260,7 @@ void BookmarkEditorView::Show(gfx::NativeWindow parent_window) {
     ExpandAndSelect();
   GetWidget()->Show();
   // Select all the text in the name Textfield.
-  title_tf_->SelectAll();
+  title_tf_->SelectAll(true);
   // Give focus to the name Textfield.
   title_tf_->RequestFocus();
 }
@@ -288,7 +289,7 @@ void BookmarkEditorView::ShowContextMenuForView(views::View* source,
 }
 
 void BookmarkEditorView::Init() {
-  bb_model_ = profile_->GetBookmarkModel();
+  bb_model_ = BookmarkModelFactory::GetForProfile(profile_);
   DCHECK(bb_model_);
   bb_model_->AddObserver(this);
 
@@ -303,8 +304,8 @@ void BookmarkEditorView::Init() {
   } else if (details_.type == EditDetails::NEW_FOLDER) {
     title = l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME);
   } else if (details_.type == EditDetails::NEW_URL) {
-    bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
-        &url, &title);
+    url = details_.url;
+    title = details_.title;
   }
   title_tf_ = new views::Textfield;
   title_tf_->SetText(title);
@@ -495,8 +496,8 @@ BookmarkEditorView::EditorNode* BookmarkEditorView::AddNewFolder(
 void BookmarkEditorView::ExpandAndSelect() {
   BookmarkExpandedStateTracker::Nodes expanded_nodes =
       bb_model_->expanded_state_tracker()->GetExpandedNodes();
-  for (BookmarkExpandedStateTracker::Nodes::const_iterator i =
-       expanded_nodes.begin(); i != expanded_nodes.end(); ++i) {
+  for (BookmarkExpandedStateTracker::Nodes::const_iterator i(
+       expanded_nodes.begin()); i != expanded_nodes.end(); ++i) {
     EditorNode* editor_node =
         FindNodeWithID(tree_model_->GetRoot(), (*i)->id());
     if (editor_node)

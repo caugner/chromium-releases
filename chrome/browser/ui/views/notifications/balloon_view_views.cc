@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
@@ -24,17 +23,18 @@
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/path.h"
 #include "ui/views/bubble/bubble_border.h"
-#include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -47,8 +47,6 @@
 #else
 #include "chrome/browser/ui/views/notifications/balloon_view_host.h"
 #endif
-
-using views::Widget;
 
 namespace {
 
@@ -234,7 +232,7 @@ void BalloonViewImpl::RepositionToBalloon() {
   anim_frame_end_ = gfx::Rect(
       balloon_->GetPosition().x(), balloon_->GetPosition().y(),
       GetTotalWidth(), GetTotalHeight());
-  anim_frame_start_ = frame_container_->GetClientAreaScreenBounds();
+  anim_frame_start_ = frame_container_->GetClientAreaBoundsInScreen();
   animation_.reset(new ui::SlideAnimation(this));
   animation_->Show();
 }
@@ -359,14 +357,14 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   if (enable_web_ui_)
     html_contents_->EnableWebUI();
 
-  html_container_ = new Widget;
-  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  html_container_ = new views::Widget;
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.bounds = contents_rect;
   html_container_->Init(params);
   html_container_->SetContentsView(html_contents_->view());
 
   gfx::Rect balloon_rect(x(), y(), GetTotalWidth(), GetTotalHeight());
-  frame_container_ = new Widget;
+  frame_container_ = new views::Widget;
   params.delegate = this;
   params.transparent = true;
   params.bounds = balloon_rect;
@@ -501,7 +499,7 @@ gfx::Rect BalloonViewImpl::GetContentsRectangle() const {
 
   gfx::Size content_size = balloon_->content_size();
   gfx::Point offset = GetContentsOffset();
-  gfx::Rect frame_rect = frame_container_->GetWindowScreenBounds();
+  gfx::Rect frame_rect = frame_container_->GetWindowBoundsInScreen();
   return gfx::Rect(frame_rect.x() + offset.x(),
                    frame_rect.y() + GetShelfHeight() + offset.y(),
                    content_size.width(),

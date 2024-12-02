@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_SCRIPT_BADGE_CONTROLLER_H_
 #define CHROME_BROWSER_EXTENSIONS_SCRIPT_BADGE_CONTROLLER_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -15,14 +14,18 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/script_executor.h"
-#include "chrome/browser/extensions/script_executor_impl.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class ExtensionAction;
 class ExtensionService;
+class GURL;
 class TabContents;
+
+namespace base {
+class ListValue;
+}  // namespace base
 
 namespace IPC {
 class Message;
@@ -38,57 +41,43 @@ class Extension;
 // - For content_script declarations, this receives IPCs from the renderer
 //   notifying that a content script is running (either on this tab or one of
 //   its frames), which is recorded.
-// - The ScriptExecutor interface is exposed for programmatically executing
-//   scripts. Successfully executed scripts are recorded.
+// - Observes a ScriptExecutor so that successfully-executed scripts
+//   can cause a script badge to appear.
 //
 // When extension IDs are recorded a NOTIFICATION_EXTENSION_LOCATION_BAR_UPDATED
 // is sent, and those extensions will be returned from GetCurrentActions until
 // the next page navigation.
-//
-// Ref-counted so that it can be safely bound in a base::Bind.
 class ScriptBadgeController
-    : public base::RefCountedThreadSafe<ScriptBadgeController>,
-      public LocationBarController,
-      public ScriptExecutor,
+    : public LocationBarController,
+      public ScriptExecutor::Observer,
       public content::WebContentsObserver,
       public content::NotificationObserver {
  public:
-  explicit ScriptBadgeController(TabContents* tab_contents);
-
-  // LocationBarController implementation.
-  virtual std::vector<ExtensionAction*> GetCurrentActions() OVERRIDE;
-  virtual Action OnClicked(const std::string& extension_id,
-                           int mouse_button) OVERRIDE;
-
-  // ScriptExecutor implementation.
-  virtual void ExecuteScript(const std::string& extension_id,
-                             ScriptType script_type,
-                             const std::string& code,
-                             FrameScope frame_scope,
-                             UserScript::RunLocation run_at,
-                             WorldType world_type,
-                             const ExecuteScriptCallback& callback) OVERRIDE;
-
- private:
-  friend class base::RefCountedThreadSafe<ScriptBadgeController>;
+  explicit ScriptBadgeController(TabContents* tab_contents,
+                                 ScriptExecutor* script_executor);
   virtual ~ScriptBadgeController();
 
-  // Callback for ExecuteScript which if successful and for the current URL
-  // records that the script is running, then calls the original callback.
-  void OnExecuteScriptFinished(const std::string& extension_id,
-                               const ExecuteScriptCallback& callback,
-                               bool success,
-                               int32 page_id,
-                               const std::string& error);
+  // LocationBarController implementation.
+  virtual std::vector<ExtensionAction*> GetCurrentActions() const OVERRIDE;
+  virtual void GetAttentionFor(const std::string& extension_id) OVERRIDE;
+  virtual Action OnClicked(const std::string& extension_id,
+                           int mouse_button) OVERRIDE;
+  virtual void NotifyChange() OVERRIDE;
 
+  // ScriptExecutor::Observer implementation.
+  virtual void OnExecuteScriptFinished(
+      const std::string& extension_id,
+      const std::string& error,
+      int32 on_page_id,
+      const GURL& on_url,
+      const base::ListValue& script_result) OVERRIDE;
+
+ private:
   // Gets the ExtensionService for |tab_contents_|.
   ExtensionService* GetExtensionService();
 
-  // Gets the current page ID.
+  // Gets the current page ID, or -1 if no navigation entry has been committed.
   int32 GetPageID();
-
-  // Sends a LOCATION_BAR_UPDATED notification.
-  void Notify();
 
   // content::WebContentsObserver implementation.
   virtual void DidNavigateMainFrame(
@@ -103,27 +92,33 @@ class ScriptBadgeController
 
   // IPC::Message handlers.
   void OnContentScriptsExecuting(const std::set<std::string>& extension_ids,
-                                 int32 page_id);
+                                 int32 page_id,
+                                 const GURL& on_url);
 
-  // Tries to insert an extension into the relevant collections, and returns
-  // whether any change was made.
-  bool InsertExtension(const std::string& extension_id);
+  // Adds the extension's icon to the list of script badges.  Returns
+  // the script badge ExtensionAction that was added, or NULL if
+  // extension_id isn't valid.
+  ExtensionAction* AddExtensionToCurrentActions(
+      const std::string& extension_id);
+
+  // Called when an extension is running script on the current tab,
+  // and tries to insert an extension into the relevant collections.
+  // Returns true if any change was made.
+  bool MarkExtensionExecuting(const std::string& extension_id);
 
   // Tries to erase an extension from the relevant collections, and returns
   // whether any change was made.
   bool EraseExtension(const Extension* extension);
 
-  // Delegate ScriptExecutorImpl for running ExecuteScript.
-  ScriptExecutorImpl script_executor_;
-
   // Our parent TabContents.
   TabContents* tab_contents_;
 
-  // The current extension actions in the order they appeared.
+  // The current extension actions in the order they appeared.  These come from
+  // calls to ExecuteScript or getAttention on the current frame.
   std::vector<ExtensionAction*> current_actions_;
 
-  // The extensions that have called ExecuteScript on the current frame.
-  std::set<std::string> extensions_executing_scripts_;
+  // The extensions that have actions in current_actions_.
+  std::set<std::string> extensions_in_current_actions_;
 
   // Listen to extension unloaded notifications.
   content::NotificationRegistrar registrar_;

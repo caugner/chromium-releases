@@ -38,7 +38,6 @@ ChunkedByteBuffer::~ChunkedByteBuffer() {
 }
 
 void ChunkedByteBuffer::Append(const uint8* start, size_t length) {
-  DCHECK(length > 0);
   size_t remaining_bytes = length;
   const uint8* next_data = start;
 
@@ -111,7 +110,7 @@ scoped_ptr< std::vector<uint8> > ChunkedByteBuffer::PopChunk() {
 }
 
 void ChunkedByteBuffer::Clear() {
-  chunks_.reset();
+  chunks_.clear();
   partial_chunk_.reset(new Chunk());
   total_bytes_stored_ = 0;
 }

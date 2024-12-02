@@ -20,8 +20,11 @@
 #include "base/time.h"
 #include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
+#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_provider.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -44,8 +47,10 @@
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
-// http://blogs.msdn.com/oldnewthing/archive/2004/10/25/247180.aspx
 #if defined(OS_WIN)
+#include "base/win/metro.h"
+
+// http://blogs.msdn.com/oldnewthing/archive/2004/10/25/247180.aspx
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #endif
 
@@ -469,7 +474,12 @@ void MetricsLog::WritePluginStabilityElements(
       NOTREACHED();
       continue;
     }
+    int loading_errors = 0;
+    plugin_dict->GetInteger(prefs::kStabilityPluginLoadingErrors,
+                            &loading_errors);
+    WriteIntAttribute("loadingerrorcount", loading_errors);
 
+    // Write the protobuf version.
     SystemProfileProto::Stability::PluginStability* plugin_stability =
         stability->add_plugin_stability();
     SetPluginInfo(*plugin_info, plugin_prefs,
@@ -477,6 +487,7 @@ void MetricsLog::WritePluginStabilityElements(
     plugin_stability->set_launch_count(launches);
     plugin_stability->set_instance_count(instances);
     plugin_stability->set_crash_count(crashes);
+    plugin_stability->set_loading_error_count(loading_errors);
   }
 
   pref->ClearPref(prefs::kStabilityPluginStats);
@@ -747,7 +758,17 @@ void MetricsLog::RecordEnvironmentProto(
 #endif
 
   SystemProfileProto::OS* os = system_profile->mutable_os();
-  os->set_name(base::SysInfo::OperatingSystemName());
+  std::string os_name = base::SysInfo::OperatingSystemName();
+#if defined(OS_WIN)
+  // TODO(mad): This only checks whether the main process is a Metro process at
+  // upload time; not whether the collected metrics were all gathered from
+  // Metro.  This is ok as an approximation for now, since users will rarely be
+  // switching from Metro to Desktop mode; but we should re-evaluate whether we
+  // can distinguish metrics more cleanly in the future: http://crbug.com/140568
+  if (base::win::IsMetroProcess())
+    os_name += " (Metro)";
+#endif
+  os->set_name(os_name);
   os->set_version(base::SysInfo::OperatingSystemVersion());
 
   const content::GPUInfo& gpu_info =
@@ -810,7 +831,7 @@ void MetricsLog::WriteAllProfilesMetrics(
        i != all_profiles_metrics.end_keys(); ++i) {
     const std::string& key_name = *i;
     if (key_name.compare(0, profile_prefix.size(), profile_prefix) == 0) {
-      DictionaryValue* profile;
+      const DictionaryValue* profile;
       if (all_profiles_metrics.GetDictionaryWithoutPathExpansion(key_name,
                                                                  &profile))
         WriteProfileMetrics(key_name.substr(profile_prefix.size()), *profile);
@@ -824,7 +845,7 @@ void MetricsLog::WriteProfileMetrics(const std::string& profileidhash,
   WriteAttribute("profileidhash", profileidhash);
   for (DictionaryValue::key_iterator i = profile_metrics.begin_keys();
        i != profile_metrics.end_keys(); ++i) {
-    Value* value;
+    const Value* value;
     if (profile_metrics.GetWithoutPathExpansion(*i, &value)) {
       DCHECK(*i != "id");
       switch (value->GetType()) {

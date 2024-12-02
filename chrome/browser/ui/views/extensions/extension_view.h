@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_VIEW_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -12,11 +11,11 @@
 #include "ui/views/controls/native/native_view_host.h"
 
 class Browser;
-class ExtensionHost;
 class ExtensionView;
 
 namespace extensions {
 class Extension;
+class ExtensionHost;
 }
 
 namespace content {
@@ -26,7 +25,7 @@ class RenderViewHost;
 // This handles the display portion of an ExtensionHost.
 class ExtensionView : public views::NativeViewHost {
  public:
-  ExtensionView(ExtensionHost* host, Browser* browser);
+  ExtensionView(extensions::ExtensionHost* host, Browser* browser);
   virtual ~ExtensionView();
 
   // A class that represents the container that this view is in.
@@ -38,7 +37,7 @@ class ExtensionView : public views::NativeViewHost {
     virtual void OnViewWasResized() {}
   };
 
-  ExtensionHost* host() const { return host_; }
+  extensions::ExtensionHost* host() const { return host_; }
   Browser* browser() const { return browser_; }
   const extensions::Extension* extension() const;
   content::RenderViewHost* render_view_host() const;
@@ -71,7 +70,7 @@ class ExtensionView : public views::NativeViewHost {
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
  private:
-  friend class ExtensionHost;
+  friend class extensions::ExtensionHost;
 
   // Initializes the RenderWidgetHostView for this object.
   void CreateWidgetHostView();
@@ -85,7 +84,7 @@ class ExtensionView : public views::NativeViewHost {
 
   // The running extension instance that we're displaying.
   // Note that host_ owns view
-  ExtensionHost* host_;
+  extensions::ExtensionHost* host_;
 
   // The browser window that this view is in.
   Browser* browser_;

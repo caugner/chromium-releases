@@ -13,7 +13,6 @@
 #include "base/threading/thread.h"
 #include "net/base/backoff_entry.h"
 #include "remoting/base/encoder.h"
-#include "remoting/host/capturer.h"
 #include "remoting/host/client_session.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/host_key_pair.h"
@@ -32,11 +31,13 @@ class SessionConfig;
 class CandidateSessionConfig;
 }  // namespace protocol
 
-class Capturer;
+class AudioEncoder;
+class AudioScheduler;
 class ChromotingHostContext;
 class DesktopEnvironment;
 class Encoder;
 class ScreenRecorder;
+class VideoFrameCapturer;
 
 // A class to implement the functionality of a host process.
 //
@@ -48,7 +49,7 @@ class ScreenRecorder;
 //
 // 2. We listen for incoming connection using libjingle. We will create
 //    a ConnectionToClient object that wraps around linjingle for transport.
-//    A ScreenRecorder is created with an Encoder and a Capturer.
+//    A ScreenRecorder is created with an Encoder and a VideoFrameCapturer.
 //    A ConnectionToClient is added to the ScreenRecorder for transporting
 //    the screen captures. An InputStub is created and registered with the
 //    ConnectionToClient to receive mouse / keyboard events from the remote
@@ -90,7 +91,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   void AddStatusObserver(HostStatusObserver* observer);
   void RemoveStatusObserver(HostStatusObserver* observer);
 
-  // This method may be called only form
+  // This method may be called only from
   // HostStatusObserver::OnClientAuthenticated() to reject the new
   // client.
   void RejectAuthenticatingClient();
@@ -103,6 +104,10 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // factory before all authenticators it created are deleted.
   void SetAuthenticatorFactory(
       scoped_ptr<protocol::AuthenticatorFactory> authenticator_factory);
+
+  // Sets the maximum duration of any session. By default, a session has no
+  // maximum duration.
+  void SetMaximumSessionDuration(const base::TimeDelta& max_session_duration);
 
   ////////////////////////////////////////////////////////////////////////////
   // ClientSession::EventHandler implementation.
@@ -161,16 +166,15 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Creates encoder for the specified configuration.
   static Encoder* CreateEncoder(const protocol::SessionConfig& config);
 
+  // Creates an audio encoder for the specified configuration.
+  static scoped_ptr<AudioEncoder> CreateAudioEncoder(
+      const protocol::SessionConfig& config);
+
   virtual ~ChromotingHost();
 
-  std::string GenerateHostAuthToken(const std::string& encoded_client_token);
-
-  void AddAuthenticatedClient(ClientSession* client,
-                              const protocol::SessionConfig& config,
-                              const std::string& jid);
-
   void StopScreenRecorder();
-  void OnScreenRecorderStopped();
+  void StopAudioScheduler();
+  void OnRecorderStopped();
 
   // Called from Shutdown() or OnScreenRecorderStopped() to finish shutdown.
   void ShutdownFinish();
@@ -192,14 +196,14 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // The connections to remote clients.
   ClientList clients_;
 
-  // Session manager for the host process.
-  // TODO(sergeyu): Do we need to have one screen recorder per client?
+  // Schedulers for audio and video capture.
+  // TODO(sergeyu): Do we need to have one set of schedulers per client?
   scoped_refptr<ScreenRecorder> recorder_;
+  scoped_refptr<AudioScheduler> audio_scheduler_;
 
-  // Number of screen recorders that are currently being
-  // stopped. Normally set to 0 or 1, but in some cases it may be
-  // greater than 1, particularly if when second client can connect
-  // immediately after previous one disconnected.
+  // Number of screen recorders and audio schedulers that are currently being
+  // stopped. Used to delay shutdown if one or more recorders/schedulers are
+  // asynchronously shutting down.
   int stopping_recorders_;
 
   // Tracks the internal state of the host.
@@ -222,6 +226,9 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // TODO(sergeyu): The following members do not belong to
   // ChromotingHost and should be moved elsewhere.
   UiStrings ui_strings_;
+
+  // The maximum duration of any session.
+  base::TimeDelta max_session_duration_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);
 };

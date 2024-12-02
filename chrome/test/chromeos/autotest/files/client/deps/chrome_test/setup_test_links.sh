@@ -23,11 +23,6 @@ ln -f -s /opt/google/chrome/nacl_helper_bootstrap "$this_dir/"
 ln -f -s /opt/google/chrome/nacl_irt_*.nexe "$this_dir/"
 ln -f -s /opt/google/chrome/libppGoogleNaClPluginChrome.so "$this_dir/"
 
-mkdir -p "$this_dir/chromeos"
-ln -f -s "/opt/google/chrome/chromeos/libcros.so" \
-    "$this_dir/chromeos/libcros.so"
-
-
 # Create links to resources from pyauto_dep.
 
 chrome_test_dep_dir=$(readlink -f "$this_dir/../../..")
@@ -51,6 +46,7 @@ function link_from_pyauto_dep() {
 }
 
 link_from_pyauto_dep \
+    "$pyauto_dep_dir/test_src/chrome/browser/resources/gaia_auth" \
     "$pyauto_dep_dir/test_src/chrome/test/pyautolib" \
     "$pyauto_dep_dir/test_src/net/tools/testserver" \
     "$pyauto_dep_dir/test_src/out/Release/chromedriver" \
@@ -58,4 +54,10 @@ link_from_pyauto_dep \
     "$pyauto_dep_dir/test_src/out/Release/pyproto" \
     "$pyauto_dep_dir/test_src/out/Release/suid-python" \
     "$pyauto_dep_dir/test_src/out/Release/_pyautolib.so" \
+    "$pyauto_dep_dir/test_src/out/Release/libffmpegsumo.so" \
     "$pyauto_dep_dir/test_src/third_party"/*
+
+# Make sure the test files are owned by chronos as some browser_tests emit
+# temporary files into the directories.
+chown -R chronos "$chrome_test_dep_dir"
+

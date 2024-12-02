@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_VIEWS_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -44,9 +43,11 @@ class ExtensionKeybindingRegistryViews
  private:
   // Overridden from ExtensionKeybindingRegistry:
   virtual void AddExtensionKeybinding(
-      const extensions::Extension* extension) OVERRIDE;
+      const extensions::Extension* extension,
+      const std::string& command_name) OVERRIDE;
   virtual void RemoveExtensionKeybinding(
-      const extensions::Extension* extension) OVERRIDE;
+      const extensions::Extension* extension,
+      const std::string& command_name) OVERRIDE;
 
   // Weak pointer to the our profile. Not owned by us.
   Profile* profile_;

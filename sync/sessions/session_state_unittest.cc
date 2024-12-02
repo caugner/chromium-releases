@@ -11,13 +11,11 @@
 #include "base/test/values_test_util.h"
 #include "base/time.h"
 #include "base/values.h"
-#include "sync/internal_api/public/sessions/error_counters.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
 #include "sync/internal_api/public/sessions/sync_source_info.h"
-#include "sync/internal_api/public/sessions/syncer_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 namespace {
 
@@ -32,11 +30,11 @@ class SessionStateTest : public testing::Test {};
 TEST_F(SessionStateTest, SyncSourceInfoToValue) {
   sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source =
       sync_pb::GetUpdatesCallerInfo::PERIODIC;
-  syncable::ModelTypePayloadMap types;
-  types[syncable::PREFERENCES] = "preferencespayload";
-  types[syncable::EXTENSIONS] = "";
+  ModelTypePayloadMap types;
+  types[PREFERENCES] = "preferencespayload";
+  types[EXTENSIONS] = "";
   scoped_ptr<DictionaryValue> expected_types_value(
-      syncable::ModelTypePayloadMapToValue(types));
+      ModelTypePayloadMapToValue(types));
 
   SyncSourceInfo source_info(updates_source, types);
 
@@ -46,57 +44,28 @@ TEST_F(SessionStateTest, SyncSourceInfoToValue) {
   ExpectDictDictionaryValue(*expected_types_value, *value, "types");
 }
 
-TEST_F(SessionStateTest, SyncerStatusToValue) {
-  SyncerStatus status;
-  status.invalid_store = true;
-  status.num_successful_commits = 5;
-  status.num_successful_bookmark_commits = 10;
-  status.num_updates_downloaded_total = 100;
-  status.num_tombstone_updates_downloaded_total = 200;
-  status.num_reflected_updates_downloaded_total = 50;
-  status.num_local_overwrites = 15;
-  status.num_server_overwrites = 18;
-
-  scoped_ptr<DictionaryValue> value(status.ToValue());
-  EXPECT_EQ(8u, value->size());
-  ExpectDictBooleanValue(status.invalid_store, *value, "invalidStore");
-  ExpectDictIntegerValue(status.num_successful_commits,
-                         *value, "numSuccessfulCommits");
-  ExpectDictIntegerValue(status.num_successful_bookmark_commits,
-                         *value, "numSuccessfulBookmarkCommits");
-  ExpectDictIntegerValue(status.num_updates_downloaded_total,
-                         *value, "numUpdatesDownloadedTotal");
-  ExpectDictIntegerValue(status.num_tombstone_updates_downloaded_total,
-                         *value, "numTombstoneUpdatesDownloadedTotal");
-  ExpectDictIntegerValue(status.num_reflected_updates_downloaded_total,
-                         *value, "numReflectedUpdatesDownloadedTotal");
-  ExpectDictIntegerValue(status.num_local_overwrites,
-                         *value, "numLocalOverwrites");
-  ExpectDictIntegerValue(status.num_server_overwrites,
-                         *value, "numServerOverwrites");
-}
-
 TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
-  SyncerStatus syncer_status;
-  syncer_status.num_successful_commits = 500;
-  scoped_ptr<DictionaryValue> expected_syncer_status_value(
-      syncer_status.ToValue());
+  ModelNeutralState model_neutral;
+  model_neutral.num_server_changes_remaining = 105;
+  model_neutral.num_successful_commits = 5;
+  model_neutral.num_successful_bookmark_commits = 10;
+  model_neutral.num_updates_downloaded_total = 100;
+  model_neutral.num_tombstone_updates_downloaded_total = 200;
+  model_neutral.num_reflected_updates_downloaded_total = 50;
+  model_neutral.num_local_overwrites = 15;
+  model_neutral.num_server_overwrites = 18;
 
-  ErrorCounters errors;
-
-  const int kNumServerChangesRemaining = 105;
   const bool kIsShareUsable = true;
 
-  const syncable::ModelTypeSet initial_sync_ended(
-      syncable::BOOKMARKS, syncable::PREFERENCES);
+  const ModelTypeSet initial_sync_ended(BOOKMARKS, PREFERENCES);
   scoped_ptr<ListValue> expected_initial_sync_ended_value(
-      syncable::ModelTypeSetToValue(initial_sync_ended));
+      ModelTypeSetToValue(initial_sync_ended));
 
-  syncable::ModelTypePayloadMap download_progress_markers;
-  download_progress_markers[syncable::BOOKMARKS] = "test";
-  download_progress_markers[syncable::APPS] = "apps";
+  ModelTypePayloadMap download_progress_markers;
+  download_progress_markers[BOOKMARKS] = "test";
+  download_progress_markers[APPS] = "apps";
   scoped_ptr<DictionaryValue> expected_download_progress_markers_value(
-      syncable::ModelTypePayloadMapToValue(download_progress_markers));
+      ModelTypePayloadMapToValue(download_progress_markers));
 
   const bool kHasMoreToSync = false;
   const bool kIsSilenced = true;
@@ -108,9 +77,7 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
   SyncSourceInfo source;
   scoped_ptr<DictionaryValue> expected_source_value(source.ToValue());
 
-  SyncSessionSnapshot snapshot(syncer_status,
-                               errors,
-                               kNumServerChangesRemaining,
+  SyncSessionSnapshot snapshot(model_neutral,
                                kIsShareUsable,
                                initial_sync_ended,
                                download_progress_markers,
@@ -126,11 +93,23 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
                                base::Time::Now(),
                                false);
   scoped_ptr<DictionaryValue> value(snapshot.ToValue());
-  EXPECT_EQ(14u, value->size());
-  ExpectDictDictionaryValue(*expected_syncer_status_value, *value,
-                            "syncerStatus");
-  ExpectDictIntegerValue(kNumServerChangesRemaining, *value,
-                         "numServerChangesRemaining");
+  EXPECT_EQ(20u, value->size());
+  ExpectDictIntegerValue(model_neutral.num_successful_commits,
+                         *value, "numSuccessfulCommits");
+  ExpectDictIntegerValue(model_neutral.num_successful_bookmark_commits,
+                         *value, "numSuccessfulBookmarkCommits");
+  ExpectDictIntegerValue(model_neutral.num_updates_downloaded_total,
+                         *value, "numUpdatesDownloadedTotal");
+  ExpectDictIntegerValue(model_neutral.num_tombstone_updates_downloaded_total,
+                         *value, "numTombstoneUpdatesDownloadedTotal");
+  ExpectDictIntegerValue(model_neutral.num_reflected_updates_downloaded_total,
+                         *value, "numReflectedUpdatesDownloadedTotal");
+  ExpectDictIntegerValue(model_neutral.num_local_overwrites,
+                         *value, "numLocalOverwrites");
+  ExpectDictIntegerValue(model_neutral.num_server_overwrites,
+                         *value, "numServerOverwrites");
+  ExpectDictIntegerValue(model_neutral.num_server_changes_remaining,
+                         *value, "numServerChangesRemaining");
   ExpectDictBooleanValue(kIsShareUsable, *value, "isShareUsable");
   ExpectDictListValue(*expected_initial_sync_ended_value, *value,
                       "initialSyncEnded");
@@ -152,4 +131,4 @@ TEST_F(SessionStateTest, SyncSessionSnapshotToValue) {
 
 }  // namespace
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer

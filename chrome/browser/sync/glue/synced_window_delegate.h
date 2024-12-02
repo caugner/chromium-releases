@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_SYNCED_WINDOW_DELEGATE_H_
 #define CHROME_BROWSER_SYNC_GLUE_SYNCED_WINDOW_DELEGATE_H_
-#pragma once
 
 #include <set>
 
@@ -62,6 +61,9 @@ class SyncedWindowDelegate {
 
   // Return the tab id for the tab at |index|.
   virtual SessionID::id_type GetTabIdAt(int index) const = 0;
+
+  // Return true if we are currently restoring sessions asynchronously.
+  virtual bool IsSessionRestoreInProgress() const = 0;
 
  protected:
   virtual ~SyncedWindowDelegate() {}

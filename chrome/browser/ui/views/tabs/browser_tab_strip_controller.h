@@ -4,16 +4,16 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_BROWSER_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_BROWSER_TAB_STRIP_CONTROLLER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/ui/search/search_model_observer.h"
+#include "chrome/browser/ui/search/toolbar_search_animator_observer.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 class BaseTab;
 class Browser;
@@ -28,9 +28,12 @@ class WebContents;
 
 // An implementation of TabStripController that sources data from the
 // TabContentses in a TabStripModel.
-class BrowserTabStripController : public TabStripController,
-                                  public TabStripModelObserver,
-                                  public content::NotificationObserver {
+class BrowserTabStripController
+    : public TabStripController,
+      public TabStripModelObserver,
+      public content::NotificationObserver,
+      public chrome::search::SearchModelObserver,
+      public chrome::search::ToolbarSearchAnimatorObserver {
  public:
   BrowserTabStripController(Browser* browser, TabStripModel* model);
   virtual ~BrowserTabStripController();
@@ -53,7 +56,6 @@ class BrowserTabStripController : public TabStripController,
   virtual int GetActiveIndex() const OVERRIDE;
   virtual bool IsTabSelected(int model_index) const OVERRIDE;
   virtual bool IsTabPinned(int model_index) const OVERRIDE;
-  virtual bool IsTabCloseable(int model_index) const OVERRIDE;
   virtual bool IsNewTabPage(int model_index) const OVERRIDE;
   virtual void SelectTab(int model_index) OVERRIDE;
   virtual void ExtendSelectionTo(int model_index) OVERRIDE;
@@ -99,6 +101,14 @@ class BrowserTabStripController : public TabStripController,
                                    int model_index) OVERRIDE;
   virtual void TabBlockedStateChanged(TabContents* contents,
                                       int model_index) OVERRIDE;
+
+  // chrome::search::SearchModelObserver implementation:
+  virtual void ModeChanged(const chrome::search::Mode& mode) OVERRIDE;
+
+  // chrome::search::ToolbarSearchAnimatorObserver implementation:
+  virtual void OnToolbarBackgroundAnimatorProgressed() OVERRIDE;
+  virtual void OnToolbarBackgroundAnimatorCanceled(
+      TabContents* tab_contents) OVERRIDE;
 
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
@@ -152,8 +162,6 @@ class BrowserTabStripController : public TabStripController,
 
   // If non-NULL it means we're showing a menu for the tab.
   scoped_ptr<TabContextMenuContents> context_menu_contents_;
-
-  content::NotificationRegistrar notification_registrar_;
 
   // Helper for performing tab selection as a result of dragging over a tab.
   HoverTabSelector hover_tab_selector_;

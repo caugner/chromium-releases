@@ -4,7 +4,6 @@
 
 #ifndef CHROME_TEST_BASE_TESTING_PROFILE_H_
 #define CHROME_TEST_BASE_TESTING_PROFILE_H_
-#pragma once
 
 #include <string>
 
@@ -12,10 +11,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/timer.h"
+#include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/profiles/profile.h"
 
 namespace content {
 class MockResourceContext;
+}
+
+namespace extensions {
+class ExtensionPrefs;
 }
 
 namespace history {
@@ -32,7 +36,6 @@ class SpecialStoragePolicy;
 }
 
 class CommandLine;
-class ExtensionPrefs;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
 class HostContentSettingsMap;
@@ -44,6 +47,14 @@ class TestingPrefService;
 
 class TestingProfile : public Profile {
  public:
+  // Profile directory name for the test user. This is "Default" on most
+  // platforms but must be different on ChromeOS because a logged-in user cannot
+  // use "Default" as profile directory.
+  // Browser- and UI tests should always use this to get to the user's profile
+  // directory. Unit-tests, though, should use |kInitialProfile|, which is
+  // always "Default", because they are runnining without logged-in user.
+  static const char kTestUserProfileDir[];
+
   // Default constructor that cannot be used with multi-profiles.
   TestingProfile();
 
@@ -94,10 +105,6 @@ class TestingProfile : public Profile {
   // BlockUntilBookmarkModelLoaded.
   void CreateBookmarkModel(bool delete_file);
 
-  // Creates a ProtocolHandlerRegistry. If not invoked the protocol handler
-  // registry is NULL.
-  void CreateProtocolHandlerRegistry();
-
   // Creates a WebDataService. If not invoked, the web data service is NULL.
   void CreateWebDataService();
 
@@ -146,9 +153,9 @@ class TestingProfile : public Profile {
   virtual Profile* GetOriginalProfile() OVERRIDE;
   virtual VisitedLinkMaster* GetVisitedLinkMaster() OVERRIDE;
   virtual ExtensionService* GetExtensionService() OVERRIDE;
-  virtual UserScriptMaster* GetUserScriptMaster() OVERRIDE;
+  virtual extensions::UserScriptMaster* GetUserScriptMaster() OVERRIDE;
   virtual ExtensionProcessManager* GetExtensionProcessManager() OVERRIDE;
-  virtual ExtensionEventRouter* GetExtensionEventRouter() OVERRIDE;
+  virtual extensions::EventRouter* GetExtensionEventRouter() OVERRIDE;
   void SetExtensionSpecialStoragePolicy(
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy*
@@ -160,7 +167,6 @@ class TestingProfile : public Profile {
   // this by calling CreateRequestContext(). See the note at GetRequestContext
   // for more information.
   net::CookieMonster* GetCookieMonster();
-  virtual history::ShortcutsBackend* GetShortcutsBackend() OVERRIDE;
   virtual policy::PolicyService* GetPolicyService() OVERRIDE;
   // Sets the profile's PrefService. If a pref service hasn't been explicitly
   // set GetPrefs creates one, so normally you need not invoke this. If you need
@@ -200,7 +206,6 @@ class TestingProfile : public Profile {
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual void MarkAsCleanShutdown() OVERRIDE {}
   virtual void InitPromoResources() OVERRIDE {}
-  virtual void InitRegisteredProtocolHandlers() OVERRIDE {}
 
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
@@ -254,10 +259,6 @@ class TestingProfile : public Profile {
 
   // The favicon service. Only created if CreateFaviconService is invoked.
   scoped_ptr<FaviconService> favicon_service_;
-
-  // The ProtocolHandlerRegistry. Only created if CreateProtocolHandlerRegistry
-  // is invoked.
-  scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
   // The policy service. Lazily created as a stub.
   scoped_ptr<policy::PolicyService> policy_service_;

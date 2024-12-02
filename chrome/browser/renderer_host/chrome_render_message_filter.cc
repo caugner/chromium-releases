@@ -12,15 +12,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/metrics/histogram_synchronizer.h"
+#include "chrome/browser/extensions/message_service.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
+#include "chrome/browser/nacl_host/pnacl_file_host.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,12 +29,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/message_bundle.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/common/process_type.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
@@ -46,6 +47,7 @@
 #endif
 
 using content::BrowserThread;
+using extensions::APIPermission;
 using WebKit::WebCache;
 using WebKit::WebSecurityOrigin;
 
@@ -57,7 +59,8 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
       profile_(profile),
       off_the_record_(profile_->IsOffTheRecord()),
       request_context_(request_context),
-      extension_info_map_(ExtensionSystem::Get(profile)->info_map()),
+      extension_info_map_(
+          extensions::ExtensionSystem::Get(profile)->info_map()),
       cookie_settings_(CookieSettings::Factory::GetForProfile(profile)),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
@@ -71,10 +74,12 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
   IPC_BEGIN_MESSAGE_MAP_EX(ChromeRenderMessageFilter, message, *message_was_ok)
 #if !defined(DISABLE_NACL)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_LaunchNaCl, OnLaunchNaCl)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_GetReadonlyPnaclFD,
+                                    OnGetReadonlyPnaclFd)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_NaClCreateTemporaryFile,
+                                    OnNaClCreateTemporaryFile)
 #endif
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DnsPrefetch, OnDnsPrefetch)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RendererHistograms,
-                        OnRendererHistograms)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ResourceTypeStats,
                         OnResourceTypeStats)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_UpdatedCacheStats,
@@ -93,6 +98,10 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnExtensionAddLazyListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveLazyListener,
                         OnExtensionRemoveLazyListener)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_AddFilteredListener,
+                        OnExtensionAddFilteredListener)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_RemoveFilteredListener,
+                        OnExtensionRemoveFilteredListener)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_CloseChannel, OnExtensionCloseChannel)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
                         OnExtensionRequestForIOThread)
@@ -101,6 +110,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_GenerateUniqueID,
                         OnExtensionGenerateUniqueID)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_UnloadAck, OnExtensionUnloadAck)
+    IPC_MESSAGE_HANDLER(ExtensionHostMsg_ResumeRequests,
+                        OnExtensionResumeRequests);
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDatabase, OnAllowDatabase)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDOMStorage, OnAllowDOMStorage)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowFileSystem, OnAllowFileSystem)
@@ -139,6 +150,8 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
     case ExtensionHostMsg_RemoveListener::ID:
     case ExtensionHostMsg_AddLazyListener::ID:
     case ExtensionHostMsg_RemoveLazyListener::ID:
+    case ExtensionHostMsg_AddFilteredListener::ID:
+    case ExtensionHostMsg_RemoveFilteredListener::ID:
     case ExtensionHostMsg_CloseChannel::ID:
     case ExtensionHostMsg_ShouldUnloadAck::ID:
     case ExtensionHostMsg_UnloadAck::ID:
@@ -157,18 +170,24 @@ void ChromeRenderMessageFilter::OnLaunchNaCl(const GURL& manifest_url,
   NaClProcessHost* host = new NaClProcessHost(manifest_url, off_the_record_);
   host->Launch(this, socket_count, reply_msg, extension_info_map_);
 }
+
+void ChromeRenderMessageFilter::OnGetReadonlyPnaclFd(
+    const std::string& filename, IPC::Message* reply_msg) {
+  // This posts a task to another thread, but the renderer will
+  // block until the reply is sent.
+  pnacl_file_host::GetReadonlyPnaclFd(this, filename, reply_msg);
+}
+
+void ChromeRenderMessageFilter::OnNaClCreateTemporaryFile(
+    IPC::Message* reply_msg) {
+  pnacl_file_host::CreateTemporaryFile(this, reply_msg);
+}
 #endif
 
 void ChromeRenderMessageFilter::OnDnsPrefetch(
     const std::vector<std::string>& hostnames) {
   if (profile_->GetNetworkPredictor())
     profile_->GetNetworkPredictor()->DnsPrefetchList(hostnames);
-}
-
-void ChromeRenderMessageFilter::OnRendererHistograms(
-    int sequence_number,
-    const std::vector<std::string>& histograms) {
-  HistogramSynchronizer::DeserializeHistogramList(sequence_number, histograms);
 }
 
 void ChromeRenderMessageFilter::OnResourceTypeStats(
@@ -252,7 +271,7 @@ void ChromeRenderMessageFilter::OnOpenChannelToExtension(
     const std::string& target_extension_id,
     const std::string& channel_name, int* port_id) {
   int port2_id;
-  ExtensionMessageService::AllocatePortIdPair(port_id, &port2_id);
+  extensions::MessageService::AllocatePortIdPair(port_id, &port2_id);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -268,7 +287,7 @@ void ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread(
     const std::string& target_extension_id,
     const std::string& channel_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ExtensionSystem::Get(profile_)->message_service()->
+  extensions::ExtensionSystem::Get(profile_)->message_service()->
       OpenChannelToExtension(
           source_process_id, source_routing_id, receiver_port_id,
           source_extension_id, target_extension_id, channel_name);
@@ -278,7 +297,7 @@ void ChromeRenderMessageFilter::OnOpenChannelToTab(
     int routing_id, int tab_id, const std::string& extension_id,
     const std::string& channel_name, int* port_id) {
   int port2_id;
-  ExtensionMessageService::AllocatePortIdPair(port_id, &port2_id);
+  extensions::MessageService::AllocatePortIdPair(port_id, &port2_id);
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -294,7 +313,7 @@ void ChromeRenderMessageFilter::OpenChannelToTabOnUIThread(
     const std::string& extension_id,
     const std::string& channel_name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ExtensionSystem::Get(profile_)->message_service()->
+  extensions::ExtensionSystem::Get(profile_)->message_service()->
       OpenChannelToTab(
           source_process_id, source_routing_id, receiver_port_id,
           tab_id, extension_id, channel_name);
@@ -325,8 +344,8 @@ void ChromeRenderMessageFilter::OnGetExtensionMessageBundleOnFileThread(
     IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  scoped_ptr<ExtensionMessageBundle::SubstitutionMap> dictionary_map(
-      extension_file_util::LoadExtensionMessageBundleSubstitutionMap(
+  scoped_ptr<extensions::MessageBundle::SubstitutionMap> dictionary_map(
+      extension_file_util::LoadMessageBundleSubstitutionMap(
           extension_path,
           extension_id,
           default_locale));
@@ -374,13 +393,41 @@ void ChromeRenderMessageFilter::OnExtensionRemoveLazyListener(
         event_name, extension_id);
 }
 
+void ChromeRenderMessageFilter::OnExtensionAddFilteredListener(
+    const std::string& extension_id,
+    const std::string& event_name,
+    const base::DictionaryValue& filter,
+    bool lazy) {
+  content::RenderProcessHost* process =
+      content::RenderProcessHost::FromID(render_process_id_);
+  if (!process || !profile_->GetExtensionEventRouter())
+    return;
+
+  profile_->GetExtensionEventRouter()->AddFilteredEventListener(
+      event_name, process, extension_id, filter, lazy);
+}
+
+void ChromeRenderMessageFilter::OnExtensionRemoveFilteredListener(
+    const std::string& extension_id,
+    const std::string& event_name,
+    const base::DictionaryValue& filter,
+    bool lazy) {
+  content::RenderProcessHost* process =
+      content::RenderProcessHost::FromID(render_process_id_);
+  if (!process || !profile_->GetExtensionEventRouter())
+    return;
+
+  profile_->GetExtensionEventRouter()->RemoveFilteredEventListener(
+      event_name, process, extension_id, filter, lazy);
+}
+
 void ChromeRenderMessageFilter::OnExtensionCloseChannel(int port_id,
                                                         bool connection_error) {
   if (!content::RenderProcessHost::FromID(render_process_id_))
     return;  // To guard against crash in browser_tests shutdown.
 
-  ExtensionMessageService* message_service =
-      ExtensionSystem::Get(profile_)->message_service();
+  extensions::MessageService* message_service =
+      extensions::ExtensionSystem::Get(profile_)->message_service();
   if (message_service)
     message_service->CloseChannel(port_id, connection_error);
 }
@@ -411,6 +458,11 @@ void ChromeRenderMessageFilter::OnExtensionUnloadAck(
 void ChromeRenderMessageFilter::OnExtensionGenerateUniqueID(int* unique_id) {
   static int next_unique_id = 1;
   *unique_id = next_unique_id++;
+}
+
+void ChromeRenderMessageFilter::OnExtensionResumeRequests(int route_id) {
+  content::ResourceDispatcherHost::Get()->ResumeBlockedRequestsForRoute(
+      render_process_id_, route_id);
 }
 
 void ChromeRenderMessageFilter::OnAllowDatabase(int render_view_id,
@@ -475,7 +527,7 @@ void ChromeRenderMessageFilter::OnAllowIndexedDB(int render_view_id,
 void ChromeRenderMessageFilter::OnCanTriggerClipboardRead(
     const GURL& origin, bool* allowed) {
   *allowed = extension_info_map_->SecurityOriginHasAPIPermission(
-      origin, render_process_id_, ExtensionAPIPermission::kClipboardRead);
+      origin, render_process_id_, APIPermission::kClipboardRead);
 }
 
 void ChromeRenderMessageFilter::OnCanTriggerClipboardWrite(
@@ -484,7 +536,7 @@ void ChromeRenderMessageFilter::OnCanTriggerClipboardWrite(
   // for compatibility.
   *allowed = (origin.SchemeIs(chrome::kExtensionScheme) ||
       extension_info_map_->SecurityOriginHasAPIPermission(
-          origin, render_process_id_, ExtensionAPIPermission::kClipboardWrite));
+          origin, render_process_id_, APIPermission::kClipboardWrite));
 }
 
 void ChromeRenderMessageFilter::OnGetCookies(

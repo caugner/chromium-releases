@@ -193,6 +193,13 @@
   <section>
     <h3 i18n-content="advancedSectionTitlePrivacy"></h3>
     <div>
+<if expr="is_win">
+      <div id="privacy-win8-data-settings" class="settings-row" hidden>
+        <span i18n-content="privacyWin8Data"></span>
+        <a target="_blank" i18n-content="learnMore"
+            i18n-values="href:privacyWin8DataLearnMoreURL"></a>
+      </div>
+</if>
       <div class="settings-row">
         <button id="privacyContentSettingsButton"
             i18n-content="privacyContentSettingsButton"></button>
@@ -258,6 +265,16 @@
     </div>
   </section>
 <if expr="pp_ifdef('chromeos')">
+  <!-- By default, the display section is hidden.  It is only visible if
+       more than one display is found. -->
+  <section id="display-options-section" hidden>
+    <h3 i18n-content="displayOptionsTitle"></h3>
+    <div class="settings-row">
+      <button id="display-options-button"
+          i18n-content="displayOptionsButton">
+      </button>
+    </div>
+  </section>
   <!-- By default, the bluetooth section is hidden.  It is only visible if a
        bluetooth adapter is discovered -->
   <section id="bluetooth-devices" hidden>
@@ -494,6 +511,14 @@
           <label>
             <input id="accessibility-high-contrast-check" type="checkbox">
             <span i18n-content="accessibilityHighContrast"></span>
+          </label>
+        </div>
+      </div>
+      <div class="option-name">
+        <div class="checkbox">
+          <label>
+            <input id="accessibility-screen-magnifier-check" type="checkbox">
+            <span i18n-content="accessibilityScreenMagnifier"></span>
           </label>
         </div>
       </div>

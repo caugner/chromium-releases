@@ -11,19 +11,20 @@
 #include "sync/engine/conflict_resolver.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/engine/throttled_data_type_tracker.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/sessions/session_state.h"
 #include "sync/sessions/status_controller.h"
-#include "sync/syncable/syncable.h"
 #include "sync/syncable/syncable_id.h"
+#include "sync/syncable/write_transaction.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
 #include "sync/test/fake_extensions_activity_monitor.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace syncer {
+
 using syncable::WriteTransaction;
 
-namespace browser_sync {
 namespace sessions {
 namespace {
 
@@ -40,20 +41,9 @@ class SyncSessionTest : public testing::Test,
   }
 
   virtual void SetUp() {
-    ModelSafeRoutingInfo routing_info;
-    std::vector<ModelSafeWorker*> workers;
-
-    GetModelSafeRoutingInfo(&routing_info);
-    GetWorkers(&workers);
-
-    context_.reset(
-        new SyncSessionContext(
-            NULL, NULL, routing_info, workers, &extensions_activity_monitor_,
-            throttled_data_type_tracker_.get(),
-            std::vector<SyncEngineEventListener*>(), NULL, NULL));
     routes_.clear();
-    routes_[syncable::BOOKMARKS] = GROUP_UI;
-    routes_[syncable::AUTOFILL] = GROUP_DB;
+    routes_[BOOKMARKS] = GROUP_UI;
+    routes_[AUTOFILL] = GROUP_DB;
     scoped_refptr<ModelSafeWorker> passive_worker(
         new FakeModelWorker(GROUP_PASSIVE));
     scoped_refptr<ModelSafeWorker> ui_worker(
@@ -64,6 +54,23 @@ class SyncSessionTest : public testing::Test,
     workers_.push_back(passive_worker);
     workers_.push_back(ui_worker);
     workers_.push_back(db_worker);
+
+    std::vector<ModelSafeWorker*> workers;
+    GetWorkers(&workers);
+
+    context_.reset(
+        new SyncSessionContext(
+            NULL,
+            NULL,
+            workers,
+            &extensions_activity_monitor_,
+            throttled_data_type_tracker_.get(),
+            std::vector<SyncEngineEventListener*>(),
+            NULL,
+            NULL,
+            true  /* enable keystore encryption */));
+    context_->set_routing_info(routes_);
+
     session_.reset(MakeSession());
     throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
   }
@@ -117,14 +124,13 @@ class SyncSessionTest : public testing::Test,
       FAIL() << msg;
   }
 
-  syncable::ModelTypeSet ParamsMeaningAllEnabledTypes() {
-    syncable::ModelTypeSet request_params(
-        syncable::BOOKMARKS, syncable::AUTOFILL);
+  ModelTypeSet ParamsMeaningAllEnabledTypes() {
+    ModelTypeSet request_params(BOOKMARKS, AUTOFILL);
     return request_params;
   }
 
-  syncable::ModelTypeSet ParamsMeaningJustOneEnabledType() {
-    return syncable::ModelTypeSet(syncable::AUTOFILL);
+  ModelTypeSet ParamsMeaningJustOneEnabledType() {
+    return ModelTypeSet(AUTOFILL);
   }
 
   MessageLoop message_loop_;
@@ -261,18 +267,17 @@ TEST_F(SyncSessionTest, ResetTransientState) {
             session_->source().updates_source);
   EXPECT_FALSE(status()->conflicts_resolved());
   EXPECT_FALSE(session_->HasMoreToSync());
-  EXPECT_FALSE(status()->TestAndClearIsDirty());
 }
 
 TEST_F(SyncSessionTest, Coalesce) {
   std::vector<ModelSafeWorker*> workers_one, workers_two;
   ModelSafeRoutingInfo routes_one, routes_two;
-  syncable::ModelTypePayloadMap one_type =
-      syncable::ModelTypePayloadMapFromEnumSet(
+  ModelTypePayloadMap one_type =
+      ModelTypePayloadMapFromEnumSet(
           ParamsMeaningJustOneEnabledType(),
           std::string());
-  syncable::ModelTypePayloadMap all_types =
-      syncable::ModelTypePayloadMapFromEnumSet(
+  ModelTypePayloadMap all_types =
+      ModelTypePayloadMapFromEnumSet(
           ParamsMeaningAllEnabledTypes(),
           std::string());
   SyncSourceInfo source_one(sync_pb::GetUpdatesCallerInfo::PERIODIC, one_type);
@@ -287,9 +292,9 @@ TEST_F(SyncSessionTest, Coalesce) {
   workers_two.push_back(passive_worker);
   workers_two.push_back(db_worker);
   workers_two.push_back(ui_worker);
-  routes_one[syncable::AUTOFILL] = GROUP_DB;
-  routes_two[syncable::AUTOFILL] = GROUP_DB;
-  routes_two[syncable::BOOKMARKS] = GROUP_UI;
+  routes_one[AUTOFILL] = GROUP_DB;
+  routes_two[AUTOFILL] = GROUP_DB;
+  routes_two[BOOKMARKS] = GROUP_UI;
   SyncSession one(context_.get(), this, source_one, routes_one, workers_one);
   SyncSession two(context_.get(), this, source_two, routes_two, workers_two);
 
@@ -324,12 +329,12 @@ TEST_F(SyncSessionTest, Coalesce) {
 TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestRemoveOneType) {
   std::vector<ModelSafeWorker*> workers_one, workers_two;
   ModelSafeRoutingInfo routes_one, routes_two;
-  syncable::ModelTypePayloadMap one_type =
-      syncable::ModelTypePayloadMapFromEnumSet(
+  ModelTypePayloadMap one_type =
+      ModelTypePayloadMapFromEnumSet(
           ParamsMeaningJustOneEnabledType(),
           std::string());
-  syncable::ModelTypePayloadMap all_types =
-      syncable::ModelTypePayloadMapFromEnumSet(
+  ModelTypePayloadMap all_types =
+      ModelTypePayloadMapFromEnumSet(
           ParamsMeaningAllEnabledTypes(),
           std::string());
   SyncSourceInfo source_one(sync_pb::GetUpdatesCallerInfo::PERIODIC, one_type);
@@ -344,9 +349,9 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestRemoveOneType) {
   workers_two.push_back(passive_worker);
   workers_two.push_back(db_worker);
   workers_two.push_back(ui_worker);
-  routes_one[syncable::AUTOFILL] = GROUP_DB;
-  routes_two[syncable::AUTOFILL] = GROUP_DB;
-  routes_two[syncable::BOOKMARKS] = GROUP_UI;
+  routes_one[AUTOFILL] = GROUP_DB;
+  routes_two[AUTOFILL] = GROUP_DB;
+  routes_two[BOOKMARKS] = GROUP_UI;
   SyncSession one(context_.get(), this, source_one, routes_one, workers_one);
   SyncSession two(context_.get(), this, source_two, routes_two, workers_two);
 
@@ -385,7 +390,7 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestRemoveOneType) {
 
   // Make sure the model safe routing info is reduced to one type.
   ModelSafeRoutingInfo::const_iterator it =
-      two.routing_info().find(syncable::AUTOFILL);
+      two.routing_info().find(AUTOFILL);
   // Note that attempting to use EXPECT_NE would fail for an Android build due
   // to seeming incompatibility with gtest and stlport.
   EXPECT_TRUE(it != two.routing_info().end());
@@ -396,8 +401,8 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestRemoveOneType) {
 TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestWithSameType) {
   std::vector<ModelSafeWorker*> workers_first, workers_second;
   ModelSafeRoutingInfo routes_first, routes_second;
-  syncable::ModelTypePayloadMap all_types =
-      syncable::ModelTypePayloadMapFromEnumSet(
+  ModelTypePayloadMap all_types =
+      ModelTypePayloadMapFromEnumSet(
           ParamsMeaningAllEnabledTypes(),
           std::string());
   SyncSourceInfo source_first(sync_pb::GetUpdatesCallerInfo::PERIODIC,
@@ -415,10 +420,10 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestWithSameType) {
   workers_second.push_back(passive_worker);
   workers_second.push_back(db_worker);
   workers_second.push_back(ui_worker);
-  routes_first[syncable::AUTOFILL] = GROUP_DB;
-  routes_first[syncable::BOOKMARKS] = GROUP_UI;
-  routes_second[syncable::AUTOFILL] = GROUP_DB;
-  routes_second[syncable::BOOKMARKS] = GROUP_UI;
+  routes_first[AUTOFILL] = GROUP_DB;
+  routes_first[BOOKMARKS] = GROUP_UI;
+  routes_second[AUTOFILL] = GROUP_DB;
+  routes_second[BOOKMARKS] = GROUP_UI;
   SyncSession first(context_.get(), this, source_first, routes_first,
       workers_first);
   SyncSession second(context_.get(), this, source_second, routes_second,
@@ -459,9 +464,9 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestWithSameType) {
 
   // Make sure the model safe routing info is reduced to first type.
   ModelSafeRoutingInfo::const_iterator it1 =
-      second.routing_info().find(syncable::AUTOFILL);
+      second.routing_info().find(AUTOFILL);
   ModelSafeRoutingInfo::const_iterator it2 =
-      second.routing_info().find(syncable::BOOKMARKS);
+      second.routing_info().find(BOOKMARKS);
 
   // Note that attempting to use EXPECT_NE would fail for an Android build due
   // to seeming incompatibility with gtest and stlport.
@@ -477,64 +482,24 @@ TEST_F(SyncSessionTest, RebaseRoutingInfoWithLatestWithSameType) {
 
 
 TEST_F(SyncSessionTest, MakeTypePayloadMapFromBitSet) {
-  syncable::ModelTypeSet types;
+  ModelTypeSet types;
   std::string payload = "test";
-  syncable::ModelTypePayloadMap types_with_payloads =
-      syncable::ModelTypePayloadMapFromEnumSet(types, payload);
+  ModelTypePayloadMap types_with_payloads =
+      ModelTypePayloadMapFromEnumSet(types, payload);
   EXPECT_TRUE(types_with_payloads.empty());
 
-  types.Put(syncable::BOOKMARKS);
-  types.Put(syncable::PASSWORDS);
-  types.Put(syncable::AUTOFILL);
+  types.Put(BOOKMARKS);
+  types.Put(PASSWORDS);
+  types.Put(AUTOFILL);
   payload = "test2";
-  types_with_payloads =
-      syncable::ModelTypePayloadMapFromEnumSet(types, payload);
+  types_with_payloads = ModelTypePayloadMapFromEnumSet(types, payload);
 
   ASSERT_EQ(3U, types_with_payloads.size());
-  EXPECT_EQ(types_with_payloads[syncable::BOOKMARKS], payload);
-  EXPECT_EQ(types_with_payloads[syncable::PASSWORDS], payload);
-  EXPECT_EQ(types_with_payloads[syncable::AUTOFILL], payload);
-}
-
-TEST_F(SyncSessionTest, MakeTypePayloadMapFromRoutingInfo) {
-  std::string payload = "test";
-  syncable::ModelTypePayloadMap types_with_payloads
-      = syncable::ModelTypePayloadMapFromRoutingInfo(routes_, payload);
-  ASSERT_EQ(routes_.size(), types_with_payloads.size());
-  for (ModelSafeRoutingInfo::iterator iter = routes_.begin();
-       iter != routes_.end();
-       ++iter) {
-    EXPECT_EQ(payload, types_with_payloads[iter->first]);
-  }
-}
-
-TEST_F(SyncSessionTest, CoalescePayloads) {
-  syncable::ModelTypePayloadMap original;
-  std::string empty_payload;
-  std::string payload1 = "payload1";
-  std::string payload2 = "payload2";
-  std::string payload3 = "payload3";
-  original[syncable::BOOKMARKS] = empty_payload;
-  original[syncable::PASSWORDS] = payload1;
-  original[syncable::AUTOFILL] = payload2;
-  original[syncable::THEMES] = payload3;
-
-  syncable::ModelTypePayloadMap update;
-  update[syncable::BOOKMARKS] = empty_payload;  // Same.
-  update[syncable::PASSWORDS] = empty_payload;  // Overwrite with empty.
-  update[syncable::AUTOFILL] = payload1;        // Overwrite with non-empty.
-  update[syncable::SESSIONS] = payload2;        // New.
-  // Themes untouched.
-
-  CoalescePayloads(&original, update);
-  ASSERT_EQ(5U, original.size());
-  EXPECT_EQ(empty_payload, original[syncable::BOOKMARKS]);
-  EXPECT_EQ(payload1, original[syncable::PASSWORDS]);
-  EXPECT_EQ(payload1, original[syncable::AUTOFILL]);
-  EXPECT_EQ(payload2, original[syncable::SESSIONS]);
-  EXPECT_EQ(payload3, original[syncable::THEMES]);
+  EXPECT_EQ(types_with_payloads[BOOKMARKS], payload);
+  EXPECT_EQ(types_with_payloads[PASSWORDS], payload);
+  EXPECT_EQ(types_with_payloads[AUTOFILL], payload);
 }
 
 }  // namespace
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer

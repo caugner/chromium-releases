@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_DIALOG_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_DIALOG_H_
-#pragma once
 
 #include <vector>
 
@@ -12,19 +11,19 @@
 #include "base/string16.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 
-class Browser;
-
 namespace base {
 class DictionaryValue;
 }
 
-void ShowExtensionInstallDialog(Browser* browser,
+void ShowExtensionInstallDialog(gfx::NativeWindow parent,
+                                content::PageNavigator* navigator,
                                 ExtensionInstallPrompt::Delegate* delegate,
                                 const ExtensionInstallPrompt::Prompt& prompt);
 
 // The implementations of this function are platform-specific.
 void ShowExtensionInstallDialogImpl(
-    Browser* browser,
+    gfx::NativeWindow parent,
+    content::PageNavigator* navigator,
     ExtensionInstallPrompt::Delegate* delegate,
     const ExtensionInstallPrompt::Prompt& prompt);
 

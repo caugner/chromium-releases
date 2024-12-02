@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROTECTOR_PROTECTED_PREFS_WATCHER_H_
 #define CHROME_BROWSER_PROTECTOR_PROTECTED_PREFS_WATCHER_H_
-#pragma once
 
 #include <string>
 
@@ -92,7 +91,7 @@ class ProtectedPrefsWatcher : public content::NotificationObserver {
   std::string GetSignatureData(PrefService* prefs) const;
 
   // Cached set of extension IDs. They are not changed as frequently
-  ExtensionPrefs::ExtensionIdSet cached_extension_ids_;
+  extensions::ExtensionPrefs::ExtensionIdSet cached_extension_ids_;
 
   scoped_ptr<PrefSetObserver> pref_observer_;
 

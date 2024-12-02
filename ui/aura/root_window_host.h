@@ -4,7 +4,6 @@
 
 #ifndef UI_AURA_ROOT_WINDOW_HOST_H_
 #define UI_AURA_ROOT_WINDOW_HOST_H_
-#pragma once
 
 #include <vector>
 
@@ -21,6 +20,7 @@ class Size;
 namespace aura {
 
 class RootWindow;
+class RootWindowHostDelegate;
 
 // RootWindowHost bridges between a native window and the embedded RootWindow.
 // It provides the accelerated widget and maps events from the native os to
@@ -30,21 +30,19 @@ class RootWindowHost {
   virtual ~RootWindowHost() {}
 
   // Creates a new RootWindowHost. The caller owns the returned value.
-  static RootWindowHost* Create(const gfx::Rect& bounds);
+  static RootWindowHost* Create(RootWindowHostDelegate* delegate,
+                                const gfx::Rect& bounds);
 
   // Returns the actual size of the screen.
   // (gfx::Screen only reports on the virtual desktop exposed by Aura.)
   static gfx::Size GetNativeScreenSize();
 
+  virtual RootWindow* GetRootWindow() = 0;
+
   // Returns the RootWindowHost for the specified accelerated widget, or NULL if
   // there is none associated.
   static RootWindowHost* GetForAcceleratedWidget(
       gfx::AcceleratedWidget accelerated_widget);
-
-  // Sets the RootWindow this RootWindowHost is hosting. RootWindowHost does not
-  // own the RootWindow.
-  virtual void SetRootWindow(RootWindow* root_window) = 0;
-  virtual RootWindow* GetRootWindow() = 0;
 
   // Returns the accelerated widget.
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() = 0;
@@ -74,11 +72,12 @@ class RootWindowHost {
   // Shows or hides the cursor.
   virtual void ShowCursor(bool show) = 0;
 
-  // Queries the mouse's current position relative to the host window.
-  // The position is constrained within the host window.
-  // You should probably call RootWindow::last_mouse_location() instead; this
-  // method can be expensive.
-  virtual gfx::Point QueryMouseLocation() = 0;
+  // Queries the mouse's current position relative to the host window and sets
+  // it in |location_return|. Returns true if the cursor is within the host
+  // window. The position set to |location_return| is constrained within the
+  // host window.
+  // This method is expensive, instead use gfx::Screen::GetCursorScreenPoint().
+  virtual bool QueryMouseLocation(gfx::Point* location_return) = 0;
 
   // Clips the cursor to the bounds of the root window until UnConfineCursor().
   virtual bool ConfineCursorToRootWindow() = 0;

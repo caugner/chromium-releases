@@ -12,14 +12,14 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/threading/non_thread_safe.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "base/threading/thread_checker.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 
 class PrefService;
 
 namespace base {
-  class DictionaryValue;
+class DictionaryValue;
+class ListValue;
 }
 
 namespace browser_sync {
@@ -30,7 +30,7 @@ namespace browser_sync {
 // services.  For now this is still tied to sync while we refactor, so minimize
 // churn and keep it here.
 class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
-                           public sync_notifier::InvalidationStateTracker {
+                           public syncer::InvalidationStateTracker {
  public:
   // |pref_service| may be NULL (for unit tests), but in that case no setter
   // methods should be called. Does not own |pref_service|.
@@ -41,9 +41,9 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
   void Clear();
 
   // InvalidationStateTracker implementation.
-  virtual sync_notifier::InvalidationVersionMap GetAllMaxVersions() const
+  virtual syncer::InvalidationVersionMap GetAllMaxVersions() const
       OVERRIDE;
-  virtual void SetMaxVersion(syncable::ModelType model_type,
+  virtual void SetMaxVersion(const invalidation::ObjectId& id,
                              int64 max_version) OVERRIDE;
   // TODO(tim): These are not yet used. Bug 124140.
   virtual void SetInvalidationState(const std::string& state) OVERRIDE;
@@ -51,18 +51,37 @@ class InvalidatorStorage : public base::SupportsWeakPtr<InvalidatorStorage>,
 
  private:
   FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, SerializeEmptyMap);
-  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeOutOfRange);
-  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeInvalidFormat);
-  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeEmptyDictionary);
-  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeBasic);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest,
+                           DeserializeFromListOutOfRange);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest,
+                           DeserializeFromListInvalidFormat);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest,
+                           DeserializeFromListWithDuplicates);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest,
+                           DeserializeFromEmptyList);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeFromListBasic);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeMapOutOfRange);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeMapInvalidFormat);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest,
+                           DeserializeMapEmptyDictionary);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, DeserializeMapBasic);
+  FRIEND_TEST_ALL_PREFIXES(InvalidatorStorageTest, MigrateLegacyPreferences);
 
-  base::NonThreadSafe non_thread_safe_;
+  base::ThreadChecker thread_checker_;
 
-  // Helpers to convert between InvalidationVersionMap <--> DictionaryValue.
+  // Helpers to convert between InvalidationVersionMap <--> ListValue.
+  static void DeserializeFromList(
+      const base::ListValue& max_versions_list,
+      syncer::InvalidationVersionMap* max_versions_map);
+  static void SerializeToList(
+      const syncer::InvalidationVersionMap& max_versions_map,
+      base::ListValue* max_versions_list);
+
+  // Code for migrating from old MaxInvalidationVersions pref, which was a map
+  // from sync types to max invalidation versions.
+  void MigrateMaxInvalidationVersionsPref();
   static void DeserializeMap(const base::DictionaryValue* max_versions_dict,
-                             sync_notifier::InvalidationVersionMap* map);
-  static void SerializeMap(const sync_notifier::InvalidationVersionMap& map,
-                           base::DictionaryValue* to_dict);
+                             syncer::InvalidationVersionMap* map);
 
   // May be NULL.
   PrefService* const pref_service_;

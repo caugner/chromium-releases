@@ -10,6 +10,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -19,6 +20,8 @@
 #import "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_controller.h"
@@ -47,9 +50,8 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
-#include "grit/ui_resources_standard.h"
-#include "skia/ext/skia_utils_mac.h"
+#include "grit/theme_resources.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -241,7 +243,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 
     browser_ = browser;
     initialWidth_ = initialWidth;
-    bookmarkModel_ = browser_->profile()->GetBookmarkModel();
+    bookmarkModel_ = BookmarkModelFactory::GetForProfile(browser_->profile());
     buttons_.reset([[NSMutableArray alloc] init]);
     delegate_ = delegate;
     resizeDelegate_ = resizeDelegate;
@@ -528,9 +530,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (node->is_folder())
     return folderImage_;
 
-  const SkBitmap& favicon = bookmarkModel_->GetFavicon(node);
-  if (!favicon.isNull())
-    return gfx::SkBitmapToNSImage(favicon);
+  const gfx::Image& favicon = bookmarkModel_->GetFavicon(node);
+  if (!favicon.IsEmpty())
+    return favicon.ToNSImage();
 
   return defaultImage_;
 }
@@ -786,9 +788,14 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* parent = [self nodeFromMenuItem:sender];
   if (!parent)
     parent = bookmarkModel_->bookmark_bar_node();
+  GURL url;
+  string16 title;
+  bookmark_utils::GetURLAndTitleToBookmark(
+      chrome::GetActiveWebContents(browser_), &url, &title);
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
-                       BookmarkEditor::EditDetails::AddNodeInFolder(parent, -1),
+                       BookmarkEditor::EditDetails::AddNodeInFolder(
+                           parent, -1, url, title),
                        BookmarkEditor::SHOW_TREE);
 }
 
@@ -823,7 +830,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (IBAction)importBookmarks:(id)sender {
-  browser_->OpenImportSettingsDialog();
+  chrome::ShowImportDialog(browser_);
 }
 
 #pragma mark Private Methods
@@ -2288,7 +2295,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 #pragma mark BookmarkBarToolbarViewController Protocol
 
 - (int)currentTabContentsHeight {
-  WebContents* wc = browser_->GetActiveWebContents();
+  WebContents* wc = chrome::GetActiveWebContents(browser_);
   return wc ? wc->GetView()->GetContainerSize().height() : 0;
 }
 
@@ -2615,7 +2622,6 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     disposition:(WindowOpenDisposition)disposition {
   [self closeFolderAndStopTrackingMenus];
   bookmark_utils::OpenAll([[self view] window],
-                          browser_->profile(),
                           browser_,
                           node,
                           disposition);

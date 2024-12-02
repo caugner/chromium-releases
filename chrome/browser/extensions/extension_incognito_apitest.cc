@@ -9,11 +9,12 @@
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 
 using content::WebContents;
@@ -27,17 +28,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoNoScript) {
       .AppendASCII("content_scripts")));
 
   // Open incognito window and navigate to test page.
-  ui_test_utils::OpenURLOffTheRecord(
+  Browser* otr_browser = ui_test_utils::OpenURLOffTheRecord(
       browser()->profile(),
       test_server()->GetURL("files/extensions/test_file.html"));
 
-  Browser* otr_browser = browser::FindTabbedBrowser(
-      browser()->profile()->GetOffTheRecordProfile(), false);
-  WebContents* tab = otr_browser->GetActiveWebContents();
+  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
 
   // Verify the script didn't run.
   bool result = false;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       tab->GetRenderViewHost(), L"",
       L"window.domAutomationController.send(document.title == 'Unmodified')",
       &result));
@@ -64,17 +63,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, IncognitoYesScript) {
       .AppendASCII("content_scripts").AppendASCII("isolated_world1")));
 
   // Open incognito window and navigate to test page.
-  ui_test_utils::OpenURLOffTheRecord(
+  Browser* otr_browser = ui_test_utils::OpenURLOffTheRecord(
       browser()->profile(),
       test_server()->GetURL("files/extensions/test_file.html"));
 
-  Browser* otr_browser = browser::FindTabbedBrowser(
-      browser()->profile()->GetOffTheRecordProfile(), false);
-  WebContents* tab = otr_browser->GetActiveWebContents();
+  WebContents* tab = chrome::GetActiveWebContents(otr_browser);
 
   // Verify the script ran.
   bool result = false;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       tab->GetRenderViewHost(), L"",
       L"window.domAutomationController.send(document.title == 'modified')",
       &result));
@@ -194,12 +191,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_IncognitoPopup) {
       .AppendASCII("incognito").AppendASCII("popup")));
 
   // Open incognito window and navigate to test page.
-  ui_test_utils::OpenURLOffTheRecord(
+  Browser* incognito_browser = ui_test_utils::OpenURLOffTheRecord(
       browser()->profile(),
       test_server()->GetURL("files/extensions/test_file.html"));
-
-  Browser* incognito_browser = browser::FindTabbedBrowser(
-      browser()->profile()->GetOffTheRecordProfile(), false);
 
   // Simulate the incognito's browser action being clicked.
   BrowserActionTestUtil(incognito_browser).Press(0);

@@ -12,6 +12,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/rect_f.h"
 
 namespace {
 
@@ -68,76 +69,6 @@ bool ParamTraits<GURL>::Read(const Message* m, PickleIterator* iter, GURL* p) {
 
 void ParamTraits<GURL>::Log(const GURL& p, std::string* l) {
   l->append(p.spec());
-}
-
-void ParamTraits<ResourceType::Type>::Write(Message* m, const param_type& p) {
-  m->WriteInt(p);
-}
-
-bool ParamTraits<ResourceType::Type>::Read(const Message* m,
-                                           PickleIterator* iter,
-                                           param_type* p) {
-  int type;
-  if (!m->ReadInt(iter, &type) || !ResourceType::ValidType(type))
-    return false;
-  *p = ResourceType::FromInt(type);
-  return true;
-}
-
-void ParamTraits<ResourceType::Type>::Log(const param_type& p, std::string* l) {
-  std::string type;
-  switch (p) {
-    case ResourceType::MAIN_FRAME:
-      type = "MAIN_FRAME";
-      break;
-    case ResourceType::SUB_FRAME:
-      type = "SUB_FRAME";
-      break;
-    case ResourceType::STYLESHEET:
-      type = "STYLESHEET";
-      break;
-    case ResourceType::SCRIPT:
-      type = "SCRIPT";
-      break;
-    case ResourceType::IMAGE:
-      type = "IMAGE";
-      break;
-    case ResourceType::FONT_RESOURCE:
-      type = "FONT_RESOURCE";
-      break;
-    case ResourceType::SUB_RESOURCE:
-      type = "SUB_RESOURCE";
-      break;
-    case ResourceType::OBJECT:
-      type = "OBJECT";
-      break;
-    case ResourceType::MEDIA:
-      type = "MEDIA";
-      break;
-    case ResourceType::WORKER:
-      type = "WORKER";
-      break;
-    case ResourceType::SHARED_WORKER:
-      type = "SHARED_WORKER";
-      break;
-    case ResourceType::PREFETCH:
-      type = "PREFETCH";
-      break;
-    case ResourceType::PRERENDER:
-      type = "PRERENDER";
-      break;
-    case ResourceType::FAVICON:
-      type = "FAVICON";
-      break;
-    case ResourceType::XHR:
-      type = "XHR";
-      break;
-    default:
-      type = "UNKNOWN";
-      break;
-  }
-
-  LogParam(type, l);
 }
 
 void ParamTraits<net::URLRequestStatus>::Write(Message* m,
@@ -492,6 +423,34 @@ void ParamTraits<gfx::Rect>::Log(const gfx::Rect& p, std::string* l) {
                                p.width(), p.height()));
 }
 
+void ParamTraits<gfx::RectF>::Write(Message* m, const gfx::RectF& p) {
+  ParamTraits<float>::Write(m, p.x());
+  ParamTraits<float>::Write(m, p.y());
+  ParamTraits<float>::Write(m, p.width());
+  ParamTraits<float>::Write(m, p.height());
+}
+
+bool ParamTraits<gfx::RectF>::Read(const Message* m,
+                                   PickleIterator* iter,
+                                   gfx::RectF* r) {
+  float x, y, w, h;
+  if (!ParamTraits<float>::Read(m, iter, &x) ||
+      !ParamTraits<float>::Read(m, iter, &y) ||
+      !ParamTraits<float>::Read(m, iter, &w) ||
+      !ParamTraits<float>::Read(m, iter, &h))
+    return false;
+  r->set_x(x);
+  r->set_y(y);
+  r->set_width(w);
+  r->set_height(h);
+  return true;
+}
+
+void ParamTraits<gfx::RectF>::Log(const gfx::RectF& p, std::string* l) {
+  l->append(base::StringPrintf("(%f, %f, %f, %f)", p.x(), p.y(),
+                               p.width(), p.height()));
+}
+
 void ParamTraits<ui::Range>::Write(Message* m, const ui::Range& r) {
   m->WriteUInt64(r.start());
   m->WriteUInt64(r.end());
@@ -553,39 +512,25 @@ void ParamTraits<SkBitmap>::Log(const SkBitmap& p, std::string* l) {
   l->append("<SkBitmap>");
 }
 
-void ParamTraits<content::ConsoleMessageLevel>::Write(Message* m,
-                                                      const param_type& p) {
-  m->WriteInt(static_cast<int>(p));
-}
+}  // namespace IPC
 
-bool ParamTraits<content::ConsoleMessageLevel>::Read(const Message* m,
-                                                     PickleIterator* iter,
-                                                     param_type* p) {
-  int type;
-  if (!m->ReadInt(iter, &type))
-    return false;
-  *p = static_cast<param_type>(type);
-  return true;
-}
+// Generate param traits write methods.
+#include "ipc/param_traits_write_macros.h"
+namespace IPC {
+#undef CONTENT_PUBLIC_COMMON_COMMON_PARAM_TRAITS_MACROS_H_
+#include "content/public/common/common_param_traits_macros.h"
+}  // namespace IPC
 
-void ParamTraits<content::ConsoleMessageLevel>::Log(const param_type& p,
-                                                    std::string* l) {
-  std::string level;
-  switch (p) {
-    case content::CONSOLE_MESSAGE_LEVEL_TIP:
-      level = "CONSOLE_MESSAGE_LEVEL_TIP";
-      break;
-    case content::CONSOLE_MESSAGE_LEVEL_LOG:
-      level = "CONSOLE_MESSAGE_LEVEL_LOG";
-      break;
-    case content::CONSOLE_MESSAGE_LEVEL_WARNING:
-      level = "CONSOLE_MESSAGE_LEVEL_WARNING";
-      break;
-    case content::CONSOLE_MESSAGE_LEVEL_ERROR:
-      level = "CONSOLE_MESSAGE_LEVEL_ERROR";
-      break;
-  }
-  LogParam(level, l);
-}
+// Generate param traits read methods.
+#include "ipc/param_traits_read_macros.h"
+namespace IPC {
+#undef CONTENT_PUBLIC_COMMON_COMMON_PARAM_TRAITS_MACROS_H_
+#include "content/public/common/common_param_traits_macros.h"
+}  // namespace IPC
 
+// Generate param traits log methods.
+#include "ipc/param_traits_log_macros.h"
+namespace IPC {
+#undef CONTENT_PUBLIC_COMMON_COMMON_PARAM_TRAITS_MACROS_H_
+#include "content/public/common/common_param_traits_macros.h"
 }  // namespace IPC

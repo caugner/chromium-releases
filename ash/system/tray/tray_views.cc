@@ -5,9 +5,9 @@
 #include "ash/system/tray/tray_views.h"
 
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_item_view.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -27,6 +27,18 @@ namespace internal {
 namespace {
 const int kIconPaddingLeft = 5;
 const int kPaddingAroundButtons = 5;
+
+const int kBarImagesActive[] = {
+    IDR_SLIDER_ACTIVE_LEFT,
+    IDR_SLIDER_ACTIVE_CENTER,
+    IDR_SLIDER_ACTIVE_RIGHT,
+};
+
+const int kBarImagesDisabled[] = {
+    IDR_SLIDER_DISABLED_LEFT,
+    IDR_SLIDER_DISABLED_CENTER,
+    IDR_SLIDER_DISABLED_RIGHT,
+};
 
 views::View* CreatePopupHeaderButtonsContainer() {
   views::View* view = new views::View;
@@ -97,6 +109,12 @@ ActionableView::ActionableView()
 ActionableView::~ActionableView() {
 }
 
+void ActionableView::DrawBorder(gfx::Canvas* canvas, const gfx::Rect& bounds) {
+  gfx::Rect rect = bounds;
+  rect.Inset(1, 1, 3, 3);
+  canvas->DrawRect(rect, kFocusBorderColor);
+}
+
 bool ActionableView::OnKeyPressed(const views::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_SPACE ||
       event.key_code() == ui::VKEY_RETURN) {
@@ -125,10 +143,8 @@ void ActionableView::SetAccessibleName(const string16& name) {
 }
 
 void ActionableView::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  if (HasFocus() && (focusable() || IsAccessibilityFocusable())) {
-    canvas->DrawRect(gfx::Rect(1, 1, width() - 3, height() - 3),
-                     kFocusBorderColor);
-  }
+  if (HasFocus() && (focusable() || IsAccessibilityFocusable()))
+    DrawBorder(canvas, GetLocalBounds());
 }
 
 ui::GestureStatus ActionableView::OnGestureEvent(
@@ -315,6 +331,7 @@ TrayPopupTextButton::TrayPopupTextButton(views::ButtonListener* listener,
   set_alignment(ALIGN_CENTER);
   set_border(NULL);
   set_focusable(true);
+  set_request_focus_on_press(false);
 }
 
 TrayPopupTextButton::~TrayPopupTextButton() {}
@@ -387,7 +404,8 @@ TrayPopupHeaderButton::TrayPopupHeaderButton(views::ButtonListener* listener,
                                              int enabled_resource_id,
                                              int disabled_resource_id,
                                              int enabled_resource_id_hover,
-                                             int disabled_resource_id_hover)
+                                             int disabled_resource_id_hover,
+                                             int accessible_name_id)
     : views::ToggleImageButton(listener) {
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   SetImage(views::CustomButton::BS_NORMAL,
@@ -400,7 +418,9 @@ TrayPopupHeaderButton::TrayPopupHeaderButton(views::ButtonListener* listener,
       bundle.GetImageNamed(disabled_resource_id_hover).ToImageSkia());
   SetImageAlignment(views::ImageButton::ALIGN_CENTER,
                     views::ImageButton::ALIGN_MIDDLE);
+  SetAccessibleName(bundle.GetLocalizedString(accessible_name_id));
   set_focusable(true);
+  set_request_focus_on_press(false);
 }
 
 TrayPopupHeaderButton::~TrayPopupHeaderButton() {}
@@ -426,6 +446,83 @@ void TrayPopupHeaderButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
 
 void TrayPopupHeaderButton::StateChanged() {
   SchedulePaint();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// TrayBarButtonWithTitle
+
+class TrayBarButtonWithTitle::TrayBarButton
+  : public views::View {
+ public:
+  TrayBarButton(const int bar_active_images[], const int bar_disabled_images[])
+    : views::View(),
+      bar_active_images_(bar_active_images),
+      bar_disabled_images_(bar_disabled_images),
+      painter_(new views::HorizontalPainter(bar_active_images_)){
+  }
+  virtual ~TrayBarButton() {}
+
+  // Overriden from views::View
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+    painter_->Paint(canvas, size());
+  }
+
+  void Update(bool control_on) {
+    painter_.reset(new views::HorizontalPainter(
+        control_on ? bar_active_images_ : bar_disabled_images_));
+    SchedulePaint();
+  }
+
+ private:
+  const int* bar_active_images_;
+  const int* bar_disabled_images_;
+  scoped_ptr<views::HorizontalPainter> painter_;
+
+  DISALLOW_COPY_AND_ASSIGN(TrayBarButton);
+};
+
+TrayBarButtonWithTitle::TrayBarButtonWithTitle(views::ButtonListener* listener,
+                                               int title_id,
+                                               int width)
+    : views::CustomButton(listener),
+      image_(new TrayBarButton(kBarImagesActive, kBarImagesDisabled)),
+      title_(new views::Label),
+      width_(width) {
+  AddChildView(image_);
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  string16 text = rb.GetLocalizedString(title_id);
+  title_->SetText(text);
+  AddChildView(title_);
+
+  image_height_ = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+      kBarImagesActive[0]).ToImageSkia()->height();
+}
+
+TrayBarButtonWithTitle::~TrayBarButtonWithTitle() {}
+
+gfx::Size TrayBarButtonWithTitle::GetPreferredSize() {
+  return gfx::Size(width_, kTrayPopupItemHeight);
+}
+
+void TrayBarButtonWithTitle::Layout() {
+  gfx::Size title_size = title_->GetPreferredSize();
+  gfx::Rect rect(GetContentsBounds());
+  int bar_image_y = rect.height() / 2 - image_height_ / 2;
+  gfx::Rect bar_image_rect(rect.x(),
+                           bar_image_y,
+                           rect.width(),
+                           image_height_);
+  image_->SetBoundsRect(bar_image_rect);
+  // The image_ has some empty space below the bar image, move the title
+  // a little bit up to look closer to the bar.
+  title_->SetBounds(rect.x(),
+                    bar_image_y + image_height_ - 3,
+                    rect.width(),
+                    title_size.height());
+}
+
+void TrayBarButtonWithTitle::UpdateButton(bool control_on) {
+  image_->Update(control_on);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -512,98 +609,6 @@ void SpecialPopupRow::Layout() {
   content_->SetBoundsRect(bounds);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// TrayNotificationView
-
-TrayNotificationView::TrayNotificationView(int icon_id) : icon_id_(icon_id) {
-}
-
-TrayNotificationView::~TrayNotificationView() {
-}
-
-void TrayNotificationView::InitView(views::View* contents) {
-  set_background(views::Background::CreateSolidBackground(kBackgroundColor));
-
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
-
-  views::ImageButton* close_button = new views::ImageButton(this);
-  close_button->SetImage(views::CustomButton::BS_NORMAL,
-                         ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-                             IDR_AURA_WINDOW_CLOSE));
-
-  icon_ = new views::ImageView;
-  if (icon_id_ != 0) {
-    icon_->SetImage(
-        ResourceBundle::GetSharedInstance().GetImageSkiaNamed(icon_id_));
-  }
-
-  views::ColumnSet* columns = layout->AddColumnSet(0);
-
-  columns->AddPaddingColumn(0, kTrayPopupPaddingHorizontal/2);
-
-  // Icon
-  columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
-                     0, /* resize percent */
-                     views::GridLayout::FIXED,
-                     kNotificationIconWidth, kNotificationIconWidth);
-
-  columns->AddPaddingColumn(0, kTrayPopupPaddingHorizontal/2);
-
-  // Contents
-  columns->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL,
-                     0, /* resize percent */
-                     views::GridLayout::FIXED,
-                     kTrayNotificationContentsWidth,
-                     kTrayNotificationContentsWidth);
-
-  columns->AddPaddingColumn(0, kTrayPopupPaddingHorizontal/2);
-
-  // Close button
-  columns->AddColumn(views::GridLayout::CENTER, views::GridLayout::CENTER,
-                     0, /* resize percent */
-                     views::GridLayout::FIXED,
-                     kNotificationIconWidth, kNotificationIconWidth);
-
-  columns->AddPaddingColumn(0, kTrayPopupPaddingHorizontal/2);
-
-  // Layout rows
-  layout->AddPaddingRow(0, kTrayPopupPaddingBetweenItems);
-  layout->StartRow(0, 0);
-  layout->AddView(icon_);
-  layout->AddView(contents);
-  layout->AddView(close_button);
-  layout->AddPaddingRow(0, kTrayPopupPaddingBetweenItems);
-}
-
-void TrayNotificationView::SetIconImage(const gfx::ImageSkia& image) {
-  icon_->SetImage(image);
-  SchedulePaint();
-}
-
-void TrayNotificationView::UpdateView(views::View* new_contents) {
-  RemoveAllChildViews(true);
-  InitView(new_contents);
-  Layout();
-  PreferredSizeChanged();
-  SchedulePaint();
-}
-
-void TrayNotificationView::UpdateViewAndImage(views::View* new_contents,
-                                              const gfx::ImageSkia& image) {
-  RemoveAllChildViews(true);
-  InitView(new_contents);
-  icon_->SetImage(image);
-  Layout();
-  PreferredSizeChanged();
-  SchedulePaint();
-}
-
-void TrayNotificationView::ButtonPressed(views::Button* sender,
-                                         const views::Event& event) {
-  OnClose();
-}
-
 void SetupLabelForTray(views::Label* label) {
   label->SetFont(
       label->font().DeriveFont(2, gfx::Font::BOLD));
@@ -613,6 +618,39 @@ void SetupLabelForTray(views::Label* label) {
   label->SetShadowColors(SkColorSetARGB(64, 0, 0, 0),
                          SkColorSetARGB(64, 0, 0, 0));
   label->SetShadowOffset(0, 1);
+}
+
+void SetTrayImageItemBorder(views::View* tray_view,
+                            ShelfAlignment alignment) {
+  if (alignment == SHELF_ALIGNMENT_BOTTOM) {
+    tray_view->set_border(views::Border::CreateEmptyBorder(
+        0, kTrayImageItemHorizontalPaddingBottomAlignment,
+        0, kTrayImageItemHorizontalPaddingBottomAlignment));
+  } else {
+    tray_view->set_border(views::Border::CreateEmptyBorder(
+        kTrayImageItemVerticalPaddingVerticalAlignment,
+        kTrayImageItemHorizontalPaddingVerticalAlignment,
+        kTrayImageItemVerticalPaddingVerticalAlignment,
+        kTrayImageItemHorizontalPaddingVerticalAlignment));
+  }
+}
+
+void SetTrayLabelItemBorder(TrayItemView* tray_view,
+                            ShelfAlignment alignment) {
+  if (alignment == SHELF_ALIGNMENT_BOTTOM) {
+    tray_view->set_border(views::Border::CreateEmptyBorder(
+        0, kTrayLabelItemHorizontalPaddingBottomAlignment,
+        0, kTrayLabelItemHorizontalPaddingBottomAlignment));
+  } else {
+    // Center the label for vertical launcher alignment.
+    int horizontal_padding = (tray_view->GetPreferredSize().width() -
+        tray_view->label()->GetPreferredSize().width()) / 2;
+    tray_view->set_border(views::Border::CreateEmptyBorder(
+        kTrayLabelItemVerticalPaddingVeriticalAlignment,
+        horizontal_padding,
+        kTrayLabelItemVerticalPaddingVeriticalAlignment,
+        horizontal_padding));
+  }
 }
 
 }  // namespace internal

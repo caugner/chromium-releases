@@ -292,8 +292,12 @@ PluginList::PluginList()
 
 PluginList::PluginList(const PluginGroupDefinition* definitions,
                        size_t num_definitions)
-    : loading_state_(LOADING_STATE_NEEDS_REFRESH) {
-  // Don't do platform-dependend initialization in unit tests.
+    :
+#if defined(OS_WIN)
+      dont_load_new_wmp_(false),
+#endif
+      loading_state_(LOADING_STATE_NEEDS_REFRESH) {
+  // Don't do platform-dependent initialization in unit tests.
   AddHardcodedPluginGroups(definitions, num_definitions);
 }
 
@@ -422,7 +426,7 @@ void PluginList::SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins) {
   DCHECK_NE(LOADING_STATE_REFRESHING, loading_state_);
   loading_state_ = LOADING_STATE_UP_TO_DATE;
 
-  plugin_groups_.reset();
+  plugin_groups_.clear();
   for (std::vector<webkit::WebPluginInfo>::const_iterator it = plugins.begin();
        it != plugins.end();
        ++it) {
@@ -445,18 +449,15 @@ void PluginList::GetPlugins(std::vector<WebPluginInfo>* plugins) {
   }
 }
 
-bool PluginList::GetPluginsIfNoRefreshNeeded(
+bool PluginList::GetPluginsNoRefresh(
     std::vector<webkit::WebPluginInfo>* plugins) {
   base::AutoLock lock(lock_);
-  if (loading_state_ != LOADING_STATE_UP_TO_DATE)
-    return false;
-
   for (size_t i = 0; i < plugin_groups_.size(); ++i) {
     const std::vector<webkit::WebPluginInfo>& gr_plugins =
         plugin_groups_[i]->web_plugin_infos();
     plugins->insert(plugins->end(), gr_plugins.begin(), gr_plugins.end());
   }
-  return true;
+  return loading_state_ == LOADING_STATE_UP_TO_DATE;
 }
 
 void PluginList::GetPluginInfoArray(
@@ -538,7 +539,7 @@ void PluginList::GetPluginGroups(
 PluginGroup* PluginList::GetPluginGroup(
     const webkit::WebPluginInfo& web_plugin_info) {
   base::AutoLock lock(lock_);
-  for (size_t i = 0; i < plugin_groups_->size(); ++i) {
+  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
     const std::vector<webkit::WebPluginInfo>& plugins =
         plugin_groups_[i]->web_plugin_infos();
     for (size_t j = 0; j < plugins.size(); ++j) {
@@ -564,7 +565,7 @@ void PluginList::AddHardcodedPluginGroups(
     const PluginGroupDefinition* group_definitions,
     size_t num_group_definitions) {
   for (size_t i = 0; i < num_group_definitions; ++i) {
-    hardcoded_plugin_groups_->push_back(
+    hardcoded_plugin_groups_.push_back(
         PluginGroup::FromPluginGroupDefinition(group_definitions[i]));
   }
 }

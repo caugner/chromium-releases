@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_PREPOPULATE_DATA_H_
 #define CHROME_BROWSER_SEARCH_ENGINES_TEMPLATE_URL_PREPOPULATE_DATA_H_
-#pragma once
 
 #include <stddef.h>
 #include <string>
@@ -23,10 +22,11 @@ namespace TemplateURLPrepopulateData {
 extern const int kMaxPrepopulatedEngineID;
 
 #if defined(OS_ANDROID)
-// Returns the default country code at the time of install from Android.
-// This could either be the command line value that has been set or the
-// current location code during install.
-extern const std::string GetCountryCodeAtInstall();
+
+// This must be called early only once. |country_code| is the country code at
+// install following the ISO-3166 specification.
+void InitCountryCode(const std::string& country_code);
+
 #endif
 
 void RegisterUserPrefs(PrefService* prefs);

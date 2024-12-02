@@ -11,8 +11,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -368,12 +368,12 @@ void DeviceStatusCollector::GetStatus(em::DeviceStatusReportRequest* request) {
 }
 
 void DeviceStatusCollector::OnOSVersion(VersionLoader::Handle handle,
-                                        std::string version) {
+                                        const std::string& version) {
   os_version_ = version;
 }
 
 void DeviceStatusCollector::OnOSFirmware(VersionLoader::Handle handle,
-                                         std::string version) {
+                                         const std::string& version) {
   firmware_version_ = version;
 }
 

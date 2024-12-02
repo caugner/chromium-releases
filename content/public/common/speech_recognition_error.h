@@ -4,12 +4,9 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_SPEECH_RECOGNITION_ERROR_H_
 #define CONTENT_PUBLIC_COMMON_SPEECH_RECOGNITION_ERROR_H_
-#pragma once
 
 namespace content {
 
-// This enumeration follows the values described here:
-// http://www.w3.org/2005/Incubator/htmlspeech/2010/10/google-api-draft.html#speech-input-error
 enum SpeechRecognitionErrorCode {
   // There was no error.
   SPEECH_RECOGNITION_ERROR_NONE = 0,

@@ -95,6 +95,93 @@ void BrowserThreadImpl::Init() {
     delegate->Init();
 }
 
+// We disable optimizations for this block of functions so the compiler doesn't
+// merge them all together.
+MSVC_DISABLE_OPTIMIZE()
+MSVC_PUSH_DISABLE_WARNING(4748)
+
+NOINLINE void BrowserThreadImpl::UIThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::DBThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::WebKitThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::FileThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::FileUserBlockingThreadRun(
+    MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::ProcessLauncherThreadRun(
+    MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::CacheThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+NOINLINE void BrowserThreadImpl::IOThreadRun(MessageLoop* message_loop) {
+  volatile int line_number = __LINE__;
+  Thread::Run(message_loop);
+  CHECK_GT(line_number, 0);
+}
+
+MSVC_POP_WARNING()
+MSVC_ENABLE_OPTIMIZE();
+
+void BrowserThreadImpl::Run(MessageLoop* message_loop) {
+  BrowserThread::ID thread_id;
+  if (!GetCurrentThreadIdentifier(&thread_id))
+    return Thread::Run(message_loop);
+
+  switch (thread_id) {
+    case BrowserThread::UI:
+      return UIThreadRun(message_loop);
+    case BrowserThread::DB:
+      return DBThreadRun(message_loop);
+    case BrowserThread::WEBKIT_DEPRECATED:
+      return WebKitThreadRun(message_loop);
+    case BrowserThread::FILE:
+      return FileThreadRun(message_loop);
+    case BrowserThread::FILE_USER_BLOCKING:
+      return FileUserBlockingThreadRun(message_loop);
+    case BrowserThread::PROCESS_LAUNCHER:
+      return ProcessLauncherThreadRun(message_loop);
+    case BrowserThread::CACHE:
+      return CacheThreadRun(message_loop);
+    case BrowserThread::IO:
+      return IOThreadRun(message_loop);
+    case BrowserThread::ID_COUNT:
+      CHECK(false);  // This shouldn't actually be reached!
+      break;
+  }
+  Thread::Run(message_loop);
+}
+
 void BrowserThreadImpl::CleanUp() {
   BrowserThreadGlobals& globals = g_globals.Get();
 
@@ -186,22 +273,10 @@ class BrowserThreadMessageLoopProxy : public base::MessageLoopProxy {
   // MessageLoopProxy implementation.
   virtual bool PostDelayedTask(
       const tracked_objects::Location& from_here,
-      const base::Closure& task, int64 delay_ms) OVERRIDE {
-    return BrowserThread::PostDelayedTask(id_, from_here, task, delay_ms);
-  }
-  virtual bool PostDelayedTask(
-      const tracked_objects::Location& from_here,
       const base::Closure& task, base::TimeDelta delay) OVERRIDE {
     return BrowserThread::PostDelayedTask(id_, from_here, task, delay);
   }
 
-  virtual bool PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      int64 delay_ms) OVERRIDE {
-    return BrowserThread::PostNonNestableDelayedTask(id_, from_here, task,
-                                                     delay_ms);
-  }
   virtual bool PostNonNestableDelayedTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task,
@@ -301,19 +376,6 @@ bool BrowserThread::PostTask(ID identifier,
 bool BrowserThread::PostDelayedTask(ID identifier,
                                     const tracked_objects::Location& from_here,
                                     const base::Closure& task,
-                                    int64 delay_ms) {
-  return BrowserThreadImpl::PostTaskHelper(
-      identifier,
-      from_here,
-      task,
-      base::TimeDelta::FromMilliseconds(delay_ms),
-      true);
-}
-
-// static
-bool BrowserThread::PostDelayedTask(ID identifier,
-                                    const tracked_objects::Location& from_here,
-                                    const base::Closure& task,
                                     base::TimeDelta delay) {
   return BrowserThreadImpl::PostTaskHelper(
       identifier, from_here, task, delay, true);
@@ -326,20 +388,6 @@ bool BrowserThread::PostNonNestableTask(
     const base::Closure& task) {
   return BrowserThreadImpl::PostTaskHelper(
       identifier, from_here, task, base::TimeDelta(), false);
-}
-
-// static
-bool BrowserThread::PostNonNestableDelayedTask(
-    ID identifier,
-    const tracked_objects::Location& from_here,
-    const base::Closure& task,
-    int64 delay_ms) {
-  return BrowserThreadImpl::PostTaskHelper(
-      identifier,
-      from_here,
-      task,
-      base::TimeDelta::FromMilliseconds(delay_ms),
-      false);
 }
 
 // static

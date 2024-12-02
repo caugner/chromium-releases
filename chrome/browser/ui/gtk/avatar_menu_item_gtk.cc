@@ -16,7 +16,6 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -154,12 +153,6 @@ void AvatarMenuItemGtk::Observe(int type,
   // Assume that the widget isn't highlighted since theme changes will almost
   // never happen while we're up.
   gtk_widget_modify_bg(widget_.get(), GTK_STATE_NORMAL, unhighlighted_color_);
-
-  if (edit_profile_link_) {
-    gtk_chrome_link_button_set_use_gtk_theme(
-        GTK_CHROME_LINK_BUTTON(edit_profile_link_),
-        using_native);
-  }
 }
 
 void AvatarMenuItemGtk::OnEditProfileLinkClicked(GtkWidget* link) {
@@ -208,7 +201,9 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
   // of the profile icon.
   if (item_.active) {
     const SkBitmap* avatar_image = item_.icon.ToSkBitmap();
-    gfx::Canvas canvas(*avatar_image, /* is_opaque */ true);
+    gfx::ImageSkiaRep avatar_image_rep =
+        gfx::ImageSkiaRep(*avatar_image, ui::SCALE_FACTOR_100P);
+    gfx::Canvas canvas(avatar_image_rep, /* is_opaque */ true);
 
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     const SkBitmap* check_image = rb.GetImageNamed(
@@ -218,7 +213,7 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
     int x = avatar_image->width() - check_image->width() + kCheckMarkXOffset;
     canvas.DrawImageInt(*check_image, x, y);
 
-    SkBitmap final_image = canvas.ExtractBitmap();
+    SkBitmap final_image = canvas.ExtractImageRep().sk_bitmap();
     avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(final_image);
   } else {
     avatar_pixbuf = gfx::GdkPixbufFromSkBitmap(*item_.icon.ToSkBitmap());
@@ -236,17 +231,20 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
                                        gfx::Font(),
                                        kUserNameMaxWidth,
                                        ui::ELIDE_AT_END);
+
+  name_label = theme_service->BuildLabel(UTF16ToUTF8(elided_name),
+                                         ui::kGdkBlack);
   if (item_.active) {
-    name_label = gtk_util::CreateBoldLabel(UTF16ToUTF8(elided_name));
-  } else {
-    name_label = theme_service->BuildLabel(UTF16ToUTF8(elided_name),
-                                           ui::kGdkBlack);
+    char* markup = g_markup_printf_escaped(
+        "<span weight='bold'>%s</span>", UTF16ToUTF8(elided_name).c_str());
+    gtk_label_set_markup(GTK_LABEL(name_label), markup);
   }
+
   gtk_misc_set_alignment(GTK_MISC(name_label), 0, 0);
   gtk_box_pack_start(GTK_BOX(item_vbox), name_label, TRUE, TRUE, 0);
 
   // The sync status label.
-  status_label_ = gtk_label_new("");
+  status_label_ = theme_service_->BuildLabel(std::string(), ui::kGdkBlack);
   char* markup = g_markup_printf_escaped(
       "<span size='small'>%s</span>", UTF16ToUTF8(item_.sync_state).c_str());
   gtk_label_set_markup(GTK_LABEL(status_label_), markup);
@@ -258,8 +256,8 @@ void AvatarMenuItemGtk::Init(GtkThemeService* theme_service) {
 
   if (item_.active) {
     // The "edit your profile" link.
-    edit_profile_link_ = gtk_chrome_link_button_new(
-        l10n_util::GetStringUTF8(IDS_PROFILES_EDIT_PROFILE_LINK).c_str());
+    edit_profile_link_ = theme_service_->BuildChromeLinkButton(
+        l10n_util::GetStringUTF8(IDS_PROFILES_EDIT_PROFILE_LINK));
     // Fix for bug#107348. edit link steals focus from menu item which
     // hides edit link button in focus-out-event handler,
     // so, it misses the click event.

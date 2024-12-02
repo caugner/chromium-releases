@@ -5,12 +5,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/app_non_client_frame_view_aura.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
@@ -23,14 +24,14 @@ class AppNonClientFrameViewAuraTest : public InProcessBrowserTest {
 
   virtual void SetUpOnMainThread() OVERRIDE {
     Browser::CreateParams params = Browser::CreateParams::CreateForApp(
-        Browser::TYPE_PANEL,
+        Browser::TYPE_POPUP,
         std::string("Test"),
         gfx::Rect(),
         browser()->profile());
     params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
     params.app_type = Browser::APP_TYPE_HOST;
-    app_browser_ = Browser::CreateWithParams(params);
-    app_browser_->AddBlankTab(true);
+    app_browser_ = new Browser(params);
+    chrome::AddBlankTab(app_browser_, true);
     app_browser_->window()->Show();
   }
 
@@ -89,7 +90,7 @@ IN_PROC_BROWSER_TEST_F(AppNonClientFrameViewAuraTest, ClickClose) {
 
   // Click close button.
   eg.MoveMouseTo(root_window->bounds().width() - 1, 0);
-  ui_test_utils::WindowedNotificationObserver signal(
+  content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::Source<Browser>(app_browser()));
   eg.ClickLeftButton();

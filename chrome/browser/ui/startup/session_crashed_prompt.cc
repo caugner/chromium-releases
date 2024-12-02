@@ -8,15 +8,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -25,8 +25,7 @@ namespace {
 // A delegate for the InfoBar shown when the previous session has crashed.
 class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  SessionCrashedInfoBarDelegate(Profile* profile,
-                                InfoBarTabHelper* infobar_helper);
+  explicit SessionCrashedInfoBarDelegate(InfoBarTabHelper* infobar_helper);
 
  private:
   virtual ~SessionCrashedInfoBarDelegate();
@@ -38,17 +37,12 @@ class SessionCrashedInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
-  // The Profile that we restore sessions from.
-  Profile* profile_;
-
   DISALLOW_COPY_AND_ASSIGN(SessionCrashedInfoBarDelegate);
 };
 
 SessionCrashedInfoBarDelegate::SessionCrashedInfoBarDelegate(
-    Profile* profile,
     InfoBarTabHelper* infobar_helper)
-    : ConfirmInfoBarDelegate(infobar_helper),
-      profile_(profile) {
+    : ConfirmInfoBarDelegate(infobar_helper) {
 }
 
 SessionCrashedInfoBarDelegate::~SessionCrashedInfoBarDelegate() {
@@ -75,23 +69,23 @@ string16 SessionCrashedInfoBarDelegate::GetButtonLabel(
 
 bool SessionCrashedInfoBarDelegate::Accept() {
   uint32 behavior = 0;
-  Browser* browser = browser::FindLastActiveWithProfile(profile_);
-  if (browser && browser->tab_count() == 1
-      && browser->GetWebContentsAt(0)->GetURL() ==
-      GURL(chrome::kChromeUINewTabURL)) {
+  Browser* browser =
+      browser::FindBrowserWithWebContents(owner()->web_contents());
+  if (browser->tab_count() == 1 &&
+      chrome::GetWebContentsAt(browser, 0)->GetURL() ==
+          GURL(chrome::kChromeUINewTabURL)) {
     // There is only one tab and its the new tab page, make session restore
     // clobber it.
     behavior = SessionRestore::CLOBBER_CURRENT_TAB;
   }
   SessionRestore::RestoreSession(
-      profile_, browser, behavior, std::vector<GURL>());
+      browser->profile(), browser, behavior, std::vector<GURL>());
   return true;
 }
 
 }  // namespace
 
-
-namespace browser {
+namespace chrome {
 
 void ShowSessionCrashedPrompt(Browser* browser) {
   // Assume that if the user is launching incognito they were previously
@@ -101,7 +95,7 @@ void ShowSessionCrashedPrompt(Browser* browser) {
 
   // In ChromeBot tests, there might be a race. This line appears to get
   // called during shutdown and |tab| can be NULL.
-  TabContents* tab = browser->GetActiveTabContents();
+  TabContents* tab = chrome::GetActiveTabContents(browser);
   if (!tab)
     return;
 
@@ -110,9 +104,7 @@ void ShowSessionCrashedPrompt(Browser* browser) {
     return;
 
   tab->infobar_tab_helper()->AddInfoBar(
-      new SessionCrashedInfoBarDelegate(browser->profile(),
-                                        tab->infobar_tab_helper()));
+      new SessionCrashedInfoBarDelegate(tab->infobar_tab_helper()));
 }
 
-}  // namespace browser
-
+}  // namespace chrome

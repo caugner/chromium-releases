@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_H_
 #define CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_H_
-#pragma once
 
 #include <vector>
 
@@ -294,11 +293,6 @@ class TabStripModel : public content::NotificationObserver {
   // model.
   int GetIndexOfWebContents(const content::WebContents* contents) const;
 
-  // Returns the index of the specified NavigationController, or kNoTab if it is
-  // not in this TabStripModel.
-  int GetIndexOfController(
-      const content::NavigationController* controller) const;
-
   // Notify any observers that the TabContents at the specified index has
   // changed in some way. See TabChangeType for details of |change_type|.
   void UpdateTabContentsStateAt(
@@ -549,7 +543,7 @@ class TabStripModel : public content::NotificationObserver {
   //
   // Returns true if the TabContentses were closed immediately, false if we
   // are waiting for the result of an onunload handler.
-  bool InternalCloseTabs(const std::vector<int>& in_indices,
+  bool InternalCloseTabs(const std::vector<int>& indices,
                          uint32 close_types);
 
   // Invoked from InternalCloseTabs and when an extension is removed for an app

@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_FONT_RENDER_PARAMS_LINUX_H_
 #define UI_GFX_FONT_RENDER_PARAMS_LINUX_H_
-#pragma once
 
 #include "ui/base/ui_export.h"
 
@@ -42,6 +41,9 @@ struct UI_EXPORT FontRenderParams {
   // Should FreeType's autohinter be used (as opposed to Freetype's bytecode
   // interpreter, which uses fonts' own hinting instructions)?
   bool autohinter;
+
+  // Should embedded bitmaps in fonts should be used?
+  bool use_bitmaps;
 
   // Hinting level.
   Hinting hinting;

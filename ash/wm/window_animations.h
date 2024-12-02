@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_WINDOW_ANIMATIONS_H_
 #define ASH_WM_WINDOW_ANIMATIONS_H_
-#pragma once
 
 #include "ash/ash_export.h"
 
@@ -36,6 +35,8 @@ enum WindowVisibilityAnimationType {
   WINDOW_VISIBILITY_ANIMATION_TYPE_WORKSPACE_HIDE,  // Inverse of SHOW.
   WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE,        // Window scale/rotates down
                                                     // to its launcher icon.
+  // Fade in/out using brightness and grayscale web filters.
+  WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE,
 };
 
 // Type of visibility change transition that a window should animate.
@@ -88,6 +89,10 @@ ASH_EXPORT base::TimeDelta GetCrossFadeDuration(const gfx::Rect& old_bounds,
 // Returns false if the |window| didn't animate.
 ASH_EXPORT bool AnimateOnChildWindowVisibilityChanged(
     aura::Window* window, bool visible);
+
+// Delay the old layer deletion so that test can verify the behavior of
+// old layer.
+ASH_EXPORT void SetDelayedOldLayerDeletionInCrossFadeForTest(bool value);
 
 }  // namespace internal
 }  // namespace ash

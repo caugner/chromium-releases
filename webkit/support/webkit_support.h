@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/Platform.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
@@ -60,6 +61,9 @@ namespace webkit_support {
 // initialized (as it is already done by the TestSuite).
 void SetUpTestEnvironment();
 void SetUpTestEnvironmentForUnitTests();
+void SetUpTestEnvironment(WebKit::Platform* shadow_platform_delegate);
+void SetUpTestEnvironmentForUnitTests(
+    WebKit::Platform* shadow_platform_delegate);
 void TearDownTestEnvironment();
 
 // Returns a pointer to a WebKitPlatformSupport implementation for
@@ -81,6 +85,10 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(
 WebKit::WebMediaPlayer* CreateMediaPlayer(
     WebKit::WebFrame* frame,
     WebKit::WebMediaPlayerClient* client);
+
+#if defined(OS_ANDROID)
+void ReleaseMediaResources();
+#endif
 
 // This is used by WebFrameClient::createApplicationCacheHost().
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
@@ -110,19 +118,17 @@ WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view);
 
-// Deprecated, call the version above.
-WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
-    const WebKit::WebGraphicsContext3D::Attributes& attributes,
-    WebKit::WebView* web_view,
-    bool direct);
-
-
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.
 // |response| is the response provided with the contents.
 void RegisterMockedURL(const WebKit::WebURL& url,
                        const WebKit::WebURLResponse& response,
                        const WebKit::WebString& file_path);
+
+// Registers the error to be returned when |url| is requested.
+void RegisterMockedErrorURL(const WebKit::WebURL& url,
+                            const WebKit::WebURLResponse& response,
+                            const WebKit::WebURLError& error);
 
 // Unregisters URLs so they are no longer mocked.
 void UnregisterMockedURL(const WebKit::WebURL& url);
@@ -131,6 +137,9 @@ void UnregisterAllMockedURLs();
 // Causes all pending asynchronous requests to be served.  When this method
 // returns all the pending requests have been processed.
 void ServeAsynchronousMockedRequests();
+
+// Returns the last request that handled by |ServeAsynchronousMockedRequests()|.
+WebKit::WebURLRequest GetLastHandledAsynchronousMockedRequest();
 
 // Wrappers to minimize dependecy.
 

@@ -13,11 +13,14 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/extensions/permissions/api_permission.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_sniffer.h"
@@ -27,7 +30,9 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 
+using extensions::APIPermissionSet;
 using extensions::Extension;
+using extensions::PermissionSet;
 
 namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
@@ -96,10 +101,10 @@ static scoped_refptr<Extension> LoadManifestStrict(
   return LoadManifest(dir, test_file, Extension::NO_FLAGS);
 }
 
-static ExtensionAction* LoadAction(const std::string& manifest) {
+static scoped_ptr<ExtensionAction> LoadAction(const std::string& manifest) {
   scoped_refptr<Extension> extension = LoadManifest("page_action",
       manifest);
-  return new ExtensionAction(*(extension->page_action()));
+  return extension->page_action()->CopyForTest();
 }
 
 static void LoadActionAndExpectError(const std::string& manifest,
@@ -204,7 +209,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   scoped_ptr<ExtensionAction> action;
 
   // First try with an empty dictionary.
-  action.reset(LoadAction("page_action_empty.json"));
+  action = LoadAction("page_action_empty.json");
   ASSERT_TRUE(action != NULL);
 
   // Now setup some values to use in the action.
@@ -213,7 +218,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   std::string img1("image1.png");
   std::string img2("image2.png");
 
-  action.reset(LoadAction("page_action.json"));
+  action = LoadAction("page_action.json");
   ASSERT_TRUE(NULL != action.get());
   ASSERT_EQ(id, action->id());
 
@@ -224,20 +229,20 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   ASSERT_EQ(img2, (*action->icon_paths())[1]);
 
   // Same test with explicitly set type.
-  action.reset(LoadAction("page_action_type.json"));
+  action = LoadAction("page_action_type.json");
   ASSERT_TRUE(NULL != action.get());
 
   // Try an action without id key.
-  action.reset(LoadAction("page_action_no_id.json"));
+  action = LoadAction("page_action_no_id.json");
   ASSERT_TRUE(NULL != action.get());
 
   // Then try without the name key. It's optional, so no error.
-  action.reset(LoadAction("page_action_no_name.json"));
+  action = LoadAction("page_action_no_name.json");
   ASSERT_TRUE(NULL != action.get());
   ASSERT_TRUE(action->GetTitle(1).empty());
 
   // Then try without the icon paths key.
-  action.reset(LoadAction("page_action_no_icon.json"));
+  action = LoadAction("page_action_no_icon.json");
   ASSERT_TRUE(NULL != action.get());
 
   // Now test that we can parse the new format for page actions.
@@ -245,7 +250,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   const std::string kIcon("image1.png");
   const std::string kPopupHtmlFile("a_popup.html");
 
-  action.reset(LoadAction("page_action_new_format.json"));
+  action = LoadAction("page_action_new_format.json");
   ASSERT_TRUE(action.get());
   ASSERT_EQ(kTitle, action->GetTitle(1));
   ASSERT_EQ(0u, action->icon_paths()->size());
@@ -255,7 +260,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
       errors::kInvalidPageActionDefaultTitle);
 
   // Invalid name should give an error only with no title.
-  action.reset(LoadAction("page_action_invalid_name.json"));
+  action = LoadAction("page_action_invalid_name.json");
   ASSERT_TRUE(NULL != action.get());
   ASSERT_EQ(kTitle, action->GetTitle(1));
 
@@ -269,7 +274,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   // Only use "popup", expect success.
   scoped_refptr<Extension> extension = LoadManifest("page_action",
              "page_action_popup.json");
-  action.reset(LoadAction("page_action_popup.json"));
+  action = LoadAction("page_action_popup.json");
   ASSERT_TRUE(NULL != action.get());
   ASSERT_STREQ(
       extension->url().Resolve(kPopupHtmlFile).spec().c_str(),
@@ -284,14 +289,14 @@ TEST(ExtensionTest, LoadPageActionHelper) {
 
   // Use only "default_popup", expect success.
   extension = LoadManifest("page_action", "page_action_popup.json");
-  action.reset(LoadAction("page_action_default_popup.json"));
+  action = LoadAction("page_action_default_popup.json");
   ASSERT_TRUE(NULL != action.get());
   ASSERT_STREQ(
       extension->url().Resolve(kPopupHtmlFile).spec().c_str(),
       action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
 
   // Setting default_popup to "" is the same as having no popup.
-  action.reset(LoadAction("page_action_empty_default_popup.json"));
+  action = LoadAction("page_action_empty_default_popup.json");
   ASSERT_TRUE(NULL != action.get());
   EXPECT_FALSE(action->HasPopup(ExtensionAction::kDefaultTabId));
   ASSERT_STREQ(
@@ -299,7 +304,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
       action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
 
   // Setting popup to "" is the same as having no popup.
-  action.reset(LoadAction("page_action_empty_popup.json"));
+  action = LoadAction("page_action_empty_popup.json");
 
   ASSERT_TRUE(NULL != action.get());
   EXPECT_FALSE(action->HasPopup(ExtensionAction::kDefaultTabId));
@@ -686,6 +691,18 @@ TEST(ExtensionTest, ExtraFlags) {
   EXPECT_FALSE(extension->from_webstore());
 }
 
+TEST(ExtensionTest, BrowserActionSynthesizesCommand) {
+  scoped_refptr<Extension> extension;
+
+  extension = LoadManifest("api_test/browser_action/synthesized",
+                           "manifest.json");
+  // An extension with a browser action but no extension command specified
+  // should get a command assigned to it.
+  const extensions::Command* command = extension->browser_action_command();
+  ASSERT_TRUE(command != NULL);
+  ASSERT_EQ(ui::VKEY_UNKNOWN, command->accelerator().key_code());
+}
+
 // Base class for testing the CanExecuteScriptOnPage and CanCaptureVisiblePage
 // methods of Extension for extensions with various permissions.
 class ExtensionScriptAndCaptureVisibleTest : public testing::Test {
@@ -857,9 +874,9 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, TabSpecific) {
   scoped_refptr<Extension> extension =
       LoadManifestStrict("script_and_capture", "tab_specific.json");
 
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(0));
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(1));
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(2));
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(0).get());
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(1).get());
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(2).get());
 
   std::set<GURL> no_urls;
 
@@ -868,53 +885,68 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, TabSpecific) {
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
 
   URLPatternSet allowed_hosts;
-    allowed_hosts.AddPattern(URLPattern(URLPattern::SCHEME_ALL,
-                                        http_url.spec()));
+  allowed_hosts.AddPattern(URLPattern(URLPattern::SCHEME_ALL,
+                                      http_url.spec()));
   std::set<GURL> allowed_urls;
-    allowed_urls.insert(http_url);
-    // http_url_with_path() will also be allowed, because Extension should be
-    // considering the security origin of the URL not the URL itself, and
-    // http_url is in allowed_hosts.
-    allowed_urls.insert(http_url_with_path);
+  allowed_urls.insert(http_url);
+  // http_url_with_path() will also be allowed, because Extension should be
+  // considering the security origin of the URL not the URL itself, and
+  // http_url is in allowed_hosts.
+  allowed_urls.insert(http_url_with_path);
 
-  extension->SetTabSpecificHostPermissions(0, allowed_hosts);
-  EXPECT_EQ(allowed_hosts, *extension->GetTabSpecificHostPermissions(0));
+  {
+    scoped_refptr<PermissionSet> permissions(
+        new PermissionSet(APIPermissionSet(), allowed_hosts, URLPatternSet()));
+    extension->UpdateTabSpecificPermissions(0, permissions);
+    EXPECT_EQ(permissions->explicit_hosts(),
+              extension->GetTabSpecificPermissions(0)->explicit_hosts());
+  }
 
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, allowed_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 1));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
 
-  extension->ClearTabSpecificHostPermissions(0);
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(0));
+  extension->ClearTabSpecificPermissions(0);
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(0).get());
 
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 1));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
 
   std::set<GURL> more_allowed_urls = allowed_urls;
-    more_allowed_urls.insert(https_url);
+  more_allowed_urls.insert(https_url);
   URLPatternSet more_allowed_hosts = allowed_hosts;
-    more_allowed_hosts.AddPattern(URLPattern(URLPattern::SCHEME_ALL,
-                                             https_url.spec()));
+  more_allowed_hosts.AddPattern(URLPattern(URLPattern::SCHEME_ALL,
+                                           https_url.spec()));
 
-  extension->SetTabSpecificHostPermissions(0, allowed_hosts);
-  EXPECT_EQ(allowed_hosts, *extension->GetTabSpecificHostPermissions(0));
-  extension->SetTabSpecificHostPermissions(1, more_allowed_hosts);
-  EXPECT_EQ(more_allowed_hosts, *extension->GetTabSpecificHostPermissions(1));
+  {
+    scoped_refptr<PermissionSet> permissions(
+        new PermissionSet(APIPermissionSet(), allowed_hosts, URLPatternSet()));
+    extension->UpdateTabSpecificPermissions(0, permissions);
+    EXPECT_EQ(permissions->explicit_hosts(),
+              extension->GetTabSpecificPermissions(0)->explicit_hosts());
+
+    permissions = new PermissionSet(APIPermissionSet(),
+                                    more_allowed_hosts,
+                                    URLPatternSet());
+    extension->UpdateTabSpecificPermissions(1, permissions);
+    EXPECT_EQ(permissions->explicit_hosts(),
+              extension->GetTabSpecificPermissions(1)->explicit_hosts());
+  }
 
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, allowed_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, more_allowed_urls, 1));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
 
-  extension->ClearTabSpecificHostPermissions(0);
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(0));
+  extension->ClearTabSpecificPermissions(0);
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(0).get());
 
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, more_allowed_urls, 1));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 2));
 
-  extension->ClearTabSpecificHostPermissions(1);
-  EXPECT_EQ(NULL, extension->GetTabSpecificHostPermissions(1));
+  extension->ClearTabSpecificPermissions(1);
+  EXPECT_FALSE(extension->GetTabSpecificPermissions(1).get());
 
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 0));
   EXPECT_TRUE(AllowedExclusivelyOnTab(extension, no_urls, 1));

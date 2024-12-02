@@ -41,8 +41,8 @@ class FILEAPI_EXPORT SandboxMountPointProvider
     : public FileSystemMountPointProvider,
       public FileSystemQuotaUtil {
  public:
-  typedef FileSystemMountPointProvider::ValidateFileSystemCallback
-      ValidateFileSystemCallback;
+  using FileSystemMountPointProvider::ValidateFileSystemCallback;
+  using FileSystemMountPointProvider::DeleteFileSystemCallback;
 
   // Origin enumerator interface.
   // An instance of this interface is assumed to be called on the file thread.
@@ -89,23 +89,26 @@ class FILEAPI_EXPORT SandboxMountPointProvider
       FileSystemType type,
       const FilePath& virtual_path) OVERRIDE;
   virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
-  virtual FileSystemFileUtil* GetFileUtil() OVERRIDE;
+  virtual FileSystemFileUtil* GetFileUtil(FileSystemType type) OVERRIDE;
   virtual FilePath GetPathForPermissionsCheck(const FilePath& virtual_path)
       const OVERRIDE;
   virtual FileSystemOperationInterface* CreateFileSystemOperation(
-      const GURL& origin_url,
-      FileSystemType file_system_type,
-      const FilePath& virtual_path,
+      const FileSystemURL& url,
       FileSystemContext* context) const OVERRIDE;
   virtual webkit_blob::FileStreamReader* CreateFileStreamReader(
-    const GURL& url,
-    int64 offset,
-    FileSystemContext* context) const OVERRIDE;
+      const FileSystemURL& url,
+      int64 offset,
+      FileSystemContext* context) const OVERRIDE;
   virtual FileStreamWriter* CreateFileStreamWriter(
-    const GURL& url,
-    int64 offset,
-    FileSystemContext* context) const OVERRIDE;
+      const FileSystemURL& url,
+      int64 offset,
+      FileSystemContext* context) const OVERRIDE;
   virtual FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+  virtual void DeleteFileSystem(
+      const GURL& origin_url,
+      FileSystemType type,
+      FileSystemContext* context,
+      const DeleteFileSystemCallback& callback) OVERRIDE;
 
   FilePath old_base_path() const;
   FilePath new_base_path() const;
@@ -128,7 +131,7 @@ class FILEAPI_EXPORT SandboxMountPointProvider
 
   // Deletes the data on the origin and reports the amount of deleted data
   // to the quota manager via |proxy|.
-  bool DeleteOriginDataOnFileThread(
+  base::PlatformFileError DeleteOriginDataOnFileThread(
       FileSystemContext* context,
       quota::QuotaManagerProxy* proxy,
       const GURL& origin_url,
@@ -179,7 +182,7 @@ class FILEAPI_EXPORT SandboxMountPointProvider
   // filesystem.
   bool IsAllowedScheme(const GURL& url) const;
 
-  friend class FileSystemTestOriginHelper;
+  friend class LocalFileSystemTestOriginHelper;
   friend class SandboxMountPointProviderMigrationTest;
   friend class SandboxMountPointProviderOriginEnumeratorTest;
 

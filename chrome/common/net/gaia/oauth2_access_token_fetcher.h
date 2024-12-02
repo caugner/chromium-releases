@@ -4,7 +4,6 @@
 
 #ifndef CHROME_COMMON_NET_GAIA_OAUTH2_ACCESS_TOKEN_FETCHER_H_
 #define CHROME_COMMON_NET_GAIA_OAUTH2_ACCESS_TOKEN_FETCHER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -16,6 +15,10 @@
 #include "net/url_request/url_fetcher_delegate.h"
 
 class OAuth2AccessTokenFetcherTest;
+
+namespace base {
+class Time;
+}
 
 namespace net {
 class URLFetcher;
@@ -76,7 +79,8 @@ class OAuth2AccessTokenFetcher : public net::URLFetcherDelegate {
   void EndGetAccessToken(const net::URLFetcher* source);
 
   // Helper mehtods for reporting back results.
-  void OnGetTokenSuccess(const std::string& access_token);
+  void OnGetTokenSuccess(const std::string& access_token,
+                         const base::Time& expiration_time);
   void OnGetTokenFailure(const GoogleServiceAuthError& error);
 
   // Other helpers.
@@ -87,7 +91,8 @@ class OAuth2AccessTokenFetcher : public net::URLFetcherDelegate {
       const std::string& refresh_token,
       const std::vector<std::string>& scopes);
   static bool ParseGetAccessTokenResponse(const net::URLFetcher* source,
-                                          std::string* access_token);
+                                          std::string* access_token,
+                                          int* expires_in);
 
   // State that is set during construction.
   OAuth2AccessTokenConsumer* const consumer_;

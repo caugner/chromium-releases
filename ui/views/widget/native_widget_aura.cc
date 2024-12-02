@@ -12,6 +12,7 @@
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/window_move_client.h"
 #include "ui/aura/client/window_types.h"
 #include "ui/aura/env.h"
@@ -69,22 +70,8 @@ aura::client::WindowType GetAuraWindowTypeForWidgetType(
   }
 }
 
-const gfx::Rect* GetRestoreBounds(aura::Window* window) {
-  return window->GetProperty(aura::client::kRestoreBoundsKey);
-}
-
 void SetRestoreBounds(aura::Window* window, const gfx::Rect& bounds) {
   window->SetProperty(aura::client::kRestoreBoundsKey, new gfx::Rect(bounds));
-}
-
-void AdjustScreenBounds(aura::Window* window, gfx::Rect* bounds) {
-  aura::client::ScreenPositionClient* screen_position_client =
-      aura::client::GetScreenPositionClient(window);
-  if (screen_position_client) {
-    gfx::Point origin = bounds->origin();
-    screen_position_client->ConvertToScreenPoint(&origin);
-    bounds->set_origin(origin);
-  }
 }
 
 }  // namespace
@@ -188,6 +175,9 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
 
   delegate_->OnNativeWidgetCreated();
   if (desktop_helper_.get() && desktop_helper_->GetRootWindow()) {
+    if (!params.child && params.GetParent())
+      params.GetParent()->AddTransientChild(window_);
+
     window_->SetParent(desktop_helper_->GetRootWindow());
   } else if (params.child) {
     window_->SetParent(params.GetParent());
@@ -210,6 +200,12 @@ void NativeWidgetAura::InitNativeWidget(const Widget::InitParams& params) {
     }
     // SetAlwaysOnTop before SetParent so that always-on-top container is used.
     SetAlwaysOnTop(params.keep_on_top);
+    // If the parent is not specified, find the default parent for
+    // the |window_| using the desired |params.bounds|.
+    if (!parent) {
+      parent = aura::client::GetStackingClient()->GetDefaultParent(
+          window_, params.bounds);
+    }
     window_->SetParent(parent);
   }
 
@@ -358,6 +354,16 @@ void NativeWidgetAura::CenterWindow(const gfx::Size& size) {
   // rect of a single screen.
   gfx::Rect work_area =
       gfx::Screen::GetDisplayNearestWindow(window_).work_area();
+
+  aura::client::ScreenPositionClient* screen_position_client =
+      aura::client::GetScreenPositionClient(window_->GetRootWindow());
+  if (screen_position_client) {
+    gfx::Point origin = work_area.origin();
+    screen_position_client->ConvertPointFromScreen(window_->GetRootWindow(),
+                                                   &origin);
+    work_area.set_origin(origin);
+  }
+
   parent_bounds = parent_bounds.Intersect(work_area);
 
   // If |window_|'s transient parent's bounds are big enough to fit it, then we
@@ -375,7 +381,9 @@ void NativeWidgetAura::CenterWindow(const gfx::Size& size) {
       parent_bounds.y() + (parent_bounds.height() - size.height()) / 2,
       size.width(),
       size.height());
-  window_bounds = window_bounds.AdjustToFit(work_area);
+  // Don't size the window bigger than the parent, otherwise the user may not be
+  // able to close or move it.
+  window_bounds = window_bounds.AdjustToFit(parent_bounds);
 
   // Convert the bounds back relative to the parent.
   gfx::Point origin = window_bounds.origin();
@@ -422,18 +430,14 @@ void NativeWidgetAura::InitModalType(ui::ModalType modal_type) {
     window_->SetProperty(aura::client::kModalKey, modal_type);
 }
 
-gfx::Rect NativeWidgetAura::GetWindowScreenBounds() const {
-  gfx::Rect bounds = window_->GetBoundsInRootWindow();
-  AdjustScreenBounds(window_, &bounds);
-  return bounds;
+gfx::Rect NativeWidgetAura::GetWindowBoundsInScreen() const {
+  return window_->GetBoundsInScreen();
 }
 
-gfx::Rect NativeWidgetAura::GetClientAreaScreenBounds() const {
+gfx::Rect NativeWidgetAura::GetClientAreaBoundsInScreen() const {
   // View-to-screen coordinate system transformations depend on this returning
   // the full window bounds, for example View::ConvertPointToScreen().
-  gfx::Rect bounds = window_->GetBoundsInRootWindow();
-  AdjustScreenBounds(window_, &bounds);
-  return bounds;
+  return window_->GetBoundsInScreen();
 }
 
 gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
@@ -447,10 +451,16 @@ gfx::Rect NativeWidgetAura::GetRestoredBounds() const {
   return restore_bounds ? *restore_bounds : window_->bounds();
 }
 
-void NativeWidgetAura::SetBounds(const gfx::Rect& in_bounds) {
-  gfx::Rect bounds = in_bounds;
-  if (desktop_helper_.get())
-    bounds = desktop_helper_->ModifyAndSetBounds(bounds);
+void NativeWidgetAura::SetBounds(const gfx::Rect& bounds) {
+  aura::RootWindow* root = window_->GetRootWindow();
+  if (root) {
+    aura::client::ScreenPositionClient* screen_position_client =
+        aura::client::GetScreenPositionClient(root);
+    if (screen_position_client) {
+      screen_position_client->SetBounds(window_, bounds);
+      return;
+    }
+  }
   window_->SetBounds(bounds);
 }
 
@@ -511,8 +521,8 @@ void NativeWidgetAura::Hide() {
 
 void NativeWidgetAura::ShowMaximizedWithBounds(
     const gfx::Rect& restored_bounds) {
-  SetRestoreBounds(window_, restored_bounds);
   ShowWithWindowState(ui::SHOW_STATE_MAXIMIZED);
+  SetRestoreBounds(window_, restored_bounds);
 }
 
 void NativeWidgetAura::ShowWithWindowState(ui::WindowShowState state) {
@@ -845,7 +855,7 @@ void NativeWidgetAura::OnWindowDestroyed() {
     delete this;
 }
 
-void NativeWidgetAura::OnWindowVisibilityChanged(bool visible) {
+void NativeWidgetAura::OnWindowTargetVisibilityChanged(bool visible) {
   delegate_->OnNativeWidgetVisibilityChanged(visible);
 }
 

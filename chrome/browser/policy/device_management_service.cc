@@ -17,7 +17,6 @@
 #include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/host_resolver.h"
@@ -28,6 +27,7 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_response_headers.h"
 #include "net/proxy/proxy_service.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -67,11 +67,6 @@ const int kPendingApproval = 412;
 const int kInternalServerError = 500;
 const int kServiceUnavailable = 503;
 const int kPolicyNotFound = 902; // This error is not sent as HTTP status code.
-
-// TODO(pastarmovj): Legacy error codes are here for compatibility only. They
-// should be removed once the DM Server has been updated.
-const int kPendingApprovalLegacy = 491;
-const int kDeviceNotFoundLegacy = 901;
 
 #if defined(OS_CHROMEOS)
 // Machine info keys.
@@ -319,6 +314,8 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     const net::ResponseCookies& cookies,
     const std::string& data) {
   if (status.status() != net::URLRequestStatus::SUCCESS) {
+    LOG(WARNING) << "DMServer request failed, status: " << status.status()
+                 << ", error: " << status.error();
     ReportError(DM_STATUS_REQUEST_FAILED);
     return;
   }
@@ -345,7 +342,6 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     case kDeviceManagementNotAllowed:
       ReportError(DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED);
       return;
-    case kPendingApprovalLegacy:
     case kPendingApproval:
       ReportError(DM_STATUS_SERVICE_ACTIVATION_PENDING);
       return;
@@ -354,7 +350,6 @@ void DeviceManagementRequestJobImpl::HandleResponse(
     case kServiceUnavailable:
       ReportError(DM_STATUS_TEMPORARY_UNAVAILABLE);
       return;
-    case kDeviceNotFoundLegacy:
     case kDeviceNotFound:
       ReportError(DM_STATUS_SERVICE_DEVICE_NOT_FOUND);
       return;
@@ -514,7 +509,7 @@ DeviceManagementService::DeviceManagementService(
 
 void DeviceManagementService::StartJob(DeviceManagementRequestJobImpl* job,
                                        bool bypass_proxy) {
-  net::URLFetcher* fetcher = content::URLFetcher::Create(
+  net::URLFetcher* fetcher = net::URLFetcher::Create(
       0, job->GetURL(server_url_), net::URLFetcher::POST, this);
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES |

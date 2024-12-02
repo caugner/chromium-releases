@@ -12,13 +12,12 @@
 #include "base/stringprintf.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_preference_helpers.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/api/experimental_font_settings.h"
+#include "chrome/common/extensions/api/font_settings.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/font_list_async.h"
@@ -30,14 +29,16 @@
 #include "ui/gfx/platform_font_win.h"
 #endif
 
-namespace fonts = extensions::api::experimental_font_settings;
+using extensions::APIPermission;
+
+namespace fonts = extensions::api::font_settings;
 
 namespace {
 
-const char kFontNameKey[] = "fontName";
+const char kFontIdKey[] = "fontId";
 const char kGenericFamilyKey[] = "genericFamily";
 const char kLevelOfControlKey[] = "levelOfControl";
-const char kLocalizedNameKey[] = "localizedName";
+const char kDisplayNameKey[] = "displayName";
 const char kPixelSizeKey[] = "pixelSize";
 const char kScriptKey[] = "script";
 
@@ -45,12 +46,12 @@ const char kSetFromIncognitoError[] =
     "Can't modify regular settings from an incognito context.";
 
 const char kOnDefaultFixedFontSizeChanged[] =
-    "experimental.fontSettings.onDefaultFixedFontSizeChanged";
+    "fontSettings.onDefaultFixedFontSizeChanged";
 const char kOnDefaultFontSizeChanged[] =
-    "experimental.fontSettings.onDefaultFontSizeChanged";
-const char kOnFontChanged[] = "experimental.fontSettings.onFontChanged";
+    "fontSettings.onDefaultFontSizeChanged";
+const char kOnFontChanged[] = "fontSettings.onFontChanged";
 const char kOnMinimumFontSizeChanged[] =
-    "experimental.fontSettings.onMinimumFontSizeChanged";
+    "fontSettings.onMinimumFontSizeChanged";
 
 // Format for font name preference paths.
 const char kWebKitFontPrefFormat[] = "webkit.webprefs.fonts.%s.%s";
@@ -202,7 +203,7 @@ void ExtensionFontSettingsEventRouter::OnFontNamePrefChanged(
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
   args.Append(dict);
-  dict->SetString(kFontNameKey, font_name);
+  dict->SetString(kFontIdKey, font_name);
   dict->SetString(kGenericFamilyKey, generic_family);
   dict->SetString(kScriptKey, script);
 
@@ -210,7 +211,7 @@ void ExtensionFontSettingsEventRouter::OnFontNamePrefChanged(
       profile_,
       kOnFontChanged,
       &args,
-      ExtensionAPIPermission::kExperimental,
+      APIPermission::kFontSettings,
       incognito,
       pref_name);
 }
@@ -234,7 +235,7 @@ void ExtensionFontSettingsEventRouter::OnFontPrefChanged(
       profile_,
       event_name,
       &args,
-      ExtensionAPIPermission::kExperimental,
+      APIPermission::kFontSettings,
       incognito,
       pref_name);
 }
@@ -256,10 +257,11 @@ bool ClearFontFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       profile_->GetPrefs()->FindPreference(pref_path.c_str()));
 
-  ExtensionPrefs* prefs = profile_->GetExtensionService()->extension_prefs();
+  extensions::ExtensionPrefs* prefs =
+      profile_->GetExtensionService()->extension_prefs();
   prefs->RemoveExtensionControlledPref(extension_id(),
                                        pref_path.c_str(),
-                                       kExtensionPrefsScopeRegular);
+                                       extensions::kExtensionPrefsScopeRegular);
   return true;
 }
 
@@ -289,9 +291,9 @@ bool GetFontFunction::RunImpl() {
                                                       kIncognito);
 
   DictionaryValue* result = new DictionaryValue();
-  result->SetString(kFontNameKey, font_name);
+  result->SetString(kFontIdKey, font_name);
   result->SetString(kLevelOfControlKey, level_of_control);
-  result_.reset(result);
+  SetResult(result);
   return true;
 }
 
@@ -311,12 +313,13 @@ bool SetFontFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(
       profile_->GetPrefs()->FindPreference(pref_path.c_str()));
 
-  ExtensionPrefs* prefs = profile_->GetExtensionService()->extension_prefs();
+  extensions::ExtensionPrefs* prefs =
+      profile_->GetExtensionService()->extension_prefs();
   prefs->SetExtensionControlledPref(
       extension_id(),
       pref_path.c_str(),
-      kExtensionPrefsScopeRegular,
-      Value::CreateStringValue(params->details.font_name));
+      extensions::kExtensionPrefsScopeRegular,
+      Value::CreateStringValue(params->details.font_id));
   return true;
 }
 
@@ -353,12 +356,12 @@ bool GetFontListFunction::CopyFontsToResult(ListValue* fonts) {
     }
 
     DictionaryValue* font_name = new DictionaryValue();
-    font_name->Set(kFontNameKey, Value::CreateStringValue(name));
-    font_name->Set(kLocalizedNameKey, Value::CreateStringValue(localized_name));
+    font_name->Set(kFontIdKey, Value::CreateStringValue(name));
+    font_name->Set(kDisplayNameKey, Value::CreateStringValue(localized_name));
     result->Append(font_name);
   }
 
-  result_.reset(result.release());
+  SetResult(result.release());
   return true;
 }
 
@@ -368,10 +371,11 @@ bool ClearFontPrefExtensionFunction::RunImpl() {
     return false;
   }
 
-  ExtensionPrefs* prefs = profile_->GetExtensionService()->extension_prefs();
+  extensions::ExtensionPrefs* prefs =
+      profile_->GetExtensionService()->extension_prefs();
   prefs->RemoveExtensionControlledPref(extension_id(),
                                        GetPrefName(),
-                                       kExtensionPrefsScopeRegular);
+                                       extensions::kExtensionPrefsScopeRegular);
   return true;
 }
 
@@ -393,7 +397,7 @@ bool GetFontPrefExtensionFunction::RunImpl() {
   DictionaryValue* result = new DictionaryValue();
   result->Set(GetKey(), pref->GetValue()->DeepCopy());
   result->SetString(kLevelOfControlKey, level_of_control);
-  result_.reset(result);
+  SetResult(result);
   return true;
 }
 
@@ -409,10 +413,11 @@ bool SetFontPrefExtensionFunction::RunImpl() {
   Value* value;
   EXTENSION_FUNCTION_VALIDATE(details->Get(GetKey(), &value));
 
-  ExtensionPrefs* prefs = profile_->GetExtensionService()->extension_prefs();
+  extensions::ExtensionPrefs* prefs =
+      profile_->GetExtensionService()->extension_prefs();
   prefs->SetExtensionControlledPref(extension_id(),
                                     GetPrefName(),
-                                    kExtensionPrefsScopeRegular,
+                                    extensions::kExtensionPrefsScopeRegular,
                                     value->DeepCopy());
   return true;
 }

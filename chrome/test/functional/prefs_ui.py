@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import time
+
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
 import test_utils
@@ -202,6 +204,22 @@ class PrefsUITest(pyauto.PyUITest):
     self._VerifyContentExceptionUI(
         ContentTypes.PLUGINS, 'http://maps.google.com:80',
         Behaviors.BLOCK, incognito=True)
+
+  def testSetCookieAndDeleteInContentSettings(self):
+    """Verify a cookie can be deleted in the Content Settings UI."""
+    # Create a cookie.
+    cookie_dict = {
+        'name': 'test_cookie',
+        'value': 'test_value',
+        'expiry': time.time() + 30,
+    }
+    site = '127.0.0.1'
+    self.NavigateToURL(self.GetHttpURLForDataPath('google', 'google.html'))
+    self._driver.add_cookie(cookie_dict)
+    page = settings.CookiesAndSiteDataSettings.FromNavigation(self._driver)
+    page.DeleteSiteData(site)
+    self.assertTrue(site not in page.GetSiteNameList(),
+                    'Site "%s" was not deleted.'  % site)
 
   def testRemoveMailProtocolHandler(self):
     """Verify the mail protocol handler is added and removed successfully."""

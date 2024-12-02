@@ -51,7 +51,7 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "webkit/glue/image_decoder.h"
-#include "webkit/glue/image_resource_fetcher.h"
+#include "webkit/glue/multi_resolution_image_resource_fetcher.h"
 #include "webkit/glue/webkit_glue.h"
 #include "v8/include/v8-testing.h"
 
@@ -70,7 +70,8 @@ using WebKit::WebURL;
 using WebKit::WebURLRequest;
 using WebKit::WebView;
 using WebKit::WebVector;
-using webkit_glue::ImageResourceFetcher;
+using extensions::APIPermission;
+using webkit_glue::MultiResolutionImageResourceFetcher;
 
 // Delay in milliseconds that we'll wait before capturing the page contents
 // and thumbnail.
@@ -331,15 +332,17 @@ void ChromeRenderViewObserver::OnDownloadFavicon(int id,
     SkBitmap data_image = ImageFromDataUrl(image_url);
     data_image_failed = data_image.empty();
     if (!data_image_failed) {
+      std::vector<SkBitmap> images(1, data_image);
       Send(new IconHostMsg_DidDownloadFavicon(
-          routing_id(), id, image_url, false, data_image));
+          routing_id(), id, image_url, false, image_size, images));
     }
   }
 
   if (data_image_failed ||
       !DownloadFavicon(id, image_url, image_size)) {
     Send(new IconHostMsg_DidDownloadFavicon(
-        routing_id(), id, image_url, true, SkBitmap()));
+        routing_id(), id, image_url, true, image_size,
+        std::vector<SkBitmap>()));
   }
 }
 
@@ -482,30 +485,46 @@ bool ChromeRenderViewObserver::allowWriteToClipboard(WebFrame* frame,
   return allowed;
 }
 
-bool ChromeRenderViewObserver::IsExperimentalWebFeatureAllowed(
-    const WebDocument& document) {
-  // Experimental Web API is enabled when
-  // - The specific API is allowed from command line flag, or
-  // - If the document is running extensions or apps which
-  //   has the "experimental" permission, or
-  // - The document is running Web UI.
-  WebSecurityOrigin origin = document.securityOrigin();
-  if (EqualsASCII(origin.protocol(), chrome::kChromeUIScheme))
-    return true;
+bool ChromeRenderViewObserver::HasExtensionPermission(
+    const WebSecurityOrigin& origin, APIPermission::ID permission) const {
+  if (!EqualsASCII(origin.protocol(), chrome::kExtensionScheme))
+    return false;
+
+  const std::string extension_id = origin.host().utf8().data();
+  if (!extension_dispatcher_->IsExtensionActive(extension_id))
+    return false;
+
   const extensions::Extension* extension =
-      extension_dispatcher_->extensions()->GetExtensionOrAppByURL(
-          ExtensionURLInfo(origin, document.url()));
+      extension_dispatcher_->extensions()->GetByID(extension_id);
   if (!extension)
     return false;
-  return (extension_dispatcher_->IsExtensionActive(extension->id()) &&
-          extension->HasAPIPermission(ExtensionAPIPermission::kExperimental));
+
+  return extension->HasAPIPermission(permission);
 }
 
 bool ChromeRenderViewObserver::allowWebComponents(const WebDocument& document,
                                                   bool defaultValue) {
   if (defaultValue)
     return true;
-  return IsExperimentalWebFeatureAllowed(document);
+
+  WebSecurityOrigin origin = document.securityOrigin();
+  if (EqualsASCII(origin.protocol(), chrome::kChromeUIScheme))
+    return true;
+
+  // The <browser> tag is implemented via Shadow DOM.
+  if (HasExtensionPermission(origin, APIPermission::kBrowserTag))
+    return true;
+
+  if (HasExtensionPermission(origin, APIPermission::kExperimental))
+    return true;
+
+  return false;
+}
+
+bool ChromeRenderViewObserver::allowHTMLNotifications(
+    const WebDocument& document) {
+  WebSecurityOrigin origin = document.securityOrigin();
+  return HasExtensionPermission(origin, APIPermission::kNotification);
 }
 
 static void SendInsecureContentSignal(int signal) {
@@ -1031,26 +1050,29 @@ bool ChromeRenderViewObserver::DownloadFavicon(int id,
   if (!render_view()->GetWebView())
     return false;
   // Create an image resource fetcher and assign it with a call back object.
-  image_fetchers_.push_back(linked_ptr<ImageResourceFetcher>(
-      new ImageResourceFetcher(
-          image_url, render_view()->GetWebView()->mainFrame(), id, image_size,
+  image_fetchers_.push_back(linked_ptr<MultiResolutionImageResourceFetcher>(
+      new MultiResolutionImageResourceFetcher(
+          image_url, render_view()->GetWebView()->mainFrame(), id,
           WebURLRequest::TargetIsFavicon,
           base::Bind(&ChromeRenderViewObserver::DidDownloadFavicon,
-                     base::Unretained(this)))));
+                     base::Unretained(this), image_size))));
   return true;
 }
 
 void ChromeRenderViewObserver::DidDownloadFavicon(
-    ImageResourceFetcher* fetcher, const SkBitmap& image) {
+    int requested_size,
+    MultiResolutionImageResourceFetcher* fetcher,
+    const std::vector<SkBitmap>& images) {
   // Notify requester of image download status.
   Send(new IconHostMsg_DidDownloadFavicon(routing_id(),
                                           fetcher->id(),
                                           fetcher->image_url(),
-                                          image.isNull(),
-                                          image));
+                                          images.empty(),
+                                          requested_size,
+                                          images));
 
   // Remove the image fetcher from our pending list. We're in the callback from
-  // ImageResourceFetcher, best to delay deletion.
+  // MultiResolutionImageResourceFetcher, best to delay deletion.
   ImageResourceFetcherList::iterator iter;
   for (iter = image_fetchers_.begin(); iter != image_fetchers_.end(); ++iter) {
     if (iter->get() == fetcher) {

@@ -9,8 +9,10 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -48,14 +50,14 @@ IN_PROC_BROWSER_TEST_F(ChromeMainTest, ReuseBrowserInstanceWhenOpeningFile) {
       FilePath(), FilePath().AppendASCII("empty.html"));
   CommandLine new_command_line(GetCommandLineForRelaunch());
   new_command_line.AppendArgPath(test_file_path);
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_TAB_ADDED,
         content::NotificationService::AllSources());
   Relaunch(new_command_line);
   observer.Wait();
 
   GURL url = net::FilePathToFileURL(test_file_path);
-  content::WebContents* tab = browser()->GetActiveWebContents();
+  content::WebContents* tab = chrome::GetActiveWebContents(browser());
   ASSERT_EQ(url, tab->GetController().GetActiveEntry()->GetVirtualURL());
 }
 
@@ -94,17 +96,17 @@ IN_PROC_BROWSER_TEST_F(ChromeMainTest, SecondLaunchFromIncognitoWithNormalUrl) {
   ASSERT_EQ(1u, browser::GetTabbedBrowserCount(browser()->profile()));
 
   // Create an incognito window.
-  browser()->NewIncognitoWindow();
+  chrome::NewIncognitoWindow(browser());
 
   ASSERT_EQ(2u, BrowserList::size());
   ASSERT_EQ(1u, browser::GetTabbedBrowserCount(browser()->profile()));
 
   // Close the first window.
   Profile* profile = browser()->profile();
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_BROWSER_CLOSED,
         content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   observer.Wait();
 
   // There should only be the incognito window open now.
@@ -116,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ChromeMainTest, SecondLaunchFromIncognitoWithNormalUrl) {
       FilePath(), FilePath().AppendASCII("empty.html"));
   CommandLine new_command_line(GetCommandLineForRelaunch());
   new_command_line.AppendArgPath(test_file_path);
-  ui_test_utils::WindowedNotificationObserver tab_observer(
+  content::WindowedNotificationObserver tab_observer(
         chrome::NOTIFICATION_TAB_ADDED,
         content::NotificationService::AllSources());
   Relaunch(new_command_line);

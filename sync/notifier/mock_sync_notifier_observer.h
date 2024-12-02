@@ -4,14 +4,13 @@
 
 #ifndef SYNC_NOTIFIER_MOCK_SYNC_NOTIFIER_OBSERVER_H_
 #define SYNC_NOTIFIER_MOCK_SYNC_NOTIFIER_OBSERVER_H_
-#pragma once
 
 #include <string>
 
 #include "sync/notifier/sync_notifier_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 class MockSyncNotifierObserver : public SyncNotifierObserver {
  public:
@@ -21,10 +20,9 @@ class MockSyncNotifierObserver : public SyncNotifierObserver {
   MOCK_METHOD0(OnNotificationsEnabled, void());
   MOCK_METHOD1(OnNotificationsDisabled, void(NotificationsDisabledReason));
   MOCK_METHOD2(OnIncomingNotification,
-               void(const syncable::ModelTypePayloadMap&,
-                    IncomingNotificationSource));
+               void(const ObjectIdPayloadMap&, IncomingNotificationSource));
 };
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_MOCK_SYNC_NOTIFIER_OBSERVER_H_

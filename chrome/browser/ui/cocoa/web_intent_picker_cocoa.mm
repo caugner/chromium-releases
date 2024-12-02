@@ -11,6 +11,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/web_contents.h"
+#include "ipc/ipc_message.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/gfx/image/image.h"
 
@@ -154,16 +156,17 @@ void WebIntentPickerCocoa::OnExtensionIconChanged(
   PerformLayout();
 }
 
-void WebIntentPickerCocoa::OnInlineDisposition(WebIntentPickerModel* model,
+void WebIntentPickerCocoa::OnInlineDisposition(const string16& title,
                                                const GURL& url) {
   content::WebContents* web_contents = content::WebContents::Create(
       tab_contents_->profile(),
       tab_util::GetSiteInstanceForNewTab(tab_contents_->profile(), url),
       MSG_ROUTING_NONE, NULL, NULL);
   inline_disposition_tab_contents_.reset(new TabContents(web_contents));
+  Browser* browser = browser::FindBrowserWithWebContents(
+      tab_contents_->web_contents());
   inline_disposition_delegate_.reset(
-      new WebIntentInlineDispositionDelegate(this, web_contents,
-                                             tab_contents_->profile()));
+      new WebIntentInlineDispositionDelegate(this, web_contents, browser));
 
   // Must call this immediately after WebContents creation to avoid race
   // with load.
@@ -174,7 +177,8 @@ void WebIntentPickerCocoa::OnInlineDisposition(WebIntentPickerModel* model,
       content::Referrer(),
       content::PAGE_TRANSITION_START_PAGE,
       std::string());
-
+  [sheet_controller_ setInlineDispositionTitle:
+      base::SysUTF16ToNSString(title)];
   [sheet_controller_ setInlineDispositionTabContents:
       inline_disposition_tab_contents_.get()];
   PerformLayout();
@@ -220,6 +224,11 @@ void WebIntentPickerCocoa::OnInlineDispositionAutoResize(
   [sheet_controller_ setInlineDispositionFrameSize:inline_content_size];
 }
 
+void WebIntentPickerCocoa::OnPendingAsyncCompleted() {
+  DCHECK(sheet_controller_);
+  [sheet_controller_ pendingAsyncCompleted];
+}
+
 void WebIntentPickerCocoa::OnExtensionLinkClicked(const std::string& id) {
   DCHECK(delegate_);
   delegate_->OnExtensionLinkClicked(id);
@@ -228,4 +237,13 @@ void WebIntentPickerCocoa::OnExtensionLinkClicked(const std::string& id) {
 void WebIntentPickerCocoa::OnSuggestionsLinkClicked() {
   DCHECK(delegate_);
   delegate_->OnSuggestionsLinkClicked();
+}
+
+void WebIntentPickerCocoa::OnChooseAnotherService() {
+  DCHECK(delegate_);
+  delegate_->OnChooseAnotherService();
+  inline_disposition_tab_contents_.reset();
+  inline_disposition_delegate_.reset();
+  [sheet_controller_ setInlineDispositionTabContents:NULL];
+  PerformLayout();
 }

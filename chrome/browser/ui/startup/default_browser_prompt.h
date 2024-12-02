@@ -4,15 +4,18 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_DEFAULT_BROWSER_PROMPT_H_
 #define CHROME_BROWSER_UI_STARTUP_DEFAULT_BROWSER_PROMPT_H_
-#pragma once
 
 class Profile;
 
-namespace browser {
+namespace chrome {
 
 // Shows a prompt UI to set the default browser if necessary.
 void ShowDefaultBrowserPrompt(Profile* profile);
 
-}  // namespace browser
+// Shows a prompt UI to set the default browser on first run
+// (if necessary and permitted). Returns true if the dialog has been launched.
+bool ShowFirstRunDefaultBrowserPrompt(Profile* profile);
+
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_STARTUP_DEFAULT_BROWSER_PROMPT_H_

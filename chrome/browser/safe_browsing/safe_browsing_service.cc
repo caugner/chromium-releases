@@ -40,7 +40,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -92,6 +92,10 @@ FilePath BaseFilename() {
   bool result = PathService::Get(chrome::DIR_USER_DATA, &path);
   DCHECK(result);
   return path.Append(chrome::kSafeBrowsingBaseFilename);
+}
+
+FilePath CookieFilePath() {
+  return FilePath(BaseFilename().value() + kCookiesFile);
 }
 
 }  // namespace
@@ -224,7 +228,12 @@ void SafeBrowsingService::Client::OnSafeBrowsingResult(
   }
 }
 
-/* static */
+// static
+FilePath SafeBrowsingService::GetCookieFilePathForTesting() {
+  return CookieFilePath();
+}
+
+// static
 SafeBrowsingService* SafeBrowsingService::CreateSafeBrowsingService() {
   if (!factory_)
     factory_ = g_safe_browsing_service_factory_impl.Pointer();
@@ -610,8 +619,7 @@ void SafeBrowsingService::InitURLRequestContextOnIOThread(
   DCHECK(!url_request_context_.get());
 
   scoped_refptr<net::CookieStore> cookie_store = new net::CookieMonster(
-      new SQLitePersistentCookieStore(
-          FilePath(BaseFilename().value() + kCookiesFile), false, NULL),
+      new SQLitePersistentCookieStore(CookieFilePath(), false, NULL),
       NULL);
 
   url_request_context_.reset(new SafeBrowsingURLRequestContext);
@@ -974,6 +982,17 @@ void SafeBrowsingService::DatabaseUpdateFinished(bool update_succeeded) {
   GetDatabase()->UpdateFinished(update_succeeded);
   DCHECK(database_update_in_progress_);
   database_update_in_progress_ = false;
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&SafeBrowsingService::NotifyDatabaseUpdateFinished,
+                 this, update_succeeded));
+}
+
+void SafeBrowsingService::NotifyDatabaseUpdateFinished(bool update_succeeded) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
+      content::Source<SafeBrowsingService>(this),
+      content::Details<bool>(&update_succeeded));
 }
 
 void SafeBrowsingService::Start() {

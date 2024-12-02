@@ -14,7 +14,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/workspace.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
-#include "ash/wm/workspace_controller.h"
+#include "ash/wm/workspace_controller_test_helper.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
@@ -75,8 +75,9 @@ class WorkspaceManagerTest : public test::AshTestBase {
   // Overridden from AshTestBase:
   virtual void SetUp() OVERRIDE {
     test::AshTestBase::SetUp();
-    Shell::TestApi shell_test(Shell::GetInstance());
-    manager_ = shell_test.workspace_controller()->workspace_manager();
+    WorkspaceControllerTestHelper workspace_helper(
+        Shell::TestApi(Shell::GetInstance()).workspace_controller());
+    manager_ = workspace_helper.workspace_manager();
     manager_->set_grid_size(0);
   }
   virtual void TearDown() OVERRIDE {
@@ -98,14 +99,14 @@ TEST_F(WorkspaceManagerTest, AddNormalWindowWhenEmpty) {
   scoped_ptr<Window> w1(CreateTestWindow());
   w1->SetBounds(gfx::Rect(0, 0, 250, 251));
 
-  ASSERT_TRUE(manager_->IsManagedWindow(w1.get()));
+  ASSERT_TRUE(manager_->ShouldManageWindow(w1.get()));
   EXPECT_FALSE(FindBy(w1.get()));
 
-  EXPECT_TRUE(GetRestoreBounds(w1.get()) == NULL);
+  EXPECT_TRUE(GetRestoreBoundsInScreen(w1.get()) == NULL);
 
   w1->Show();
 
-  EXPECT_TRUE(GetRestoreBounds(w1.get()) == NULL);
+  EXPECT_TRUE(GetRestoreBoundsInScreen(w1.get()) == NULL);
 
   ASSERT_TRUE(w1->layer() != NULL);
   EXPECT_TRUE(w1->layer()->visible());
@@ -125,7 +126,7 @@ TEST_F(WorkspaceManagerTest, SingleMaximizeWindow) {
   scoped_ptr<Window> w1(CreateTestWindow());
   w1->SetBounds(gfx::Rect(0, 0, 250, 251));
 
-  ASSERT_TRUE(manager_->IsManagedWindow(w1.get()));
+  ASSERT_TRUE(manager_->ShouldManageWindow(w1.get()));
 
   w1->Show();
 
@@ -143,9 +144,9 @@ TEST_F(WorkspaceManagerTest, SingleMaximizeWindow) {
   EXPECT_EQ(Workspace::TYPE_MAXIMIZED, workspaces()[1]->type());
   ASSERT_EQ(1u, workspaces()[1]->windows().size());
   EXPECT_EQ(w1.get(), workspaces()[1]->windows()[0]);
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(w1.get()).width(),
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBoundsInParent(w1.get()).width(),
             w1->bounds().width());
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(w1.get()).height(),
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBoundsInParent(w1.get()).height(),
             w1->bounds().height());
 
   // Restore the window.
@@ -203,7 +204,8 @@ TEST_F(WorkspaceManagerTest, AddMaximizedWindowWhenEmpty) {
 
   ASSERT_TRUE(w1->layer() != NULL);
   EXPECT_TRUE(w1->layer()->visible());
-  gfx::Rect work_area(ScreenAsh::GetMaximizedWindowBounds(w1.get()));
+  gfx::Rect work_area(
+      ScreenAsh::GetMaximizedWindowBoundsInParent(w1.get()));
   EXPECT_EQ(work_area.width(), w1->bounds().width());
   EXPECT_EQ(work_area.height(), w1->bounds().height());
 
@@ -241,7 +243,7 @@ TEST_F(WorkspaceManagerTest, MaximizeWithNormalWindow) {
   ASSERT_TRUE(w2->layer() != NULL);
   EXPECT_TRUE(w2->layer()->visible());
 
-  gfx::Rect work_area(ScreenAsh::GetMaximizedWindowBounds(w1.get()));
+  gfx::Rect work_area(ScreenAsh::GetMaximizedWindowBoundsInParent(w1.get()));
   EXPECT_EQ(work_area.width(), w2->bounds().width());
   EXPECT_EQ(work_area.height(), w2->bounds().height());
 
@@ -291,7 +293,7 @@ TEST_F(WorkspaceManagerTest, ChangeBoundsOfNormalWindow) {
   scoped_ptr<Window> w1(CreateTestWindow());
   w1->Show();
 
-  EXPECT_TRUE(manager_->IsManagedWindow(w1.get()));
+  EXPECT_TRUE(manager_->ShouldManageWindow(w1.get()));
   // Setting the bounds should go through since the window is in the normal
   // workspace.
   w1->SetBounds(gfx::Rect(0, 0, 200, 500));
@@ -351,8 +353,8 @@ TEST_F(WorkspaceManagerTest, SingleFullscreenWindow) {
   EXPECT_EQ(w1.get(), workspaces()[1]->windows()[0]);
   EXPECT_EQ(GetFullscreenBounds(w1.get()).width(), w1->bounds().width());
   EXPECT_EQ(GetFullscreenBounds(w1.get()).height(), w1->bounds().height());
-  ASSERT_TRUE(GetRestoreBounds(w1.get()));
-  EXPECT_EQ(gfx::Rect(0, 0, 250, 251), *GetRestoreBounds(w1.get()));
+  ASSERT_TRUE(GetRestoreBoundsInScreen(w1.get()));
+  EXPECT_EQ(gfx::Rect(0, 0, 250, 251), *GetRestoreBoundsInScreen(w1.get()));
 }
 
 // Makes sure switching workspaces doesn't show transient windows.
@@ -511,7 +513,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
   w1->Show();
   EXPECT_EQ(ShelfLayoutManager::VISIBLE, shelf->visibility_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(w2.get()).ToString(),
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBoundsInParent(w2.get()).ToString(),
             w2->bounds().ToString());
 
   // Switch to w2.
@@ -519,7 +521,7 @@ TEST_F(WorkspaceManagerTest, ShelfStateUpdated) {
   EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(ShelfLayoutManager::AUTO_HIDE_HIDDEN, shelf->auto_hide_state());
   EXPECT_EQ("0,1 101x102", w1->bounds().ToString());
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(w2.get()).ToString(),
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBoundsInParent(w2.get()).ToString(),
             w2->bounds().ToString());
 }
 
@@ -605,8 +607,8 @@ TEST_F(WorkspaceManagerTest, GetWindowStateWithUnmanagedFullscreenWindow) {
   w2->Show();
 
   EXPECT_EQ(ShelfLayoutManager::HIDDEN, shelf->visibility_state());
-  ASSERT_FALSE(manager_->IsManagedWindow(w2.get()));
-  EXPECT_EQ(WorkspaceManager::WINDOW_STATE_FULL_SCREEN,
+  ASSERT_FALSE(manager_->ShouldManageWindow(w2.get()));
+  EXPECT_EQ(WORKSPACE_WINDOW_STATE_FULL_SCREEN,
             manager_->GetWindowState());
 
   w2->Hide();
@@ -641,8 +643,8 @@ TEST_F(WorkspaceManagerTest,
   // Even though auto-hide behavior is NEVER full-screen windows cause the shelf
   // to hide.
   EXPECT_EQ(ShelfLayoutManager::HIDDEN, shelf->visibility_state());
-  ASSERT_FALSE(manager_->IsManagedWindow(w2.get()));
-  EXPECT_EQ(WorkspaceManager::WINDOW_STATE_FULL_SCREEN,
+  ASSERT_FALSE(manager_->ShouldManageWindow(w2.get()));
+  EXPECT_EQ(WORKSPACE_WINDOW_STATE_FULL_SCREEN,
             manager_->GetWindowState());
 
   w2->Hide();
@@ -650,7 +652,7 @@ TEST_F(WorkspaceManagerTest,
 
   w2->Show();
   EXPECT_EQ(ShelfLayoutManager::HIDDEN, shelf->visibility_state());
-  EXPECT_EQ(WorkspaceManager::WINDOW_STATE_FULL_SCREEN,
+  EXPECT_EQ(WORKSPACE_WINDOW_STATE_FULL_SCREEN,
             manager_->GetWindowState());
 
   w2.reset();
@@ -669,6 +671,28 @@ TEST_F(WorkspaceManagerTest, DontResetAnimation) {
   w2->Show();
   w2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   EXPECT_TRUE(w1->GetProperty(aura::client::kAnimationsDisabledKey));
+}
+
+// Verifies a window marked as persisting across all workspaces ends up in its
+// own workspace when maximized.
+TEST_F(WorkspaceManagerTest, MaximizeDontPersistEndsUpInOwnWorkspace) {
+  scoped_ptr<Window> w1(CreateTestWindow());
+
+  SetPersistsAcrossAllWorkspaces(
+      w1.get(),
+      WINDOW_PERSISTS_ACROSS_ALL_WORKSPACES_VALUE_YES);
+  w1->Show();
+
+  // Shouldn't contain the window initially.
+  EXPECT_FALSE(manager_->Contains(w1.get()));
+
+  // Maximize should trigger containing the window.
+  w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  EXPECT_TRUE(manager_->Contains(w1.get()));
+
+  // And resetting to normal should remove it.
+  w1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_FALSE(manager_->Contains(w1.get()));
 }
 
 }  // namespace internal

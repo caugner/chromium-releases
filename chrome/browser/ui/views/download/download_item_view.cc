@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -106,6 +105,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
   DCHECK(download_);
   download_->AddObserver(this);
+  set_context_menu_controller(this);
 
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
@@ -401,29 +401,7 @@ gfx::Size DownloadItemView::GetPreferredSize() {
 // Handle a mouse click and open the context menu if the mouse is
 // over the drop-down region.
 bool DownloadItemView::OnMousePressed(const views::MouseEvent& event) {
-  // Mouse should not activate us in dangerous mode.
-  if (mode_ == DANGEROUS_MODE)
-    return true;
-
-  // Stop any completion animation.
-  if (complete_animation_.get() && complete_animation_->is_animating())
-    complete_animation_->End();
-
-  if (event.IsOnlyLeftMouseButton()) {
-    if (InDropDownButtonXCoordinateRange(event.x())) {
-      drop_down_pressed_ = true;
-      SetState(NORMAL, PUSHED);
-      // We are setting is_mouse_gesture to false when calling ShowContextMenu
-      // so that the positioning of the context menu will be similar to a
-      // keyboard invocation.  I.e. we want the menu to always be positioned
-      // next to the drop down button instead of the next to the pointer.
-      ShowContextMenu(event.location(), false);
-      // Once called, it is possible that *this was deleted (e.g.: due to
-      // invoking the 'Discard' action.)
-    } else if (!IsShowingWarningDialog()) {
-      SetState(PUSHED, NORMAL);
-    }
-  }
+  HandlePressEvent(event, event.IsOnlyLeftMouseButton());
   return true;
 }
 
@@ -457,17 +435,7 @@ bool DownloadItemView::OnMouseDragged(const views::MouseEvent& event) {
 }
 
 void DownloadItemView::OnMouseReleased(const views::MouseEvent& event) {
-  // Mouse should not activate us in dangerous mode.
-  if (mode_ == DANGEROUS_MODE)
-    return;
-
-  if (event.IsOnlyLeftMouseButton() &&
-      !InDropDownButtonXCoordinateRange(event.x()) &&
-      !IsShowingWarningDialog()) {
-    OpenDownload();
-  }
-
-  SetState(NORMAL, NORMAL);
+  HandleClickEvent(event, event.IsOnlyLeftMouseButton());
 }
 
 void DownloadItemView::OnMouseCaptureLost() {
@@ -526,6 +494,22 @@ bool DownloadItemView::OnKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
+ui::GestureStatus DownloadItemView::OnGestureEvent(
+    const views::GestureEvent& event) {
+  if (event.type() == ui::ET_GESTURE_TAP_DOWN) {
+    HandlePressEvent(event, true);
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
+
+  if (event.type() == ui::ET_GESTURE_TAP) {
+    HandleClickEvent(event, true);
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
+
+  SetState(NORMAL, NORMAL);
+  return views::View::OnGestureEvent(event);
+}
+
 bool DownloadItemView::GetTooltipText(const gfx::Point& p,
                                       string16* tooltip) const {
   if (IsShowingWarningDialog()) {
@@ -538,49 +522,6 @@ bool DownloadItemView::GetTooltipText(const gfx::Point& p,
   return true;
 }
 
-void DownloadItemView::ShowContextMenu(const gfx::Point& p,
-                                       bool is_mouse_gesture) {
-  gfx::Point point = p;
-  gfx::Size size;
-
-  // Similar hack as in MenuButton.
-  // We're about to show the menu from a mouse press. By showing from the
-  // mouse press event we block RootView in mouse dispatching. This also
-  // appears to cause RootView to get a mouse pressed BEFORE the mouse
-  // release is seen, which means RootView sends us another mouse press no
-  // matter where the user pressed. To force RootView to recalculate the
-  // mouse target during the mouse press we explicitly set the mouse handler
-  // to NULL.
-  static_cast<views::internal::RootView*>(GetWidget()->GetRootView())->
-      SetMouseHandler(NULL);
-
-  // If |is_mouse_gesture| is false, |p| is ignored. The menu is shown aligned
-  // to drop down arrow button.
-  if (!is_mouse_gesture) {
-    drop_down_pressed_ = true;
-    SetState(NORMAL, PUSHED);
-    point.SetPoint(drop_down_x_left_, box_y_);
-    size.SetSize(drop_down_x_right_ - drop_down_x_left_, box_height_);
-  }
-  // Post a task to release the button.  When we call the Run method on the menu
-  // below, it runs an inner message loop that might cause us to be deleted.
-  // Posting a task with a WeakPtr lets us safely handle the button release.
-  MessageLoop::current()->PostNonNestableTask(
-      FROM_HERE,
-      base::Bind(&DownloadItemView::ReleaseDropDown,
-                 weak_ptr_factory_.GetWeakPtr()));
-  views::View::ConvertPointToScreen(this, &point);
-
-  if (!context_menu_.get()) {
-    context_menu_.reset(
-        new DownloadShelfContextMenuView(model_.get(),
-                                         parent_->GetNavigator()));
-  }
-  context_menu_->Run(GetWidget()->GetTopLevelWidget(),
-                     gfx::Rect(point, size));
-  // We could be deleted now.
-}
-
 void DownloadItemView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = accessible_name_;
   state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
@@ -589,6 +530,14 @@ void DownloadItemView::GetAccessibleState(ui::AccessibleViewState* state) {
   } else {
     state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
   }
+}
+
+void DownloadItemView::ShowContextMenuForView(View* source,
+                                              const gfx::Point& point) {
+  // |point| is in screen coordinates. So convert it to local coordinates first.
+  gfx::Point local_point = point;
+  ConvertPointFromScreen(this, &local_point);
+  ShowContextMenuImpl(local_point, true);
 }
 
 void DownloadItemView::ButtonPressed(
@@ -930,6 +879,91 @@ void DownloadItemView::LoadIconIfItemPathChanged() {
     return;
 
   LoadIcon();
+}
+
+void DownloadItemView::ShowContextMenuImpl(const gfx::Point& p,
+                                           bool is_mouse_gesture) {
+  gfx::Point point = p;
+  gfx::Size size;
+
+  // Similar hack as in MenuButton.
+  // We're about to show the menu from a mouse press. By showing from the
+  // mouse press event we block RootView in mouse dispatching. This also
+  // appears to cause RootView to get a mouse pressed BEFORE the mouse
+  // release is seen, which means RootView sends us another mouse press no
+  // matter where the user pressed. To force RootView to recalculate the
+  // mouse target during the mouse press we explicitly set the mouse handler
+  // to NULL.
+  static_cast<views::internal::RootView*>(GetWidget()->GetRootView())->
+      SetMouseHandler(NULL);
+
+  // If |is_mouse_gesture| is false, |p| is ignored. The menu is shown aligned
+  // to drop down arrow button.
+  if (!is_mouse_gesture) {
+    drop_down_pressed_ = true;
+    SetState(NORMAL, PUSHED);
+    point.SetPoint(drop_down_x_left_, box_y_);
+    size.SetSize(drop_down_x_right_ - drop_down_x_left_, box_height_);
+  }
+  // Post a task to release the button.  When we call the Run method on the menu
+  // below, it runs an inner message loop that might cause us to be deleted.
+  // Posting a task with a WeakPtr lets us safely handle the button release.
+  MessageLoop::current()->PostNonNestableTask(
+      FROM_HERE,
+      base::Bind(&DownloadItemView::ReleaseDropDown,
+                 weak_ptr_factory_.GetWeakPtr()));
+  views::View::ConvertPointToScreen(this, &point);
+
+  if (!context_menu_.get()) {
+    context_menu_.reset(
+        new DownloadShelfContextMenuView(model_.get(),
+                                         parent_->GetNavigator()));
+  }
+  context_menu_->Run(GetWidget()->GetTopLevelWidget(),
+                     gfx::Rect(point, size));
+  // We could be deleted now.
+}
+
+void DownloadItemView::HandlePressEvent(const views::LocatedEvent& event,
+                                        bool active_event) {
+  // The event should not activate us in dangerous mode.
+  if (mode_ == DANGEROUS_MODE)
+    return;
+
+  // Stop any completion animation.
+  if (complete_animation_.get() && complete_animation_->is_animating())
+    complete_animation_->End();
+
+  if (active_event) {
+    if (InDropDownButtonXCoordinateRange(event.x())) {
+      drop_down_pressed_ = true;
+      SetState(NORMAL, PUSHED);
+      // We are setting is_mouse_gesture to false when calling ShowContextMenu
+      // so that the positioning of the context menu will be similar to a
+      // keyboard invocation.  I.e. we want the menu to always be positioned
+      // next to the drop down button instead of the next to the pointer.
+      ShowContextMenuImpl(event.location(), false);
+      // Once called, it is possible that *this was deleted (e.g.: due to
+      // invoking the 'Discard' action.)
+    } else if (!IsShowingWarningDialog()) {
+      SetState(PUSHED, NORMAL);
+    }
+  }
+}
+
+void DownloadItemView::HandleClickEvent(const views::LocatedEvent& event,
+                                        bool active_event) {
+  // Mouse should not activate us in dangerous mode.
+  if (mode_ == DANGEROUS_MODE)
+    return;
+
+  if (active_event &&
+      !InDropDownButtonXCoordinateRange(event.x()) &&
+      !IsShowingWarningDialog()) {
+    OpenDownload();
+  }
+
+  SetState(NORMAL, NORMAL);
 }
 
 // Load an icon for the file type we're downloading, and animate any in progress

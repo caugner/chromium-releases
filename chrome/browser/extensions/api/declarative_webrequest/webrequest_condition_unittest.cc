@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
+#include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rule.h"
 #include "chrome/common/extensions/matcher/url_matcher_constants.h"
 #include "content/public/browser/resource_request_info.h"
 #include "net/url_request/url_request_test_util.h"
@@ -68,15 +69,19 @@ TEST(WebRequestConditionTest, CreateCondition) {
   EXPECT_EQ("", error);
   ASSERT_TRUE(result.get());
 
-  TestURLRequest match_request(GURL("http://www.example.com"), NULL);
+  TestURLRequestContext context;
+  TestURLRequest match_request(GURL("http://www.example.com"), NULL, &context);
   content::ResourceRequestInfo::AllocateForTesting(&match_request,
-      ResourceType::MAIN_FRAME, NULL);
-  EXPECT_TRUE(result->IsFulfilled(&match_request, ON_BEFORE_REQUEST));
+      ResourceType::MAIN_FRAME, NULL, -1, -1);
+  EXPECT_TRUE(result->IsFulfilled(
+      WebRequestRule::RequestData(&match_request, ON_BEFORE_REQUEST)));
 
-  TestURLRequest wrong_resource_type(GURL("https://www.example.com"), NULL);
+  TestURLRequest wrong_resource_type(
+      GURL("https://www.example.com"), NULL, &context);
   content::ResourceRequestInfo::AllocateForTesting(&wrong_resource_type,
-      ResourceType::SUB_FRAME, NULL);
-  EXPECT_FALSE(result->IsFulfilled(&wrong_resource_type, ON_BEFORE_REQUEST));
+      ResourceType::SUB_FRAME, NULL, -1, -1);
+  EXPECT_FALSE(result->IsFulfilled(
+      WebRequestRule::RequestData(&wrong_resource_type, ON_BEFORE_REQUEST)));
 }
 
 TEST(WebRequestConditionTest, CreateConditionSet) {
@@ -135,22 +140,25 @@ TEST(WebRequestConditionTest, CreateConditionSet) {
   // Test that the result is correct and matches http://www.example.com and
   // https://www.example.com
   GURL http_url("http://www.example.com");
-  TestURLRequest http_request(http_url, NULL);
+  TestURLRequestContext context;
+  TestURLRequest http_request(http_url, NULL, &context);
   url_match_ids = matcher.MatchURL(http_url);
   for (std::set<URLMatcherConditionSet::ID>::iterator i = url_match_ids.begin();
        i != url_match_ids.end(); ++i) {
-    if (result->IsFulfilled(*i, &http_request, ON_BEFORE_REQUEST))
+    if (result->IsFulfilled(
+            *i, WebRequestRule::RequestData(&http_request, ON_BEFORE_REQUEST)))
       ++number_matches;
   }
   EXPECT_EQ(1, number_matches);
 
   GURL https_url("https://www.example.com");
   url_match_ids = matcher.MatchURL(https_url);
-  TestURLRequest https_request(https_url, NULL);
+  TestURLRequest https_request(https_url, NULL, &context);
   number_matches = 0;
   for (std::set<URLMatcherConditionSet::ID>::iterator i = url_match_ids.begin();
        i != url_match_ids.end(); ++i) {
-    if (result->IsFulfilled(*i, &https_request, ON_BEFORE_REQUEST))
+    if (result->IsFulfilled(
+            *i, WebRequestRule::RequestData(&https_request, ON_BEFORE_REQUEST)))
       ++number_matches;
   }
   EXPECT_EQ(1, number_matches);
@@ -158,11 +166,13 @@ TEST(WebRequestConditionTest, CreateConditionSet) {
   // Check that both, hostPrefix and hostSuffix are evaluated.
   GURL https_foo_url("https://foo.example.com");
   url_match_ids = matcher.MatchURL(https_foo_url);
-  TestURLRequest https_foo_request(https_foo_url, NULL);
+  TestURLRequest https_foo_request(https_foo_url, NULL, &context);
   number_matches = 0;
   for (std::set<URLMatcherConditionSet::ID>::iterator i = url_match_ids.begin();
        i != url_match_ids.end(); ++i) {
-    if (result->IsFulfilled(*i, &https_foo_request, ON_BEFORE_REQUEST))
+    if (result->IsFulfilled(
+            *i, WebRequestRule::RequestData(
+                &https_foo_request, ON_BEFORE_REQUEST)))
       ++number_matches;
   }
   EXPECT_EQ(0, number_matches);
@@ -213,22 +223,23 @@ TEST(WebRequestConditionTest, TestPortFilter) {
 
   // Test various URLs.
   GURL http_url("http://www.example.com");
-  TestURLRequest http_request(http_url, NULL);
+  TestURLRequestContext context;
+  TestURLRequest http_request(http_url, NULL, &context);
   url_match_ids = matcher.MatchURL(http_url);
   ASSERT_EQ(1u, url_match_ids.size());
 
   GURL http_url_80("http://www.example.com:80");
-  TestURLRequest http_request_80(http_url_80, NULL);
+  TestURLRequest http_request_80(http_url_80, NULL, &context);
   url_match_ids = matcher.MatchURL(http_url_80);
   ASSERT_EQ(1u, url_match_ids.size());
 
   GURL http_url_1000("http://www.example.com:1000");
-  TestURLRequest http_request_1000(http_url_1000, NULL);
+  TestURLRequest http_request_1000(http_url_1000, NULL, &context);
   url_match_ids = matcher.MatchURL(http_url_1000);
   ASSERT_EQ(1u, url_match_ids.size());
 
   GURL http_url_2000("http://www.example.com:2000");
-  TestURLRequest http_request_2000(http_url_2000, NULL);
+  TestURLRequest http_request_2000(http_url_2000, NULL, &context);
   url_match_ids = matcher.MatchURL(http_url_2000);
   ASSERT_EQ(0u, url_match_ids.size());
 }

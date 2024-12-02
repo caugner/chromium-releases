@@ -5,24 +5,29 @@
 #include "chrome/browser/extensions/test_extension_system.h"
 
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
-#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_pref_value_map_factory.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/message_service.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/value_store/testing_value_store.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/browser_thread.h"
 
+using content::BrowserThread;
+
+namespace extensions {
 
 TestExtensionSystem::TestExtensionSystem(Profile* profile)
-    : profile_(profile) {
+    : profile_(profile),
+      info_map_(new ExtensionInfoMap()) {
 }
 
 TestExtensionSystem::~TestExtensionSystem() {
@@ -37,8 +42,19 @@ void TestExtensionSystem::CreateExtensionProcessManager() {
 }
 
 void TestExtensionSystem::CreateAlarmManager(
-    extensions::AlarmManager::TimeProvider now) {
-  alarm_manager_.reset(new extensions::AlarmManager(profile_, now));
+    AlarmManager::TimeProvider now) {
+  alarm_manager_.reset(new AlarmManager(profile_, now));
+}
+
+void TestExtensionSystem::CreateSocketManager() {
+  // Note that we're intentionally creating the socket manager on the wrong
+  // thread (not the IO thread). This is because we don't want to presume or
+  // require that there be an IO thread in a lightweight test context. If we do
+  // need thread-specific behavior someday, we'll probably need something like
+  // CreateSocketManagerOnThreadForTesting(thread_id). But not today.
+  BrowserThread::ID id;
+  CHECK(BrowserThread::GetCurrentThreadIdentifier(&id));
+  socket_manager_.reset(new ApiResourceManager<Socket>(id));
 }
 
 ExtensionService* TestExtensionSystem::CreateExtensionService(
@@ -57,9 +73,7 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
       profile_->GetPrefs(),
       install_directory,
       ExtensionPrefValueMapFactory::GetForProfile(profile_)));
-  state_store_.reset(new extensions::StateStore(
-      profile_,
-      new TestingValueStore()));
+  state_store_.reset(new StateStore(profile_, new TestingValueStore()));
   extension_prefs_->Init(extensions_disabled);
   extension_service_.reset(new ExtensionService(profile_,
                                                 command_line,
@@ -71,8 +85,8 @@ ExtensionService* TestExtensionSystem::CreateExtensionService(
   return extension_service_.get();
 }
 
-extensions::ManagementPolicy* TestExtensionSystem::CreateManagementPolicy() {
-  management_policy_.reset(new extensions::ManagementPolicy());
+ManagementPolicy* TestExtensionSystem::CreateManagementPolicy() {
+  management_policy_.reset(new ManagementPolicy());
   DCHECK(extension_prefs_.get());
   management_policy_->RegisterProvider(extension_prefs_.get());
 
@@ -83,7 +97,7 @@ ExtensionService* TestExtensionSystem::extension_service() {
   return extension_service_.get();
 }
 
-extensions::ManagementPolicy* TestExtensionSystem::management_policy() {
+ManagementPolicy* TestExtensionSystem::management_policy() {
   return management_policy_.get();
 }
 
@@ -103,33 +117,46 @@ ExtensionProcessManager* TestExtensionSystem::process_manager() {
   return extension_process_manager_.get();
 }
 
-extensions::AlarmManager* TestExtensionSystem::alarm_manager() {
+AlarmManager* TestExtensionSystem::alarm_manager() {
   return alarm_manager_.get();
 }
 
-extensions::StateStore* TestExtensionSystem::state_store() {
+StateStore* TestExtensionSystem::state_store() {
   return state_store_.get();
 }
 
 ExtensionInfoMap* TestExtensionSystem::info_map() {
-  return NULL;
+  return info_map_.get();
 }
 
-extensions::LazyBackgroundTaskQueue*
+LazyBackgroundTaskQueue*
 TestExtensionSystem::lazy_background_task_queue() {
   return NULL;
 }
 
-ExtensionMessageService* TestExtensionSystem::message_service() {
+MessageService* TestExtensionSystem::message_service() {
   return NULL;
 }
 
-ExtensionEventRouter* TestExtensionSystem::event_router() {
+EventRouter* TestExtensionSystem::event_router() {
   return NULL;
 }
 
-extensions::RulesRegistryService*
-TestExtensionSystem::rules_registry_service() {
+RulesRegistryService* TestExtensionSystem::rules_registry_service() {
+  return NULL;
+}
+
+ApiResourceManager<SerialConnection>*
+TestExtensionSystem::serial_connection_manager() {
+  return NULL;
+}
+
+ApiResourceManager<Socket>*TestExtensionSystem::socket_manager() {
+  return socket_manager_.get();
+}
+
+ApiResourceManager<UsbDeviceResource>*
+TestExtensionSystem::usb_device_resource_manager() {
   return NULL;
 }
 
@@ -137,3 +164,5 @@ TestExtensionSystem::rules_registry_service() {
 ProfileKeyedService* TestExtensionSystem::Build(Profile* profile) {
   return new TestExtensionSystem(profile);
 }
+
+}  // namespace extensions

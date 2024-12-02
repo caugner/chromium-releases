@@ -4,11 +4,12 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_MODULE_H__
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_MODULE_H__
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
 
+namespace extensions {
 class ExtensionPrefs;
+}
 
 class SetUpdateUrlDataFunction : public SyncExtensionFunction {
  public:
@@ -21,7 +22,7 @@ class SetUpdateUrlDataFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  ExtensionPrefs* extension_prefs();
+  extensions::ExtensionPrefs* extension_prefs();
 };
 
 class IsAllowedIncognitoAccessFunction : public SyncExtensionFunction {

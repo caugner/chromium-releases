@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_UI_SHIM_H_
 #define CONTENT_BROWSER_GPU_GPU_PROCESS_HOST_UI_SHIM_H_
-#pragma once
 
 // This class lives on the UI thread and supports classes like the
 // BackingStoreProxy, which must live on the UI thread. The IO thread
@@ -97,16 +96,10 @@ class GpuProcessHostUIShim
   void OnAcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params);
   void OnAcceleratedSurfaceSuspend(int32 surface_id);
-
-#if defined(OS_MACOSX) || defined(USE_AURA)
   void OnAcceleratedSurfaceNew(
       const GpuHostMsg_AcceleratedSurfaceNew_Params& params);
-#endif
-
-#if defined(USE_AURA)
   void OnAcceleratedSurfaceRelease(
       const GpuHostMsg_AcceleratedSurfaceRelease_Params& params);
-#endif
 
   // The serial number of the GpuProcessHost / GpuProcessHostUIShim pair.
   int host_id_;

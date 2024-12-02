@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_CONSTRAINED_WINDOW_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_CONSTRAINED_WINDOW_VIEWS_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/constrained_window.h"
@@ -80,6 +79,7 @@ class ConstrainedWindowViews : public views::Widget,
   virtual void OnNativeConstrainedWindowMouseActivate() OVERRIDE;
   virtual views::internal::NativeWidgetDelegate*
       AsNativeWidgetDelegate() OVERRIDE;
+  virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
 
   TabContents* tab_contents_;
 

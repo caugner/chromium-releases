@@ -444,7 +444,8 @@ cr.define('print_preview', function() {
       this.isInKioskAutoPrintMode_ =
           event.initialSettings.isInKioskAutoPrintMode;
       this.destinationStore_.setInitialDestinationId(
-          event.initialSettings.initialDestinationId);
+          event.initialSettings.initialDestinationId,
+          event.initialSettings.isLocalDestination);
       document.title = event.initialSettings.documentTitle;
       this.printTicketStore_.initialize(
           event.initialSettings.isDocumentModifiable,
@@ -630,6 +631,9 @@ cr.define('print_preview', function() {
      */
     onKeyDown_: function(e) {
       // Escape key closes the dialog.
+      // <if expr="not pp_ifdef('toolkit_views')">
+      // On the toolkit_views environment, ESC key is handled by C++-side
+      // instead of JS-side.
       if (e.keyCode == 27 && !e.shiftKey && !e.ctrlKey && !e.altKey &&
           !e.metaKey) {
         if (this.destinationSearch_.getIsVisible()) {
@@ -642,6 +646,7 @@ cr.define('print_preview', function() {
         e.preventDefault();
         return;
       }
+      // </if>
 
       // Ctrl + Shift + p / Mac equivalent.
       if (e.keyCode == 80) {
@@ -809,6 +814,7 @@ cr.define('print_preview', function() {
 
 <include src="search/destination_list.js"/>
 <include src="search/cloud_destination_list.js"/>
+<include src="search/recent_destination_list.js"/>
 <include src="search/destination_list_item.js"/>
 <include src="search/destination_search.js"/>
 <include src="search/search_box.js"/>

@@ -5,6 +5,7 @@
       'NAME' : 'file_io',
       'TYPE' : 'main',
       'SOURCES' : ['file_io.cc'],
+      'LIBS' : ['ppapi_cpp', 'ppapi', 'pthread']
     }
   ],
   'DEST': 'examples',

@@ -6,12 +6,11 @@
 
 #include "base/logging.h"
 #include "base/win/metro.h"
-
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 
-namespace browser {
+namespace chrome {
 
 // Metro driver exports for getting the launch type, initial url, initial
 // search term, etc.
@@ -53,12 +52,11 @@ GURL GetURLToOpen(Profile* profile) {
     if (default_provider) {
       const TemplateURLRef& search_url = default_provider->url_ref();
       DCHECK(search_url.SupportsReplacement());
-      return GURL(search_url.ReplaceSearchTerms(search_string,
-                      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+      return GURL(search_url.ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(search_string)));
     }
   }
   return GURL();
 }
 
-}  // namespace browser
-
+}  // namespace chrome

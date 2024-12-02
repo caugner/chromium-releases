@@ -9,7 +9,6 @@
 
 #ifndef CHROME_TEST_BASE_TESTING_BROWSER_PROCESS_H_
 #define CHROME_TEST_BASE_TESTING_BROWSER_PROCESS_H_
-#pragma once
 
 #include <string>
 
@@ -55,12 +54,11 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
-  virtual VariationsService* variations_service() OVERRIDE;
+  virtual chrome_variations::VariationsService* variations_service() OVERRIDE;
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
-  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
   virtual SafeBrowsingService* safe_browsing_service() OVERRIDE;
@@ -73,7 +71,7 @@ class TestingBrowserProcess : public BrowserProcess {
 #endif  // defined(OS_CHROMEOS)
 
   virtual ui::Clipboard* clipboard() OVERRIDE;
-  virtual ExtensionEventRouterForwarder*
+  virtual extensions::EventRouterForwarder*
       extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
   virtual IntranetRedirectDetector* intranet_redirect_detector() OVERRIDE;

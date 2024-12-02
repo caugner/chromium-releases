@@ -13,6 +13,8 @@
 #include "webkit/fileapi/file_system_operation_interface.h"
 #include "webkit/fileapi/file_system_options.h"
 #include "webkit/fileapi/file_system_quota_client.h"
+#include "webkit/fileapi/file_system_task_runners.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/isolated_mount_point_provider.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -35,31 +37,32 @@ QuotaClient* CreateQuotaClient(
   return new FileSystemQuotaClient(context, is_incognito);
 }
 
-void DidOpenFileSystem(FileSystemContext::OpenFileSystemCallback callback,
-                       const GURL& filesystem_root,
-                       const std::string& filesystem_name,
-                       base::PlatformFileError error) {
+void DidOpenFileSystem(
+    const FileSystemContext::OpenFileSystemCallback& callback,
+    const GURL& filesystem_root,
+    const std::string& filesystem_name,
+    base::PlatformFileError error) {
   callback.Run(error, filesystem_name, filesystem_root);
 }
 
 }  // anonymous namespace
 
 FileSystemContext::FileSystemContext(
-    base::SequencedTaskRunner* file_task_runner,
-    base::SingleThreadTaskRunner* io_task_runner,
+    scoped_ptr<FileSystemTaskRunners> task_runners,
     quota::SpecialStoragePolicy* special_storage_policy,
     quota::QuotaManagerProxy* quota_manager_proxy,
     const FilePath& profile_path,
     const FileSystemOptions& options)
-    : file_task_runner_(file_task_runner),
-      io_task_runner_(io_task_runner),
+    : task_runners_(task_runners.Pass()),
       quota_manager_proxy_(quota_manager_proxy),
       sandbox_provider_(
           new SandboxMountPointProvider(
-              file_task_runner,
+              task_runners_->file_task_runner(),
               profile_path,
               options)),
-      isolated_provider_(new IsolatedMountPointProvider) {
+      isolated_provider_(new IsolatedMountPointProvider(profile_path)) {
+  DCHECK(task_runners_.get());
+
   if (quota_manager_proxy) {
     quota_manager_proxy->RegisterClient(CreateQuotaClient(
             this, options.is_incognito()));
@@ -72,27 +75,17 @@ FileSystemContext::FileSystemContext(
 
 bool FileSystemContext::DeleteDataForOriginOnFileThread(
     const GURL& origin_url) {
-  DCHECK(file_task_runner_->RunsTasksOnCurrentThread());
+  DCHECK(task_runners_->file_task_runner()->RunsTasksOnCurrentThread());
   DCHECK(sandbox_provider());
 
   // Delete temporary and persistent data.
   return
-      sandbox_provider()->DeleteOriginDataOnFileThread(
-          this, quota_manager_proxy(), origin_url, kFileSystemTypeTemporary) &&
-      sandbox_provider()->DeleteOriginDataOnFileThread(
-          this, quota_manager_proxy(), origin_url, kFileSystemTypePersistent);
-}
-
-bool FileSystemContext::DeleteDataForOriginAndTypeOnFileThread(
-    const GURL& origin_url, FileSystemType type) {
-  DCHECK(file_task_runner_->RunsTasksOnCurrentThread());
-  if (type == fileapi::kFileSystemTypeTemporary ||
-      type == fileapi::kFileSystemTypePersistent) {
-    DCHECK(sandbox_provider());
-    return sandbox_provider()->DeleteOriginDataOnFileThread(
-        this, quota_manager_proxy(), origin_url, type);
-  }
-  return false;
+      (sandbox_provider()->DeleteOriginDataOnFileThread(
+          this, quota_manager_proxy(), origin_url, kFileSystemTypeTemporary) ==
+       base::PLATFORM_FILE_OK) &&
+      (sandbox_provider()->DeleteOriginDataOnFileThread(
+          this, quota_manager_proxy(), origin_url, kFileSystemTypePersistent) ==
+       base::PLATFORM_FILE_OK);
 }
 
 FileSystemQuotaUtil*
@@ -110,7 +103,7 @@ FileSystemFileUtil* FileSystemContext::GetFileUtil(
       GetMountPointProvider(type);
   if (!mount_point_provider)
     return NULL;
-  return mount_point_provider->GetFileUtil();
+  return mount_point_provider->GetFileUtil(type);
 }
 
 FileSystemMountPointProvider* FileSystemContext::GetMountPointProvider(
@@ -122,6 +115,9 @@ FileSystemMountPointProvider* FileSystemContext::GetMountPointProvider(
     case kFileSystemTypeExternal:
       return external_provider_.get();
     case kFileSystemTypeIsolated:
+    case kFileSystemTypeDragged:
+    case kFileSystemTypeNativeMedia:
+    case kFileSystemTypeDeviceMedia:
       return isolated_provider_.get();
     default:
       if (provider_map_.find(type) != provider_map_.end())
@@ -147,7 +143,7 @@ void FileSystemContext::OpenFileSystem(
     const GURL& origin_url,
     FileSystemType type,
     bool create,
-    OpenFileSystemCallback callback) {
+    const OpenFileSystemCallback& callback) {
   DCHECK(!callback.is_null());
 
   FileSystemMountPointProvider* mount_point_provider =
@@ -165,31 +161,38 @@ void FileSystemContext::OpenFileSystem(
       base::Bind(&DidOpenFileSystem, callback, root_url, name));
 }
 
+void FileSystemContext::DeleteFileSystem(
+    const GURL& origin_url,
+    FileSystemType type,
+    const DeleteFileSystemCallback& callback) {
+  FileSystemMountPointProvider* mount_point_provider =
+      GetMountPointProvider(type);
+  if (!mount_point_provider) {
+    callback.Run(base::PLATFORM_FILE_ERROR_SECURITY);
+    return;
+  }
+
+  mount_point_provider->DeleteFileSystem(origin_url, type, this, callback);
+}
+
 FileSystemOperationInterface* FileSystemContext::CreateFileSystemOperation(
-    const GURL& url) {
-  GURL origin_url;
-  FileSystemType file_system_type = kFileSystemTypeUnknown;
-  FilePath file_path;
-  if (!CrackFileSystemURL(url, &origin_url, &file_system_type, &file_path))
+    const FileSystemURL& url) {
+  if (!url.is_valid())
     return NULL;
   FileSystemMountPointProvider* mount_point_provider =
-      GetMountPointProvider(file_system_type);
+      GetMountPointProvider(url.type());
   if (!mount_point_provider)
     return NULL;
-  return mount_point_provider->CreateFileSystemOperation(
-      origin_url, file_system_type, file_path, this);
+  return mount_point_provider->CreateFileSystemOperation(url, this);
 }
 
 webkit_blob::FileStreamReader* FileSystemContext::CreateFileStreamReader(
-    const GURL& url,
+    const FileSystemURL& url,
     int64 offset) {
-  GURL origin_url;
-  FileSystemType file_system_type = kFileSystemTypeUnknown;
-  FilePath file_path;
-  if (!CrackFileSystemURL(url, &origin_url, &file_system_type, &file_path))
+  if (!url.is_valid())
     return NULL;
   FileSystemMountPointProvider* mount_point_provider =
-      GetMountPointProvider(file_system_type);
+      GetMountPointProvider(url.type());
   if (!mount_point_provider)
     return NULL;
   return mount_point_provider->CreateFileStreamReader(url, offset, this);
@@ -206,8 +209,8 @@ void FileSystemContext::RegisterMountPointProvider(
 FileSystemContext::~FileSystemContext() {}
 
 void FileSystemContext::DeleteOnCorrectThread() const {
-  if (!io_task_runner_->RunsTasksOnCurrentThread() &&
-      io_task_runner_->DeleteSoon(FROM_HERE, this)) {
+  if (!task_runners_->io_task_runner()->RunsTasksOnCurrentThread() &&
+      task_runners_->io_task_runner()->DeleteSoon(FROM_HERE, this)) {
     return;
   }
   STLDeleteContainerPairSecondPointers(provider_map_.begin(),

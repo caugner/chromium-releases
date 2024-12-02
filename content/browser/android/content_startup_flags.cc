@@ -32,32 +32,8 @@ void SetPepperCommandLineFlags(std::string plugin_descriptor) {
   // in the process start up time. Need to look into whether we can add the
   // plugin when the process is running.
   if (!plugin_descriptor.empty()) {
-    // Usually the plugins are parsed by pepper_plugin_registry, but
-    // flash needs two seperate command-line flags in order to work
-    // when no mime-type is specified. The plugin string will look like this:
-    // flash|others
-    // Each plugin is specified like this:
-    // path<#name><#description><#version>;mimetype
-    std::vector<std::string> other_flash;
-    base::SplitString(plugin_descriptor, '|', &other_flash);
-    if (other_flash.size() == 2) {
-      const std::string& other = other_flash[0];
-      const std::string& flash = other_flash[1];
-      parsed_command_line->AppendSwitchNative(
-          switches::kRegisterPepperPlugins, other);
-      std::vector<std::string> parts;
-      base::SplitString(flash, ';', &parts);
-      if (parts.size() >= 2) {
-        std::vector<std::string> info;
-        base::SplitString(parts[0], '#', &info);
-        if (info.size() >= 4) {
-          parsed_command_line->AppendSwitchNative(
-              switches::kPpapiFlashPath, info[0]);
-          parsed_command_line->AppendSwitchNative(
-              switches::kPpapiFlashVersion, info[3]);
-        }
-      }
-    }
+    parsed_command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
+                                            plugin_descriptor);
   }
 }
 
@@ -74,7 +50,7 @@ void SetContentCommandLineFlags(int max_render_process_count,
 
   CommandLine* parsed_command_line = CommandLine::ForCurrentProcess();
 
-#if !defined(ANDROID_UPSTREAM_BRINGUP)
+
   // TODO(yfriedman): Upstream this when bringing up rendering code and
   // rendering modes. b/6668088
   // Set subflags for the --graphics-mode=XYZ omnibus flag.
@@ -97,11 +73,11 @@ void SetContentCommandLineFlags(int max_render_process_count,
     SetCommandLineSwitch(switches::kEnableCompositingForFixedPosition);
     SetCommandLineSwitch(switches::kEnableThreadedCompositing);
     // Per tile painting saves memory in background tabs (http://b/5669228).
-    SetCommandLineSwitch(switches::kEnablePerTilePainting);
+    // ...but it now fails an SkAssert(), so disable it. b/6819634
+    // SetCommandLineSwitch(switches::kEnablePerTilePainting);
   } else {
     LOG(FATAL) << "Invalid --graphics-mode flag: " << graphics_mode;
   }
-#endif
 
   if (parsed_command_line->HasSwitch(switches::kRendererProcessLimit)) {
     std::string limit = parsed_command_line->GetSwitchValueASCII(
@@ -131,9 +107,6 @@ void SetContentCommandLineFlags(int max_render_process_count,
   // Run the GPU service as a thread in the browser instead of as a
   // standalone process.
   parsed_command_line->AppendSwitch(switches::kInProcessGPU);
-
-  // Disable WebGL for now (See http://b/5634125)
-  parsed_command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
 
   // Always use fixed layout and viewport tag.
   parsed_command_line->AppendSwitch(switches::kEnableFixedLayout);

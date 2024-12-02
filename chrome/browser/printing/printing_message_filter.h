@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PRINTING_PRINTING_MESSAGE_FILTER_H_
 #define CHROME_BROWSER_PRINTING_PRINTING_MESSAGE_FILTER_H_
-#pragma once
 
 #include <string>
 
@@ -17,6 +16,8 @@
 
 class FilePath;
 struct PrintHostMsg_ScriptedPrint_Params;
+class Profile;
+class ProfileIOData;
 
 namespace base {
 class DictionaryValue;
@@ -35,7 +36,7 @@ class PrintJobManager;
 // renderer process on the IPC thread.
 class PrintingMessageFilter : public content::BrowserMessageFilter {
  public:
-  explicit PrintingMessageFilter(int render_process_id);
+  PrintingMessageFilter(int render_process_id, Profile* profile);
 
   // content::BrowserMessageFilter methods.
   virtual void OverrideThreadForMessage(
@@ -106,11 +107,13 @@ class PrintingMessageFilter : public content::BrowserMessageFilter {
       IPC::Message* reply_msg);
 
   // Check to see if print preview has been cancelled.
-  void OnCheckForCancel(const std::string& preview_ui_addr,
+  void OnCheckForCancel(int32 preview_ui_id,
                         int preview_request_id,
                         bool* cancel);
 
   printing::PrintJobManager* print_job_manager_;
+
+  ProfileIOData* profile_io_data_;
 
   int render_process_id_;
 

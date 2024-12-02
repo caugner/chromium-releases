@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_COMMANDS_COMMAND_SERVICE_H_
 #define CHROME_BROWSER_EXTENSIONS_API_COMMANDS_COMMAND_SERVICE_H_
-#pragma once
 
 #include <string>
 
@@ -50,36 +49,47 @@ class CommandService : public ProfileKeyedService,
   explicit CommandService(Profile* profile);
   virtual ~CommandService();
 
-  // Gets the keybinding (if any) for the browser action of an extension given
+  // Gets the command (if any) for the browser action of an extension given
   // its |extension_id|. The function consults the master list to see if
-  // the keybinding is active. Returns NULL if the extension has no browser
-  // action. Returns NULL if the keybinding is not active and |type| requested
-  // is ACTIVE_ONLY.
-  const extensions::Command* GetBrowserActionCommand(
-      const std::string& extension_id, QueryType type);
+  // the command is active. Returns false if the extension has no browser
+  // action. Returns false if the command is not active and |type| requested
+  // is ACTIVE_ONLY. |command| contains the command found and |active| (if not
+  // NULL) contains whether |command| is active.
+  bool GetBrowserActionCommand(const std::string& extension_id,
+                               QueryType type,
+                               extensions::Command* command,
+                               bool* active);
 
-  // Gets the keybinding (if any) for the page action of an extension given
+  // Gets the command (if any) for the page action of an extension given
   // its |extension_id|. The function consults the master list to see if
-  // the keybinding is active. Returns NULL if the extension has no page
-  // action. Returns NULL if the keybinding is not active and |type| requested
-  // is ACTIVE_ONLY.
-  const extensions::Command* GetPageActionCommand(
-      const std::string& extension_id, QueryType type);
+  // the command is active. Returns false if the extension has no page
+  // action. Returns false if the command is not active and |type| requested
+  // is ACTIVE_ONLY. |command| contains the command found and |active| (if not
+  // NULL) contains whether |command| is active.
+  bool GetPageActionCommand(const std::string& extension_id,
+                            QueryType type,
+                            extensions::Command* command,
+                            bool* active);
 
-  // Gets the active keybinding (if any) for the named commands of an extension
+  // Gets the command (if any) for the script badge of an extension given
+  // its |extension_id|. The function consults the master list to see if
+  // the command is active. Returns false if the extension has no script
+  // badge. Returns false if the command is not active and |type| requested
+  // is ACTIVE_ONLY. |command| contains the command found and |active| (if not
+  // NULL) contains whether |command| is active.
+  bool GetScriptBadgeCommand(const std::string& extension_id,
+                             QueryType type,
+                             extensions::Command* command,
+                             bool* active);
+
+  // Gets the active command (if any) for the named commands of an extension
   // given its |extension_id|. The function consults the master list to see if
-  // the keybinding is active. Returns an empty map if the extension has no
+  // the command is active. Returns an empty map if the extension has no
   // named commands or no active named commands when |type| requested is
   // ACTIVE_ONLY.
-  extensions::CommandMap GetNamedCommands(
-      const std::string& extension_id, QueryType type);
-
-  // Checks to see if a keybinding |accelerator| for a given |command_name| in
-  // an extension with id |extension_id| is registered as active (by consulting
-  // the master list in |user_prefs|).
-  bool IsKeybindingActive(const ui::Accelerator& accelerator,
-                          const std::string& extension_id,
-                          const std::string& command_name) const;
+  bool GetNamedCommands(const std::string& extension_id,
+                        QueryType type,
+                        extensions::CommandMap* command_map);
 
   // Records a keybinding |accelerator| as active for an extension with id
   // |extension_id| and command with the name |command_name|. If
@@ -93,12 +103,33 @@ class CommandService : public ProfileKeyedService,
                          std::string command_name,
                          bool allow_overrides);
 
+  // Update the keybinding prefs (for a command with a matching |extension_id|
+  // and |command_name|) to |keystroke|. If the command had another key assigned
+  // that key assignment will be removed.
+  void UpdateKeybindingPrefs(const std::string& extension_id,
+                             const std::string& command_name,
+                             const std::string& keystroke);
+
+  // Finds the shortcut assigned to a command with the name |command_name|
+  // within an extension with id |extension_id|. Returns an empty Accelerator
+  // object (with keycode VKEY_UNKNOWN) if no shortcut is assigned or the
+  // command is not found.
+  ui::Accelerator FindShortcutForCommand(const std::string& extension_id,
+                                         const std::string& command);
+
   // Overridden from content::NotificationObserver.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  // An enum specifying the types of icons that can have a command.
+  enum ExtensionActionType {
+    BROWSER_ACTION,
+    PAGE_ACTION,
+    SCRIPT_BADGE,
+  };
+
   // Assigns initial keybinding for a given |extension|'s page action, browser
   // action and named commands. In each case, if the suggested keybinding is
   // free, it will be taken by this extension. If not, that keybinding request
@@ -107,7 +138,16 @@ class CommandService : public ProfileKeyedService,
   void AssignInitialKeybindings(const extensions::Extension* extension);
 
   // Removes all keybindings for a given extension by its |extension_id|.
-  void RemoveKeybindingPrefs(std::string extension_id);
+  // |command_name| is optional and if specified, causes only the command with
+  // the name |command_name| to be removed.
+  void RemoveKeybindingPrefs(const std::string& extension_id,
+                             const std::string& command_name);
+
+  bool GetExtensionActionCommand(const std::string& extension_id,
+                                 QueryType query_type,
+                                 extensions::Command* command,
+                                 bool* active,
+                                 ExtensionActionType action_type);
 
   // The content notification registrar for listening to extension events.
   content::NotificationRegistrar registrar_;

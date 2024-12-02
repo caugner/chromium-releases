@@ -11,6 +11,7 @@
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -20,6 +21,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/test/browser_test_utils.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
@@ -55,7 +57,7 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.media_type = WebKit::WebContextMenuData::MediaTypeNone;
     params.unfiltered_link_url = unfiltered_url;
     params.link_url = url;
-    WebContents* web_contents = browser()->GetActiveWebContents();
+    WebContents* web_contents = chrome::GetActiveWebContents(browser());
     params.page_url = web_contents->GetController().GetActiveEntry()->GetURL();
 #if defined(OS_MACOSX)
     params.writing_direction_default = 0;
@@ -63,7 +65,7 @@ class ContextMenuBrowserTest : public InProcessBrowserTest {
     params.writing_direction_right_to_left = 0;
 #endif  // OS_MACOSX
     TestRenderViewContextMenu* menu = new TestRenderViewContextMenu(
-        browser()->GetActiveWebContents(), params);
+        chrome::GetActiveWebContents(browser()), params);
     menu->Init();
     return menu;
   }
@@ -101,8 +103,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
 IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
                        MAYBE_RealMenu) {
   ContextMenuNotificationObserver menu_observer(
-      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-      chrome::NOTIFICATION_TAB_ADDED);
+      IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
   ui_test_utils::WindowedTabAddedNotificationObserver tab_observer(
       content::NotificationService::AllSources());
 
@@ -117,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
   mouse_event.x = 15;
   mouse_event.y = 15;
   gfx::Rect offset;
-  content::WebContents* tab = browser()->GetActiveWebContents();
+  content::WebContents* tab = chrome::GetActiveWebContents(browser());
   tab->GetView()->GetContainerBounds(&offset);
   mouse_event.globalX = 15 + offset.x();
   mouse_event.globalY = 15 + offset.y();
@@ -130,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(ContextMenuBrowserTest,
   // be added.
   tab_observer.Wait();
   tab = tab_observer.GetTab();
-  ui_test_utils::WaitForLoadStop(tab);
+  content::WaitForLoadStop(tab);
 
   // Verify that it's the correct tab.
   EXPECT_EQ(GURL("about:blank"), tab->GetURL());

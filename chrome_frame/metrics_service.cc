@@ -50,6 +50,7 @@
 #include "third_party/bzip2/bzlib.h"
 #endif
 
+#include "base/metrics/statistics_recorder.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -83,10 +84,6 @@ base::LazyInstance<base::ThreadLocalPointer<MetricsService> >
 std::string MetricsService::client_id_;
 
 base::Lock MetricsService::metrics_service_lock_;
-
-// Initialize histogram statistics gathering system.
-base::LazyInstance<base::StatisticsRecorder>
-    g_statistics_recorder_ = LAZY_INSTANCE_INITIALIZER;
 
 // This class provides functionality to upload the ChromeFrame UMA data to the
 // server. An instance of this class is created whenever we have data to be
@@ -270,8 +267,7 @@ void MetricsService::InitializeMetricsState() {
   session_id_ = CrashMetricsReporter::GetInstance()->IncrementMetric(
       CrashMetricsReporter::SESSION_ID);
 
-  // Ensure that an instance of the StatisticsRecorder object is created.
-  g_statistics_recorder_.Get();
+  base::StatisticsRecorder::Initialize();
   CrashMetricsReporter::GetInstance()->set_active(true);
 }
 

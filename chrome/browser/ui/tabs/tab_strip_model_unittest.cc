@@ -18,9 +18,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_order_controller.h"
@@ -84,11 +85,9 @@ class TabStripDummyDelegate : public TestTabStripModelDelegate {
  public:
   explicit TabStripDummyDelegate(TabContents* dummy)
       : dummy_contents_(dummy),
-        can_close_(true),
         run_unload_(false) {}
   virtual ~TabStripDummyDelegate() {}
 
-  void set_can_close(bool value) { can_close_ = value; }
   void set_run_unload_listener(bool value) { run_unload_ = value; }
 
   // Overridden from TabStripModelDelegate:
@@ -106,19 +105,11 @@ class TabStripDummyDelegate : public TestTabStripModelDelegate {
   virtual bool RunUnloadListenerBeforeClosing(TabContents* contents) OVERRIDE {
     return run_unload_;
   }
-  virtual bool CanCloseContents(std::vector<int>* indices) OVERRIDE {
-    if (!can_close_)
-      indices->clear();
-    return can_close_;
-  }
 
  private:
   // A dummy TabContents we give to callers that expect us to actually
   // build a Destinations tab for them.
   TabContents* dummy_contents_;
-
-  // Whether tabs can be closed.
-  bool can_close_;
 
   // Whether to report that we need to run an unload listener before closing.
   bool run_unload_;
@@ -132,13 +123,13 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   }
 
   TabContents* CreateTabContents() {
-    return Browser::TabContentsFactory(
+    return chrome::TabContentsFactory(
         profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
   }
 
   TabContents* CreateTabContentsWithSharedRPH(
       WebContents* web_contents) {
-    TabContents* retval = Browser::TabContentsFactory(profile(),
+    TabContents* retval = chrome::TabContentsFactory(profile(),
         web_contents->GetRenderViewHost()->GetSiteInstance(), MSG_ROUTING_NONE,
         NULL, NULL);
     EXPECT_EQ(retval->web_contents()->GetRenderProcessHost(),
@@ -162,7 +153,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   }
 
   void SwitchTabTo(WebContents* contents) {
-    // contents()->DidBecomeSelected();
+    // contents()->WasShown();
   }
 
   // Sets the id of the specified contents.
@@ -526,14 +517,6 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
 
   // Test CloseTabContentsAt
   {
-    // Let's test nothing happens when the delegate veto the close.
-    delegate.set_can_close(false);
-    EXPECT_FALSE(tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE));
-    EXPECT_EQ(3, tabstrip.count());
-    EXPECT_EQ(0, observer.GetStateCount());
-
-    // Now let's close for real.
-    delegate.set_can_close(true);
     EXPECT_TRUE(tabstrip.CloseTabContentsAt(2, TabStripModel::CLOSE_NONE));
     EXPECT_EQ(2, tabstrip.count());
 
@@ -588,10 +571,8 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     EXPECT_EQ(contents1, tabstrip.GetTabContentsAt(1));
     EXPECT_EQ(0, tabstrip.GetIndexOfTabContents(contents2));
     EXPECT_EQ(1, tabstrip.GetIndexOfTabContents(contents1));
-    EXPECT_EQ(0, tabstrip.GetIndexOfController(
-                     &contents2->web_contents()->GetController()));
-    EXPECT_EQ(1, tabstrip.GetIndexOfController(
-                     &contents1->web_contents()->GetController()));
+    EXPECT_EQ(0, tabstrip.GetIndexOfWebContents(contents2->web_contents()));
+    EXPECT_EQ(1, tabstrip.GetIndexOfWebContents(contents1->web_contents()));
   }
 
   // Test UpdateTabContentsStateAt
@@ -973,10 +954,6 @@ TEST_F(TabStripModelTest, CommandCloseTab) {
       PrepareTabstripForSelectionTest(&tabstrip, 1, 0, "0"));
   EXPECT_TRUE(tabstrip.IsContextMenuCommandEnabled(
                   0, TabStripModel::CommandCloseTab));
-  delegate.set_can_close(false);
-  EXPECT_TRUE(tabstrip.IsContextMenuCommandEnabled(
-                   0, TabStripModel::CommandCloseTab));
-  delegate.set_can_close(true);
   tabstrip.ExecuteContextMenuCommand(0, TabStripModel::CommandCloseTab);
   ASSERT_TRUE(tabstrip.empty());
 

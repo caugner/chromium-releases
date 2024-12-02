@@ -6,12 +6,11 @@
 
 #ifndef SYNC_NOTIFIER_INVALIDATION_UTIL_H_
 #define SYNC_NOTIFIER_INVALIDATION_UTIL_H_
-#pragma once
 
+#include <set>
 #include <string>
 
-#include "google/cacheinvalidation/deps/callback.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
 namespace invalidation {
 
@@ -20,21 +19,29 @@ class ObjectId;
 
 }  // namespace invalidation
 
-namespace sync_notifier {
+namespace syncer {
 
-void RunAndDeleteClosure(invalidation::Closure* task);
+struct ObjectIdLessThan {
+  bool operator()(const invalidation::ObjectId& lhs,
+                  const invalidation::ObjectId& rhs) const;
+};
 
-bool RealModelTypeToObjectId(syncable::ModelType model_type,
+typedef std::set<invalidation::ObjectId, ObjectIdLessThan> ObjectIdSet;
+
+bool RealModelTypeToObjectId(ModelType model_type,
                              invalidation::ObjectId* object_id);
 
 bool ObjectIdToRealModelType(const invalidation::ObjectId& object_id,
-                             syncable::ModelType* model_type);
+                             ModelType* model_type);
+
+ObjectIdSet ModelTypeSetToObjectIdSet(const ModelTypeSet& models);
+ModelTypeSet ObjectIdSetToModelTypeSet(const ObjectIdSet& ids);
 
 std::string ObjectIdToString(const invalidation::ObjectId& object_id);
 
 std::string InvalidationToString(
     const invalidation::Invalidation& invalidation);
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_INVALIDATION_UTIL_H_

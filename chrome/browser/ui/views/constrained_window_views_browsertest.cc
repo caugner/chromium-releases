@@ -4,6 +4,8 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
@@ -104,7 +106,7 @@ class ConstrainedWindowViewTest : public InProcessBrowserTest {
 // *) Constrained windows that are queued don't register themselves as
 //    accelerator targets until they are displayed.
 IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
-  TabContents* tab_contents = browser()->GetActiveTabContents();
+  TabContents* tab_contents = chrome::GetActiveTabContents(browser());
   ASSERT_TRUE(tab_contents != NULL);
   ConstrainedWindowTabHelper* constrained_window_helper =
       tab_contents->constrained_window_tab_helper();
@@ -140,7 +142,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
   // test_dialog1.
   EXPECT_TRUE(focus_manager->ProcessAccelerator(
       ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE)));
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
 
   EXPECT_TRUE(test_dialog1->done());
   EXPECT_FALSE(test_dialog2->done());
@@ -153,13 +155,13 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
   int tab_with_constrained_window = browser()->active_index();
 
   // Create a new tab.
-  browser()->NewTab();
+  chrome::NewTab(browser());
 
   // The constrained dialog should no longer be selected.
   EXPECT_NE(test_dialog2->GetInitiallyFocusedView(),
             focus_manager->GetFocusedView());
 
-  browser()->ActivateTabAt(tab_with_constrained_window, false);
+  chrome::ActivateTabAt(browser(), tab_with_constrained_window, false);
 
   // Activating the previous tab should bring focus to the constrained window.
   EXPECT_EQ(test_dialog2->GetInitiallyFocusedView(),
@@ -168,7 +170,7 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, FocusTest) {
   // Send another VKEY_RETURN, closing test_dialog2
   EXPECT_TRUE(focus_manager->ProcessAccelerator(
       ui::Accelerator(ui::VKEY_RETURN, ui::EF_NONE)));
-  ui_test_utils::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(test_dialog2->done());
   EXPECT_EQ(0u, constrained_window_helper->constrained_window_count());
 }

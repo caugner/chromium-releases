@@ -52,6 +52,7 @@ class TestHelper {
     GLenum type;
     GLint fake_location;
     GLint real_location;
+    GLint desired_location;
     const char* good_name;
   };
 
@@ -76,6 +77,11 @@ class TestHelper {
 
   static void SetupShader(
       ::gfx::MockGLInterface* gl,
+      AttribInfo* attribs, size_t num_attribs,
+      UniformInfo* uniforms, size_t num_uniforms,
+      GLuint service_id);
+
+  static void SetupProgramSuccessExpectations(::gfx::MockGLInterface* gl,
       AttribInfo* attribs, size_t num_attribs,
       UniformInfo* uniforms, size_t num_uniforms,
       GLuint service_id);

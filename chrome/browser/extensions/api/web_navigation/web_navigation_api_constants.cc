@@ -10,8 +10,11 @@ namespace web_navigation_api_constants {
 
 const char kErrorKey[] = "error";
 const char kFrameIdKey[] = "frameId";
-const char kSourceTabIdKey[] = "sourceTabId";
+const char kProcessIdKey[] = "processId";
+const char kReplacedTabIdKey[] = "replacedTabId";
 const char kSourceFrameIdKey[] = "sourceFrameId";
+const char kSourceProcessIdKey[] = "sourceProcessId";
+const char kSourceTabIdKey[] = "sourceTabId";
 const char kTabIdKey[] = "tabId";
 const char kTimeStampKey[] = "timeStamp";
 const char kTransitionTypeKey[] = "transitionType";
@@ -25,9 +28,11 @@ const char kOnCreatedNavigationTarget[] =
     "webNavigation.onCreatedNavigationTarget";
 const char kOnDOMContentLoaded[] =
     "webNavigation.onDOMContentLoaded";
+const char kOnHistoryStateUpdated[] = "webNavigation.onHistoryStateUpdated";
 const char kOnErrorOccurred[] = "webNavigation.onErrorOccurred";
 const char kOnReferenceFragmentUpdated[] =
     "webNavigation.onReferenceFragmentUpdated";
+const char kOnTabReplaced[] = "webNavigation.onTabReplaced";
 
 }  // namespace web_navigation_api_constants
 

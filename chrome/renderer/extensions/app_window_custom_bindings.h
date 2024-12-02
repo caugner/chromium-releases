@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_APP_WINDOW_CUSTOM_BINDINGS_H_
 #define CHROME_RENDERER_EXTENSIONS_APP_WINDOW_CUSTOM_BINDINGS_H_
-#pragma once
 
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 
@@ -12,7 +11,7 @@ class ExtensionDispatcher;
 
 namespace extensions {
 
-// Implements custom bindings for the appWindow API.
+// Implements custom bindings for the app.window API.
 class AppWindowCustomBindings : public ChromeV8Extension {
  public:
   explicit AppWindowCustomBindings(ExtensionDispatcher* extension_dispatcher);

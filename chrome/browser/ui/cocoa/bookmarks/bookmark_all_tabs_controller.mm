@@ -8,6 +8,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -22,12 +23,16 @@ using content::WebContents;
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
+                       url:(const GURL&)url
+                     title:(const string16&)title
              configuration:(BookmarkEditor::Configuration)configuration {
   NSString* nibName = @"BookmarkAllTabs";
   if ((self = [super initWithParentWindow:parentWindow
                                   nibName:nibName
                                   profile:profile
                                    parent:parent
+                                      url:url
+                                    title:title
                             configuration:configuration])) {
   }
   return self;
@@ -46,7 +51,7 @@ using content::WebContents;
   Browser* browser = browser::GetLastActiveBrowser();
   const int tabCount = browser->tab_count();
   for (int i = 0; i < tabCount; ++i) {
-    WebContents* contents = browser->GetWebContentsAt(i);
+    WebContents* contents = chrome::GetWebContentsAt(browser, i);
     ActiveTabNameURLPair tabPair(contents->GetTitle(), contents->GetURL());
     activeTabPairsVector_.push_back(tabPair);
   }

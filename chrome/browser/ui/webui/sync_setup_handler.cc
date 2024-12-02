@@ -51,7 +51,7 @@ struct SyncConfigInfo {
 
   bool encrypt_all;
   bool sync_everything;
-  syncable::ModelTypeSet data_types;
+  syncer::ModelTypeSet data_types;
   std::string passphrase;
   bool passphrase_is_gaia;
 };
@@ -76,16 +76,16 @@ const char* kDataTypeNames[] = {
   "typedUrls"
 };
 
-const syncable::ModelType kDataTypes[] = {
-  syncable::APPS,
-  syncable::AUTOFILL,
-  syncable::BOOKMARKS,
-  syncable::EXTENSIONS,
-  syncable::PASSWORDS,
-  syncable::PREFERENCES,
-  syncable::SESSIONS,
-  syncable::THEMES,
-  syncable::TYPED_URLS
+const syncer::ModelType kDataTypes[] = {
+  syncer::APPS,
+  syncer::AUTOFILL,
+  syncer::BOOKMARKS,
+  syncer::EXTENSIONS,
+  syncer::PASSWORDS,
+  syncer::PREFERENCES,
+  syncer::SESSIONS,
+  syncer::THEMES,
+  syncer::TYPED_URLS
 };
 
 static const size_t kNumDataTypes = arraysize(kDataTypes);
@@ -195,7 +195,8 @@ bool IsClientOAuthEnabled() {
 SyncSetupHandler::SyncSetupHandler(ProfileManager* profile_manager)
     : configuring_sync_(false),
       profile_manager_(profile_manager),
-      last_signin_error_(GoogleServiceAuthError::NONE) {
+      last_signin_error_(GoogleServiceAuthError::NONE),
+      retry_on_signin_failure_(true) {
 }
 
 SyncSetupHandler::~SyncSetupHandler() {
@@ -284,6 +285,8 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 
   static OptionsStringResource resources[] = {
     { "syncSetupConfigureTitle", IDS_SYNC_SETUP_CONFIGURE_TITLE },
+    { "syncSetupTimeoutTitle", IDS_SYNC_SETUP_TIME_OUT_TITLE },
+    { "syncSetupTimeoutContent", IDS_SYNC_SETUP_TIME_OUT_CONTENT },
     { "cannotBeBlank", IDS_SYNC_CANNOT_BE_BLANK },
     { "emailLabel", IDS_SYNC_LOGIN_EMAIL_NEW_LINE },
     { "passwordLabel", IDS_SYNC_LOGIN_PASSWORD_NEW_LINE },
@@ -349,7 +352,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "encryptedDataTypesTitle", IDS_SYNC_ENCRYPTION_DATA_TYPES_TITLE },
     { "encryptSensitiveOption", IDS_SYNC_ENCRYPT_SENSITIVE_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
-    { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "aspWarningText", IDS_SYNC_ASP_PASSWORD_WARNING_TEXT },
     { "promoPageTitle", IDS_SYNC_PROMO_TAB_TITLE },
     { "promoSkipButton", IDS_SYNC_PROMO_SKIP_BUTTON },
@@ -364,11 +366,26 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 
 void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
                                             bool passphrase_failed) {
+  ProfileSyncService* service = GetSyncService();
+  if (!service->sync_initialized()) {
+    // When user tries to setup sync while the sync backend is not initialized,
+    // kick the sync backend and wait for it to be ready and show spinner until
+    // the backend gets ready.
+    retry_on_signin_failure_ = false;
+
+    service->UnsuppressAndStart();
+    DisplaySpinner();
+    // To listen to the token available notifications, start SigninTracker.
+    signin_tracker_.reset(
+        new SigninTracker(GetProfile(), this,
+                          SigninTracker::SERVICES_INITIALIZING));
+    return;
+  }
+
   // Should only be called if user is signed in, so no longer need our
   // SigninTracker.
   signin_tracker_.reset();
   configuring_sync_ = true;
-  ProfileSyncService* service = GetSyncService();
   DCHECK(service->sync_initialized()) <<
       "Cannot configure sync until the sync backend is initialized";
 
@@ -385,9 +402,9 @@ void SyncSetupHandler::DisplayConfigureSync(bool show_advanced,
   DictionaryValue args;
 
   // Tell the UI layer which data types are registered/enabled by the user.
-  const syncable::ModelTypeSet registered_types =
+  const syncer::ModelTypeSet registered_types =
       service->GetRegisteredDataTypes();
-  const syncable::ModelTypeSet preferred_types =
+  const syncer::ModelTypeSet preferred_types =
       service->GetPreferredDataTypes();
   for (size_t i = 0; i < kNumDataTypes; ++i) {
     const std::string key_name = kDataTypeNames[i];
@@ -464,6 +481,17 @@ void SyncSetupHandler::RegisterMessages() {
       "SyncSetupShowSetupUI",
       base::Bind(&SyncSetupHandler::HandleShowSetupUI,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "SyncSetupShowSetupUIWithoutLogin",
+      base::Bind(&SyncSetupHandler::HandleShowSetupUIWithoutLogin,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "SyncSetupDoSignOutOnAuthError",
+      base::Bind(&SyncSetupHandler::HandleDoSignOutOnAuthError,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("CloseTimeout",
+      base::Bind(&SyncSetupHandler::HandleCloseTimeout,
+                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback("SyncSetupStopSyncing",
       base::Bind(&SyncSetupHandler::HandleStopSyncing,
                  base::Unretained(this)));
@@ -474,6 +502,7 @@ SigninManager* SyncSetupHandler::GetSignin() const {
 }
 
 void SyncSetupHandler::DisplayGaiaLogin(bool fatal_error) {
+  retry_on_signin_failure_ = true;
   DisplayGaiaLoginWithErrorMessage(string16(), fatal_error);
 }
 
@@ -483,6 +512,8 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
   // If the user exits the signin wizard after this without configuring sync,
   // CloseSyncSetup() will ensure they are logged out.
   configuring_sync_ = false;
+
+  string16 local_error_message(error_message);
 
   // Setup args for the GAIA login screen:
   //   error_message: custom error message to display.
@@ -500,6 +531,9 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
     error = last_signin_error_.state();
     captcha = last_signin_error_.captcha().image_url.spec();
     editable_user = true;
+
+    if (local_error_message.empty())
+      local_error_message = UTF8ToUTF16(last_signin_error_.error_message());
   } else {
     // Fresh login attempt - lock in the authenticated username if there is
     // one (don't let the user change it).
@@ -521,8 +555,8 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
     args.SetBoolean("hideEmailAndPassword", IsClientOAuthEnabled());
 
   args.SetBoolean("editableUser", editable_user);
-  if (!error_message.empty())
-    args.SetString("errorMessage", error_message);
+  if (!local_error_message.empty())
+    args.SetString("errorMessage", local_error_message);
   if (fatal_error)
     args.SetBoolean("fatalError", true);
   args.SetString("captchaUrl", captcha);
@@ -531,10 +565,59 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
 }
 
+bool SyncSetupHandler::PrepareSyncSetup() {
+  ProfileSyncService* service = GetSyncService();
+  if (!service) {
+    // If there's no sync service, the user tried to manually invoke a syncSetup
+    // URL, but sync features are disabled.  We need to close the overlay for
+    // this (rare) case.
+    DLOG(WARNING) << "Closing sync UI because sync is disabled";
+    CloseOverlay();
+    return false;
+  }
+
+  // If the wizard is already visible, just focus that one.
+  if (FocusExistingWizardIfPresent()) {
+    if (!IsActiveLogin())
+      CloseOverlay();
+    return false;
+  }
+
+  // Notify services that login UI is now active.
+  GetLoginUIService()->SetLoginUI(this);
+  service->SetSetupInProgress(true);
+
+  return true;
+}
+
 // TODO(kochi): Handle error conditions (timeout, other failures).
+// http://crbug.com/128692
 void SyncSetupHandler::DisplaySpinner() {
   configuring_sync_ = true;
   StringValue page("spinner");
+  DictionaryValue args;
+
+  const int kTimeoutSec = 30;
+  DCHECK(!backend_start_timer_.get());
+  backend_start_timer_.reset(new base::OneShotTimer<SyncSetupHandler>());
+  backend_start_timer_->Start(FROM_HERE,
+                              base::TimeDelta::FromSeconds(kTimeoutSec),
+                              this, &SyncSetupHandler::DisplayTimeout);
+
+  web_ui()->CallJavascriptFunction(
+      "SyncSetupOverlay.showSyncSetupPage", page, args);
+}
+
+// TODO(kochi): Handle error conditions other than timeout.
+// http://crbug.com/128692
+void SyncSetupHandler::DisplayTimeout() {
+  // Stop a timer to handle timeout in waiting for checking network connection.
+  backend_start_timer_.reset();
+
+  // Do not listen to signin events.
+  signin_tracker_.reset();
+
+  StringValue page("timeout");
   DictionaryValue args;
   web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
@@ -552,14 +635,6 @@ void SyncSetupHandler::DisplayGaiaSuccessAndClose() {
 void SyncSetupHandler::DisplayGaiaSuccessAndSettingUp() {
   RecordSignin();
   web_ui()->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndSettingUp");
-}
-
-void SyncSetupHandler::ShowFatalError() {
-  // For now, just send the user back to the login page. Ultimately may want
-  // to give different feedback (especially for chromeos).
-#if !defined(OS_CHROMEOS)
-  DisplayGaiaLogin(true);
-#endif
 }
 
 void SyncSetupHandler::OnDidClosePage(const ListValue* args) {
@@ -590,22 +665,30 @@ void SyncSetupHandler::HandleSubmitAuth(const ListValue* args) {
     return;
   }
 
-  // If one of password, captcha and otp is non-empty, then the other two must
-  // be empty.  At least one should be non-empty.
-  DCHECK(password.empty() || (captcha.empty() && otp.empty()));
-  DCHECK(captcha.empty() || (password.empty() && otp.empty()));
-  DCHECK(otp.empty() || (captcha.empty() && password.empty()));
-  DCHECK(!otp.empty() || !captcha.empty() || !password.empty());
+  // If one of password, captcha, otp and access_code is non-empty, then the
+  // others must be empty.  At least one should be non-empty.
+  DCHECK(password.empty() ||
+         (captcha.empty() && otp.empty() && access_code.empty()));
+  DCHECK(captcha.empty() ||
+         (password.empty() && otp.empty() && access_code.empty()));
+  DCHECK(otp.empty() ||
+         (captcha.empty() && password.empty() && access_code.empty()));
+  DCHECK(access_code.empty() ||
+         (captcha.empty() && password.empty() && otp.empty()));
+  DCHECK(!otp.empty() || !captcha.empty() || !password.empty() ||
+         !access_code.empty());
 
-  // Last error is two-factor implies otp should not be empty.
-  DCHECK((last_signin_error_.state() != GoogleServiceAuthError::TWO_FACTOR) ||
-      !otp.empty());
-  // Last error is captcha-required implies captcha should not be empty.
-  DCHECK((last_signin_error_.state() !=
-      GoogleServiceAuthError::CAPTCHA_REQUIRED) || !captcha.empty());
+  if (IsClientOAuthEnabled()) {
+    // Last error is two-factor implies otp should not be empty.
+    DCHECK((last_signin_error_.state() != GoogleServiceAuthError::TWO_FACTOR) ||
+        !otp.empty());
+    // Last error is captcha-required implies captcha should not be empty.
+    DCHECK((last_signin_error_.state() !=
+        GoogleServiceAuthError::CAPTCHA_REQUIRED) || !captcha.empty());
+  }
+
   const std::string& solution = captcha.empty() ?
       (otp.empty() ? EmptyString() : otp) : captcha;
-
   TryLogin(username, password, solution, access_code);
 }
 
@@ -662,16 +745,21 @@ void SyncSetupHandler::GaiaCredentialsValid() {
 }
 
 void SyncSetupHandler::SigninFailed(const GoogleServiceAuthError& error) {
+  // Stop a timer to handle timeout in waiting for checking network connection.
+  backend_start_timer_.reset();
+
   last_signin_error_ = error;
   // Got a failed signin - this is either just a typical auth error, or a
   // sync error (treat sync errors as "fatal errors" - i.e. non-auth errors).
-  // On ChromeOS, this condition should trigger the orange badge on wrench menu
-  // and prompt to sign out.
-#if !defined(OS_CHROMEOS)
-  DisplayGaiaLogin(GetSyncService()->HasUnrecoverableError());
-#else
-  CloseOverlay();
-#endif
+  // On ChromeOS, this condition can happen when auth token is invalid and
+  // cannot start sync backend.
+  if (retry_on_signin_failure_) {
+    DisplayGaiaLogin(GetSyncService()->HasUnrecoverableError());
+  } else {
+    // TODO(peria): Show error dialog for prompting sign in and out on
+    // Chrome OS. http://crbug.com/128692
+    CloseOverlay();
+  }
 }
 
 Profile* SyncSetupHandler::GetProfile() const {
@@ -684,6 +772,9 @@ ProfileSyncService* SyncSetupHandler::GetSyncService() const {
 
 void SyncSetupHandler::SigninSuccess() {
   DCHECK(GetSyncService()->sync_initialized());
+  // Stop a timer to handle timeout in waiting for checking network connection.
+  backend_start_timer_.reset();
+
   // If we have signed in while sync is already setup, it must be due to some
   // kind of re-authentication flow. In that case, just close the signin dialog
   // rather than forcing the user to go through sync configuration.
@@ -815,14 +906,6 @@ void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
   ProfileSyncService* service = GetSyncService();
   DCHECK(service);
 
-#if defined(OS_CHROMEOS)
-  if (service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
-    DLOG(INFO) << "Signing out the user to fix a sync error.";
-    browser::AttemptUserExit();
-    return;
-  }
-#endif
-
   // Bring up the existing wizard, or just display it on this page.
   if (!FocusExistingWizardIfPresent())
     OpenSyncSetup(false);
@@ -830,6 +913,15 @@ void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
 
 void SyncSetupHandler::HandleShowSetupUI(const ListValue* args) {
   OpenSyncSetup(false);
+}
+
+void SyncSetupHandler::HandleShowSetupUIWithoutLogin(const ListValue* args) {
+  OpenConfigureSync();
+}
+
+void SyncSetupHandler::HandleDoSignOutOnAuthError(const ListValue* args) {
+  DLOG(INFO) << "Signing out the user to fix a sync error.";
+  browser::AttemptUserExit();
 }
 
 void SyncSetupHandler::HandleStopSyncing(const ListValue* args) {
@@ -842,10 +934,14 @@ void SyncSetupHandler::HandleStopSyncing(const ListValue* args) {
   }
 }
 
+void SyncSetupHandler::HandleCloseTimeout(const ListValue* args) {
+  CloseSyncSetup();
+}
+
 void SyncSetupHandler::CloseSyncSetup() {
   // TODO(atwilson): Move UMA tracking of signin events out of sync module.
+  ProfileSyncService* sync_service = GetSyncService();
   if (IsActiveLogin()) {
-    ProfileSyncService* sync_service = GetSyncService();
     if (!sync_service->HasSyncSetupCompleted()) {
       if (signin_tracker_.get()) {
         ProfileSyncService::SyncEvent(
@@ -858,27 +954,22 @@ void SyncSetupHandler::CloseSyncSetup() {
             ProfileSyncService::CANCEL_FROM_SIGNON_WITHOUT_AUTH);
       }
     }
-
     // Let the various services know that we're no longer active.
     GetLoginUIService()->LoginUIClosed(this);
-    if (sync_service)
-      sync_service->SetSetupInProgress(false);
+  }
+
+  if (sync_service) {
+    sync_service->SetSetupInProgress(false);
 
     // Make sure user isn't left half-logged-in (signed in, but without sync
     // started up). If the user hasn't finished setting up sync, then sign out
     // and shut down sync.
-    if (sync_service && !sync_service->HasSyncSetupCompleted()) {
+    if (!sync_service->HasSyncSetupCompleted()) {
       DVLOG(1) << "Signin aborted by user action";
-      // Calling DisableForUser() will also sign the user out on desktop
-      // platforms (platforms without sync auto-start enabled).
       sync_service->DisableForUser();
 
-#if defined(OS_CHROMEOS)
-      // Suppress sync startup on ChromeOS, so it doesn't get restarted when
-      // the user logs in again.
       browser_sync::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
       sync_prefs.SetStartSuppressed(true);
-#endif
     }
   }
 
@@ -890,29 +981,16 @@ void SyncSetupHandler::CloseSyncSetup() {
 
   configuring_sync_ = false;
   signin_tracker_.reset();
+
+  // Stop a timer to handle timeout in waiting for checking network connection.
+  backend_start_timer_.reset();
 }
 
 void SyncSetupHandler::OpenSyncSetup(bool force_login) {
+  if (!PrepareSyncSetup())
+    return;
+
   ProfileSyncService* service = GetSyncService();
-  if (!service) {
-    // If there's no sync service, the user tried to manually invoke a syncSetup
-    // URL, but sync features are disabled.  We need to close the overlay for
-    // this (rare) case.
-    DLOG(WARNING) << "Closing sync UI because sync is disabled";
-    CloseOverlay();
-    return;
-  }
-
-  // If the wizard is already visible, just focus that one.
-  if (FocusExistingWizardIfPresent()) {
-    if (!IsActiveLogin())
-      CloseOverlay();
-    return;
-  }
-
-  // Notify services that we are now active.
-  GetLoginUIService()->SetLoginUI(this);
-  service->SetSetupInProgress(true);
 
   // There are several different UI flows that can bring the user here:
   // 1) Signin promo (passes force_login=true)
@@ -926,8 +1004,6 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
   //    logged in.
   // 6) One-click signin (credentials are already available, so should display
   //    sync configure UI, not login UI).
-  // 7) ChromeOS re-enable after disabling sync.
-#if !defined(OS_CHROMEOS)
   if (force_login ||
       !service->IsSyncEnabledAndLoggedIn() ||
       service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
@@ -939,28 +1015,16 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
     // via the "Advanced..." button or through One-Click signin (cases 5/6).
     DisplayConfigureSync(true, false);
   }
-#else
-  PrepareConfigDialog();
-#endif
 
   ShowSetupUI();
 }
 
-void SyncSetupHandler::PrepareConfigDialog() {
-  // On Chrome OS user is always logged in. Instead of showing login dialog,
-  // show spinner until the backend gets ready to configure sync.
-  ProfileSyncService* service = GetSyncService();
-  if (!service->sync_initialized()) {
-    // To listen to the token available notifications, start SigninTracker.
-    signin_tracker_.reset(
-        new SigninTracker(GetProfile(), this,
-                          SigninTracker::SERVICES_INITIALIZING));
-    service->SetSetupInProgress(true);
-    service->UnsuppressAndStart();
-    DisplaySpinner();
-  } else {
-    DisplayConfigureSync(true, false);
-  }
+void SyncSetupHandler::OpenConfigureSync() {
+  if (!PrepareSyncSetup())
+    return;
+
+  DisplayConfigureSync(true, false);
+  ShowSetupUI();
 }
 
 void SyncSetupHandler::FocusUI() {
@@ -989,6 +1053,9 @@ LoginUIService* SyncSetupHandler::GetLoginUIService() const {
 }
 
 void SyncSetupHandler::CloseOverlay() {
+  // Stop a timer to handle timeout in waiting for sync setup.
+  backend_start_timer_.reset();
+
   CloseSyncSetup();
   web_ui()->CallJavascriptFunction("OptionsPage.closeOverlay");
 }

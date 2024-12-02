@@ -23,6 +23,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
 
@@ -85,7 +86,7 @@ TemplateURLFetcher::RequestDelegate::RequestDelegate(
     content::WebContents* web_contents,
     TemplateURLFetcherCallbacks* callbacks,
     ProviderType provider_type)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(url_fetcher_(content::URLFetcher::Create(
+    : ALLOW_THIS_IN_INITIALIZER_LIST(url_fetcher_(net::URLFetcher::Create(
           osdd_url, net::URLFetcher::GET, this))),
       fetcher_(fetcher),
       keyword_(keyword),
@@ -275,22 +276,22 @@ void TemplateURLFetcher::ScheduleDownload(
   }
 
   // Make sure we aren't already downloading this request.
-  for (Requests::iterator i = requests_->begin(); i != requests_->end(); ++i) {
+  for (Requests::iterator i = requests_.begin(); i != requests_.end(); ++i) {
     if (((*i)->url() == osdd_url) ||
         ((provider_type == TemplateURLFetcher::AUTODETECTED_PROVIDER) &&
          ((*i)->keyword() == keyword)))
       return;
   }
 
-  requests_->push_back(
+  requests_.push_back(
       new RequestDelegate(this, keyword, osdd_url, favicon_url, web_contents,
                           owned_callbacks.release(), provider_type));
 }
 
 void TemplateURLFetcher::RequestCompleted(RequestDelegate* request) {
   Requests::iterator i =
-      std::find(requests_->begin(), requests_->end(), request);
-  DCHECK(i != requests_->end());
-  requests_->erase(i);
+      std::find(requests_.begin(), requests_.end(), request);
+  DCHECK(i != requests_.end());
+  requests_.weak_erase(i);
   delete request;
 }

@@ -9,7 +9,7 @@
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -227,7 +227,7 @@ void BrowserLauncherItemController::UpdateLauncher(TabContents* tab) {
     DCHECK_EQ(TYPE_TABBED, type_);
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     if (tab->favicon_tab_helper()->ShouldDisplayFavicon()) {
-      item.image = tab->favicon_tab_helper()->GetFavicon();
+      item.image = tab->favicon_tab_helper()->GetFavicon().AsBitmap();
       if (item.image.empty()) {
         item.image = *rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
       }

@@ -40,6 +40,7 @@ const char* kQuickOfficeViewerMimeType[] = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 };
 
+typedef base::Callback<void(const WDTypedResult* result)> ResultsHandler;
 typedef WebIntentsRegistry::IntentServiceList IntentServiceList;
 
 // Compares two mime types for equality. Supports wild cards in both
@@ -48,9 +49,13 @@ bool MimeTypesAreEqual(const string16& type1, const string16& type2) {
   // We don't have a MIME matcher that allows patterns on both sides
   // Instead, we do two comparisons, treating each type in turn as a
   // pattern. If either one matches, we consider this a MIME match.
-  if (net::MatchesMimeType(UTF16ToUTF8(type1), UTF16ToUTF8(type2)))
+  std::string t1 = UTF16ToUTF8(type1);
+  std::string t2 = UTF16ToUTF8(type2);
+  StringToLowerASCII(&t1);
+  StringToLowerASCII(&t2);
+  if (net::MatchesMimeType(t1, t2))
     return true;
-  return net::MatchesMimeType(UTF16ToUTF8(type2), UTF16ToUTF8(type1));
+  return net::MatchesMimeType(t2, t1);
 }
 
 // Returns true if the passed string is a MIME type. Works by comparing string
@@ -84,14 +89,14 @@ void AddMatchingServicesForExtension(const Extension& extension,
   }
 }
 
-// Removes all services from |matching_services| that do not match |mimetype|.
+// Removes all services from |matching_services| that do not match |type|.
 // Wildcards are supported, of the form '<type>/*' or '*'.
-void FilterServicesByMimetype(const string16& mimetype,
-                              IntentServiceList* matching_services) {
+void FilterServicesByType(const string16& type,
+                          IntentServiceList* matching_services) {
   // Filter out all services not matching the query type.
   IntentServiceList::iterator iter(matching_services->begin());
   while (iter != matching_services->end()) {
-    if (WebIntentsTypesMatch(iter->type, mimetype))
+    if (WebIntentsTypesMatch(iter->type, type))
       ++iter;
     else
       iter = matching_services->erase(iter);
@@ -102,7 +107,11 @@ void FilterServicesByMimetype(const string16& mimetype,
 // into a callback that returns true if the list contains a specific service.
 void ExistenceCallback(const webkit_glue::WebIntentServiceData& service,
                        const base::Callback<void(bool)>& callback,
-                       const WebIntentsRegistry::IntentServiceList& list) {
+                       const WDTypedResult* result) {
+
+  WebIntentsRegistry::IntentServiceList list = static_cast<
+      const WDResult<IntentServiceList>*>(result)->GetValue();
+
   for (WebIntentsRegistry::IntentServiceList::const_iterator i = list.begin();
        i != list.end(); ++i) {
     if (*i == service) {
@@ -150,16 +159,9 @@ bool IntentsAreEquivalent(const webkit_glue::WebIntentServiceData& lhs,
 
 using webkit_glue::WebIntentServiceData;
 
-// Internal object representing all data associated with a single query.
-struct WebIntentsRegistry::IntentsQuery {
-  // Underlying data query.
-  WebDataService::Handle pending_query_;
-
-  // The callback for this particular query.
-  QueryCallback callback_;
-
-  // Callback for a query for defaults.
-  DefaultQueryCallback default_callback_;
+// Internal object containing arguments to be used in post processing
+// WDS results.
+struct WebIntentsRegistry::QueryParams {
 
   // The particular action to filter for while searching through extensions.
   // If |action_| is empty, return all extension-provided services.
@@ -172,28 +174,59 @@ struct WebIntentsRegistry::IntentsQuery {
   // The url of the invoking page.
   GURL url_;
 
-  // Create a new IntentsQuery for services with the specified action/type.
-  IntentsQuery(const QueryCallback& callback,
-               const string16& action, const string16& type)
-      : callback_(callback), action_(action), type_(type) {}
+  // Create a new QueryParams for all intent services or for existence checks.
+  QueryParams() : type_(ASCIIToUTF16("*")) {}
 
-  // Create a new IntentsQuery for all intent services or for existence checks.
-  explicit IntentsQuery(const QueryCallback callback)
-      : callback_(callback), type_(ASCIIToUTF16("*")) {}
+  QueryParams(const string16& action, const string16& type)
+      : action_(action), type_(type) {}
 
-  // Create a new IntentsQuery for default services.
-  IntentsQuery(const DefaultQueryCallback& callback,
-               const string16& action, const string16& type, const GURL& url)
-      : default_callback_(callback), action_(action), type_(type), url_(url) {}
+  // Create a new QueryParams for default services.
+  QueryParams(const string16& action, const string16& type, const GURL& url)
+      : action_(action), type_(type), url_(url) {}
+};
+
+// Internal object adapting the WDS consumer interface to base::Bind
+// callback way of doing business.
+class WebIntentsRegistry::QueryAdapter : public WebDataServiceConsumer {
+
+ public:
+  // Underlying data query.
+  WebDataService::Handle query_handle_;
+
+  // Create a new QueryAdapter that delegates results to |handler|.
+  QueryAdapter(WebIntentsRegistry* registry, const ResultsHandler& handler)
+      : registry_(registry), handler_(handler) {
+    registry_->TrackQuery(this);
+  }
+
+  void OnWebDataServiceRequestDone(
+      WebDataService::Handle h,
+      const WDTypedResult* result) OVERRIDE {
+
+    handler_.Run(result);
+    registry_->ReleaseQuery(this);
+  }
+
+ private:
+  // Handle so we can call back into the WebIntentsRegistry when
+  // processing query results. The registry is guaranteed to be
+  // valid for the life of this object. We do not own this object.
+  WebIntentsRegistry* registry_;
+
+  // The callback for this particular query.
+  ResultsHandler handler_;
 };
 
 WebIntentsRegistry::WebIntentsRegistry() {}
 
 WebIntentsRegistry::~WebIntentsRegistry() {
+
   // Cancel all pending queries, since we can't handle them any more.
-  for (QueryMap::iterator it(queries_.begin()); it != queries_.end(); ++it) {
-    wds_->CancelRequest(it->first);
-    delete it->second;
+  for (QueryVector::iterator it = pending_queries_.begin();
+      it != pending_queries_.end(); ++it) {
+    QueryAdapter* query = *it;
+    wds_->CancelRequest(query->query_handle_);
+    delete query;
   }
 }
 
@@ -204,22 +237,12 @@ void WebIntentsRegistry::Initialize(
   extension_service_ = extension_service;
 }
 
-void WebIntentsRegistry::OnWebDataServiceRequestDone(
-    WebDataService::Handle h,
+void WebIntentsRegistry::OnWebIntentsResultReceived(
+    const QueryParams& params,
+    const QueryCallback& callback,
     const WDTypedResult* result) {
   DCHECK(result);
-  if (result->GetType() == WEB_INTENTS_DEFAULTS_RESULT) {
-    OnWebDataServiceDefaultsRequestDone(h, result);
-    return;
-  }
   DCHECK(result->GetType() == WEB_INTENTS_RESULT);
-
-  QueryMap::iterator it = queries_.find(h);
-  DCHECK(it != queries_.end());
-
-  IntentsQuery* query(it->second);
-  DCHECK(query);
-  queries_.erase(it);
 
   IntentServiceList matching_services = static_cast<
       const WDResult<IntentServiceList>*>(result)->GetValue();
@@ -231,43 +254,40 @@ void WebIntentsRegistry::OnWebDataServiceRequestDone(
     if (extensions) {
       for (ExtensionSet::const_iterator i(extensions->begin());
            i != extensions->end(); ++i) {
-        AddMatchingServicesForExtension(**i, query->action_,
+        AddMatchingServicesForExtension(**i, params.action_,
                                         &matching_services);
       }
     }
   }
 
   // Filter out all services not matching the query type.
-  FilterServicesByMimetype(query->type_, &matching_services);
+  FilterServicesByType(params.type_, &matching_services);
 
   // Collapse intents that are equivalent for all but |type|.
   CollapseIntents(&matching_services);
 
-  query->callback_.Run(matching_services);
-  delete query;
+  callback.Run(matching_services);
 }
 
-const Extension* WebIntentsRegistry::ExtensionForURL(const std::string& url) {
-  const ExtensionSet* extensions = extension_service_->extensions();
-  if (!extensions)
-    return NULL;
-
-  // Use the unsafe ExtensionURLInfo constructor: we don't care if the extension
-  // is running or not.
-  GURL gurl(url);
-  ExtensionURLInfo info(gurl);
-  return extensions->GetExtensionOrAppByURL(info);
-}
-
-void WebIntentsRegistry::OnWebDataServiceDefaultsRequestDone(
-    WebDataService::Handle h,
+void WebIntentsRegistry::OnAllDefaultIntentServicesReceived(
+    const DefaultIntentServicesCallback& callback,
     const WDTypedResult* result) {
-  QueryMap::iterator it = queries_.find(h);
-  DCHECK(it != queries_.end());
+  DCHECK(result);
+  DCHECK(result->GetType() == WEB_INTENTS_DEFAULTS_RESULT);
 
-  IntentsQuery* query(it->second);
-  DCHECK(query);
-  queries_.erase(it);
+  const std::vector<DefaultWebIntentService> services = static_cast<
+      const WDResult<std::vector<DefaultWebIntentService> >*>(result)->
+          GetValue();
+
+  callback.Run(services);
+}
+
+void WebIntentsRegistry::OnWebIntentsDefaultsResultReceived(
+    const QueryParams& params,
+    const DefaultQueryCallback& callback,
+    const WDTypedResult* result) {
+  DCHECK(result);
+  DCHECK(result->GetType() == WEB_INTENTS_DEFAULTS_RESULT);
 
   std::vector<DefaultWebIntentService> services = static_cast<
       const WDResult<std::vector<DefaultWebIntentService> >*>(result)->
@@ -276,10 +296,10 @@ void WebIntentsRegistry::OnWebDataServiceDefaultsRequestDone(
   DefaultWebIntentService default_service;
   std::vector<DefaultWebIntentService>::iterator iter(services.begin());
   for (; iter != services.end(); ++iter) {
-    if (!WebIntentsTypesMatch(iter->type, query->type_)) {
+    if (!WebIntentsTypesMatch(iter->type, params.type_)) {
       continue;
     }
-    if (!iter->url_pattern.MatchesURL(query->url_)) {
+    if (!iter->url_pattern.MatchesURL(params.url_)) {
       continue;
     }
     const Extension* extension = ExtensionForURL(iter->service_url);
@@ -313,26 +333,31 @@ void WebIntentsRegistry::OnWebDataServiceDefaultsRequestDone(
       qoviewer_service.action = ASCIIToUTF16(kViewActionURL);
       qoviewer_service.type = ASCIIToUTF16(kQuickOfficeViewerMimeType[i]);
       qoviewer_service.service_url = kQuickOfficeViewerServiceURL;
-      if (WebIntentsTypesMatch(qoviewer_service.type, query->type_)) {
+      if (WebIntentsTypesMatch(qoviewer_service.type, params.type_)) {
         default_service = qoviewer_service;
         break;
       }
     }
   }
 
-  query->default_callback_.Run(default_service);
-  delete query;
+  callback.Run(default_service);
 }
 
 void WebIntentsRegistry::GetIntentServices(
-    const string16& action, const string16& mimetype,
+    const string16& action, const string16& type,
     const QueryCallback& callback) {
   DCHECK(wds_.get());
   DCHECK(!callback.is_null());
 
-  IntentsQuery* query = new IntentsQuery(callback, action, mimetype);
-  query->pending_query_ = wds_->GetWebIntentServices(action, this);
-  queries_[query->pending_query_] = query;
+  const QueryParams params(action, type);
+  const ResultsHandler handler = base::Bind(
+      &WebIntentsRegistry::OnWebIntentsResultReceived,
+      base::Unretained(this),
+      params,
+      callback);
+
+  QueryAdapter* query = new QueryAdapter(this, handler);
+  query->query_handle_ = wds_->GetWebIntentServices(action, query);
 }
 
 void WebIntentsRegistry::GetAllIntentServices(
@@ -340,9 +365,29 @@ void WebIntentsRegistry::GetAllIntentServices(
   DCHECK(wds_.get());
   DCHECK(!callback.is_null());
 
-  IntentsQuery* query = new IntentsQuery(callback);
-  query->pending_query_ = wds_->GetAllWebIntentServices(this);
-  queries_[query->pending_query_] = query;
+  const QueryParams params;
+  const ResultsHandler handler = base::Bind(
+      &WebIntentsRegistry::OnWebIntentsResultReceived,
+      base::Unretained(this),
+      params,
+      callback);
+
+  QueryAdapter* query = new QueryAdapter(this, handler);
+  query->query_handle_ = wds_->GetAllWebIntentServices(query);
+}
+
+void WebIntentsRegistry::GetAllDefaultIntentServices(
+    const DefaultIntentServicesCallback& callback) {
+  DCHECK(!callback.is_null());
+
+  ResultsHandler handler = base::Bind(
+      &WebIntentsRegistry::OnAllDefaultIntentServicesReceived,
+      base::Unretained(this),
+      callback);
+
+  QueryAdapter* query = new QueryAdapter(this, handler);
+  query->query_handle_ =
+      wds_->GetAllDefaultWebIntentServices(query);
 }
 
 void WebIntentsRegistry::IntentServiceExists(
@@ -350,46 +395,52 @@ void WebIntentsRegistry::IntentServiceExists(
     const base::Callback<void(bool)>& callback) {
   DCHECK(!callback.is_null());
 
-  IntentsQuery* query = new IntentsQuery(
-      base::Bind(&ExistenceCallback, service, callback));
-  query->pending_query_ = wds_->GetWebIntentServicesForURL(
-      UTF8ToUTF16(service.service_url.spec()), this);
-  queries_[query->pending_query_] = query;
+  ResultsHandler handler = base::Bind(
+      &ExistenceCallback,
+      service,
+      callback);
+
+  QueryAdapter* query = new QueryAdapter(this, handler);
+  query->query_handle_ = wds_->GetWebIntentServicesForURL(
+      UTF8ToUTF16(service.service_url.spec()), query);
 }
 
 void WebIntentsRegistry::GetIntentServicesForExtensionFilter(
         const string16& action,
-        const string16& mimetype,
+        const string16& type,
         const std::string& extension_id,
         const QueryCallback& callback) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(!callback.is_null());
 
-  scoped_ptr<IntentsQuery> query(
-      new IntentsQuery(callback, action, mimetype));
+  const QueryParams params(action, type);
   content::BrowserThread::PostTask(
       content::BrowserThread::UI,
       FROM_HERE,
-      base::Bind(&WebIntentsRegistry::DoGetIntentServicesForExtensionFilter,
-                 base::Unretained(this),
-                 base::Passed(&query), extension_id));
+      base::Bind(
+          &WebIntentsRegistry::DoGetIntentServicesForExtensionFilter,
+          base::Unretained(this),
+          params,
+          extension_id,
+          callback));
 }
 
 void WebIntentsRegistry::DoGetIntentServicesForExtensionFilter(
-    scoped_ptr<IntentsQuery> query,
-    const std::string& extension_id) {
+    const QueryParams& params,
+    const std::string& extension_id,
+    const QueryCallback& callback) {
   IntentServiceList matching_services;
 
   if (extension_service_) {
     const Extension* extension =
         extension_service_->GetExtensionById(extension_id, false);
     AddMatchingServicesForExtension(*extension,
-                                    query->action_,
+                                    params.action_,
                                     &matching_services);
-    FilterServicesByMimetype(query->type_, &matching_services);
+    FilterServicesByType(params.type_, &matching_services);
   }
 
-  query->callback_.Run(matching_services);
+  callback.Run(matching_services);
 }
 
 void WebIntentsRegistry::RegisterDefaultIntentService(
@@ -411,11 +462,17 @@ void WebIntentsRegistry::GetDefaultIntentService(
     const DefaultQueryCallback& callback) {
   DCHECK(!callback.is_null());
 
-  IntentsQuery* query =
-      new IntentsQuery(callback, action, type, invoking_url);
-  query->pending_query_ =
-      wds_->GetDefaultWebIntentServicesForAction(action, this);
-  queries_[query->pending_query_] = query;
+  const QueryParams params(action, type);
+
+  ResultsHandler handler = base::Bind(
+      &WebIntentsRegistry::OnWebIntentsDefaultsResultReceived,
+      base::Unretained(this),
+      params,
+      callback);
+
+  QueryAdapter* query = new QueryAdapter(this, handler);
+  query->query_handle_ =
+      wds_->GetDefaultWebIntentServicesForAction(action, query);
 }
 
 void WebIntentsRegistry::RegisterIntentService(
@@ -459,4 +516,32 @@ void WebIntentsRegistry::CollapseIntents(IntentServiceList* services) {
   // Cut off everything after the last intent copied to the list.
   if (++write_iter != services->end())
     services->erase(write_iter, services->end());
+}
+
+const Extension* WebIntentsRegistry::ExtensionForURL(const std::string& url) {
+  const ExtensionSet* extensions = extension_service_->extensions();
+  if (!extensions)
+    return NULL;
+
+  // Use the unsafe ExtensionURLInfo constructor: we don't care if the extension
+  // is running or not.
+  GURL gurl(url);
+  ExtensionURLInfo info(gurl);
+  return extensions->GetExtensionOrAppByURL(info);
+}
+
+void WebIntentsRegistry::TrackQuery(QueryAdapter* query) {
+  DCHECK(query);
+  pending_queries_.push_back(query);
+}
+
+void WebIntentsRegistry::ReleaseQuery(QueryAdapter* query) {
+  QueryVector::iterator it = std::find(
+      pending_queries_.begin(), pending_queries_.end(), query);
+  if (it != pending_queries_.end()) {
+    pending_queries_.erase(it);
+    delete query;
+  } else {
+    NOTREACHED();
+  }
 }

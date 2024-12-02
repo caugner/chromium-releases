@@ -10,7 +10,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace {
 
 class ProtoEnumConversionsTest : public testing::Test {
@@ -55,6 +55,10 @@ TEST_F(ProtoEnumConversionsTest, GetUpdatesSourceString) {
   TestEnumStringFunction(
       GetUpdatesSourceString,
       sync_pb::GetUpdatesCallerInfo::GetUpdatesSource_MIN,
+      sync_pb::GetUpdatesCallerInfo::SYNC_CYCLE_CONTINUATION);
+  TestEnumStringFunction(
+      GetUpdatesSourceString,
+      sync_pb::GetUpdatesCallerInfo::NEWLY_SUPPORTED_DATATYPE,
       sync_pb::GetUpdatesCallerInfo::GetUpdatesSource_MAX);
 }
 
@@ -86,4 +90,4 @@ TEST_F(ProtoEnumConversionsTest, GetActionString) {
 }
 
 }  // namespace
-}  // namespace browser_sync
+}  // namespace syncer

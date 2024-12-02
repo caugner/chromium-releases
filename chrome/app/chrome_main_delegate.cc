@@ -42,7 +42,7 @@
 #include "base/win/registry.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "policy/policy_constants.h"
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #include "tools/memory_watcher/memory_watcher.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #endif
@@ -87,7 +87,7 @@
 #endif
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linuxish.h"
+#include "chrome/app/breakpad_linux.h"
 #endif
 
 base::LazyInstance<chrome::ChromeContentBrowserClient>

@@ -4,14 +4,16 @@
 
 #include "ui/compositor/compositor.h"
 
+#include <algorithm>
+
 #include "base/command_line.h"
 #include "base/threading/thread_restrictions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/images/SkImageEncoder.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFloatPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/images/SkImageEncoder.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "ui/compositor/compositor_observer.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/dip_util.h"
@@ -38,7 +40,7 @@ bool test_compositor_enabled = false;
 
 ui::ContextFactory* g_context_factory = NULL;
 
-}  // anonymous namespace
+}  // namespace
 
 namespace ui {
 
@@ -155,6 +157,7 @@ Compositor::Compositor(CompositorDelegate* delegate,
 #endif
 
   host_.initialize(this, root_web_layer_, settings);
+  host_.setSurfaceReady();
   root_web_layer_.setAnchorPoint(WebKit::WebFloatPoint(0.f, 0.f));
 }
 
@@ -167,6 +170,11 @@ Compositor::~Compositor() {
   host_.setRootLayer(NULL);
   if (root_layer_)
     root_layer_->SetCompositor(NULL);
+
+  // Stop all outstanding draws before telling the ContextFactory to tear
+  // down any contexts that the |host_| may rely upon.
+  host_.reset();
+
   if (!test_compositor_enabled)
     ContextFactory::GetInstance()->RemoveCompositor(this);
 }
@@ -222,6 +230,10 @@ void Compositor::Draw(bool force_clear) {
     return;
 
   last_started_frame_++;
+  if (!g_compositor_thread)
+    FOR_EACH_OBSERVER(CompositorObserver,
+                      observer_list_,
+                      OnCompositingWillStart(this));
 
   // TODO(nduca): Temporary while compositor calls
   // compositeImmediately() directly.
@@ -259,7 +271,7 @@ bool Compositor::ReadPixels(SkBitmap* bitmap,
 }
 
 void Compositor::SetScaleAndSize(float scale, const gfx::Size& size_in_pixel) {
-  DCHECK(scale > 0);
+  DCHECK_GT(scale, 0);
   if (size_in_pixel.IsEmpty() || scale <= 0)
     return;
   size_ = size_in_pixel;
@@ -283,6 +295,10 @@ void Compositor::RemoveObserver(CompositorObserver* observer) {
 
 bool Compositor::HasObserver(CompositorObserver* observer) {
   return observer_list_.HasObserver(observer);
+}
+
+bool Compositor::IsThreaded() const {
+  return g_compositor_thread != NULL;
 }
 
 void Compositor::OnSwapBuffersPosted() {
@@ -325,8 +341,8 @@ WebKit::WebGraphicsContext3D* Compositor::createContext3D() {
   if (test_compositor_enabled) {
     ui::TestWebGraphicsContext3D* test_context =
       new ui::TestWebGraphicsContext3D();
-   test_context->Initialize();
-   return test_context;
+    test_context->Initialize();
+    return test_context;
   } else {
     return ContextFactory::GetInstance()->CreateContext(this);
   }
@@ -335,7 +351,21 @@ WebKit::WebGraphicsContext3D* Compositor::createContext3D() {
 void Compositor::didRebindGraphicsContext(bool success) {
 }
 
+// Called once per draw in single-threaded compositor mode and potentially
+// many times between draws in the multi-threaded compositor mode.
+void Compositor::didCommit() {
+  FOR_EACH_OBSERVER(CompositorObserver,
+                    observer_list_,
+                    OnCompositingDidCommit(this));
+}
+
 void Compositor::didCommitAndDrawFrame() {
+  // TODO(backer): Plumb through an earlier impl side will start.
+  if (g_compositor_thread)
+    FOR_EACH_OBSERVER(CompositorObserver,
+                      observer_list_,
+                      OnCompositingWillStart(this));
+
   FOR_EACH_OBSERVER(CompositorObserver,
                     observer_list_,
                     OnCompositingStarted(this));
@@ -354,13 +384,13 @@ void Compositor::SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
                                           const gfx::Size& image_size) {
   // Swizzle from RGBA to BGRA
   size_t bitmap_size = 4 * image_size.width() * image_size.height();
-  for(size_t i = 0; i < bitmap_size; i += 4)
+  for (size_t i = 0; i < bitmap_size; i += 4)
     std::swap(pixels[i], pixels[i + 2]);
 
   // Vertical flip to transform from GL co-ords
   size_t row_size = 4 * image_size.width();
   scoped_array<unsigned char> tmp_row(new unsigned char[row_size]);
-  for(int row = 0; row < image_size.height() / 2; row++) {
+  for (int row = 0; row < image_size.height() / 2; row++) {
     memcpy(tmp_row.get(),
            &pixels[row * row_size],
            row_size);

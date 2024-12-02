@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_INTENTS_WEB_INTENT_PICKER_CONTROLLER_H_
 #define CHROME_BROWSER_UI_INTENTS_WEB_INTENT_PICKER_CONTROLLER_H_
-#pragma once
 
 #include <vector>
 
@@ -41,9 +40,10 @@ struct WebIntentServiceData;
 
 // Controls the creation of the WebIntentPicker UI and forwards the user's
 // intent handler choice back to the WebContents object.
-class WebIntentPickerController : public content::NotificationObserver,
-                                  public WebIntentPickerDelegate,
-                                  public WebstoreInstaller::Delegate {
+class WebIntentPickerController
+    : public content::NotificationObserver,
+      public WebIntentPickerDelegate,
+      public extensions::WebstoreInstaller::Delegate {
  public:
   explicit WebIntentPickerController(TabContents* tab_contents);
   virtual ~WebIntentPickerController();
@@ -56,6 +56,15 @@ class WebIntentPickerController : public content::NotificationObserver,
   // Shows the web intent picker given the intent |action| and MIME-type |type|.
   void ShowDialog(const string16& action,
                   const string16& type);
+
+  // Called by the location bar to see whether the web intents picker affordance
+  // should be shown. TODO(gbillock): refactor this into a
+  // LocationBarPageToolModel.
+  bool ShowLocationBarPickerTool();
+
+  // Called to notify a controller for a page hosting a web intents service
+  // that the source WebContents has been destroyed.
+  void SourceWebContentsDestroyed(content::WebContents* source);
 
  protected:
   // content::NotificationObserver implementation.
@@ -75,7 +84,7 @@ class WebIntentPickerController : public content::NotificationObserver,
   virtual void OnChooseAnotherService() OVERRIDE;
   virtual void OnClosing() OVERRIDE;
 
-  // WebstoreInstaller::Delegate implementation.
+  // extensions::WebstoreInstaller::Delegate implementation.
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(const std::string& id,
                                          const std::string& error) OVERRIDE;
@@ -84,7 +93,9 @@ class WebIntentPickerController : public content::NotificationObserver,
   friend class WebIntentPickerControllerTest;
   friend class WebIntentPickerControllerBrowserTest;
   friend class WebIntentPickerControllerIncognitoBrowserTest;
-  friend class InvokingTabObserver;
+
+  // Adds a service to the data model.
+  void AddServiceToModel(const webkit_glue::WebIntentServiceData& service);
 
   // Gets a notification when the return message is sent to the source tab,
   // so we can close the picker dialog or service tab.
@@ -97,6 +108,15 @@ class WebIntentPickerController : public content::NotificationObserver,
   void set_model_observer(WebIntentPickerModelObserver* observer) {
     picker_model_->set_observer(observer);
   }
+
+  // Notify the controller that its TabContents is hosting a web intents
+  // service. Sets the source and dispatcher for the invoking client.
+  void SetWindowDispositionSource(content::WebContents* source,
+                                  content::WebIntentsDispatcher* dispatcher);
+
+  // Called to notify a controller for a page hosting a web intents service
+  // that the source dispatcher has been replied on.
+  void SourceDispatcherReplied(webkit_glue::WebIntentReplyType reply_type);
 
   // Called by the WebIntentsRegistry, returning |services|, which is
   // a list of WebIntentServiceData matching the query.
@@ -188,6 +208,15 @@ class WebIntentPickerController : public content::NotificationObserver,
   // This bool is not equivalent to picker != NULL in a unit test. In that
   // case, a picker may be non-NULL before it is shown.
   bool picker_shown_;
+
+  // Weak pointer to the source WebContents for the intent if the TabContents
+  // with which this controller is associated is hosting a web intents window
+  // disposition service.
+  content::WebContents* window_disposition_source_;
+
+  // If this tab is hosting a web intents service, a weak pointer to dispatcher
+  // that invoked us. Weak pointer.
+  content::WebIntentsDispatcher* source_intents_dispatcher_;
 
   // Weak pointer to the routing object for the renderer which launched the
   // intent. Contains the intent data and a way to signal back to the

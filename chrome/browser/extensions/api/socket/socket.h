@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SOCKET_SOCKET_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SOCKET_SOCKET_H_
-#pragma once
 
 #include <queue>
 #include <string>
@@ -15,6 +14,7 @@
 #include "chrome/browser/extensions/api/api_resource.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
+#include "net/base/ip_endpoint.h"
 
 namespace net {
 class AddressList;
@@ -33,7 +33,7 @@ typedef base::Callback<
 
 // A Socket wraps a low-level socket and includes housekeeping information that
 // we need to manage it in the context of an extension.
-class Socket : public APIResource {
+class Socket : public ApiResource {
  public:
   virtual ~Socket();
   virtual void Connect(const std::string& address,
@@ -64,6 +64,12 @@ class Socket : public APIResource {
   virtual bool SetKeepAlive(bool enable, int delay);
   virtual bool SetNoDelay(bool no_delay);
 
+  bool IsConnected();
+  virtual bool IsTCPSocket() = 0;
+
+  virtual bool GetPeerAddress(net::IPEndPoint* address) = 0;
+  virtual bool GetLocalAddress(net::IPEndPoint* address) = 0;
+
   static bool StringAndPortToAddressList(const std::string& ip_address_str,
                                          int port,
                                          net::AddressList* address_list);
@@ -75,7 +81,7 @@ class Socket : public APIResource {
                                         int* port);
 
  protected:
-  explicit Socket(APIResourceEventNotifier* event_notifier);
+  explicit Socket(ApiResourceEventNotifier* event_notifier);
 
   void WriteData();
   virtual int WriteImpl(net::IOBuffer* io_buffer,

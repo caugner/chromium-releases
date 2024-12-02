@@ -32,10 +32,9 @@ class CONTENT_EXPORT MacVideoDecodeAccelerator
       public base::NonThreadSafe {
  public:
   // Does not take ownership of |client| which must outlive |*this|.
-  MacVideoDecodeAccelerator(media::VideoDecodeAccelerator::Client* client);
-
-  // Set the OpenGL context to use.
-  void SetCGLContext(CGLContextObj cgl_context);
+  MacVideoDecodeAccelerator(CGLContextObj cgl_context,
+                            media::VideoDecodeAccelerator::Client* client);
+  virtual ~MacVideoDecodeAccelerator();
 
   // media::VideoDecodeAccelerator implementation.
   virtual bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
@@ -48,7 +47,6 @@ class CONTENT_EXPORT MacVideoDecodeAccelerator
   virtual void Destroy() OVERRIDE;
 
  private:
-  virtual ~MacVideoDecodeAccelerator();
 
   // Callback for a completed frame.
   void OnFrameReady(int32 bitstream_buffer_id,
@@ -84,6 +82,9 @@ class CONTENT_EXPORT MacVideoDecodeAccelerator
   // Notifies the client that the input buffer identifed by |input_buffer_id|
   // has been processed.
   void NotifyInputBufferRead(int input_buffer_id);
+
+  // Helper for Destroy(), doing all the actual work except for deleting self.
+  void Cleanup();
 
   // To expose client callbacks from VideoDecodeAccelerator.
   Client* client_;
@@ -123,6 +124,11 @@ class CONTENT_EXPORT MacVideoDecodeAccelerator
 
   // Utility to build the AVC configuration record.
   content::AVCConfigRecordBuilder config_record_builder_;
+
+  // Maps a bitstream ID to the number of NALUs that are being decoded for
+  // that bitstream. This is used to ensure that NotifyEndOfBitstreamBuffer()
+  // is called after all NALUs contained in a bitstream have been decoded.
+  std::map<int32, int> bitstream_nalu_count_;
 };
 
 #endif  // CONTENT_COMMON_GPU_MEDIA_VIDEO_DECODE_ACCELERATOR_MAC_H_

@@ -25,6 +25,10 @@
 #include "ui/gl/gpu_preference.h"
 #include "ui/surface/transport_dib.h"
 
+#if defined(OS_ANDROID)
+#include "content/common/android/surface_texture_peer.h"
+#endif
+
 #define IPC_MESSAGE_START GpuMsgStart
 
 IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
@@ -58,6 +62,8 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
 #elif defined(OS_MACOSX)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
 #endif
+  IPC_STRUCT_MEMBER(uint32, protection_state_id)
+  IPC_STRUCT_MEMBER(bool, skip_ack)
 IPC_STRUCT_END()
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT
@@ -73,6 +79,7 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params)
 #if defined(OS_MACOSX)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
 #endif
+  IPC_STRUCT_MEMBER(uint32, protection_state_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
@@ -88,6 +95,28 @@ IPC_STRUCT_BEGIN(GPUCommandBufferConsoleMessage)
   IPC_STRUCT_MEMBER(int32, id)
   IPC_STRUCT_MEMBER(std::string, message)
 IPC_STRUCT_END()
+
+#if defined(OS_ANDROID)
+IPC_STRUCT_BEGIN(GpuStreamTextureMsg_MatrixChanged_Params)
+  IPC_STRUCT_MEMBER(float, m00)
+  IPC_STRUCT_MEMBER(float, m01)
+  IPC_STRUCT_MEMBER(float, m02)
+  IPC_STRUCT_MEMBER(float, m03)
+  IPC_STRUCT_MEMBER(float, m10)
+  IPC_STRUCT_MEMBER(float, m11)
+  IPC_STRUCT_MEMBER(float, m12)
+  IPC_STRUCT_MEMBER(float, m13)
+  IPC_STRUCT_MEMBER(float, m20)
+  IPC_STRUCT_MEMBER(float, m21)
+  IPC_STRUCT_MEMBER(float, m22)
+  IPC_STRUCT_MEMBER(float, m23)
+  IPC_STRUCT_MEMBER(float, m30)
+  IPC_STRUCT_MEMBER(float, m31)
+  IPC_STRUCT_MEMBER(float, m32)
+  IPC_STRUCT_MEMBER(float, m33)
+IPC_STRUCT_END()
+IPC_ENUM_TRAITS(content::SurfaceTexturePeer::SurfaceTextureTarget)
+#endif
 
 IPC_STRUCT_TRAITS_BEGIN(content::DxDiagNode)
   IPC_STRUCT_TRAITS_MEMBER(values)
@@ -196,18 +225,16 @@ IPC_MESSAGE_CONTROL0(GpuMsg_CollectGraphicsInfo)
 // view.
 IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_ResizeViewACK)
 
-// Tells the GPU process that it's safe to start rendering to the surface.
-IPC_MESSAGE_ROUTED2(AcceleratedSurfaceMsg_NewACK,
-                    uint64 /* surface_handle */,
-                    TransportDIB::Handle /* shared memory buffer */)
+// Tells the GPU process if it's worth suggesting release of the front surface.
+IPC_MESSAGE_ROUTED2(AcceleratedSurfaceMsg_SetFrontSurfaceIsProtected,
+                    bool /* is_protected */,
+                    uint32 /* protection_state_id */)
 
-// Tells the GPU process that the browser process handled the swap
-// buffers request.
-IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_BuffersSwappedACK)
-
-// Tells the GPU process that the browser process handled the
-// PostSubBuffer command.
-IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_PostSubBufferACK)
+// Tells the GPU process that the browser process has handled the swap
+// buffers or post sub-buffer request. A non-zero sync point means
+// that we should wait for the sync point.
+IPC_MESSAGE_ROUTED1(AcceleratedSurfaceMsg_BufferPresented,
+                    uint32 /* sync_point */)
 
 // Tells the GPU process to remove all contexts.
 IPC_MESSAGE_CONTROL0(GpuMsg_Clean)
@@ -312,6 +339,34 @@ IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_CreateOffscreenCommandBuffer,
 // object that it's hosting.
 IPC_SYNC_MESSAGE_CONTROL1_0(GpuChannelMsg_DestroyCommandBuffer,
                             int32 /* instance_id */)
+
+
+#if defined(OS_ANDROID)
+// Register the StreamTextureProxy class with the GPU process, so that
+// the renderer process will get notified whenever a frame becomes available.
+IPC_SYNC_MESSAGE_CONTROL2_1(GpuChannelMsg_RegisterStreamTextureProxy,
+                            int32, /* stream_id */
+                            gfx::Size, /* initial_size */
+                            int /* route_id */)
+
+// Tells the GPU process create and send the java surface texture object to
+// the renderer process through the binder thread.
+IPC_MESSAGE_CONTROL4(GpuChannelMsg_EstablishStreamTexture,
+                     int32, /* stream_id */
+                     content::SurfaceTexturePeer::SurfaceTextureTarget,
+                     /* type */
+                     int32, /* primary_id */
+                     int32 /* secondary_id */)
+
+//------------------------------------------------------------------------------
+// Stream Texture Messages
+// Inform the renderer that a new frame is available.
+IPC_MESSAGE_ROUTED0(GpuStreamTextureMsg_FrameAvailable)
+
+// Inform the renderer process that the transform matrix has changed.
+IPC_MESSAGE_ROUTED1(GpuStreamTextureMsg_MatrixChanged,
+                    GpuStreamTextureMsg_MatrixChanged_Params /* params */)
+#endif
 
 //------------------------------------------------------------------------------
 // GPU Command Buffer Messages

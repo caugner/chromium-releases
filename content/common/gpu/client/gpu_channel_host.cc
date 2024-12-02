@@ -101,7 +101,7 @@ bool GpuChannelHost::Send(IPC::Message* message) {
   }
 
   // Callee takes ownership of message, regardless of whether Send is
-  // successful. See IPC::Message::Sender.
+  // successful. See IPC::Sender.
   delete message;
   return false;
 }
@@ -215,7 +215,7 @@ void GpuChannelHost::DestroyCommandBuffer(
 }
 
 void GpuChannelHost::AddRoute(
-    int route_id, base::WeakPtr<IPC::Channel::Listener> listener) {
+    int route_id, base::WeakPtr<IPC::Listener> listener) {
   DCHECK(MessageLoopProxy::current());
 
   scoped_refptr<base::MessageLoopProxy> io_loop = factory_->GetIOLoopProxy();
@@ -243,7 +243,7 @@ GpuChannelHost::MessageFilter::~MessageFilter() {}
 
 void GpuChannelHost::MessageFilter::AddRoute(
     int route_id,
-    base::WeakPtr<IPC::Channel::Listener> listener,
+    base::WeakPtr<IPC::Listener> listener,
     scoped_refptr<MessageLoopProxy> loop) {
   DCHECK(parent_->factory_->IsIOThread());
   DCHECK(listeners_.find(route_id) == listeners_.end());
@@ -276,7 +276,7 @@ bool GpuChannelHost::MessageFilter::OnMessageReceived(
     info.loop->PostTask(
         FROM_HERE,
         base::Bind(
-            base::IgnoreResult(&IPC::Channel::Listener::OnMessageReceived),
+            base::IgnoreResult(&IPC::Listener::OnMessageReceived),
             info.listener,
             message));
   }
@@ -286,6 +286,13 @@ bool GpuChannelHost::MessageFilter::OnMessageReceived(
 
 void GpuChannelHost::MessageFilter::OnChannelError() {
   DCHECK(parent_->factory_->IsIOThread());
+
+  // Post the task to signal the GpuChannelHost before the proxies. That way, if
+  // they themselves post a task to recreate the context, they will not try to
+  // re-use this channel host before it has a chance to mark itself lost.
+  MessageLoop* main_loop = parent_->factory_->GetMainLoop();
+  main_loop->PostTask(FROM_HERE,
+                      base::Bind(&GpuChannelHost::OnChannelError, parent_));
   // Inform all the proxies that an error has occurred. This will be reported
   // via OpenGL as a lost context.
   for (ListenerMap::iterator it = listeners_.begin();
@@ -294,14 +301,10 @@ void GpuChannelHost::MessageFilter::OnChannelError() {
     const GpuListenerInfo& info = it->second;
     info.loop->PostTask(
         FROM_HERE,
-        base::Bind(&IPC::Channel::Listener::OnChannelError, info.listener));
+        base::Bind(&IPC::Listener::OnChannelError, info.listener));
   }
 
   listeners_.clear();
-
-  MessageLoop* main_loop = parent_->factory_->GetMainLoop();
-  main_loop->PostTask(FROM_HERE,
-                      base::Bind(&GpuChannelHost::OnChannelError, parent_));
 }
 
 

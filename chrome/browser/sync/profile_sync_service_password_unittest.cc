@@ -40,7 +40,6 @@
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/password_specifics.pb.h"
-#include "sync/syncable/syncable.h"
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/forms/password_form.h"
@@ -49,34 +48,13 @@ using base::Time;
 using browser_sync::PasswordChangeProcessor;
 using browser_sync::PasswordDataTypeController;
 using browser_sync::PasswordModelAssociator;
-using browser_sync::TestIdFactory;
-using browser_sync::UnrecoverableErrorHandler;
 using content::BrowserThread;
-using sync_api::SyncManager;
-using sync_api::UserShare;
-using syncable::BASE_VERSION;
-using syncable::CREATE;
-using syncable::IS_DEL;
-using syncable::IS_DIR;
-using syncable::IS_UNAPPLIED_UPDATE;
-using syncable::IS_UNSYNCED;
-using syncable::MutableEntry;
-using syncable::SERVER_IS_DIR;
-using syncable::SERVER_VERSION;
-using syncable::SPECIFICS;
-using syncable::UNIQUE_SERVER_TAG;
-using syncable::UNITTEST;
-using syncable::WriteTransaction;
+using syncer::syncable::WriteTransaction;
 using testing::_;
 using testing::AtLeast;
 using testing::DoAll;
-using testing::DoDefault;
-using testing::ElementsAre;
-using testing::Eq;
-using testing::Invoke;
 using testing::InvokeWithoutArgs;
 using testing::Return;
-using testing::SaveArg;
 using testing::SetArgumentPointee;
 using webkit::forms::PasswordForm;
 
@@ -93,7 +71,7 @@ ACTION_P3(MakePasswordSyncComponents, service, ps, dtc) {
 ACTION_P(AcquireSyncTransaction, password_test_service) {
   // Check to make sure we can aquire a transaction (will crash if a transaction
   // is already held by this thread, deadlock if held by another thread).
-  sync_api::WriteTransaction trans(
+  syncer::WriteTransaction trans(
       FROM_HERE, password_test_service->GetUserShare());
   DVLOG(1) << "Sync transaction acquired.";
 }
@@ -134,21 +112,21 @@ class PasswordTestProfileSyncService : public TestProfileSyncService {
 
 class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
  public:
-  sync_api::UserShare* GetUserShare() {
+  syncer::UserShare* GetUserShare() {
     return service_->GetUserShare();
   }
 
   void AddPasswordSyncNode(const PasswordForm& entry) {
-    sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
-    sync_api::ReadNode password_root(&trans);
-    ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+    syncer::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
+    syncer::ReadNode password_root(&trans);
+    ASSERT_EQ(syncer::BaseNode::INIT_OK,
               password_root.InitByTagLookup(browser_sync::kPasswordTag));
 
-    sync_api::WriteNode node(&trans);
+    syncer::WriteNode node(&trans);
     std::string tag = PasswordModelAssociator::MakeTag(entry);
-    sync_api::WriteNode::InitUniqueByCreationResult result =
-        node.InitUniqueByCreation(syncable::PASSWORDS, password_root, tag);
-    ASSERT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
+    syncer::WriteNode::InitUniqueByCreationResult result =
+        node.InitUniqueByCreation(syncer::PASSWORDS, password_root, tag);
+    ASSERT_EQ(syncer::WriteNode::INIT_SUCCESS, result);
     PasswordModelAssociator::WriteToSyncNode(entry, &node);
   }
 
@@ -186,8 +164,7 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
     BrowserThread::PostTask(
         BrowserThread::DB, FROM_HERE,
         base::Bind(&ProfileSyncServicePasswordTest::SignalEvent, &done));
-    done.TimedWait(base::TimeDelta::FromMilliseconds(
-        TestTimeouts::action_timeout_ms()));
+    done.TimedWait(TestTimeouts::action_timeout());
   }
 
   void StartSyncService(const base::Closure& root_callback,
@@ -203,9 +180,8 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       service_.reset(new PasswordTestProfileSyncService(
           factory, &profile_, signin, false,
           root_callback, node_callback));
-      syncable::ModelTypeSet preferred_types =
-          service_->GetPreferredDataTypes();
-      preferred_types.Put(syncable::PASSWORDS);
+      syncer::ModelTypeSet preferred_types = service_->GetPreferredDataTypes();
+      preferred_types.Put(syncer::PASSWORDS);
       service_->ChangePreferredDataTypes(preferred_types);
       PasswordDataTypeController* data_type_controller =
           new PasswordDataTypeController(factory,
@@ -244,15 +220,15 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   }
 
   void GetPasswordEntriesFromSyncDB(std::vector<PasswordForm>* entries) {
-    sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
-    sync_api::ReadNode password_root(&trans);
-    ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+    syncer::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
+    syncer::ReadNode password_root(&trans);
+    ASSERT_EQ(syncer::BaseNode::INIT_OK,
               password_root.InitByTagLookup(browser_sync::kPasswordTag));
 
     int64 child_id = password_root.GetFirstChildId();
-    while (child_id != sync_api::kInvalidId) {
-      sync_api::ReadNode child_node(&trans);
-      ASSERT_EQ(sync_api::BaseNode::INIT_OK,
+    while (child_id != syncer::kInvalidId) {
+      syncer::ReadNode child_node(&trans);
+      ASSERT_EQ(syncer::BaseNode::INIT_OK,
                 child_node.InitByIdLookup(child_id));
 
       const sync_pb::PasswordSpecificsData& password =
@@ -311,7 +287,7 @@ TEST_F(ProfileSyncServicePasswordTest, EmptyNativeEmptySync) {
   EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(), base::Closure());
   std::vector<PasswordForm> sync_entries;
   GetPasswordEntriesFromSyncDB(&sync_entries);
@@ -341,7 +317,7 @@ TEST_F(ProfileSyncServicePasswordTest, HasNativeEntriesEmptySync) {
   EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(), base::Closure());
   std::vector<PasswordForm> sync_forms;
   GetPasswordEntriesFromSyncDB(&sync_forms);
@@ -393,7 +369,7 @@ TEST_F(ProfileSyncServicePasswordTest, HasNativeEntriesEmptySyncSameUsername) {
   EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(), base::Closure());
   std::vector<PasswordForm> sync_forms;
   GetPasswordEntriesFromSyncDB(&sync_forms);
@@ -448,7 +424,7 @@ TEST_F(ProfileSyncServicePasswordTest, HasNativeHasSyncNoMerge) {
   EXPECT_CALL(*password_store_, FillBlacklistLogins(_)).WillOnce(Return(true));
   EXPECT_CALL(*password_store_, AddLoginImpl(_)).Times(1);
 
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(),
                    base::Bind(&AddPasswordEntriesCallback, this, sync_forms));
 
@@ -513,7 +489,7 @@ TEST_F(ProfileSyncServicePasswordTest, EnsureNoTransactions) {
   EXPECT_CALL(*password_store_, AddLoginImpl(_))
       .WillOnce(AcquireSyncTransaction(this));
 
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(),
                    base::Bind(&AddPasswordEntriesCallback, this, sync_forms));
 
@@ -586,7 +562,7 @@ TEST_F(ProfileSyncServicePasswordTest, HasNativeHasSyncMergeEntry) {
   EXPECT_CALL(*password_store_, FillBlacklistLogins(_)).WillOnce(Return(true));
   EXPECT_CALL(*password_store_, UpdateLoginImpl(_)).Times(1);
 
-  CreateRootHelper create_root(this, syncable::PASSWORDS);
+  CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(),
                    base::Bind(&AddPasswordEntriesCallback, this, sync_forms));
 

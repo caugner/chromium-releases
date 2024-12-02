@@ -4,7 +4,6 @@
 
 #ifndef UI_APP_LIST_APPS_GRID_VIEW_H_
 #define UI_APP_LIST_APPS_GRID_VIEW_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -53,6 +52,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
   virtual bool OnKeyReleased(const views::KeyEvent& event) OVERRIDE;
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    views::View* parent,
+                                    views::View* child) OVERRIDE;
 
  private:
   // Updates from model.
@@ -78,7 +80,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   AppListModel::Apps* model_;  // Owned by AppListModel.
   views::ButtonListener* listener_;
-  PaginationModel* pagination_model_;  // Owned by AppListView.
+  PaginationModel* pagination_model_;  // Owned by AppListController.
 
   gfx::Size icon_size_;
   int cols_;

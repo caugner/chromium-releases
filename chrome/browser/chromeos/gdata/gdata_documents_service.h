@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOCUMENTS_SERVICE_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOCUMENTS_SERVICE_H_
-#pragma once
 
 #include <string>
 
@@ -104,6 +103,14 @@ class DocumentsServiceInterface {
   // calling thread.
   virtual void GetAccountMetadata(const GetDataCallback& callback) = 0;
 
+  // Gets the About resource from the server for the current account.
+  // Upon completion, invokes |callback| with results on the calling thread.
+  // (For Drive V2 API only)
+  virtual void GetAboutResource(const GetDataCallback& callback) = 0;
+
+  // Gets the application list (For Drive V2 API only).
+  virtual void GetApplicationList(const GetDataCallback& callback) = 0;
+
   // Deletes a document identified by its 'self' |url| and |etag|.
   // Upon completion, invokes |callback| with results on the calling thread.
   virtual void DeleteDocument(const GURL& document_url,
@@ -179,6 +186,18 @@ class DocumentsServiceInterface {
   // Resumes uploading of a document/file on the calling thread.
   virtual void ResumeUpload(const ResumeUploadParams& params,
                             const ResumeUploadCallback& callback) = 0;
+
+  // Authorizes a Drive app with the id |app_id| to open the given document.
+  // Upon completion, invokes |callback| with results on the calling thread.
+  virtual void AuthorizeApp(const GURL& resource_url,
+                            const std::string& app_id,
+                            const GetDataCallback& callback) = 0;
+
+  // True if OAuth2 access token is retrieved and believed to be fresh.
+  virtual bool HasAccessToken() const = 0;
+
+  // True if OAuth2 refresh token is present.
+  virtual bool HasRefreshToken() const = 0;
 };
 
 // This class provides documents feed service calls.
@@ -204,6 +223,8 @@ class DocumentsService : public DocumentsServiceInterface {
                                 const GetDataCallback& callback) OVERRIDE;
 
   virtual void GetAccountMetadata(const GetDataCallback& callback) OVERRIDE;
+  virtual void GetAboutResource(const GetDataCallback& callback) OVERRIDE;
+  virtual void GetApplicationList(const GetDataCallback& callback) OVERRIDE;
   virtual void DeleteDocument(const GURL& document_url,
                               const EntryActionCallback& callback) OVERRIDE;
   virtual void DownloadDocument(
@@ -240,6 +261,11 @@ class DocumentsService : public DocumentsServiceInterface {
                               const InitiateUploadCallback& callback) OVERRIDE;
   virtual void ResumeUpload(const ResumeUploadParams& params,
                             const ResumeUploadCallback& callback) OVERRIDE;
+  virtual void AuthorizeApp(const GURL& resource_url,
+                            const std::string& app_id,
+                            const GetDataCallback& callback) OVERRIDE;
+  virtual bool HasAccessToken() const OVERRIDE;
+  virtual bool HasRefreshToken() const OVERRIDE;
 
  private:
   Profile* profile_;

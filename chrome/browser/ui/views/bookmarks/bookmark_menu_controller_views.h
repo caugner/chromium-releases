@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_MENU_CONTROLLER_VIEWS_H_
-#pragma once
 
 #include <set>
 
@@ -17,7 +16,7 @@
 class BookmarkBarView;
 class BookmarkMenuDelegate;
 class BookmarkNode;
-class Profile;
+class Browser;
 
 namespace content {
 class PageNavigator;
@@ -51,7 +50,7 @@ class BookmarkMenuController : public BaseBookmarkModelObserver,
 
   // Creates a BookmarkMenuController showing the children of |node| starting
   // at |start_child_index|.
-  BookmarkMenuController(Profile* profile,
+  BookmarkMenuController(Browser* browser,
                          content::PageNavigator* page_navigator,
                          views::Widget* parent,
                          const BookmarkNode* node,

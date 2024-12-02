@@ -67,12 +67,17 @@ chrome.fileBrowserPrivate = {
   /**
    * View multiple files.
    */
-  viewFiles: function(selectedFiles) {
-    console.log('viewFiles called: ' + selectedFiles.length +
-                ' files selected');
-    for (var i = 0; i != selectedFiles.length; i++) {
-      window.open(selectedFiles[i]);
+  viewFiles: function(urls, actionId, callback) {
+    var success = true;
+    for (var i = 0; i != urls.length; i++) {
+      var url = urls[i];
+      if (!url.match(/\.(pdf|txt)$/i)) {
+        success = false;
+        break;
+      }
+      window.open(url);
     }
+    callback(success);
   },
 
   /**
@@ -321,7 +326,13 @@ chrome.fileBrowserPrivate = {
     });
   },
 
-  getSizeStats: function() {},
+  getSizeStats: function(url, callback) {
+    var kB_inGb = 1024 * 1024;
+    callback({
+      remainingSizeKB: 9 * kB_inGb,
+      totalSizeKB: 10 * kB_inGb
+    });
+  },
 
   getVolumeMetadata: function(url, callback) {
     var metadata = {};
@@ -433,6 +444,8 @@ chrome.fileBrowserPrivate = {
 
       FILE_IS_DIRECTORY: 'Folder',
 
+      CHROMEOS_RELEASE_BOARD: 'stumpy',
+
       GDATA_DIRECTORY_LABEL: 'Google Drive',
       ENABLE_GDATA: true,
       PDF_VIEW_ENABLED: true,
@@ -448,7 +461,7 @@ chrome.fileBrowserPrivate = {
       SIZE_TB: 'TB',
       SIZE_PB: 'PB',
       TYPE_COLUMN_LABEL: 'Type',
-      DATE_COLUMN_LABEL: 'Date',
+      DATE_COLUMN_LABEL: 'Date modified',
       PREVIEW_COLUMN_LABEL: 'Preview',
 
       ERROR_CREATING_FOLDER: 'Unable to create folder "$1". $2',
@@ -478,6 +491,9 @@ chrome.fileBrowserPrivate = {
       ACTION_WATCH: 'Watch',
       ACTION_LISTEN: 'Listen',
       INSTALL_CRX: 'Open',
+
+      CHANGE_DEFAULT_MENU_ITEM: 'Change default...',
+      CHANGE_DEFAULT_CAPTION: 'Choose the default app for $1 files:',
 
       GALLERY_EDIT: 'Edit',
       GALLERY_SHARE: 'Share',
@@ -524,8 +540,17 @@ chrome.fileBrowserPrivate = {
       UNMOUNT_DEVICE_BUTTON_LABEL: 'Unmount',
       FORMAT_DEVICE_BUTTON_LABEL: 'Format',
 
+      GDATA_MENU_HELP: 'Help',
       GDATA_MOBILE_CONNECTION_OPTION: 'Do not use mobile data for sync',
       GDATA_SHOW_HOSTED_FILES_OPTION: 'Show Google Docs files',
+      GDATA_CLEAR_LOCAL_CACHE: 'Clear local cache',
+      GDATA_WAITING_FOR_SPACE_INFO: 'Waiting for space info...',
+      GDATA_FAILED_SPACE_INFO: 'Failed to retrieve space info',
+      GDATA_BUY_MORE_SPACE: 'Buy more storage...',
+      GDATA_SPACE_AVAILABLE: '$1 left',
+
+      GDATA_BUY_MORE_SPACE_LINK: 'Buy more storage',
+      GDATA_SPACE_AVAILABLE_LONG: 'Google Drive space left: $1.',
 
       OFFLINE_COLUMN_LABEL: 'Available offline',
       GDATA_LOADING: 'Hang with us. We\'re fetching your files.',
@@ -534,6 +559,7 @@ chrome.fileBrowserPrivate = {
       GDATA_CANNOT_REACH: '$1 cannot be reached at this time',
 
       GDATA_WELCOME_TITLE: 'Welcome to Google Drive!',
+      GDATA_WELCOME_TITLE_ALTERNATIVE: 'Get 100 GB free with Google Drive',
       GDATA_WELCOME_TEXT_SHORT:
           'All files saved in this folder are backed up online automatically',
       GDATA_WELCOME_TEXT_LONG:
@@ -544,6 +570,7 @@ chrome.fileBrowserPrivate = {
           'safely stored in Google Drive .</p>' +
           '<p><strong>Share, create and collaborate</strong> ' +
           'on files with others all in one place .</p>',
+      GDATA_WELCOME_GET_STARTED: 'Get started',
       GDATA_WELCOME_DISMISS: 'Dismiss',
       GDATA_LOADING_PROGRESS: '$1 files fetched',
 
@@ -560,17 +587,32 @@ chrome.fileBrowserPrivate = {
       GSHEET_DOCUMENT_FILE_TYPE: 'Google spreadsheet',
       GSLIDES_DOCUMENT_FILE_TYPE: 'Google presentation',
 
-      PASTE_ITEMS_REMAINING: 'Transferring $1 items',
-      PASTE_CANCELLED: 'Transfer cancelled.',
-      PASTE_TARGET_EXISTS_ERROR: 'Transfer failed, item exists: "$1"',
-      PASTE_FILESYSTEM_ERROR: 'Transfer failed. $1',
-      PASTE_UNEXPECTED_ERROR: 'Transfer failed, unexpected error: $1',
+      TRANSFER_ITEMS_REMAINING: 'Transferring $1 items',
+      TRANSFER_CANCELLED: 'Transfer cancelled.',
+      TRANSFER_TARGET_EXISTS_ERROR: 'Transfer failed, item exists: "$1"',
+      TRANSFER_FILESYSTEM_ERROR: 'Transfer failed. $1',
+      TRANSFER_UNEXPECTED_ERROR: 'Transfer failed, unexpected error: $1',
+      COPY_FILE_NAME: 'Copying $1',
+      COPY_ITEMS_REMAINING: 'Copying $1 items.',
+      COPY_CANCELLED: 'Copy operation cancelled.',
+      COPY_TARGET_EXISTS_ERROR: 'Copy operation failed, item exists: "$1"',
+      COPY_FILESYSTEM_ERROR: 'Copy operation failed. $1',
+      COPY_UNEXPECTED_ERROR: 'Copy operation failed, unexpected error: $1',
+      MOVE_FILE_NAME: 'Moving $1',
+      MOVE_ITEMS_REMAINING: 'Moving $1 items.',
+      MOVE_CANCELLED: 'Move cancelled.',
+      MOVE_TARGET_EXISTS_ERROR: 'Move failed, item exists: "$1"',
+      MOVE_FILESYSTEM_ERROR: 'Move failed. $1',
+      MOVE_UNEXPECTED_ERROR: 'Move failed, unexpected error: $1',
 
       CANCEL_LABEL: 'Cancel',
       OPEN_LABEL: 'Open',
       SAVE_LABEL: 'Save',
       OK_LABEL: 'OK',
-      NO_ACTION_FOR_FILE: "To view this file, convert it to a format that's viewable on the web. <a target='_blank' href='$1'>Learn More.</a>",
+      NO_ACTION_FOR_FILE: 'This file type is not supported. Please visit the ' +
+          '<a target=\'_blank\' href=\'$1\'>Chrome Web Store</a>' +
+          ' to find an app that can open this type of file.' +
+          ' <a target=\'_blank\' href=\'$2\'>Learn More.</a>',
 
       DEFAULT_NEW_FOLDER_NAME: 'New Folder',
       MORE_FILES: 'Show all files',
@@ -626,6 +668,7 @@ chrome.fileBrowserPrivate = {
       IMAGE_FILE_TYPE: '$1 image',
       VIDEO_FILE_TYPE: '$1 video',
       AUDIO_FILE_TYPE: '$1 audio',
+      GENERIC_FILE_TYPE: '$1 file',
       HTML_DOCUMENT_FILE_TYPE: 'HTML document',
       ZIP_ARCHIVE_FILE_TYPE: 'Zip archive',
       RAR_ARCHIVE_FILE_TYPE: 'RAR archive',
@@ -638,10 +681,14 @@ chrome.fileBrowserPrivate = {
       POWERPOINT_PRESENTATION_FILE_TYPE: 'PowerPoint presentation',
       EXCEL_FILE_TYPE: 'Excel spreadsheet',
 
+      SEARCH_TEXT_LABEL: 'Search',
       SEARCH_NO_MATCHING_FILES: 'No files match <b>"$1"</b>',
+      SEARCH_SPINNER: 'Searching...',
 
       TIME_TODAY: 'Today $1',
       TIME_YESTERDAY: 'Yesterday $1',
+
+      ALL_FILES_FILTER: 'All files',
 
       DEFAULT_ACTION_LABEL: '(default)',
       ASH: true,
@@ -666,6 +713,14 @@ chrome.extension = {
       return path.replace('external/', 'file:///persistent/');
     }
     return path || document.location.href;
+  },
+
+  getBackgroundPage: function() {
+    return window;
+  },
+
+  getViews: function() {
+    return [window];
   }
 };
 
@@ -686,6 +741,15 @@ chrome.test = {
  */
 chrome.fileBrowserHandler = {
   onExecute: new MockEventSource()
+};
+
+/**
+ * Mock object for |chrome.runtime|.
+ */
+chrome.runtime = {
+  getBackgroundPage: function(callback) {
+    setTimeout(function() {callback(window);}, 0);
+  }
 };
 
 /**
@@ -760,44 +824,3 @@ chrome.mediaPlayerPrivate = {
     this.popup_ = null;
   }
 };
-
-/**
- * TODO(olege): Remove once a Chrome with this interface available is released.
- */
-var v8Intl = (function() {
-
-var v8Intl = {};
-
-/**
- * Constructs v8Intl.DateTimeFormat object given optional locales and options
- * parameters.
- *
- * @constructor
- * @param {Array?} locales Unused in the mock.
- * @param {Object} options Unused in the mock.
- */
-v8Intl.DateTimeFormat = function(locales, options) {
-  return {
-    format: function(dateValue) {
-      return dateValue.toString();
-    }
-  };
-};
-
-/**
- * @constructor
- * @param {Array?} locales Unused in the mock.
- * @param {Object} options Unused in the mock.
- */
-v8Intl.Collator = function(locales, options) {
-  return {
-    compare: function(a, b) {
-      if (a > b) return 1;
-      if (a < b) return -1;
-      return 0;
-    }
-  };
-};
-
-return v8Intl;
-}());

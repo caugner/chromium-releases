@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_DIALOG_H_
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_EXTENSION_DIALOG_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/logging.h"
@@ -12,9 +11,8 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/views/widget/widget_delegate.h"
 
-class Browser;
+class BaseWindow;
 class ExtensionDialogObserver;
-class ExtensionHost;
 class GURL;
 class Profile;
 
@@ -22,21 +20,25 @@ namespace content {
 class WebContents;
 }
 
+namespace extensions {
+class ExtensionHost;
+}
+
 // Modal dialog containing contents provided by an extension.
-// Dialog is automatically centered in the browser window and has fixed size.
+// Dialog is automatically centered in the owning window and has fixed size.
 // For example, used by the Chrome OS file browser.
 class ExtensionDialog : public views::WidgetDelegate,
                         public content::NotificationObserver,
                         public base::RefCounted<ExtensionDialog> {
  public:
-  virtual ~ExtensionDialog();
-
-  // Create and show a dialog with |url| centered over the browser window.
-  // |browser| is the browser to which the pop-up will be attached.
+  // Create and show a dialog with |url| centered over the provided window.
+  // |base_window| is the window to which the pop-up will be attached.
+  // |profile| is the profile that the extension is registered with.
   // |web_contents| is the tab that spawned the dialog.
   // |width| and |height| are the size of the dialog in pixels.
   static ExtensionDialog* Show(const GURL& url,
-                               Browser* browser,
+                               BaseWindow* base_window,
+                               Profile* profile,
                                content::WebContents* web_contents,
                                int width,
                                int height,
@@ -74,7 +76,10 @@ class ExtensionDialog : public views::WidgetDelegate,
   // Sets the window title.
   void set_title(const string16& title) { window_title_ = title; }
 
-  ExtensionHost* host() const { return extension_host_.get(); }
+  // Sets minimum contents size in pixels and makes the window resizable.
+  void SetMinimumContentsSize(int width, int height);
+
+  extensions::ExtensionHost* host() const { return extension_host_.get(); }
 
   // views::WidgetDelegate overrides.
   virtual bool CanResize() const OVERRIDE;
@@ -92,24 +97,29 @@ class ExtensionDialog : public views::WidgetDelegate,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+ protected:
+  virtual ~ExtensionDialog();
+
  private:
+  friend class base::RefCounted<ExtensionDialog>;
+
   // Use Show() to create instances.
-  ExtensionDialog(ExtensionHost* host, ExtensionDialogObserver* observer);
+  ExtensionDialog(extensions::ExtensionHost* host,
+                  ExtensionDialogObserver* observer);
 
   static ExtensionDialog* ShowInternal(const GURL& url,
-                                       Browser* browser,
-                                       ExtensionHost* host,
+                                       BaseWindow* base_window,
+                                       extensions::ExtensionHost* host,
                                        int width,
                                        int height,
                                        bool fullscreen,
                                        const string16& title,
                                        ExtensionDialogObserver* observer);
 
-  static ExtensionHost* CreateExtensionHost(const GURL& url,
-                                            Browser* browser,
-                                            Profile* profile);
+  static extensions::ExtensionHost* CreateExtensionHost(const GURL& url,
+                                                        Profile* profile);
 
-  void InitWindow(Browser* browser, int width, int height);
+  void InitWindow(BaseWindow* base_window, int width, int height);
   void InitWindowFullscreen();
 
   // Window that holds the extension host view.
@@ -119,7 +129,7 @@ class ExtensionDialog : public views::WidgetDelegate,
   string16 window_title_;
 
   // The contained host for the view.
-  scoped_ptr<ExtensionHost> extension_host_;
+  scoped_ptr<extensions::ExtensionHost> extension_host_;
 
   content::NotificationRegistrar registrar_;
 

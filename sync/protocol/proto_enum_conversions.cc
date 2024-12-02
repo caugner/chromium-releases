@@ -9,7 +9,7 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 
-namespace browser_sync {
+namespace syncer {
 
 #define ASSERT_ENUM_BOUNDS(enum_parent, enum_type, enum_min, enum_max)  \
   COMPILE_ASSERT(enum_parent::enum_type##_MIN == enum_parent::enum_min, \
@@ -79,7 +79,6 @@ const char* GetUpdatesSourceString(
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, NOTIFICATION);
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, PERIODIC);
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, SYNC_CYCLE_CONTINUATION);
-    ENUM_CASE(sync_pb::GetUpdatesCallerInfo, CLEAR_PRIVATE_DATA);
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, NEWLY_SUPPORTED_DATATYPE);
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, MIGRATION);
     ENUM_CASE(sync_pb::GetUpdatesCallerInfo, NEW_CLIENT);
@@ -171,4 +170,4 @@ const char* GetFaviconTypeString(
 #undef ASSERT_ENUM_BOUNDS
 #undef ENUM_CASE
 
-}  // namespace
+}  // namespace syncer

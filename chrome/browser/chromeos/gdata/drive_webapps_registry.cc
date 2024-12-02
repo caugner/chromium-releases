@@ -17,8 +17,8 @@ namespace {
 // WebApp store URL prefix.
 const char kStoreProductUrl[] = "https://chrome.google.com/webstore/";
 
-// Extracts WebApp id from its web store URL.
-std::string GetWebAppIdFromUrl(const GURL& url) {
+// Extracts Web store id from its web store URL.
+std::string GetWebStoreIdFromUrl(const GURL& url) {
   if (!StartsWithASCII(url.spec(), kStoreProductUrl, false)) {
     LOG(WARNING) << "Unrecognized product URL " << url.spec();
     return std::string();
@@ -33,15 +33,21 @@ std::string GetWebAppIdFromUrl(const GURL& url) {
   return components[components.size() - 1];
 }
 
-}
+}  // namespace
 
 // DriveWebAppInfo struct implementation.
 
 DriveWebAppInfo::DriveWebAppInfo(const std::string& app_id,
+                                 const InstalledApp::IconList& app_icons,
+                                 const InstalledApp::IconList& document_icons,
+                                 const std::string& web_store_id,
                                  const string16& app_name,
                                  const string16& object_type,
                                  bool is_primary_selector)
     : app_id(app_id),
+      app_icons(app_icons),
+      document_icons(document_icons),
+      web_store_id(web_store_id),
       app_name(app_name),
       object_type(object_type),
       is_primary_selector(is_primary_selector) {
@@ -54,16 +60,21 @@ DriveWebAppInfo::~DriveWebAppInfo() {
 
 DriveWebAppsRegistry::WebAppFileSelector::WebAppFileSelector(
     const GURL& product_link,
+    const InstalledApp::IconList& app_icons,
+    const InstalledApp::IconList& document_icons,
     const string16& object_type,
+    const std::string& app_id,
     bool is_primary_selector)
     : product_link(product_link),
+      app_icons(app_icons),
+      document_icons(document_icons),
       object_type(object_type),
+      app_id(app_id),
       is_primary_selector(is_primary_selector) {
 }
 
 DriveWebAppsRegistry::WebAppFileSelector::~WebAppFileSelector() {
 }
-
 
 // DriveWebAppsRegistry implementation.
 
@@ -101,39 +112,70 @@ void DriveWebAppsRegistry::GetWebAppsForFile(
   }
 }
 
+std::set<std::string> DriveWebAppsRegistry::GetExtensionsForWebStoreApp(
+    const std::string& web_store_id) {
+  std::set<std::string> extensions;
+  // Iterate over all the registered filename extensions, looking for the given
+  // web_store_id.
+  for (WebAppFileSelectorMap::iterator iter = webapp_extension_map_.begin();
+      iter != webapp_extension_map_.end(); ++iter) {
+    std::string id = GetWebStoreIdFromUrl(iter->second->product_link);
+    if (id == web_store_id)
+      extensions.insert(iter->first);
+  }
+  return extensions;
+}
+
 void DriveWebAppsRegistry::UpdateFromFeed(AccountMetadataFeed* metadata) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  webapp_map_.clear();
+  url_to_name_map_.clear();
   STLDeleteValues(&webapp_extension_map_);
   STLDeleteValues(&webapp_mimetypes_map_);
   for (ScopedVector<InstalledApp>::const_iterator it =
-           metadata->installed_apps()->begin();
-       it != metadata->installed_apps()->end(); ++it) {
+           metadata->installed_apps().begin();
+       it != metadata->installed_apps().end(); ++it) {
     const InstalledApp* app = *it;
     GURL product_url = app->GetProductUrl();
     if (product_url.is_empty())
       continue;
 
-    webapp_map_.insert(
+    InstalledApp::IconList app_icons =
+        app->GetIconsForCategory(AppIcon::APPLICATION);
+    InstalledApp::IconList document_icons =
+        app->GetIconsForCategory(AppIcon::DOCUMENT);
+
+    url_to_name_map_.insert(
         std::make_pair(product_url, app->app_name()));
     AddAppSelectorList(product_url,
+                       app_icons,
+                       document_icons,
                        app->object_type(),
+                       app->app_id(),
                        true,   // primary
                        app->primary_mimetypes(),
                        &webapp_mimetypes_map_);
     AddAppSelectorList(product_url,
+                       app_icons,
+                       document_icons,
                        app->object_type(),
+                       app->app_id(),
                        false,   // primary
                        app->secondary_mimetypes(),
                        &webapp_mimetypes_map_);
     AddAppSelectorList(product_url,
+                       app_icons,
+                       document_icons,
                        app->object_type(),
+                       app->app_id(),
                        true,   // primary
                        app->primary_extensions(),
                        &webapp_extension_map_);
     AddAppSelectorList(product_url,
+                       app_icons,
+                       document_icons,
                        app->object_type(),
+                       app->app_id(),
                        false,   // primary
                        app->secondary_extensions(),
                        &webapp_extension_map_);
@@ -143,7 +185,10 @@ void DriveWebAppsRegistry::UpdateFromFeed(AccountMetadataFeed* metadata) {
 // static.
 void DriveWebAppsRegistry::AddAppSelectorList(
     const GURL& product_link,
+    const InstalledApp::IconList& app_icons,
+    const InstalledApp::IconList& document_icons,
     const string16& object_type,
+    const std::string& app_id,
     bool is_primary_selector,
     const ScopedVector<std::string>& selectors,
     WebAppFileSelectorMap* map) {
@@ -152,7 +197,10 @@ void DriveWebAppsRegistry::AddAppSelectorList(
     std::string* value = *it;
     map->insert(std::make_pair(
         *value, new WebAppFileSelector(product_link,
+                                       app_icons,
+                                       document_icons,
                                        object_type,
+                                       app_id,
                                        is_primary_selector)));
   }
 }
@@ -165,14 +213,14 @@ void DriveWebAppsRegistry::FindWebAppsForSelector(
        it != map.end() && it->first == file_selector; ++it) {
     const WebAppFileSelector* web_app = it->second;
     std::map<GURL, string16>::const_iterator product_iter =
-        webapp_map_.find(web_app->product_link);
-    if (product_iter == webapp_map_.end()) {
+        url_to_name_map_.find(web_app->product_link);
+    if (product_iter == url_to_name_map_.end()) {
       NOTREACHED();
       continue;
     }
 
-    std::string webapp_id = GetWebAppIdFromUrl(web_app->product_link);
-    if (webapp_id.empty())
+    std::string web_store_id = GetWebStoreIdFromUrl(web_app->product_link);
+    if (web_store_id.empty())
       continue;
 
     if (apps->find(web_app) != apps->end())
@@ -180,7 +228,10 @@ void DriveWebAppsRegistry::FindWebAppsForSelector(
 
     apps->insert(std::make_pair(
         web_app,
-        new DriveWebAppInfo(webapp_id,
+        new DriveWebAppInfo(web_app->app_id,
+                            web_app->app_icons,
+                            web_app->document_icons,
+                            web_store_id,
                             product_iter->second,   // app name.
                             web_app->object_type,
                             web_app->is_primary_selector)));

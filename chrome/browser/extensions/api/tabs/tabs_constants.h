@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_TABS_TABS_CONSTANTS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_TABS_TABS_CONSTANTS_H_
-#pragma once
 
 namespace extensions {
 namespace tabs_constants {
@@ -93,6 +92,7 @@ extern const char kNotImplementedError[];
 extern const char kSupportedInWindowsOnlyError[];
 extern const char kInvalidWindowTypeError[];
 extern const char kInvalidWindowStateError[];
+extern const char kScreenshotsDisabled[];
 
 extern const char kNoCodeOrFileToExecuteError[];
 extern const char kMoreThanOneValuesError[];

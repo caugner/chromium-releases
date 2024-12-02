@@ -380,10 +380,6 @@ WifiConfigView::~WifiConfigView() {
     cert_library_->RemoveObserver(this);
 }
 
-string16 WifiConfigView::GetTitle() {
-  return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_JOIN_WIFI_NETWORKS);
-}
-
 views::View* WifiConfigView::GetInitiallyFocusedView() {
   // Return a reasonable widget for initial focus,
   // depending on what we're showing.
@@ -406,7 +402,7 @@ bool WifiConfigView::CanLogin() {
 
   // If the network requires a passphrase, make sure it is the right length.
   if (passphrase_textfield_ != NULL
-      && PassphraseActive()
+      && passphrase_textfield_->enabled()
       && passphrase_textfield_->text().length() < kMinWirelessPasswordLen)
     return false;
 
@@ -884,7 +880,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
-  int column_view_set_id = 0;
+  const int column_view_set_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(column_view_set_id);
   const int kPasswordVisibleWidth = 20;
   // Label
@@ -899,6 +895,14 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   // Password visible button / policy indicator.
   column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0, kPasswordVisibleWidth);
+
+  // Title
+  layout->StartRow(0, column_view_set_id);
+  views::Label* title = new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_JOIN_WIFI_NETWORKS));
+  title->SetFont(title->font().DeriveFont(1, gfx::Font::BOLD));
+  layout->AddView(title, 5, 1);
+  layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   // SSID input
   layout->StartRow(0, column_view_set_id);
@@ -1047,7 +1051,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
     passphrase_visible_button_->SetImage(
         views::ImageButton::BS_NORMAL,
         ResourceBundle::GetSharedInstance().
-        GetImageSkiaNamed(IDR_NETWORK_SHOW_PASSWORD_OFF));
+        GetImageSkiaNamed(IDR_NETWORK_SHOW_PASSWORD));
     passphrase_visible_button_->SetImage(
         views::ImageButton::BS_HOT,
         ResourceBundle::GetSharedInstance().
@@ -1055,7 +1059,11 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
     passphrase_visible_button_->SetToggledImage(
         views::ImageButton::BS_NORMAL,
         ResourceBundle::GetSharedInstance().
-        GetImageSkiaNamed(IDR_NETWORK_SHOW_PASSWORD_ON));
+        GetImageSkiaNamed(IDR_NETWORK_HIDE_PASSWORD));
+    passphrase_visible_button_->SetToggledImage(
+        views::ImageButton::BS_HOT,
+        ResourceBundle::GetSharedInstance().
+        GetImageSkiaNamed(IDR_NETWORK_HIDE_PASSWORD_HOVER));
     passphrase_visible_button_->SetImageAlignment(
         views::ImageButton::ALIGN_CENTER, views::ImageButton::ALIGN_MIDDLE);
     layout->AddView(passphrase_visible_button_);

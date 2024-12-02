@@ -26,7 +26,6 @@
   ],
   'defines': [
     'HAS_OUT_OF_PROC_TEST_RUNNER',
-    'BROWSER_TESTS_HEADER_OVERRIDE="chrome/test/base/in_process_browser_test.h"',
   ],
   'include_dirs': [
     '<(src_dir)',
@@ -34,10 +33,6 @@
   ],
   'sources': [
     '<(src_dir)/chrome/test/base/chrome_test_launcher.cc',
-    '<(src_dir)/content/app/startup_helper_win.cc',
-    '<(src_dir)/content/test/gpu/test_switches.cc',
-    '<(src_dir)/content/test/gpu/test_switches.h',
-    '<(src_dir)/content/test/test_launcher.cc',
   ],
   # hard_dependency is necessary for this target because it has actions
   # that generate a header file included by dependent targets. The header
@@ -48,7 +43,6 @@
     ['OS=="win"', {
       'dependencies': [
         'chrome_version_resources',
-        '../sandbox/sandbox.gyp:sandbox',
       ],
       'include_dirs': [
         '<(DEPTH)/third_party/wtl/include',
@@ -61,13 +55,9 @@
         '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources_standard.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome_version/other_version.rc',
         '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
-        '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
       ],

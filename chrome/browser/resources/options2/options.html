@@ -37,7 +37,8 @@
 <if expr="pp_ifdef('chromeos')">
   <link rel="stylesheet" href="chromeos/accounts_options_page.css">
   <link rel="stylesheet" href="chromeos/bluetooth.css">
-  <link rel="stylesheet" href="chromeos/image_picker.css">
+  <link rel="stylesheet" href="chromeos/change_picture_options.css">
+  <link rel="stylesheet" href="chromeos/display_options.css">
   <link rel="stylesheet" href="chromeos/internet_detail.css">
   <link rel="stylesheet" href="chromeos/pointer_overlay.css">
 </if>
@@ -88,7 +89,6 @@
   <include src="manage_profile_overlay.html">
   <include src="password_manager.html">
   <include src="search_engine_manager.html">
-  <include src="session_restore_overlay.html">
   <include src="spelling_confirm_overlay.html">
   <include src="startup_overlay.html">
   <include src="../sync_setup_overlay.html">
@@ -97,6 +97,7 @@
     <include src="chromeos/bluetooth_add_device_overlay.html">
     <include src="chromeos/bluetooth_pair_device_overlay.html">
     <include src="chromeos/change_picture_options.html">
+    <include src="chromeos/display_options.html">
     <include src="chromeos/keyboard_overlay.html">
     <include src="chromeos/pointer_overlay.html">
   </if>
@@ -113,8 +114,10 @@
   <include src="autofill_edit_creditcard_overlay.html">
   <include src="content_settings_exceptions_area.html">
   <include src="cookies_view.html">
+  <include src="cookies_view_app.html">
   <include src="handler_options.html">
   <include src="language_add_language_overlay.html">
+  <include src="media_galleries_manager_overlay.html">
   <if expr="pp_ifdef('chromeos')">
     <include src="chromeos/internet_detail.html">
     <include src="chromeos/preferred_networks.html">
@@ -148,9 +151,9 @@
 </div>
 
 <div id="templates" hidden>
-  <div id="managed-prefs-banner" class="managed-prefs-banner">
-    <div class="managed-prefs-gradient">
-      <span id="managed-prefs-text" class="managed-prefs-text"></span>
+  <div id="managed-prefs-banner" class="page-banner managed-prefs-banner">
+    <div class="page-banner-gradient">
+      <span id="managed-prefs-text" class="page-banner-text"></span>
     </div>
   </div>
 </div>

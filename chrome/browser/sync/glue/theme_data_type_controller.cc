@@ -20,14 +20,14 @@ ThemeDataTypeController::ThemeDataTypeController(
                                  sync_service) {
 }
 
-syncable::ModelType ThemeDataTypeController::type() const {
-  return syncable::THEMES;
+syncer::ModelType ThemeDataTypeController::type() const {
+  return syncer::THEMES;
 }
 
 ThemeDataTypeController::~ThemeDataTypeController() {}
 
 bool ThemeDataTypeController::StartModels() {
-  ExtensionSystem::Get(profile_)->Init(true);
+  extensions::ExtensionSystem::Get(profile_)->InitForRegularProfile(true);
   return true;
 }
 

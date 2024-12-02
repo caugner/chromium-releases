@@ -29,7 +29,7 @@ namespace {
 const wchar_t kVersionKey[] = L"pv";
 const wchar_t kNameKey[] = L"name";
 const wchar_t kNameValue[] = L"GCP Virtual Driver";
-const wchar_t kPpdName[] = L"GCP-DRIVER.PPD";
+const wchar_t kPpdName[] = L"gcp-driver.ppd";
 const wchar_t kDriverName[] = L"MXDWDRV.DLL";
 const wchar_t kUiDriverName[] = L"PS5UI.DLL";
 const wchar_t kHelpName[] = L"PSCRIPT.HLP";
@@ -48,7 +48,7 @@ void SetOmahaKeys() {
   }
 
   // Get the version from the resource file.
-  std::wstring version_string;
+  string16 version_string;
   scoped_ptr<FileVersionInfo> version_info(
       FileVersionInfo::CreateFileVersionInfoForCurrentModule());
 
@@ -233,7 +233,7 @@ void ReadyPpdDependencies(const FilePath& install_path) {
     CORE_PRINTER_DRIVER driver;
     GetCorePrinterDrivers(NULL,
                           NULL,
-                          L"{D20EA372-DD35-4950-9ED8-A6335AFE79F0}",
+                          L"{D20EA372-DD35-4950-9ED8-A6335AFE79F5}",
                           1,
                           &driver);
     GetPrinterDriverPackagePath(NULL,

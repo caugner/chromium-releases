@@ -90,7 +90,6 @@ string16 ChromiumBinariesDistribution::GetVersionKey() {
 }
 
 bool ChromiumBinariesDistribution::CanSetAsDefault() {
-  NOTREACHED();
   return false;
 }
 
@@ -101,5 +100,13 @@ int ChromiumBinariesDistribution::GetIconIndex() {
 
 bool ChromiumBinariesDistribution::GetChromeChannel(string16* channel) {
   NOTREACHED();
+  return false;
+}
+
+bool ChromiumBinariesDistribution::GetDelegateExecuteHandlerData(
+    string16* handler_class_uuid,
+    string16* type_lib_uuid,
+    string16* type_lib_version,
+    string16* interface_uuid) {
   return false;
 }

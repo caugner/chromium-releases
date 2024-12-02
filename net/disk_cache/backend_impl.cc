@@ -497,8 +497,10 @@ int BackendImpl::SyncInit() {
   if (previous_crash) {
     ReportError(ERR_PREVIOUS_CRASH);
   } else if (!restarted_) {
-      ReportError(ERR_NO_ERROR);
+    ReportError(ERR_NO_ERROR);
   }
+
+  FlushIndex();
 
   return disabled_ ? net::ERR_FAILED : net::OK;
 }
@@ -522,6 +524,7 @@ void BackendImpl::CleanupCache() {
     }
   }
   block_files_.CloseFiles();
+  FlushIndex();
   index_ = NULL;
   ptr_factory_.InvalidateWeakPtrs();
   done_.Signal();
@@ -695,6 +698,8 @@ EntryImpl* BackendImpl::OpenEntryImpl(const std::string& key) {
   eviction_.OnOpenEntry(cache_entry);
   entry_count_++;
 
+  Trace("Open hash 0x%x end: 0x%x", hash,
+        cache_entry->entry()->address().value());
   CACHE_UMA(AGE_MS, "OpenTime", 0, start);
   stats_.OnEvent(Stats::OPEN_HIT);
   SIMPLE_STATS_COUNTER("disk_cache.hit");
@@ -795,6 +800,7 @@ EntryImpl* BackendImpl::CreateEntryImpl(const std::string& key) {
   stats_.OnEvent(Stats::CREATE_HIT);
   SIMPLE_STATS_COUNTER("disk_cache.miss");
   Trace("create entry hit ");
+  FlushIndex();
   return cache_entry.release();
 }
 
@@ -922,6 +928,7 @@ void BackendImpl::RecoveredEntry(CacheRankingsBlock* rankings) {
     return;
 
   data_->table[hash & mask_] = address.value();
+  FlushIndex();
 }
 
 void BackendImpl::InternalDoomEntry(EntryImpl* entry) {
@@ -950,6 +957,8 @@ void BackendImpl::InternalDoomEntry(EntryImpl* entry) {
   } else if (!error) {
     data_->table[hash & mask_] = child;
   }
+
+  FlushIndex();
 }
 
 #if defined(NET_BUILD_STRESS_CACHE)
@@ -1164,7 +1173,8 @@ void BackendImpl::CriticalError(int error) {
 }
 
 void BackendImpl::ReportError(int error) {
-  STRESS_DCHECK(!error || error == ERR_PREVIOUS_CRASH);
+  STRESS_DCHECK(!error || error == ERR_PREVIOUS_CRASH ||
+                error == ERR_CACHE_CREATED);
 
   // We transmit positive numbers, instead of direct error codes.
   DCHECK_LE(error, 0);
@@ -1301,6 +1311,11 @@ int BackendImpl::SelfCheck() {
   }
 
   return CheckAllEntries();
+}
+
+void BackendImpl::FlushIndex() {
+  if (index_ && !disabled_)
+    index_->Flush();
 }
 
 // ------------------------------------------------------------------------
@@ -1538,6 +1553,7 @@ void BackendImpl::PrepareForRestart() {
 
   disabled_ = true;
   data_->header.crash = 0;
+  index_->Flush();
   index_ = NULL;
   data_ = NULL;
   block_files_.CloseFiles();
@@ -1721,6 +1737,7 @@ EntryImpl* BackendImpl::MatchEntry(const std::string& key, uint32 hash,
     cache_entry = NULL;
 
   find_parent ? parent_entry.swap(&tmp) : cache_entry.swap(&tmp);
+  FlushIndex();
   return tmp;
 }
 

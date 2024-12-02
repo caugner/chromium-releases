@@ -15,7 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using browser_sync::UIModelWorker;
-using browser_sync::SyncerError;
+using syncer::SyncerError;
 using content::BrowserThread;
 
 // Various boilerplate, primarily for the StopWithPendingWork test.
@@ -28,12 +28,12 @@ class UIModelWorkerVisitor {
        was_run_(was_run) { }
   virtual ~UIModelWorkerVisitor() { }
 
-  virtual SyncerError DoWork() {
+  virtual syncer::SyncerError DoWork() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
     was_run_->Signal();
     if (quit_loop_when_run_)
       MessageLoop::current()->Quit();
-    return browser_sync::SYNCER_OK;
+    return syncer::SYNCER_OK;
   }
 
  private:
@@ -50,8 +50,8 @@ class Syncer {
 
   void SyncShare(UIModelWorkerVisitor* visitor) {
     // We wait until the callback is executed. So it is safe to use Unretained.
-    browser_sync::WorkCallback c = base::Bind(&UIModelWorkerVisitor::DoWork,
-                                              base::Unretained(visitor));
+    syncer::WorkCallback c = base::Bind(&UIModelWorkerVisitor::DoWork,
+                                       base::Unretained(visitor));
     worker_->DoWorkAndWaitUntilDone(c);
   }
  private:

@@ -13,12 +13,15 @@ bool DataTypeController::IsUnrecoverableResult(StartResult result) {
   return (result == UNRECOVERABLE_ERROR);
 }
 
-SyncError DataTypeController::CreateAndUploadError(
+syncer::SyncError DataTypeController::CreateAndUploadError(
     const tracked_objects::Location& location,
     const std::string& message,
-    syncable::ModelType type) {
-  ChromeReportUnrecoverableError();
-  return SyncError(location, message, type);
+    syncer::ModelType type) {
+  // TODO(sync): remove this once search engines triggers less errors, such as
+  // due to crbug.com/130448.
+  if (type != syncer::SEARCH_ENGINES)
+    ChromeReportUnrecoverableError();
+  return syncer::SyncError(location, message, type);
 }
 
 void DataTypeController::RecordUnrecoverableError(
@@ -29,8 +32,12 @@ void DataTypeController::RecordUnrecoverableError(
            << message << " at location "
            << from_here.ToString();
   UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeRunFailures", type(),
-                            syncable::MODEL_TYPE_COUNT);
-  ChromeReportUnrecoverableError();
+                            syncer::MODEL_TYPE_COUNT);
+
+  // TODO(sync): remove this once search engines triggers less errors, such as
+  // due to crbug.com/130448.
+  if (type() != syncer::SEARCH_ENGINES)
+    ChromeReportUnrecoverableError();
 }
 
 }  // namespace browser_sync

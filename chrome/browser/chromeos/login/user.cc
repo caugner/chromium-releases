@@ -15,9 +15,6 @@ namespace chromeos {
 
 namespace {
 
-// Resource ID of the image to use as stub image.
-const int kStubImageResourceID = IDR_PROFILE_PICTURE_LOADING;
-
 // Returns account name portion of an email.
 std::string GetUserName(const std::string& email) {
   std::string::size_type i = email.find('@');
@@ -29,22 +26,21 @@ std::string GetUserName(const std::string& email) {
 
 }  // namespace
 
-User::User(const std::string& email, bool is_guest)
+// The demo user is represented by a domainless username.
+const char kDemoUser[] = "demouser@";
+// Incognito user is represented by an empty string (since some code already
+// depends on that and it's hard to figure out what).
+const char kGuestUser[] = "";
+
+User::User(const std::string& email)
     : email_(email),
-      user_image_(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-          kDefaultImageResources[0])),
       oauth_token_status_(OAUTH_TOKEN_STATUS_UNKNOWN),
       image_index_(kInvalidImageIndex),
-      image_is_stub_(false),
-      is_guest_(is_guest) {
+      image_is_stub_(false) {
   // The email address of a demo user is for internal purposes only,
   // never meant for display.
-  if (email != kDemoUser) {
+  if (!is_demo_user())
     display_email_ = email;
-    is_demo_user_ = false;
-  } else {
-    is_demo_user_ = true;
-  }
 }
 
 User::~User() {}
@@ -53,17 +49,19 @@ void User::SetImage(const UserImage& user_image, int image_index) {
   user_image_ = user_image;
   image_index_ = image_index;
   image_is_stub_ = false;
+  DCHECK(HasDefaultImage() || user_image.has_raw_image());
+}
+
+void User::SetImageURL(const GURL& image_url) {
+  user_image_.set_url(image_url);
 }
 
 void User::SetStubImage(int image_index) {
-  user_image_.SetImage(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-      kStubImageResourceID));
+  user_image_ = UserImage(
+      *ResourceBundle::GetSharedInstance().
+          GetImageSkiaNamed(IDR_PROFILE_PICTURE_LOADING));
   image_index_ = image_index;
   image_is_stub_ = true;
-}
-
-void User::SetWallpaperThumbnail(const SkBitmap& wallpaper_thumbnail) {
-  wallpaper_thumbnail_ = wallpaper_thumbnail;
 }
 
 std::string User::GetAccountName(bool use_display_email) const {
@@ -73,11 +71,15 @@ std::string User::GetAccountName(bool use_display_email) const {
     return GetUserName(email_);
 }
 
+bool User::HasDefaultImage() const {
+  return image_index_ >= 0 && image_index_ < kDefaultImagesCount;
+}
+
 string16 User::GetDisplayName() const {
-  // We should try hard not to return an empty string (crbug.com/131630#c13).
-  if (display_name_.empty())
-    return UTF8ToUTF16(GetAccountName(true));
-  return display_name_;
+  // Fallback to the email account name in case display name haven't been set.
+  return display_name_.empty() ?
+      UTF8ToUTF16(GetAccountName(true)) :
+      display_name_;
 }
 
 }  // namespace chromeos

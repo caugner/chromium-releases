@@ -10,10 +10,13 @@
 #include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -25,7 +28,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -197,7 +200,7 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
                                      TabContents* tab_contents) {
@@ -214,7 +217,7 @@ void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow parent_window,
       parent_window)->Show();
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 class CreateUrlApplicationShortcutView::IconDownloadCallbackFunctor {
  public:
@@ -440,10 +443,10 @@ bool CreateUrlApplicationShortcutView::Accept() {
   tab_contents_->extension_tab_helper()->SetAppIcon(
       shortcut_info_.favicon.IsEmpty() ? SkBitmap() :
                                          *shortcut_info_.favicon.ToSkBitmap());
-  if (tab_contents_->web_contents()->GetDelegate()) {
-    tab_contents_->web_contents()->GetDelegate()->ConvertContentsToApplication(
-        tab_contents_->web_contents());
-  }
+  Browser* browser =
+      browser::FindBrowserWithWebContents(tab_contents_->web_contents());
+  if (browser)
+    chrome::ConvertTabToAppWindow(browser, tab_contents_->web_contents());
   return true;
 }
 
@@ -492,6 +495,7 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
   shortcut_info_.description = UTF8ToUTF16(app_->description());
   shortcut_info_.is_platform_app = app_->is_platform_app();
   shortcut_info_.extension_path = app_->path();
+  shortcut_info_.profile_path = profile->GetPath();
 
   // The icon will be resized to |max_size|.
   const gfx::Size max_size(kAppIconSize, kAppIconSize);

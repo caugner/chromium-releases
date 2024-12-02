@@ -4,7 +4,6 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_HTTP_JOB_H_
 #define NET_URL_REQUEST_URL_REQUEST_HTTP_JOB_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -142,6 +141,7 @@ class URLRequestHttpJob : public URLRequestJob {
   typedef base::RefCountedData<bool> SharedBoolean;
 
   class HttpFilterContext;
+  class HttpTransactionDelegateImpl;
 
   virtual ~URLRequestHttpJob();
 
@@ -186,6 +186,9 @@ class URLRequestHttpJob : public URLRequestJob {
   // Returns the effective response headers, considering that they may be
   // overridden by |override_response_headers_|.
   HttpResponseHeaders* GetResponseHeaders() const;
+
+  // Override of the private interface of URLRequestJob.
+  virtual void OnDetachRequest() OVERRIDE;
 
   base::Time request_creation_time_;
 
@@ -233,6 +236,8 @@ class URLRequestHttpJob : public URLRequestJob {
   // NetworkDelegate::NotifyURLRequestDestroyed has not been called, yet,
   // to inform the NetworkDelegate that it may not call back.
   bool awaiting_callback_;
+
+  scoped_ptr<HttpTransactionDelegateImpl> http_transaction_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestHttpJob);
 };

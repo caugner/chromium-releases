@@ -9,10 +9,11 @@
 
 #include "ash/shell.h"
 #include "ash/test/test_shell_delegate.h"
+#include "base/run_loop.h"
 #include "base/string_split.h"
 #include "content/public/test/web_contents_tester.h"
 #include "ui/aura/env.h"
-#include "ui/aura/monitor_manager.h"
+#include "ui/aura/display_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/ime/text_input_test_support.h"
 #include "ui/compositor/layer_animator.h"
@@ -30,7 +31,7 @@ std::vector<gfx::Display> CreateDisplaysFromString(
   base::SplitString(specs, ',', &parts);
   for (std::vector<std::string>::const_iterator iter = parts.begin();
        iter != parts.end(); ++iter) {
-    displays.push_back(aura::MonitorManager::CreateMonitorFromSpec(*iter));
+    displays.push_back(aura::DisplayManager::CreateDisplayFromSpec(*iter));
   }
   return displays;
 }
@@ -72,26 +73,27 @@ void AshTestBase::TearDown() {
   ui::TextInputTestSupport::Shutdown();
 }
 
-void AshTestBase::ChangeMonitorConfig(float scale,
+void AshTestBase::ChangeDisplayConfig(float scale,
                                       const gfx::Rect& bounds_in_pixel) {
   gfx::Display display = gfx::Display(gfx::Screen::GetPrimaryDisplay().id());
   display.SetScaleAndBounds(scale, bounds_in_pixel);
   std::vector<gfx::Display> displays;
   displays.push_back(display);
-  aura::Env::GetInstance()->monitor_manager()->OnNativeMonitorsChanged(
+  aura::Env::GetInstance()->display_manager()->OnNativeDisplaysChanged(
       displays);
 }
 
-void AshTestBase::UpdateMonitor(const std::string& display_specs) {
+void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   std::vector<gfx::Display> displays = CreateDisplaysFromString(display_specs);
-  aura::Env::GetInstance()->monitor_manager()->
-      OnNativeMonitorsChanged(displays);
+  aura::Env::GetInstance()->display_manager()->
+      OnNativeDisplaysChanged(displays);
 }
 
 void AshTestBase::RunAllPendingInMessageLoop() {
 #if !defined(OS_MACOSX)
-  message_loop_.RunAllPendingWithDispatcher(
-      aura::Env::GetInstance()->GetDispatcher());
+  DCHECK(MessageLoopForUI::current() == &message_loop_);
+  base::RunLoop run_loop(aura::Env::GetInstance()->GetDispatcher());
+  run_loop.RunUntilIdle();
 #endif
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_UTIL_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_UTIL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -12,8 +11,8 @@
 #include "base/file_path.h"
 #include "base/platform_file.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileError.h"
-#include "webkit/fileapi/fileapi_export.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/fileapi_export.h"
 #include "webkit/quota/quota_types.h"
 
 class GURL;

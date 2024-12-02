@@ -55,7 +55,6 @@ void Label::SetFont(const gfx::Font& font) {
 
 void Label::SetText(const string16& text) {
   text_ = text;
-  url_ = GURL();
   text_size_valid_ = false;
   is_email_ = false;
   PreferredSizeChanged();
@@ -65,16 +64,6 @@ void Label::SetText(const string16& text) {
 void Label::SetEmail(const string16& email) {
   SetText(email);
   is_email_ = true;
-}
-
-void Label::SetURL(const GURL& url) {
-  DCHECK(url.is_valid());
-  url_ = url;
-  text_ = UTF8ToUTF16(url_.spec());
-  text_size_valid_ = false;
-  is_email_ = false;
-  PreferredSizeChanged();
-  SchedulePaint();
 }
 
 void Label::SetAutoColorReadabilityEnabled(bool enabled) {
@@ -125,7 +114,7 @@ void Label::SetHorizontalAlignment(Alignment alignment) {
 }
 
 void Label::SetMultiLine(bool multi_line) {
-  DCHECK(!multi_line || !elide_in_middle_);
+  DCHECK(!multi_line || elide_behavior_ != ELIDE_IN_MIDDLE);
   if (multi_line != is_multi_line_) {
     is_multi_line_ = multi_line;
     text_size_valid_ = false;
@@ -143,10 +132,10 @@ void Label::SetAllowCharacterBreak(bool allow_character_break) {
   }
 }
 
-void Label::SetElideInMiddle(bool elide_in_middle) {
-  DCHECK(!elide_in_middle || !is_multi_line_);
-  if (elide_in_middle != elide_in_middle_) {
-    elide_in_middle_ = elide_in_middle;
+void Label::SetElideBehavior(ElideBehavior elide_behavior) {
+  DCHECK(elide_behavior != ELIDE_IN_MIDDLE || !is_multi_line_);
+  if (elide_behavior != elide_behavior_) {
+    elide_behavior_ = elide_behavior;
     text_size_valid_ = false;
     is_email_ = false;
     PreferredSizeChanged();
@@ -370,7 +359,7 @@ void Label::Init(const string16& text, const gfx::Font& font) {
   horiz_alignment_ = ALIGN_CENTER;
   is_multi_line_ = false;
   allow_character_break_ = false;
-  elide_in_middle_ = false;
+  elide_behavior_ = NO_ELIDE;
   is_email_ = false;
   collapse_when_hidden_ = false;
   directionality_mode_ = USE_UI_DIRECTIONALITY;
@@ -494,28 +483,14 @@ void Label::CalculateDrawStringParams(string16* paint_text,
                                       int* flags) const {
   DCHECK(paint_text && text_bounds && flags);
 
-  if (!url_.is_empty()) {
-    // TODO(jungshik) : Figure out how to get 'intl.accept_languages'
-    // preference and use it when calling ElideUrl.
-    *paint_text =
-        ui::ElideUrl(url_, font_, GetAvailableRect().width(), std::string());
-
-    // An URLs is always treated as an LTR text and therefore we should
-    // explicitly mark it as such if the locale is RTL so that URLs containing
-    // Hebrew or Arabic characters are displayed correctly.
-    //
-    // Note that we don't check the View's UI layout setting in order to
-    // determine whether or not to insert the special Unicode formatting
-    // characters. We use the locale settings because an URL is always treated
-    // as an LTR string, even if its containing view does not use an RTL UI
-    // layout.
-    *paint_text = base::i18n::GetDisplayStringInLTRDirectionality(
-        *paint_text);
-  } else if (is_email_) {
+  if (is_email_) {
     *paint_text = ui::ElideEmail(text_, font_, GetAvailableRect().width());
-  } else if (elide_in_middle_) {
+  } else if (elide_behavior_ == ELIDE_IN_MIDDLE) {
     *paint_text = ui::ElideText(text_, font_, GetAvailableRect().width(),
                                 ui::ELIDE_IN_MIDDLE);
+  } else if (elide_behavior_ == ELIDE_AT_END) {
+    *paint_text = ui::ElideText(text_, font_, GetAvailableRect().width(),
+                                ui::ELIDE_AT_END);
   } else {
     *paint_text = text_;
   }

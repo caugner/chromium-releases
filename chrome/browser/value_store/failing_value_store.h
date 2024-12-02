@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_VALUE_STORE_FAILING_VALUE_STORE_H_
 #define CHROME_BROWSER_VALUE_STORE_FAILING_VALUE_STORE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/value_store/value_store.h"
@@ -12,7 +11,8 @@
 // Settings storage area which fails every request.
 class FailingValueStore : public ValueStore {
  public:
-  FailingValueStore() {}
+  FailingValueStore();
+  virtual ~FailingValueStore();
 
   // ValueStore implementation.
   virtual size_t GetBytesInUse(const std::string& key) OVERRIDE;

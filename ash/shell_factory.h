@@ -4,7 +4,6 @@
 
 #ifndef ASH_SHELL_FACTORY_H_
 #define ASH_SHELL_FACTORY_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/desktop_background/desktop_background_resources.h"
@@ -31,9 +30,8 @@ class Widget;
 namespace ash {
 
 namespace internal {
-void CreateDesktopBackground(const gfx::ImageSkia& wallpaper,
-                             WallpaperLayout wallpaper_layout,
-                             aura::RootWindow* root_window);
+views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
+                                       int container_id);
 
 ASH_EXPORT views::Widget* CreateStatusArea(views::View* contents);
 

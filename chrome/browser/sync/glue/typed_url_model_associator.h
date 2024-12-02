@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_TYPED_URL_MODEL_ASSOCIATOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_TYPED_URL_MODEL_ASSOCIATOR_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -28,7 +27,7 @@ class HistoryBackend;
 class URLRow;
 };
 
-namespace sync_api {
+namespace syncer {
 class WriteNode;
 class WriteTransaction;
 };
@@ -49,7 +48,7 @@ class TypedUrlModelAssociator : public AssociatorInterface {
   typedef std::vector<std::pair<GURL, std::vector<history::VisitInfo> > >
       TypedUrlVisitVector;
 
-  static syncable::ModelType model_type() { return syncable::TYPED_URLS; }
+  static syncer::ModelType model_type() { return syncer::TYPED_URLS; }
   TypedUrlModelAssociator(ProfileSyncService* sync_service,
                           history::HistoryBackend* history_backend,
                           DataTypeErrorHandler* error_handler);
@@ -58,10 +57,10 @@ class TypedUrlModelAssociator : public AssociatorInterface {
   // AssociatorInterface implementation.
   //
   // Iterates through the sync model looking for matched pairs of items.
-  virtual SyncError AssociateModels() OVERRIDE;
+  virtual syncer::SyncError AssociateModels() OVERRIDE;
 
   // Clears all associations.
-  virtual SyncError DisassociateModels() OVERRIDE;
+  virtual syncer::SyncError DisassociateModels() OVERRIDE;
 
   // Called from the main thread, to abort the currently active model
   // association (for example, if we are shutting down).
@@ -74,7 +73,7 @@ class TypedUrlModelAssociator : public AssociatorInterface {
   virtual bool CryptoReadyIfNecessary() OVERRIDE;
 
   // Delete all typed url nodes.
-  bool DeleteAllNodes(sync_api::WriteTransaction* trans);
+  bool DeleteAllNodes(syncer::WriteTransaction* trans);
 
   void WriteToHistoryBackend(const history::URLRows* new_urls,
                              const TypedUrlUpdateVector* updated_urls,
@@ -127,7 +126,7 @@ class TypedUrlModelAssociator : public AssociatorInterface {
                                std::vector<history::VisitInfo>* new_visits);
   static void WriteToSyncNode(const history::URLRow& url,
                               const history::VisitVector& visits,
-                              sync_api::WriteNode* node);
+                              syncer::WriteNode* node);
 
   // Diffs the set of visits between the history DB and the sync DB, using the
   // sync DB as the canonical copy. Result is the set of |new_visits| and
@@ -173,7 +172,7 @@ class TypedUrlModelAssociator : public AssociatorInterface {
  private:
 
   // Helper routine that actually does the work of associating models.
-  SyncError DoAssociateModels();
+  syncer::SyncError DoAssociateModels();
 
   // Helper function that determines if we should ignore a URL for the purposes
   // of sync, because it contains invalid data or is import-only.

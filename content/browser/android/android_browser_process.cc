@@ -9,16 +9,18 @@
 #include "base/logging.h"
 #include "content/browser/android/content_startup_flags.h"
 #include "content/public/common/content_constants.h"
-#include "jni/android_browser_process_jni.h"
+#include "jni/AndroidBrowserProcess_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
+
+namespace content {
 
 static void SetCommandLineFlags(JNIEnv*env,
                                 jclass clazz,
                                 jint max_render_process_count,
                                 jstring plugin_descriptor) {
   std::string plugin_str = ConvertJavaStringToUTF8(env, plugin_descriptor);
-  content::SetContentCommandLineFlags(max_render_process_count, plugin_str);
+  SetContentCommandLineFlags(max_render_process_count, plugin_str);
 }
 
 static jboolean IsOfficialBuild(JNIEnv* env, jclass clazz) {
@@ -28,8 +30,6 @@ static jboolean IsOfficialBuild(JNIEnv* env, jclass clazz) {
   return false;
 #endif
 }
-
-namespace content {
 
 bool RegisterAndroidBrowserProcess(JNIEnv* env) {
   return RegisterNativesImpl(env);

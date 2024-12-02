@@ -35,12 +35,6 @@ class TestTaskRunner : public base::TaskRunner {
   TestTaskRunner() {}
 
   virtual bool RunsTasksOnCurrentThread() const OVERRIDE { return true; }
-  virtual bool PostDelayedTask(const tracked_objects::Location&,
-                               const base::Closure&,
-                               int64) OVERRIDE {
-    ADD_FAILURE();
-    return false;
-  }
   MOCK_METHOD3(PostDelayedTask, bool(const tracked_objects::Location&,
                                      const base::Closure&,
                                      base::TimeDelta));
@@ -59,7 +53,7 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
   CloudPolicyRefreshSchedulerTest()
       : task_runner_(new TestTaskRunner()),
         network_change_notifier_(net::NetworkChangeNotifier::CreateMock()) {
-    browser::RegisterLocalState(&prefs_);
+    chrome::RegisterLocalState(&prefs_);
     prefs_.SetInteger(prefs::kUserPolicyRefreshRate, kPolicyRefreshRate);
   }
 

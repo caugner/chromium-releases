@@ -15,8 +15,9 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -25,6 +26,7 @@
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -92,8 +94,8 @@ AutocompleteActionPredictor::AutocompleteActionPredictor(Profile* profile)
   } else {
     // Request the in-memory database from the history to force it to load so
     // it's available as soon as possible.
-    HistoryService* history_service =
-        profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        profile_, Profile::EXPLICIT_ACCESS);
     if (history_service)
       history_service->InMemoryDatabase();
 
@@ -118,6 +120,8 @@ AutocompleteActionPredictor::~AutocompleteActionPredictor() {
     main_profile_predictor_->incognito_predictor_ = NULL;
   else if (incognito_predictor_)
     incognito_predictor_->main_profile_predictor_ = NULL;
+  if (prerender_handle_.get())
+    prerender_handle_->OnCancel();
 }
 
 void AutocompleteActionPredictor::RegisterTransitionalMatches(
@@ -139,17 +143,33 @@ void AutocompleteActionPredictor::RegisterTransitionalMatches(
                                             transitional_match);
   }
 
-  for (AutocompleteResult::const_iterator it = result.begin();
-       it != result.end(); ++it) {
+  for (AutocompleteResult::const_iterator i(result.begin()); i != result.end();
+       ++i) {
     if (std::find(match_it->urls.begin(), match_it->urls.end(),
-                  it->destination_url) == match_it->urls.end()) {
-      match_it->urls.push_back(it->destination_url);
+                  i->destination_url) == match_it->urls.end()) {
+      match_it->urls.push_back(i->destination_url);
     }
   }
 }
 
 void AutocompleteActionPredictor::ClearTransitionalMatches() {
   transitional_matches_.clear();
+}
+
+void AutocompleteActionPredictor::StartPrerendering(
+    const GURL& url,
+    content::SessionStorageNamespace* session_storage_namespace,
+    const gfx::Size& size) {
+  if (prerender_handle_.get())
+    prerender_handle_->OnNavigateAway();
+  if (prerender::PrerenderManager* prerender_manager =
+          prerender::PrerenderManagerFactory::GetForProfile(profile_)) {
+    prerender_handle_.reset(
+        prerender_manager->AddPrerenderFromOmnibox(
+            url, session_storage_namespace, size));
+  } else {
+    prerender_handle_.reset();
+  }
 }
 
 // Given a match, return a recommended action.
@@ -307,16 +327,6 @@ void AutocompleteActionPredictor::OnOmniboxOpenedUrl(
       prerender::IsOmniboxEnabled(profile_));
 
   const GURL& opened_url = match.destination_url;
-
-  // If the Omnibox triggered a prerender but the URL doesn't match the one the
-  // user is navigating to, cancel the prerender.
-  prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile_);
-  // |prerender_manager| can be NULL in incognito mode or if prerendering is
-  // otherwise disabled.
-  if (prerender_manager && !prerender_manager->IsPrerendering(opened_url))
-    prerender_manager->CancelOmniboxPrerenders();
-
   const string16 lower_user_text(base::i18n::ToLower(log.text));
 
   // Traverse transitional matches for those that have a user_text that is a

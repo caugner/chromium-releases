@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/ash/launcher/launcher_favicon_loader.h"
 
 #include "base/logging.h"
+#include "chrome/browser/favicon/favicon_util.h"
 #include "chrome/browser/ui/views/ash/launcher/browser_launcher_item_controller.h"
 #include "chrome/common/favicon_url.h"
 #include "chrome/common/icon_messages.h"
@@ -42,7 +43,8 @@ class FaviconBitmapHandler {
   void OnDidDownloadFavicon(int id,
                             const GURL& image_url,
                             bool errored,
-                            const SkBitmap& bitmap);
+                            int requested_size,
+                            const std::vector<SkBitmap>& bitmaps);
 
  private:
   void DownloadFavicon(const GURL& image_url);
@@ -106,18 +108,18 @@ void FaviconBitmapHandler::OnUpdateFaviconURL(
 
 void FaviconBitmapHandler::DownloadFavicon(const GURL& image_url) {
   int image_size = 0;  // Request the full sized image.
-  static int next_id = 1;
-  int id = next_id++;
   pending_requests_.insert(image_url);
   content::RenderViewHost* host = web_contents_->GetRenderViewHost();
-  host->Send(new IconMsg_DownloadFavicon(
-      host->GetRoutingID(), id, image_url, image_size));
+  FaviconUtil::DownloadFavicon(host, image_url, image_size);
 }
 
-void FaviconBitmapHandler::OnDidDownloadFavicon(int id,
-                                                const GURL& image_url,
-                                                bool errored,
-                                                const SkBitmap& bitmap) {
+
+void FaviconBitmapHandler::OnDidDownloadFavicon(
+    int id,
+    const GURL& image_url,
+    bool errored,
+    int requested_size,
+    const std::vector<SkBitmap>& bitmaps) {
   UrlSet::iterator iter = pending_requests_.find(image_url);
   if (iter == pending_requests_.end()) {
     // Updates are received for all downloads; ignore unrequested urls.
@@ -125,8 +127,9 @@ void FaviconBitmapHandler::OnDidDownloadFavicon(int id,
   }
   pending_requests_.erase(iter);
 
-  if (!errored)
-    AddFavicon(image_url, bitmap);
+  // Favicon bitmaps are ordered by decreasing width.
+  if (!errored && !bitmaps.empty())
+    AddFavicon(image_url, bitmaps[0]);
 }
 
 void FaviconBitmapHandler::AddFavicon(const GURL& image_url,
@@ -181,9 +184,12 @@ void LauncherFaviconLoader::OnUpdateFaviconURL(
   favicon_handler_->OnUpdateFaviconURL(page_id, candidates);
 }
 
-void LauncherFaviconLoader::OnDidDownloadFavicon(int id,
-                                                 const GURL& image_url,
-                                                 bool errored,
-                                                 const SkBitmap& bitmap) {
-  favicon_handler_->OnDidDownloadFavicon(id, image_url, errored, bitmap);
+void LauncherFaviconLoader::OnDidDownloadFavicon(
+    int id,
+    const GURL& image_url,
+    bool errored,
+    int requested_size,
+    const std::vector<SkBitmap>& bitmaps) {
+  favicon_handler_->OnDidDownloadFavicon(
+      id, image_url, errored, requested_size, bitmaps);
 }

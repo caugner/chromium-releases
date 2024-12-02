@@ -4,13 +4,17 @@
 
 #include "chrome/browser/autocomplete/search_provider.h"
 
+#include "base/run_loop.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
+#include "chrome/browser/autocomplete/autocomplete_controller.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/autocomplete_provider.h"
+#include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -21,7 +25,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_url_fetcher_factory.h"
+#include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,7 +41,7 @@ using content::BrowserThread;
 //   is added to history.
 // . test_factory_ is set as the URLFetcherFactory.
 class SearchProviderTest : public testing::Test,
-                           public AutocompleteProvider::ACProviderListener {
+                           public AutocompleteProviderListener {
  public:
   SearchProviderTest()
       : default_t_url_(NULL),
@@ -68,9 +72,9 @@ class SearchProviderTest : public testing::Test,
   // it if found.  Returns whether |match| was set.
   bool FindMatchWithDestination(const GURL& url, AutocompleteMatch* match);
 
-  // ACProviderListener method. If we're waiting for the provider to finish,
-  // this exits the message loop.
-  virtual void OnProviderUpdate(bool updated_matches);
+  // AutocompleteProviderListener:
+  // If we're waiting for the provider to finish, this exits the message loop.
+  virtual void OnProviderUpdate(bool updated_matches) OVERRIDE;
 
   // Runs a nested message loop until provider_ is done. The message loop is
   // exited by way of OnProviderUPdate.
@@ -103,7 +107,7 @@ class SearchProviderTest : public testing::Test,
   content::TestBrowserThread io_thread_;
 
   // URLFetcherFactory implementation registered.
-  TestURLFetcherFactory test_factory_;
+  net::TestURLFetcherFactory test_factory_;
 
   // Profile we use.
   TestingProfile profile_;
@@ -176,13 +180,12 @@ void SearchProviderTest::RunTillProviderDone() {
     return;
 
   quit_when_done_ = true;
-#if defined(OS_MACOSX)
-  message_loop_.Run();
-#elif defined(OS_ANDROID)
+#if defined(OS_ANDROID)
   // Android doesn't have Run(), only Start().
   message_loop_.Start();
 #else
-  message_loop_.RunWithDispatcher(NULL);
+  base::RunLoop run_loop;
+  run_loop.Run();
 #endif
 }
 
@@ -211,8 +214,9 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
     return;
   ASSERT_GE(provider_->matches().size(), 1u);
   EXPECT_TRUE(FindMatchWithDestination(GURL(
-      default_t_url_->url_ref().ReplaceSearchTerms(text,
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), wyt_match));
+      default_t_url_->url_ref().ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(text))),
+      wyt_match));
 }
 
 void SearchProviderTest::TearDown() {
@@ -228,8 +232,8 @@ GURL SearchProviderTest::AddSearchToHistory(TemplateURL* t_url,
   HistoryService* history =
       HistoryServiceFactory::GetForProfile(&profile_,
                                            Profile::EXPLICIT_ACCESS);
-  GURL search(t_url->url_ref().ReplaceSearchTerms(term,
-      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+  GURL search(t_url->url_ref().ReplaceSearchTerms(
+      TemplateURLRef::SearchTermsArgs(term)));
   static base::Time last_added_time;
   last_added_time = std::max(base::Time::Now(),
       last_added_time + base::TimeDelta::FromMicroseconds(1));
@@ -264,7 +268,7 @@ bool SearchProviderTest::FindMatchWithDestination(const GURL& url,
 }
 
 void SearchProviderTest::FinishDefaultSuggestQuery() {
-  TestURLFetcher* default_fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* default_fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kDefaultProviderURLFetcherID);
   ASSERT_TRUE(default_fetcher);
 
@@ -282,13 +286,13 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
   QueryForInput(term, string16(), false);
 
   // Make sure the default providers suggest service was queried.
-  TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kDefaultProviderURLFetcherID);
   ASSERT_TRUE(fetcher);
 
   // And the URL matches what we expected.
   GURL expected_url(default_t_url_->suggestions_url_ref().ReplaceSearchTerms(
-      term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+      TemplateURLRef::SearchTermsArgs(term)));
   ASSERT_TRUE(fetcher->GetOriginalURL() == expected_url);
 
   // Tell the SearchProvider the suggest query is done.
@@ -308,8 +312,8 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
 
   AutocompleteMatch wyt_match;
   EXPECT_TRUE(FindMatchWithDestination(
-      GURL(default_t_url_->url_ref().ReplaceSearchTerms(term,
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), &wyt_match));
+      GURL(default_t_url_->url_ref().ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(term))), &wyt_match));
   EXPECT_TRUE(wyt_match.description.empty());
 
   // The match for term1 should be more relevant than the what you typed result.
@@ -333,7 +337,7 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
                 string16(), false);
 
   // Make sure the default providers suggest service was queried.
-  TestURLFetcher* default_fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* default_fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kDefaultProviderURLFetcherID);
   ASSERT_TRUE(default_fetcher);
 
@@ -343,13 +347,13 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   default_fetcher = NULL;
 
   // Make sure the keyword providers suggest service was queried.
-  TestURLFetcher* keyword_fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* keyword_fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kKeywordProviderURLFetcherID);
   ASSERT_TRUE(keyword_fetcher);
 
   // And the URL matches what we expected.
   GURL expected_url(keyword_t_url_->suggestions_url_ref().ReplaceSearchTerms(
-      term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
+      TemplateURLRef::SearchTermsArgs(term)));
   ASSERT_TRUE(keyword_fetcher->GetOriginalURL() == expected_url);
 
   // Tell the SearchProvider the keyword suggest query is done.
@@ -418,8 +422,7 @@ TEST_F(SearchProviderTest, FinalizeInstantQuery) {
   // 'foobar'.
   EXPECT_EQ(2u, provider_->matches().size());
   GURL instant_url(default_t_url_->url_ref().ReplaceSearchTerms(
-      ASCIIToUTF16("foobar"), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      string16()));
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("foobar"))));
   AutocompleteMatch instant_match;
   EXPECT_TRUE(FindMatchWithDestination(instant_url, &instant_match));
 
@@ -429,8 +432,9 @@ TEST_F(SearchProviderTest, FinalizeInstantQuery) {
   // Make sure the what you typed match has no description.
   AutocompleteMatch wyt_match;
   EXPECT_TRUE(FindMatchWithDestination(
-      GURL(default_t_url_->url_ref().ReplaceSearchTerms(ASCIIToUTF16("foo"),
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), &wyt_match));
+      GURL(default_t_url_->url_ref().ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("foo")))),
+          &wyt_match));
   EXPECT_TRUE(wyt_match.description.empty());
 
   // The instant search should be more relevant.
@@ -452,8 +456,7 @@ TEST_F(SearchProviderTest, RememberInstantQuery) {
   // 'foobar'.
   EXPECT_EQ(2u, provider_->matches().size());
   GURL instant_url(default_t_url_->url_ref().ReplaceSearchTerms(
-      ASCIIToUTF16("foobar"), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      string16()));
+      TemplateURLRef::SearchTermsArgs(ASCIIToUTF16("foobar"))));
   AutocompleteMatch instant_match;
   EXPECT_TRUE(FindMatchWithDestination(instant_url, &instant_match));
 
@@ -673,7 +676,7 @@ TEST_F(SearchProviderTest, NavSuggest) {
   QueryForInput(ASCIIToUTF16("a.c"), string16(), false);
 
   // Make sure the default providers suggest service was queried.
-  TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kDefaultProviderURLFetcherID);
   ASSERT_TRUE(fetcher);
 
@@ -700,7 +703,7 @@ TEST_F(SearchProviderTest, SuggestRelevance) {
   QueryForInput(ASCIIToUTF16("a"), string16(), false);
 
   // Make sure the default provider's suggest service was queried.
-  TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+  net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
       SearchProvider::kDefaultProviderURLFetcherID);
   ASSERT_TRUE(fetcher);
 
@@ -870,7 +873,7 @@ TEST_F(SearchProviderTest, SuggestRelevanceExperiment) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
     QueryForInput(ASCIIToUTF16("a"), string16(), false);
-    TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+    net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
         SearchProvider::kDefaultProviderURLFetcherID);
     fetcher->set_response_code(200);
     fetcher->SetResponseString(cases[i].json);
@@ -965,7 +968,7 @@ TEST_F(SearchProviderTest, SuggestRelevanceExperimentUrlInput) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
     QueryForInput(ASCIIToUTF16(cases[i].input), string16(), false);
-    TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+    net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
         SearchProvider::kDefaultProviderURLFetcherID);
     fetcher->set_response_code(200);
     fetcher->SetResponseString(cases[i].json);
@@ -1028,7 +1031,7 @@ TEST_F(SearchProviderTest, SuggestRelevanceExperimentRequestedUrlInput) {
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
     QueryForInput(ASCIIToUTF16(cases[i].input), ASCIIToUTF16("com"), false);
-    TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
+    net::TestURLFetcher* fetcher = test_factory_.GetFetcherByID(
         SearchProvider::kDefaultProviderURLFetcherID);
     fetcher->set_response_code(200);
     fetcher->SetResponseString(cases[i].json);

@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_NATIVE_WIDGET_TYPES_H_
 #define UI_GFX_NATIVE_WIDGET_TYPES_H_
-#pragma once
 
 #include "build/build_config.h"
 
@@ -88,7 +87,10 @@ typedef struct _GdkRegion GdkRegion;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 #elif defined(OS_ANDROID)
-class ChromeView;
+struct ANativeWindow;
+namespace content {
+class ContentViewCore;
+}
 #endif
 class SkBitmap;
 
@@ -119,8 +121,8 @@ typedef GdkRegion* NativeRegion;
 typedef GdkEvent* NativeEvent;
 #elif defined(OS_ANDROID)
 typedef void* NativeCursor;
-typedef ChromeView* NativeView;
-typedef ChromeView* NativeWindow;
+typedef content::ContentViewCore* NativeView;
+typedef content::ContentViewCore* NativeWindow;
 typedef void* NativeRegion;
 typedef jobject NativeEvent;
 #endif
@@ -279,7 +281,7 @@ const AcceleratedWidget kNullAcceleratedWidget = 0;
 typedef NSView* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
 #elif defined(OS_ANDROID)
-typedef uint64 AcceleratedWidget;
+typedef ANativeWindow* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = 0;
 #else
 #error unknown platform

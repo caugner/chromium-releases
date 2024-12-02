@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_BAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_BOOKMARKS_BOOKMARK_BAR_VIEW_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -16,7 +15,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_bar_instructions_view.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_views.h"
 #include "chrome/browser/ui/views/detachable_toolbar_view.h"
 #include "content/public/browser/notification_observer.h"
@@ -29,6 +28,7 @@
 
 class BookmarkContextMenu;
 class Browser;
+class BrowserView;
 
 namespace content {
 class PageNavigator;
@@ -61,7 +61,7 @@ class BookmarkBarView : public DetachableToolbarView,
                         public views::DragController,
                         public ui::AnimationDelegate,
                         public BookmarkMenuController::Observer,
-                        public BookmarkBarInstructionsView::Delegate {
+                        public chrome::BookmarkBarInstructionsDelegate {
  public:
   // The internal view class name.
   static const char kViewClassName[];
@@ -74,7 +74,8 @@ class BookmarkBarView : public DetachableToolbarView,
   // Maximum size of buttons on the bookmark bar.
   static const int kMaxButtonWidth;
 
-  explicit BookmarkBarView(Browser* browser);
+  // |browser_view| can be NULL during tests.
+  BookmarkBarView(Browser* browser, BrowserView* browser_view);
   virtual ~BookmarkBarView();
 
   // Returns the current browser.
@@ -178,18 +179,18 @@ class BookmarkBarView : public DetachableToolbarView,
   virtual void OnThemeChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
 
-  // AccessiblePaneView methods:
+  // AccessiblePaneView:
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // SlideAnimationDelegate implementation.
+  // ui::AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
-  // BookmarkMenuController::Observer
+  // BookmarkMenuController::Observer:
   virtual void BookmarkMenuDeleted(
       BookmarkMenuController* controller) OVERRIDE;
 
-  // BookmarkBarInstructionsView::Delegate.
+  // chrome::BookmarkBarInstructionsDelegate:
   virtual void ShowImportDialog() OVERRIDE;
 
   // BookmarkModelObserver:
@@ -390,8 +391,8 @@ class BookmarkBarView : public DetachableToolbarView,
 
   ButtonSeparatorView* bookmarks_separator_view_;
 
-  // Owning browser.
   Browser* browser_;
+  BrowserView* browser_view_;
 
   // True if the owning browser is showing an infobar.
   bool infobar_visible_;

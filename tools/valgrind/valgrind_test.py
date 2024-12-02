@@ -363,6 +363,8 @@ class ValgrindTool(BaseTool):
 
     if self._options.trace_children:
       proc += ["--trace-children=yes"]
+      proc += ["--trace-children-skip='*perl*'"]
+      proc += ["--trace-children-skip='*python*'"]
 
     proc += self.ToolSpecificFlags()
     proc += self._tool_flags
@@ -393,9 +395,15 @@ class ValgrindTool(BaseTool):
       proc.append(wrapper)
       return proc
 
+    # Valgrind doesn't play nice with the Chrome sandbox.  Empty this env var
+    # set by runtest.py to disable the sandbox.
+    if os.environ.get("CHROME_DEVEL_SANDBOX", None):
+      logging.info("Removing CHROME_DEVEL_SANDBOX fron environment")
+      os.environ["CHROME_DEVEL_SANDBOX"] = ''
+
     if self._options.indirect:
       wrapper = self.CreateBrowserWrapper(proc)
-      os.putenv("BROWSER_WRAPPER", wrapper)
+      os.environ["BROWSER_WRAPPER"] = wrapper
       logging.info('export BROWSER_WRAPPER=' + wrapper)
       proc = []
     proc += self._args
@@ -772,9 +780,10 @@ class DrMemory(BaseTool):
   It is not very mature at the moment, some things might not work properly.
   """
 
-  def __init__(self, full_mode):
+  def __init__(self, full_mode, pattern_mode):
     super(DrMemory, self).__init__()
     self.full_mode = full_mode
+    self.pattern_mode = pattern_mode
     self.RegisterOptionParserHook(DrMemory.ExtendOptionParser)
 
   def ToolName(self):
@@ -911,7 +920,9 @@ class DrMemory(BaseTool):
     # TODO(timurrrr): In fact, we want "starting from .." instead of "below .."
     proc += ["-callstack_truncate_below", ",".join(boring_callers)]
 
-    if not self.full_mode:
+    if self.pattern_mode:
+      proc += ["-pattern", "0xf1fd", "-no_count_leaks", "-redzone_size", "0x20"]
+    elif not self.full_mode:
       proc += ["-light"]
 
     proc += self._tool_flags
@@ -1218,9 +1229,11 @@ class ToolFactory:
       # TODO(timurrrr): remove support for "drmemory" when buildbots are
       # switched to drmemory_light OR make drmemory==drmemory_full the default
       # mode when the tool is mature enough.
-      return DrMemory(False)
+      return DrMemory(False, False)
     if tool_name == "drmemory_full":
-      return DrMemory(True)
+      return DrMemory(True, False)
+    if tool_name == "drmemory_pattern":
+      return DrMemory(False, True)
     if tool_name == "tsan_rv":
       return RaceVerifier()
     if tool_name == "tsan_gcc":

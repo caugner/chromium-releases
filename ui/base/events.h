@@ -4,7 +4,6 @@
 
 #ifndef UI_BASE_EVENTS_H_
 #define UI_BASE_EVENTS_H_
-#pragma once
 
 #include "base/event_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -124,9 +123,6 @@ enum GestureStatus {
                                // indicate that the Gesture event was not
                                // handled.
   GESTURE_STATUS_CONSUMED,     // The Gesture event got consumed.
-  GESTURE_STATUS_SYNTH_MOUSE   // The Gesture event was not processed, but a
-                               // synthetic mouse event generated from the
-                               // unused Gesture event was handled.
 };
 
 // Get the EventType from a native event.
@@ -212,6 +208,10 @@ UI_EXPORT base::NativeEvent CreateNoopEvent();
 
 #if defined(OS_WIN)
 UI_EXPORT int GetModifiersFromACCEL(const ACCEL& accel);
+
+// Returns true if |message| identifies a mouse event that was generated as the
+// result of a touch event.
+UI_EXPORT bool IsMouseEventFromTouch(UINT message);
 #endif
 
 }  // namespace ui

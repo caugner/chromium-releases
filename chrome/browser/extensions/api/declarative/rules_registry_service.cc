@@ -22,15 +22,20 @@ namespace extensions {
 namespace {
 
 // Returns the key to use for storing declarative rules in the state store.
-std::string GetDeclarativeRuleStorageKey(const std::string& event_name) {
-  return "declarative_rules." + event_name;
+std::string GetDeclarativeRuleStorageKey(const std::string& event_name,
+                                         bool incognito) {
+  if (incognito)
+    return "declarative_rules.incognito." + event_name;
+  else
+    return "declarative_rules." + event_name;
 }
 
 // Registers |web_request_rules_registry| on the IO thread.
 void RegisterToExtensionWebRequestEventRouterOnIO(
+    void* profile,
     scoped_refptr<WebRequestRulesRegistry> web_request_rules_registry) {
   ExtensionWebRequestEventRouter::GetInstance()->RegisterRulesRegistry(
-      web_request_rules_registry);
+      profile, web_request_rules_registry);
 }
 
 }  // namespace
@@ -39,33 +44,38 @@ RulesRegistryService::RulesRegistryService(Profile* profile)
     : profile_(profile) {
   if (profile) {
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                   content::Source<Profile>(profile));
+                   content::Source<Profile>(profile->GetOriginalProfile()));
   }
 }
 
-RulesRegistryService::~RulesRegistryService() {}
+RulesRegistryService::~RulesRegistryService() {
+  for (size_t i = 0; i < delegates_.size(); ++i)
+    delegates_[i]->CleanupOnUIThread();
+}
 
 void RulesRegistryService::RegisterDefaultRulesRegistries() {
   RulesRegistryStorageDelegate* delegate = new RulesRegistryStorageDelegate();
   scoped_refptr<WebRequestRulesRegistry> web_request_rules_registry(
       new WebRequestRulesRegistry(profile_, delegate));
-  delegate->Init(profile_, web_request_rules_registry,
+  delegate->InitOnUIThread(profile_, web_request_rules_registry,
       GetDeclarativeRuleStorageKey(
-          declarative_webrequest_constants::kOnRequest));
+          declarative_webrequest_constants::kOnRequest,
+          profile_->IsOffTheRecord()));
+  delegates_.push_back(delegate);
 
   RegisterRulesRegistry(declarative_webrequest_constants::kOnRequest,
                         web_request_rules_registry);
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&RegisterToExtensionWebRequestEventRouterOnIO,
-          web_request_rules_registry));
+          profile_, web_request_rules_registry));
 }
 
 void RulesRegistryService::Shutdown() {
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
       base::Bind(&RegisterToExtensionWebRequestEventRouterOnIO,
-          scoped_refptr<WebRequestRulesRegistry>(NULL)));
+          profile_, scoped_refptr<WebRequestRulesRegistry>(NULL)));
 }
 
 void RulesRegistryService::RegisterRulesRegistry(

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_DOM_STORAGE_CONTEXT_H_
 #define CONTENT_PUBLIC_BROWSER_DOM_STORAGE_CONTEXT_H_
-#pragma once
 
 #include <vector>
 
@@ -17,6 +16,7 @@ class GURL;
 namespace content {
 
 class BrowserContext;
+class SessionStorageNamespace;
 
 // Represents the per-BrowserContext Local Storage data.
 class DOMStorageContext {
@@ -30,6 +30,13 @@ class DOMStorageContext {
 
   // Deletes the local storage data for the given origin.
   virtual void DeleteOrigin(const GURL& origin) = 0;
+
+  // Creates a SessionStorageNamespace with the given |persistent_id|. Used
+  // after tabs are restored by session restore. When created, the
+  // SessionStorageNamespace with the correct |persistent_id| will be
+  // associated with the persisted sessionStorage data.
+  virtual scoped_refptr<SessionStorageNamespace> RecreateSessionStorage(
+      const std::string& persistent_id) = 0;
 
  protected:
   virtual ~DOMStorageContext() {}

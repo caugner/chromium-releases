@@ -19,7 +19,7 @@
 #include "content/public/browser/speech_recognition_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -186,8 +186,7 @@ void SpeechRecognitionBubbleGtk::Show() {
       target_rect.x() > container_rect.width() ||
       target_rect.y() > container_rect.height()) {
     // Target is not in screen view, so point to wrench.
-    Browser* browser =
-        browser::FindOrCreateTabbedBrowser(profile);
+    Browser* browser = browser::FindBrowserWithWebContents(GetWebContents());
     BrowserWindowGtk* browser_window =
         BrowserWindowGtk::GetBrowserWindowForNativeWindow(
             browser->window()->GetNativeWindow());

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/process.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -32,14 +33,15 @@ class PPAPI_PROXY_EXPORT HostDispatcher : public Dispatcher {
   // actually represents a stack of blocking messages.
   class SyncMessageStatusReceiver : public IPC::ChannelProxy::MessageFilter {
    public:
-    virtual ~SyncMessageStatusReceiver() {}
-
     // Notification that a sync message is about to be sent out.
     virtual void BeginBlockOnSyncMessage() = 0;
 
     // Notification that a sync message reply was received and the dispatcher
     // is no longer blocked on a sync message.
     virtual void EndBlockOnSyncMessage() = 0;
+
+   protected:
+    virtual ~SyncMessageStatusReceiver() {}
   };
 
   // Constructor for the renderer side. This will take a reference to the
@@ -78,9 +80,9 @@ class PPAPI_PROXY_EXPORT HostDispatcher : public Dispatcher {
   virtual bool IsPlugin() const;
   virtual bool Send(IPC::Message* msg);
 
-  // IPC::Channel::Listener.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelError();
+  // IPC::Listener.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   // Proxied version of calling GetInterface on the plugin. This will check
   // if the plugin supports the given interface (with caching) and returns the

@@ -238,8 +238,8 @@ class TestLayerDelegate : public LayerDelegate {
 
   // Overridden from LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
-    SkBitmap contents = canvas->ExtractBitmap();
-    paint_size_ = gfx::Size(contents.width(), contents.height());
+    gfx::ImageSkiaRep contents = canvas->ExtractImageRep();
+    paint_size_ = gfx::Size(contents.pixel_width(), contents.pixel_height());
     canvas->FillRect(gfx::Rect(paint_size_), colors_[color_index_]);
     color_index_ = (color_index_ + 1) % static_cast<int>(colors_.size());
     const SkMatrix& matrix = canvas->sk_canvas()->getTotalMatrix();
@@ -323,18 +323,27 @@ class NullLayerDelegate : public LayerDelegate {
 // Remembers if it has been notified.
 class TestCompositorObserver : public CompositorObserver {
  public:
-  TestCompositorObserver() : started_(false), ended_(false), aborted_(false) {}
+  TestCompositorObserver()
+      : will_start_(false), started_(false), ended_(false), aborted_(false) {}
 
-  bool notified() const { return started_ && ended_; }
+  bool notified() const { return will_start_ && started_ && ended_; }
   bool aborted() const { return aborted_; }
 
   void Reset() {
+    will_start_ = false;
     started_ = false;
     ended_ = false;
     aborted_ = false;
   }
 
  private:
+  virtual void OnCompositingDidCommit(Compositor* compositor) OVERRIDE {
+  }
+
+  virtual void OnCompositingWillStart(Compositor* compositor) OVERRIDE {
+    will_start_ = true;
+  }
+
   virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {
     started_ = true;
   }
@@ -347,6 +356,7 @@ class TestCompositorObserver : public CompositorObserver {
     aborted_ = true;
   }
 
+  bool will_start_;
   bool started_;
   bool ended_;
   bool aborted_;
@@ -1295,4 +1305,4 @@ TEST_F(LayerWithDelegateTest, SetBoundsWhenInvisible) {
   EXPECT_TRUE(delegate.painted());
 }
 
-} // namespace ui
+}  // namespace ui

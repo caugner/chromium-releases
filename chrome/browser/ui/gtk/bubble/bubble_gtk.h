@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BUBBLE_BUBBLE_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BUBBLE_BUBBLE_GTK_H_
-#pragma once
 
 #include <gtk/gtk.h>
 
@@ -108,6 +107,8 @@ class BubbleGtk : public content::NotificationObserver {
   // a window that does not auto close, and is useful if an auto closing window
   // starts being inspected.
   void StopGrabbingInput();
+
+  GtkWidget* anchor_widget() { return anchor_widget_; }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(BubbleGtkTest, ArrowLocation);

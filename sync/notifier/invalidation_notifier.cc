@@ -9,19 +9,18 @@
 #include "base/metrics/histogram.h"
 #include "jingle/notifier/listener/push_client.h"
 #include "net/url_request/url_request_context.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/notifier/sync_notifier_observer.h"
 #include "talk/xmpp/jid.h"
 #include "talk/xmpp/xmppclientsettings.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 InvalidationNotifier::InvalidationNotifier(
     scoped_ptr<notifier::PushClient> push_client,
     const InvalidationVersionMap& initial_max_invalidation_versions,
     const std::string& initial_invalidation_state,
-    const browser_sync::WeakHandle<InvalidationStateTracker>&
-        invalidation_state_tracker,
+    const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
     const std::string& client_info)
     : state_(STOPPED),
       initial_max_invalidation_versions_(initial_max_invalidation_versions),
@@ -35,14 +34,21 @@ InvalidationNotifier::~InvalidationNotifier() {
   DCHECK(CalledOnValidThread());
 }
 
-void InvalidationNotifier::AddObserver(SyncNotifierObserver* observer) {
+void InvalidationNotifier::RegisterHandler(SyncNotifierObserver* handler) {
   DCHECK(CalledOnValidThread());
-  observers_.AddObserver(observer);
+  registrar_.RegisterHandler(handler);
 }
 
-void InvalidationNotifier::RemoveObserver(SyncNotifierObserver* observer) {
+void InvalidationNotifier::UpdateRegisteredIds(SyncNotifierObserver* handler,
+                                               const ObjectIdSet& ids) {
   DCHECK(CalledOnValidThread());
-  observers_.RemoveObserver(observer);
+  registrar_.UpdateRegisteredIds(handler, ids);
+  invalidation_client_.RegisterIds(registrar_.GetAllRegisteredIds());
+}
+
+void InvalidationNotifier::UnregisterHandler(SyncNotifierObserver* handler) {
+  DCHECK(CalledOnValidThread());
+  registrar_.UnregisterHandler(handler);
 }
 
 void InvalidationNotifier::SetUniqueId(const std::string& unique_id) {
@@ -86,39 +92,25 @@ void InvalidationNotifier::UpdateCredentials(
   invalidation_client_.UpdateCredentials(email, token);
 }
 
-void InvalidationNotifier::UpdateEnabledTypes(
-    syncable::ModelTypeSet enabled_types) {
-  DCHECK(CalledOnValidThread());
-  CHECK(!invalidation_client_id_.empty());
-  invalidation_client_.RegisterTypes(enabled_types);
-}
-
-void InvalidationNotifier::SendNotification(
-    syncable::ModelTypeSet changed_types) {
+void InvalidationNotifier::SendNotification(ModelTypeSet changed_types) {
   DCHECK(CalledOnValidThread());
   // Do nothing.
 }
 
-void InvalidationNotifier::OnInvalidate(
-    const syncable::ModelTypePayloadMap& type_payloads) {
+void InvalidationNotifier::OnInvalidate(const ObjectIdPayloadMap& id_payloads) {
   DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(
-      SyncNotifierObserver, observers_,
-      OnIncomingNotification(type_payloads,
-                             sync_notifier::REMOTE_NOTIFICATION));
+  registrar_.DispatchInvalidationsToHandlers(id_payloads, REMOTE_NOTIFICATION);
 }
 
 void InvalidationNotifier::OnNotificationsEnabled() {
   DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(SyncNotifierObserver, observers_,
-                    OnNotificationsEnabled());
+  registrar_.EmitOnNotificationsEnabled();
 }
 
 void InvalidationNotifier::OnNotificationsDisabled(
     NotificationsDisabledReason reason) {
   DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(SyncNotifierObserver, observers_,
-                    OnNotificationsDisabled(reason));
+  registrar_.EmitOnNotificationsDisabled(reason);
 }
 
-}  // namespace sync_notifier
+}  // namespace syncer

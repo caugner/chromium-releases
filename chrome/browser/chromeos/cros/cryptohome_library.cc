@@ -4,27 +4,25 @@
 
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 
-#include "base/command_line.h"
-#include "base/message_loop.h"
+#include <map>
+
+#include "base/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "content/public/browser/browser_thread.h"
-#include "crypto/encryptor.h"
-#include "crypto/sha2.h"
 
-using content::BrowserThread;
+namespace chromeos {
 
 namespace {
 
 const char kStubSystemSalt[] = "stub_system_salt";
-const int kPassHashLen = 32;
 
-}
+// Does nothing.  Used as a Cryptohome::VoidMethodCallback.
+void DoNothing(DBusMethodCallStatus call_status) {}
 
-namespace chromeos {
+}  // namespace
 
 // This class handles the interaction with the ChromeOS cryptohome library APIs.
 class CryptohomeLibraryImpl : public CryptohomeLibrary {
@@ -33,18 +31,6 @@ class CryptohomeLibraryImpl : public CryptohomeLibrary {
   }
 
   virtual ~CryptohomeLibraryImpl() {
-  }
-
-  virtual bool IsMounted() OVERRIDE {
-    bool result = false;
-    DBusThreadManager::Get()->GetCryptohomeClient()->IsMounted(&result);
-    return result;
-  }
-
-  virtual bool TpmIsReady() OVERRIDE {
-    bool result = false;
-    DBusThreadManager::Get()->GetCryptohomeClient()->TpmIsReady(&result);
-    return result;
   }
 
   virtual bool TpmIsEnabled() OVERRIDE {
@@ -66,13 +52,9 @@ class CryptohomeLibraryImpl : public CryptohomeLibrary {
     return result;
   }
 
-  virtual bool TpmGetPassword(std::string* password) OVERRIDE {
-    return DBusThreadManager::Get()->GetCryptohomeClient()->
-        TpmGetPassword(password);
-  }
-
   virtual void TpmCanAttemptOwnership() OVERRIDE {
-    DBusThreadManager::Get()->GetCryptohomeClient()->TpmCanAttemptOwnership();
+    DBusThreadManager::Get()->GetCryptohomeClient()->TpmCanAttemptOwnership(
+        base::Bind(&DoNothing));
   }
 
   virtual void TpmClearStoredPassword() OVERRIDE {
@@ -131,21 +113,6 @@ class CryptohomeLibraryImpl : public CryptohomeLibrary {
     return result;
   }
 
-  virtual std::string HashPassword(const std::string& password) OVERRIDE {
-    // Get salt, ascii encode, update sha with that, then update with ascii
-    // of password, then end.
-    std::string ascii_salt = GetSystemSalt();
-    char passhash_buf[kPassHashLen];
-
-    // Hash salt and password
-    crypto::SHA256HashString(ascii_salt + password,
-                             &passhash_buf, sizeof(passhash_buf));
-
-    return StringToLowerASCII(base::HexEncode(
-        reinterpret_cast<const void*>(passhash_buf),
-        sizeof(passhash_buf) / 2));
-  }
-
   virtual std::string GetSystemSalt() OVERRIDE {
     LoadSystemSalt();  // no-op if it's already loaded.
     return StringToLowerASCII(base::HexEncode(
@@ -175,16 +142,6 @@ class CryptohomeLibraryStubImpl : public CryptohomeLibrary {
     : locked_(false) {}
   virtual ~CryptohomeLibraryStubImpl() {}
 
-  virtual bool IsMounted() OVERRIDE {
-    return true;
-  }
-
-  // Tpm begin ready after 20-th call.
-  virtual bool TpmIsReady() OVERRIDE {
-    static int counter = 0;
-    return ++counter > 20;
-  }
-
   virtual bool TpmIsEnabled() OVERRIDE {
     return true;
   }
@@ -194,11 +151,6 @@ class CryptohomeLibraryStubImpl : public CryptohomeLibrary {
   }
 
   virtual bool TpmIsBeingOwned() OVERRIDE {
-    return true;
-  }
-
-  virtual bool TpmGetPassword(std::string* password) OVERRIDE {
-    *password = "Stub-TPM-password";
     return true;
   }
 
@@ -236,12 +188,6 @@ class CryptohomeLibraryStubImpl : public CryptohomeLibrary {
 
   virtual bool InstallAttributesIsFirstInstall() OVERRIDE {
     return !locked_;
-  }
-
-  virtual std::string HashPassword(const std::string& password) OVERRIDE {
-    return StringToLowerASCII(base::HexEncode(
-            reinterpret_cast<const void*>(password.data()),
-            password.length()));
   }
 
   virtual std::string GetSystemSalt() OVERRIDE {

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_MANAGER_IMPL_H_
 #define CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_MANAGER_IMPL_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -26,7 +25,7 @@ class SpeechRecognitionManagerDelegate;
 
 namespace speech {
 
-class SpeechRecognizerImpl;
+class SpeechRecognizer;
 
 // This is the manager for speech recognition. It is a single instance in
 // the browser process and can serve several requests. Each recognition request
@@ -63,6 +62,8 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
   virtual void AbortSession(int session_id) OVERRIDE;
   virtual void AbortAllSessionsForListener(
         content::SpeechRecognitionEventListener* listener) OVERRIDE;
+  virtual void AbortAllSessionsForRenderView(int render_process_id,
+                                             int render_view_id) OVERRIDE;
   virtual void StopAudioCaptureForSession(int session_id) OVERRIDE;
   virtual const content::SpeechRecognitionSessionConfig& GetSessionConfig(
       int session_id) const OVERRIDE;
@@ -124,7 +125,7 @@ class CONTENT_EXPORT SpeechRecognitionManagerImpl :
     bool listener_is_active;
     content::SpeechRecognitionSessionConfig config;
     content::SpeechRecognitionSessionContext context;
-    scoped_refptr<SpeechRecognizerImpl> recognizer;
+    scoped_refptr<SpeechRecognizer> recognizer;
   };
 
   // Callback issued by the SpeechRecognitionManagerDelegate for reporting

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_THEMES_THEME_SERVICE_H_
 #define CHROME_BROWSER_THEMES_THEME_SERVICE_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -97,6 +96,11 @@ class ThemeService : public base::NonThreadSafe,
     COLOR_CONTROL_BACKGROUND,
     COLOR_BUTTON_BACKGROUND,
 
+    COLOR_SEARCH_NTP_BACKGROUND,
+    COLOR_SEARCH_SEARCH_BACKGROUND,
+    COLOR_SEARCH_DEFAULT_BACKGROUND,
+    COLOR_SEARCH_SEPARATOR_LINE,
+
     // These colors don't have constant default values. They are derived from
     // the runtime value of other colors.
     COLOR_NTP_SECTION_HEADER_TEXT,
@@ -164,7 +168,9 @@ class ThemeService : public base::NonThreadSafe,
   virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual bool HasCustomImage(int id) const OVERRIDE;
-  virtual base::RefCountedMemory* GetRawData(int id) const OVERRIDE;
+  virtual base::RefCountedMemory* GetRawData(
+      int id,
+      ui::ScaleFactor scale_factor) const OVERRIDE;
 #if defined(OS_MACOSX)
   virtual NSImage* GetNSImageNamed(int id, bool allow_default) const OVERRIDE;
   virtual NSColor* GetNSImageColorNamed(int id,

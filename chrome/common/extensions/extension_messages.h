@@ -8,12 +8,13 @@
 #include "base/shared_memory.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_permission_set.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "chrome/common/view_type.h"
 #include "chrome/common/web_apps.h"
 #include "content/public/common/common_param_traits.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 
 #define IPC_MESSAGE_START ExtensionMsgStart
@@ -92,6 +93,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebApplicationInfo)
   IPC_STRUCT_TRAITS_MEMBER(icons)
   IPC_STRUCT_TRAITS_MEMBER(permissions)
   IPC_STRUCT_TRAITS_MEMBER(launch_container)
+  IPC_STRUCT_TRAITS_MEMBER(is_offline_enabled)
 IPC_STRUCT_TRAITS_END()
 
 // Singly-included section for custom IPC traits.
@@ -122,7 +124,7 @@ struct ExtensionMsg_Loaded_Params {
   FilePath path;
 
   // The extension's active permissions.
-  ExtensionAPIPermissionSet apis;
+  extensions::APIPermissionSet apis;
   URLPatternSet explicit_hosts;
   URLPatternSet scriptable_hosts;
 
@@ -152,8 +154,8 @@ struct ParamTraits<URLPatternSet> {
 };
 
 template <>
-struct ParamTraits<ExtensionAPIPermission::ID> {
-  typedef ExtensionAPIPermission::ID param_type;
+struct ParamTraits<extensions::APIPermission::ID> {
+  typedef extensions::APIPermission::ID param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* p);
   static void Log(const param_type& p, std::string* l);
@@ -247,7 +249,7 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_SetTabId,
 IPC_MESSAGE_CONTROL5(ExtensionMsg_UpdatePermissions,
                      int /* UpdateExtensionPermissionsInfo::REASON */,
                      std::string /* extension_id */,
-                     ExtensionAPIPermissionSet /* permissions */,
+                     extensions::APIPermissionSet /* permissions */,
                      URLPatternSet /* explicit_hosts */,
                      URLPatternSet /* scriptable_hosts */)
 
@@ -256,7 +258,7 @@ IPC_MESSAGE_CONTROL4(ExtensionMsg_UpdateTabSpecificPermissions,
                      int32 /* page_id (only relevant for the target tab) */,
                      int /* tab_id */,
                      std::string /* extension_id */,
-                     URLPatternSet /* host */)
+                     URLPatternSet /* hosts */)
 
 // Tell the renderer to clear tab-specific permissions for some extensions.
 IPC_MESSAGE_CONTROL2(ExtensionMsg_ClearTabSpecificPermissions,
@@ -284,6 +286,10 @@ IPC_MESSAGE_CONTROL2(ExtensionMsg_ShouldUnload,
 // lazy background page becoming active again, we are ready to unload. This
 // message tells the page to dispatch the unload event.
 IPC_MESSAGE_CONTROL1(ExtensionMsg_Unload,
+                     std::string /* extension_id */)
+
+// The browser changed its mind about unloading this extension.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_CancelUnload,
                      std::string /* extension_id */)
 
 // Send to renderer once the installation mentioned on
@@ -367,6 +373,22 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_RemoveLazyListener,
                      std::string /* extension_id */,
                      std::string /* name */)
 
+// Notify the browser that the given extension added a listener to instances of
+// the named event that satisfy the filter.
+IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AddFilteredListener,
+                     std::string /* extension_id */,
+                     std::string /* name */,
+                     DictionaryValue /* filter */,
+                     bool /* lazy */)
+
+// Notify the browser that the given extension is no longer interested in
+// instances of the named event that satisfy the filter.
+IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveFilteredListener,
+                     std::string /* extension_id */,
+                     std::string /* name */,
+                     DictionaryValue /* filter */,
+                     bool /* lazy */)
+
 // Notify the browser that an event has finished being dispatched.
 IPC_MESSAGE_ROUTED0(ExtensionHostMsg_EventAck)
 
@@ -408,20 +430,22 @@ IPC_SYNC_MESSAGE_CONTROL1_1(ExtensionHostMsg_GetMessageBundle,
                             SubstitutionMap /* message bundle */)
 
 // Sent from the renderer to the browser to return the script running result.
-IPC_MESSAGE_ROUTED4(ExtensionHostMsg_ExecuteCodeFinished,
+IPC_MESSAGE_ROUTED5(ExtensionHostMsg_ExecuteCodeFinished,
                     int /* request id */,
-                    bool /* whether the script ran successfully */,
+                    std::string /* error; empty implies success */,
                     int32 /* page_id the code executed on, if successful */,
-                    std::string /* error message, if unsuccessful */)
+                    GURL /* URL of the code executed on, if successful */,
+                    ListValue /* result of the script */)
 
 // Sent from the renderer to the browser to notify that content scripts are
 // running in the renderer that the IPC originated from.
 // Note that the page_id is for the parent (or more accurately the topmost)
 // frame (e.g. if executing in an iframe this is the page ID of the parent,
 // unless the parent is an iframe... etc).
-IPC_MESSAGE_ROUTED2(ExtensionHostMsg_ContentScriptsExecuting,
+IPC_MESSAGE_ROUTED3(ExtensionHostMsg_ContentScriptsExecuting,
                     std::set<std::string> /* extensions that have scripts */,
-                    int32 /* page_id of the _topmost_ frame */)
+                    int32 /* page_id of the _topmost_ frame */,
+                    GURL /* url of the _topmost_ frame */)
 
 IPC_MESSAGE_ROUTED2(ExtensionHostMsg_DidGetApplicationInfo,
                     int32 /* page_id */,
@@ -478,3 +502,6 @@ IPC_MESSAGE_ROUTED0(ExtensionHostMsg_DecrementLazyKeepaliveCount)
 // browser process.
 IPC_SYNC_MESSAGE_CONTROL0_1(ExtensionHostMsg_GenerateUniqueID,
                             int /* unique_id */)
+
+// Resumes resource requests for a newly created app window.
+IPC_MESSAGE_CONTROL1(ExtensionHostMsg_ResumeRequests, int /* route_id */)

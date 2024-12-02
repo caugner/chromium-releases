@@ -4,7 +4,6 @@
 
 #ifndef CHROME_SERVICE_CLOUD_PRINT_PRINT_SYSTEM_H_
 #define CHROME_SERVICE_CLOUD_PRINT_PRINT_SYSTEM_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -119,10 +118,12 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
    public:
     // Callback interface for JobSpooler notifications.
     class Delegate {
-      public:
-        virtual ~Delegate() { }
-        virtual void OnJobSpoolSucceeded(const PlatformJobId& job_id) = 0;
-        virtual void OnJobSpoolFailed() = 0;
+     public:
+      virtual void OnJobSpoolSucceeded(const PlatformJobId& job_id) = 0;
+      virtual void OnJobSpoolFailed() = 0;
+
+     protected:
+      virtual ~Delegate() {}
     };
 
     // Spool job to the printer asynchronously. Caller will be notified via

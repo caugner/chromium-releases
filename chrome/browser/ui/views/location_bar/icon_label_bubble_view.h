@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_ICON_LABEL_BUBBLE_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_ICON_LABEL_BUBBLE_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -41,6 +40,11 @@ class IconLabelBubbleView : public views::View {
     is_extension_icon_ = is_extension_icon;
   }
 
+  // Sets the label's text background color to |color|. Needed for correct
+  // sub-pixel text rendering.
+  void SetLabelBackgroundColor(SkColor color);
+
+  // views::View overrides:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;

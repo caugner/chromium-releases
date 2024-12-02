@@ -1,4 +1,5 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+#
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -22,9 +23,9 @@ import subprocess
 import sys
 
 # cmd_helper.py is under ../../build/android/
-sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), '..',
-   '..', 'build', 'android'))
-import cmd_helper # pylint: disable=F0401
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
+                                             '..', 'build', 'android')))
+from pylib import cmd_helper  # pylint: disable=F0401
 
 
 class NativeTestApkGenerator(object):
@@ -39,9 +40,9 @@ class NativeTestApkGenerator(object):
   # Files or directories we need to copy to create a complete apk test shell.
   _SOURCE_FILES = ['AndroidManifest.xml',
                    'native_test_apk.xml',
-                   'res',  # res/values/strings.xml
-                   'java', # .../ChromeNativeTestActivity.java
-                   ]
+                   'res',   # res/values/strings.xml
+                   'java',  # .../ChromeNativeTestActivity.java
+                  ]
 
   # Files in the destion directory that have a "replaceme" string
   # which should be replaced by the basename of the shared library.
@@ -54,13 +55,12 @@ class NativeTestApkGenerator(object):
   def __init__(self, native_library, jars, output_directory, target_abi):
     self._native_library = native_library
     self._jars = jars
-    self._output_directory = output_directory
+    self._output_directory = os.path.abspath(output_directory)
     self._target_abi = target_abi
     self._root_name = None
     if self._native_library:
       self._root_name = self._LibraryRoot()
-    logging.warn('root name: %s' % self._root_name)
-
+    logging.warn('root name: %s', self._root_name)
 
   def _LibraryRoot(self):
     """Return a root name for a shared library.
@@ -76,31 +76,22 @@ class NativeTestApkGenerator(object):
     else:
       return None
 
-  def _CopyTemplateFiles(self):
+  def _CopyTemplateFilesAndClearDir(self):
     """Copy files needed to build a new apk.
 
-    TODO(jrg): add more smarts so we don't change file timestamps if
-    the files don't change?
+    Uses rsync to avoid unnecessary io.  This call also clears outstanding
+    files in the directory.
     """
-    srcdir = os.path.dirname(os.path.realpath( __file__))
-    if not os.path.exists(self._output_directory):
-      os.makedirs(self._output_directory)
-    for f in self._SOURCE_FILES:
-      src = os.path.join(srcdir, f)
-      dest = os.path.join(self._output_directory, f)
-      if os.path.isfile(src):
-        if os.path.exists(dest):
-          os.remove(dest)
-        logging.warn('%s --> %s' % (src, dest))
-        shutil.copyfile(src, dest)
-      else:  # directory
-        if os.path.exists(dest):
-          # One more sanity check since we're deleting a directory...
-          if not '/out/' in dest:
-            raise Exception('Unbelievable output directory; bailing for safety')
-          shutil.rmtree(dest)
-        logging.warn('%s --> %s' % (src, dest))
-        shutil.copytree(src, dest)
+    srcdir = os.path.abspath(os.path.dirname(__file__))
+    destdir = self._output_directory
+    if not os.path.exists(destdir):
+      os.makedirs(destdir)
+    elif not '/out/' in destdir:
+      raise Exception('Unbelievable output directory; bailing for safety')
+    logging.warning('rsync %s --> %s', self._SOURCE_FILES, destdir)
+    logging.info(cmd_helper.GetCmdOutput(
+        ['rsync', '-aRv', '--delete', '--exclude', '.svn'] +
+        self._SOURCE_FILES + [destdir], cwd=srcdir))
 
   def _ReplaceStrings(self):
     """Replace 'replaceme' strings in generated files with a root libname.
@@ -114,35 +105,35 @@ class NativeTestApkGenerator(object):
       dest = os.path.join(self._output_directory, f)
       contents = open(dest).read()
       contents = contents.replace('replaceme', self._root_name)
-      dest = dest.replace('replaceme', self._root_name) # update the filename!
-      open(dest, "w").write(contents)
+      dest = dest.replace('replaceme', self._root_name)  # update the filename!
+      open(dest, 'w').write(contents)
 
   def _CopyLibraryAndJars(self):
-    """Copy the shlib and jars into the apk source tree (if relevant)"""
+    """Copy the shlib and jars into the apk source tree (if relevant)."""
     if self._native_library:
       destdir = os.path.join(self._output_directory, 'libs/' + self._target_abi)
       if not os.path.exists(destdir):
         os.makedirs(destdir)
       dest = os.path.join(destdir, os.path.basename(self._native_library))
-      logging.warn('strip %s --> %s' % (self._native_library, dest))
+      logging.warn('strip %s --> %s', self._native_library, dest)
       strip = os.environ['STRIP']
       cmd_helper.RunCmd(
           [strip, '--strip-unneeded', self._native_library, '-o', dest])
     if self._jars:
-      destdir = os.path.join(self._output_directory, 'libs')
+      destdir = os.path.join(self._output_directory, 'java/libs')
       if not os.path.exists(destdir):
         os.makedirs(destdir)
       for jar in self._jars:
         dest = os.path.join(destdir, os.path.basename(jar))
-        logging.warn('%s --> %s' % (jar, dest))
+        logging.warn('%s --> %s', jar, dest)
         shutil.copyfile(jar, dest)
 
-  def CreateBundle(self, ant_compile):
+  def CreateBundle(self, sdk_build):
     """Create the apk bundle source and assemble components."""
-    if not ant_compile:
+    if not sdk_build:
       self._SOURCE_FILES.append('Android.mk')
       self._REPLACEME_FILES.append('Android.mk')
-    self._CopyTemplateFiles()
+    self._CopyTemplateFilesAndClearDir()
     self._ReplaceStrings()
     self._CopyLibraryAndJars()
 
@@ -154,7 +145,8 @@ class NativeTestApkGenerator(object):
     """
     cmd = ['ant']
     if ant_args:
-      cmd.append(ant_args)
+      cmd.extend(ant_args)
+    cmd.append("-DAPP_ABI=" + self._target_abi)
     cmd.extend(['-buildfile',
                 os.path.join(self._output_directory, 'native_test_apk.xml')])
     logging.warn(cmd)
@@ -162,7 +154,7 @@ class NativeTestApkGenerator(object):
     (stdout, _) = p.communicate()
     logging.warn(stdout)
     if p.returncode != 0:
-      logging.error('Ant return code %d' % p.returncode)
+      logging.error('Ant return code %d', p.returncode)
       sys.exit(p.returncode)
 
   def CompileAndroidMk(self):
@@ -188,11 +180,16 @@ def main(argv):
                     help='Output directory for generated files.')
   parser.add_option('--app_abi', default='armeabi',
                     help='ABI for native shared library')
-  parser.add_option('--ant-compile', action='store_true',
-                    help='If specified, build the generated apk with ant. '
+  parser.add_option('--sdk-build', type='int', default=1,
+                    help='Unless set to 0, build the generated apk with ant. '
                          'Otherwise assume compiling within the Android '
                          'source tree using Android.mk.')
-  parser.add_option('--ant-args',
+  # FIXME(beverloo): Remove --ant-compile when all users adopted.
+  parser.add_option('--ant-compile', action='store_true',
+                    help=('If specified, build the generated apk with ant. '
+                          'Otherwise assume compiling within the Android '
+                          'source tree using Android.mk.'))
+  parser.add_option('--ant-args', action='append',
                     help='extra args for ant')
 
   options, _ = parser.parse_args(argv)
@@ -215,9 +212,9 @@ def main(argv):
                                 jars=jar_list,
                                 output_directory=options.output,
                                 target_abi=options.app_abi)
-  ntag.CreateBundle(options.ant_compile)
+  ntag.CreateBundle(options.sdk_build or options.ant_compile)
 
-  if options.ant_compile:
+  if options.sdk_build or options.ant_compile:
     ntag.Compile(options.ant_args)
   else:
     ntag.CompileAndroidMk()

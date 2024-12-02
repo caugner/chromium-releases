@@ -6,7 +6,9 @@
 
 namespace chromeos {
 
-MockIBusClient::MockIBusClient() {}
+MockIBusClient::MockIBusClient()
+    : create_input_context_call_count_(0) {
+}
 
 MockIBusClient::~MockIBusClient() {}
 
@@ -14,6 +16,18 @@ void MockIBusClient::CreateInputContext(
     const std::string& client_name,
     const CreateInputContextCallback& callback,
     const ErrorCallback& error_callback) {
+  create_input_context_call_count_ ++;
+  if (!create_input_context_handler_.is_null())
+    create_input_context_handler_.Run(client_name, callback, error_callback);
+}
+
+void MockIBusClient::RegisterComponent(
+    const ibus::IBusComponent& ibus_component,
+    const RegisterComponentCallback& callback,
+    const ErrorCallback& error_callback) {
+  register_component_call_count_ ++;
+  if (!register_component_handler_.is_null())
+    register_component_handler_.Run(ibus_component, callback, error_callback);
 }
 
 }  // namespace chromeos

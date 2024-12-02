@@ -12,6 +12,7 @@
 #include "base/pickle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -20,6 +21,9 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_instructions_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_menu_controller_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -278,7 +282,7 @@ void BookmarkBarGtk::Init() {
 
   AddCoreButtons();
   // TODO(erg): Handle extensions
-  model_ = profile->GetBookmarkModel();
+  model_ = BookmarkModelFactory::GetForProfile(profile);
   model_->AddObserver(this);
   if (model_->IsLoaded())
     Loaded(model_, false);
@@ -375,7 +379,7 @@ void BookmarkBarGtk::PopupForButton(GtkWidget* button) {
   }
 
   current_menu_.reset(
-      new BookmarkMenuController(browser_->profile(), page_navigator_,
+      new BookmarkMenuController(browser_, page_navigator_,
           GTK_WINDOW(gtk_widget_get_toplevel(button)),
           node,
           button == overflow_button_ ? first_hidden : 0));
@@ -691,7 +695,7 @@ bool BookmarkBarGtk::GetTabContentsSize(gfx::Size* size) {
     NOTREACHED();
     return false;
   }
-  WebContents* web_contents = browser->GetActiveWebContents();
+  WebContents* web_contents = chrome::GetActiveWebContents(browser);
   if (!web_contents) {
     // It is possible to have a browser but no WebContents while under testing,
     // so don't NOTREACHED() and error the program.
@@ -1119,7 +1123,8 @@ void BookmarkBarGtk::PopupMenuForNode(GtkWidget* sender,
   GtkWindow* window = GTK_WINDOW(gtk_widget_get_toplevel(sender));
   current_context_menu_controller_.reset(
       new BookmarkContextMenuController(
-          window, this, browser_->profile(), page_navigator_, parent, nodes));
+          window, this, browser_, browser_->profile(), page_navigator_, parent,
+          nodes));
   current_context_menu_.reset(
       new MenuGtk(NULL, current_context_menu_controller_->menu_model()));
   current_context_menu_->PopupAsContext(
@@ -1147,10 +1152,10 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
   DCHECK(node->is_url());
   DCHECK(page_navigator_);
 
-  Profile* profile = browser_->profile();
-  RecordAppLaunch(profile, node->url());
-  bookmark_utils::OpenAll(window_->GetNativeWindow(), profile, page_navigator_,
-      node, event_utils::DispositionForCurrentButtonPressEvent());
+  RecordAppLaunch(browser_->profile(), node->url());
+  bookmark_utils::OpenAll(
+      window_->GetNativeWindow(), page_navigator_, node,
+      event_utils::DispositionForCurrentButtonPressEvent());
 
   content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
@@ -1234,8 +1239,8 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
-    bookmark_utils::OpenAll(window_->GetNativeWindow(), browser_->profile(),
-                            page_navigator_, node, NEW_BACKGROUND_TAB);
+    bookmark_utils::OpenAll(window_->GetNativeWindow(), page_navigator_, node,
+                            NEW_BACKGROUND_TAB);
   }
 }
 
@@ -1451,7 +1456,7 @@ void BookmarkBarGtk::OnThrobbingWidgetDestroy(GtkWidget* widget) {
 }
 
 void BookmarkBarGtk::ShowImportDialog() {
-  browser_->OpenImportSettingsDialog();
+  chrome::ShowImportDialog(browser_);
 }
 
 void BookmarkBarGtk::OnEditBookmarksEnabledChanged() {

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_RESOURCE_CONTEXT_H_
 #define CONTENT_SHELL_SHELL_RESOURCE_CONTEXT_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -14,7 +13,7 @@ namespace content {
 
 class ShellURLRequestContextGetter;
 
-class ShellResourceContext : public content::ResourceContext {
+class ShellResourceContext : public ResourceContext {
  public:
   explicit ShellResourceContext(ShellURLRequestContextGetter* getter);
   virtual ~ShellResourceContext();

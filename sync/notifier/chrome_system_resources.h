@@ -8,7 +8,6 @@
 
 #ifndef SYNC_NOTIFIER_CHROME_SYSTEM_RESOURCES_H_
 #define SYNC_NOTIFIER_CHROME_SYSTEM_RESOURCES_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -27,7 +26,7 @@ namespace notifier {
 class PushClient;
 }  // namespace notifier
 
-namespace sync_notifier {
+namespace syncer {
 
 class ChromeLogger : public invalidation::Logger {
  public:
@@ -146,6 +145,6 @@ class ChromeSystemResources : public invalidation::SystemResources {
   PushClientChannel push_client_channel_;
 };
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_CHROME_SYSTEM_RESOURCES_H_

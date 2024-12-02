@@ -52,8 +52,6 @@ using content::DownloadUrlParameters;
 
 namespace {
 
-using extensions::Extension;
-
 // Key used to attach the Approval to the DownloadItem.
 const char kApprovalKey[] = "extensions.webstore_installer";
 
@@ -84,7 +82,7 @@ GURL GetWebstoreInstallURL(
     params.push_back("installsource=" + install_source);
   params.push_back("lang=" + g_browser_process->GetApplicationLocale());
   params.push_back("uc");
-  std::string url_string = extension_urls::GetWebstoreUpdateUrl(true).spec();
+  std::string url_string = extension_urls::GetWebstoreUpdateUrl().spec();
 
   GURL url(url_string + "?response=redirect&x=" +
       net::EscapeQueryParamValue(JoinString(params, '&'), true));
@@ -135,11 +133,14 @@ void GetDownloadFilePath(
 
 }  // namespace
 
+namespace extensions {
+
 WebstoreInstaller::Approval::Approval()
     : profile(NULL),
       use_app_installed_bubble(false),
       skip_post_install_ui(false),
-      skip_install_dialog(false) {
+      skip_install_dialog(false),
+      record_oauth2_grant(false) {
 }
 
 scoped_ptr<WebstoreInstaller::Approval>
@@ -187,6 +188,7 @@ WebstoreInstaller::WebstoreInstaller(Profile* profile,
   download_url_ = GetWebstoreInstallURL(id, flags & FLAG_INLINE_INSTALL ?
       kInlineInstallSource : kDefaultInstallSource);
 
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   registrar_.Add(this, chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
@@ -357,3 +359,5 @@ void WebstoreInstaller::ReportSuccess() {
 
   Release();  // Balanced in Start().
 }
+
+}  // namespace extensions

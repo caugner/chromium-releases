@@ -4,17 +4,26 @@
 
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 
+#include "base/bind.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/common/url_constants.h"
+#include "net/base/net_log.h"
+#include "net/cookies/parsed_cookie.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 
 namespace extension_web_request_api_helpers {
 
 namespace {
+
+// A ParsedRequestCookie consists of the key and value of the cookie.
+typedef std::pair<base::StringPiece, base::StringPiece> ParsedRequestCookie;
+typedef std::vector<ParsedRequestCookie> ParsedRequestCookies;
+typedef std::vector<linked_ptr<net::ParsedCookie> > ParsedResponseCookies;
 
 static const char* kResourceTypeStrings[] = {
   "main_frame",
@@ -51,6 +60,17 @@ COMPILE_ASSERT(
 
 }  // namespace
 
+RequestCookie::RequestCookie() {}
+RequestCookie::~RequestCookie() {}
+
+ResponseCookie::ResponseCookie() {}
+ResponseCookie::~ResponseCookie() {}
+
+RequestCookieModification::RequestCookieModification() {}
+RequestCookieModification::~RequestCookieModification() {}
+
+ResponseCookieModification::ResponseCookieModification() : type(ADD) {}
+ResponseCookieModification::~ResponseCookieModification() {}
 
 EventResponseDelta::EventResponseDelta(
     const std::string& extension_id, const base::Time& extension_install_time)
@@ -63,71 +83,41 @@ EventResponseDelta::~EventResponseDelta() {
 }
 
 
-EventLogEntry::EventLogEntry(
-    net::NetLog::EventType event_type,
-    const scoped_refptr<net::NetLog::EventParameters>& params)
-    : event_type(event_type),
-      params(params) {
+// Creates a NetLog callback the returns a Value with the ID of the extension
+// that caused an event.  |delta| must remain valid for the lifetime of the
+// callback.
+net::NetLog::ParametersCallback CreateNetLogExtensionIdCallback(
+    const EventResponseDelta* delta) {
+  return net::NetLog::StringCallback("extension_id", &delta->extension_id);
 }
 
-EventLogEntry::~EventLogEntry() {
+// Creates NetLog parameters to indicate that an extension modified a request.
+// Caller takes ownership of returned value.
+Value* NetLogModificationCallback(
+    const EventResponseDelta* delta,
+    net::NetLog::LogLevel log_level) {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetString("extension_id", delta->extension_id);
+
+  ListValue* modified_headers = new ListValue();
+  net::HttpRequestHeaders::Iterator modification(
+      delta->modified_request_headers);
+  while (modification.GetNext()) {
+    std::string line = modification.name() + ": " + modification.value();
+    modified_headers->Append(Value::CreateStringValue(line));
+  }
+  dict->Set("modified_headers", modified_headers);
+
+  ListValue* deleted_headers = new ListValue();
+  for (std::vector<std::string>::const_iterator key =
+           delta->deleted_request_headers.begin();
+       key != delta->deleted_request_headers.end();
+       ++key) {
+    deleted_headers->Append(Value::CreateStringValue(*key));
+  }
+  dict->Set("deleted_headers", deleted_headers);
+  return dict;
 }
-
-
-// NetLog parameter to indicate the ID of the extension that caused an event.
-class NetLogExtensionIdParameter : public net::NetLog::EventParameters {
- public:
-  explicit NetLogExtensionIdParameter(const std::string& extension_id)
-      : extension_id_(extension_id) {}
-
-  virtual base::Value* ToValue() const OVERRIDE {
-    DictionaryValue* dict = new DictionaryValue();
-    dict->SetString("extension_id", extension_id_);
-    return dict;
-  }
-
- protected:
-  virtual ~NetLogExtensionIdParameter() {}
-
- private:
-  const std::string extension_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetLogExtensionIdParameter);
-};
-
-
-// NetLog parameter to indicate that an extension modified a request.
-class NetLogModificationParameter : public NetLogExtensionIdParameter {
- public:
-  explicit NetLogModificationParameter(const std::string& extension_id)
-      : NetLogExtensionIdParameter(extension_id) {}
-
-  virtual base::Value* ToValue() const OVERRIDE {
-    Value* parent = NetLogExtensionIdParameter::ToValue();
-    DCHECK(parent->IsType(Value::TYPE_DICTIONARY));
-    DictionaryValue* dict = static_cast<DictionaryValue*>(parent);
-    dict->Set("modified_headers", modified_headers_.DeepCopy());
-    dict->Set("deleted_headers", deleted_headers_.DeepCopy());
-    return dict;
-  }
-
-  void DeletedHeader(const std::string& key) {
-    deleted_headers_.Append(Value::CreateStringValue(key));
-  }
-
-  void ModifiedHeader(const std::string& key, const std::string& value) {
-    modified_headers_.Append(Value::CreateStringValue(key + ": " + value));
-  }
-
- private:
-  virtual ~NetLogModificationParameter() {}
-
-  ListValue modified_headers_;
-  ListValue deleted_headers_;
-
-  DISALLOW_COPY_AND_ASSIGN(NetLogModificationParameter);
-};
-
 
 bool InDecreasingExtensionInstallationTimeOrder(
     const linked_ptr<EventResponseDelta>& a,
@@ -145,7 +135,7 @@ ListValue* StringToCharList(const std::string& s) {
   return result;
 }
 
-bool CharListToString(ListValue* list, std::string* out) {
+bool CharListToString(const ListValue* list, std::string* out) {
   if (!list)
     return false;
   const size_t list_length = list->GetSize();
@@ -279,16 +269,14 @@ EventResponseDelta* CalculateOnAuthRequiredDelta(
 void MergeCancelOfResponses(
     const EventResponseDeltas& deltas,
     bool* canceled,
-    EventLogEntries* event_log_entries) {
+    const net::BoundNetLog* net_log) {
   for (EventResponseDeltas::const_iterator i = deltas.begin();
        i != deltas.end(); ++i) {
     if ((*i)->cancel) {
       *canceled = true;
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_ABORTED_REQUEST,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*i)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(i->get()));
       break;
     }
   }
@@ -305,7 +293,7 @@ static bool MergeOnBeforeRequestResponsesHelper(
     const EventResponseDeltas& deltas,
     GURL* new_url,
     std::set<std::string>* conflicting_extensions,
-    EventLogEntries* event_log_entries,
+    const net::BoundNetLog* net_log,
     bool consider_only_cancel_scheme_urls) {
   bool redirected = false;
 
@@ -322,18 +310,14 @@ static bool MergeOnBeforeRequestResponsesHelper(
     if (!redirected || *new_url == (*delta)->new_url) {
       *new_url = (*delta)->new_url;
       redirected = true;
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_REDIRECTED_REQUEST,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     } else {
       conflicting_extensions->insert((*delta)->extension_id);
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     }
   }
   return redirected;
@@ -343,12 +327,12 @@ void MergeOnBeforeRequestResponses(
     const EventResponseDeltas& deltas,
     GURL* new_url,
     std::set<std::string>* conflicting_extensions,
-    EventLogEntries* event_log_entries) {
+    const net::BoundNetLog* net_log) {
 
   // First handle only redirects to data:// URLs and about:blank. These are a
   // special case as they represent a way of cancelling a request.
   if (MergeOnBeforeRequestResponsesHelper(
-          deltas, new_url, conflicting_extensions, event_log_entries, true)) {
+          deltas, new_url, conflicting_extensions, net_log, true)) {
     // If any extension cancelled a request by redirecting to a data:// URL or
     // about:blank, we don't consider the other redirects.
     return;
@@ -356,14 +340,227 @@ void MergeOnBeforeRequestResponses(
 
   // Handle all other redirects.
   MergeOnBeforeRequestResponsesHelper(
-            deltas, new_url, conflicting_extensions, event_log_entries, false);
+      deltas, new_url, conflicting_extensions, net_log, false);
+}
+
+// Assumes that |header_value| is the cookie header value of a HTTP Request
+// following the cookie-string schema of RFC 6265, section 4.2.1, and returns
+// cookie name/value pairs. If cookie values are presented in double quotes,
+// these will appear in |parsed| as well. We can assume that the cookie header
+// is written by Chromium and therefore, well-formed.
+static void ParseRequestCookieLine(
+    const std::string& header_value,
+    ParsedRequestCookies* parsed_cookies) {
+  std::string::const_iterator i = header_value.begin();
+  while (i != header_value.end()) {
+    // Here we are at the beginning of a cookie.
+
+    // Eat whitespace.
+    while (i != header_value.end() && *i == ' ') ++i;
+    if (i == header_value.end()) return;
+
+    // Find cookie name.
+    std::string::const_iterator cookie_name_beginning = i;
+    while (i != header_value.end() && *i != '=') ++i;
+    base::StringPiece cookie_name(cookie_name_beginning, i);
+
+    // Find cookie value.
+    base::StringPiece cookie_value;
+    if (i != header_value.end()) {  // Cookies may have no value.
+      ++i;  // Skip '='.
+      std::string::const_iterator cookie_value_beginning = i;
+      if (*i == '"') {
+        while (i != header_value.end() && *i != '"') ++i;
+        if (i == header_value.end()) return;
+        ++i;  // Skip '"'.
+        cookie_value = base::StringPiece(cookie_value_beginning, i);
+        // i points to character after '"', potentially a ';'
+      } else {
+        while (i != header_value.end() && *i != ';') ++i;
+        cookie_value = base::StringPiece(cookie_value_beginning, i);
+        // i points to ';' or end of string.
+      }
+    }
+    parsed_cookies->push_back(make_pair(cookie_name, cookie_value));
+    // Eat ';'
+    if (i != header_value.end()) ++i;
+  }
+}
+
+// Writes all cookies of |parsed_cookies| into a HTTP Request header value
+// that belongs to the "Cookie" header.
+static std::string SerializeRequestCookieLine(
+    const ParsedRequestCookies& parsed_cookies) {
+  std::string buffer;
+  for (ParsedRequestCookies::const_iterator i = parsed_cookies.begin();
+       i != parsed_cookies.end(); ++i) {
+    if (!buffer.empty())
+      buffer += "; ";
+    buffer += i->first.as_string();
+    if (!i->second.empty())
+      buffer += "=" + i->second.as_string();
+  }
+  return buffer;
+}
+
+static bool DoesRequestCookieMatchFilter(
+    const ParsedRequestCookie& cookie,
+    RequestCookie* filter) {
+  if (!filter) return true;
+  if (filter->name.get() && cookie.first != *filter->name) return false;
+  if (filter->value.get() && cookie.second != *filter->value) return false;
+  return true;
+}
+
+// Applies all CookieModificationType::ADD operations for request cookies of
+// |deltas| to |cookies|. Returns whether any cookie was added.
+static bool MergeAddRequestCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedRequestCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const RequestCookieModifications& modifications =
+        (*delta)->request_cookie_modifications;
+    for (RequestCookieModifications::const_iterator mod = modifications.begin();
+         mod != modifications.end(); ++mod) {
+      if ((*mod)->type != ADD || !(*mod)->modification.get())
+        continue;
+      std::string* new_name = (*mod)->modification->name.get();
+      std::string* new_value = (*mod)->modification->value.get();
+      if (!new_name || !new_value)
+        continue;
+
+      bool cookie_with_same_name_found = false;
+      for (ParsedRequestCookies::iterator cookie = cookies->begin();
+           cookie != cookies->end() && !cookie_with_same_name_found; ++cookie) {
+        if (cookie->first == *new_name) {
+          if (cookie->second != *new_value) {
+            cookie->second = *new_value;
+            modified = true;
+          }
+          cookie_with_same_name_found = true;
+        }
+      }
+      if (!cookie_with_same_name_found) {
+        cookies->push_back(std::make_pair(base::StringPiece(*new_name),
+                                          base::StringPiece(*new_value)));
+        modified = true;
+      }
+    }
+  }
+  return modified;
+}
+
+// Applies all CookieModificationType::EDIT operations for request cookies of
+// |deltas| to |cookies|. Returns whether any cookie was modified.
+static bool MergeEditRequestCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedRequestCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const RequestCookieModifications& modifications =
+        (*delta)->request_cookie_modifications;
+    for (RequestCookieModifications::const_iterator mod = modifications.begin();
+         mod != modifications.end(); ++mod) {
+      if ((*mod)->type != EDIT || !(*mod)->modification.get())
+        continue;
+
+      std::string* new_value = (*mod)->modification->value.get();
+      RequestCookie* filter = (*mod)->filter.get();
+      for (ParsedRequestCookies::iterator cookie = cookies->begin();
+           cookie != cookies->end(); ++cookie) {
+        if (!DoesRequestCookieMatchFilter(*cookie, filter))
+          continue;
+        // If the edit operation tries to modify the cookie name, we just ignore
+        // this. We only modify the cookie value.
+        if (new_value && cookie->second != *new_value) {
+          cookie->second = *new_value;
+          modified = true;
+        }
+      }
+    }
+  }
+  return modified;
+}
+
+// Applies all CookieModificationType::REMOVE operations for request cookies of
+// |deltas| to |cookies|. Returns whether any cookie was deleted.
+static bool MergeRemoveRequestCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedRequestCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const RequestCookieModifications& modifications =
+        (*delta)->request_cookie_modifications;
+    for (RequestCookieModifications::const_iterator mod = modifications.begin();
+         mod != modifications.end(); ++mod) {
+      if ((*mod)->type != REMOVE)
+        continue;
+
+      RequestCookie* filter = (*mod)->filter.get();
+      ParsedRequestCookies::iterator i = cookies->begin();
+      while (i != cookies->end()) {
+        if (DoesRequestCookieMatchFilter(*i, filter)) {
+          i = cookies->erase(i);
+          modified = true;
+        } else {
+          ++i;
+        }
+      }
+    }
+  }
+  return modified;
+}
+
+void MergeCookiesInOnBeforeSendHeadersResponses(
+    const EventResponseDeltas& deltas,
+    net::HttpRequestHeaders* request_headers,
+    std::set<std::string>* conflicting_extensions,
+    const net::BoundNetLog* net_log) {
+  // Skip all work if there are no registered cookie modifications.
+  bool cookie_modifications_exist = false;
+  EventResponseDeltas::const_iterator delta;
+  for (delta = deltas.begin(); delta != deltas.end(); ++delta) {
+    cookie_modifications_exist |=
+        !(*delta)->request_cookie_modifications.empty();
+  }
+  if (!cookie_modifications_exist)
+    return;
+
+  // Parse old cookie line.
+  std::string cookie_header;
+  request_headers->GetHeader(net::HttpRequestHeaders::kCookie, &cookie_header);
+  ParsedRequestCookies cookies;
+  ParseRequestCookieLine(cookie_header, &cookies);
+
+  // Modify cookies.
+  bool modified = false;
+  modified |= MergeAddRequestCookieModifications(deltas, &cookies);
+  modified |= MergeEditRequestCookieModifications(deltas, &cookies);
+  modified |= MergeRemoveRequestCookieModifications(deltas, &cookies);
+
+  // Reassemble and store new cookie line.
+  if (modified) {
+    std::string new_cookie_header = SerializeRequestCookieLine(cookies);
+    request_headers->SetHeader(net::HttpRequestHeaders::kCookie,
+                               new_cookie_header);
+  }
 }
 
 void MergeOnBeforeSendHeadersResponses(
     const EventResponseDeltas& deltas,
     net::HttpRequestHeaders* request_headers,
     std::set<std::string>* conflicting_extensions,
-    EventLogEntries* event_log_entries) {
+    const net::BoundNetLog* net_log) {
   EventResponseDeltas::const_iterator delta;
 
   // Here we collect which headers we have removed or set to new values
@@ -378,9 +575,6 @@ void MergeOnBeforeSendHeadersResponses(
         (*delta)->deleted_request_headers.empty()) {
       continue;
     }
-
-    scoped_refptr<NetLogModificationParameter> log(
-        new NetLogModificationParameter((*delta)->extension_id));
 
     // Check whether any modification affects a request header that
     // has been modified differently before. As deltas is sorted by decreasing
@@ -431,35 +625,240 @@ void MergeOnBeforeSendHeadersResponses(
         // Record which keys were changed.
         net::HttpRequestHeaders::Iterator modification(
             (*delta)->modified_request_headers);
-        while (modification.GetNext()) {
+        while (modification.GetNext())
           set_headers.insert(modification.name());
-          log->ModifiedHeader(modification.name(), modification.value());
-        }
       }
 
       // Perform all deletions and record which keys were deleted.
       {
         std::vector<std::string>::iterator key;
         for (key = (*delta)->deleted_request_headers.begin();
-            key != (*delta)->deleted_request_headers.end();
+             key != (*delta)->deleted_request_headers.end();
              ++key) {
           request_headers->RemoveHeader(*key);
           removed_headers.insert(*key);
-          log->DeletedHeader(*key);
         }
       }
-      EventLogEntry log_entry(
-          net::NetLog::TYPE_CHROME_EXTENSION_MODIFIED_HEADERS, log);
-      event_log_entries->push_back(log_entry);
+      net_log->AddEvent(
+          net::NetLog::TYPE_CHROME_EXTENSION_MODIFIED_HEADERS,
+          base::Bind(&NetLogModificationCallback, delta->get()));
     } else {
       conflicting_extensions->insert((*delta)->extension_id);
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     }
   }
+
+  MergeCookiesInOnBeforeSendHeadersResponses(deltas, request_headers,
+      conflicting_extensions, net_log);
+}
+
+// Retrives all cookies from |override_response_headers|.
+static ParsedResponseCookies GetResponseCookies(
+    scoped_refptr<net::HttpResponseHeaders> override_response_headers) {
+  ParsedResponseCookies result;
+
+  void* iter = NULL;
+  std::string value;
+  while (override_response_headers->EnumerateHeader(&iter, "Set-Cookie",
+                                                    &value)) {
+    result.push_back(make_linked_ptr(new net::ParsedCookie(value)));
+  }
+  return result;
+}
+
+// Stores all |cookies| in |override_response_headers| deleting previously
+// existing cookie definitions.
+static void StoreResponseCookies(
+    const ParsedResponseCookies& cookies,
+    scoped_refptr<net::HttpResponseHeaders> override_response_headers) {
+  override_response_headers->RemoveHeader("Set-Cookie");
+  for (ParsedResponseCookies::const_iterator i = cookies.begin();
+       i != cookies.end(); ++i) {
+    override_response_headers->AddHeader("Set-Cookie: " + (*i)->ToCookieLine());
+  }
+}
+
+// Modifies |cookie| according to |modification|. Each value that is set in
+// |modification| is applied to |cookie|.
+static bool ApplyResponseCookieModification(ResponseCookie* modification,
+                                            net::ParsedCookie* cookie) {
+  bool modified = false;
+  if (modification->name.get())
+    modified |= cookie->SetName(*modification->name);
+  if (modification->value.get())
+    modified |= cookie->SetValue(*modification->value);
+  if (modification->expires.get())
+    modified |= cookie->SetExpires(*modification->expires);
+  if (modification->max_age.get())
+    modified |= cookie->SetMaxAge(base::IntToString(*modification->max_age));
+  if (modification->domain.get())
+    modified |= cookie->SetDomain(*modification->domain);
+  if (modification->path.get())
+    modified |= cookie->SetPath(*modification->path);
+  if (modification->secure.get())
+    modified |= cookie->SetIsSecure(*modification->secure);
+  if (modification->http_only.get())
+    modified |= cookie->SetIsHttpOnly(*modification->http_only);
+  return modified;
+}
+
+static bool DoesResponseCookieMatchFilter(net::ParsedCookie* cookie,
+                                          ResponseCookie* filter) {
+  if (!cookie->IsValid()) return false;
+  if (!filter) return true;
+  if (filter->name.get() && cookie->Name() != *filter->name) return false;
+  if (filter->value.get() && cookie->Value() != *filter->value) return false;
+  if (filter->expires.get()) {
+    std::string actual_value = cookie->HasExpires() ? cookie->Expires() : "";
+    if (actual_value != *filter->expires)
+      return false;
+  }
+  if (filter->max_age.get()) {
+    std::string actual_value = cookie->HasMaxAge() ? cookie->MaxAge() : "";
+    if (actual_value != base::IntToString(*filter->max_age))
+      return false;
+  }
+  if (filter->domain.get()) {
+    std::string actual_value = cookie->HasDomain() ? cookie->Domain() : "";
+    if (actual_value != *filter->domain)
+      return false;
+  }
+  if (filter->path.get()) {
+    std::string actual_value = cookie->HasPath() ? cookie->Path() : "";
+    if (actual_value != *filter->path)
+      return false;
+  }
+  if (filter->secure.get() && cookie->IsSecure() != *filter->secure)
+    return false;
+  if (filter->http_only.get() && cookie->IsHttpOnly() != *filter->http_only)
+    return false;
+  return true;
+}
+
+// Applies all CookieModificationType::ADD operations for response cookies of
+// |deltas| to |cookies|. Returns whether any cookie was added.
+static bool MergeAddResponseCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedResponseCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const ResponseCookieModifications& modifications =
+        (*delta)->response_cookie_modifications;
+    for (ResponseCookieModifications::const_iterator mod =
+             modifications.begin(); mod != modifications.end(); ++mod) {
+      if ((*mod)->type != ADD || !(*mod)->modification.get())
+        continue;
+      // Cookie names are not unique in response cookies so we always append
+      // and never override.
+      linked_ptr<net::ParsedCookie> cookie(new net::ParsedCookie(""));
+      ApplyResponseCookieModification((*mod)->modification.get(), cookie.get());
+      cookies->push_back(cookie);
+      modified = true;
+    }
+  }
+  return modified;
+}
+
+// Applies all CookieModificationType::EDIT operations for response cookies of
+// |deltas| to |cookies|. Returns whether any cookie was modified.
+static bool MergeEditResponseCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedResponseCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const ResponseCookieModifications& modifications =
+        (*delta)->response_cookie_modifications;
+    for (ResponseCookieModifications::const_iterator mod =
+             modifications.begin(); mod != modifications.end(); ++mod) {
+      if ((*mod)->type != EDIT || !(*mod)->modification.get())
+        continue;
+
+      for (ParsedResponseCookies::iterator cookie = cookies->begin();
+           cookie != cookies->end(); ++cookie) {
+        if (DoesResponseCookieMatchFilter(cookie->get(),
+                                          (*mod)->filter.get())) {
+          modified |= ApplyResponseCookieModification(
+              (*mod)->modification.get(), cookie->get());
+        }
+      }
+    }
+  }
+  return modified;
+}
+
+// Applies all CookieModificationType::REMOVE operations for response cookies of
+// |deltas| to |cookies|. Returns whether any cookie was deleted.
+static bool MergeRemoveResponseCookieModifications(
+    const EventResponseDeltas& deltas,
+    ParsedResponseCookies* cookies) {
+  bool modified = false;
+  // We assume here that the deltas are sorted in decreasing extension
+  // precedence (i.e. decreasing extension installation time).
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    const ResponseCookieModifications& modifications =
+        (*delta)->response_cookie_modifications;
+    for (ResponseCookieModifications::const_iterator mod =
+             modifications.begin(); mod != modifications.end(); ++mod) {
+      if ((*mod)->type != REMOVE)
+        continue;
+
+      ParsedResponseCookies::iterator i = cookies->begin();
+      while (i != cookies->end()) {
+        if (DoesResponseCookieMatchFilter(i->get(),
+                                          (*mod)->filter.get())) {
+          i = cookies->erase(i);
+          modified = true;
+        } else {
+          ++i;
+        }
+      }
+    }
+  }
+  return modified;
+}
+
+void MergeCookiesInOnHeadersReceivedResponses(
+    const EventResponseDeltas& deltas,
+    const net::HttpResponseHeaders* original_response_headers,
+    scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
+    std::set<std::string>* conflicting_extensions,
+    const net::BoundNetLog* net_log) {
+  // Skip all work if there are no registered cookie modifications.
+  bool cookie_modifications_exist = false;
+  EventResponseDeltas::const_reverse_iterator delta;
+  for (delta = deltas.rbegin(); delta != deltas.rend(); ++delta) {
+    cookie_modifications_exist |=
+        !(*delta)->response_cookie_modifications.empty();
+  }
+  if (!cookie_modifications_exist)
+    return;
+
+  // Only create a copy if we really want to modify the response headers.
+  if (override_response_headers->get() == NULL) {
+    *override_response_headers = new net::HttpResponseHeaders(
+        original_response_headers->raw_headers());
+  }
+
+  ParsedResponseCookies cookies =
+      GetResponseCookies(*override_response_headers);
+
+  bool modified = false;
+  modified |= MergeAddResponseCookieModifications(deltas, &cookies);
+  modified |= MergeEditResponseCookieModifications(deltas, &cookies);
+  modified |= MergeRemoveResponseCookieModifications(deltas, &cookies);
+
+  // Store new value.
+  if (modified)
+    StoreResponseCookies(cookies, *override_response_headers);
 }
 
 // Converts the key of the (key, value) pair to lower case.
@@ -474,7 +873,7 @@ void MergeOnHeadersReceivedResponses(
     const net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
     std::set<std::string>* conflicting_extensions,
-    EventLogEntries* event_log_entries) {
+    const net::BoundNetLog* net_log) {
   EventResponseDeltas::const_iterator delta;
 
   // Here we collect which headers we have removed or added so far due to
@@ -518,8 +917,7 @@ void MergeOnHeadersReceivedResponses(
       {
         for (i = (*delta)->deleted_response_headers.begin();
              i != (*delta)->deleted_response_headers.end(); ++i) {
-          (*override_response_headers)->RemoveHeaderWithValue(i->first,
-                                                              i->second);
+          (*override_response_headers)->RemoveHeaderLine(i->first, i->second);
           removed_headers.insert(ToLowerCase(*i));
         }
       }
@@ -535,27 +933,26 @@ void MergeOnHeadersReceivedResponses(
           (*override_response_headers)->AddHeader(i->first + ": " + i->second);
         }
       }
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_MODIFIED_HEADERS,
-          make_scoped_refptr(
-              new NetLogModificationParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     } else {
       conflicting_extensions->insert((*delta)->extension_id);
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     }
   }
+
+  MergeCookiesInOnHeadersReceivedResponses(deltas, original_response_headers,
+      override_response_headers, conflicting_extensions, net_log);
 }
 
 bool MergeOnAuthRequiredResponses(
     const EventResponseDeltas& deltas,
     net::AuthCredentials* auth_credentials,
     std::set<std::string>* conflicting_extensions,
-    EventLogEntries* event_log_entries) {
+    const net::BoundNetLog* net_log) {
   CHECK(auth_credentials);
   bool credentials_set = false;
 
@@ -570,17 +967,13 @@ bool MergeOnAuthRequiredResponses(
         auth_credentials->password() != (*delta)->auth_credentials->password();
     if (credentials_set && different) {
       conflicting_extensions->insert((*delta)->extension_id);
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
     } else {
-      EventLogEntry log_entry(
+      net_log->AddEvent(
           net::NetLog::TYPE_CHROME_EXTENSION_PROVIDE_AUTH_CREDENTIALS,
-          make_scoped_refptr(
-              new NetLogExtensionIdParameter((*delta)->extension_id)));
-      event_log_entries->push_back(log_entry);
+          CreateNetLogExtensionIdCallback(delta->get()));
       *auth_credentials = *(*delta)->auth_credentials;
       credentials_set = true;
     }
@@ -588,64 +981,6 @@ bool MergeOnAuthRequiredResponses(
   return credentials_set;
 }
 
-namespace {
-
-// Returns true if the URL is sensitive and requests to this URL must not be
-// modified/canceled by extensions, e.g. because it is targeted to the webstore
-// to check for updates, extension blacklisting, etc.
-bool IsSensitiveURL(const GURL& url) {
-  // TODO(battre) Merge this, CanExtensionAccessURL of web_request_api.cc and
-  // Extension::CanExecuteScriptOnPage into one function.
-  bool is_webstore_gallery_url =
-      StartsWithASCII(url.spec(), extension_urls::kGalleryBrowsePrefix, true);
-  bool sensitive_chrome_url = false;
-  if (EndsWith(url.host(), "google.com", true)) {
-    sensitive_chrome_url |= (url.host() == "www.google.com") &&
-                            StartsWithASCII(url.path(), "/chrome", true);
-    sensitive_chrome_url |= (url.host() == "chrome.google.com");
-    if (StartsWithASCII(url.host(), "client", true)) {
-      for (int i = 0; i < 10; ++i) {
-        sensitive_chrome_url |=
-            (StringPrintf("client%d.google.com", i) == url.host());
-      }
-    }
-  }
-  GURL::Replacements replacements;
-  replacements.ClearQuery();
-  replacements.ClearRef();
-  GURL url_without_query = url.ReplaceComponents(replacements);
-  return is_webstore_gallery_url || sensitive_chrome_url ||
-      extension_urls::IsWebstoreUpdateUrl(url_without_query) ||
-      extension_urls::IsBlacklistUpdateUrl(url);
-}
-
-// Returns true if the scheme is one we want to allow extensions to have access
-// to. Extensions still need specific permissions for a given URL, which is
-// covered by CanExtensionAccessURL.
-bool HasWebRequestScheme(const GURL& url) {
-  return (url.SchemeIs(chrome::kAboutScheme) ||
-          url.SchemeIs(chrome::kFileScheme) ||
-          url.SchemeIs(chrome::kFileSystemScheme) ||
-          url.SchemeIs(chrome::kFtpScheme) ||
-          url.SchemeIs(chrome::kHttpScheme) ||
-          url.SchemeIs(chrome::kHttpsScheme) ||
-          url.SchemeIs(chrome::kExtensionScheme));
-}
-
-}  // namespace
-
-bool HideRequest(net::URLRequest* request) {
-  const GURL& url = request->url();
-  const GURL& first_party_url = request->first_party_for_cookies();
-  bool hide = false;
-  if (first_party_url.is_valid()) {
-    hide = IsSensitiveURL(first_party_url) ||
-           !HasWebRequestScheme(first_party_url);
-  }
-  if (!hide)
-    hide = IsSensitiveURL(url) || !HasWebRequestScheme(url);
-  return hide;
-}
 
 #define ARRAYEND(array) (array + arraysize(array))
 
@@ -672,6 +1007,14 @@ bool ParseResourceType(const std::string& type_str,
     return false;
   *type = kResourceTypeValues[iter - kResourceTypeStrings];
   return true;
+}
+
+bool CanExtensionAccessURL(const extensions::Extension* extension,
+                           const GURL& url) {
+  // about: URLs are not covered in host permissions, but are allowed anyway.
+  return (url.SchemeIs(chrome::kAboutScheme) ||
+          extension->HasHostPermission(url) ||
+          url.GetOrigin() == extension->url());
 }
 
 }  // namespace extension_web_request_api_helpers

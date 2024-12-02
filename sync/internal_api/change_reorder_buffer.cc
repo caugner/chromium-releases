@@ -8,19 +8,19 @@
 #include <queue>
 #include <set>
 #include <utility>  // for pair<>
-#include <vector>
 
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/read_node.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/base_transaction.h"
+#include "sync/syncable/directory.h"
+#include "sync/syncable/entry.h"
 
 using std::numeric_limits;
 using std::pair;
 using std::queue;
 using std::set;
-using std::vector;
 
-namespace sync_api {
+namespace syncer {
 
 // Traversal provides a way to collect a set of nodes from the syncable
 // directory structure and then traverse them, along with any intermediate
@@ -154,8 +154,7 @@ bool ChangeReorderBuffer::GetAllChangesInTreeOrder(
         CHECK_EQ(BaseNode::INIT_OK, node.InitByIdLookup(i->first));
 
         // We only care about parents of entry's with position-sensitive models.
-        if (syncable::ShouldMaintainPosition(
-                node.GetEntry()->GetModelType())) {
+        if (ShouldMaintainPosition(node.GetEntry()->GetModelType())) {
           parents_of_position_changes.insert(node.GetParentId());
         }
       }
@@ -226,4 +225,4 @@ bool ChangeReorderBuffer::GetAllChangesInTreeOrder(
   return true;
 }
 
-}  // namespace sync_api
+}  // namespace syncer

@@ -28,6 +28,8 @@ using content::BrowserThread;
 
 namespace {
 
+#if 0
+// TODO(altimofeev) See below.
 class BrowserMock: public Browser {
  public:
   explicit BrowserMock(Type type, Profile* profile) : Browser(type, profile) {}
@@ -35,15 +37,16 @@ class BrowserMock: public Browser {
   MOCK_METHOD2(ExecuteCommandWithDisposition,
                void(int command_id, WindowOpenDisposition));
 };
+#endif
 
 class LoginUIServiceMock: public LoginUIService {
  public:
-  explicit LoginUIServiceMock(Profile* profile) : LoginUIService(profile) {}
-  MOCK_METHOD0(ShowLoginUI, void());
+  explicit LoginUIServiceMock() : LoginUIService() {}
+  MOCK_METHOD1(ShowLoginUI, void(Browser*));
 };
 
 ProfileKeyedService* BuildMockLoginUIService(Profile* profile) {
-  return new LoginUIServiceMock(profile);
+  return new LoginUIServiceMock();
 }
 
 // Same as BrowserWithTestWindowTest, but uses MockBrowser to test calls to
@@ -53,6 +56,8 @@ class SyncGlobalErrorTest : public BrowserWithTestWindowTest {
   SyncGlobalErrorTest() {}
   virtual ~SyncGlobalErrorTest() {}
 
+#if 0
+  // TODO(altimofeev): see below.
   virtual void SetUp() OVERRIDE {
     testing::Test::SetUp();
 
@@ -65,6 +70,7 @@ class SyncGlobalErrorTest : public BrowserWithTestWindowTest {
   virtual void TearDown() OVERRIDE {
     testing::Test::TearDown();
   }
+#endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SyncGlobalErrorTest);
@@ -105,6 +111,13 @@ void VerifySyncGlobalErrorResult(NiceMock<ProfileSyncServiceMock>* service,
   EXPECT_FALSE(error->GetBubbleViewTitle().empty());
 
 #if defined(OS_CHROMEOS)
+  // TODO(altimofeev): Implement this in a way that doesn't involve subclassing
+  //                   Browser or using GMock on browser/ui types which is
+  //                   banned. Consider observing NOTIFICATION_APP_TERMINATING
+  //                   instead.
+  //                   http://crbug.com/134675
+#else
+#if defined(OS_CHROMEOS)
   if (error_state != GoogleServiceAuthError::NONE) {
     // In CrOS sign-in/sign-out is made to fix the error.
     EXPECT_CALL(*static_cast<BrowserMock*>(browser),
@@ -114,12 +127,13 @@ void VerifySyncGlobalErrorResult(NiceMock<ProfileSyncServiceMock>* service,
 #else
   // Test message handler.
   if (is_error) {
-    EXPECT_CALL(*login_ui_service, ShowLoginUI());
+    EXPECT_CALL(*login_ui_service, ShowLoginUI(browser));
     error->ExecuteMenuItem(browser);
-    EXPECT_CALL(*login_ui_service, ShowLoginUI());
+    EXPECT_CALL(*login_ui_service, ShowLoginUI(browser));
     error->BubbleViewAcceptButtonPressed(browser);
     error->BubbleViewDidClose(browser);
   }
+#endif
 #endif
 }
 
@@ -137,8 +151,8 @@ TEST_F(SyncGlobalErrorTest, PassphraseGlobalError) {
   SyncGlobalError error(&service, signin);
 
   browser_sync::SyncBackendHost::Status status;
-  EXPECT_CALL(service, QueryDetailedSyncStatus())
-              .WillRepeatedly(Return(status));
+  EXPECT_CALL(service, QueryDetailedSyncStatus(_))
+              .WillRepeatedly(Return(false));
 
   EXPECT_CALL(service, IsPassphraseRequired())
               .WillRepeatedly(Return(true));
@@ -163,8 +177,8 @@ TEST_F(SyncGlobalErrorTest, AuthStateGlobalError) {
   SyncGlobalError error(&service, signin);
 
   browser_sync::SyncBackendHost::Status status;
-  EXPECT_CALL(service, QueryDetailedSyncStatus())
-              .WillRepeatedly(Return(status));
+  EXPECT_CALL(service, QueryDetailedSyncStatus(_))
+              .WillRepeatedly(Return(false));
 
   struct {
     GoogleServiceAuthError::State error_state;

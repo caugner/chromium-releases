@@ -6,10 +6,12 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/test/js_injection_ready_observer.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -84,11 +86,10 @@ void TestNavigationObserver::WaitForObservation(
 }
 
 void TestNavigationObserver::Wait() {
+  base::RunLoop run_loop;
   WaitForObservation(
-      base::Bind(&MessageLoop::Run,
-                 base::Unretained(MessageLoop::current())),
-      base::Bind(&MessageLoop::Quit,
-                 base::Unretained(MessageLoop::current())));
+      base::Bind(&base::RunLoop::Run, base::Unretained(&run_loop)),
+      content::GetQuitTaskForRunLoop(&run_loop));
 }
 
 TestNavigationObserver::TestNavigationObserver(
@@ -131,8 +132,10 @@ void TestNavigationObserver::Observe(
           ++navigations_completed_ == number_of_navigations_) {
         navigation_started_ = false;
         done_ = true;
-        if (running_)
+        if (running_) {
+          running_ = false;
           done_callback_.Run();
+        }
       }
       break;
     case NOTIFICATION_RENDER_VIEW_HOST_CREATED:

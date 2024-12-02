@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_BROWSER_ACTIONS_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_BROWSER_ACTIONS_API_H_
-#pragma once
 
 #include "chrome/browser/extensions/api/extension_action/extension_actions_api.h"
 #include "chrome/browser/extensions/extension_function.h"
@@ -88,6 +87,22 @@ class BrowserActionGetBadgeBackgroundColorFunction
 
  protected:
   virtual ~BrowserActionGetBadgeBackgroundColorFunction() {}
+};
+
+class BrowserActionEnableFunction : public ExtensionActionShowFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("browserAction.enable")
+
+ protected:
+  virtual ~BrowserActionEnableFunction() {}
+};
+
+class BrowserActionDisableFunction : public ExtensionActionHideFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("browserAction.disable")
+
+ protected:
+  virtual ~BrowserActionDisableFunction() {}
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_BROWSER_ACTIONS_API_H_

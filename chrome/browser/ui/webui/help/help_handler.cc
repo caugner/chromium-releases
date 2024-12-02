@@ -17,7 +17,9 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
@@ -34,13 +36,13 @@
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_CHROMEOS)
-#include "base/i18n/time_formatting.h"
 #include "base/file_util_proxy.h"
+#include "base/i18n/time_formatting.h"
 #include "base/sys_info.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 #endif
 
@@ -141,8 +143,8 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
     { "upToDate", IDS_UPGRADE_UP_TO_DATE },
     { "updating", IDS_UPGRADE_UPDATING },
     { "updateAlmostDone", IDS_UPGRADE_SUCCESSFUL_RELAUNCH },
-    { "getHelpWithChrome",  IDS_GET_HELP_USING_CHROME },
-    { "reportAnIssue",  IDS_REPORT_AN_ISSUE },
+    { "getHelpWithChrome", IDS_GET_HELP_USING_CHROME },
+    { "reportAnIssue", IDS_REPORT_AN_ISSUE },
 #if defined(OS_CHROMEOS)
     { "platform", IDS_PLATFORM_LABEL },
     { "firmware", IDS_ABOUT_PAGE_FIRMWARE },
@@ -170,7 +172,7 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 
 #if defined(OS_MACOSX)
   localized_strings->SetString("updateObsoleteOS",
-                               browser::LocalizedObsoleteOSString());
+                               chrome::LocalizedObsoleteOSString());
   localized_strings->SetString("updateObsoleteOSURL",
                                chrome::kMacLeopardObsoleteURL);
 #endif
@@ -294,7 +296,7 @@ void HelpHandler::OnPageLoaded(const ListValue* args) {
 
 #if defined(OS_MACOSX)
   scoped_ptr<base::Value> is_os_obsolete(
-      base::Value::CreateBooleanValue(browser::IsOSObsoleteOrNearlySo()));
+      base::Value::CreateBooleanValue(chrome::IsOSObsoleteOrNearlySo()));
   web_ui()->CallJavascriptFunction("help.HelpPage.setObsoleteOS",
                                    *is_os_obsolete);
 #endif
@@ -315,14 +317,14 @@ void HelpHandler::OpenFeedbackDialog(const ListValue* args) {
   DCHECK(args->empty());
   Browser* browser = browser::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
-  browser->OpenFeedbackDialog();
+  chrome::OpenFeedbackDialog(browser);
 }
 
 void HelpHandler::OpenHelpPage(const base::ListValue* args) {
   DCHECK(args->empty());
   Browser* browser = browser::FindBrowserWithWebContents(
       web_ui()->GetWebContents());
-  browser->ShowHelpTab(Browser::HELP_SOURCE_WEBUI);
+  chrome::ShowHelp(browser, chrome::HELP_SOURCE_WEBUI);
 }
 
 #if defined(OS_CHROMEOS)
@@ -409,14 +411,14 @@ void HelpHandler::SetPromotionState(VersionUpdater::PromotionState state) {
 
 #if defined(OS_CHROMEOS)
 void HelpHandler::OnOSVersion(chromeos::VersionLoader::Handle handle,
-                              std::string version) {
+                              const std::string& version) {
   scoped_ptr<Value> version_string(Value::CreateStringValue(version));
   web_ui()->CallJavascriptFunction("help.HelpPage.setOSVersion",
                                    *version_string);
 }
 
 void HelpHandler::OnOSFirmware(chromeos::VersionLoader::Handle handle,
-                               std::string firmware) {
+                               const std::string& firmware) {
   scoped_ptr<Value> firmware_string(Value::CreateStringValue(firmware));
   web_ui()->CallJavascriptFunction("help.HelpPage.setOSFirmware",
                                    *firmware_string);

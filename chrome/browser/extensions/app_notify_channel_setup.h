@@ -13,12 +13,14 @@
 #include "chrome/browser/extensions/app_notify_channel_ui.h"
 #include "chrome/common/net/gaia/oauth2_access_token_consumer.h"
 #include "chrome/common/net/gaia/oauth2_access_token_fetcher.h"
-#include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
-class AppNotifyChannelSetupTest;
 class Profile;
+
+namespace extensions {
+class AppNotifyChannelSetupTest;
 
 // This class uses the browser login credentials to setup app notifications
 // for a given app.
@@ -86,7 +88,8 @@ class AppNotifyChannelSetup
   void Start();
 
   // OAuth2AccessTokenConsumer implementation.
-  virtual void OnGetTokenSuccess(const std::string& access_token) OVERRIDE;
+  virtual void OnGetTokenSuccess(const std::string& access_token,
+                                 const base::Time& expiration_time) OVERRIDE;
   virtual void OnGetTokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
 
 
@@ -171,5 +174,7 @@ class AppNotifyChannelSetup
 
   DISALLOW_COPY_AND_ASSIGN(AppNotifyChannelSetup);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_APP_NOTIFY_CHANNEL_SETUP_H_

@@ -10,7 +10,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 
-ExtensionPrefs* SetUpdateUrlDataFunction::extension_prefs() {
+extensions::ExtensionPrefs* SetUpdateUrlDataFunction::extension_prefs() {
   return profile()->GetExtensionService()->extension_prefs();
 }
 
@@ -26,7 +26,7 @@ bool IsAllowedIncognitoAccessFunction::RunImpl() {
   ExtensionService* ext_service = profile()->GetExtensionService();
   const extensions::Extension* extension = GetExtension();
 
-  result_.reset(Value::CreateBooleanValue(
+  SetResult(Value::CreateBooleanValue(
       ext_service->IsIncognitoEnabled(extension->id())));
   return true;
 }
@@ -35,7 +35,7 @@ bool IsAllowedFileSchemeAccessFunction::RunImpl() {
   ExtensionService* ext_service = profile()->GetExtensionService();
   const extensions::Extension* extension = GetExtension();
 
-  result_.reset(Value::CreateBooleanValue(
-        ext_service->AllowFileAccess(extension)));
+  SetResult(Value::CreateBooleanValue(
+      ext_service->AllowFileAccess(extension)));
   return true;
 }

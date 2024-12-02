@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_CONTENT_CLIENT_H_
 #define CONTENT_SHELL_SHELL_CONTENT_CLIENT_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -19,6 +18,7 @@ class ShellContentClient : public ContentClient {
   virtual ~ShellContentClient();
 
   virtual std::string GetUserAgent() const OVERRIDE;
+  virtual string16 GetLocalizedString(int message_id) const OVERRIDE;
   virtual base::StringPiece GetDataResource(
       int resource_id,
       ui::ScaleFactor scale_factor) const OVERRIDE;

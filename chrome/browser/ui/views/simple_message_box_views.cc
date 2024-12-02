@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -22,7 +23,7 @@
 #include "ui/aura/root_window.h"
 #endif
 
-namespace browser {
+namespace chrome {
 
 namespace {
 
@@ -179,10 +180,11 @@ MessageBoxResult ShowMessageBox(gfx::NativeWindow parent,
 #else
   {
     MessageLoop::ScopedNestableTaskAllower allow(MessageLoopForUI::current());
-    MessageLoopForUI::current()->RunWithDispatcher(dialog);
+    base::RunLoop run_loop(dialog);
+    run_loop.Run();
   }
 #endif
   return dialog->result();
 }
 
-}  // namespace browser
+}  // namespace chrome

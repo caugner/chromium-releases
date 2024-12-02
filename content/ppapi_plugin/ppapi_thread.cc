@@ -16,7 +16,9 @@
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkitplatformsupport_impl.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/plugin/content_plugin_client.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_sync_channel.h"
@@ -32,7 +34,7 @@
 #include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #elif defined(OS_MACOSX)
 #include "content/common/sandbox_init_mac.h"
 #endif
@@ -122,7 +124,9 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_END_MESSAGE_MAP()
   return true;
 }
+
 void PpapiThread::OnChannelConnected(int32 peer_pid) {
+  ChildThread::OnChannelConnected(peer_pid);
 #if defined(OS_WIN)
   if (is_broker_)
     peer_handle_.Set(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, peer_pid));
@@ -174,6 +178,10 @@ void PpapiThread::PreCacheFont(const void* logfontw) {
   Send(new ChildProcessHostMsg_PreCacheFont(
       *static_cast<const LOGFONTW*>(logfontw)));
 #endif
+}
+
+void PpapiThread::SetActiveURL(const std::string& url) {
+  content::GetContentClient()->SetActiveURL(GURL(url));
 }
 
 uint32 PpapiThread::Register(ppapi::proxy::PluginDispatcher* plugin_dispatcher) {
@@ -367,4 +375,11 @@ bool PpapiThread::SetupRendererChannel(int renderer_id,
 void PpapiThread::SavePluginName(const FilePath& path) {
   ppapi::proxy::PluginGlobals::Get()->set_plugin_name(
       path.BaseName().AsUTF8Unsafe());
+
+  // plugin() is NULL when in-process.  Which is fine, because this is
+  // just a hook for setting the process name.
+  if (content::GetContentClient()->plugin()) {
+    content::GetContentClient()->plugin()->PluginProcessStarted(
+        path.BaseName().RemoveExtension().LossyDisplayName());
+  }
 }

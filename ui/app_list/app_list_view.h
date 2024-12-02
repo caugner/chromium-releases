@@ -4,7 +4,6 @@
 
 #ifndef UI_APP_LIST_APP_LIST_VIEW_H_
 #define UI_APP_LIST_APP_LIST_VIEW_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "ui/app_list/app_list_export.h"
@@ -35,6 +34,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   // Initializes the widget.
   void InitAsBubble(gfx::NativeView parent,
+                    PaginationModel* pagination_model,
                     views::View* anchor,
                     views::BubbleBorder::ArrowLocation arrow_location);
 
@@ -73,9 +73,6 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   scoped_ptr<AppListModel> model_;
   scoped_ptr<AppListViewDelegate> delegate_;
-
-  // PaginationModel for apps grid view and page switcher.
-  scoped_ptr<PaginationModel> pagination_model_;
 
   AppListBubbleBorder* bubble_border_;  // Owned by views hierarchy.
   SearchBoxView* search_box_view_;  // Owned by views hierarchy.

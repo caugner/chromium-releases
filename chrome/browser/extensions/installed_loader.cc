@@ -7,6 +7,7 @@
 #include "base/file_path.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_prefs.h"
@@ -93,7 +94,7 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
 
   // Check policy on every load in case an extension was blacklisted while
   // Chrome was not running.
-  const ManagementPolicy* policy = ExtensionSystem::Get(
+  const ManagementPolicy* policy = extensions::ExtensionSystem::Get(
       extension_service_->profile())->management_policy();
   if (extension &&
       !policy->UserMayLoad(extension, NULL)) {
@@ -198,6 +199,7 @@ void InstalledLoader::LoadAllExtensions() {
   int page_action_count = 0;
   int browser_action_count = 0;
   int disabled_for_permissions_count = 0;
+  int item_user_count = 0;
   const ExtensionSet* extensions = extension_service_->extensions();
   ExtensionSet::const_iterator ex;
   for (ex = extensions->begin(); ex != extensions->end(); ++ex) {
@@ -257,6 +259,8 @@ void InstalledLoader::LoadAllExtensions() {
         }
         break;
     }
+    if (!Extension::IsExternalLocation((*ex)->location()))
+      ++item_user_count;
     if ((*ex)->page_action() != NULL)
       ++page_action_count;
     if ((*ex)->browser_action() != NULL)
@@ -274,6 +278,8 @@ void InstalledLoader::LoadAllExtensions() {
       ++disabled_for_permissions_count;
     }
   }
+
+  UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAllUser", item_user_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadApp",
                            app_user_count + app_external_count);
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadAppUser", app_user_count);

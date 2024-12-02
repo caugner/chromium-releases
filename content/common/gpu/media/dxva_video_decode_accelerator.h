@@ -40,11 +40,12 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
 
   // Does not take ownership of |client| which must outlive |*this|.
   explicit DXVAVideoDecodeAccelerator(
-      media::VideoDecodeAccelerator::Client* client);
+      media::VideoDecodeAccelerator::Client* client,
+      const base::Callback<bool(void)>& make_context_current);
   virtual ~DXVAVideoDecodeAccelerator();
 
   // media::VideoDecodeAccelerator implementation.
-  virtual bool Initialize(media::VideoCodecProfile) OVERRIDE;
+  virtual bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
   virtual void Decode(const media::BitstreamBuffer& bitstream_buffer) OVERRIDE;
   virtual void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) OVERRIDE;
@@ -183,9 +184,6 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   // Set to true if we requested picture slots from the client.
   bool pictures_requested_;
 
-  // Contains the id of the last input buffer received from the client.
-  int32 last_input_buffer_id_;
-
   // Ideally the reset token would be a stack variable which is used while
   // creating the device manager. However it seems that the device manager
   // holds onto the token and attempts to access it if the underlying device
@@ -203,6 +201,9 @@ class CONTENT_EXPORT DXVAVideoDecodeAccelerator
   // 1. All required decoder dlls were successfully loaded.
   // 2. The device manager initialization completed.
   static bool pre_sandbox_init_done_;
+
+  // Callback to set the correct gl context.
+  base::Callback<bool(void)> make_context_current_;
 };
 
 #endif  // CONTENT_COMMON_GPU_MEDIA_DXVA_VIDEO_DECODE_ACCELERATOR_H_

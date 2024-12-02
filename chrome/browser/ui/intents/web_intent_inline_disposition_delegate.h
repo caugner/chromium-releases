@@ -4,13 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_INTENTS_WEB_INTENT_INLINE_DISPOSITION_DELEGATE_H_
 #define CHROME_BROWSER_UI_INTENTS_WEB_INTENT_INLINE_DISPOSITION_DELEGATE_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 
+class Browser;
 class WebIntentPicker;
 
 // This class is the policy delegate for the rendered page in the intents
@@ -24,10 +24,10 @@ class WebIntentInlineDispositionDelegate
   // |picker| is notified when the web contents loading state changes. Must not
   // be NULL.
   // |contents| is the WebContents for the inline disposition.
-  // |profile| is the browser profile inline disposition was invoked from.
+  // |browser| is the browser inline disposition was invoked from.
   WebIntentInlineDispositionDelegate(WebIntentPicker* picker,
                                      content::WebContents* contents,
-                                     Profile* profile);
+                                     Browser* browser);
   virtual ~WebIntentInlineDispositionDelegate();
 
   // WebContentsDelegate implementation.
@@ -54,7 +54,7 @@ class WebIntentInlineDispositionDelegate
       content::RenderViewHost* render_view_host) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate
-  virtual ExtensionWindowController* GetExtensionWindowController()
+  virtual extensions::WindowController* GetExtensionWindowController()
     const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
@@ -67,7 +67,7 @@ class WebIntentInlineDispositionDelegate
   // The WebContents container. Weak pointer.
   content::WebContents* web_contents_;
 
-  Profile* profile_;  // Weak pointer.
+  Browser* browser_;  // Weak pointer.
 
   // Dispatch handler for extension APIs.
   ExtensionFunctionDispatcher extension_function_dispatcher_;

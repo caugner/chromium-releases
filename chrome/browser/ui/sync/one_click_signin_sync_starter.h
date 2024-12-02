@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_SYNC_ONE_CLICK_SIGNIN_SYNC_STARTER_H_
 #define CHROME_BROWSER_UI_SYNC_ONE_CLICK_SIGNIN_SYNC_STARTER_H_
-#pragma once
 
 #include <string>
 
 #include "chrome/browser/signin/signin_tracker.h"
 
-class Profile;
+class Browser;
 
 // Waits for successful singin notification from the signin manager and then
 // starts the sync machine.  Instances of this class delete themselves once
@@ -19,7 +18,7 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer {
  public:
   enum StartSyncMode {SYNC_WITH_DEFAULT_SETTINGS, CONFIGURE_SYNC_FIRST };
 
-  OneClickSigninSyncStarter(Profile* profile,
+  OneClickSigninSyncStarter(Browser* browser,
                             const std::string& session_index,
                             const std::string& email,
                             const std::string& password,
@@ -28,12 +27,12 @@ class OneClickSigninSyncStarter : public SigninTracker::Observer {
  private:
   virtual ~OneClickSigninSyncStarter();
 
-  // content::SigninTracker::Observer override.
+  // SigninTracker::Observer override.
   virtual void GaiaCredentialsValid() OVERRIDE;
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
 
-  Profile* const profile_;
+  Browser* browser_;
   SigninTracker signin_tracker_;
   StartSyncMode start_mode_;
 

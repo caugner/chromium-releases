@@ -13,12 +13,11 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 namespace captive_portal {
@@ -94,6 +93,9 @@ void RecordRepeatHistograms(Result result,
 }
 
 }  // namespace
+
+// Disabled for M22.
+bool CaptivePortalService::is_disabled_for_testing_ = true;
 
 class CaptivePortalService::RecheckBackoffEntry : public net::BackoffEntry {
  public:
@@ -198,10 +200,10 @@ void CaptivePortalService::DetectCaptivePortalInternal() {
   }
 
   // The first 0 means this can use a TestURLFetcherFactory in unit tests.
-  url_fetcher_.reset(content::URLFetcher::Create(0,
-                                                 test_url_,
-                                                 net::URLFetcher::GET,
-                                                 this));
+  url_fetcher_.reset(net::URLFetcher::Create(0,
+                                             test_url_,
+                                             net::URLFetcher::GET,
+                                             this));
   url_fetcher_->SetAutomaticallyRetryOn5xx(false);
   url_fetcher_->SetRequestContext(profile_->GetRequestContext());
   // Can't safely use net::LOAD_DISABLE_CERT_REVOCATION_CHECKING here,
@@ -326,9 +328,8 @@ void CaptivePortalService::ResetBackoffEntry(Result result) {
 
 void CaptivePortalService::UpdateEnabledState() {
   bool enabled_before = enabled_;
-  enabled_ = resolve_errors_with_web_service_.GetValue() &&
-             CommandLine::ForCurrentProcess()->HasSwitch(
-                 switches::kCaptivePortalDetection);
+  enabled_ = !is_disabled_for_testing_ &&
+             resolve_errors_with_web_service_.GetValue();
   if (enabled_before == enabled_)
     return;
 

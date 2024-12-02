@@ -9,11 +9,17 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 
 namespace {
+
+const int kDelayedScheduleManageTimeoutMs = 67;
 
 bool IsInSameContextShareGroupAsAnyOf(
     const GpuCommandBufferStubBase* stub,
@@ -26,43 +32,63 @@ bool IsInSameContextShareGroupAsAnyOf(
   return false;
 }
 
-#if defined(OS_ANDROID)
-size_t CalculateBonusMemoryAllocationBasedOnSize(gfx::Size size) {
-  const int viewportMultiplier = 16;
-  const unsigned int componentsPerPixel = 4; // GraphicsContext3D::RGBA
-  const unsigned int bytesPerComponent = 1; // sizeof(GC3Dubyte)
-
-  if (size.IsEmpty())
-    return 0;
-
-  size_t limit = viewportMultiplier * size.width() * size.height() *
-                     componentsPerPixel * bytesPerComponent;
-  if (limit < GpuMemoryManager::kMinimumAllocationForTab)
-    limit = GpuMemoryManager::kMinimumAllocationForTab;
-  else if (limit > GpuMemoryManager::kMaximumAllocationForTabs)
-    limit = GpuMemoryManager::kMaximumAllocationForTabs;
-  return limit - GpuMemoryManager::kMinimumAllocationForTab;
-}
-#endif
-
 void AssignMemoryAllocations(
-    std::vector<GpuCommandBufferStubBase*>& stubs,
-    GpuMemoryAllocation allocation) {
-  for (std::vector<GpuCommandBufferStubBase*>::iterator it = stubs.begin();
-      it != stubs.end(); ++it) {
+    GpuMemoryManager::StubMemoryStatMap* stub_memory_stats,
+    const std::vector<GpuCommandBufferStubBase*>& stubs,
+    GpuMemoryAllocation allocation,
+    bool visible) {
+  for (std::vector<GpuCommandBufferStubBase*>::const_iterator it =
+          stubs.begin();
+      it != stubs.end();
+      ++it) {
     (*it)->SetMemoryAllocation(allocation);
+    (*stub_memory_stats)[*it].allocation = allocation;
+    (*stub_memory_stats)[*it].visible = visible;
   }
 }
 
 }
 
+size_t GpuMemoryManager::CalculateBonusMemoryAllocationBasedOnSize(
+    gfx::Size size) const {
+  const int kViewportMultiplier = 16;
+  const unsigned int kComponentsPerPixel = 4; // GraphicsContext3D::RGBA
+  const unsigned int kBytesPerComponent = 1; // sizeof(GC3Dubyte)
+
+  if (size.IsEmpty())
+    return 0;
+
+  size_t limit = kViewportMultiplier * size.width() * size.height() *
+                 kComponentsPerPixel * kBytesPerComponent;
+  if (limit < GetMinimumTabAllocation())
+    limit = GetMinimumTabAllocation();
+  else if (limit > GetAvailableGpuMemory())
+    limit = GetAvailableGpuMemory();
+  return limit - GetMinimumTabAllocation();
+}
+
 GpuMemoryManager::GpuMemoryManager(GpuMemoryManagerClient* client,
         size_t max_surfaces_with_frontbuffer_soft_limit)
     : client_(client),
-      manage_scheduled_(false),
+      manage_immediate_scheduled_(false),
       max_surfaces_with_frontbuffer_soft_limit_(
           max_surfaces_with_frontbuffer_soft_limit),
-      weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      bytes_available_gpu_memory_(0),
+      bytes_allocated_current_(0),
+      bytes_allocated_historical_max_(0) {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kForceGpuMemAvailableMb)) {
+    base::StringToSizeT(
+      command_line->GetSwitchValueASCII(switches::kForceGpuMemAvailableMb),
+      &bytes_available_gpu_memory_);
+    bytes_available_gpu_memory_ *= 1024 * 1024;
+  } else {
+#if defined(OS_ANDROID)
+    bytes_available_gpu_memory_ = 64 * 1024 * 1024;
+#else
+    bytes_available_gpu_memory_ = 256 * 1024 * 1024;
+#endif
+  }
 }
 
 GpuMemoryManager::~GpuMemoryManager() {
@@ -80,13 +106,48 @@ bool GpuMemoryManager::StubWithSurfaceComparator::operator()(
     return !rhs_ss.visible && (lhs_ss.last_used_time > rhs_ss.last_used_time);
 };
 
-void GpuMemoryManager::ScheduleManage() {
-  if (manage_scheduled_)
+void GpuMemoryManager::ScheduleManage(bool immediate) {
+  if (manage_immediate_scheduled_)
     return;
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    base::Bind(&GpuMemoryManager::Manage, weak_factory_.GetWeakPtr()));
-  manage_scheduled_ = true;
+  if (immediate) {
+    MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&GpuMemoryManager::Manage, AsWeakPtr()));
+    manage_immediate_scheduled_ = true;
+    if (!delayed_manage_callback_.IsCancelled())
+      delayed_manage_callback_.Cancel();
+  } else {
+    if (!delayed_manage_callback_.IsCancelled())
+      return;
+    delayed_manage_callback_.Reset(base::Bind(&GpuMemoryManager::Manage,
+                                              AsWeakPtr()));
+    MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      delayed_manage_callback_.callback(),
+      base::TimeDelta::FromMilliseconds(kDelayedScheduleManageTimeoutMs));
+  }
+}
+
+void GpuMemoryManager::TrackMemoryAllocatedChange(size_t old_size,
+                                                  size_t new_size)
+{
+  if (new_size < old_size) {
+    size_t delta = old_size - new_size;
+    DCHECK(bytes_allocated_current_ >= delta);
+    bytes_allocated_current_ -= delta;
+  } else {
+    size_t delta = new_size - old_size;
+    bytes_allocated_current_ += delta;
+    if (bytes_allocated_current_ > bytes_allocated_historical_max_) {
+      bytes_allocated_historical_max_ = bytes_allocated_current_;
+    }
+  }
+  if (new_size != old_size) {
+    TRACE_COUNTER_ID1("GpuMemoryManager",
+                      "GpuMemoryUsage",
+                      this,
+                      bytes_allocated_current_);
+  }
 }
 
 // The current Manage algorithm simply classifies contexts (stubs) into
@@ -119,7 +180,8 @@ void GpuMemoryManager::ScheduleManage() {
 //  1. Find the most visible context-with-a-surface within each
 //     context-without-a-surface's share group, and inherit its visibilty.
 void GpuMemoryManager::Manage() {
-  manage_scheduled_ = false;
+  manage_immediate_scheduled_ = false;
+  delayed_manage_callback_.Cancel();
 
   // Create stub lists by separating out the two types received from client
   std::vector<GpuCommandBufferStubBase*> stubs_with_surface;
@@ -189,40 +251,64 @@ void GpuMemoryManager::Manage() {
   size_t num_stubs_need_mem = stubs_with_surface_foreground.size() +
                               stubs_without_surface_foreground.size() +
                               stubs_without_surface_background.size();
-  size_t base_allocation_size = kMinimumAllocationForTab * num_stubs_need_mem;
-  if (base_allocation_size < kMaximumAllocationForTabs &&
+  size_t base_allocation_size = GetMinimumTabAllocation() * num_stubs_need_mem;
+  if (base_allocation_size < GetAvailableGpuMemory() &&
       !stubs_with_surface_foreground.empty())
-    bonus_allocation = (kMaximumAllocationForTabs - base_allocation_size) /
-                           stubs_with_surface_foreground.size();
+    bonus_allocation = (GetAvailableGpuMemory() - base_allocation_size) /
+                       stubs_with_surface_foreground.size();
 #else
   // On android, calculate bonus allocation based on surface size.
   if (!stubs_with_surface_foreground.empty())
     bonus_allocation = CalculateBonusMemoryAllocationBasedOnSize(
         stubs_with_surface_foreground[0]->GetSurfaceSize());
 #endif
+  size_t stubs_with_surface_foreground_allocation = GetMinimumTabAllocation() +
+                                                    bonus_allocation;
+  if (stubs_with_surface_foreground_allocation >= GetMaximumTabAllocation())
+    stubs_with_surface_foreground_allocation = GetMaximumTabAllocation();
+
+  stub_memory_stats_for_last_manage_.clear();
 
   // Now give out allocations to everyone.
-  AssignMemoryAllocations(stubs_with_surface_foreground,
-      GpuMemoryAllocation(kMinimumAllocationForTab + bonus_allocation,
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_with_surface_foreground,
+      GpuMemoryAllocation(stubs_with_surface_foreground_allocation,
           GpuMemoryAllocation::kHasFrontbuffer |
-          GpuMemoryAllocation::kHasBackbuffer));
+          GpuMemoryAllocation::kHasBackbuffer),
+      true);
 
-  AssignMemoryAllocations(stubs_with_surface_background,
-      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasFrontbuffer));
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_with_surface_background,
+      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasFrontbuffer),
+      false);
 
-  AssignMemoryAllocations(stubs_with_surface_hibernated,
-      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasNoBuffers));
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_with_surface_hibernated,
+      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasNoBuffers),
+      false);
 
-  AssignMemoryAllocations(stubs_without_surface_foreground,
-      GpuMemoryAllocation(kMinimumAllocationForTab,
-          GpuMemoryAllocation::kHasNoBuffers));
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_without_surface_foreground,
+      GpuMemoryAllocation(GetMinimumTabAllocation(),
+          GpuMemoryAllocation::kHasNoBuffers),
+      true);
 
-  AssignMemoryAllocations(stubs_without_surface_background,
-      GpuMemoryAllocation(kMinimumAllocationForTab,
-          GpuMemoryAllocation::kHasNoBuffers));
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_without_surface_background,
+      GpuMemoryAllocation(GetMinimumTabAllocation(),
+          GpuMemoryAllocation::kHasNoBuffers),
+      false);
 
-  AssignMemoryAllocations(stubs_without_surface_hibernated,
-      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasNoBuffers));
+  AssignMemoryAllocations(
+      &stub_memory_stats_for_last_manage_,
+      stubs_without_surface_hibernated,
+      GpuMemoryAllocation(0, GpuMemoryAllocation::kHasNoBuffers),
+      false);
 }
 
 #endif

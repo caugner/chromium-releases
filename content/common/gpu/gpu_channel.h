@@ -4,10 +4,10 @@
 
 #ifndef CONTENT_COMMON_GPU_GPU_CHANNEL_H_
 #define CONTENT_COMMON_GPU_GPU_CHANNEL_H_
-#pragma once
 
 #include <deque>
 #include <string>
+#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
@@ -24,6 +24,10 @@
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gpu_preference.h"
 
+#if defined(OS_ANDROID)
+#include "content/common/android/surface_texture_peer.h"
+#endif
+
 class GpuChannelManager;
 struct GPUCreateCommandBufferConfig;
 class GpuWatchdog;
@@ -37,10 +41,16 @@ namespace gpu {
 struct RefCountedCounter;
 }
 
+#if defined(OS_ANDROID)
+namespace content {
+class StreamTextureManagerAndroid;
+}
+#endif
+
 // Encapsulates an IPC channel between the GPU process and one renderer
 // process. On the renderer side there's a corresponding GpuChannelHost.
-class GpuChannel : public IPC::Channel::Listener,
-                   public IPC::Message::Sender,
+class GpuChannel : public IPC::Listener,
+                   public IPC::Sender,
                    public base::RefCountedThreadSafe<GpuChannel> {
  public:
   // Takes ownership of the renderer process handle.
@@ -68,11 +78,11 @@ class GpuChannel : public IPC::Channel::Listener,
 
   base::ProcessId renderer_pid() const { return channel_->peer_pid(); }
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
-  // IPC::Message::Sender implementation:
+  // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   virtual void AppendAllCommandBufferStubs(
@@ -103,7 +113,7 @@ class GpuChannel : public IPC::Channel::Listener,
   int GenerateRouteID();
 
   // Called to add/remove a listener for a particular message routing ID.
-  void AddRoute(int32 route_id, IPC::Channel::Listener* listener);
+  void AddRoute(int32 route_id, IPC::Listener* listener);
   void RemoveRoute(int32 route_id);
 
   gpu::RefCountedCounter* MessagesPendingCount() {
@@ -126,8 +136,6 @@ class GpuChannel : public IPC::Channel::Listener,
   bool OnControlMessageReceived(const IPC::Message& msg);
 
   void HandleMessage();
-  void PollWork(int route_id);
-  void ScheduleDelayedWork(GpuCommandBufferStub *stub, int64 delay);
 
   // Message handlers.
   void OnCreateOffscreenCommandBuffer(
@@ -135,6 +143,19 @@ class GpuChannel : public IPC::Channel::Listener,
       const GPUCreateCommandBufferConfig& init_params,
       IPC::Message* reply_message);
   void OnDestroyCommandBuffer(int32 route_id, IPC::Message* reply_message);
+
+#if defined(OS_ANDROID)
+  // Register the StreamTextureProxy class with the gpu process so that all
+  // the callbacks will be correctly forwarded to the renderer.
+  void OnRegisterStreamTextureProxy(
+      int32 stream_id, const gfx::Size& initial_size, int32* route_id);
+
+  // Create a java surface texture object and send it to the renderer process
+  // through binder thread.
+  void OnEstablishStreamTexture(
+      int32 stream_id, content::SurfaceTexturePeer::SurfaceTextureTarget type,
+      int32 primary_id, int32 secondary_id);
+#endif
 
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they
@@ -179,6 +200,10 @@ class GpuChannel : public IPC::Channel::Listener,
   bool software_;
   bool handle_messages_scheduled_;
   bool processed_get_state_fast_;
+
+#if defined(OS_ANDROID)
+  scoped_ptr<content::StreamTextureManagerAndroid> stream_texture_manager_;
+#endif
 
   base::WeakPtrFactory<GpuChannel> weak_factory_;
 

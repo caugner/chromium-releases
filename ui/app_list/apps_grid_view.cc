@@ -9,6 +9,7 @@
 #include "ui/app_list/app_list_item_view.h"
 #include "ui/app_list/pagination_model.h"
 #include "ui/views/border.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -23,12 +24,15 @@ const int kPagePadding = 40;
 const int kPreferredTileWidth = 88;
 const int kPreferredTileHeight = 98;
 
+// Max extra column padding space in pixels for invalid page transition.
+const int kMaxExtraColPaddingForInvalidTransition = 80;
+
 }  // namespace
 
 namespace app_list {
 
 AppsGridView::AppsGridView(views::ButtonListener* listener,
-                                   PaginationModel* pagination_model)
+                           PaginationModel* pagination_model)
     : model_(NULL),
       listener_(listener),
       pagination_model_(pagination_model),
@@ -117,13 +121,14 @@ void AppsGridView::Layout() {
   const int current_page = pagination_model_->selected_page();
   const PaginationModel::Transition& transition =
       pagination_model_->transition();
-  int transition_offset = 0;
-  if (transition.target_page >= 0) {
-    transition_offset = transition.progress * page_width;
-    // Transition to right means negative offset.
-    if (transition.target_page > current_page)
-      transition_offset = -transition_offset;
-  }
+  const bool is_valid =
+      pagination_model_->is_valid_page(transition.target_page);
+
+  // Transition to right means negative offset.
+  const int dir = transition.target_page > current_page ? -1 : 1;
+  const int transition_offset = is_valid ?
+      transition.progress * page_width * dir :
+      transition.progress * kMaxExtraColPaddingForInvalidTransition * dir;
 
   const int first_visible_index = current_page * tiles_per_page();
   const int last_visible_index = (current_page + 1) * tiles_per_page() - 1;
@@ -139,8 +144,16 @@ void AppsGridView::Layout() {
       x_offset = page_width;
 
     int page = i / tiles_per_page();
-    if (page == current_page || page == transition.target_page)
-      x_offset += transition_offset;
+    if (is_valid) {
+      if (page == current_page || page == transition.target_page)
+        x_offset += transition_offset;
+    } else {
+      const int col = i % cols_;
+      if (transition_offset > 0)
+        x_offset += transition_offset * (col + 1);
+      else
+        x_offset += transition_offset * (cols_ - col);
+    }
 
     gfx::Rect adjusted_slot(tile_slot);
     adjusted_slot.Offset(x_offset, 0);
@@ -217,6 +230,18 @@ void AppsGridView::OnPaintFocusBorder(gfx::Canvas* canvas) {
   // Override to not paint focus frame.
 }
 
+void AppsGridView::ViewHierarchyChanged(bool is_add,
+                                        views::View* parent,
+                                        views::View* child) {
+  if (!is_add) {
+    if (parent == this &&
+        selected_item_index_ >= 0 &&
+        GetItemViewAtIndex(selected_item_index_) == child) {
+      selected_item_index_ = -1;
+    }
+  }
+}
+
 void AppsGridView::Update() {
   selected_item_index_ = -1;
   RemoveAllChildViews(true);
@@ -235,8 +260,6 @@ void AppsGridView::Update() {
 void AppsGridView::UpdatePaginationModel() {
   pagination_model_->SetTotalPages(
       (child_count() - 1) / tiles_per_page() + 1);
-  if (pagination_model_->selected_page() < 0)
-    pagination_model_->SelectPage(0, false /* animate */);
 }
 
 AppListItemView* AppsGridView::CreateViewForItemAtIndex(size_t index) {
@@ -263,7 +286,10 @@ void AppsGridView::SetSelectedItemByIndex(int index) {
     selected_item_index_ = -1;
   } else {
     selected_item_index_ = index;
-    GetItemViewAtIndex(selected_item_index_)->SchedulePaint();
+    AppListItemView* selected_view = GetItemViewAtIndex(selected_item_index_);
+    selected_view->SchedulePaint();
+    GetWidget()->NotifyAccessibilityEvent(
+        selected_view, ui::AccessibilityTypes::EVENT_FOCUS, true);
 
     if (tiles_per_page()) {
       pagination_model_->SelectPage(selected_item_index_ / tiles_per_page(),

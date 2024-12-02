@@ -4,7 +4,6 @@
 
 #ifndef SYNC_UTIL_CRYPTOGRAPHER_H_
 #define SYNC_UTIL_CRYPTOGRAPHER_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -13,12 +12,12 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/util/nigori.h"
 
-namespace browser_sync {
+namespace syncer {
 
 class Encryptor;
 
@@ -65,7 +64,7 @@ class Cryptographer {
     // set of encrypted types is SensitiveTypes() and that the encrypt
     // everything flag is false.
     virtual void OnEncryptedTypesChanged(
-        syncable::ModelTypeSet encrypted_types,
+        ModelTypeSet encrypted_types,
         bool encrypt_everything) = 0;
 
    protected:
@@ -98,6 +97,10 @@ class Cryptographer {
   // It is an error to call this if is_ready() == true, though it is fair to
   // never call Bootstrap at all.
   void Bootstrap(const std::string& restored_bootstrap_token);
+
+  // Bootstrap the keystore key.
+  void BootstrapKeystoreKey(
+      const std::string& restored_keystore_bootstrap_token);
 
   // Returns whether we can decrypt |encrypted| using the keys we currently know
   // about.
@@ -170,6 +173,9 @@ class Cryptographer {
   // can't be created (i.e. if this Cryptograhper doesn't have valid keys).
   bool GetBootstrapToken(std::string* token) const;
 
+  // Obtain the bootstrap token based on the keystore encryption key.
+  bool GetKeystoreKeyBootstrapToken(std::string* token) const;
+
   // Update the cryptographer based on the contents of the nigori specifics.
   // This updates both the encryption keys and the set of encrypted types.
   // Returns NEEDS_PASSPHRASE if was unable to decrypt the pending keys,
@@ -180,8 +186,17 @@ class Cryptographer {
   // stored in the |pending_keys_|.
   UpdateResult Update(const sync_pb::NigoriSpecifics& nigori);
 
+  // Set the keystore-derived nigori from the provided key.
+  // Returns true if we succesfully create the keystore derived nigori from the
+  // provided key, false otherwise.
+  bool SetKeystoreKey(const std::string& keystore_key);
+
+  // Returns true if we currently have a keystore-derived nigori, false
+  // otherwise.
+  bool HasKeystoreKey() const;
+
   // The set of types that are always encrypted.
-  static syncable::ModelTypeSet SensitiveTypes();
+  static ModelTypeSet SensitiveTypes();
 
   // Reset our set of encrypted types based on the contents of the nigori
   // specifics.
@@ -198,11 +213,10 @@ class Cryptographer {
   bool encrypt_everything() const;
 
   // Return the set of encrypted types.
-  syncable::ModelTypeSet GetEncryptedTypes() const;
+  ModelTypeSet GetEncryptedTypes() const;
 
   // Forwards to MergeEncryptedTypes.
-  void MergeEncryptedTypesForTest(
-      syncable::ModelTypeSet encrypted_types);
+  void MergeEncryptedTypesForTest(ModelTypeSet encrypted_types);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SyncCryptographerTest, PackUnpack);
@@ -210,7 +224,7 @@ class Cryptographer {
 
   // Merges the given set of encrypted types with the existing set and emits a
   // notification if necessary.
-  void MergeEncryptedTypes(syncable::ModelTypeSet encrypted_types);
+  void MergeEncryptedTypes(ModelTypeSet encrypted_types);
 
   void EmitEncryptedTypesChangedNotification();
 
@@ -225,8 +239,9 @@ class Cryptographer {
   // Does not update the default nigori.
   void InstallKeyBag(const sync_pb::NigoriKeyBag& bag);
 
-  // Helper method to add a nigori as the new default nigori.
-  bool AddKeyImpl(Nigori* nigori);
+  // Helper method to add a nigori as either the new default nigori or the new
+  // keystore nigori.
+  bool AddKeyImpl(Nigori* nigori, bool is_keystore_key);
 
   // Functions to serialize + encrypt a Nigori object in an opaque format for
   // persistence by sync infrastructure.
@@ -239,15 +254,16 @@ class Cryptographer {
 
   NigoriMap nigoris_;  // The Nigoris we know about, mapped by key name.
   NigoriMap::value_type* default_nigori_;  // The Nigori used for encryption.
+  NigoriMap::value_type* keystore_nigori_; // Nigori generated from keystore.
 
   scoped_ptr<sync_pb::EncryptedData> pending_keys_;
 
-  syncable::ModelTypeSet encrypted_types_;
+  ModelTypeSet encrypted_types_;
   bool encrypt_everything_;
 
   DISALLOW_COPY_AND_ASSIGN(Cryptographer);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_UTIL_CRYPTOGRAPHER_H_

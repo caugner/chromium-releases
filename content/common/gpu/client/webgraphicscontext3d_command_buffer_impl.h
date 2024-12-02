@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_GPU_CLIENT_WEBGRAPHICSCONTEXT3D_COMMAND_BUFFER_IMPL_H_
 #define CONTENT_COMMON_GPU_CLIENT_WEBGRAPHICSCONTEXT3D_COMMAND_BUFFER_IMPL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -42,6 +41,7 @@ class GLES2Implementation;
 
 using WebKit::WebGLId;
 
+using WebKit::WGC3Dbyte;
 using WebKit::WGC3Dchar;
 using WebKit::WGC3Denum;
 using WebKit::WGC3Dboolean;
@@ -58,10 +58,12 @@ using WebKit::WGC3Dsizeiptr;
 // context...
 class WebGraphicsContext3DSwapBuffersClient {
  public:
-  virtual ~WebGraphicsContext3DSwapBuffersClient() { }
   virtual void OnViewContextSwapBuffersPosted() = 0;
   virtual void OnViewContextSwapBuffersComplete() = 0;
   virtual void OnViewContextSwapBuffersAborted() = 0;
+
+ protected:
+  virtual ~WebGraphicsContext3DSwapBuffersClient() {}
 };
 
 class WebGraphicsContext3DErrorMessageCallback;
@@ -131,7 +133,8 @@ class WebGraphicsContext3DCommandBufferImpl
   // on any failure.
   static WebGraphicsContext3DCommandBufferImpl* CreateOffscreenContext(
       GpuChannelHostFactory* factory,
-      const WebGraphicsContext3D::Attributes& attributes);
+      const WebGraphicsContext3D::Attributes& attributes,
+      const GURL& active_url);
 
   //----------------------------------------------------------------------
   // WebGraphicsContext3D methods
@@ -567,6 +570,17 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void copyTextureCHROMIUM(WGC3Denum target, WebGLId source_id,
                                    WebGLId dest_id, WGC3Dint level,
                                    WGC3Denum internal_format);
+
+  virtual void bindUniformLocationCHROMIUM(WebGLId program, WGC3Dint location,
+                                           const WGC3Dchar* uniform);
+
+  virtual void shallowFlushCHROMIUM();
+
+  virtual void genMailboxCHROMIUM(WGC3Dbyte* mailbox);
+  virtual void produceTextureCHROMIUM(WGC3Denum target,
+                                      const WGC3Dbyte* mailbox);
+  virtual void consumeTextureCHROMIUM(WGC3Denum target,
+                                      const WGC3Dbyte* mailbox);
 
  protected:
   virtual GrGLInterface* onCreateGrGLInterface();

@@ -29,7 +29,8 @@
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/update_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/user_image_screen_handler.h"
-#include "chrome/browser/ui/webui/options2/chromeos/user_image_source2.h"
+#include "chrome/browser/ui/webui/options2/chromeos/user_image_source.h"
+#include "chrome/browser/ui/webui/options2/chromeos/wallpaper_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -178,6 +179,13 @@ OobeUI::OobeUI(content::WebUI* web_ui)
   options2::UserImageSource* user_image_source =
       new options2::UserImageSource();
   ChromeURLDataManager::AddDataSource(profile, user_image_source);
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableNewOobe)) {
+    // Set up the chrome://wallpaper/ source.
+    chromeos::options2::WallpaperImageSource* wallpaper_image_source =
+        new chromeos::options2::WallpaperImageSource();
+    ChromeURLDataManager::AddDataSource(profile, wallpaper_image_source);
+  }
 }
 
 OobeUI::~OobeUI() {
@@ -230,10 +238,19 @@ void OobeUI::GetLocalizedStrings(base::DictionaryValue* localized_strings) {
     handlers_[i]->GetLocalizedStrings(localized_strings);
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(localized_strings);
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableNewOobe))
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableNewOobe))
     localized_strings->SetString("oobeType", "new");
   else
     localized_strings->SetString("oobeType", "old");
+
+  // If we're not doing boot animation then WebUI should trigger
+  // wallpaper load on boot.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableBootAnimation)) {
+    localized_strings->SetString("bootIntoWallpaper", "on");
+  } else {
+    localized_strings->SetString("bootIntoWallpaper", "off");
+  }
 
   // OobeUI is used for OOBE/login and lock screen.
   if (BaseLoginDisplayHost::default_host())

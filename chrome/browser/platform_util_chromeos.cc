@@ -10,6 +10,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
@@ -36,12 +37,12 @@ void OpenItemOnFileThread(const FilePath& full_path) {
 
 void OpenURL(const std::string& url) {
   // TODO(beng): improve this to locate context from call stack.
-  browser::NavigateParams params(NULL,
-                                 GURL(url),
-                                 content::PAGE_TRANSITION_LINK);
+  Browser* browser = browser::FindOrCreateTabbedBrowser(
+      ProfileManager::GetDefaultProfileOrOffTheRecord());
+  chrome::NavigateParams params(
+      browser, GURL(url), content::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
-  params.profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
 }
 
 }  // namespace

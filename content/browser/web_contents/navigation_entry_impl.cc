@@ -94,6 +94,14 @@ const GURL& NavigationEntryImpl::GetURL() const {
   return url_;
 }
 
+void NavigationEntryImpl::SetBaseURLForDataURL(const GURL& url) {
+  base_url_for_data_url_ = url;
+}
+
+const GURL& NavigationEntryImpl::GetBaseURLForDataURL() const {
+  return base_url_for_data_url_;
+}
+
 void NavigationEntryImpl::SetReferrer(const Referrer& referrer) {
   referrer_ = referrer;
 }
@@ -203,6 +211,17 @@ void NavigationEntryImpl::SetPostID(int64 post_id) {
 int64 NavigationEntryImpl::GetPostID() const {
   return post_id_;
 }
+
+void NavigationEntryImpl::SetBrowserInitiatedPostData(
+    const base::RefCountedMemory* data) {
+  browser_initiated_post_data_ = data;
+}
+
+const base::RefCountedMemory*
+NavigationEntryImpl::GetBrowserInitiatedPostData() const {
+  return browser_initiated_post_data_.get();
+}
+
 
 const FaviconStatus& NavigationEntryImpl::GetFavicon() const {
   return favicon_;

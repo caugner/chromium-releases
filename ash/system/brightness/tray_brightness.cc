@@ -14,7 +14,7 @@
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/image_button.h"
@@ -161,10 +161,7 @@ views::View* TrayBrightness::CreateTrayView(user::LoginStatus status) {
 }
 
 views::View* TrayBrightness::CreateDefaultView(user::LoginStatus status) {
-  CHECK(brightness_view_ == NULL);
-  brightness_view_ = new tray::BrightnessView(current_percent_);
-  is_default_view_ = true;
-  return brightness_view_;
+  return NULL;
 }
 
 views::View* TrayBrightness::CreateDetailedView(user::LoginStatus status) {

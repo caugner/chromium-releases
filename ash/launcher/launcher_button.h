@@ -4,9 +4,9 @@
 
 #ifndef ASH_LAUNCHER_LAUNCHER_BUTTON_H_
 #define ASH_LAUNCHER_LAUNCHER_BUTTON_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/image_view.h"
 
@@ -46,7 +46,7 @@ class LauncherButton : public views::CustomButton {
                                 LauncherButtonHost* host);
 
   // Sets the image to display for this entry.
-  void SetImage(const SkBitmap& image);
+  void SetImage(const gfx::ImageSkia& image);
 
   // |state| is or'd into the current state.
   void AddState(State state);
@@ -89,13 +89,15 @@ class LauncherButton : public views::CustomButton {
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(const views::GestureEvent& event)
+      OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
   // Sets the icon image with a shadow.
-  void SetShadowedImage(const SkBitmap& bitmap);
+  void SetShadowedImage(const gfx::ImageSkia& bitmap);
   // Override for custom initialization.
   virtual void Init();
   // Override to subclass IconView.
@@ -126,6 +128,8 @@ class LauncherButton : public views::CustomButton {
   // Runs a pulse animation for |icon_view_|. It is created when button state
   // has a STATE_PENDING bit and destroyed when that bit is clear.
   scoped_ptr<IconPulseAnimation> icon_pulse_animation_;
+
+  gfx::ShadowValues icon_shadows_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherButton);
 };

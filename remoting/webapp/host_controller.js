@@ -66,13 +66,22 @@ remoting.HostController.prototype.state = function() {
 };
 
 /**
+ * @param {function(boolean, boolean, boolean):void} callback Callback to be
+ *     called when done.
+ */
+remoting.HostController.prototype.getConsent = function(callback) {
+  this.plugin_.getUsageStatsConsent(callback);
+};
+
+/**
  * Show or hide daemon-specific parts of the UI.
  * @return {void} Nothing.
  */
 remoting.HostController.prototype.updateDom = function() {
   var match = '';
   var state = this.state();
-  var enabled = (state == remoting.HostController.State.STARTED);
+  var enabled = (state == remoting.HostController.State.STARTING) ||
+      (state == remoting.HostController.State.STARTED);
   var supported = (state != remoting.HostController.State.NOT_IMPLEMENTED);
   remoting.updateModalUi(enabled ? 'enabled' : 'disabled', 'data-daemon-state');
   document.getElementById('daemon-control').hidden = !supported;
@@ -102,11 +111,12 @@ remoting.HostController.prototype.setTooltips = function() {
 /**
  * Registers and starts the host.
  * @param {string} hostPin Host PIN.
+ * @param {boolean} consent The user's consent to crash dump reporting.
  * @param {function(remoting.HostController.AsyncResult):void} callback
  * callback Callback to be called when done.
  * @return {void} Nothing.
  */
-remoting.HostController.prototype.start = function(hostPin, callback) {
+remoting.HostController.prototype.start = function(hostPin, consent, callback) {
   /** @type {remoting.HostController} */
   var that = this;
   var hostName = this.plugin_.getHostName();
@@ -173,7 +183,7 @@ remoting.HostController.prototype.start = function(hostPin, callback) {
       var onStartDaemon = function(result) {
         onStarted(callback, result, hostName);
       };
-      that.plugin_.startDaemon(hostConfig, onStartDaemon);
+      that.plugin_.startDaemon(hostConfig, consent, onStartDaemon);
     } else {
       console.log('Failed to register the host. Status: ' + xhr.status +
                   ' response: ' + xhr.responseText);
@@ -209,14 +219,14 @@ remoting.HostController.prototype.start = function(hostPin, callback) {
    *  @param {string} publicKey */
   function onKeyGenerated(privateKey, publicKey) {
     remoting.oauth2.callWithToken(
-        /** @param {string?} oauthToken */
+        /** @param {string} oauthToken */
         function(oauthToken) {
-          if (oauthToken) {
-            doRegisterHost(privateKey, publicKey, oauthToken);
-          } else {
-            // TODO(jamiewalch): Have a more specific error code here?
-            callback(remoting.HostController.AsyncResult.FAILED);
-          }
+          doRegisterHost(privateKey, publicKey, oauthToken);
+        },
+        /** @param {remoting.Error} error */
+        function(error) {
+          // TODO(jamiewalch): Have a more specific error code here?
+          callback(remoting.HostController.AsyncResult.FAILED);
         });
   };
 
@@ -258,7 +268,9 @@ function parseHostConfig_(configStr) {
       typeof config['xmpp_login'] == 'string') {
     return config;
   } else {
-    console.error('Invalid getDaemonConfig response.');
+    if (configStr != '{}') {
+      console.error('Invalid getDaemonConfig response.');
+    }
   }
   return null;
 }

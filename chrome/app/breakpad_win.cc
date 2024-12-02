@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <tchar.h>
+#include <userenv.h>
 
 #include <algorithm>
 #include <vector>
@@ -36,17 +37,25 @@
 #include "chrome/installer/util/install_util.h"
 #include "policy/policy_constants.h"
 
+// userenv.dll is required for GetProfileType().
+#pragma comment(lib, "userenv.lib")
+
 namespace breakpad_win {
 
+// TODO(raymes): Modify the way custom crash info is stored. g_custom_entries
+// is way too too fragile. See
+// https://code.google.com/p/chromium/issues/detail?id=137062.
 std::vector<google_breakpad::CustomInfoEntry>* g_custom_entries = NULL;
 size_t g_num_of_experiments_offset = 0;
 size_t g_experiment_chunks_offset = 0;
+bool g_deferred_crash_uploads = false;
 
 }   // namespace breakpad_win
 
 using breakpad_win::g_custom_entries;
 using breakpad_win::g_experiment_chunks_offset;
 using breakpad_win::g_num_of_experiments_offset;
+using breakpad_win::g_deferred_crash_uploads;
 
 namespace {
 
@@ -75,6 +84,10 @@ const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 
 // This is the well known SID for the system principal.
 const wchar_t kSystemPrincipalSid[] =L"S-1-5-18";
+
+// This is the minimum version of google update that is required for deferred
+// crash uploads to work.
+const char kMinUpdateVersion[] = "1.3.21.115";
 
 google_breakpad::ExceptionHandler* g_breakpad = NULL;
 google_breakpad::ExceptionHandler* g_dumphandler_no_crash = NULL;
@@ -221,6 +234,35 @@ void SetPluginPath(const std::wstring& path) {
   }
 }
 
+// Returns a string containing a list of all modifiers for the loaded profile.
+std::wstring GetProfileType() {
+  std::wstring profile_type;
+  DWORD profile_bits = 0;
+  if (::GetProfileType(&profile_bits)) {
+    static const struct {
+      DWORD bit;
+      const wchar_t* name;
+    } kBitNames[] = {
+      { PT_MANDATORY, L"mandatory" },
+      { PT_ROAMING, L"roaming" },
+      { PT_TEMPORARY, L"temporary" },
+    };
+    for (size_t i = 0; i < arraysize(kBitNames); ++i) {
+      const DWORD this_bit = kBitNames[i].bit;
+      if ((profile_bits & this_bit) != 0) {
+        profile_type.append(kBitNames[i].name);
+        profile_bits &= ~this_bit;
+        if (profile_bits != 0)
+          profile_type.append(L", ");
+      }
+    }
+  } else {
+    DWORD last_error = ::GetLastError();
+    base::SStringPrintf(&profile_type, L"error %u", last_error);
+  }
+  return profile_type;
+}
+
 // Returns the custom info structure based on the dll in parameter and the
 // process type.
 google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
@@ -266,6 +308,13 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
       google_breakpad::CustomInfoEntry(L"ptype", type.c_str()));
   g_custom_entries->push_back(
       google_breakpad::CustomInfoEntry(L"channel", channel.c_str()));
+  g_custom_entries->push_back(
+      google_breakpad::CustomInfoEntry(L"profile-type",
+                                       GetProfileType().c_str()));
+
+  if (g_deferred_crash_uploads)
+    g_custom_entries->push_back(
+        google_breakpad::CustomInfoEntry(L"deferred-upload", L"true"));
 
   if (!special_build.empty())
     g_custom_entries->push_back(
@@ -337,7 +386,8 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
       CommandLine::ForCurrentProcess()->argv(), &switches);
   SetCommandLine2(&switches[0], switches.size());
 
-  if (type == L"renderer" || type == L"plugin" || type == L"gpu-process") {
+  if (type == L"renderer" || type == L"plugin" || type == L"ppapi" ||
+      type == L"gpu-process") {
     g_num_of_views_offset = g_custom_entries->size();
     g_custom_entries->push_back(
         google_breakpad::CustomInfoEntry(L"num-views", L""));
@@ -351,7 +401,7 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& exe_path,
           base::StringPrintf(L"url-chunk-%i", i).c_str(), L""));
     }
 
-    if (type == L"plugin") {
+    if (type == L"plugin" || type == L"ppapi") {
       std::wstring plugin_path =
           CommandLine::ForCurrentProcess()->GetSwitchValueNative("plugin-path");
       if (!plugin_path.empty())
@@ -687,6 +737,18 @@ static bool MetricsReportingControlledByPolicy(bool* result) {
   return false;
 }
 
+// Check whether the installed version of google update supports deferred
+// uploads of crash reports.
+static bool DeferredUploadsSupported(bool system_install) {
+  Version update_version =
+      GoogleUpdateSettings::GetGoogleUpdateVersion(system_install);
+  if (!update_version.IsValid() ||
+      update_version.IsOlderThan(std::string(kMinUpdateVersion)))
+    return false;
+
+  return true;
+}
+
 static void InitPipeNameEnvVar(bool is_per_user_install) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
   if (env->HasVar(kPipeNameVar)) {
@@ -717,7 +779,11 @@ static void InitPipeNameEnvVar(bool is_per_user_install) {
       crash_reporting_enabled = GoogleUpdateSettings::GetCollectStatsConsent();
 
     if (!crash_reporting_enabled) {
-      return;
+      if (!controlled_by_policy &&
+          DeferredUploadsSupported(!is_per_user_install))
+        g_deferred_crash_uploads = true;
+      else
+        return;
     }
 
     // Build the pipe name. It can be either:

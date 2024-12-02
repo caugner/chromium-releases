@@ -4,17 +4,17 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/test/test_server.h"
 
 class HostRulesTest : public InProcessBrowserTest {
  protected:
-  HostRulesTest() {
-    EnableDOMAutomation();
-  }
+  HostRulesTest() {}
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
     ASSERT_TRUE(test_server()->Start());
@@ -39,8 +39,8 @@ IN_PROC_BROWSER_TEST_F(HostRulesTest, TestMap) {
   ui_test_utils::NavigateToURL(browser(), test_url);
 
   std::string html;
-  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser()->GetActiveWebContents()->GetRenderViewHost(),
+  EXPECT_TRUE(content::ExecuteJavaScriptAndExtractString(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(document.body.outerHTML);",
       &html));

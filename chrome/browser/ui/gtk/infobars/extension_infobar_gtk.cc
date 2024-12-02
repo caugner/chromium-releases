@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -85,13 +85,13 @@ void ExtensionInfoBarGtk::OnImageLoaded(const gfx::Image& image,
   static const int kDropArrowLeftMargin = 3;
   scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(
       gfx::Size(image_size + kDropArrowLeftMargin + drop_image->width(),
-                image_size), false));
+                image_size), ui::SCALE_FACTOR_100P, false));
   canvas->DrawImageInt(*icon, 0, 0, icon->width(), icon->height(), 0, 0,
                        image_size, image_size, false);
   canvas->DrawImageInt(*drop_image, image_size + kDropArrowLeftMargin,
                        image_size / 2);
 
-  SkBitmap bitmap = canvas->ExtractBitmap();
+  SkBitmap bitmap = canvas->ExtractImageRep().sk_bitmap();
   GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(bitmap);
   gtk_image_set_from_pixbuf(GTK_IMAGE(icon_), pixbuf);
   g_object_unref(pixbuf);
@@ -109,8 +109,8 @@ void ExtensionInfoBarGtk::BuildWidgets() {
   gtk_util::CenterWidgetInHBox(hbox_, button_, false, 0);
 
   // Start loading the image for the menu button.
-  const extensions::Extension* extension = delegate_->extension_host()->
-      extension();
+  const extensions::Extension* extension =
+      delegate_->extension_host()->extension();
   ExtensionResource icon_resource = extension->GetIconResource(
       ExtensionIconSet::EXTENSION_ICON_BITTY, ExtensionIconSet::MATCH_EXACTLY);
   // Create a tracker to load the image. It will report back on OnImageLoaded.
@@ -124,7 +124,7 @@ void ExtensionInfoBarGtk::BuildWidgets() {
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_), 0, 1, 0, 0);
   gtk_box_pack_start(GTK_BOX(hbox_), alignment_, TRUE, TRUE, 0);
 
-  ExtensionHost* extension_host = delegate_->extension_host();
+  extensions::ExtensionHost* extension_host = delegate_->extension_host();
   view_ = extension_host->view();
 
   if (gtk_widget_get_parent(view_->native_view())) {

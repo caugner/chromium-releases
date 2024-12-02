@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_FORM_MANAGER_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_FORM_MANAGER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -14,6 +13,10 @@
 #include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "webkit/forms/password_form.h"
+
+namespace content {
+class WebContents;
+}  // namespace content
 
 class PasswordManager;
 class PasswordStore;
@@ -31,6 +34,7 @@ class PasswordFormManager : public PasswordStoreConsumer {
   //           used to filter login results from database.
   PasswordFormManager(Profile* profile,
                       PasswordManager* password_manager,
+                      content::WebContents* web_contents,
                       const webkit::forms::PasswordForm& observed_form,
                       bool ssl_valid);
   virtual ~PasswordFormManager();
@@ -99,6 +103,11 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // These routines are used to update internal statistics ("ActionsTaken").
   void SubmitPassed();
   void SubmitFailed();
+
+  // Return the username associated with the credentials.
+  const string16& associated_username() const {
+    return pending_credentials_.username_value;
+  }
 
   // Returns the realm URL for the form managed my this manager.
   const std::string& realm() const {
@@ -178,6 +187,11 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // UMA.
   int GetActionsTaken();
 
+  // Informs the renderer that the user has not blacklisted observed_form_ by
+  // choosing "never save passwords for this site". This is used by the password
+  // generation manager to deside whether to show the password generation icon.
+  virtual void SendNotBlacklistedToRenderer();
+
   // Set of PasswordForms from the DB that best match the form
   // being managed by this. Use a map instead of vector, because we most
   // frequently require lookups by username value in IsNewLogin.
@@ -232,6 +246,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
 
   // The profile from which we get the PasswordStore.
   Profile* profile_;
+
+  // Web contents from which we get the RenderViewHost for sending messages to
+  // the corresponding renderer.
+  content::WebContents* web_contents_;
 
   // These three fields record the "ActionsTaken" by the browser and
   // the user with this form, and the result. They are combined and

@@ -12,9 +12,11 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/gdata_test_util.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/chromeos/gdata/mock_gdata_file_system.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -26,6 +28,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::AnyNumber;
+using ::testing::DoAll;
 using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::_;
@@ -44,9 +47,9 @@ ACTION_P(MockUpdateFileByResourceId, error) {
 
 // Action used to set mock expectations for GetFileInfoByResourceId().
 ACTION_P2(MockUpdateFileByResourceId, error, md5) {
-  scoped_ptr<GDataFileProto> file_proto(new GDataFileProto);
-  file_proto->set_file_md5(md5);
-  arg1.Run(error, FilePath(), file_proto.Pass());
+  scoped_ptr<GDataEntryProto> entry_proto(new GDataEntryProto);
+  entry_proto->mutable_file_specific_info()->set_file_md5(md5);
+  arg1.Run(error, FilePath(), entry_proto.Pass());
 }
 
 class GDataSyncClientTest : public testing::Test {
@@ -54,8 +57,6 @@ class GDataSyncClientTest : public testing::Test {
   GDataSyncClientTest()
       : ui_thread_(content::BrowserThread::UI, &message_loop_),
         io_thread_(content::BrowserThread::IO),
-        sequence_token_(
-            content::BrowserThread::GetBlockingPool()->GetSequenceToken()),
         profile_(new TestingProfile),
         mock_file_system_(new StrictMock<MockGDataFileSystem>),
         mock_network_library_(NULL) {
@@ -73,10 +74,11 @@ class GDataSyncClientTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     // Initialize the sync client.
+    scoped_refptr<base::SequencedWorkerPool> pool =
+        content::BrowserThread::GetBlockingPool();
     cache_ = GDataCache::CreateGDataCacheOnUIThread(
         temp_dir_.path(),
-        content::BrowserThread::GetBlockingPool(),
-        sequence_token_);
+        pool->GetSequencedTaskRunner(pool->GetSequenceToken()));
     sync_client_.reset(new GDataSyncClient(profile_.get(),
                                            mock_file_system_.get(),
                                            cache_));
@@ -100,19 +102,7 @@ class GDataSyncClientTest : public testing::Test {
     sync_client_.reset();
     chromeos::CrosLibrary::Shutdown();
     cache_->DestroyOnUIThread();
-    RunAllPendingForIO();
-  }
-
-  // Used to wait for the result from an operation that involves file IO,
-  // that runs on the blocking pool thread.
-  void RunAllPendingForIO() {
-    // We should first flush tasks on UI thread, as it can require some
-    // tasks to be run before IO tasks start.
-    message_loop_.RunAllPending();
-    content::BrowserThread::GetBlockingPool()->FlushForTesting();
-    // Once IO tasks are done, flush UI thread again so the results from IO
-    // tasks are processed.
-    message_loop_.RunAllPending();
+    test_util::RunBlockingPoolTask();
   }
 
   // Sets up MockNetworkLibrary as if it's connected to wifi network.
@@ -230,7 +220,7 @@ class GDataSyncClientTest : public testing::Test {
     EXPECT_CALL(*mock_file_system_,
                 GetFileByResourceId(resource_id, _, _))
         .WillOnce(MockGetFileByResourceId(
-            base::PLATFORM_FILE_OK,
+            GDATA_FILE_OK,
             FilePath::FromUTF8Unsafe("local_path_does_not_matter"),
             std::string("mime_type_does_not_matter"),
             REGULAR_FILE));
@@ -242,7 +232,7 @@ class GDataSyncClientTest : public testing::Test {
       const std::string& resource_id) {
     EXPECT_CALL(*mock_file_system_,
                 UpdateFileByResourceId(resource_id, _))
-        .WillOnce(MockUpdateFileByResourceId(base::PLATFORM_FILE_OK));
+        .WillOnce(MockUpdateFileByResourceId(GDATA_FILE_OK));
   }
 
   // Sets the expectation for MockGDataFileSystem::GetFileInfoByResourceId(),
@@ -250,14 +240,14 @@ class GDataSyncClientTest : public testing::Test {
   // ID.
   //
   // This is used for testing StartCheckingExistingPinnedFiles(), hence we
-  // are only interested in the MD5 value in GDataFileProto.
+  // are only interested in the MD5 value in GDataEntryProto.
   void SetExpectationForGetFileInfoByResourceId(
       const std::string& resource_id,
       const std::string& new_md5) {
   EXPECT_CALL(*mock_file_system_,
-              GetFileInfoByResourceId(resource_id, _))
+              GetEntryInfoByResourceId(resource_id, _))
       .WillOnce(MockUpdateFileByResourceId(
-          base::PLATFORM_FILE_OK,
+          GDATA_FILE_OK,
           new_md5));
   }
 
@@ -284,54 +274,10 @@ class GDataSyncClientTest : public testing::Test {
                                           resource_id);
   }
 
-  // This class is used to monitor if any task is posted to a message loop.
-  //
-  // TODO(satorux): Move this class and RunBlockingPoolTask() to a common
-  // place so it can be used from with GDataFileSystemTest. crbug.com/134126.
-  class TaskObserver : public MessageLoop::TaskObserver {
-   public:
-    TaskObserver() : posted_(false) {}
-    virtual ~TaskObserver() {}
-
-    // MessageLoop::TaskObserver overrides.
-    virtual void WillProcessTask(base::TimeTicks time_posted) {}
-    virtual void DidProcessTask(base::TimeTicks time_posted) {
-      posted_ = true;
-    }
-
-    // Returns true if any task was posted.
-    bool posted() const { return posted_; }
-
-   private:
-    bool posted_;
-    DISALLOW_COPY_AND_ASSIGN(TaskObserver);
-  };
-
-  // Runs a task posted to the blocking pool, including subquent tasks posted
-  // to the UI message loop and the blocking pool.
-  //
-  // A task is often posted to the blocking pool with PostTaskAndReply(). In
-  // that case, a task is posted back to the UI message loop, which can again
-  // post a task to the blocking pool. This function processes these tasks
-  // repeatedly.
-  void RunBlockingPoolTask() {
-    while (true) {
-      content::BrowserThread::GetBlockingPool()->FlushForTesting();
-
-      TaskObserver task_observer;
-      MessageLoop::current()->AddTaskObserver(&task_observer);
-      MessageLoop::current()->RunAllPending();
-      MessageLoop::current()->RemoveTaskObserver(&task_observer);
-      if (!task_observer.posted())
-        break;
-    }
-  }
-
  protected:
   MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread io_thread_;
-  const base::SequencedWorkerPool::SequenceToken sequence_token_;
   ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<StrictMock<MockGDataFileSystem> > mock_file_system_;
@@ -352,7 +298,7 @@ TEST_F(GDataSyncClientTest, StartInitialScan) {
   // Start processing the files in the backlog. This will collect the
   // resource IDs of these files.
   sync_client_->StartProcessingBacklog();
-  RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the contents of the queue for fetching.
   std::vector<std::string> resource_ids =
@@ -381,7 +327,7 @@ TEST_F(GDataSyncClientTest, StartSyncLoop) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will be fetched by GetFileByResourceId(), once
+  // These files will be fetched or uploaded by GDataFileSystem, once
   // StartSyncLoop() starts.
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_foo");
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_bar");
@@ -400,11 +346,38 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_Offline) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will not be fetched by GetFileByResourceId(), as
-  // network is not connected.
-  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(_, _, _)).Times(0);
+  // These files will be neither fetched nor uploaded not by GDataFileSystem,
+  // as network is not connected.
 
   sync_client_->StartSyncLoop();
+}
+
+TEST_F(GDataSyncClientTest, StartSyncLoop_ResumedConnection) {
+  const std::string resource_id("resource_id_not_fetched_foo");
+  const FilePath file_path(
+      FilePath::FromUTF8Unsafe("local_path_does_not_matter"));
+  const std::string mime_type("mime_type_does_not_matter");
+  SetUpTestFiles();
+  ConnectToWifi();
+  AddResourceIdToFetch(resource_id);
+
+  // Disconnect from network on fetch try.
+  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(resource_id, _, _))
+      .WillOnce(DoAll(
+          InvokeWithoutArgs(this, &GDataSyncClientTest::ConnectToNone),
+          MockGetFileByResourceId(GDATA_FILE_ERROR_NO_CONNECTION,
+                                  file_path,
+                                  mime_type,
+                                  REGULAR_FILE)));
+
+  sync_client_->StartSyncLoop();
+
+  // Expect fetch retry on network reconnection.
+  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(resource_id, _, _))
+      .WillOnce(MockGetFileByResourceId(
+          GDATA_FILE_OK, file_path, mime_type, REGULAR_FILE));
+
+  ConnectToWifi();
 }
 
 TEST_F(GDataSyncClientTest, StartSyncLoop_CelluarDisabled) {
@@ -416,9 +389,8 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_CelluarDisabled) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will not be fetched by GetFileByResourceId(), as
-  // fetching over cellular network is disabled by default.
-  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(_, _, _)).Times(0);
+  // These files will be neither fetched nor uploaded not by GDataFileSystem,
+  // as fetching over cellular network is disabled by default.
 
   // Then connect to cellular. This will kick off StartSyncLoop().
   ConnectToCellular();
@@ -436,7 +408,7 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_CelluarEnabled) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will be fetched by GetFileByResourceId(), as fetching
+  // These files will be fetched or uploaded by GDataFileSystem, as syncing
   // over cellular network is explicitly enabled.
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_foo");
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_bar");
@@ -456,9 +428,8 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_WimaxDisabled) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will not be fetched by GetFileByResourceId(), as
-  // fetching over wimax network is disabled by default.
-  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(_, _, _)).Times(0);
+  // These files will be neither fetched nor uploaded not by GDataFileSystem,
+  // as syncing over wimax network is disabled by default.
 
   // Then connect to wimax. This will kick off StartSyncLoop().
   ConnectToWimax();
@@ -476,7 +447,7 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_CelluarEnabledWithWimax) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will be fetched by GetFileByResourceId(), as fetching
+  // These files will be fetched or uploaded by GDataFileSystem, as syncing
   // over cellular network, which includes wimax, is explicitly enabled.
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_foo");
   SetExpectationForGetFileByResourceId("resource_id_not_fetched_bar");
@@ -499,9 +470,8 @@ TEST_F(GDataSyncClientTest, StartSyncLoop_GDataDisabled) {
   AddResourceIdToFetch("resource_id_not_fetched_baz");
   AddResourceIdToUpload("resource_id_dirty");
 
-  // The three files will not be fetched by GetFileByResourceId(), as the
-  // GData feature is disabled.
-  EXPECT_CALL(*mock_file_system_, GetFileByResourceId(_, _, _)).Times(0);
+  // These files will be neither fetched nor uploaded not by GDataFileSystem,
+  // as the GData feature is disabled.
 
   sync_client_->StartSyncLoop();
 }
@@ -584,7 +554,7 @@ TEST_F(GDataSyncClientTest, ExistingPinnedFiles) {
   // Start checking the existing pinned files. This will collect the resource
   // IDs of pinned files, with stale local cache files.
   sync_client_->StartCheckingExistingPinnedFiles();
-  RunBlockingPoolTask();
+  test_util::RunBlockingPoolTask();
 
   // Check the contents of the queue for fetching.
   std::vector<std::string> resource_ids =

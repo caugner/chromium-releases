@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
 #define CONTENT_RENDERER_RENDER_VIEW_IMPL_H_
-#pragma once
 
 #include <deque>
 #include <map>
@@ -100,13 +99,16 @@ class RenderViewTest;
 class RendererAccessibility;
 struct CustomContextMenuContext;
 struct FileChooserParams;
-struct SelectedFileInfo;
 }  // namespace content
 
 namespace gfx {
 class Point;
 class Rect;
 }  // namespace gfx
+
+namespace ui {
+struct SelectedFileInfo;
+}  // namespace ui
 
 namespace webkit {
 
@@ -255,8 +257,6 @@ class RenderViewImpl : public RenderWidget,
   }
 #endif
 
-  WebKit::WebPeerConnectionHandler* CreatePeerConnectionHandler(
-      WebKit::WebPeerConnectionHandlerClient* client);
   WebKit::WebPeerConnection00Handler* CreatePeerConnectionHandlerJsep(
       WebKit::WebPeerConnection00HandlerClient* client);
 
@@ -329,6 +329,9 @@ class RenderViewImpl : public RenderWidget,
   // Informs the render view that a PPAPI plugin has changed selection.
   void PpapiPluginSelectionChanged();
 
+  // Notification that a PPAPI plugin has been created.
+  void PpapiPluginCreated(ppapi::host::PpapiHost* host);
+
   // Retrieves the current caret position if a PPAPI plugin has focus.
   bool GetPpapiPluginCaretBounds(gfx::Rect* rect);
 
@@ -391,7 +394,7 @@ class RenderViewImpl : public RenderWidget,
   // supported PPAPI plug-ins.
   bool HasIMETextFocus();
 
-  // IPC::Channel::Listener implementation -------------------------------------
+  // IPC::Listener implementation ----------------------------------------------
 
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
@@ -434,6 +437,7 @@ class RenderViewImpl : public RenderWidget,
   virtual bool enumerateChosenDirectory(
       const WebKit::WebString& path,
       WebKit::WebFileChooserCompletion* chooser_completion);
+  virtual void initializeHelperPluginWebFrame(WebKit::WebHelperPlugin*);
   virtual void didStartLoading();
   virtual void didStopLoading();
   virtual void didChangeLoadProgress(WebKit::WebFrame* frame,
@@ -617,7 +621,7 @@ class RenderViewImpl : public RenderWidget,
                                         int world_id);
   virtual void didChangeScrollOffset(WebKit::WebFrame* frame);
   virtual void numberOfWheelEventHandlersChanged(unsigned num_handlers);
-  virtual void numberOfTouchEventHandlersChanged(unsigned num_handlers);
+  virtual void hasTouchEventHandlers(bool has_handlers);
   virtual void didChangeContentsSize(WebKit::WebFrame* frame,
                                      const WebKit::WebSize& size);
   virtual void reportFindInPageMatchCount(int request_id,
@@ -631,6 +635,9 @@ class RenderViewImpl : public RenderWidget,
                               long long size,
                               bool create,
                               WebKit::WebFileSystemCallbacks* callbacks);
+  virtual void deleteFileSystem(WebKit::WebFrame* frame,
+                                WebKit::WebFileSystem::Type type,
+                                WebKit::WebFileSystemCallbacks* callbacks);
   virtual void queryStorageUsageAndQuota(
       WebKit::WebFrame* frame,
       WebKit::WebStorageQuotaType type,
@@ -651,6 +658,9 @@ class RenderViewImpl : public RenderWidget,
       WebKit::WebFrame* source,
       WebKit::WebSecurityOrigin targetOrigin,
       WebKit::WebDOMMessageEvent event) OVERRIDE;
+  virtual WebKit::WebString userAgentOverride(
+      WebKit::WebFrame* frame,
+      const WebKit::WebURL& url) OVERRIDE;
 
   // WebKit::WebPageSerializerClient implementation ----------------------------
 
@@ -744,7 +754,7 @@ class RenderViewImpl : public RenderWidget,
   virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) OVERRIDE;
   virtual void OnSetFocus(bool enable) OVERRIDE;
   virtual void OnWasHidden() OVERRIDE;
-  virtual void OnWasRestored(bool needs_repainting) OVERRIDE;
+  virtual void OnWasShown(bool needs_repainting) OVERRIDE;
   virtual bool SupportsAsynchronousSwapBuffers() OVERRIDE;
   virtual void OnImeSetComposition(
       const string16& text,
@@ -788,10 +798,12 @@ class RenderViewImpl : public RenderWidget,
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, UpdateTargetURLWithInvalidURL);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            GetCompositionCharacterBoundsTest);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnNavigationHttpPost);
 #if defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, MacTestCmdUp);
 #endif
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndPrune);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ZoomLimit);
 
   typedef std::map<GURL, double> HostZoomLevels;
 
@@ -916,7 +928,7 @@ class RenderViewImpl : public RenderWidget,
   void OnEnumerateDirectoryResponse(int id, const std::vector<FilePath>& paths);
   void OnExecuteEditCommand(const std::string& name, const std::string& value);
   void OnFileChooserResponse(
-      const std::vector<content::SelectedFileInfo>& files);
+      const std::vector<ui::SelectedFileInfo>& files);
   void OnFind(int request_id, const string16&, const WebKit::WebFindOptions&);
   void OnFindReplyAck();
   void OnGetAllSavableResourceLinksForCurrentPage(const GURL& page_url);
@@ -972,7 +984,8 @@ class RenderViewImpl : public RenderWidget,
   void OnSetWindowVisibility(bool visible);
 #endif
   void OnSetZoomLevel(double zoom_level);
-  void OnSetZoomLevelForLoadingURL(const GURL& url, double zoom_level);
+  CONTENT_EXPORT void OnSetZoomLevelForLoadingURL(const GURL& url,
+                                                  double zoom_level);
   void OnExitFullscreen();
   void OnShouldClose();
   void OnStop();
@@ -1087,7 +1100,7 @@ class RenderViewImpl : public RenderWidget,
   // selection handles in sync with the webpage.
   void SyncSelectionIfRequired();
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   void UpdateFontRenderingFromRendererPrefs();
 #else
   void UpdateFontRenderingFromRendererPrefs() {}
@@ -1264,13 +1277,6 @@ class RenderViewImpl : public RenderWidget,
   // we can discard them when the view goes away.
   std::set<gfx::PluginWindowHandle> fake_plugin_window_handles_;
 #endif
-
-  // When this view is composited, the context used for compositing may or may
-  // not support the GL_CHROMIUM_swapbuffers_complete_callback extension. Since
-  // querying for the existence of this extension is expensive we cache the
-  // result. These are used to implement SupportsAsynchronousSwapBuffers().
-  bool context_has_swapbuffers_complete_callback_;
-  bool queried_for_swapbuffers_complete_callback_;
 
   // Helper objects ------------------------------------------------------------
 

@@ -12,9 +12,11 @@
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/dialogs/selected_file_info.h"
 
 namespace {
 
@@ -41,14 +43,14 @@ SavePackageFilePickerChromeOS::SavePackageFilePickerChromeOS(
     : content::WebContentsObserver(web_contents),
       callback_(callback) {
   if (g_should_prompt_for_filename) {
-    select_file_dialog_ = SelectFileDialog::Create(this);
-    select_file_dialog_->SelectFile(SelectFileDialog::SELECT_SAVEAS_FILE,
+    select_file_dialog_ = ui::SelectFileDialog::Create(
+        this, new ChromeSelectFilePolicy(web_contents));
+    select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_SAVEAS_FILE,
                                     string16(),
                                     suggested_path.ReplaceExtension("mhtml"),
                                     NULL,
                                     0,
                                     "mhtml",
-                                    web_contents,
                                     platform_util::GetTopLevel(
                                         web_contents->GetNativeView()),
                                     NULL);
@@ -65,14 +67,24 @@ SavePackageFilePickerChromeOS::~SavePackageFilePickerChromeOS() {
 }
 
 void SavePackageFilePickerChromeOS::FileSelected(
-    const FilePath& selected_path_const,
+    const FilePath& selected_path,
+    int unused_index,
+    void* unused_params) {
+  FileSelectedWithExtraInfo(
+      ui::SelectedFileInfo(selected_path, selected_path),
+      unused_index,
+      unused_params);
+}
+
+void SavePackageFilePickerChromeOS::FileSelectedWithExtraInfo(
+    const ui::SelectedFileInfo& selected_file_info,
     int unused_index,
     void* unused_params) {
   if (!web_contents()) {
     delete this;
     return;
   }
-  FilePath selected_path = selected_path_const;
+  FilePath selected_path = selected_file_info.file_path;
   file_util::NormalizeFileNameEncoding(&selected_path);
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());

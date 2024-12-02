@@ -4,7 +4,6 @@
 
 #ifndef BASE_LINUX_UTIL_H_
 #define BASE_LINUX_UTIL_H_
-#pragma once
 
 #include <stdint.h>
 #include <sys/types.h>
@@ -16,11 +15,6 @@
 namespace base {
 
 BASE_EXPORT extern const char kFindInodeSwitch[];
-
-// This should be kept in sync with sandbox/linux/suid/sandbox.c
-BASE_EXPORT extern const long kSUIDSandboxApiNumber;
-BASE_EXPORT extern const char kSandboxEnvironmentApiRequest[];
-BASE_EXPORT extern const char kSandboxEnvironmentApiProvides[];
 
 // This is declared here so the crash reporter can access the memory directly
 // in compromised context without going through the standard library.

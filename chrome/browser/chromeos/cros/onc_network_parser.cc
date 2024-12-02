@@ -80,7 +80,7 @@ OncValueSignature ethernet_signature[] = {
 OncValueSignature wifi_signature[] = {
   { onc::wifi::kAutoConnect, PROPERTY_INDEX_AUTO_CONNECT, TYPE_BOOLEAN },
   { onc::wifi::kEAP, PROPERTY_INDEX_EAP, TYPE_DICTIONARY },
-  { onc::wifi::kHiddenSSID, PROPERTY_INDEX_WIFI_HIDDEN_SSID, TYPE_BOOLEAN },
+  { onc::wifi::kHiddenSSID, PROPERTY_INDEX_HIDDEN_SSID, TYPE_BOOLEAN },
   { onc::wifi::kPassphrase, PROPERTY_INDEX_PASSPHRASE, TYPE_STRING },
   { onc::wifi::kSecurity, PROPERTY_INDEX_SECURITY, TYPE_STRING },
   { onc::wifi::kSSID, PROPERTY_INDEX_SSID, TYPE_STRING },
@@ -621,7 +621,7 @@ bool OncNetworkParser::ParseNestedObject(Network* network,
     if (key == onc::kRecommended)
       continue;
 
-    base::Value* inner_value = NULL;
+    const base::Value* inner_value = NULL;
     dict->GetWithoutPathExpansion(key, &inner_value);
     CHECK(inner_value != NULL);
     int field_index;
@@ -1554,7 +1554,7 @@ bool OncWifiNetworkParser::ParseWifiValue(OncNetworkParser* parser,
     case PROPERTY_INDEX_AUTO_CONNECT:
       network->set_auto_connect(GetBooleanValue(value));
       return true;
-    case PROPERTY_INDEX_WIFI_HIDDEN_SSID:
+    case PROPERTY_INDEX_HIDDEN_SSID:
       wifi_network->set_hidden_ssid(GetBooleanValue(value));
       return true;
     default:
@@ -1941,7 +1941,7 @@ bool OncVirtualNetworkParser::ParseOpenVPNValue(OncNetworkParser* parser,
       // today.  So extract the first.
       const base::ListValue* value_list = NULL;
       value.GetAsList(&value_list);
-      base::Value* first_item = NULL;
+      const base::Value* first_item = NULL;
       if (!value_list->Get(0, &first_item) ||
           !first_item->IsType(base::Value::TYPE_STRING)) {
         VLOG(1) << "RemoteCertKU must be non-empty list of strings";

@@ -8,7 +8,6 @@
 
 #ifndef CHROME_INSTALLER_UTIL_SHELL_UTIL_H_
 #define CHROME_INSTALLER_UTIL_SHELL_UTIL_H_
-#pragma once
 
 #include <windows.h>
 
@@ -113,6 +112,9 @@ class ShellUtil {
   // Registry value name of the open verb.
   static const wchar_t* kRegVerbOpen;
 
+  // Registry value name of the opennewwindow verb.
+  static const wchar_t* kRegVerbOpenNewWindow;
+
   // Registry value name of the run verb.
   static const wchar_t* kRegVerbRun;
 
@@ -121,6 +123,9 @@ class ShellUtil {
 
   // Registry value name for the DelegateExecute verb handler.
   static const wchar_t* kRegDelegateExecute;
+
+  // Registry value name for the OpenWithProgids entry for file associations.
+  static const wchar_t* kRegOpenWithProgids;
 
   // Returns true if |chrome_exe| is registered in HKLM with |suffix|.
   // Note: This only checks one deterministic key in HKLM for |chrome_exe| and
@@ -378,15 +383,18 @@ class ShellUtil {
   static bool RemoveChromeQuickLaunchShortcut(BrowserDistribution* dist,
                                               int shell_change);
 
+  // This will remove all secondary tiles from the start screen for |dist|.
+  static void RemoveChromeStartScreenShortcuts(BrowserDistribution* dist,
+                                               const string16& chrome_exe);
+
   enum ChromeShortcutOptions {
     SHORTCUT_NO_OPTIONS = 0,
     // Set DualMode property for Windows 8 Metro-enabled shortcuts.
     SHORTCUT_DUAL_MODE = 1 << 0,
-    // Create a new shortcut (overwriting if necessary). If not specified, only
-    // specified (non-null) properties are going to be modified on the existing
-    // shortcut (which has to exist).
+    // Create a new shortcut (overwriting if necessary).
     SHORTCUT_CREATE_ALWAYS = 1 << 1,
-    // Use an alternate, localized, application name for the shortcut.
+    // Use an alternate application name for the shortcut (e.g. "The Internet").
+    // This option is only applied to the Desktop shortcut.
     SHORTCUT_ALTERNATE = 1 << 2,
   };
 
@@ -396,6 +404,9 @@ class ShellUtil {
   // |icon_index|. If create_new is set to true, the function will create a new
   // shortcut if it doesn't exist.
   // |options|: bitfield for which the options come from ChromeShortcutOptions.
+  // If SHORTCUT_CREATE_ALWAYS is not set in |options|, only specified (non-
+  // null) properties on an existing shortcut will be modified. If the shortcut
+  // does not exist, this method is a no-op and returns false.
   static bool UpdateChromeShortcut(BrowserDistribution* dist,
                                    const string16& chrome_exe,
                                    const string16& shortcut,

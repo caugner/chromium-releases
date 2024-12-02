@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_DEFAULT_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INSTALL_UI_DEFAULT_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_install_ui.h"
 
@@ -14,13 +13,14 @@ class TabContents;
 
 class ExtensionInstallUIDefault : public ExtensionInstallUI {
  public:
-  explicit ExtensionInstallUIDefault(Browser* browser);
+  explicit ExtensionInstallUIDefault(Profile* profile);
   virtual ~ExtensionInstallUIDefault();
 
   // ExtensionInstallUI implementation:
   virtual void OnInstallSuccess(const extensions::Extension* extension,
                                 SkBitmap* icon) OVERRIDE;
-  virtual void OnInstallFailure(const CrxInstallerError& error) OVERRIDE;
+  virtual void OnInstallFailure(
+      const extensions::CrxInstallerError& error) OVERRIDE;
   virtual void SetSkipPostInstallUI(bool skip_ui) OVERRIDE;
   virtual void SetUseAppInstalledBubble(bool use_bubble) OVERRIDE;
 
@@ -39,8 +39,6 @@ class ExtensionInstallUIDefault : public ExtensionInstallUI {
       const extensions::Extension* new_theme,
       const std::string& previous_theme_id,
       bool previous_using_native_theme);
-
-  Browser* browser_;
 
   // Whether or not to show the default UI after completing the installation.
   bool skip_post_install_ui_;

@@ -4,7 +4,6 @@
 
 #ifndef SYNC_INTERNAL_API_JS_SYNC_MANAGER_OBSERVER_H_
 #define SYNC_INTERNAL_API_JS_SYNC_MANAGER_OBSERVER_H_
-#pragma once
 
 #include <string>
 
@@ -18,42 +17,40 @@ namespace tracked_objects {
 class Location;
 }  // namespace tracked_objects
 
-namespace browser_sync {
+namespace syncer {
 
 class JsEventDetails;
 class JsEventHandler;
 
 // Routes SyncManager events to a JsEventHandler.
-class JsSyncManagerObserver : public sync_api::SyncManager::Observer {
+class JsSyncManagerObserver : public SyncManager::Observer {
  public:
   JsSyncManagerObserver();
   virtual ~JsSyncManagerObserver();
 
   void SetJsEventHandler(const WeakHandle<JsEventHandler>& event_handler);
 
-  // sync_api::SyncManager::Observer implementation.
+  // SyncManager::Observer implementation.
   virtual void OnSyncCycleCompleted(
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
-  virtual void OnConnectionStatusChange(
-      sync_api::ConnectionStatus status) OVERRIDE;
+  virtual void OnConnectionStatusChange(ConnectionStatus status) OVERRIDE;
   virtual void OnUpdatedToken(const std::string& token) OVERRIDE;
   virtual void OnPassphraseRequired(
-      sync_api::PassphraseRequiredReason reason,
+      PassphraseRequiredReason reason,
       const sync_pb::EncryptedData& pending_keys) OVERRIDE;
   virtual void OnPassphraseAccepted() OVERRIDE;
   virtual void OnBootstrapTokenUpdated(
       const std::string& bootstrap_token) OVERRIDE;
   virtual void OnEncryptedTypesChanged(
-      syncable::ModelTypeSet encrypted_types,
+      ModelTypeSet encrypted_types,
       bool encrypt_everything) OVERRIDE;
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnInitializationComplete(
-      const WeakHandle<JsBackend>& js_backend, bool success) OVERRIDE;
+      const WeakHandle<JsBackend>& js_backend, bool success,
+      syncer::ModelTypeSet restored_types) OVERRIDE;
   virtual void OnStopSyncingPermanently() OVERRIDE;
-  virtual void OnClearServerDataSucceeded() OVERRIDE;
-  virtual void OnClearServerDataFailed() OVERRIDE;
   virtual void OnActionableError(
-      const browser_sync::SyncProtocolError& sync_protocol_error) OVERRIDE;
+      const SyncProtocolError& sync_protocol_error) OVERRIDE;
 
  private:
   void HandleJsEvent(const tracked_objects::Location& from_here,
@@ -64,6 +61,6 @@ class JsSyncManagerObserver : public sync_api::SyncManager::Observer {
   DISALLOW_COPY_AND_ASSIGN(JsSyncManagerObserver);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_JS_SYNC_MANAGER_OBSERVER_H_

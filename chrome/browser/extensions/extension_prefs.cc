@@ -9,7 +9,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/admin_policy.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
-#include "chrome/browser/extensions/extension_menu_manager.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/prefs/pref_notifier.h"
@@ -18,6 +17,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_switch_utils.h"
 #include "chrome/common/extensions/manifest.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_info.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -25,8 +26,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using extensions::Extension;
-using extensions::ExtensionInfo;
+namespace extensions {
 
 namespace {
 
@@ -132,11 +132,10 @@ const char kBrowserActionPinned[] = "browser_action_pinned";
 const char kPrefActivePermissions[] = "active_permissions";
 const char kPrefGrantedPermissions[] = "granted_permissions";
 
-// The preference names for ExtensionPermissionSet values.
+// The preference names for PermissionSet values.
 const char kPrefAPIs[] = "api";
 const char kPrefExplicitHosts[] = "explicit_host";
 const char kPrefScriptableHosts[] = "scriptable_host";
-const char kPrefScopes[] = "scopes";
 
 // The preference names for the old granted permissions scheme.
 const char kPrefOldGrantedFullAccess[] = "granted_permissions.full";
@@ -173,8 +172,21 @@ const char kPrefIncognitoContentSettings[] = "incognito_content_settings";
 // background page.
 const char kRegisteredEvents[] = "events";
 
+// A dictionary of event names to lists of filters that this extension has
+// registered from its lazy background page.
+const char kFilteredEvents[] = "filtered_events";
+
 // Persisted value for omnibox.setDefaultSuggestion.
 const char kOmniboxDefaultSuggestion[] = "omnibox_default_suggestion";
+
+// List of media gallery permissions.
+const char kMediaGalleriesPermissions[] = "media_galleries_permissions";
+
+// Key for Media Gallery ID.
+const char kMediaGalleryIdKey[] = "id";
+
+// Key for Media Gallery Permission Value.
+const char kMediaGalleryHasPermissionKey[] = "has_permission";
 
 // Provider of write access to a dictionary storing extension prefs.
 class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
@@ -270,7 +282,7 @@ ExtensionPrefs::ExtensionPrefs(
       extension_pref_value_map_(extension_pref_value_map),
       ALLOW_THIS_IN_INITIALIZER_LIST(extension_sorting_(
           new ExtensionSorting(this, prefs))),
-      content_settings_store_(new extensions::ContentSettingsStore()) {
+      content_settings_store_(new ContentSettingsStore()) {
 }
 
 ExtensionPrefs::~ExtensionPrefs() {
@@ -309,7 +321,7 @@ void ExtensionPrefs::MakePathsRelative() {
   std::set<std::string> absolute_keys;
   for (DictionaryValue::key_iterator i = dict->begin_keys();
        i != dict->end_keys(); ++i) {
-    DictionaryValue* extension_dict = NULL;
+    const DictionaryValue* extension_dict = NULL;
     if (!dict->GetDictionaryWithoutPathExpansion(*i, &extension_dict))
       continue;
     int location_value;
@@ -330,7 +342,7 @@ void ExtensionPrefs::MakePathsRelative() {
 
   // Fix these paths.
   DictionaryPrefUpdate update(prefs_, kExtensionsPref);
-  const DictionaryValue* update_dict = update.Get();
+  DictionaryValue* update_dict = update.Get();
   for (std::set<std::string>::iterator i = absolute_keys.begin();
        i != absolute_keys.end(); ++i) {
     DictionaryValue* extension_dict = NULL;
@@ -428,7 +440,7 @@ bool ExtensionPrefs::ReadExtensionPrefList(
     const std::string& extension_id, const std::string& pref_key,
     const ListValue** out_value) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
-  ListValue* out = NULL;
+  const ListValue* out = NULL;
   if (!ext || !ext->GetList(pref_key, &out))
     return false;
   if (out_value)
@@ -468,22 +480,22 @@ void ExtensionPrefs::SetExtensionPrefURLPatternSet(
   UpdateExtensionPref(extension_id, pref_key, new_value.ToValue().release());
 }
 
-ExtensionPermissionSet* ExtensionPrefs::ReadExtensionPrefPermissionSet(
+PermissionSet* ExtensionPrefs::ReadExtensionPrefPermissionSet(
     const std::string& extension_id,
     const std::string& pref_key) {
   if (!GetExtensionPref(extension_id))
     return NULL;
 
   // Retrieve the API permissions.
-  ExtensionAPIPermissionSet apis;
+  APIPermissionSet apis;
   const ListValue* api_values = NULL;
   std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
   if (ReadExtensionPrefList(extension_id, api_pref, &api_values)) {
-    ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+    PermissionsInfo* info = PermissionsInfo::GetInstance();
     for (size_t i = 0; i < api_values->GetSize(); ++i) {
       std::string permission_name;
       if (api_values->GetString(i, &permission_name)) {
-        ExtensionAPIPermission *permission = info->GetByName(permission_name);
+        APIPermission *permission = info->GetByName(permission_name);
         if (permission)
           apis.insert(permission->id());
       }
@@ -502,34 +514,21 @@ ExtensionPermissionSet* ExtensionPrefs::ReadExtensionPrefPermissionSet(
       extension_id, JoinPrefs(pref_key, kPrefScriptableHosts),
       &scriptable_hosts, UserScript::kValidUserScriptSchemes);
 
-  // Retrieve the oauth2 scopes.
-  ExtensionOAuth2Scopes scopes;
-  const ListValue* scope_values = NULL;
-  std::string scope_pref = JoinPrefs(pref_key, kPrefScopes);
-  if (ReadExtensionPrefList(extension_id, scope_pref, &scope_values)) {
-    for (size_t i = 0; i < scope_values->GetSize(); ++i) {
-      std::string scope;
-      if (scope_values->GetString(i, &scope))
-        scopes.insert(scope);
-    }
-  }
-
-  return new ExtensionPermissionSet(
-      apis, explicit_hosts, scriptable_hosts, scopes);
+  return new PermissionSet(apis, explicit_hosts, scriptable_hosts);
 }
 
 void ExtensionPrefs::SetExtensionPrefPermissionSet(
     const std::string& extension_id,
     const std::string& pref_key,
-    const ExtensionPermissionSet* new_value) {
+    const PermissionSet* new_value) {
   // Set the API permissions.
   ListValue* api_values = new ListValue();
-  ExtensionAPIPermissionSet apis = new_value->apis();
-  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  APIPermissionSet apis = new_value->apis();
+  PermissionsInfo* info = PermissionsInfo::GetInstance();
   std::string api_pref = JoinPrefs(pref_key, kPrefAPIs);
-  for (ExtensionAPIPermissionSet::const_iterator i = apis.begin();
+  for (APIPermissionSet::const_iterator i = apis.begin();
        i != apis.end(); ++i) {
-    ExtensionAPIPermission* perm = info->GetByID(*i);
+    APIPermission* perm = info->GetByID(*i);
     if (perm)
       api_values->Append(Value::CreateStringValue(perm->name()));
   }
@@ -548,22 +547,10 @@ void ExtensionPrefs::SetExtensionPrefPermissionSet(
                                   JoinPrefs(pref_key, kPrefScriptableHosts),
                                   new_value->scriptable_hosts());
   }
-
-  // Set the oauth2 scopes.
-  ExtensionOAuth2Scopes scopes = new_value->scopes();
-  if (!scopes.empty()) {
-    ListValue* scope_values = new ListValue();
-    for (ExtensionOAuth2Scopes::iterator i = scopes.begin();
-         i != scopes.end(); ++i) {
-      scope_values->Append(Value::CreateStringValue(*i));
-    }
-    std::string scope_pref = JoinPrefs(pref_key, kPrefScopes);
-    UpdateExtensionPref(extension_id, scope_pref, scope_values);
-  }
 }
 
 // static
-bool ExtensionPrefs::IsBlacklistBitSet(DictionaryValue* ext) {
+bool ExtensionPrefs::IsBlacklistBitSet(const DictionaryValue* ext) {
   return ReadBooleanFromPref(ext, kPrefBlacklist);
 }
 
@@ -653,33 +640,38 @@ void ExtensionPrefs::SetAppNotificationDisabled(
                       Value::CreateBooleanValue(value));
 }
 
-std::string ExtensionPrefs::GetPolicyProviderName() const {
+std::string ExtensionPrefs::GetDebugPolicyProviderName() const {
+#ifdef NDEBUG
+  NOTREACHED();
+  return std::string();
+#else
   return "admin policy black/white/forcelist, via the ExtensionPrefs";
+#endif
 }
 
-bool ExtensionPrefs::UserMayLoad(const extensions::Extension* extension,
+bool ExtensionPrefs::UserMayLoad(const Extension* extension,
                                  string16* error) const {
 
   const base::ListValue* blacklist =
       prefs_->GetList(prefs::kExtensionInstallDenyList);
   const base::ListValue* whitelist =
       prefs_->GetList(prefs::kExtensionInstallAllowList);
-  return extensions::admin_policy::UserMayLoad(blacklist, whitelist, extension,
+  return admin_policy::UserMayLoad(blacklist, whitelist, extension,
                                                error);
 }
 
 bool ExtensionPrefs::UserMayModifySettings(const Extension* extension,
                                            string16* error) const {
-  return extensions::admin_policy::UserMayModifySettings(extension, error);
+  return admin_policy::UserMayModifySettings(extension, error);
 }
 
 bool ExtensionPrefs::MustRemainEnabled(const Extension* extension,
                                        string16* error) const {
-  return extensions::admin_policy::MustRemainEnabled(extension, error);
+  return admin_policy::MustRemainEnabled(extension, error);
 }
 
 bool ExtensionPrefs::ExtensionsBlacklistedByDefault() const {
-  return extensions::admin_policy::BlacklistedByDefault(
+  return admin_policy::BlacklistedByDefault(
       prefs_->GetList(prefs::kExtensionInstallDenyList));
 }
 
@@ -725,7 +717,7 @@ void ExtensionPrefs::UpdateBlacklist(
   if (extensions) {
     for (DictionaryValue::key_iterator extension_id = extensions->begin_keys();
          extension_id != extensions->end_keys(); ++extension_id) {
-      DictionaryValue* ext;
+      const DictionaryValue* ext;
       if (!extensions->GetDictionaryWithoutPathExpansion(*extension_id, &ext)) {
         NOTREACHED() << "Invalid pref for extension " << *extension_id;
         continue;
@@ -848,7 +840,7 @@ void ExtensionPrefs::SetActiveBit(const std::string& extension_id,
 }
 
 void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
-  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  PermissionsInfo* info = PermissionsInfo::GetInstance();
   for (ExtensionIdSet::const_iterator ext_id =
        extension_ids.begin(); ext_id != extension_ids.end(); ++ext_id) {
 
@@ -866,7 +858,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
 
     // Add the plugin permission if the full access bit was set.
     if (full_access) {
-      ListValue* apis = NULL;
+      const ListValue* apis = NULL;
       ListValue* new_apis = NULL;
 
       std::string granted_apis =
@@ -877,7 +869,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
         new_apis = new ListValue();
 
       std::string plugin_name = info->GetByID(
-          ExtensionAPIPermission::kPlugin)->name();
+          APIPermission::kPlugin)->name();
       new_apis->Append(Value::CreateStringValue(plugin_name));
       UpdateExtensionPref(*ext_id, granted_apis, new_apis);
     }
@@ -888,7 +880,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
     // does not matter how we treat the old effective hosts as long as the
     // new effective hosts will be the same, so we move them to explicit
     // host permissions.
-    ListValue* hosts;
+    const ListValue* hosts;
     std::string explicit_hosts =
         JoinPrefs(kPrefGrantedPermissions, kPrefExplicitHosts);
     if (ext->GetList(kPrefOldGrantedHosts, &hosts)) {
@@ -901,7 +893,7 @@ void ExtensionPrefs::MigratePermissions(const ExtensionIdSet& extension_ids) {
   }
 }
 
-ExtensionPermissionSet* ExtensionPrefs::GetGrantedPermissions(
+PermissionSet* ExtensionPrefs::GetGrantedPermissions(
     const std::string& extension_id) {
   CHECK(Extension::IdIsValid(extension_id));
   return ReadExtensionPrefPermissionSet(extension_id, kPrefGrantedPermissions);
@@ -909,23 +901,41 @@ ExtensionPermissionSet* ExtensionPrefs::GetGrantedPermissions(
 
 void ExtensionPrefs::AddGrantedPermissions(
     const std::string& extension_id,
-    const ExtensionPermissionSet* permissions) {
+    const PermissionSet* permissions) {
   CHECK(Extension::IdIsValid(extension_id));
 
-  scoped_refptr<ExtensionPermissionSet> granted_permissions(
+  scoped_refptr<PermissionSet> granted_permissions(
       GetGrantedPermissions(extension_id));
 
   // The new granted permissions are the union of the already granted
   // permissions and the newly granted permissions.
-  scoped_refptr<ExtensionPermissionSet> new_perms(
-      ExtensionPermissionSet::CreateUnion(
+  scoped_refptr<PermissionSet> new_perms(
+      PermissionSet::CreateUnion(
           permissions, granted_permissions.get()));
 
   SetExtensionPrefPermissionSet(
       extension_id, kPrefGrantedPermissions, new_perms.get());
 }
 
-ExtensionPermissionSet* ExtensionPrefs::GetActivePermissions(
+void ExtensionPrefs::RemoveGrantedPermissions(
+    const std::string& extension_id,
+    const PermissionSet* permissions) {
+  CHECK(Extension::IdIsValid(extension_id));
+
+  scoped_refptr<PermissionSet> granted_permissions(
+      GetGrantedPermissions(extension_id));
+
+  // The new granted permissions are the difference of the already granted
+  // permissions and the newly ungranted permissions.
+  scoped_refptr<PermissionSet> new_perms(
+      PermissionSet::CreateDifference(
+          granted_permissions.get(), permissions));
+
+  SetExtensionPrefPermissionSet(
+      extension_id, kPrefGrantedPermissions, new_perms.get());
+}
+
+PermissionSet* ExtensionPrefs::GetActivePermissions(
     const std::string& extension_id) {
   CHECK(Extension::IdIsValid(extension_id));
   return ReadExtensionPrefPermissionSet(extension_id, kPrefActivePermissions);
@@ -933,7 +943,7 @@ ExtensionPermissionSet* ExtensionPrefs::GetActivePermissions(
 
 void ExtensionPrefs::SetActivePermissions(
     const std::string& extension_id,
-    const ExtensionPermissionSet* permissions) {
+    const PermissionSet* permissions) {
   SetExtensionPrefPermissionSet(
       extension_id, kPrefActivePermissions, permissions);
 }
@@ -945,7 +955,7 @@ std::set<std::string> ExtensionPrefs::GetRegisteredEvents(
   if (!extension)
     return events;
 
-  ListValue* value = NULL;
+  const ListValue* value = NULL;
   if (!extension->GetList(kRegisteredEvents, &value))
     return events;
 
@@ -955,6 +965,59 @@ std::set<std::string> ExtensionPrefs::GetRegisteredEvents(
       events.insert(event);
   }
   return events;
+}
+
+void ExtensionPrefs::AddFilterToEvent(const std::string& event_name,
+                                      const std::string& extension_id,
+                                      const DictionaryValue* filter) {
+  ScopedExtensionPrefUpdate update(prefs_, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  DictionaryValue* filtered_events = NULL;
+  if (!extension_dict->GetDictionary(kFilteredEvents, &filtered_events)) {
+    filtered_events = new DictionaryValue;
+    extension_dict->Set(kFilteredEvents, filtered_events);
+  }
+  ListValue* filter_list = NULL;
+  if (!filtered_events->GetList(event_name, &filter_list)) {
+    filter_list = new ListValue;
+    filtered_events->SetWithoutPathExpansion(event_name, filter_list);
+  }
+
+  filter_list->Append(filter->DeepCopy());
+}
+
+void ExtensionPrefs::RemoveFilterFromEvent(const std::string& event_name,
+                                           const std::string& extension_id,
+                                           const DictionaryValue* filter) {
+  ScopedExtensionPrefUpdate update(prefs_, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  DictionaryValue* filtered_events = NULL;
+
+  if (!extension_dict->GetDictionary(kFilteredEvents, &filtered_events))
+    return;
+  ListValue* filter_list = NULL;
+  if (!filtered_events->GetListWithoutPathExpansion(event_name, &filter_list))
+    return;
+
+  for (size_t i = 0; i < filter_list->GetSize(); i++) {
+    DictionaryValue* filter;
+    CHECK(filter_list->GetDictionary(i, &filter));
+    if (filter->Equals(filter)) {
+      filter_list->Remove(i, NULL);
+      break;
+    }
+  }
+}
+
+const DictionaryValue* ExtensionPrefs::GetFilteredEvents(
+    const std::string& extension_id) const {
+  const DictionaryValue* extension = GetExtensionPref(extension_id);
+  if (!extension)
+    return NULL;
+  const DictionaryValue* result = NULL;
+  if (!extension->GetDictionary(kFilteredEvents, &result))
+    return NULL;
+  return result;
 }
 
 void ExtensionPrefs::SetRegisteredEvents(
@@ -967,12 +1030,12 @@ void ExtensionPrefs::SetRegisteredEvents(
   UpdateExtensionPref(extension_id, kRegisteredEvents, value);
 }
 
-extensions::ExtensionOmniboxSuggestion
+ExtensionOmniboxSuggestion
 ExtensionPrefs::GetOmniboxDefaultSuggestion(const std::string& extension_id) {
-  extensions::ExtensionOmniboxSuggestion suggestion;
+  ExtensionOmniboxSuggestion suggestion;
 
-  const base::DictionaryValue* extension = GetExtensionPref(extension_id);
-  base::DictionaryValue* dict = NULL;
+  const DictionaryValue* extension = GetExtensionPref(extension_id);
+  const DictionaryValue* dict = NULL;
   if (extension && extension->GetDictionary(kOmniboxDefaultSuggestion, &dict))
     suggestion.Populate(*dict, false);
 
@@ -981,7 +1044,7 @@ ExtensionPrefs::GetOmniboxDefaultSuggestion(const std::string& extension_id) {
 
 void ExtensionPrefs::SetOmniboxDefaultSuggestion(
     const std::string& extension_id,
-    const extensions::ExtensionOmniboxSuggestion& suggestion) {
+    const ExtensionOmniboxSuggestion& suggestion) {
   scoped_ptr<base::DictionaryValue> dict = suggestion.ToValue().Pass();
   UpdateExtensionPref(extension_id, kOmniboxDefaultSuggestion, dict.release());
 }
@@ -1095,6 +1158,121 @@ void ExtensionPrefs::SetLaunchType(const std::string& extension_id,
                                    LaunchType launch_type) {
   UpdateExtensionPref(extension_id, kPrefLaunchType,
       Value::CreateIntegerValue(static_cast<int>(launch_type)));
+}
+
+namespace {
+
+bool GetMediaGalleryPermissionFromDictionary(
+    const DictionaryValue* dict,
+    MediaGalleryPermission* out_permission) {
+  std::string string_id;
+  if (dict->GetString(kMediaGalleryIdKey, &string_id) &&
+      base::StringToUint64(string_id, &out_permission->pref_id) &&
+      dict->GetBoolean(kMediaGalleryHasPermissionKey,
+                       &out_permission->has_permission)) {
+    return true;
+  }
+  NOTREACHED();
+  return false;
+}
+
+void RemoveMediaGalleryPermissionsFromExtension(PrefService* prefs,
+                                                const std::string& extension_id,
+                                                MediaGalleryPrefId gallery_id) {
+  ScopedExtensionPrefUpdate update(prefs, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  ListValue* permissions = NULL;
+  if (!extension_dict->GetList(kMediaGalleriesPermissions, &permissions))
+    return;
+
+  for (ListValue::iterator it = permissions->begin();
+       it != permissions->end();
+       ++it) {
+    const DictionaryValue* dict = NULL;
+    if (!(*it)->GetAsDictionary(&dict))
+      continue;
+    MediaGalleryPermission perm;
+    if (!GetMediaGalleryPermissionFromDictionary(dict, &perm))
+      continue;
+    if (perm.pref_id == gallery_id) {
+      permissions->Erase(it, NULL);
+      return;
+    }
+  }
+}
+
+}  // namespace
+
+void ExtensionPrefs::SetMediaGalleryPermission(const std::string& extension_id,
+                                               MediaGalleryPrefId gallery,
+                                               bool has_access) {
+  ScopedExtensionPrefUpdate update(prefs_, extension_id);
+  DictionaryValue* extension_dict = update.Get();
+  ListValue* permissions = NULL;
+  if (!extension_dict->GetList(kMediaGalleriesPermissions, &permissions)) {
+    permissions = new ListValue;
+    extension_dict->Set(kMediaGalleriesPermissions, permissions);
+  } else {
+    // If the gallery is already in the list, update the permission.
+    for (ListValue::const_iterator it = permissions->begin();
+         it != permissions->end();
+         ++it) {
+      DictionaryValue* dict = NULL;
+      if (!(*it)->GetAsDictionary(&dict))
+        continue;
+      MediaGalleryPermission perm;
+      if (!GetMediaGalleryPermissionFromDictionary(dict, &perm))
+        continue;
+      if (perm.pref_id == gallery) {
+        dict->SetBoolean(kMediaGalleryHasPermissionKey, has_access);
+        return;
+      }
+    }
+  }
+
+  DictionaryValue* dict = new DictionaryValue;
+  dict->SetString(kMediaGalleryIdKey, base::Uint64ToString(gallery));
+  dict->SetBoolean(kMediaGalleryHasPermissionKey, has_access);
+  permissions->Append(dict);
+}
+
+std::vector<MediaGalleryPermission> ExtensionPrefs::GetMediaGalleryPermissions(
+        const std::string& extension_id) {
+  std::vector<MediaGalleryPermission> result;
+  const ListValue* permissions = NULL;
+  if (ReadExtensionPrefList(extension_id, kMediaGalleriesPermissions,
+                            &permissions)) {
+    for (ListValue::const_iterator it = permissions->begin();
+         it != permissions->end();
+         ++it) {
+      DictionaryValue* dict = NULL;
+      if (!(*it)->GetAsDictionary(&dict))
+        continue;
+      MediaGalleryPermission perm;
+      if (!GetMediaGalleryPermissionFromDictionary(dict, &perm))
+        continue;
+      result.push_back(perm);
+    }
+  }
+  return result;
+}
+
+void ExtensionPrefs::RemoveMediaGalleryPermissions(
+    MediaGalleryPrefId gallery_id) {
+  const DictionaryValue* extensions = prefs_->GetDictionary(kExtensionsPref);
+  if (!extensions)
+    return;
+
+  for (DictionaryValue::key_iterator it = extensions->begin_keys();
+       it != extensions->end_keys();
+       ++it) {
+    const std::string& id(*it);
+    if (!Extension::IdIsValid(id)) {
+      NOTREACHED();
+      continue;
+    }
+    RemoveMediaGalleryPermissionsFromExtension(prefs_, id, gallery_id);
+  }
 }
 
 bool ExtensionPrefs::DoesExtensionHaveState(
@@ -1231,7 +1409,7 @@ void ExtensionPrefs::SetExtensionState(const std::string& extension_id,
 }
 
 bool ExtensionPrefs::GetBrowserActionVisibility(const Extension* extension) {
-  bool action_box_enabled = extensions::switch_utils::IsActionBoxEnabled();
+  bool action_box_enabled = switch_utils::IsActionBoxEnabled();
   bool default_value = !action_box_enabled;
 
   const DictionaryValue* extension_prefs = GetExtensionPref(extension->id());
@@ -1253,7 +1431,7 @@ void ExtensionPrefs::SetBrowserActionVisibility(const Extension* extension,
   if (GetBrowserActionVisibility(extension) == visible)
     return;
 
-  bool action_box_enabled = extensions::switch_utils::IsActionBoxEnabled();
+  bool action_box_enabled = switch_utils::IsActionBoxEnabled();
   const char* browser_action_pref = action_box_enabled ? kBrowserActionPinned :
                                                          kBrowserActionVisible;
   UpdateExtensionPref(extension->id(), browser_action_pref,
@@ -1283,7 +1461,7 @@ void ExtensionPrefs::UpdateManifest(const Extension* extension) {
     const DictionaryValue* extension_dict = GetExtensionPref(extension->id());
     if (!extension_dict)
       return;
-    DictionaryValue* old_manifest = NULL;
+    const DictionaryValue* old_manifest = NULL;
     bool update_required =
         !extension_dict->GetDictionary(kPrefManifest, &old_manifest) ||
         !extension->manifest()->value()->Equals(old_manifest);
@@ -1333,7 +1511,7 @@ const DictionaryValue* ExtensionPrefs::GetExtensionPref(
   const DictionaryValue* dict = prefs_->GetDictionary(kExtensionsPref);
   if (!dict)
     return NULL;
-  DictionaryValue* extension = NULL;
+  const DictionaryValue* extension = NULL;
   dict->GetDictionary(extension_id, &extension);
   return extension;
 }
@@ -1465,7 +1643,7 @@ bool ExtensionPrefs::GetIdleInstallInfo(const std::string& extension_id,
 
   // Do all the reads from the prefs together, and don't do any assignment
   // to the out parameters unless all the reads succeed.
-  DictionaryValue* info = NULL;
+  const DictionaryValue* info = NULL;
   if (!extension_prefs->GetDictionary(kIdleInstallInfo, &info))
     return false;
 
@@ -1630,7 +1808,7 @@ ExtensionPrefs::ExtensionIdSet ExtensionPrefs::GetExtensionsFrom(
   ExtensionIdSet result;
   for (base::DictionaryValue::key_iterator it = extension_prefs->begin_keys();
        it != extension_prefs->end_keys(); ++it) {
-    DictionaryValue* ext;
+    const DictionaryValue* ext;
     if (!extension_prefs->GetDictionaryWithoutPathExpansion(*it, &ext)) {
       NOTREACHED() << "Invalid pref for extension " << *it;
       continue;
@@ -1665,7 +1843,7 @@ void ExtensionPrefs::LoadExtensionControlledPrefs(
   bool success = ScopeToPrefKey(scope, &scope_string);
   DCHECK(success);
   std::string key = extension_id + "." + scope_string;
-  DictionaryValue* preferences = NULL;
+  const DictionaryValue* preferences = NULL;
   // First try the regular lookup.
   const DictionaryValue* source_dict = prefs_->GetDictionary(kExtensionsPref);
   if (!source_dict->GetDictionary(key, &preferences))
@@ -1725,7 +1903,7 @@ void ExtensionPrefs::InitPrefStore(bool extensions_disabled) {
     // Set content settings.
     const DictionaryValue* extension_prefs = GetExtensionPref(*ext_id);
     DCHECK(extension_prefs);
-    ListValue* content_settings = NULL;
+    const ListValue* content_settings = NULL;
     if (extension_prefs->GetList(kPrefContentSettings,
                                  &content_settings)) {
       content_settings_store_->SetExtensionContentSettingFromList(
@@ -1806,14 +1984,14 @@ bool ExtensionPrefs::CanExtensionControlPref(const std::string& extension_id,
 
 bool ExtensionPrefs::DoesExtensionControlPref(const std::string& extension_id,
                                               const std::string& pref_key,
-                                              bool incognito) {
+                                              bool* from_incognito) {
   DCHECK(pref_service()->FindPreference(pref_key.c_str()))
       << "Extension controlled preference key " << pref_key
       << " not registered.";
 
   return extension_pref_value_map_->DoesExtensionControlPref(extension_id,
                                                              pref_key,
-                                                             incognito);
+                                                             from_incognito);
 }
 
 bool ExtensionPrefs::HasIncognitoPrefValue(const std::string& pref_key) {
@@ -1886,3 +2064,5 @@ void ExtensionPrefs::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterListPref(prefs::kExtensionAllowedInstallSites,
                           PrefService::UNSYNCABLE_PREF);
 }
+
+}  // namespace extensions

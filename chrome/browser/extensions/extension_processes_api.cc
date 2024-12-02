@@ -13,7 +13,7 @@
 #include "base/values.h"
 
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_util.h"
 #include "chrome/browser/extensions/extension_processes_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -489,7 +489,7 @@ void ExtensionProcessesEventRouter::DispatchEvent(
     const std::string& json_args) {
   if (profile && profile->GetExtensionEventRouter()) {
     profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-        event_name, json_args, NULL, GURL());
+        event_name, json_args, NULL, GURL(), extensions::EventFilteringInfo());
   }
 }
 
@@ -510,7 +510,7 @@ bool ExtensionProcessesEventRouter::HasEventListeners(std::string& event_name) {
   for (ProfileSet::iterator it = profiles_.begin();
        it != profiles_.end(); it++) {
     Profile* profile = *it;
-    ExtensionEventRouter* router = profile->GetExtensionEventRouter();
+    extensions::EventRouter* router = profile->GetExtensionEventRouter();
     if (!router)
       continue;
 
@@ -546,8 +546,7 @@ bool GetProcessIdForTabFunction::RunImpl() {
 
   return true;
 #else
-  error_ = ExtensionErrorUtils::FormatErrorMessage(
-      errors::kExtensionNotSupported);
+  error_ = errors::kExtensionNotSupported;
   return false;
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
@@ -569,11 +568,11 @@ void GetProcessIdForTabFunction::GetProcessIdForTab() {
     error_ = ExtensionErrorUtils::FormatErrorMessage(
         extensions::tabs_constants::kTabNotFoundError,
         base::IntToString(tab_id_));
-    result_.reset(Value::CreateIntegerValue(-1));
+    SetResult(Value::CreateIntegerValue(-1));
     SendResponse(false);
   } else {
     int process_id = contents->web_contents()->GetRenderProcessHost()->GetID();
-    result_.reset(Value::CreateIntegerValue(process_id));
+    SetResult(Value::CreateIntegerValue(process_id));
     SendResponse(true);
   }
 
@@ -607,8 +606,7 @@ bool TerminateFunction::RunImpl() {
 
   return true;
 #else
-  error_ = ExtensionErrorUtils::FormatErrorMessage(
-      errors::kExtensionNotSupported);
+  error_ = errors::kExtensionNotSupported;
   return false;
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
@@ -646,7 +644,7 @@ void TerminateFunction::TerminateProcess() {
         base::IntToString(process_id_));
     SendResponse(false);
   } else {
-    result_.reset(Value::CreateBooleanValue(killed));
+    SetResult(Value::CreateBooleanValue(killed));
     SendResponse(true);
   }
 
@@ -654,7 +652,7 @@ void TerminateFunction::TerminateProcess() {
   Release();
 }
 
-GetProcessInfoFunction::GetProcessInfoFunction() {
+GetProcessInfoFunction::GetProcessInfoFunction() : memory_(false) {
 }
 
 GetProcessInfoFunction::~GetProcessInfoFunction() {
@@ -692,8 +690,7 @@ bool GetProcessInfoFunction::RunImpl() {
   return true;
 
 #else
-  error_ = ExtensionErrorUtils::FormatErrorMessage(
-      errors::kExtensionNotSupported);
+  error_ = errors::kExtensionNotSupported;
   return false;
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
@@ -708,6 +705,7 @@ void GetProcessInfoFunction::Observe(
 }
 
 void GetProcessInfoFunction::GatherProcessInfo() {
+#if defined(ENABLE_TASK_MANAGER)
   TaskManagerModel* model = TaskManager::GetInstance()->model();
   DictionaryValue* processes = new DictionaryValue();
 
@@ -746,9 +744,10 @@ void GetProcessInfoFunction::GatherProcessInfo() {
     DCHECK(process_ids_.size() == 0);
   }
 
-  result_.reset(processes);
+  SetResult(processes);
   SendResponse(true);
 
   // Balance the AddRef in the RunImpl.
   Release();
+#endif  // defined(ENABLE_TASK_MANAGER)
 }

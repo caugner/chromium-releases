@@ -13,15 +13,15 @@
 #include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_socket.h"
 #include "chrome/browser/extensions/api/bluetooth/bluetooth_api_utils.h"
-#include "chrome/browser/extensions/extension_event_names.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/common/extensions/api/experimental_bluetooth.h"
 
 namespace chromeos {
 
 ExtensionBluetoothEventRouter::ExtensionBluetoothEventRouter(Profile* profile)
     : profile_(profile),
-      adapter_(chromeos::BluetoothAdapter::CreateDefaultAdapter()),
+      adapter_(chromeos::BluetoothAdapter::DefaultAdapter()),
       next_socket_id_(1) {
   DCHECK(profile_);
   DCHECK(adapter_.get());
@@ -69,18 +69,38 @@ void ExtensionBluetoothEventRouter::SetSendDiscoveryEvents(bool should_send) {
 
 void ExtensionBluetoothEventRouter::AdapterPresentChanged(
     chromeos::BluetoothAdapter* adapter, bool present) {
-  DCHECK(adapter == adapter_.get());
+  if (adapter != adapter_.get()) {
+    DVLOG(1) << "Ignoring event for adapter " << adapter->address();
+    return;
+  }
+
   DispatchBooleanValueEvent(
-      extension_event_names::kBluetoothOnAvailabilityChanged,
+      extensions::event_names::kBluetoothOnAvailabilityChanged,
       present);
 }
 
 void ExtensionBluetoothEventRouter::AdapterPoweredChanged(
     chromeos::BluetoothAdapter* adapter, bool has_power) {
-  DCHECK(adapter == adapter_.get());
+  if (adapter != adapter_.get()) {
+    DVLOG(1) << "Ignoring event for adapter " << adapter->address();
+    return;
+  }
+
   DispatchBooleanValueEvent(
-      extension_event_names::kBluetoothOnPowerChanged,
+      extensions::event_names::kBluetoothOnPowerChanged,
       has_power);
+}
+
+void ExtensionBluetoothEventRouter::AdapterDiscoveringChanged(
+    chromeos::BluetoothAdapter* adapter, bool discovering) {
+  if (adapter != adapter_.get()) {
+    DVLOG(1) << "Ignoring event for adapter " << adapter->address();
+    return;
+  }
+
+  DispatchBooleanValueEvent(
+      extensions::event_names::kBluetoothOnDiscoveringChanged,
+      discovering);
 }
 
 void ExtensionBluetoothEventRouter::DeviceAdded(
@@ -100,7 +120,7 @@ void ExtensionBluetoothEventRouter::DeviceAdded(
   base::JSONWriter::Write(&args, &json_args);
 
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
-      extension_event_names::kBluetoothOnDeviceDiscovered,
+      extensions::event_names::kBluetoothOnDeviceDiscovered,
       json_args,
       NULL,
       GURL());

@@ -8,6 +8,7 @@
 
 #include <GLES2/gl2ext.h>
 #include "gpu/command_buffer/client/client_test_helper.h"
+#include "gpu/command_buffer/client/program_info_manager.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/compiler_specific.h"
@@ -443,6 +444,12 @@ class GLES2ImplementationTest : public testing::Test {
 
   ExpectedMemoryInfo GetExpectedResultMemory(size_t size) {
     return transfer_buffer_->GetExpectedResultMemory(size);
+  }
+
+  // Sets the ProgramInfoManager. The manager will be owned
+  // by the ShareGroup.
+  void SetProgramInfoManager(ProgramInfoManager* manager) {
+    gl_->share_group()->set_program_info_manager(manager);
   }
 
   int CheckError() {
@@ -2294,9 +2301,9 @@ TEST_F(GLES2ImplementationTest, GetString) {
   // GLES2Implementation.
   const char* expected_str =
       "foobar "
-      "GL_CHROMIUM_map_sub "
       "GL_CHROMIUM_flipy "
-      "GL_CHROMIUM_consistent_uniform_locations "
+      "GL_CHROMIUM_map_sub "
+      "GL_CHROMIUM_shallow_flush "
       "GL_EXT_unpack_subimage";
   const char kBad = 0x12;
   struct Cmds {
@@ -2558,67 +2565,62 @@ TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
   EXPECT_EQ(0u, available);
 }
 
-TEST_F(GLES2ImplementationTest, GetUniformLocationsCHROMIUM) {
-  static const GLUniformDefinitionCHROMIUM good_defs[] = {
-    { GL_FLOAT_VEC4, 1, "moo", },
-    { GL_FLOAT_VEC4, 4, "bar", },
-    { GL_FLOAT_VEC4, 3, "foo", },
+TEST_F(GLES2ImplementationTest, ErrorQuery) {
+  GLuint id = 0;
+  gl_->GenQueriesEXT(1, &id);
+  ClearCommands();
+
+  // Test BeginQueryEXT does NOT insert commands.
+  gl_->BeginQueryEXT(GL_GET_ERROR_QUERY_CHROMIUM, id);
+  EXPECT_TRUE(NoCommandsWritten());
+  QueryTracker::Query* query = GetQuery(id);
+  ASSERT_TRUE(query != NULL);
+
+  // Test EndQueryEXT sends both begin and end command
+  struct EndCmds {
+    BeginQueryEXT begin_query;
+    EndQueryEXT end_query;
   };
+  EndCmds expected_end_cmds;
+  expected_end_cmds.begin_query.Init(
+      GL_GET_ERROR_QUERY_CHROMIUM, id, query->shm_id(), query->shm_offset());
+  expected_end_cmds.end_query.Init(
+      GL_GET_ERROR_QUERY_CHROMIUM, query->submit_count());
+  const void* commands = GetPut();
+  gl_->EndQueryEXT(GL_GET_ERROR_QUERY_CHROMIUM);
+  EXPECT_EQ(0, memcmp(
+      &expected_end_cmds, commands, sizeof(expected_end_cmds)));
+  ClearCommands();
 
-  static const GLUniformDefinitionCHROMIUM bad_defs[] = {
-    { GL_FLOAT_VEC4, 1, "moo", },
-    { GL_FLOAT_VEC4, 0, "bar", },
-    { GL_FLOAT_VEC4, 3, "foo", },
-  };
+  // Check result is not yet available.
+  GLuint available = 0xBDu;
+  gl_->GetQueryObjectuivEXT(id, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(0u, available);
 
-  // Test bad count
-  GLint locations[50] = { -1, };
-  gl_->GetUniformLocationsCHROMIUM(bad_defs, 0, 1, locations);
-  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
-  EXPECT_EQ(-1, locations[0]);
+  // Test no commands are sent if there is a client side error.
 
-  // Test bad size.
-  gl_->GetUniformLocationsCHROMIUM(
-      bad_defs, arraysize(bad_defs), 1, locations);
-  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
-  EXPECT_EQ(-1, locations[0]);
+  // Generate a client side error
+  gl_->ActiveTexture(GL_TEXTURE0 - 1);
 
-  // Test max_locations
-  gl_->GetUniformLocationsCHROMIUM(
-      good_defs, arraysize(good_defs), 3, locations);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(2, 0)),
-            locations[0]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 0)),
-            locations[1]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 1)),
-            locations[2]);
-  EXPECT_EQ(0, locations[3]);
+  gl_->BeginQueryEXT(GL_GET_ERROR_QUERY_CHROMIUM, id);
+  gl_->EndQueryEXT(GL_GET_ERROR_QUERY_CHROMIUM);
+  EXPECT_TRUE(NoCommandsWritten());
 
-  // Test all.
-  gl_->GetUniformLocationsCHROMIUM(
-      good_defs, arraysize(good_defs), arraysize(locations), locations);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(2, 0)),
-            locations[0]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 0)),
-            locations[1]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 1)),
-            locations[2]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 2)),
-            locations[3]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(0, 3)),
-            locations[4]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 0)),
-            locations[5]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 1)),
-            locations[6]);
-  EXPECT_EQ(GLES2Util::SwizzleLocation(GLES2Util::MakeFakeLocation(1, 2)),
-            locations[7]);
-  EXPECT_EQ(0, locations[8]);
+  // Check result is available.
+  gl_->GetQueryObjectuivEXT(id, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_NE(0u, available);
+
+  // Check result.
+  GLuint result = 0xBDu;
+  gl_->GetQueryObjectuivEXT(id, GL_QUERY_RESULT_EXT, &result);
+  EXPECT_TRUE(NoCommandsWritten());
+  EXPECT_EQ(static_cast<GLuint>(GL_INVALID_ENUM), result);
 }
 
 #include "gpu/command_buffer/client/gles2_implementation_unittest_autogen.h"
 
 }  // namespace gles2
 }  // namespace gpu
-
 

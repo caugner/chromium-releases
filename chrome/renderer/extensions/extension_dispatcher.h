@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_EXTENSION_DISPATCHER_H_
 #define CHROME_RENDERER_EXTENSIONS_EXTENSION_DISPATCHER_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -13,6 +12,7 @@
 #include "base/shared_memory.h"
 #include "base/timer.h"
 #include "content/public/renderer/render_process_observer.h"
+#include "chrome/common/extensions/event_filter.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/extensions/features/feature.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
@@ -25,8 +25,12 @@ class ExtensionRequestSender;
 class GURL;
 class ModuleSystem;
 class URLPattern;
-class UserScriptSlave;
 struct ExtensionMsg_Loaded_Params;
+
+namespace extensions {
+class FilteredEventRouter;
+class UserScriptSlave;
+}
 
 namespace WebKit {
 class WebFrame;
@@ -60,7 +64,9 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   const ChromeV8ContextSet& v8_context_set() const {
     return v8_context_set_;
   }
-  UserScriptSlave* user_script_slave() { return user_script_slave_.get(); }
+  extensions::UserScriptSlave* user_script_slave() {
+    return user_script_slave_.get();
+  }
   extensions::V8SchemaRegistry* v8_schema_registry() {
     return &v8_schema_registry_;
   }
@@ -71,7 +77,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // specified |frame| and isolated world. If |world_id| is zero, finds the
   // extension ID associated with the main world's JavaScript context. If the
   // JavaScript context isn't from an extension, returns empty string.
-  std::string GetExtensionID(WebKit::WebFrame* frame, int world_id);
+  std::string GetExtensionID(const WebKit::WebFrame* frame, int world_id);
 
   // See WebKit::WebPermissionClient::allowScriptExtension
   // TODO(koz): Remove once WebKit no longer calls this.
@@ -150,7 +156,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   void OnActivateExtension(const std::string& extension_id);
   void OnUpdatePermissions(int reason_id,
                            const std::string& extension_id,
-                           const ExtensionAPIPermissionSet& apis,
+                           const extensions::APIPermissionSet& apis,
                            const URLPatternSet& explicit_hosts,
                            const URLPatternSet& scriptable_hosts);
   void OnUpdateTabSpecificPermissions(int page_id,
@@ -167,6 +173,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
       bool other_webrequest);
   void OnShouldUnload(const std::string& extension_id, int sequence_id);
   void OnUnload(const std::string& extension_id);
+  void OnCancelUnload(const std::string& extension_id);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -196,6 +203,10 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                        v8::Handle<v8::Context> v8_context,
                        const std::string& api);
 
+  // Determeines whether |frame| is being run inside a platform app
+  // (this evaluates to true for iframes in platform apps).
+  bool IsWithinPlatformApp(const WebKit::WebFrame* frame);
+
   // Returns the Feature::Context type of context for a JavaScript context.
   extensions::Feature::Context ClassifyJavaScriptContext(
       const std::string& extension_id,
@@ -214,7 +225,7 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // There is zero or one for each v8 context.
   ChromeV8ContextSet v8_context_set_;
 
-  scoped_ptr<UserScriptSlave> user_script_slave_;
+  scoped_ptr<extensions::UserScriptSlave> user_script_slave_;
 
   // Same as above, but on a longer timer and will run even if the process is
   // not idle, to ensure that IdleHandle gets called eventually.

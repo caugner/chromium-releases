@@ -22,9 +22,11 @@
 #include "chrome/common/pepper_flash.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/url_constants.h"
 #include "grit/common_resources.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
@@ -38,7 +40,7 @@
 #if defined(OS_WIN)
 #include "base/win/registry.h"
 #include "base/win/windows_version.h"
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
 #elif defined(OS_MACOSX)
 #include "chrome/common/chrome_sandbox_type_mac.h"
 #endif
@@ -51,11 +53,15 @@ const char kPDFPluginExtension[] = "pdf";
 const char kPDFPluginDescription[] = "Portable Document Format";
 const char kPDFPluginPrintPreviewMimeType
    [] = "application/x-google-chrome-print-preview-pdf";
+const uint32 kPDFPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                     ppapi::PERMISSION_DEV;
 
 const char kNaClPluginName[] = "Native Client";
 const char kNaClPluginMimeType[] = "application/x-nacl";
 const char kNaClPluginExtension[] = "nexe";
 const char kNaClPluginDescription[] = "Native Client Executable";
+const uint32 kNaClPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                      ppapi::PERMISSION_DEV;
 
 const char kNaClOldPluginName[] = "Chrome NaCl";
 
@@ -69,14 +75,28 @@ const char kGTalkPluginMimeType[] ="application/googletalk";
 const char kGTalkPluginExtension[] = ".googletalk";
 const char kGTalkPluginDescription[] = "Google Talk Plugin";
 
+const char kInterposeLibraryPath[] =
+    "@executable_path/../../../libplugin_carbon_interpose.dylib";
+
 #if defined(ENABLE_REMOTING)
-const char kRemotingViewerPluginName[] = "Remoting Viewer";
+#if defined(GOOGLE_CHROME_BUILD)
+const char kRemotingViewerPluginName[] = "Chrome Remote Desktop Viewer";
+#else
+const char kRemotingViewerPluginName[] = "Chromoting Viewer";
+#endif  // defined(GOOGLE_CHROME_BUILD)
+const char kRemotingViewerPluginDescription[] =
+    "This plugin allows you to securely access other computers that have been "
+    "shared with you. To use this plugin you must first install the "
+    "<a href=\"https://chrome.google.com/remotedesktop\">"
+    "Chrome Remote Desktop</a> webapp.";
 const FilePath::CharType kRemotingViewerPluginPath[] =
     FILE_PATH_LITERAL("internal-remoting-viewer");
 // Use a consistent MIME-type regardless of branding.
 const char kRemotingViewerPluginMimeType[] =
     "application/vnd.chromium.remoting-viewer";
-#endif
+const char kRemotingViewerPluginMimeExtension[] = "";
+const char kRemotingViewerPluginMimeDescription[] = "";
+#endif  // defined(ENABLE_REMOTING)
 
 // Appends the known built-in plugins to the given vector. Some built-in
 // plugins are "internal" which means they are compiled into the Chrome binary,
@@ -106,6 +126,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
           kPDFPluginDescription);
       pdf.mime_types.push_back(pdf_mime_type);
       pdf.mime_types.push_back(print_preview_pdf_mime_type);
+      pdf.permissions = kPDFPluginPermissions;
       plugins->push_back(pdf);
 
       skip_pdf_file_check = true;
@@ -126,6 +147,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
                                                kNaClPluginExtension,
                                                kNaClPluginDescription);
       nacl.mime_types.push_back(nacl_mime_type);
+      nacl.permissions = kNaClPluginPermissions;
       plugins->push_back(nacl);
 
       skip_nacl_file_check = true;
@@ -173,11 +195,12 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   content::PepperPluginInfo info;
   info.is_internal = true;
   info.name = kRemotingViewerPluginName;
+  info.description = kRemotingViewerPluginDescription;
   info.path = FilePath(kRemotingViewerPluginPath);
   webkit::WebPluginMimeType remoting_mime_type(
       kRemotingViewerPluginMimeType,
-      std::string(),
-      std::string());
+      kRemotingViewerPluginMimeExtension,
+      kRemotingViewerPluginMimeDescription);
   info.mime_types.push_back(remoting_mime_type);
   info.internal_entry_points.get_interface = remoting::PPP_GetInterface;
   info.internal_entry_points.initialize_module =
@@ -198,6 +221,7 @@ content::PepperPluginInfo CreatePepperFlashInfo(const FilePath& path,
       switches::kPpapiFlashInProcess);
   plugin.name = kFlashPluginName;
   plugin.path = path;
+  plugin.permissions = kPepperFlashPermissions;
 
   std::vector<std::string> flash_version_numbers;
   base::SplitString(version, '.', &flash_version_numbers);
@@ -410,6 +434,12 @@ std::string ChromeContentClient::GetUserAgent() const {
   chrome::VersionInfo version_info;
   std::string product("Chrome/");
   product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
+#if defined(OS_ANDROID)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kUseMobileUserAgent)) {
+    product += " Mobile";
+  }
+#endif
   return webkit_glue::BuildUserAgentFromProduct(product);
 }
 
@@ -435,7 +465,7 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
       GetSwitchValueNative(switches::kPluginPath);
 
   FilePath builtin_flash;
-  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN, &builtin_flash))
+  if (!PathService::Get(chrome::FILE_FLASH_PLUGIN_EXISTING, &builtin_flash))
     return false;
 
   FilePath plugin_path(plugin_dll);
@@ -502,6 +532,10 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
     return true;
   }
   return false;
+}
+
+std::string ChromeContentClient::GetCarbonInterposePath() const {
+  return std::string(kInterposeLibraryPath);
 }
 #endif
 

@@ -56,6 +56,11 @@ void MockPluginDelegate::InstanceCreated(PluginInstance* instance) {
 void MockPluginDelegate::InstanceDeleted(PluginInstance* instance) {
 }
 
+scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>
+MockPluginDelegate::CreateResourceCreationAPI(PluginInstance* instance) {
+  return scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>();
+}
+
 SkBitmap* MockPluginDelegate::GetSadPluginBitmap() {
   return NULL;
 }
@@ -125,12 +130,6 @@ void MockPluginDelegate::NumberOfFindResultsChanged(int identifier,
 void MockPluginDelegate::SelectedFindResultChanged(int identifier, int index) {
 }
 
-bool MockPluginDelegate::RunFileChooser(
-    const WebKit::WebFileChooserParams& params,
-    WebKit::WebFileChooserCompletion* chooser_completion) {
-  return false;
-}
-
 bool MockPluginDelegate::AsyncOpenFile(const FilePath& path,
                                        int flags,
                                        const AsyncOpenFileCallback& callback) {
@@ -138,12 +137,14 @@ bool MockPluginDelegate::AsyncOpenFile(const FilePath& path,
 }
 
 bool MockPluginDelegate::AsyncOpenFileSystemURL(
-    const GURL& path, int flags, const AsyncOpenFileCallback& callback) {
+    const GURL& path,
+    int flags,
+    const AsyncOpenFileSystemURLCallback& callback) {
   return false;
 }
 
 bool MockPluginDelegate::OpenFileSystem(
-    const GURL& url,
+    const GURL& origin_url,
     fileapi::FileSystemType type,
     long long size,
     fileapi::FileSystemCallbackDispatcher* dispatcher) {
@@ -457,6 +458,12 @@ MockPluginDelegate::CreateClipboardClient() const {
 
 std::string MockPluginDelegate::GetDeviceID() {
   return std::string();
+}
+
+PP_FlashLSORestrictions MockPluginDelegate::GetLocalDataRestrictions(
+    const GURL& document_url,
+    const GURL& plugin_url) {
+  return PP_FLASHLSORESTRICTIONS_NONE;
 }
 
 }  // namespace ppapi

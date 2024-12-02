@@ -95,7 +95,7 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 - (void)openURLForNode:(const BookmarkNode*)node {
   Browser* browser = browser::FindTabbedBrowser(bridge_->GetProfile(), true);
   if (!browser)
-    browser = Browser::Create(bridge_->GetProfile());
+    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
   OpenURLParams params(
@@ -114,14 +114,13 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 
   Browser* browser = browser::FindTabbedBrowser(bridge_->GetProfile(), true);
   if (!browser)
-    browser = Browser::Create(bridge_->GetProfile());
+    browser = new Browser(Browser::CreateParams(bridge_->GetProfile()));
   DCHECK(browser);
 
   if (!node || !browser)
     return; // shouldn't be reached
 
-  bookmark_utils::OpenAll(NULL, browser->profile(), browser, node,
-                          disposition);
+  bookmark_utils::OpenAll(NULL, browser, node, disposition);
 
   if (disposition == NEW_FOREGROUND_TAB) {
     content::RecordAction(UserMetricsAction("OpenAllBookmarks"));

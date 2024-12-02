@@ -34,7 +34,6 @@
 
 #ifndef CHROME_BROWSER_SIGNIN_TOKEN_SERVICE_H_
 #define CHROME_BROWSER_SIGNIN_TOKEN_SERVICE_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -93,6 +92,18 @@ class TokenService : public GaiaAuthConsumer,
    private:
     std::string service_;
     GoogleServiceAuthError error_;
+  };
+
+  class CredentialsUpdatedDetails {
+   public:
+    CredentialsUpdatedDetails(const std::string& lsid,
+                              const std::string& sid)
+        : lsid_(lsid), sid_(sid) {}
+    const std::string& lsid() const { return lsid_; }
+    const std::string& sid() const { return sid_; }
+   private:
+    std::string lsid_;
+    std::string sid_;
   };
 
   // Initialize this token service with a request source
@@ -182,6 +193,9 @@ class TokenService : public GaiaAuthConsumer,
   // Gets the list of all service names for which tokens will be retrieved.
   // This method is meant only for tests.
   static void GetServiceNamesForTesting(std::vector<std::string>* names);
+
+  void FireCredentialsUpdatedNotification(const std::string& lsid,
+                                          const std::string& sid);
 
   void FireTokenAvailableNotification(const std::string& service,
                                       const std::string& auth_token);

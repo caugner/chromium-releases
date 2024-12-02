@@ -9,7 +9,6 @@
 #endif
 
 #include "base/debug/trace_event.h"
-#include "base/environment.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
@@ -30,7 +29,11 @@
 
 #if defined(OS_WIN)
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
-#include "sandbox/src/sandbox.h"
+#include "sandbox/win/src/sandbox.h"
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+#include "content/common/gpu/media/omx_video_decode_accelerator.h"
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+#include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
 #endif
 
 #if defined(USE_X11)
@@ -40,6 +43,11 @@
 #if defined(OS_LINUX)
 #include "content/public/common/sandbox_init.h"
 #endif
+
+namespace {
+void WarmUpSandbox(const content::GPUInfo&, bool);
+void CollectGraphicsInfo(content::GPUInfo*);
+}
 
 // Main function for starting the Gpu process.
 int GpuMain(const content::MainFunctionParams& parameters) {
@@ -89,20 +97,28 @@ int GpuMain(const content::MainFunctionParams& parameters) {
   success = base::HexStringToInt(
       command_line.GetSwitchValueASCII(switches::kGpuDeviceID),
       reinterpret_cast<int*>(&(gpu_info.gpu.device_id)));
+  DCHECK(success);
+  gpu_info.driver_vendor =
+      command_line.GetSwitchValueASCII(switches::kGpuDriverVendor);
   gpu_info.driver_version =
       command_line.GetSwitchValueASCII(switches::kGpuDriverVersion);
   content::GetContentClient()->SetGpuInfo(gpu_info);
 
+  // We need to track that information for the WarmUpSandbox function.
+  bool initialized_gl_context = false;
   // Load and initialize the GL implementation and locate the GL entry points.
   if (gfx::GLSurface::InitializeOneOff()) {
 #if defined(OS_LINUX)
     // We collect full GPU info on demand in Win/Mac, i.e., when about:gpu
     // page opens.  This is because we can make blacklist decisions based on
     // preliminary GPU info.
-    // However, on Linux, blacklist decisions are based on full GPU info.
-    if (!gpu_info_collector::CollectGraphicsInfo(&gpu_info))
-      VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
-    content::GetContentClient()->SetGpuInfo(gpu_info);
+    // However, on Linux, we may not have enough info for blacklisting.
+    if (!gpu_info.gpu.vendor_id || !gpu_info.gpu.device_id ||
+        gpu_info.driver_vendor.empty() || gpu_info.driver_version.empty()) {
+      CollectGraphicsInfo(&gpu_info);
+      // We know that CollectGraphicsInfo will initialize a GLContext.
+      initialized_gl_context = true;
+    }
 
 #if !defined(OS_CHROMEOS)
     if (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA
@@ -124,19 +140,10 @@ int GpuMain(const content::MainFunctionParams& parameters) {
   }
 
   {
-    TRACE_EVENT0("gpu", "Warm up rand");
-    // Warm up the random subsystem, which needs to be done pre-sandbox on all
-    // platforms.
-    (void) base::RandUint64();
-  }
-  {
-    TRACE_EVENT0("gpu", "Warm up HMAC");
-    // Warm up the crypto subsystem, which needs to done pre-sandbox on all
-    // platforms.
-    crypto::HMAC hmac(crypto::HMAC::SHA256);
-    unsigned char key = '\0';
-    bool ret = hmac.Init(&key, sizeof(key));
-    (void) ret;
+    const bool should_initialize_gl_context = !initialized_gl_context &&
+                                              !dead_on_arrival;
+    // Warm up the current process before enabling the sandbox.
+    WarmUpSandbox(gpu_info, should_initialize_gl_context);
   }
 
 #if defined(OS_LINUX)
@@ -156,24 +163,7 @@ int GpuMain(const content::MainFunctionParams& parameters) {
   }
 #endif
 
-  {
-    TRACE_EVENT0("gpu", "Initialize COM");
-    base::win::ScopedCOMInitializer com_initializer;
-  }
-
 #if defined(OS_WIN)
-  {
-    TRACE_EVENT0("gpu", "Preload setupapi.dll");
-    // Preload this DLL because the sandbox prevents it from loading.
-    LoadLibrary(L"setupapi.dll");
-  }
-
-  {
-    TRACE_EVENT0("gpu", "Initialize DXVA");
-    // Initialize H/W video decoding stuff which fails in the sandbox.
-    DXVAVideoDecodeAccelerator::PreSandboxInitialization();
-  }
-
   {
     TRACE_EVENT0("gpu", "Lower token");
     // For windows, if the target_services interface is not zero, the process
@@ -220,3 +210,94 @@ int GpuMain(const content::MainFunctionParams& parameters) {
 
   return 0;
 }
+
+namespace {
+
+void CreateDummyGlContext() {
+  scoped_refptr<gfx::GLSurface> surface(
+      gfx::GLSurface::CreateOffscreenGLSurface(false, gfx::Size(1, 1)));
+  if (!surface.get()) {
+    VLOG(1) << "gfx::GLSurface::CreateOffscreenGLSurface failed";
+    return;
+  }
+
+  // On Linux, this is needed to make sure /dev/nvidiactl has
+  // been opened and its descriptor cached.
+  scoped_refptr<gfx::GLContext> context(
+      gfx::GLContext::CreateGLContext(NULL,
+                                      surface,
+                                      gfx::PreferDiscreteGpu));
+  if (!context.get()) {
+    VLOG(1) << "gfx::GLContext::CreateGLContext failed";
+    return;
+  }
+
+  // Similarly, this is needed for /dev/nvidia0.
+  if (context->MakeCurrent(surface)) {
+    context->ReleaseCurrent(surface.get());
+  } else {
+    VLOG(1)  << "gfx::GLContext::MakeCurrent failed";
+  }
+}
+
+void WarmUpSandbox(const content::GPUInfo& gpu_info,
+                   bool should_initialize_gl_context) {
+  {
+    TRACE_EVENT0("gpu", "Warm up rand");
+    // Warm up the random subsystem, which needs to be done pre-sandbox on all
+    // platforms.
+    (void) base::RandUint64();
+  }
+  {
+    TRACE_EVENT0("gpu", "Warm up HMAC");
+    // Warm up the crypto subsystem, which needs to done pre-sandbox on all
+    // platforms.
+    crypto::HMAC hmac(crypto::HMAC::SHA256);
+    unsigned char key = '\0';
+    bool ret = hmac.Init(&key, sizeof(key));
+    (void) ret;
+  }
+
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+  OmxVideoDecodeAccelerator::PreSandboxInitialization();
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+  VaapiVideoDecodeAccelerator::PreSandboxInitialization();
+#endif
+
+#if defined(OS_LINUX)
+  if (gpu_info.gpu.vendor_id == 0x10de &&  // NVIDIA
+      gpu_info.driver_vendor == "NVIDIA" &&
+      should_initialize_gl_context) {
+    // We need this on Nvidia to pre-open /dev/nvidiactl and /dev/nvidia0.
+    CreateDummyGlContext();
+  }
+#endif
+
+  {
+    TRACE_EVENT0("gpu", "Initialize COM");
+    base::win::ScopedCOMInitializer com_initializer;
+  }
+
+#if defined(OS_WIN)
+  {
+    TRACE_EVENT0("gpu", "Preload setupapi.dll");
+    // Preload this DLL because the sandbox prevents it from loading.
+    LoadLibrary(L"setupapi.dll");
+  }
+
+  {
+    TRACE_EVENT0("gpu", "Initialize DXVA");
+    // Initialize H/W video decoding stuff which fails in the sandbox.
+    DXVAVideoDecodeAccelerator::PreSandboxInitialization();
+  }
+#endif
+}
+
+void CollectGraphicsInfo(content::GPUInfo* gpu_info) {
+  if (!gpu_info_collector::CollectGraphicsInfo(gpu_info))
+    VLOG(1) << "gpu_info_collector::CollectGraphicsInfo failed";
+  content::GetContentClient()->SetGpuInfo(*gpu_info);
+}
+
+}  // namespace.
+

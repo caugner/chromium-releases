@@ -4,12 +4,15 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_APP_APP_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_APP_APP_API_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
 
 class Profile;
 class GURL;
+
+namespace webkit_glue {
+struct WebIntentData;
+}
 
 namespace extensions {
 
@@ -60,7 +63,15 @@ class AppEventRouter {
       const Extension* extension,
       const string16& action,
       const std::string& file_system_id,
-      const FilePath& base_name);
+      const std::string& base_name);
+
+  // Dispatches the onLaunched event to the app implemented by |extension|
+  // running in |profile|. The event parameter launchData will have a field
+  // called intent, populated by |web_intent_data|.
+  static void DispatchOnLaunchedEventWithWebIntent(
+      Profile* profile,
+      const Extension* extension,
+      const webkit_glue::WebIntentData web_intent_data);
 };
 
 }  // namespace extensions

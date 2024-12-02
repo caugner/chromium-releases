@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PREDICTORS_PREDICTOR_TABLE_BASE_H_
 #define CHROME_BROWSER_PREDICTORS_PREDICTOR_TABLE_BASE_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/cancellation_flag.h"
@@ -29,14 +28,15 @@ class PredictorTableBase
   virtual void CreateTableIfNonExistent() = 0;
   virtual void LogDatabaseStats() = 0;
   void Initialize(sql::Connection* db);
+  void SetCancelled();
   sql::Connection* DB();
   void ResetDB();
 
   bool CantAccessDatabase();
 
+ private:
   base::CancellationFlag cancelled_;
 
- private:
   friend class base::RefCountedThreadSafe<PredictorTableBase>;
 
   sql::Connection* db_;

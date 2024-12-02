@@ -6,6 +6,11 @@
 
 namespace switches {
 
+// Whether or not ImageSkiaOperations methods can scale one of images
+// if they don't have the same scale factor.
+const char kDisableScalingInImageSkiaOperations[] =
+    "disable-scaling-in-image-skia-operations";
+
 // Let text glyphs have X-positions that aren't snapped to the pixel grid.
 const char kEnableTextSubpixelPositioning[] =
     "enable-text-subpixel-positioning";
@@ -42,8 +47,8 @@ const char kLoad2xResources[] = "load-2x-resources";
 // path should point to a locale.pak file.
 const char kLocalePak[] = "locale_pak";
 
-// Enables a new appearance for checkboxes and radio buttons.
-const char kNewCheckboxStyle[]           = "new-checkbox-style";
+// Disables the new appearance for checkboxes and radio buttons.
+const char kOldCheckboxStyle[]           = "old-checkbox-style";
 
 // Disable ui::MessageBox. This is useful when running as part of scripts that
 // do not have a user interface.

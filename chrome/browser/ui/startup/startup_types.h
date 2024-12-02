@@ -4,9 +4,8 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_STARTUP_TYPES_H_
 #define CHROME_BROWSER_UI_STARTUP_STARTUP_TYPES_H_
-#pragma once
 
-namespace browser {
+namespace chrome {
 namespace startup {
 
 enum IsProcessStartup {
@@ -17,6 +16,7 @@ enum IsProcessStartup {
   IS_PROCESS_STARTUP        // Session is being created when the Chrome process
                             // is not already running.
 };
+
 enum IsFirstRun {
   IS_NOT_FIRST_RUN,         // Session is being created after Chrome has already
                             // been run at least once on the system.
@@ -25,6 +25,6 @@ enum IsFirstRun {
 };
 
 }  // namespace startup
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_STARTUP_STARTUP_TYPES_H_

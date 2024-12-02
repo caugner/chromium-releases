@@ -4,7 +4,6 @@
 
 #ifndef ASH_ACCELERATORS_ACCELERATOR_DISPATCHER_H_
 #define ASH_ACCELERATORS_ACCELERATOR_DISPATCHER_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "base/message_loop.h"
@@ -22,8 +21,8 @@ namespace ash {
 class ASH_EXPORT AcceleratorDispatcher : public MessageLoop::Dispatcher,
                                          public aura::WindowObserver {
  public:
-  explicit AcceleratorDispatcher(MessageLoop::Dispatcher* nested_dispatcher,
-                                 aura::Window* associated_window);
+  AcceleratorDispatcher(MessageLoop::Dispatcher* nested_dispatcher,
+                        aura::Window* associated_window);
   virtual ~AcceleratorDispatcher();
 
   // MessageLoop::Dispatcher overrides:

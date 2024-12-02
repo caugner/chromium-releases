@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_DOM_STORAGE_DOM_STORAGE_CONTEXT_IMPL_H_
 #define CONTENT_BROWSER_DOM_STORAGE_DOM_STORAGE_CONTEXT_IMPL_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -28,6 +27,8 @@ class CONTENT_EXPORT DOMStorageContextImpl :
   // DOMStorageContext implementation.
   virtual void GetUsageInfo(const GetUsageInfoCallback& callback) OVERRIDE;
   virtual void DeleteOrigin(const GURL& origin) OVERRIDE;
+  virtual scoped_refptr<content::SessionStorageNamespace>
+      RecreateSessionStorage(const std::string& persistent_id) OVERRIDE;
 
   // Called to free up memory that's not strictly needed.
   void PurgeMemory();

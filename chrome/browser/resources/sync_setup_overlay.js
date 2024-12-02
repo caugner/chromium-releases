@@ -64,6 +64,10 @@ cr.define('options', function() {
       $('confirm-everything-ok').onclick = function() {
         self.sendConfiguration_();
       };
+      $('timeout-ok').onclick = function() {
+        chrome.send('CloseTimeout');
+        self.closeOverlay_();
+      };
       $('stop-syncing-ok').onclick = function() {
         chrome.send('SyncSetupStopSyncing');
         self.closeOverlay_();
@@ -416,6 +420,11 @@ cr.define('options', function() {
       this.setThrobbersVisible_(true);
     },
 
+    showTimeoutPage_: function() {
+      this.resetPage_('sync-setup-timeout');
+      $('sync-setup-timeout').hidden = false;
+    },
+
     showSyncEverythingPage_: function() {
       $('confirm-sync-preferences').hidden = false;
       $('customize-sync-preferences').hidden = true;
@@ -544,6 +553,8 @@ cr.define('options', function() {
         this.showConfigure_(args);
       else if (page == 'spinner')
         this.showSpinner_();
+      else if (page == 'timeout')
+        this.showTimeoutPage_();
     },
 
     /**
@@ -682,6 +693,7 @@ cr.define('options', function() {
       this.resetPage_('sync-setup-login');
       $('sync-setup-login').hidden = false;
       this.allowEmptyPassword_ = false;
+      this.captchaChallengeActive_ = false;
 
       var f = $('gaia-login-form');
       var email = $('gaia-email');
@@ -702,6 +714,7 @@ cr.define('options', function() {
         }
 
         f.accessCode.disabled = true;
+        f.otp.disabled = true;
       }
 
       if (1 == args.error) {
@@ -709,7 +722,7 @@ cr.define('options', function() {
           $('errormsg-0-access-code').hidden = false;
           this.showAccessCodeRequired_();
         } else {
-          $('errormsg-1-password').hidden = false;
+          $('errormsg-1-password').hidden = (args.errorMessage != undefined);
         }
         this.setBlurbError_(args.errorMessage);
       } else if (3 == args.error) {
@@ -794,6 +807,7 @@ cr.define('options', function() {
         this.setBlurbError_();
         return false;
       }
+
       if (!f.accessCode.disabled && !f.accessCode.value) {
         $('errormsg-0-access-code').hidden = false;
         return false;
@@ -803,6 +817,11 @@ cr.define('options', function() {
           $('asp-warning-div').hidden) {
         $('asp-warning-div').hidden = false;
         $('gaia-passwd').value = '';
+        return false;
+      }
+
+      if (!f.otp.disabled && !f.otp.value) {
+        $('errormsg-0-otp').hidden = false;
         return false;
       }
 
@@ -882,6 +901,22 @@ cr.define('options', function() {
     },
 
     /**
+     * Shows advanced configuration UI, skipping the login dialog.
+     * @private
+     */
+    showSetupUIWithoutLogin_: function() {
+      chrome.send('SyncSetupShowSetupUIWithoutLogin');
+    },
+
+    /**
+     * Forces user to sign out of Chrome for Chrome OS.
+     * @private
+     */
+    doSignOutOnAuthError_: function() {
+      chrome.send('SyncSetupDoSignOutOnAuthError');
+    },
+
+    /**
      * Hides the outer elements of the login UI. This is used by the sync promo
      * to customize the look of the login box.
      */
@@ -911,6 +946,14 @@ cr.define('options', function() {
 
   SyncSetupOverlay.showSetupUI = function() {
     SyncSetupOverlay.getInstance().showSetupUI_();
+  };
+
+  SyncSetupOverlay.showSetupUIWithoutLogin = function() {
+    SyncSetupOverlay.getInstance().showSetupUIWithoutLogin_();
+  };
+
+  SyncSetupOverlay.doSignOutOnAuthError = function() {
+    SyncSetupOverlay.getInstance().doSignOutOnAuthError_();
   };
 
   SyncSetupOverlay.showSyncSetupPage = function(page, args) {

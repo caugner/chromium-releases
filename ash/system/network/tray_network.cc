@@ -12,10 +12,11 @@
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
+#include "ash/system/tray/tray_notification_view.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -143,7 +144,8 @@ class NetworkTrayView : public TrayItemView {
  public:
   NetworkTrayView(ColorTheme size, bool tray_icon)
       : color_theme_(size), tray_icon_(tray_icon) {
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(
+        new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
 
     image_view_ = color_theme_ == DARK ?
         new FixedSizedImageView(0, kTrayPopupItemHeight) :
@@ -195,11 +197,22 @@ class NetworkDefaultView : public TrayItemMore {
   DISALLOW_COPY_AND_ASSIGN(NetworkDefaultView);
 };
 
-class NetworkDetailedView : public TrayDetailsView,
-                            public views::ButtonListener,
-                            public ViewClickListener {
+class NetworkDetailedView : public TrayDetailsView {
  public:
-  explicit NetworkDetailedView(user::LoginStatus login)
+  NetworkDetailedView() {}
+
+  virtual ~NetworkDetailedView() {}
+
+  virtual TrayNetwork::DetailedViewType GetViewType() const = 0;
+
+  virtual void Update() = 0;
+};
+
+class NetworkListDetailedView : public NetworkDetailedView,
+                                public views::ButtonListener,
+                                public ViewClickListener {
+ public:
+  NetworkListDetailedView(user::LoginStatus login)
       : login_(login),
         airplane_(NULL),
         info_icon_(NULL),
@@ -218,7 +231,7 @@ class NetworkDetailedView : public TrayDetailsView,
     Update();
   }
 
-  virtual ~NetworkDetailedView() {
+  virtual ~NetworkListDetailedView() {
     if (info_bubble_)
       info_bubble_->GetWidget()->CloseNow();
   }
@@ -245,7 +258,12 @@ class NetworkDetailedView : public TrayDetailsView,
     Update();
   }
 
-  void Update() {
+  // Overridden from NetworkDetailedView:
+  virtual TrayNetwork::DetailedViewType GetViewType() const OVERRIDE {
+    return TrayNetwork::LIST_VIEW;
+  }
+
+  virtual void Update() OVERRIDE {
     UpdateHeaderButtons();
     UpdateNetworkEntries();
     UpdateNetworkExtra();
@@ -263,21 +281,24 @@ class NetworkDetailedView : public TrayDetailsView,
         IDR_AURA_UBER_TRAY_WIFI_ENABLED,
         IDR_AURA_UBER_TRAY_WIFI_DISABLED,
         IDR_AURA_UBER_TRAY_WIFI_ENABLED_HOVER,
-        IDR_AURA_UBER_TRAY_WIFI_DISABLED_HOVER);
+        IDR_AURA_UBER_TRAY_WIFI_DISABLED_HOVER,
+        IDS_ASH_STATUS_TRAY_WIFI);
     footer()->AddButton(button_wifi_);
 
     button_mobile_ = new TrayPopupHeaderButton(this,
         IDR_AURA_UBER_TRAY_CELLULAR_ENABLED,
         IDR_AURA_UBER_TRAY_CELLULAR_DISABLED,
         IDR_AURA_UBER_TRAY_CELLULAR_ENABLED_HOVER,
-        IDR_AURA_UBER_TRAY_CELLULAR_DISABLED_HOVER);
+        IDR_AURA_UBER_TRAY_CELLULAR_DISABLED_HOVER,
+        IDS_ASH_STATUS_TRAY_CELLULAR);
     footer()->AddButton(button_mobile_);
 
     info_icon_ = new TrayPopupHeaderButton(this,
         IDR_AURA_UBER_TRAY_NETWORK_INFO,
         IDR_AURA_UBER_TRAY_NETWORK_INFO,
         IDR_AURA_UBER_TRAY_NETWORK_INFO_HOVER,
-        IDR_AURA_UBER_TRAY_NETWORK_INFO_HOVER);
+        IDR_AURA_UBER_TRAY_NETWORK_INFO_HOVER,
+        IDS_ASH_STATUS_TRAY_NETWORK_INFO);
     footer()->AddButton(info_icon_);
   }
 
@@ -606,7 +627,44 @@ class NetworkDetailedView : public TrayDetailsView,
 
   views::BubbleDelegateView* info_bubble_;
 
-  DISALLOW_COPY_AND_ASSIGN(NetworkDetailedView);
+  DISALLOW_COPY_AND_ASSIGN(NetworkListDetailedView);
+};
+
+class NetworkWifiDetailedView : public NetworkDetailedView {
+ public:
+  explicit NetworkWifiDetailedView(bool wifi_enabled) {
+    SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal,
+                                          kTrayPopupPaddingHorizontal,
+                                          10,
+                                          kTrayPopupPaddingBetweenItems));
+    ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
+    views::ImageView* image = new views::ImageView;
+    const int image_id = wifi_enabled ?
+        IDR_AURA_UBER_TRAY_WIFI_ENABLED : IDR_AURA_UBER_TRAY_WIFI_DISABLED;
+    image->SetImage(bundle.GetImageNamed(image_id).ToImageSkia());
+    AddChildView(image);
+
+    const int string_id = wifi_enabled ?
+        IDS_ASH_STATUS_TRAY_NETWORK_WIFI_ENABLED:
+        IDS_ASH_STATUS_TRAY_NETWORK_WIFI_DISABLED;
+    views::Label* label =
+        new views::Label(bundle.GetLocalizedString(string_id));
+    label->SetMultiLine(true);
+    label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    AddChildView(label);
+  }
+
+  virtual ~NetworkWifiDetailedView() {}
+
+  // Overridden from NetworkDetailedView:
+  virtual TrayNetwork::DetailedViewType GetViewType() const OVERRIDE {
+    return TrayNetwork::WIFI_VIEW;
+  }
+
+  virtual void Update() OVERRIDE {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkWifiDetailedView);
 };
 
 class NetworkErrorView : public views::View,
@@ -661,8 +719,7 @@ class NetworkErrorView : public views::View,
 class NetworkNotificationView : public TrayNotificationView {
  public:
   explicit NetworkNotificationView(TrayNetwork* tray)
-      : TrayNotificationView(0),
-        tray_(tray) {
+      : TrayNotificationView(tray, 0) {
     CreateErrorView();
     InitView(network_error_view_);
     SetIconImage(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
@@ -671,13 +728,11 @@ class NetworkNotificationView : public TrayNotificationView {
 
   // Overridden from TrayNotificationView.
   virtual void OnClose() OVERRIDE {
-    tray_->ClearNetworkError(network_error_view_->error_type());
+    tray_network()->ClearNetworkError(network_error_view_->error_type());
   }
 
-  // Overridden from views::View.
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
-    tray_->PopupDetailedView(0, true);
-    return true;
+  virtual void OnClickAction() OVERRIDE {
+    tray()->PopupDetailedView(0, true);
   }
 
   void Update() {
@@ -688,16 +743,19 @@ class NetworkNotificationView : public TrayNotificationView {
   }
 
  private:
-  void CreateErrorView() {
-    // Display the first (highest priority) error.
-    CHECK(!tray_->errors()->messages().empty());
-    NetworkErrors::ErrorMap::const_iterator iter =
-        tray_->errors()->messages().begin();
-    network_error_view_ =
-        new NetworkErrorView(tray_, iter->first, iter->second);
+  TrayNetwork* tray_network() {
+    return static_cast<TrayNetwork*>(tray());
   }
 
-  TrayNetwork* tray_;
+  void CreateErrorView() {
+    // Display the first (highest priority) error.
+    CHECK(!tray_network()->errors()->messages().empty());
+    NetworkErrors::ErrorMap::const_iterator iter =
+        tray_network()->errors()->messages().begin();
+    network_error_view_ =
+        new NetworkErrorView(tray_network(), iter->first, iter->second);
+  }
+
   tray::NetworkErrorView* network_error_view_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkNotificationView);
@@ -710,7 +768,8 @@ TrayNetwork::TrayNetwork()
       default_(NULL),
       detailed_(NULL),
       notification_(NULL),
-      errors_(new tray::NetworkErrors()) {
+      errors_(new tray::NetworkErrors()),
+      request_wifi_view_(false) {
 }
 
 TrayNetwork::~TrayNetwork() {
@@ -730,7 +789,14 @@ views::View* TrayNetwork::CreateDefaultView(user::LoginStatus status) {
 
 views::View* TrayNetwork::CreateDetailedView(user::LoginStatus status) {
   CHECK(detailed_ == NULL);
-  detailed_ = new tray::NetworkDetailedView(status);
+  if (request_wifi_view_) {
+    SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
+    // The Wi-Fi state is not toggled yet at this point.
+    detailed_ = new tray::NetworkWifiDetailedView(!delegate->GetWifiEnabled());
+    request_wifi_view_ = false;
+  } else {
+    detailed_ = new tray::NetworkListDetailedView(status);
+  }
   return detailed_;
 }
 
@@ -759,6 +825,10 @@ void TrayNetwork::DestroyNotificationView() {
 }
 
 void TrayNetwork::UpdateAfterLoginStatusChange(user::LoginStatus status) {
+}
+
+void TrayNetwork::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
+  SetTrayImageItemBorder(tray_, alignment);
 }
 
 void TrayNetwork::OnNetworkRefresh(const NetworkIconInfo& info) {
@@ -794,6 +864,13 @@ void TrayNetwork::ClearNetworkError(ErrorType error_type) {
     notification_->Update();
   else
     ShowNotificationView();
+}
+
+void TrayNetwork::OnWillToggleWifi() {
+  if (!detailed_ || detailed_->GetViewType() == WIFI_VIEW) {
+    request_wifi_view_ = true;
+    PopupDetailedView(kTrayPopupAutoCloseDelayForTextInSeconds, false);
+  }
 }
 
 void TrayNetwork::LinkClicked(ErrorType error_type) {

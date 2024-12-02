@@ -4,7 +4,6 @@
 
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_
-#pragma once
 
 #include <string>
 
@@ -31,12 +30,11 @@ namespace extension_urls {
   // etc.) about an extension from the webstore as JSON.
   GURL GetWebstoreItemJsonDataURL(const std::string& extension_id);
 
-  // Return the update URL used by gallery/webstore extensions/apps. The
-  // |secure| parameter will be ignored if the update URL is overriden with
-  // --apps-gallery-update-url.
-  GURL GetWebstoreUpdateUrl(bool secure);
+  // Return the update URL used by gallery/webstore extensions/apps.
+  GURL GetWebstoreUpdateUrl();
 
-  // Returns whether the URL is the webstore update URL (secure or not).
+  // Returns whether the URL is the webstore update URL (just considering host
+  // and path, not scheme, query, etc.)
   bool IsWebstoreUpdateUrl(const GURL& update_url);
 
   // Returns true if the URL points to an extension blacklist.
@@ -133,19 +131,6 @@ namespace extension_misc {
     // For platform apps, which don't actually have a container (they just get a
     // "onLaunched" event).
     LAUNCH_NONE
-  };
-
-  // The name of the apps promo histogram.
-  extern const char kAppsPromoHistogram[];
-
-  // The buckets used in the apps promo histogram.
-  enum AppsPromoBuckets {
-    PROMO_LAUNCH_APP,
-    PROMO_LAUNCH_WEB_STORE,
-    PROMO_CLOSE,
-    PROMO_EXPIRE,
-    PROMO_SEEN,
-    PROMO_BUCKET_BOUNDARY
   };
 
   // The name of the app launch histogram.
@@ -252,6 +237,9 @@ namespace extension_misc {
   extern const char kAppStateRunning[];
   extern const char kAppStateCannotRun[];
   extern const char kAppStateReadyToRun[];
+
+  // The path part of the file system url used for media file systems.
+  extern const char kMediaFileSystemPathPart[];
 
   // Error indicating that the app notifications API is not accessible by split
   // mode extensions in incognito windows.

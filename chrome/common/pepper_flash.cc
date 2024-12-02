@@ -10,6 +10,7 @@
 #include "base/metrics/field_trial.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "ppapi/shared_impl/ppapi_permissions.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
@@ -68,20 +69,6 @@ bool IsInFieldTrialGroup() {
 bool ConductingPepperFlashFieldTrial() {
 #if defined(OS_WIN)
   return true;
-#elif defined(OS_MACOSX)
-  // TODO(shess): This is sort of abusive.  Initially PepperFlash
-  // should be present in about:plugins but not enabled in preference
-  // to NPAPI Flash.  Returning |true| here causes
-  // BrowserProcessImpl::PreMainMessageLoopRun() to find PepperFlash
-  // after the built-in NPAPI Flash.  Returning |false| from
-  // IsPepperFlashEnabledByDefault() prevents PepperFlash from being
-  // moved above NPAPI Flash.
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_CANARY)
-    return true;
-
-  // TODO(shess): Don't expose for other channels, yet.
-  return false;
 #else
   return false;
 #endif
@@ -96,10 +83,13 @@ bool IsPepperFlashEnabledByDefault() {
 #elif defined(OS_LINUX)
   // For Linux, always try to use it (availability is checked elsewhere).
   return true;
-#elif defined(OS_MACOSX)
-  // Don't enable PepperFlash in preference to NPAPI Flash.
-  return false;
 #else
   return false;
 #endif
 }
+
+int32 kPepperFlashPermissions = ppapi::PERMISSION_DEV |
+                                ppapi::PERMISSION_PRIVATE |
+                                ppapi::PERMISSION_BYPASS_USER_GESTURE;
+
+

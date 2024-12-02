@@ -4,34 +4,32 @@
 
 #include "sync/util/get_session_name_mac.h"
 
-#import <Foundation/Foundation.h>
 #import <SystemConfiguration/SCDynamicStoreCopySpecific.h>
-#include <sys/sysctl.h>  // sysctlbyname()
+#include <sys/sysctl.h>
 
-#include "base/mac/foundation_util.h"
-#include "base/mac/mac_util.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/string_util.h"
-#include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 
-@interface NSHost(SnowLeopardAPI)
-- (NSString*)localizedName;
-@end
-
-namespace browser_sync {
+namespace syncer {
 namespace internal {
 
 std::string GetHardwareModelName() {
-  NSHost* myHost = [NSHost currentHost];
-  if ([myHost respondsToSelector:@selector(localizedName)])
-    return base::SysNSStringToUTF8([myHost localizedName]);
+  // Do not use NSHost currentHost, as it's very slow. http://crbug.com/138570
+  SCDynamicStoreContext context = { 0, NULL, NULL, NULL };
+  base::mac::ScopedCFTypeRef<SCDynamicStoreRef> store(
+      SCDynamicStoreCreate(kCFAllocatorDefault, CFSTR("chrome_sync"),
+                           NULL, &context));
+  base::mac::ScopedCFTypeRef<CFStringRef> machine_name(
+      SCDynamicStoreCopyLocalHostName(store.get()));
+  if (machine_name.get())
+    return base::SysCFStringRefToUTF8(machine_name.get());
 
-  // Fallback for 10.5
-  scoped_nsobject<NSString> computerName(base::mac::CFToNSCast(
-      SCDynamicStoreCopyComputerName(NULL, NULL)));
-  if (computerName.get() != NULL)
-    return base::SysNSStringToUTF8(computerName.get());
+  // Fall back to get computer name.
+  base::mac::ScopedCFTypeRef<CFStringRef> computer_name(
+      SCDynamicStoreCopyComputerName(store.get(), NULL));
+  if (computer_name.get())
+    return base::SysCFStringRefToUTF8(computer_name.get());
 
   // If all else fails, return to using a slightly nicer version of the
   // hardware model.
@@ -48,4 +46,4 @@ std::string GetHardwareModelName() {
 }
 
 }  // namespace internal
-}  // namespace browser_sync
+}  // namespace syncer

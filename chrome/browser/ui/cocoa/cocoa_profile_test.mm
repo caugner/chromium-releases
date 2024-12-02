@@ -7,6 +7,8 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "content/public/test/test_browser_thread.h"
 
@@ -69,7 +71,7 @@ void CocoaProfileTest::SetUp() {
   AutocompleteClassifierFactory::GetInstance()->SetTestingFactoryAndUse(
       profile_, &AutocompleteClassifierFactory::BuildInstanceFor);
 
-  browser_.reset(new Browser(Browser::TYPE_TABBED, profile_));
+  browser_.reset(CreateBrowser());
   ASSERT_TRUE(browser_.get());
 }
 
@@ -80,16 +82,15 @@ void CocoaProfileTest::TearDown() {
   CocoaTest::TearDown();
 }
 
-BrowserWindow* CocoaProfileTest::CreateBrowserWindow() {
-  browser_->InitBrowserWindow();
-  return browser_->window();
-}
-
 void CocoaProfileTest::CloseBrowserWindow() {
   // Check to make sure a window was actually created.
   DCHECK(browser_->window());
-  browser_->CloseAllTabs();
-  browser_->CloseWindow();
+  chrome::CloseAllTabs(browser_.get());
+  chrome::CloseWindow(browser_.get());
   // |browser_| will be deleted by its BrowserWindowController.
   ignore_result(browser_.release());
+}
+
+Browser* CocoaProfileTest::CreateBrowser() {
+  return new Browser(Browser::CreateParams(profile()));
 }

@@ -13,6 +13,7 @@
 #include "base/process_util.h"
 #include "base/threading/thread.h"
 #include "ipc/ipc_channel_proxy.h"
+#include "ipc/ipc_multiprocess_test.h"
 #include "ipc/ipc_tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
@@ -52,7 +53,7 @@ const size_t kHelloStringLength = arraysize(kHelloString);
 
 // The SyncSocket server listener class processes two sorts of
 // messages from the client.
-class SyncSocketServerListener : public IPC::Channel::Listener {
+class SyncSocketServerListener : public IPC::Listener {
  public:
   SyncSocketServerListener() : chan_(NULL) {
   }
@@ -108,7 +109,7 @@ class SyncSocketServerListener : public IPC::Channel::Listener {
 
 // Runs the fuzzing server child mode. Returns when the preset number
 // of messages have been received.
-MULTIPROCESS_TEST_MAIN(RunSyncSocketServer) {
+MULTIPROCESS_IPC_TEST_MAIN(RunSyncSocketServer) {
   MessageLoopForIO main_message_loop;
   SyncSocketServerListener listener;
   IPC::Channel chan(kSyncSocketChannel, IPC::Channel::MODE_CLIENT, &listener);
@@ -120,7 +121,7 @@ MULTIPROCESS_TEST_MAIN(RunSyncSocketServer) {
 
 // The SyncSocket client listener only processes one sort of message,
 // a response from the server.
-class SyncSocketClientListener : public IPC::Channel::Listener {
+class SyncSocketClientListener : public IPC::Listener {
  public:
   SyncSocketClientListener() {
   }
@@ -202,7 +203,8 @@ TEST_F(SyncSocketTest, SanityTest) {
   // Shut down.
   pair[0].Close();
   pair[1].Close();
-  EXPECT_TRUE(base::WaitForSingleProcess(server_process, 5000));
+  EXPECT_TRUE(base::WaitForSingleProcess(
+      server_process, base::TimeDelta::FromSeconds(5)));
   base::CloseProcessHandle(server_process);
 }
 

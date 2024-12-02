@@ -4,7 +4,6 @@
 
 #ifndef CHROME_TEST_AUTOMATION_AUTOMATION_JSON_REQUESTS_H_
 #define CHROME_TEST_AUTOMATION_AUTOMATION_JSON_REQUESTS_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -529,7 +528,7 @@ bool SendSetPreferenceJSONRequest(
 // Requests to override the user's geolocation. Returns true on success.
 bool SendOverrideGeolocationJSONRequest(
     AutomationMessageSender* sender,
-    base::DictionaryValue* geolocation,
+    const base::DictionaryValue* geolocation,
     automation::Error* error) WARN_UNUSED_RESULT;
 
 #endif  // CHROME_TEST_AUTOMATION_AUTOMATION_JSON_REQUESTS_H_

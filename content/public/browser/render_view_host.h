@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
-#pragma once
 
 #include "base/values.h"
 #include "content/common/content_export.h"
@@ -25,6 +24,10 @@ namespace gfx {
 class Point;
 }
 
+namespace ui {
+struct SelectedFileInfo;
+}
+
 namespace WebKit {
 struct WebFindOptions;
 struct WebMediaPlayerAction;
@@ -33,11 +36,11 @@ struct WebPluginAction;
 
 namespace content {
 
+class ChildProcessSecurityPolicy;
 class RenderViewHostDelegate;
 class SessionStorageNamespace;
 class SiteInstance;
 struct CustomContextMenuContext;
-struct SelectedFileInfo;
 
 // A RenderViewHost is responsible for creating and talking to a RenderView
 // object in a child process. It exposes a high level API to users, for things
@@ -59,6 +62,13 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // Downcasts from a RenderWidgetHost to a RenderViewHost.  Required
   // because RenderWidgetHost is a virtual base class.
   static RenderViewHost* From(RenderWidgetHost* rwh);
+
+  // Checks that the given renderer can request |url|, if not it sets it to
+  // about:blank.
+  // |empty_allowed| must be set to false for navigations for security reasons.
+  static void FilterURL(int renderer_id,
+                        bool empty_allowed,
+                        GURL* url);
 
   virtual ~RenderViewHost() {}
 
@@ -198,7 +208,7 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   // base::PlatformFileFlags enum which specify which file permissions should
   // be granted to the renderer.
   virtual void FilesSelectedInChooser(
-      const std::vector<SelectedFileInfo>& files,
+      const std::vector<ui::SelectedFileInfo>& files,
       int permissions) = 0;
 
   virtual RenderViewHostDelegate* GetDelegate() const = 0;

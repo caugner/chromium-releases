@@ -19,36 +19,35 @@ class ChromeSyncNotificationBridge;
 // with the exception of AddObserver/RemoveObserver, which also result in
 // the observer being registered/deregistered with the
 // ChromeSyncNotificationBridge.
-class BridgedSyncNotifier : public sync_notifier::SyncNotifier {
+class BridgedSyncNotifier : public syncer::SyncNotifier {
  public:
   // Does not take ownership of |bridge|. Takes ownership of |delegate|.
   // |delegate| may be NULL.
   BridgedSyncNotifier(ChromeSyncNotificationBridge* bridge,
-                      sync_notifier::SyncNotifier* delegate);
+                      syncer::SyncNotifier* delegate);
   virtual ~BridgedSyncNotifier();
 
   // SyncNotifier implementation. Passes through all calls to the delegate.
-  // AddObserver/RemoveObserver will also register/deregister |observer| with
-  // the bridge.
-  virtual void AddObserver(
-      sync_notifier::SyncNotifierObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(
-      sync_notifier::SyncNotifierObserver* observer) OVERRIDE;
+  // RegisterHandler, UnregisterHandler, and UpdateRegisteredIds calls will
+  // also be forwarded to the bridge.
+  virtual void RegisterHandler(syncer::SyncNotifierObserver* handler) OVERRIDE;
+  virtual void UpdateRegisteredIds(syncer::SyncNotifierObserver* handler,
+                                   const syncer::ObjectIdSet& ids) OVERRIDE;
+  virtual void UnregisterHandler(
+      syncer::SyncNotifierObserver* handler) OVERRIDE;
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
   virtual void SetStateDeprecated(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
-  virtual void UpdateEnabledTypes(
-      syncable::ModelTypeSet enabled_types) OVERRIDE;
   virtual void SendNotification(
-      syncable::ModelTypeSet changed_types) OVERRIDE;
+      syncer::ModelTypeSet changed_types) OVERRIDE;
 
  private:
   // The notification bridge that we register the observers with.
   ChromeSyncNotificationBridge* bridge_;
 
   // The delegate we are wrapping.
-  scoped_ptr<sync_notifier::SyncNotifier> delegate_;
+  scoped_ptr<syncer::SyncNotifier> delegate_;
 };
 
 }  // namespace browser_sync

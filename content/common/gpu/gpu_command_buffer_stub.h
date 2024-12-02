@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_GPU_GPU_COMMAND_BUFFER_STUB_H_
 #define CONTENT_COMMON_GPU_GPU_COMMAND_BUFFER_STUB_H_
-#pragma once
 
 #include <deque>
 #include <string>
@@ -15,14 +14,14 @@
 #include "base/observer_list.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/gpu_memory_allocation.h"
-#include "content/common/gpu/gpu_memory_allocation.h"
-#include "content/common/gpu/media/gpu_video_decode_accelerator.h"
+#include "googleurl/src/gurl.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
-#include "ipc/ipc_channel.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_listener.h"
+#include "ipc/ipc_sender.h"
+#include "media/base/video_decoder_config.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 #include "ui/gl/gl_context.h"
@@ -36,6 +35,7 @@
 
 class GpuChannel;
 struct GpuMemoryAllocation;
+class GpuVideoDecodeAccelerator;
 class GpuWatchdog;
 
 namespace gpu {
@@ -77,16 +77,17 @@ class CONTENT_EXPORT GpuCommandBufferStubBase {
 
 class GpuCommandBufferStub
     : public GpuCommandBufferStubBase,
-      public IPC::Channel::Listener,
-      public IPC::Message::Sender,
+      public IPC::Listener,
+      public IPC::Sender,
       public base::SupportsWeakPtr<GpuCommandBufferStub> {
  public:
   class DestructionObserver {
    public:
-    ~DestructionObserver() {}
-
     // Called in Destroy(), before the context/surface are released.
     virtual void OnWillDestroyStub(GpuCommandBufferStub* stub) = 0;
+
+   protected:
+    virtual ~DestructionObserver() {}
   };
 
   GpuCommandBufferStub(
@@ -102,14 +103,15 @@ class GpuCommandBufferStub
       int32 route_id,
       int32 surface_id,
       GpuWatchdog* watchdog,
-      bool software);
+      bool software,
+      const GURL& active_url);
 
   virtual ~GpuCommandBufferStub();
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // IPC::Message::Sender implementation:
+  // IPC::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // GpuCommandBufferStubBase implementation:
@@ -131,12 +133,6 @@ class GpuCommandBufferStub
 
   // Whether this command buffer can currently handle IPC messages.
   bool IsScheduled();
-
-  // Whether this command buffer needs to be polled again in the future.
-  bool HasMoreWork();
-
-  // Poll the command buffer to execute work.
-  void PollWork();
 
   // Whether there are commands in the buffer that haven't been processed.
   bool HasUnprocessedCommands();
@@ -227,6 +223,17 @@ class GpuCommandBufferStub
 
   void ReportState();
 
+  // Wrapper for GpuScheduler::PutChanged that sets the crash report URL.
+  void PutChanged();
+
+  // Poll the command buffer to execute work.
+  void PollWork();
+
+  // Whether this command buffer needs to be polled again in the future.
+  bool HasMoreWork();
+
+  void ScheduleDelayedWork(int64 delay);
+
   // The lifetime of objects of this class is managed by a GpuChannel. The
   // GpuChannels destroy all the GpuCommandBufferStubs that they own when they
   // are destroyed. So a raw pointer is safe.
@@ -272,7 +279,12 @@ class GpuCommandBufferStub
   std::deque<uint32> sync_points_;
   int sync_point_wait_count_;
 
+  bool delayed_work_scheduled_;
+
   scoped_refptr<gpu::RefCountedCounter> preempt_by_counter_;
+
+  GURL active_url_;
+  size_t active_url_hash_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };

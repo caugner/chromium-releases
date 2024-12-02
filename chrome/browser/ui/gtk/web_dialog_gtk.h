@@ -4,35 +4,31 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_WEB_DIALOG_GTK_H_
 #define CHROME_BROWSER_UI_GTK_WEB_DIALOG_GTK_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/webui/web_dialog_web_contents_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
+#include "ui/web_dialogs/web_dialog_web_contents_delegate.h"
 
 typedef struct _GtkWidget GtkWidget;
 
-class Browser;
 class TabContentsContainerGtk;
 class TabContents;
-class WebDialogController;
 
 namespace content {
 class BrowserContext;
 }
 
-class WebDialogGtk : public WebDialogWebContentsDelegate,
+class WebDialogGtk : public ui::WebDialogWebContentsDelegate,
                      public ui::WebDialogDelegate {
  public:
   WebDialogGtk(content::BrowserContext* context,
-               Browser* browser,
                ui::WebDialogDelegate* delegate,
                gfx::NativeWindow parent_window);
   virtual ~WebDialogGtk();
@@ -81,7 +77,6 @@ class WebDialogGtk : public WebDialogWebContentsDelegate,
 
   GtkWidget* dialog_;
 
-  scoped_ptr<WebDialogController> dialog_controller_;
   scoped_ptr<TabContents> tab_;
   scoped_ptr<TabContentsContainerGtk> tab_contents_container_;
 

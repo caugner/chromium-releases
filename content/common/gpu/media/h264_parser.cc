@@ -50,103 +50,6 @@ H264SEIMessage::H264SEIMessage() {
   memset(this, 0, sizeof(*this));
 }
 
-H264Parser::H264BitReader::H264BitReader()
-    : data_(NULL),
-      bytes_left_(0),
-      curr_byte_(0),
-      num_remaining_bits_in_curr_byte_(0),
-      prev_two_bytes_(0) {
-}
-
-H264Parser::H264BitReader::~H264BitReader() {}
-
-bool H264Parser::H264BitReader::Initialize(const uint8* data, off_t size) {
-  DCHECK(data);
-
-  if (size < 1)
-    return false;
-
-  data_ = data;
-  bytes_left_ = size;
-  num_remaining_bits_in_curr_byte_ = 0;
-  // Initially set to 0xffff to accept all initial two-byte sequences.
-  prev_two_bytes_ = 0xffff;
-
-  return true;
-}
-
-bool H264Parser::H264BitReader::UpdateCurrByte() {
-  if (bytes_left_ < 1)
-    return false;
-
-  // Emulation prevention three-byte detection.
-  // If a sequence of 0x000003 is found, skip (ignore) the last byte (0x03).
-  if (*data_ == 0x03 && (prev_two_bytes_ & 0xffff) == 0) {
-    // Detected 0x000003, skip last byte.
-    ++data_;
-    --bytes_left_;
-    // Need another full three bytes before we can detect the sequence again.
-    prev_two_bytes_ = 0xffff;
-
-    if (bytes_left_ < 1)
-      return false;
-  }
-
-  // Load a new byte and advance pointers.
-  curr_byte_ = *data_++ & 0xff;
-  --bytes_left_;
-  num_remaining_bits_in_curr_byte_ = 8;
-
-  prev_two_bytes_ = (prev_two_bytes_ << 8) | curr_byte_;
-
-  return true;
-}
-
-// Read |num_bits| (1 to 31 inclusive) from the stream and return them
-// in |out|, with first bit in the stream as MSB in |out| at position
-// (|num_bits| - 1).
-bool H264Parser::H264BitReader::ReadBits(int num_bits, int *out) {
-  int bits_left = num_bits;
-  *out = 0;
-  DCHECK(num_bits <= 31);
-
-  while (num_remaining_bits_in_curr_byte_ < bits_left) {
-    // Take all that's left in current byte, shift to make space for the rest.
-    *out = (curr_byte_ << (bits_left - num_remaining_bits_in_curr_byte_));
-    bits_left -= num_remaining_bits_in_curr_byte_;
-
-    if (!UpdateCurrByte())
-      return false;
-  }
-
-  *out |= (curr_byte_ >> (num_remaining_bits_in_curr_byte_ - bits_left));
-  *out &= ((1 << num_bits) - 1);
-  num_remaining_bits_in_curr_byte_ -= bits_left;
-
-  return true;
-}
-
-off_t H264Parser::H264BitReader::NumBitsLeft() {
-  return (num_remaining_bits_in_curr_byte_ + bytes_left_ * 8);
-}
-
-bool H264Parser::H264BitReader::HasMoreRBSPData() {
-  // Make sure we have more bits, if we are at 0 bits in current byte
-  // and updating current byte fails, we don't have more data anyway.
-  if (num_remaining_bits_in_curr_byte_ == 0 && !UpdateCurrByte())
-      return false;
-
-  // On last byte?
-  if (bytes_left_)
-    return true;
-
-  // Last byte, look for stop bit;
-  // We have more RBSP data if the last non-zero bit we find is not the
-  // first available bit.
-  return (curr_byte_ &
-          ((1 << (num_remaining_bits_in_curr_byte_ - 1)) - 1)) != 0;
-}
-
 #define READ_BITS_OR_RETURN(num_bits, out)                                    \
 do {                                                                          \
   int _out;                                                                   \
@@ -654,9 +557,14 @@ H264Parser::Result H264Parser::ParsePPSScalingLists(const H264SPS& sps,
 }
 
 static void FillDefaultSeqScalingLists(H264SPS* sps) {
-  // Assumes ints in arrays.
-  memset(sps->scaling_list4x4, 16, sizeof(sps->scaling_list4x4));
-  memset(sps->scaling_list8x8, 16, sizeof(sps->scaling_list8x8));
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < kH264ScalingList4x4Length; ++j)
+      sps->scaling_list4x4[i][j] = 16;
+
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < kH264ScalingList8x8Length; ++j)
+      sps->scaling_list8x8[i][j] = 16;
+
 }
 
 H264Parser::Result H264Parser::ParseSPS(int* sps_id) {
@@ -686,11 +594,6 @@ H264Parser::Result H264Parser::ParseSPS(int* sps_id) {
     if (sps->chroma_format_idc == 3)
       READ_BOOL_OR_RETURN(&sps->separate_colour_plane_flag);
 
-    if (sps->separate_colour_plane_flag)
-      sps->chroma_array_type = 0;
-    else
-      sps->chroma_array_type = sps->chroma_format_idc;
-
     READ_UE_OR_RETURN(&sps->bit_depth_luma_minus8);
     TRUE_OR_RETURN(sps->bit_depth_luma_minus8 < 7);
 
@@ -708,7 +611,15 @@ H264Parser::Result H264Parser::ParseSPS(int* sps_id) {
     } else {
       FillDefaultSeqScalingLists(sps.get());
     }
+  } else {
+    sps->chroma_format_idc = 1;
+    FillDefaultSeqScalingLists(sps.get());
   }
+
+  if (sps->separate_colour_plane_flag)
+    sps->chroma_array_type = 0;
+  else
+    sps->chroma_array_type = sps->chroma_format_idc;
 
   READ_UE_OR_RETURN(&sps->log2_max_frame_num_minus4);
   TRUE_OR_RETURN(sps->log2_max_frame_num_minus4 < 13);
@@ -716,6 +627,7 @@ H264Parser::Result H264Parser::ParseSPS(int* sps_id) {
   READ_UE_OR_RETURN(&sps->pic_order_cnt_type);
   TRUE_OR_RETURN(sps->pic_order_cnt_type < 3);
 
+  sps->expected_delta_per_pic_order_cnt_cycle = 0;
   if (sps->pic_order_cnt_type == 0) {
     READ_UE_OR_RETURN(&sps->log2_max_pic_order_cnt_lsb_minus4);
     TRUE_OR_RETURN(sps->log2_max_pic_order_cnt_lsb_minus4 < 13);
@@ -724,8 +636,13 @@ H264Parser::Result H264Parser::ParseSPS(int* sps_id) {
     READ_SE_OR_RETURN(&sps->offset_for_non_ref_pic);
     READ_SE_OR_RETURN(&sps->offset_for_top_to_bottom_field);
     READ_UE_OR_RETURN(&sps->num_ref_frames_in_pic_order_cnt_cycle);
-    for (int i = 0; i < sps->num_ref_frames_in_pic_order_cnt_cycle; ++i)
+    TRUE_OR_RETURN(sps->num_ref_frames_in_pic_order_cnt_cycle < 255);
+
+    for (int i = 0; i < sps->num_ref_frames_in_pic_order_cnt_cycle; ++i) {
       READ_SE_OR_RETURN(&sps->offset_for_ref_frame[i]);
+      sps->expected_delta_per_pic_order_cnt_cycle +=
+          sps->offset_for_ref_frame[i];
+    }
   }
 
   READ_UE_OR_RETURN(&sps->max_num_ref_frames);
@@ -807,6 +724,7 @@ H264Parser::Result H264Parser::ParsePPS(int* pps_id) {
 
   READ_SE_OR_RETURN(&pps->chroma_qp_index_offset);
   IN_RANGE_OR_RETURN(pps->chroma_qp_index_offset, -12, 12);
+  pps->second_chroma_qp_index_offset = pps->chroma_qp_index_offset;
 
   READ_BOOL_OR_RETURN(&pps->deblocking_filter_control_present_flag);
   READ_BOOL_OR_RETURN(&pps->constrained_intra_pred_flag);
@@ -1099,9 +1017,11 @@ H264Parser::Result H264Parser::ParseSliceHeader(const H264NALU& nalu,
         READ_UE_OR_RETURN(&shdr->num_ref_idx_l1_active_minus1);
     } else {
       shdr->num_ref_idx_l0_active_minus1 =
-            pps->num_ref_idx_l0_default_active_minus1;
-      shdr->num_ref_idx_l1_active_minus1 =
+          pps->num_ref_idx_l0_default_active_minus1;
+      if (shdr->IsBSlice()) {
+        shdr->num_ref_idx_l1_active_minus1 =
             pps->num_ref_idx_l1_default_active_minus1;
+      }
     }
   }
   if (shdr->field_pic_flag) {
@@ -1182,6 +1102,7 @@ H264Parser::Result H264Parser::ParseSEI(H264SEIMessage* sei_msg) {
   }
   sei_msg->type += byte;
 
+  READ_BITS_OR_RETURN(8, &byte);
   while (byte == 0xff) {
     sei_msg->payload_size += 255;
     READ_BITS_OR_RETURN(8, &byte);

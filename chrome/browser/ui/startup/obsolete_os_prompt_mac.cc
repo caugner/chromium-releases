@@ -9,13 +9,14 @@
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/cocoa/obsolete_os.h"
 #include "chrome/browser/ui/startup/obsolete_os_info_bar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 
-namespace browser {
+namespace chrome {
 
 void RegisterObsoleteOSInfobarPrefs(PrefService* local_state) {
   local_state->RegisterDoublePref(
@@ -45,7 +46,7 @@ void ShowObsoleteOSPrompt(Browser* browser) {
       return;
   }
 
-  TabContents* tab = browser->GetActiveTabContents();
+  TabContents* tab = chrome::GetActiveTabContents(browser);
   if (!tab)
     return;
   tab->infobar_tab_helper()->AddInfoBar(
@@ -58,4 +59,4 @@ void ShowObsoleteOSPrompt(Browser* browser) {
       time_now.ToDoubleT());
 }
 
-}  // namespace browser
+}  // namespace chrome

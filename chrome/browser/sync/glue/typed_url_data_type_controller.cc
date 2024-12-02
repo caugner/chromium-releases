@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
@@ -72,13 +73,13 @@ TypedUrlDataTypeController::TypedUrlDataTypeController(
   pref_registrar_.Add(prefs::kSavingBrowserHistoryDisabled, this);
 }
 
-syncable::ModelType TypedUrlDataTypeController::type() const {
-  return syncable::TYPED_URLS;
+syncer::ModelType TypedUrlDataTypeController::type() const {
+  return syncer::TYPED_URLS;
 }
 
-browser_sync::ModelSafeGroup TypedUrlDataTypeController::model_safe_group()
+syncer::ModelSafeGroup TypedUrlDataTypeController::model_safe_group()
     const {
-  return browser_sync::GROUP_HISTORY;
+  return syncer::GROUP_HISTORY;
 }
 
 void TypedUrlDataTypeController::SetBackend(history::HistoryBackend* backend) {
@@ -101,7 +102,7 @@ void TypedUrlDataTypeController::Observe(
         // generate an unrecoverable error. This can be fixed by restarting
         // Chrome (on restart, typed urls will not be a registered type).
         if (state() != NOT_RUNNING && state() != STOPPING) {
-          profile_sync_service()->DisableBrokenDatatype(syncable::TYPED_URLS,
+          profile_sync_service()->DisableBrokenDatatype(syncer::TYPED_URLS,
               FROM_HERE, "History saving is now disabled by policy.");
         }
       }
@@ -116,8 +117,8 @@ bool TypedUrlDataTypeController::PostTaskOnBackendThread(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  HistoryService* history = profile()->GetHistoryService(
-      Profile::IMPLICIT_ACCESS);
+  HistoryService* history = HistoryServiceFactory::GetForProfile(
+      profile(), Profile::IMPLICIT_ACCESS);
   if (history) {
     history->ScheduleDBTask(new RunTaskOnHistoryThread(task, this),
                             &cancelable_consumer_);

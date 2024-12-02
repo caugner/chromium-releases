@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_BASE_LOGIN_DISPLAY_HOST_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_BASE_LOGIN_DISPLAY_HOST_H_
-#pragma once
 
 #include <string>
 
@@ -13,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/settings/ownership_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
@@ -61,12 +60,13 @@ class BaseLoginDisplayHost : public LoginDisplayHost,
 
   const gfx::Rect& background_bounds() const { return background_bounds_; }
 
- private:
+ protected:
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+ private:
   // Marks display host for deletion.
   // If |post_quit_task| is true also posts Quit task to the MessageLoop.
   void ShutdownDisplayHost(bool post_quit_task);
@@ -107,6 +107,9 @@ class BaseLoginDisplayHost : public LoginDisplayHost,
   // own deletion to the message loop twice if the user logs out while we're
   // still in the process of cleaning up after login (http://crbug.com/134463).
   bool shutting_down_;
+
+  // Whether progress bar is shown on the OOBE page.
+  bool oobe_progress_bar_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseLoginDisplayHost);
 };

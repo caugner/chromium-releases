@@ -10,10 +10,13 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -48,17 +51,12 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
   EXPECT_EQ(0U, CountAllTabs());
 
   // Create more browsers/windows.
-  scoped_ptr<Browser> browser2(new Browser(Browser::TYPE_TABBED, profile()));
-  scoped_ptr<Browser> browser3(new Browser(Browser::TYPE_TABBED, profile()));
-  scoped_ptr<Browser> browser4(new Browser(Browser::TYPE_TABBED, profile()));
-
-  scoped_ptr<TestBrowserWindow> window2(new TestBrowserWindow(browser2.get()));
-  scoped_ptr<TestBrowserWindow> window3(new TestBrowserWindow(browser3.get()));
-  scoped_ptr<TestBrowserWindow> window4(new TestBrowserWindow(browser4.get()));
-
-  browser2->SetWindowForTesting(window2.get());
-  browser3->SetWindowForTesting(window3.get());
-  browser4->SetWindowForTesting(window4.get());
+  scoped_ptr<Browser> browser2(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
+  scoped_ptr<Browser> browser3(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
+  scoped_ptr<Browser> browser4(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
 
   // Sanity checks.
   EXPECT_EQ(4U, BrowserList::size());
@@ -71,23 +69,23 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyCount) {
 
   // Add some tabs.
   for (size_t i = 0; i < 3; ++i)
-    browser2->NewTab();
-  browser3->NewTab();
+    chrome::NewTab(browser2.get());
+  chrome::NewTab(browser3.get());
 
   EXPECT_EQ(4U, CountAllTabs());
 
   // Close some tabs.
-  browser2->CloseAllTabs();
+  chrome::CloseAllTabs(browser2.get());
 
   EXPECT_EQ(1U, CountAllTabs());
 
   // Add lots of tabs.
   for (size_t i = 0; i < 41; ++i)
-    browser()->NewTab();
+    chrome::NewTab(browser());
 
   EXPECT_EQ(42U, CountAllTabs());
   // Close all remaining tabs to keep all the destructors happy.
-  browser3->CloseAllTabs();
+  chrome::CloseAllTabs(browser3.get());
 }
 
 TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
@@ -95,14 +93,10 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   EXPECT_EQ(1U, BrowserList::size());
 
   // Create more browsers/windows.
-  scoped_ptr<Browser> browser2(new Browser(Browser::TYPE_TABBED, profile()));
-  scoped_ptr<Browser> browser3(new Browser(Browser::TYPE_TABBED, profile()));
-
-  scoped_ptr<TestBrowserWindow> window2(new TestBrowserWindow(browser2.get()));
-  scoped_ptr<TestBrowserWindow> window3(new TestBrowserWindow(browser3.get()));
-
-  browser2->SetWindowForTesting(window2.get());
-  browser3->SetWindowForTesting(window3.get());
+  scoped_ptr<Browser> browser2(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
+  scoped_ptr<Browser> browser3(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
 
   // Sanity checks.
   EXPECT_EQ(3U, BrowserList::size());
@@ -114,8 +108,8 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
 
   // Add some tabs.
   for (size_t i = 0; i < 3; ++i)
-    browser2->NewTab();
-  browser3->NewTab();
+    chrome::NewTab(browser2.get());
+  chrome::NewTab(browser3.get());
 
   size_t count = 0;
   for (TabContentsIterator iterator; !iterator.done(); ++iterator, ++count) {
@@ -128,7 +122,7 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   }
 
   // Close some tabs.
-  browser2->CloseAllTabs();
+  chrome::CloseAllTabs(browser2.get());
 
   count = 0;
   for (TabContentsIterator iterator; !iterator.done(); ++iterator, ++count) {
@@ -139,8 +133,8 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   }
 
   // Now make it one tab per browser.
-  browser()->NewTab();
-  browser2->NewTab();
+  chrome::NewTab(browser());
+  chrome::NewTab(browser2.get());
 
   count = 0;
   for (TabContentsIterator iterator; !iterator.done(); ++iterator, ++count) {
@@ -155,8 +149,8 @@ TEST_F(BrowserListTest, TabContentsIteratorVerifyBrowser) {
   }
 
   // Close all remaining tabs to keep all the destructors happy.
-  browser2->CloseAllTabs();
-  browser3->CloseAllTabs();
+  chrome::CloseAllTabs(browser2.get());
+  chrome::CloseAllTabs(browser3.get());
 }
 
 #if 0
@@ -166,21 +160,17 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
   EXPECT_EQ(1U, BrowserList::size());
 
   // Create more browsers/windows.
-  scoped_ptr<Browser> browser2(new Browser(Browser::TYPE_TABBED, profile()));
-  scoped_ptr<Browser> browser3(new Browser(Browser::TYPE_TABBED, profile()));
-
-  scoped_ptr<TestBrowserWindow> window2(new TestBrowserWindow(browser2.get()));
-  scoped_ptr<TestBrowserWindow> window3(new TestBrowserWindow(browser3.get()));
-
-  browser2->SetWindowForTesting(window2.get());
-  browser3->SetWindowForTesting(window3.get());
+  scoped_ptr<Browser> browser2(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
+  scoped_ptr<Browser> browser3(
+      chrome::CreateBrowserWithTestWindowForProfile(profile()));
 
   EXPECT_EQ(0U, CountAllTabs());
 
   // Add some tabs.
   for (size_t i = 0; i < 3; ++i)
-    browser2->NewTab();
-  browser3->NewTab();
+    chrome::NewTab(browser2);
+  chrome::NewTab(browser3);
 
   EXPECT_EQ(4U, CountAllTabs());
 
@@ -200,8 +190,8 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
   EXPECT_EQ(4U, CountAllTabs());
 
   // Close remaining tabs.
-  browser2->CloseAllTabs();
-  browser3->CloseAllTabs();
+  chrome::CloseAllTabs(browser2.get());
+  chrome::CloseAllTabs(browser3.get());
 
   EXPECT_EQ(1U, CountAllTabs());
 
@@ -212,8 +202,8 @@ TEST_F(BrowserListTest, TabContentsIteratorBackgroundPrinting) {
 
   // Add some tabs.
   for (size_t i = 0; i < 3; ++i) {
-    browser2->NewTab();
-    browser3->NewTab();
+    chrome::NewTab(browser2.get());
+    chrome::NewTab(browser3.get());
   }
 
   EXPECT_EQ(6U, CountAllTabs());

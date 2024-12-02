@@ -7,11 +7,12 @@
 #include <cstddef>
 
 #include "jingle/notifier/listener/fake_push_client.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/notifier/mock_sync_notifier_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 namespace {
 
@@ -27,16 +28,15 @@ class P2PNotifierTest : public testing::Test {
             scoped_ptr<notifier::PushClient>(fake_push_client_),
             NOTIFY_OTHERS),
         next_sent_notification_to_reflect_(0) {
-    p2p_notifier_.AddObserver(&mock_observer_);
+    p2p_notifier_.RegisterHandler(&mock_observer_);
   }
 
   virtual ~P2PNotifierTest() {
-    p2p_notifier_.RemoveObserver(&mock_observer_);
+    p2p_notifier_.UnregisterHandler(&mock_observer_);
   }
 
-  syncable::ModelTypePayloadMap MakePayloadMap(
-      syncable::ModelTypeSet types) {
-    return syncable::ModelTypePayloadMapFromEnumSet(types, "");
+  ModelTypePayloadMap MakePayloadMap(ModelTypeSet types) {
+    return ModelTypePayloadMapFromEnumSet(types, std::string());
   }
 
   // Simulate receiving all the notifications we sent out since last
@@ -76,21 +76,21 @@ TEST_F(P2PNotifierTest, P2PNotificationTarget) {
 TEST_F(P2PNotifierTest, P2PNotificationDataIsTargeted) {
   {
     const P2PNotificationData notification_data(
-        "sender", NOTIFY_SELF, syncable::ModelTypeSet());
+        "sender", NOTIFY_SELF, ModelTypeSet());
     EXPECT_TRUE(notification_data.IsTargeted("sender"));
     EXPECT_FALSE(notification_data.IsTargeted("other1"));
     EXPECT_FALSE(notification_data.IsTargeted("other2"));
   }
   {
     const P2PNotificationData notification_data(
-        "sender", NOTIFY_OTHERS, syncable::ModelTypeSet());
+        "sender", NOTIFY_OTHERS, ModelTypeSet());
     EXPECT_FALSE(notification_data.IsTargeted("sender"));
     EXPECT_TRUE(notification_data.IsTargeted("other1"));
     EXPECT_TRUE(notification_data.IsTargeted("other2"));
   }
   {
     const P2PNotificationData notification_data(
-        "sender", NOTIFY_ALL, syncable::ModelTypeSet());
+        "sender", NOTIFY_ALL, ModelTypeSet());
     EXPECT_TRUE(notification_data.IsTargeted("sender"));
     EXPECT_TRUE(notification_data.IsTargeted("other1"));
     EXPECT_TRUE(notification_data.IsTargeted("other2"));
@@ -118,8 +118,7 @@ TEST_F(P2PNotifierTest, P2PNotificationDataDefault) {
 // Make sure the P2PNotificationData <-> string conversions work for a
 // non-default-constructed P2PNotificationData.
 TEST_F(P2PNotifierTest, P2PNotificationDataNonDefault) {
-  const syncable::ModelTypeSet changed_types(
-      syncable::BOOKMARKS, syncable::THEMES);
+  const ModelTypeSet changed_types(BOOKMARKS, THEMES);
   const P2PNotificationData notification_data(
       "sender", NOTIFY_ALL, changed_types);
   EXPECT_TRUE(notification_data.IsTargeted("sender"));
@@ -142,13 +141,15 @@ TEST_F(P2PNotifierTest, P2PNotificationDataNonDefault) {
 // observer should receive only a notification from the call to
 // UpdateEnabledTypes().
 TEST_F(P2PNotifierTest, NotificationsBasic) {
-  syncable::ModelTypeSet enabled_types(
-      syncable::BOOKMARKS, syncable::PREFERENCES);
+  const ModelTypeSet enabled_types(BOOKMARKS, PREFERENCES);
 
   EXPECT_CALL(mock_observer_, OnNotificationsEnabled());
-  EXPECT_CALL(mock_observer_,
-              OnIncomingNotification(MakePayloadMap(enabled_types),
-                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(MakePayloadMap(enabled_types)),
+      REMOTE_NOTIFICATION));
+
+  p2p_notifier_.UpdateRegisteredIds(&mock_observer_,
+                                    ModelTypeSetToObjectIdSet(enabled_types));
 
   p2p_notifier_.SetUniqueId("sender");
 
@@ -166,16 +167,13 @@ TEST_F(P2PNotifierTest, NotificationsBasic) {
   EXPECT_EQ(kEmail, fake_push_client_->email());
   EXPECT_EQ(kToken, fake_push_client_->token());
 
-  p2p_notifier_.UpdateEnabledTypes(enabled_types);
-
   ReflectSentNotifications();
   fake_push_client_->EnableNotifications();
 
   // Sent with target NOTIFY_OTHERS so should not be propagated to
   // |mock_observer_|.
   {
-    syncable::ModelTypeSet changed_types(
-        syncable::THEMES, syncable::APPS);
+    ModelTypeSet changed_types(THEMES, APPS);
     p2p_notifier_.SendNotification(changed_types);
   }
 
@@ -186,23 +184,25 @@ TEST_F(P2PNotifierTest, NotificationsBasic) {
 // target settings.  The notifications received by the observer should
 // be consistent with the target settings.
 TEST_F(P2PNotifierTest, SendNotificationData) {
-  syncable::ModelTypeSet enabled_types(
-      syncable::BOOKMARKS, syncable::PREFERENCES);
-
-  syncable::ModelTypeSet changed_types(
-      syncable::THEMES, syncable::APPS);
-
-  const syncable::ModelTypePayloadMap& changed_payload_map =
-      MakePayloadMap(changed_types);
+  const ModelTypeSet enabled_types(BOOKMARKS, PREFERENCES, THEMES);
+  const ModelTypeSet changed_types(THEMES, APPS);
+  const ModelTypeSet expected_types(THEMES);
 
   EXPECT_CALL(mock_observer_, OnNotificationsEnabled());
   EXPECT_CALL(mock_observer_,
-              OnIncomingNotification(MakePayloadMap(enabled_types),
-                                     REMOTE_NOTIFICATION));
+              OnIncomingNotification(
+                  ModelTypePayloadMapToObjectIdPayloadMap(
+                      MakePayloadMap(enabled_types)),
+                  REMOTE_NOTIFICATION));
+
+  p2p_notifier_.UpdateRegisteredIds(&mock_observer_,
+                                    ModelTypeSetToObjectIdSet(enabled_types));
+
+  const ModelTypePayloadMap& expected_payload_map =
+      MakePayloadMap(expected_types);
 
   p2p_notifier_.SetUniqueId("sender");
   p2p_notifier_.UpdateCredentials("foo@bar.com", "fake_token");
-  p2p_notifier_.UpdateEnabledTypes(enabled_types);
 
   ReflectSentNotifications();
   fake_push_client_->EnableNotifications();
@@ -217,8 +217,9 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
-                                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(expected_payload_map),
+      REMOTE_NOTIFICATION));
   p2p_notifier_.SendNotificationDataForTest(
       P2PNotificationData("sender", NOTIFY_SELF, changed_types));
 
@@ -234,7 +235,7 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
   // Should be dropped.
   Mock::VerifyAndClearExpectations(&mock_observer_);
   p2p_notifier_.SendNotificationDataForTest(
-      P2PNotificationData("sender", NOTIFY_SELF, syncable::ModelTypeSet()));
+      P2PNotificationData("sender", NOTIFY_SELF, ModelTypeSet()));
 
   ReflectSentNotifications();
 
@@ -246,8 +247,9 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
-                                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(expected_payload_map),
+      REMOTE_NOTIFICATION));
   p2p_notifier_.SendNotificationDataForTest(
       P2PNotificationData("sender2", NOTIFY_OTHERS, changed_types));
 
@@ -256,14 +258,15 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
   // Should be dropped.
   Mock::VerifyAndClearExpectations(&mock_observer_);
   p2p_notifier_.SendNotificationDataForTest(
-      P2PNotificationData("sender2", NOTIFY_OTHERS, syncable::ModelTypeSet()));
+      P2PNotificationData("sender2", NOTIFY_OTHERS, ModelTypeSet()));
 
   ReflectSentNotifications();
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
-                                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(expected_payload_map),
+      REMOTE_NOTIFICATION));
   p2p_notifier_.SendNotificationDataForTest(
       P2PNotificationData("sender", NOTIFY_ALL, changed_types));
 
@@ -271,8 +274,9 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
-                                                     REMOTE_NOTIFICATION));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(
+      ModelTypePayloadMapToObjectIdPayloadMap(expected_payload_map),
+      REMOTE_NOTIFICATION));
   p2p_notifier_.SendNotificationDataForTest(
       P2PNotificationData("sender2", NOTIFY_ALL, changed_types));
 
@@ -281,11 +285,11 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
   // Should be dropped.
   Mock::VerifyAndClearExpectations(&mock_observer_);
   p2p_notifier_.SendNotificationDataForTest(
-      P2PNotificationData("sender2", NOTIFY_ALL, syncable::ModelTypeSet()));
+      P2PNotificationData("sender2", NOTIFY_ALL, ModelTypeSet()));
 
   ReflectSentNotifications();
 }
 
 }  // namespace
 
-}  // namespace sync_notifier
+}  // namespace syncer

@@ -24,8 +24,7 @@ class ResourceRequestInfoImpl;
 // chain of ResourceHandlers, and is the ResourceController for its handler.
 class ResourceLoader : public net::URLRequest::Delegate,
                        public SSLErrorHandler::Delegate,
-                       public ResourceController,
-                       public base::SupportsWeakPtr<ResourceLoader> {
+                       public ResourceController {
  public:
   ResourceLoader(scoped_ptr<net::URLRequest> request,
                  scoped_ptr<ResourceHandler> handler,
@@ -39,6 +38,7 @@ class ResourceLoader : public net::URLRequest::Delegate,
 
   bool is_transferring() const { return is_transferring_; }
   void MarkAsTransferring();
+  void WillCompleteTransfer();
   void CompleteTransfer(scoped_ptr<ResourceHandler> new_handler);
 
   net::URLRequest* request() { return request_.get(); }
@@ -49,8 +49,6 @@ class ResourceLoader : public net::URLRequest::Delegate,
 
   // IPC message handlers:
   void OnUploadProgressACK();
-  void OnFollowRedirect(bool has_new_first_party_for_cookies,
-                        const GURL& new_first_party_for_cookies);
 
  private:
   // net::URLRequest::Delegate implementation:
@@ -80,21 +78,20 @@ class ResourceLoader : public net::URLRequest::Delegate,
 
   void StartRequestInternal();
   void CancelRequestInternal(int error, bool from_renderer);
-  bool CompleteResponseStarted();
-  void StartReading();
-  bool ReadMore(int* bytes_read);
-  bool CompleteRead(int* bytes_read);
+  void CompleteResponseStarted();
+  void StartReading(bool is_continuation);
+  void ResumeReading();
+  void ReadMore(int* bytes_read);
+  void CompleteRead(int bytes_read);
   void ResponseCompleted();
-  bool PauseRequestIfNeeded();
-  void PauseRequest(bool pause);
-  void ResumeRequest();
   void CallDidFinishLoading();
+
+  bool is_deferred() const { return deferred_stage_ != DEFERRED_NONE; }
 
   enum DeferredStage {
     DEFERRED_NONE,
     DEFERRED_START,
     DEFERRED_REDIRECT,
-    DEFERRED_RESPONSE,
     DEFERRED_READ,
     DEFERRED_FINISH
   };
@@ -111,17 +108,12 @@ class ResourceLoader : public net::URLRequest::Delegate,
   bool waiting_for_upload_progress_ack_;
   base::TimeTicks last_upload_ticks_;
 
-  bool called_on_response_started_;
-  bool has_started_reading_;
-
-  bool is_paused_;
-  int pause_count_;
-  int paused_read_bytes_;
-
   // Indicates that we are in a state of being transferred to a new downstream
   // consumer.  We are waiting for a notification to complete the transfer, at
   // which point we'll receive a new ResourceHandler.
   bool is_transferring_;
+
+  base::WeakPtrFactory<ResourceLoader> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceLoader);
 };

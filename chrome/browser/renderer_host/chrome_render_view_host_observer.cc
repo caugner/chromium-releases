@@ -33,6 +33,7 @@ ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
       site_instance->GetBrowserContext());
 
   InitRenderViewHostForExtensions();
+  InitRenderViewForExtensions();
 }
 
 ChromeRenderViewHostObserver::~ChromeRenderViewHostObserver() {
@@ -41,6 +42,8 @@ ChromeRenderViewHostObserver::~ChromeRenderViewHostObserver() {
 }
 
 void ChromeRenderViewHostObserver::RenderViewHostInitialized() {
+  // This reinitializes some state in the case where a render process crashes
+  // but we keep the same RenderViewHost instance.
   InitRenderViewForExtensions();
 }
 
@@ -80,14 +83,6 @@ void ChromeRenderViewHostObserver::InitRenderViewHostForExtensions() {
 
   // TODO(creis): Use this to replace SetInstalledAppForRenderer.
   process_manager->RegisterRenderViewHost(render_view_host(), extension);
-
-  if (extension->is_app()) {
-    // Record which, if any, installed app is associated with this process.
-    // TODO(aa): Totally lame to store this state in a global map in extension
-    // service. Can we get it from EPM instead?
-    profile_->GetExtensionService()->SetInstalledAppForRenderer(
-        render_view_host()->GetProcess()->GetID(), extension);
-  }
 }
 
 void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
@@ -126,6 +121,13 @@ void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
     case Extension::TYPE_HOSTED_APP:
     case Extension::TYPE_PACKAGED_APP:
     case Extension::TYPE_PLATFORM_APP:
+      // Always send a Loaded message before ActivateExtension so that
+      // ExtensionDispatcher knows what Extension is active, not just its ID.
+      // This is important for classifying the Extension's JavaScript context
+      // correctly (see ExtensionDispatcher::ClassifyJavaScriptContext).
+      Send(new ExtensionMsg_Loaded(
+          std::vector<ExtensionMsg_Loaded_Params>(
+              1, ExtensionMsg_Loaded_Params(extension))));
       Send(new ExtensionMsg_ActivateExtension(extension->id()));
       break;
 

@@ -4,9 +4,8 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_FACTORY_H_
 #define SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_FACTORY_H_
-#pragma once
 
-namespace sync_api {
+namespace syncer {
 
 class HttpPostProviderInterface;
 
@@ -29,6 +28,6 @@ class HttpPostProviderFactory {
   virtual void Destroy(HttpPostProviderInterface* http) = 0;
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_HTTP_POST_PROVIDER_FACTORY_H_

@@ -12,6 +12,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -69,45 +70,6 @@ void InstallFrameworkHacks() {
 }
 
 #endif  // OS_MACOSX
-
-#if defined(OS_POSIX)
-
-class SuicideOnChannelErrorFilter : public IPC::ChannelProxy::MessageFilter {
- public:
-  // IPC::ChannelProxy::MessageFilter
-  virtual void OnChannelError() OVERRIDE {
-    // On POSIX, at least, one can install an unload handler which loops
-    // forever and leave behind a renderer process which eats 100% CPU forever.
-    //
-    // This is because the terminate signals (ViewMsg_ShouldClose and the error
-    // from the IPC channel) are routed to the main message loop but never
-    // processed (because that message loop is stuck in V8).
-    //
-    // One could make the browser SIGKILL the renderers, but that leaves open a
-    // large window where a browser failure (or a user, manually terminating
-    // the browser because "it's stuck") will leave behind a process eating all
-    // the CPU.
-    //
-    // So, we install a filter on the channel so that we can process this event
-    // here and kill the process.
-    //
-    // We want to kill this process after giving it 30 seconds to run the exit
-    // handlers. SIGALRM has a default disposition of terminating the
-    // application.
-#if defined(OS_POSIX)
-    if (CommandLine::ForCurrentProcess()->
-        HasSwitch(switches::kRendererCleanExit))
-      alarm(30);
-    else
-#endif
-      _exit(0);
-  }
-
- protected:
-  virtual ~SuicideOnChannelErrorFilter() {}
-};
-
-#endif  // OS(POSIX)
 
 }  // namespace
 
@@ -214,11 +176,7 @@ int RendererMain(const content::MainFunctionParams& parameters) {
   platform.InitSandboxTests(no_sandbox);
 
   // Initialize histogram statistics gathering system.
-  // Don't create StatisticsRecorder in the single process mode.
-  scoped_ptr<base::StatisticsRecorder> statistics;
-  if (!base::StatisticsRecorder::IsActive()) {
-    statistics.reset(new base::StatisticsRecorder());
-  }
+  base::StatisticsRecorder::Initialize();
 
   // Initialize statistical testing infrastructure.  We set client_id to the
   // empty string to disallow the renderer process from creating its own
@@ -251,10 +209,6 @@ int RendererMain(const content::MainFunctionParams& parameters) {
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;
     new RenderThreadImpl();
-#endif
-
-#if defined(OS_POSIX)
-    RenderThreadImpl::current()->AddFilter(new SuicideOnChannelErrorFilter());
 #endif
 
     platform.RunSandboxTests();

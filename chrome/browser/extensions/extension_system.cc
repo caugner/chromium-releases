@@ -9,15 +9,14 @@
 #include "base/file_path.h"
 #include "base/string_tokenizer.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/api/alarms/alarm_manager.h"
 #include "chrome/browser/extensions/api/declarative/rules_registry_service.h"
+#include "chrome/browser/extensions/component_loader.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
-#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_navigation_observer.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/management_policy.h"
+#include "chrome/browser/extensions/message_service.h"
 #include "chrome/browser/extensions/state_store.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_master.h"
@@ -43,6 +43,8 @@
 
 using content::BrowserThread;
 
+namespace extensions {
+
 //
 // ExtensionSystem
 //
@@ -51,7 +53,7 @@ ExtensionSystem::ExtensionSystem() {
   // In lieu of a way for Feature to check whether it's running on the browser
   // process, tell it.
   // See http://crbug.com/126535.
-  extensions::Feature::SetChannelCheckingEnabled(true);
+  Feature::SetChannelCheckingEnabled(true);
 }
 
 ExtensionSystem::~ExtensionSystem() {
@@ -71,8 +73,6 @@ ExtensionSystemImpl::Shared::Shared(Profile* profile)
 }
 
 ExtensionSystemImpl::Shared::~Shared() {
-  if (rules_registry_service_.get())
-    rules_registry_service_->Shutdown();
 }
 
 void ExtensionSystemImpl::Shared::InitPrefs() {
@@ -85,7 +85,7 @@ void ExtensionSystemImpl::Shared::InitPrefs() {
       ExtensionPrefValueMapFactory::GetForProfile(profile_)));
   extension_prefs_->Init(extensions_disabled);
 
-  state_store_.reset(new extensions::StateStore(
+  state_store_.reset(new StateStore(
       profile_,
       profile_->GetPath().AppendASCII(ExtensionService::kStateStoreName)));
 }
@@ -104,11 +104,9 @@ void ExtensionSystemImpl::Shared::InitInfoMap() {
 void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
 
-  lazy_background_task_queue_.reset(new extensions::LazyBackgroundTaskQueue(
-      profile_));
-  extension_event_router_.reset(new ExtensionEventRouter(profile_));
-  extension_message_service_.reset(new ExtensionMessageService(
-      lazy_background_task_queue_.get()));
+  lazy_background_task_queue_.reset(new LazyBackgroundTaskQueue(profile_));
+  message_service_.reset(new MessageService(lazy_background_task_queue_.get()));
+  extension_event_router_.reset(new EventRouter(profile_));
   extension_navigation_observer_.reset(
       new ExtensionNavigationObserver(profile_));
 
@@ -134,11 +132,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   // These services must be registered before the ExtensionService tries to
   // load any extensions.
   {
-    rules_registry_service_.reset(
-        new extensions::RulesRegistryService(profile_));
-    rules_registry_service_->RegisterDefaultRulesRegistries();
-
-    management_policy_.reset(new extensions::ManagementPolicy);
+    management_policy_.reset(new ManagementPolicy);
     RegisterManagementPolicyProviders();
   }
 
@@ -170,8 +164,8 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
       StringTokenizerT<CommandLine::StringType,
           CommandLine::StringType::const_iterator> t(path_list,
                                                      FILE_PATH_LITERAL(","));
-      scoped_refptr<extensions::UnpackedInstaller> installer =
-          extensions::UnpackedInstaller::Create(extension_service_.get());
+      scoped_refptr<UnpackedInstaller> installer =
+          UnpackedInstaller::Create(extension_service_.get());
       while (t.GetNext()) {
         installer->LoadFromCommandLine(FilePath(t.token()));
       }
@@ -204,7 +198,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   }
 }
 
-extensions::StateStore* ExtensionSystemImpl::Shared::state_store() {
+StateStore* ExtensionSystemImpl::Shared::state_store() {
   return state_store_.get();
 }
 
@@ -212,7 +206,7 @@ ExtensionService* ExtensionSystemImpl::Shared::extension_service() {
   return extension_service_.get();
 }
 
-extensions::ManagementPolicy* ExtensionSystemImpl::Shared::management_policy() {
+ManagementPolicy* ExtensionSystemImpl::Shared::management_policy() {
   return management_policy_.get();
 }
 
@@ -224,22 +218,17 @@ ExtensionInfoMap* ExtensionSystemImpl::Shared::info_map() {
   return extension_info_map_.get();
 }
 
-extensions::LazyBackgroundTaskQueue*
-ExtensionSystemImpl::Shared::lazy_background_task_queue() {
+LazyBackgroundTaskQueue*
+    ExtensionSystemImpl::Shared::lazy_background_task_queue() {
   return lazy_background_task_queue_.get();
 }
 
-ExtensionMessageService* ExtensionSystemImpl::Shared::message_service() {
-  return extension_message_service_.get();
+MessageService* ExtensionSystemImpl::Shared::message_service() {
+  return message_service_.get();
 }
 
-ExtensionEventRouter* ExtensionSystemImpl::Shared::event_router() {
+EventRouter* ExtensionSystemImpl::Shared::event_router() {
   return extension_event_router_.get();
-}
-
-extensions::RulesRegistryService*
-ExtensionSystemImpl::Shared::rules_registry_service() {
-  return rules_registry_service_.get();
 }
 
 //
@@ -259,13 +248,15 @@ ExtensionSystemImpl::ExtensionSystemImpl(Profile* profile)
 }
 
 ExtensionSystemImpl::~ExtensionSystemImpl() {
+  if (rules_registry_service_.get())
+    rules_registry_service_->Shutdown();
 }
 
 void ExtensionSystemImpl::Shutdown() {
   extension_process_manager_.reset();
 }
 
-void ExtensionSystemImpl::Init(bool extensions_enabled) {
+void ExtensionSystemImpl::InitForRegularProfile(bool extensions_enabled) {
   DCHECK(!profile_->IsOffTheRecord());
   if (user_script_master() || extension_service())
     return;  // Already initialized.
@@ -279,17 +270,36 @@ void ExtensionSystemImpl::Init(bool extensions_enabled) {
   shared_->InitInfoMap();
 
   extension_process_manager_.reset(ExtensionProcessManager::Create(profile_));
-  alarm_manager_.reset(new extensions::AlarmManager(profile_,
-                                                    &base::Time::Now));
+  alarm_manager_.reset(new AlarmManager(profile_, &base::Time::Now));
+
+  serial_connection_manager_.reset(new ApiResourceManager<SerialConnection>(
+      BrowserThread::FILE));
+  socket_manager_.reset(new ApiResourceManager<Socket>(BrowserThread::IO));
+  usb_device_resource_manager_.reset(
+      new ApiResourceManager<UsbDeviceResource>(BrowserThread::IO));
+
+  rules_registry_service_.reset(new RulesRegistryService(profile_));
+  rules_registry_service_->RegisterDefaultRulesRegistries();
 
   shared_->Init(extensions_enabled);
+}
+
+void ExtensionSystemImpl::InitForOTRProfile() {
+  // Only initialize the RulesRegistryService of the OTR ExtensionSystem if the
+  // regular ExtensionSystem has been initialized properly, as we depend on it.
+  // Some ChromeOS browser tests don't initialize the regular ExtensionSystem
+  // in login-tests.
+  if (extension_service()) {
+    rules_registry_service_.reset(new RulesRegistryService(profile_));
+    rules_registry_service_->RegisterDefaultRulesRegistries();
+  }
 }
 
 ExtensionService* ExtensionSystemImpl::extension_service() {
   return shared_->extension_service();
 }
 
-extensions::ManagementPolicy* ExtensionSystemImpl::management_policy() {
+ManagementPolicy* ExtensionSystemImpl::management_policy() {
   return shared_->management_policy();
 }
 
@@ -307,11 +317,11 @@ ExtensionProcessManager* ExtensionSystemImpl::process_manager() {
   return extension_process_manager_.get();
 }
 
-extensions::AlarmManager* ExtensionSystemImpl::alarm_manager() {
+AlarmManager* ExtensionSystemImpl::alarm_manager() {
   return alarm_manager_.get();
 }
 
-extensions::StateStore* ExtensionSystemImpl::state_store() {
+StateStore* ExtensionSystemImpl::state_store() {
   return shared_->state_store();
 }
 
@@ -319,28 +329,40 @@ ExtensionInfoMap* ExtensionSystemImpl::info_map() {
   return shared_->info_map();
 }
 
-extensions::LazyBackgroundTaskQueue*
-ExtensionSystemImpl::lazy_background_task_queue() {
+LazyBackgroundTaskQueue* ExtensionSystemImpl::lazy_background_task_queue() {
   return shared_->lazy_background_task_queue();
 }
 
-ExtensionMessageService* ExtensionSystemImpl::message_service() {
+MessageService* ExtensionSystemImpl::message_service() {
   return shared_->message_service();
 }
 
-ExtensionEventRouter* ExtensionSystemImpl::event_router() {
+EventRouter* ExtensionSystemImpl::event_router() {
   return shared_->event_router();
 }
 
-extensions::RulesRegistryService*
-ExtensionSystemImpl::rules_registry_service() {
-  return shared_->rules_registry_service();
+RulesRegistryService* ExtensionSystemImpl::rules_registry_service() {
+  return rules_registry_service_.get();
+}
+
+ApiResourceManager<SerialConnection>*
+ExtensionSystemImpl::serial_connection_manager() {
+  return serial_connection_manager_.get();
+}
+
+ApiResourceManager<Socket>* ExtensionSystemImpl::socket_manager() {
+  return socket_manager_.get();
+}
+
+ApiResourceManager<UsbDeviceResource>*
+ExtensionSystemImpl::usb_device_resource_manager() {
+  return usb_device_resource_manager_.get();
 }
 
 void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
-    const extensions::Extension* extension) {
+    const Extension* extension) {
   base::Time install_time;
-  if (extension->location() != extensions::Extension::COMPONENT) {
+  if (extension->location() != Extension::COMPONENT) {
     install_time = extension_service()->extension_prefs()->
         GetInstallTime(extension->id());
   }
@@ -361,3 +383,5 @@ void ExtensionSystemImpl::UnregisterExtensionWithRequestContexts(
       base::Bind(&ExtensionInfoMap::RemoveExtension, info_map(),
                  extension_id, reason));
 }
+
+}  // namespace extensions

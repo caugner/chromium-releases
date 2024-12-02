@@ -7,13 +7,18 @@
 #include <algorithm>
 #include <cmath>
 
+#include "ash/display/display_controller.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
+#include "ash/wm/coordinate_conversion.h"
+#include "ash/wm/cursor_manager.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/phantom_window_controller.h"
 #include "ash/wm/workspace/snap_sizer.h"
-#include "ui/aura/cursor_manager.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
@@ -45,21 +50,31 @@ const int WorkspaceWindowResizer::kMinOnscreenSize = 20;
 const int WorkspaceWindowResizer::kMinOnscreenHeight = 32;
 
 WorkspaceWindowResizer::~WorkspaceWindowResizer() {
-  aura::Env::GetInstance()->cursor_manager()->UnlockCursor();
+  Shell* shell = Shell::GetInstance();
+  shell->display_controller()->set_dont_warp_mouse(false);
+  shell->cursor_manager()->UnlockCursor();
 }
 
 // static
 WorkspaceWindowResizer* WorkspaceWindowResizer::Create(
     aura::Window* window,
-    const gfx::Point& location,
+    const gfx::Point& location_in_parent,
     int window_component,
     const std::vector<aura::Window*>& attached_windows) {
-  Details details(window, location, window_component);
+  Details details(window, location_in_parent, window_component);
   return details.is_resizable ?
       new WorkspaceWindowResizer(details, attached_windows) : NULL;
 }
 
 void WorkspaceWindowResizer::Drag(const gfx::Point& location, int event_flags) {
+  std::pair<aura::RootWindow*, gfx::Point> actual_location =
+      wm::GetRootWindowRelativeToWindow(window()->parent(), location);
+
+  // TODO(yusukes): Implement dragging a window from one display to another.
+  aura::RootWindow* current_root = actual_location.first;
+  if (current_root != window()->GetRootWindow())
+    return;
+
   int grid_size = event_flags & ui::EF_CONTROL_DOWN ?
                   0 : ash::Shell::GetInstance()->GetGridSize();
   gfx::Rect bounds = CalculateBoundsForDrag(details_, location, grid_size);
@@ -85,8 +100,8 @@ void WorkspaceWindowResizer::CompleteDrag(int event_flags) {
     return;
 
   if (snap_type_ == SNAP_LEFT_EDGE || snap_type_ == SNAP_RIGHT_EDGE) {
-    if (!GetRestoreBounds(details_.window))
-      SetRestoreBounds(details_.window, details_.initial_bounds);
+    if (!GetRestoreBoundsInScreen(details_.window))
+      SetRestoreBoundsInParent(details_.window, details_.initial_bounds);
     details_.window->SetBounds(snap_sizer_->target_bounds());
     return;
   }
@@ -105,13 +120,23 @@ void WorkspaceWindowResizer::CompleteDrag(int event_flags) {
     details_.window->SetBounds(bounds);
     return;
   }
-
-  ui::ScopedLayerAnimationSettings scoped_setter(
-      details_.window->layer()->GetAnimator());
-  // Use a small duration since the grid is small.
-  scoped_setter.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kSnapDurationMS));
-  details_.window->SetBounds(bounds);
+  // TODO(oshima|yusukes): This is temporary solution until better drag & move
+  // is implemented. (crbug.com/136816).
+  gfx::Rect dst_bounds =
+      ScreenAsh::ConvertRectToScreen(details_.window->parent(), bounds);
+  gfx::Display dst_display = gfx::Screen::GetDisplayMatching(dst_bounds);
+  if (dst_display.id() !=
+      gfx::Screen::GetDisplayNearestWindow(details_.window).id()) {
+    // Don't animate when moving to another display.
+    details_.window->SetBoundsInScreen(dst_bounds);
+  } else {
+    ui::ScopedLayerAnimationSettings scoped_setter(
+        details_.window->layer()->GetAnimator());
+    // Use a small duration since the grid is small.
+    scoped_setter.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kSnapDurationMS));
+    details_.window->SetBounds(bounds);
+  }
 }
 
 void WorkspaceWindowResizer::RevertDrag() {
@@ -153,7 +178,16 @@ WorkspaceWindowResizer::WorkspaceWindowResizer(
       snap_type_(SNAP_NONE),
       num_mouse_moves_since_bounds_change_(0) {
   DCHECK(details_.is_resizable);
-  aura::Env::GetInstance()->cursor_manager()->LockCursor();
+
+  Shell* shell = Shell::GetInstance();
+  shell->cursor_manager()->LockCursor();
+
+  // The pointer should be confined in one display during resizing a window
+  // because the window cannot span two displays at the same time anyway. The
+  // exception is window/tab dragging operation. During that operation,
+  // |dont_warp_mouse_| should be set to false so that the user could move a
+  // window/tab to another display.
+  shell->display_controller()->set_dont_warp_mouse(!ShouldAllowMouseWarp());
 
   // Only support attaching to the right/bottom.
   DCHECK(attached_windows_.empty() ||
@@ -280,13 +314,13 @@ void WorkspaceWindowResizer::AdjustBoundsForMainWindow(
     gfx::Rect* bounds, int grid_size) const {
   // Always keep kMinOnscreenHeight on the bottom.
   gfx::Rect work_area(
-      gfx::Screen::GetDisplayNearestWindow(window()).work_area());
+      ScreenAsh::GetDisplayWorkAreaBoundsInParent(details_.window));
   int max_y = AlignToGridRoundUp(work_area.bottom() - kMinOnscreenHeight,
                                  grid_size);
   if (bounds->y() > max_y)
     bounds->set_y(max_y);
 
-  // Don't allow dragging above the top of the monitor.
+  // Don't allow dragging above the top of the display.
   if (bounds->y() <= work_area.y())
     bounds->set_y(work_area.y());
 
@@ -334,7 +368,7 @@ void WorkspaceWindowResizer::SnapToWorkAreaEdges(
 
 bool WorkspaceWindowResizer::TouchesBottomOfScreen() const {
   gfx::Rect work_area(
-      gfx::Screen::GetDisplayNearestWindow(details_.window).work_area());
+      ScreenAsh::GetDisplayWorkAreaBoundsInParent(details_.window));
   return (attached_windows_.empty() &&
           details_.window->bounds().bottom() == work_area.bottom()) ||
       (!attached_windows_.empty() &&
@@ -383,7 +417,8 @@ void WorkspaceWindowResizer::UpdatePhantomWindow(const gfx::Point& location,
     phantom_window_controller_.reset(
         new PhantomWindowController(details_.window));
   }
-  phantom_window_controller_->Show(snap_sizer_->target_bounds());
+  phantom_window_controller_->Show(ScreenAsh::ConvertRectToScreen(
+      details_.window->parent(), snap_sizer_->target_bounds()));
 }
 
 void WorkspaceWindowResizer::RestackWindows() {
@@ -419,15 +454,20 @@ void WorkspaceWindowResizer::RestackWindows() {
 
 WorkspaceWindowResizer::SnapType WorkspaceWindowResizer::GetSnapType(
     const gfx::Point& location) const {
-  // TODO: this likely only wants total monitor area, not the area of a single
-  // monitor.
-  gfx::Rect area(
-      gfx::Screen::GetDisplayNearestWindow(details_.window).bounds());
+  // TODO: this likely only wants total display area, not the area of a single
+  // display.
+  gfx::Rect area(ScreenAsh::GetDisplayBoundsInParent(details_.window));
   if (location.x() <= area.x())
     return SNAP_LEFT_EDGE;
   if (location.x() >= area.right() - 1)
     return SNAP_RIGHT_EDGE;
   return SNAP_NONE;
+}
+
+bool WorkspaceWindowResizer::ShouldAllowMouseWarp() const {
+  return (details_.window_component == HTCAPTION) &&
+      (window()->GetProperty(aura::client::kModalKey) == ui::MODAL_TYPE_NONE) &&
+      (window()->type() == aura::client::WINDOW_TYPE_NORMAL);
 }
 
 }  // namespace internal

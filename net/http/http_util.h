@@ -4,7 +4,6 @@
 
 #ifndef NET_HTTP_HTTP_UTIL_H_
 #define NET_HTTP_HTTP_UTIL_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -335,9 +334,6 @@ class NET_EXPORT HttpUtil {
    private:
     HttpUtil::ValuesIterator props_;
     bool valid_;
-
-    std::string::const_iterator begin_;
-    std::string::const_iterator end_;
 
     std::string::const_iterator name_begin_;
     std::string::const_iterator name_end_;

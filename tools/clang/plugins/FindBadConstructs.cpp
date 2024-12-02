@@ -50,8 +50,10 @@ class FindBadConstructsConsumer : public ChromeClassTester {
  public:
   FindBadConstructsConsumer(CompilerInstance& instance,
                             bool check_refcounted_dtors,
-                            bool check_virtuals_in_implementations)
-      : ChromeClassTester(instance),
+                            bool check_virtuals_in_implementations,
+                            bool check_inner_classes,
+                            bool check_cc_directory)
+      : ChromeClassTester(instance, check_inner_classes, check_cc_directory),
         check_refcounted_dtors_(check_refcounted_dtors),
         check_virtuals_in_implementations_(check_virtuals_in_implementations) {
   }
@@ -208,8 +210,15 @@ class FindBadConstructsConsumer : public ChromeClassTester {
         for (CXXRecordDecl::ctor_iterator it = record->ctor_begin();
              it != record->ctor_end(); ++it) {
           if (it->hasInlineBody()) {
-            emitWarning(it->getInnerLocStart(),
-                        "Complex constructor has an inlined body.");
+            if (it->isCopyConstructor() &&
+                !record->hasUserDeclaredCopyConstructor()) {
+              emitWarning(record_location,
+                          "Complex class/struct needs an explicit out-of-line "
+                          "copy constructor.");
+            } else {
+              emitWarning(it->getInnerLocStart(),
+                          "Complex constructor has an inlined body.");
+            }
           }
         }
       }
@@ -320,8 +329,8 @@ class FindBadConstructsConsumer : public ChromeClassTester {
           !record->hasUserDeclaredDestructor()) {
         // Ignore non-user-declared destructors.
       } else {
-        CheckVirtualMethod(&*it, warn_on_inline_bodies);
-        CheckOverriddenMethod(&*it);
+        CheckVirtualMethod(*it, warn_on_inline_bodies);
+        CheckOverriddenMethod(*it);
       }
     }
   }
@@ -388,17 +397,22 @@ class FindBadConstructsAction : public PluginASTAction {
  public:
   FindBadConstructsAction()
       : check_refcounted_dtors_(true),
-        check_virtuals_in_implementations_(true) {
+        check_virtuals_in_implementations_(true),
+        check_inner_classes_(false),
+        check_cc_directory_(false) {
   }
 
  protected:
-  ASTConsumer* CreateASTConsumer(CompilerInstance &CI, llvm::StringRef ref) {
+  // Overridden from PluginASTAction:
+  virtual ASTConsumer* CreateASTConsumer(CompilerInstance& instance,
+                                         llvm::StringRef ref) {
     return new FindBadConstructsConsumer(
-        CI, check_refcounted_dtors_, check_virtuals_in_implementations_);
+        instance, check_refcounted_dtors_, check_virtuals_in_implementations_,
+        check_inner_classes_, check_cc_directory_);
   }
 
-  bool ParseArgs(const CompilerInstance &CI,
-                 const std::vector<std::string>& args) {
+  virtual bool ParseArgs(const CompilerInstance& instance,
+                         const std::vector<std::string>& args) {
     bool parsed = true;
 
     for (size_t i = 0; i < args.size() && parsed; ++i) {
@@ -406,6 +420,10 @@ class FindBadConstructsAction : public PluginASTAction {
         check_refcounted_dtors_ = false;
       } else if (args[i] == "skip-virtuals-in-implementations") {
         check_virtuals_in_implementations_ = false;
+      } else if (args[i] == "check-inner-classes") {
+        check_inner_classes_ = true;
+      } else if (args[i] == "check-cc-directory") {
+        check_cc_directory_ = true;
       } else {
         parsed = false;
         llvm::errs() << "Unknown argument: " << args[i] << "\n";
@@ -418,6 +436,8 @@ class FindBadConstructsAction : public PluginASTAction {
  private:
   bool check_refcounted_dtors_;
   bool check_virtuals_in_implementations_;
+  bool check_inner_classes_;
+  bool check_cc_directory_;
 };
 
 }  // namespace

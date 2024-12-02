@@ -4,6 +4,8 @@
 
 #include "content/common/indexed_db/proxy_webidbcursor_impl.h"
 
+#include <vector>
+
 #include "content/common/child_thread.h"
 #include "content/common/indexed_db/indexed_db_messages.h"
 #include "content/common/indexed_db/indexed_db_dispatcher.h"
@@ -35,13 +37,6 @@ RendererWebIDBCursorImpl::~RendererWebIDBCursorImpl() {
   dispatcher->CursorDestroyed(idb_cursor_id_);
 }
 
-unsigned short RendererWebIDBCursorImpl::direction() const {
-  int direction;
-  IndexedDBDispatcher::Send(
-      new IndexedDBHostMsg_CursorDirection(idb_cursor_id_, &direction));
-  return direction;
-}
-
 WebIDBKey RendererWebIDBCursorImpl::key() const {
   return key_;
 }
@@ -52,15 +47,6 @@ WebIDBKey RendererWebIDBCursorImpl::primaryKey() const {
 
 WebSerializedScriptValue RendererWebIDBCursorImpl::value() const {
   return value_;
-}
-
-void RendererWebIDBCursorImpl::update(const WebSerializedScriptValue& value,
-                                      WebIDBCallbacks* callbacks,
-                                      WebExceptionCode& ec) {
-  IndexedDBDispatcher* dispatcher =
-      IndexedDBDispatcher::ThreadSpecificInstance();
-  dispatcher->RequestIDBCursorUpdate(
-      SerializedScriptValue(value), callbacks, idb_cursor_id_, &ec);
 }
 
 void RendererWebIDBCursorImpl::advance(unsigned long count,
@@ -121,8 +107,7 @@ void RendererWebIDBCursorImpl::deleteFunction(WebIDBCallbacks* callbacks,
   dispatcher->RequestIDBCursorDelete(callbacks, idb_cursor_id_, &ec);
 }
 
-void RendererWebIDBCursorImpl::postSuccessHandlerCallback()
-{
+void RendererWebIDBCursorImpl::postSuccessHandlerCallback() {
   pending_onsuccess_callbacks_--;
 
   // If the onsuccess callback called continue() on the cursor again,
@@ -158,7 +143,7 @@ void RendererWebIDBCursorImpl::SetPrefetchData(
 
 void RendererWebIDBCursorImpl::CachedContinue(
     WebKit::WebIDBCallbacks* callbacks) {
-  DCHECK(prefetch_keys_.size() > 0);
+  DCHECK_GT(prefetch_keys_.size(), 0ul);
   DCHECK(prefetch_primary_keys_.size() == prefetch_keys_.size());
   DCHECK(prefetch_values_.size() == prefetch_keys_.size());
 

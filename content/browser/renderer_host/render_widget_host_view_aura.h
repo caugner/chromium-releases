@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_AURA_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_AURA_H_
-#pragma once
 
 #include <map>
 #include <vector>
@@ -12,6 +11,7 @@
 #include "base/callback.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "content/browser/renderer_host/image_transport_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
@@ -26,37 +26,36 @@ namespace aura {
 class CompositorLock;
 }
 
-namespace content {
-class RenderWidgetHostImpl;
-class RenderWidgetHostView;
-}
-
 namespace gfx {
 class Canvas;
 }
 
 namespace ui {
 class InputMethod;
+class Texture;
 }
 
 namespace WebKit {
 class WebTouchEvent;
 }
 
-class ImageTransportClient;
+namespace content {
+class RenderWidgetHostImpl;
+class RenderWidgetHostView;
 
 // RenderWidgetHostView class hierarchy described in render_widget_host_view.h.
 class RenderWidgetHostViewAura
-    : public content::RenderWidgetHostViewBase,
+    : public RenderWidgetHostViewBase,
       public ui::CompositorObserver,
       public ui::TextInputClient,
       public aura::WindowDelegate,
       public aura::client::ActivationDelegate,
-      public ImageTransportFactoryObserver {
+      public ImageTransportFactoryObserver,
+      public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
  public:
   // RenderWidgetHostView implementation.
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
-  virtual content::RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
+  virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
@@ -71,11 +70,11 @@ class RenderWidgetHostViewAura
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
 
   // Overridden from RenderWidgetHostViewPort:
-  virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
+  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE;
   virtual void InitAsFullscreen(
-      content::RenderWidgetHostView* reference_host_view) OVERRIDE;
-  virtual void DidBecomeSelected() OVERRIDE;
+      RenderWidgetHostView* reference_host_view) OVERRIDE;
+  virtual void WasShown() OVERRIDE;
   virtual void WasHidden() OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
@@ -100,9 +99,10 @@ class RenderWidgetHostViewAura
                                       const gfx::Rect& end_rect) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output,
-      base::Callback<void(bool)> callback) OVERRIDE;
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      const base::Callback<void(bool)>& callback,
+      skia::PlatformCanvas* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params_in_pixel,
@@ -115,11 +115,10 @@ class RenderWidgetHostViewAura
   virtual void AcceleratedSurfaceNew(
       int32 width_in_pixel,
       int32 height_in_pixel,
-      uint64* surface_id,
-      TransportDIB::Handle* surface_handle) OVERRIDE;
+      uint64 surface_id) OVERRIDE;
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
-  virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
+  virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
                                bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
@@ -175,7 +174,7 @@ class RenderWidgetHostViewAura
   virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
-  virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
+  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
   virtual bool HasHitTestMask() const OVERRIDE;
   virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
@@ -185,16 +184,18 @@ class RenderWidgetHostViewAura
   virtual void OnLostActive() OVERRIDE;
 
  protected:
-  friend class content::RenderWidgetHostView;
+  friend class RenderWidgetHostView;
 
   // Should construct only via RenderWidgetHostView::CreateViewForWidget.
-  explicit RenderWidgetHostViewAura(content::RenderWidgetHost* host);
+  explicit RenderWidgetHostViewAura(RenderWidgetHost* host);
 
  private:
   class WindowObserver;
   friend class WindowObserver;
 
   // Overridden from ui::CompositorObserver:
+  virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE;
+  virtual void OnCompositingWillStart(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingStarted(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingAborted(ui::Compositor* compositor) OVERRIDE;
@@ -228,10 +229,32 @@ class RenderWidgetHostViewAura
   bool ShouldMoveToCenter();
 
   // Run the compositing callbacks.
-  void RunCompositingCallbacks();
+  void RunCompositingDidCommitCallbacks(ui::Compositor* compositor);
+  void RunCompositingWillStartCallbacks(ui::Compositor* compositor);
+
+  // Insert a sync point into the compositor's command stream and acknowledge
+  // that we have presented the accelerated surface buffer.
+  static void InsertSyncPointAndACK(int32 route_id,
+                                    int gpu_host_id,
+                                    ui::Compositor* compositor);
 
   // Called when window_ is removed from the window tree.
   void RemovingFromRootWindow();
+
+  // After clearing |current_surface_|, and waiting for the compositor to finish
+  // using it, call this to inform the gpu process.
+  void SetSurfaceNotInUseByCompositor(ui::Compositor* compositor);
+
+  // This is called every time |current_surface_| usage changes (by thumbnailer,
+  // compositor draws, and tab visibility). Every time usage of current surface
+  // changes between "may be used" and "certain to not be used" by the ui, we
+  // inform the gpu process.
+  void AdjustSurfaceProtection();
+
+  // Called after async thumbnailer task completes.  Used to call
+  // AdjustSurfaceProtection.
+  void CopyFromCompositingSurfaceFinished(base::Callback<void(bool)> callback,
+                                          bool result);
 
   ui::Compositor* GetCompositor();
 
@@ -242,7 +265,7 @@ class RenderWidgetHostViewAura
   gfx::Rect ConvertRectToScreen(const gfx::Rect& rect);
 
   // The model object.
-  content::RenderWidgetHostImpl* host_;
+  RenderWidgetHostImpl* host_;
 
   aura::Window* window_;
 
@@ -290,12 +313,30 @@ class RenderWidgetHostViewAura
   // Current tooltip text.
   string16 tooltip_;
 
-  std::vector< base::Callback<void(void)> > on_compositing_ended_callbacks_;
+  std::vector< base::Callback<void(ui::Compositor*)> >
+      on_compositing_did_commit_callbacks_;
 
-  std::map<uint64, scoped_refptr<ImageTransportClient> >
+  std::vector< base::Callback<void(ui::Compositor*)> >
+      on_compositing_will_start_callbacks_;
+
+  std::map<uint64, scoped_refptr<ui::Texture> >
       image_transport_clients_;
 
   uint64 current_surface_;
+
+  // Protected means that the |current_surface_| may be in use by ui and cannot
+  // be safely discarded. Things to consider are thumbnailer, compositor draw,
+  // and tab visibility.
+  bool current_surface_is_protected_;
+  bool current_surface_in_use_by_compositor_;
+
+  std::vector<base::Callback<void(bool)> > pending_thumbnail_tasks_;
+
+  // This id increments every time surface_is_protected changes. We tag IPC
+  // messages which rely on protection state with this id to stay in sync.
+  uint32 protection_state_id_;
+
+  int32 surface_route_id_;
 
   gfx::GLSurfaceHandle shared_surface_handle_;
 
@@ -317,9 +358,10 @@ class RenderWidgetHostViewAura
   // events vs. normal mouse move events.
   bool synthetic_move_sent_;
 
-  // Signals we need to switch off the external texture as soon as the software
-  // backing store is updated.
-  bool needs_update_texture_;
+  // Signals that the accelerated compositing has been turned on or off.
+  // This is used to signal to turn off the external texture as soon as the
+  // software backing store is updated.
+  bool accelerated_compositing_state_changed_;
 
   // Used to prevent further resizes while a resize is pending.
   class ResizeLock;
@@ -334,5 +376,7 @@ class RenderWidgetHostViewAura
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_AURA_H_

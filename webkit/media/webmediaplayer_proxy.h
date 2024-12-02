@@ -11,8 +11,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
+#include "media/base/decryptor_client.h"
 #include "media/base/pipeline.h"
-#include "media/crypto/decryptor_client.h"
 #include "media/filters/chunk_demuxer.h"
 #include "media/filters/chunk_demuxer_client.h"
 #include "media/filters/ffmpeg_video_decoder.h"
@@ -64,9 +64,6 @@ class WebMediaPlayerProxy
       const scoped_refptr<media::FFmpegVideoDecoder>& video_decoder) {
     video_decoder_ = video_decoder;
   }
-  const scoped_refptr<media::FFmpegVideoDecoder>& video_decoder() {
-    return video_decoder_;
-  }
 
   // Methods for Filter -> WebMediaPlayerImpl communication.
   void Repaint();
@@ -100,19 +97,19 @@ class WebMediaPlayerProxy
                                            const std::string& type,
                                            std::vector<std::string>& codecs);
   void DemuxerRemoveId(const std::string& id);
-  bool DemuxerBufferedRange(const std::string& id,
-                            media::ChunkDemuxer::Ranges* ranges_out);
+  media::Ranges<base::TimeDelta> DemuxerBufferedRange(const std::string& id);
   bool DemuxerAppend(const std::string& id, const uint8* data, size_t length);
   void DemuxerAbort(const std::string& id);
   void DemuxerEndOfStream(media::PipelineStatus status);
   void DemuxerShutdown();
+  bool DemuxerSetTimestampOffset(const std::string& id, double offset);
 
   // DecryptorClient implementation.
   virtual void KeyAdded(const std::string& key_system,
                         const std::string& session_id) OVERRIDE;
   virtual void KeyError(const std::string& key_system,
                         const std::string& session_id,
-                        media::AesDecryptor::KeyError error_code,
+                        media::Decryptor::KeyError error_code,
                         int system_code) OVERRIDE;
   virtual void KeyMessage(const std::string& key_system,
                           const std::string& session_id,
@@ -157,7 +154,7 @@ class WebMediaPlayerProxy
   // Notify |webmediaplayer_| that a key error occurred.
   void KeyErrorTask(const std::string& key_system,
                     const std::string& session_id,
-                    media::AesDecryptor::KeyError error_code,
+                    media::Decryptor::KeyError error_code,
                     int system_code);
 
   // Notify |webmediaplayer_| that a key message has been generated.

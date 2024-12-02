@@ -4,7 +4,6 @@
 
 #ifndef ASH_SHELL_OBSERVER_H_
 #define ASH_SHELL_OBSERVER_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
@@ -14,7 +13,7 @@ namespace ash {
 class ASH_EXPORT ShellObserver {
  public:
   // Invoked after the screen's work area insets changes.
-  virtual void OnMonitorWorkAreaInsetsChanged() {}
+  virtual void OnDisplayWorkAreaInsetsChanged() {}
 
   // Invoked when the user logs in.
   virtual void OnLoginStateChanged(user::LoginStatus status) {}

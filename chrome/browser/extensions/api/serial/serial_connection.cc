@@ -14,10 +14,13 @@ namespace extensions {
 const char kSerialConnectionNotFoundError[] = "Serial connection not found";
 
 SerialConnection::SerialConnection(const std::string& port,
-                                   APIResourceEventNotifier* event_notifier)
-    : APIResource(APIResource::SerialConnectionResource, event_notifier),
+                                   int bitrate,
+                                   ApiResourceEventNotifier* event_notifier)
+    : ApiResource(event_notifier),
       port_(port),
+      bitrate_(bitrate),
       file_(base::kInvalidPlatformFileValue) {
+  CHECK(bitrate >= 0);
 }
 
 SerialConnection::~SerialConnection() {
@@ -51,10 +54,11 @@ void SerialConnection::Close() {
   }
 }
 
-int SerialConnection::Read(uint8* byte) {
-  DCHECK(byte);
+int SerialConnection::Read(scoped_refptr<net::IOBufferWithSize> io_buffer) {
+  DCHECK(io_buffer->data());
   return base::ReadPlatformFileAtCurrentPos(file_,
-                                            reinterpret_cast<char*>(byte), 1);
+                                            io_buffer->data(),
+                                            io_buffer->size());
 }
 
 int SerialConnection::Write(scoped_refptr<net::IOBuffer> io_buffer,

@@ -14,9 +14,15 @@
                     ['exclude', '(^|/)win_[^/]*\\.(h|cc)$'] ],
     }],
     ['OS!="mac" or >(nacl_untrusted_build)==1', {
-      'sources/': [ ['exclude', '_(cocoa|mac)(_unittest)?\\.(h|cc)$'],
-                    ['exclude', '(^|/)(cocoa|mac)/'],
-                    ['exclude', '\\.mm?$' ] ],
+      'sources/': [ ['exclude', '_(cocoa|mac)(_unittest)?\\.(h|cc|mm?)$'],
+                    ['exclude', '(^|/)(cocoa|mac)/'] ],
+    }],
+    ['OS!="ios" or >(nacl_untrusted_build)==1', {
+      'sources/': [ ['exclude', '_ios(_unittest)?\\.(h|cc|mm?)$'],
+                    ['exclude', '(^|/)ios/'] ],
+    }],
+    ['(OS!="mac" and OS!="ios") or >(nacl_untrusted_build)==1', {
+      'sources/': [ ['exclude', '\\.mm?$' ] ],
     }],
     # Do not exclude the linux files on *BSD since most of them can be
     # shared at this point.
@@ -27,12 +33,6 @@
       'sources/': [
         ['exclude', '_linux(_unittest)?\\.(h|cc)$'],
         ['exclude', '(^|/)linux/'],
-      ],
-    }],
-    ['OS!="android" and OS!="linux" and OS!="openbsd" and OS!="freebsd" or >(nacl_untrusted_build)==1', {
-      'sources/': [
-        ['exclude', '_linuxish(_unittest)?\\.(h|cc)$'],
-        ['exclude', '(^|/)linuxish/'],
       ],
     }],
     ['OS!="android"', {
@@ -48,7 +48,7 @@
       ],
     }],
     ['<(chromeos)!=1 or >(nacl_untrusted_build)==1', {
-      'sources/': [ ['exclude', '_chromeos\\.(h|cc)$'] ]
+      'sources/': [ ['exclude', '_chromeos(_unittest)?\\.(h|cc)$'] ]
     }],
     ['>(nacl_untrusted_build)==0', {
       'sources/': [
@@ -62,7 +62,7 @@
     }],
     ['<(use_x11)!=1 or >(nacl_untrusted_build)==1', {
       'sources/': [
-        ['exclude', '_(chromeos|x|x11)(_unittest)?\\.(h|cc)$'],
+        ['exclude', '_(x|x11)(_unittest)?\\.(h|cc)$'],
         ['exclude', '(^|/)x11_[^/]*\\.(h|cc)$'],
       ],
     }],

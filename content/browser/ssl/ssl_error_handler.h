@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_SSL_SSL_ERROR_HANDLER_H_
 #define CONTENT_BROWSER_SSL_SSL_ERROR_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -60,6 +59,9 @@ class SSLErrorHandler : public base::RefCountedThreadSafe<SSLErrorHandler> {
     // Called when SSLErrorHandler decides to continue the request despite the
     // SSL error.
     virtual void ContinueSSLRequest(const content::GlobalRequestID& id) = 0;
+
+   protected:
+    virtual ~Delegate() {}
   };
 
   virtual SSLCertErrorHandler* AsSSLCertErrorHandler();

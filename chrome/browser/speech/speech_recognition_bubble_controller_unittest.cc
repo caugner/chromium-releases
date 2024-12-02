@@ -6,6 +6,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/speech/speech_recognition_bubble_controller.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
@@ -127,12 +128,9 @@ class SpeechRecognitionBubbleControllerTest
   }
 
   static void ActivateBubble() {
-    if (MockSpeechRecognitionBubble::type() ==
+    if (MockSpeechRecognitionBubble::type() !=
         MockSpeechRecognitionBubble::BUBBLE_TEST_FOCUS_CHANGED) {
-      test_fixture_->controller_->SetBubbleWarmUpMode(kBubbleSessionId);
-    } else {
-      test_fixture_->controller_->SetBubbleMessage(kBubbleSessionId,
-                                                   ASCIIToUTF16("Test"));
+      test_fixture_->controller_->SetBubbleMessage(ASCIIToUTF16("Test"));
     }
   }
 
@@ -153,7 +151,7 @@ class SpeechRecognitionBubbleControllerTest
     // the bubble controller registers for tab close notifications which need
     // a valid WebContents.
     TabContents* tab_contents =
-        test_fixture_->browser()->GetActiveTabContents();
+        chrome::GetActiveTabContents(test_fixture_->browser());
     if (tab_contents)
       web_contents = tab_contents->web_contents();
     return new MockSpeechRecognitionBubble(web_contents, delegate,
@@ -192,7 +190,7 @@ TEST_F(SpeechRecognitionBubbleControllerTest, TestFocusChanged) {
   EXPECT_TRUE(focus_changed_);
   EXPECT_FALSE(cancel_clicked_);
   EXPECT_FALSE(try_again_clicked_);
-  controller_->CloseBubble(kBubbleSessionId);
+  controller_->CloseBubble();
 }
 
 // Test that the speech bubble UI gets created in the UI thread and that the
@@ -206,7 +204,7 @@ TEST_F(SpeechRecognitionBubbleControllerTest, TestRecognitionCancelled) {
   EXPECT_TRUE(cancel_clicked_);
   EXPECT_FALSE(try_again_clicked_);
   EXPECT_FALSE(focus_changed_);
-  controller_->CloseBubble(kBubbleSessionId);
+  controller_->CloseBubble();
 }
 
 // Test that the speech bubble UI gets created in the UI thread and that the
@@ -220,7 +218,7 @@ TEST_F(SpeechRecognitionBubbleControllerTest, TestTryAgainClicked) {
   EXPECT_FALSE(cancel_clicked_);
   EXPECT_TRUE(try_again_clicked_);
   EXPECT_FALSE(focus_changed_);
-  controller_->CloseBubble(kBubbleSessionId);
+  controller_->CloseBubble();
 }
 
 }  // namespace speech

@@ -4,12 +4,12 @@
 
 #ifndef CHROME_BROWSER_INFOBARS_INFOBAR_DELEGATE_H_
 #define CHROME_BROWSER_INFOBARS_INFOBAR_DELEGATE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "webkit/glue/window_open_disposition.h"
 
+class AutoLoginInfoBarDelegate;
 class ConfirmInfoBarDelegate;
 class ExtensionInfoBarDelegate;
 class InfoBar;
@@ -97,6 +97,7 @@ class InfoBarDelegate {
   virtual Type GetInfoBarType() const;
 
   // Type-checking downcast routines:
+  virtual AutoLoginInfoBarDelegate* AsAutoLoginInfoBarDelegate();
   virtual ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate();
   virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate();
   virtual InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate();

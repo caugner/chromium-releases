@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
@@ -23,10 +23,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "sync/api/sync_error.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
 #include "sync/protocol/session_specifics.pb.h"
 
 using content::BrowserThread;
@@ -180,8 +180,8 @@ void SessionChangeProcessor::Observe(
     }
 
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
-      ExtensionTabHelper* extension_tab_helper =
-          content::Source<ExtensionTabHelper>(source).ptr();
+      extensions::TabHelper* extension_tab_helper =
+          content::Source<extensions::TabHelper>(source).ptr();
       if (!extension_tab_helper ||
           extension_tab_helper->web_contents()->GetBrowserContext() !=
               profile_) {
@@ -213,13 +213,13 @@ void SessionChangeProcessor::Observe(
         entry->GetVirtualURL().is_valid() &&
         entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
       DVLOG(1) << "Triggering sync refresh for sessions datatype.";
-      const syncable::ModelType type = syncable::SESSIONS;
-      syncable::ModelTypePayloadMap payload_map;
+      const syncer::ModelType type = syncer::SESSIONS;
+      syncer::ModelTypePayloadMap payload_map;
       payload_map[type] = "";
       content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
           content::Source<Profile>(profile_),
-          content::Details<const syncable::ModelTypePayloadMap>(&payload_map));
+          content::Details<const syncer::ModelTypePayloadMap>(&payload_map));
     }
   }
 
@@ -240,7 +240,7 @@ void SessionChangeProcessor::Observe(
 
   if (reassociation_needed) {
     LOG(WARNING) << "Reassociation of local models triggered.";
-    SyncError error;
+    syncer::SyncError error;
     error = session_model_associator_->DisassociateModels();
     error = session_model_associator_->AssociateModels();
     if (error.IsSet()) {
@@ -252,8 +252,8 @@ void SessionChangeProcessor::Observe(
 }
 
 void SessionChangeProcessor::ApplyChangesFromSyncModel(
-    const sync_api::BaseTransaction* trans,
-    const sync_api::ImmutableChangeRecordList& changes) {
+    const syncer::BaseTransaction* trans,
+    const syncer::ImmutableChangeRecordList& changes) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!running()) {
     return;
@@ -261,24 +261,24 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
 
   ScopedStopObserving<SessionChangeProcessor> stop_observing(this);
 
-  sync_api::ReadNode root(trans);
-  if (root.InitByTagLookup(kSessionsTag) != sync_api::BaseNode::INIT_OK) {
+  syncer::ReadNode root(trans);
+  if (root.InitByTagLookup(kSessionsTag) != syncer::BaseNode::INIT_OK) {
     error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Sessions root node lookup failed.");
     return;
   }
 
   std::string local_tag = session_model_associator_->GetCurrentMachineTag();
-  for (sync_api::ChangeRecordList::const_iterator it =
+  for (syncer::ChangeRecordList::const_iterator it =
            changes.Get().begin(); it != changes.Get().end(); ++it) {
-    const sync_api::ChangeRecord& change = *it;
-    sync_api::ChangeRecord::Action action(change.action);
-    if (sync_api::ChangeRecord::ACTION_DELETE == action) {
+    const syncer::ChangeRecord& change = *it;
+    syncer::ChangeRecord::Action action(change.action);
+    if (syncer::ChangeRecord::ACTION_DELETE == action) {
       // Deletions are all or nothing (since we only ever delete entire
       // sessions). Therefore we don't care if it's a tab node or meta node,
       // and just ensure we've disassociated.
-      DCHECK_EQ(syncable::GetModelTypeFromSpecifics(it->specifics),
-                syncable::SESSIONS);
+      DCHECK_EQ(syncer::GetModelTypeFromSpecifics(it->specifics),
+                syncer::SESSIONS);
       const sync_pb::SessionSpecifics& specifics = it->specifics.session();
       if (specifics.session_tag() == local_tag) {
         // Another client has attempted to delete our local data (possibly by
@@ -294,8 +294,8 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
     }
 
     // Handle an update or add.
-    sync_api::ReadNode sync_node(trans);
-    if (sync_node.InitByIdLookup(change.id) != sync_api::BaseNode::INIT_OK) {
+    syncer::ReadNode sync_node(trans);
+    if (sync_node.InitByIdLookup(change.id) != syncer::BaseNode::INIT_OK) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Session node lookup failed.");
       return;
@@ -303,7 +303,7 @@ void SessionChangeProcessor::ApplyChangesFromSyncModel(
 
     // Check that the changed node is a child of the session folder.
     DCHECK(root.GetId() == sync_node.GetParentId());
-    DCHECK(syncable::SESSIONS == sync_node.GetModelType());
+    DCHECK(syncer::SESSIONS == sync_node.GetModelType());
 
     const sync_pb::SessionSpecifics& specifics(
         sync_node.GetSessionSpecifics());

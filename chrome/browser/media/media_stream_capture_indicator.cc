@@ -20,7 +20,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -134,7 +133,6 @@ void MediaStreamCaptureIndicator::DoDevicesClosedOnUIThread(
   if (!status_icon_)
     return;
 
-  DCHECK(!tabs_.empty());
   RemoveCaptureDeviceTab(render_process_id, render_view_id, devices);
 }
 
@@ -198,6 +196,7 @@ void MediaStreamCaptureIndicator::ShowBalloon(
 
 void MediaStreamCaptureIndicator::Hide() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(tabs_.empty());
   if (!status_icon_)
     return;
 
@@ -220,12 +219,14 @@ void MediaStreamCaptureIndicator::UpdateStatusTrayIconContextMenu() {
   bool video = false;
   int command_id = IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST;
   for (CaptureDeviceTabs::iterator iter = tabs_.begin();
-       iter != tabs_.end();  ++iter) {
+       iter != tabs_.end();) {
     string16 tab_title = GetTitle(iter->render_process_id,
                                   iter->render_view_id);
-    // The tab has gone away.
-    if (tab_title.empty())
+    if (tab_title.empty()) {
+      // Delete the entry since the tab has gone away.
+      iter = tabs_.erase(iter);
       continue;
+    }
 
     // Check if any audio and video devices have been used.
     audio = audio || iter->audio_ref_count > 0;
@@ -240,11 +241,13 @@ void MediaStreamCaptureIndicator::UpdateStatusTrayIconContextMenu() {
       break;
 
     ++command_id;
+    ++iter;
   }
 
-  // All the tabs have gone away.
-  if (!audio && !video)
+  if (!audio && !video) {
+    Hide();
     return;
+  }
 
   // The icon will take the ownership of the passed context menu.
   status_icon_->SetContextMenu(menu.release());
@@ -308,32 +311,29 @@ void MediaStreamCaptureIndicator::RemoveCaptureDeviceTab(
     int render_view_id,
     const content::MediaStreamDevices& devices) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
   CaptureDeviceTabs::iterator iter = std::find_if(
       tabs_.begin(), tabs_.end(), TabEquals(render_process_id, render_view_id));
-  DCHECK(iter != tabs_.end());
 
-  content::MediaStreamDevices::const_iterator dev = devices.begin();
-  for (; dev != devices.end(); ++dev) {
-    DCHECK(dev->type == content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE ||
-           dev->type == content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE);
-    if (dev->type == content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE)
-      --iter->audio_ref_count;
-    else
-      --iter->video_ref_count;
+  if (iter != tabs_.end()) {
+    content::MediaStreamDevices::const_iterator dev = devices.begin();
+    for (; dev != devices.end(); ++dev) {
+      DCHECK(dev->type == content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE ||
+             dev->type == content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE);
+      if (dev->type == content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE)
+        --iter->audio_ref_count;
+      else
+        --iter->video_ref_count;
 
-    DCHECK_GE(iter->audio_ref_count, 0);
-    DCHECK_GE(iter->video_ref_count, 0);
+      DCHECK_GE(iter->audio_ref_count, 0);
+      DCHECK_GE(iter->video_ref_count, 0);
+    }
+
+    // Remove the tab if all the devices have been closed.
+    if (iter->audio_ref_count == 0 && iter->video_ref_count == 0)
+      tabs_.erase(iter);
   }
 
-  // Remove the tab if all the devices have been closed.
-  if (iter->audio_ref_count == 0 && iter->video_ref_count == 0)
-    tabs_.erase(iter);
-
-  if (tabs_.empty())
-    Hide();
-  else
-    UpdateStatusTrayIconContextMenu();
+  UpdateStatusTrayIconContextMenu();
 }
 
 string16 MediaStreamCaptureIndicator::GetTitle(int render_process_id,

@@ -7,13 +7,13 @@
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "base/values.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace {
 
 using ::testing::InSequence;
@@ -46,22 +46,18 @@ TEST_F(JsMutationEventObserverTest, OnChangesApplied) {
   // We don't test with passwords as that requires additional setup.
 
   // Build a list of example ChangeRecords.
-  sync_api::ChangeRecord changes[syncable::MODEL_TYPE_COUNT];
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
+  ChangeRecord changes[MODEL_TYPE_COUNT];
+  for (int i = AUTOFILL_PROFILE; i < MODEL_TYPE_COUNT; ++i) {
     changes[i].id = i;
     switch (i % 3) {
       case 0:
-        changes[i].action =
-            sync_api::ChangeRecord::ACTION_ADD;
+        changes[i].action = ChangeRecord::ACTION_ADD;
         break;
       case 1:
-        changes[i].action =
-            sync_api::ChangeRecord::ACTION_UPDATE;
+        changes[i].action = ChangeRecord::ACTION_UPDATE;
         break;
       default:
-        changes[i].action =
-            sync_api::ChangeRecord::ACTION_DELETE;
+        changes[i].action = ChangeRecord::ACTION_DELETE;
         break;
     }
   }
@@ -71,16 +67,15 @@ TEST_F(JsMutationEventObserverTest, OnChangesApplied) {
   // starting from changes[i].
 
   // Set expectations for each data type.
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
+  for (int i = AUTOFILL_PROFILE; i < MODEL_TYPE_COUNT; ++i) {
     const std::string& model_type_str =
-        syncable::ModelTypeToString(syncable::ModelTypeFromInt(i));
+        ModelTypeToString(ModelTypeFromInt(i));
     DictionaryValue expected_details;
     expected_details.SetString("modelType", model_type_str);
     expected_details.SetString("writeTransactionId", "0");
     ListValue* expected_changes = new ListValue();
     expected_details.Set("changes", expected_changes);
-    for (int j = i; j < syncable::MODEL_TYPE_COUNT; ++j) {
+    for (int j = i; j < MODEL_TYPE_COUNT; ++j) {
       expected_changes->Append(changes[j].ToValue());
     }
     EXPECT_CALL(mock_js_event_handler_,
@@ -89,13 +84,11 @@ TEST_F(JsMutationEventObserverTest, OnChangesApplied) {
   }
 
   // Fire OnChangesApplied() for each data type.
-  for (int i = syncable::AUTOFILL_PROFILE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    sync_api::ChangeRecordList
-        local_changes(changes + i, changes + arraysize(changes));
+  for (int i = AUTOFILL_PROFILE; i < MODEL_TYPE_COUNT; ++i) {
+    ChangeRecordList local_changes(changes + i, changes + arraysize(changes));
     js_mutation_event_observer_.OnChangesApplied(
-        syncable::ModelTypeFromInt(i),
-        0, sync_api::ImmutableChangeRecordList(&local_changes));
+        ModelTypeFromInt(i),
+        0, ImmutableChangeRecordList(&local_changes));
   }
 
   PumpLoop();
@@ -104,24 +97,22 @@ TEST_F(JsMutationEventObserverTest, OnChangesApplied) {
 TEST_F(JsMutationEventObserverTest, OnChangesComplete) {
   InSequence dummy;
 
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     DictionaryValue expected_details;
     expected_details.SetString(
         "modelType",
-        syncable::ModelTypeToString(syncable::ModelTypeFromInt(i)));
+        ModelTypeToString(ModelTypeFromInt(i)));
     EXPECT_CALL(mock_js_event_handler_,
                 HandleJsEvent("onChangesComplete",
                              HasDetailsAsDictionary(expected_details)));
   }
 
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     js_mutation_event_observer_.OnChangesComplete(
-        syncable::ModelTypeFromInt(i));
+        ModelTypeFromInt(i));
   }
   PumpLoop();
 }
 
 }  // namespace
-}  // namespace browser_sync
+}  // namespace syncer

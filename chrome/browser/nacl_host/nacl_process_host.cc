@@ -145,6 +145,9 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url, bool off_the_record)
       getenv("NACL_UNTRUSTED_EXCEPTION_HANDLING") != NULL) {
     enable_exception_handling_ = true;
   }
+
+  enable_ipc_proxy_ = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableNaClIPCProxy);
 }
 
 NaClProcessHost::~NaClProcessHost() {
@@ -327,8 +330,8 @@ scoped_ptr<CommandLine> NaClProcessHost::GetCommandForLaunchWithGdb(
   return scoped_ptr<CommandLine>(cmd_line);
 }
 #elif defined(OS_LINUX)
-namespace {
-class NaClGdbWatchDelegate : public MessageLoopForIO::Watcher {
+class NaClProcessHost::NaClGdbWatchDelegate
+    : public MessageLoopForIO::Watcher {
  public:
   // fd_write_ is used by nacl-gdb via /proc/browser_PID/fd/fd_write_
   NaClGdbWatchDelegate(int fd_read, int fd_write,
@@ -353,13 +356,13 @@ class NaClGdbWatchDelegate : public MessageLoopForIO::Watcher {
   base::Closure reply_;
 };
 
-void NaClGdbWatchDelegate::OnFileCanReadWithoutBlocking(int fd) {
+void NaClProcessHost::NaClGdbWatchDelegate::OnFileCanReadWithoutBlocking(
+    int fd) {
   char buf;
   if (HANDLE_EINTR(read(fd_read_, &buf, 1)) != 1 || buf != '\0')
     LOG(ERROR) << "Failed to sync with nacl-gdb";
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, reply_);
 }
-}  // namespace
 
 bool NaClProcessHost::LaunchNaClGdb(base::ProcessId pid) {
   CommandLine::StringType nacl_gdb =
@@ -537,6 +540,8 @@ bool NaClProcessHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(NaClProcessMsg_AttachDebugExceptionHandler,
                                     OnAttachDebugExceptionHandler)
 #endif
+    IPC_MESSAGE_HANDLER(NaClProcessHostMsg_PpapiChannelCreated,
+                        OnPpapiChannelCreated)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -556,7 +561,8 @@ void NaClProcessHost::OnResourcesReady() {
   }
 }
 
-bool NaClProcessHost::ReplyToRenderer() {
+bool NaClProcessHost::ReplyToRenderer(
+    const IPC::ChannelHandle& channel_handle) {
   std::vector<nacl::FileDescriptor> handles_for_renderer;
   for (size_t i = 0; i < internal_->sockets_for_renderer.size(); i++) {
 #if defined(OS_WIN)
@@ -600,7 +606,7 @@ bool NaClProcessHost::ReplyToRenderer() {
 #endif
 
   ChromeViewHostMsg_LaunchNaCl::WriteReplyParams(
-      reply_msg_, handles_for_renderer);
+      reply_msg_, handles_for_renderer, channel_handle);
   chrome_render_message_filter_->Send(reply_msg_);
   chrome_render_message_filter_ = NULL;
   reply_msg_ = NULL;
@@ -618,6 +624,7 @@ bool NaClProcessHost::StartNaClExecution() {
   params.enable_exception_handling = enable_exception_handling_;
   params.enable_debug_stub =
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableNaClDebug);
+  params.enable_ipc_proxy = enable_ipc_proxy_;
 
   base::PlatformFile irt_file = nacl_browser->IrtFile();
   CHECK_NE(irt_file, base::kInvalidPlatformFileValue);
@@ -665,7 +672,17 @@ bool NaClProcessHost::StartNaClExecution() {
 }
 
 bool NaClProcessHost::SendStart() {
-  return ReplyToRenderer() && StartNaClExecution();
+  if (!enable_ipc_proxy_) {
+    if (!ReplyToRenderer(IPC::ChannelHandle()))
+      return false;
+  }
+  return StartNaClExecution();
+}
+
+void NaClProcessHost::OnPpapiChannelCreated(
+    const IPC::ChannelHandle& channel_handle) {
+  DCHECK(enable_ipc_proxy_);
+  ReplyToRenderer(channel_handle);
 }
 
 bool NaClProcessHost::StartWithLaunchedProcess() {

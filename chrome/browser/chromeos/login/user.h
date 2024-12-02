@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_USER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_USER_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -15,10 +14,15 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image_skia.h"
 
-// The demo user is represented by a domainless username.
-const char kDemoUser[] = "demouser";
-
 namespace chromeos {
+
+// Fake username for the demo user.
+extern const char kDemoUser[];
+
+// Username for incognito login.
+extern const char kGuestUser[];
+
+extern const int kDefaultImagesCount;
 
 // A class representing information about a previously logged in user.
 // Each user has a canonical email (username), returned by |email()| and
@@ -43,7 +47,7 @@ class User {
   static const int kInvalidImageIndex = -3;
 
   enum WallpaperType {
-    RANDOM = 0,
+    DAILY = 0,
     CUSTOMIZED = 1,
     DEFAULT = 2,
     UNKNOWN = 3
@@ -62,6 +66,9 @@ class User {
   // The image for this user.
   const gfx::ImageSkia& image() const { return user_image_.image(); }
 
+  // Whether the user has a default image.
+  bool HasDefaultImage() const;
+
   int image_index() const { return image_index_; }
   bool has_raw_image() const { return user_image_.has_raw_image(); }
   // Returns raw representation of static user image.
@@ -74,8 +81,9 @@ class User {
     return user_image_.animated_image();
   }
 
-  // The thumbnail of user custom wallpaper.
-  const SkBitmap& wallpaper_thumbnail() const { return wallpaper_thumbnail_; }
+  // Returns the URL of user image, if there is any. Currently only the profile
+  // image has a URL, for other images empty URL is returned.
+  GURL image_url() const { return user_image_.url(); }
 
   // True if user image is a stub (while real image is being loaded from file).
   bool image_is_stub() const { return image_is_stub_; }
@@ -89,8 +97,8 @@ class User {
   // The displayed (non-canonical) user email.
   std::string display_email() const { return display_email_; }
 
-  bool is_demo_user() const { return is_demo_user_; }
-  bool is_guest() const { return is_guest_; }
+  bool is_demo_user() const { return email_ == kDemoUser; }
+  bool is_guest() const { return email_ == kGuestUser; }
 
  private:
   friend class UserManagerImpl;
@@ -98,11 +106,13 @@ class User {
   friend class UserManagerTest;
 
   // Do not allow anyone else to create new User instances.
-  User(const std::string& email, bool is_guest);
+  explicit User(const std::string& email_guest);
   ~User();
 
   // Setters are private so only UserManager can call them.
   void SetImage(const UserImage& user_image, int image_index);
+
+  void SetImageURL(const GURL& image_url);
 
   // Sets a stub image until the next |SetImage| call. |image_index| may be
   // one of |kExternalImageIndex| or |kProfileImageIndex|.
@@ -129,7 +139,6 @@ class User {
   std::string display_email_;
   UserImage user_image_;
   OAuthTokenStatus oauth_token_status_;
-  SkBitmap wallpaper_thumbnail_;
 
   // Either index of a default image for the user, |kExternalImageIndex| or
   // |kProfileImageIndex|.
@@ -137,12 +146,6 @@ class User {
 
   // True if current user image is a stub set by a |SetStubImage| call.
   bool image_is_stub_;
-
-  // Is this a guest account?
-  bool is_guest_;
-
-  // Is this a demo user account?
-  bool is_demo_user_;
 
   DISALLOW_COPY_AND_ASSIGN(User);
 };

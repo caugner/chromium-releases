@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_LOCATION_BAR_LOCATION_BAR_VIEW_MAC_H_
 #define CHROME_BROWSER_UI_COCOA_LOCATION_BAR_LOCATION_BAR_VIEW_MAC_H_
-#pragma once
 
 #include <string>
 
@@ -14,12 +13,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/command_observer.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/content_settings_types.h"
 
@@ -29,8 +29,10 @@ class CommandUpdater;
 class ContentSettingDecoration;
 class EVBubbleDecoration;
 class KeywordHintDecoration;
+class LocationBarDecoration;
 class LocationIconDecoration;
 class PageActionDecoration;
+class PlusDecoration;
 class Profile;
 class SelectedKeywordDecoration;
 class SkBitmap;
@@ -41,11 +43,11 @@ class ToolbarModel;
 // the portable code.  Wires up an OmniboxViewMac instance to
 // the location bar text field, which handles most of the work.
 
-class LocationBarViewMac : public AutocompleteEditController,
-                           public LocationBar,
+class LocationBarViewMac : public LocationBar,
                            public LocationBarTesting,
+                           public OmniboxEditController,
                            public content::NotificationObserver,
-                           public CommandUpdater::CommandObserver {
+                           public CommandObserver {
  public:
   LocationBarViewMac(AutocompleteTextField* field,
                      CommandUpdater* command_updater,
@@ -110,6 +112,9 @@ class LocationBarViewMac : public AutocompleteEditController,
   // Layout the various decorations which live in the field.
   void Layout();
 
+  // Re-draws |decoration| if it's already being displayed.
+  void RedrawDecoration(LocationBarDecoration* decoration);
+
   // Returns the current WebContents.
   content::WebContents* GetWebContents() const;
 
@@ -133,7 +138,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   // visible.
   NSRect GetBlockedPopupRect() const;
 
-  // AutocompleteEditController implementation.
+  // OmniboxEditController:
   virtual void OnAutocompleteAccept(
       const GURL& url,
       WindowOpenDisposition disposition,
@@ -154,12 +159,12 @@ class LocationBarViewMac : public AutocompleteEditController,
   AutocompleteTextField* GetAutocompleteTextField() { return field_; }
 
 
-  // Overridden from NotificationObserver.
+  // content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Overridden from CommandUpdater::CommandObserver.
+  // CommandObserver:
   virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
 
  private:
@@ -211,6 +216,9 @@ class LocationBarViewMac : public AutocompleteEditController,
   // A decoration that shows a lock icon and ev-cert label in a bubble
   // on the left.
   scoped_ptr<EVBubbleDecoration> ev_bubble_decoration_;
+
+  // Action "plus" button right of bookmark star.
+  scoped_ptr<PlusDecoration> plus_decoration_;
 
   // Bookmark star right of page actions.
   scoped_ptr<StarDecoration> star_decoration_;

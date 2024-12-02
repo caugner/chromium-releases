@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_WEB_CONTENTS_DELEGATE_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -134,11 +133,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // in screen coordinates.
   virtual void MoveContents(WebContents* source, const gfx::Rect& pos) {}
 
-  // Causes the delegate to detach |source| and clean up any internal data
-  // pointing to it.  After this call ownership of |source| passes to the
-  // caller, and it is safe to call "source->set_delegate(someone_else);".
-  virtual void DetachContents(WebContents* source) {}
-
   // Called to determine if the WebContents is contained in a popup window
   // or a panel window.
   virtual bool IsPopupOrPanel(const WebContents* source) const;
@@ -165,10 +159,6 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Check whether this contents is permitted to load data URLs in WebUI mode.
   // This is normally disallowed for security.
   virtual bool CanLoadDataURLsInWebUI() const;
-
-  // Detach the given tab and convert it to a "webapp" view.  The tab must be
-  // a WebContents with a valid WebApp set.
-  virtual void ConvertContentsToApplication(WebContents* source) {}
 
   // Return the rect where to display the resize corner, if any, otherwise
   // an empty rect.
@@ -265,7 +255,13 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   virtual void HandleMouseDown() {}
   virtual void HandleMouseUp() {}
-  virtual void HandleMouseActivate() {}
+
+  // Handles activation resulting from a pointer event (e.g. when mouse is
+  // pressed, or a touch-gesture begins).
+  virtual void HandlePointerActivate() {}
+
+  virtual void HandleGestureBegin() {}
+  virtual void HandleGestureEnd() {}
 
   // Render view drag n drop ended.
   virtual void DragEnded() {}

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_SYNC_ONE_CLICK_SIGNIN_HELPER_H_
 #define CHROME_BROWSER_UI_SYNC_ONE_CLICK_SIGNIN_HELPER_H_
-#pragma once
 
 #include <string>
 
@@ -28,9 +27,11 @@ class OneClickSigninHelper : public content::WebContentsObserver {
   // Returns true if the one-click signin feature can be offered at this time.
   // It can be offered if the contents is not in an incognito window.  If
   // |check_connected| is true, then the profile is checked to see if it's
-  // already connected to a google account, in which case a one click signin
+  // already connected to a google account or if the user has already rejected
+  // one-click sign-in with this email, in which cases a one click signin
   // should not be offered.
   static bool CanOffer(content::WebContents* web_contents,
+                       const std::string& email,
                        bool check_connected);
 
   // Looks for the Google-Accounts-SignIn response header, and if found,
@@ -54,7 +55,8 @@ class OneClickSigninHelper : public content::WebContentsObserver {
   virtual void DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidStopLoading(
+      content::RenderViewHost* render_view_host) OVERRIDE;
 
   // Save the email address that we can display the info bar correctly.
   void SaveSessionIndexAndEmail(const std::string& session_index,

@@ -4,14 +4,13 @@
 
 #ifndef ASH_LAUNCHER_LAUNCHER_VIEW_H_
 #define ASH_LAUNCHER_LAUNCHER_VIEW_H_
-#pragma once
 
 #include <utility>
 #include <vector>
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "base/observer_list.h"
 #include "ui/views/animation/bounds_animator_observer.h"
 #include "ui/views/context_menu_controller.h"
@@ -21,7 +20,6 @@
 
 namespace views {
 class BoundsAnimator;
-class ImageButton;
 class MenuRunner;
 class ViewModel;
 }
@@ -41,6 +39,9 @@ namespace internal {
 
 class LauncherButton;
 class LauncherTooltipManager;
+class ShelfLayoutManager;
+class OverflowBubble;
+class OverflowButton;
 
 class ASH_EXPORT LauncherView : public views::View,
                                 public LauncherModelObserver,
@@ -50,7 +51,9 @@ class ASH_EXPORT LauncherView : public views::View,
                                 public views::FocusTraversable,
                                 public views::BoundsAnimatorObserver {
  public:
-  LauncherView(LauncherModel* model, LauncherDelegate* delegate);
+  LauncherView(LauncherModel* model,
+               LauncherDelegate* delegate,
+               ShelfLayoutManager* shelf_layout_manager);
   virtual ~LauncherView();
 
   LauncherTooltipManager* tooltip_manager() { return tooltip_.get(); }
@@ -69,6 +72,9 @@ class ASH_EXPORT LauncherView : public views::View,
   // Returns true if we're showing a menu.
   bool IsShowingMenu() const;
 
+  // Returns true if overflow bubble is shown.
+  bool IsShowingOverflowBubble() const;
+
   views::View* GetAppListButtonView() const;
 
   // Returns true if the mouse cursor exits the area for launcher tooltip.
@@ -76,6 +82,13 @@ class ASH_EXPORT LauncherView : public views::View,
   // in the gaps, but the tooltip should hide if the mouse moved totally outside
   // of the buttons area.
   bool ShouldHideTooltip(const gfx::Point& cursor_location);
+
+  void set_first_visible_index(int first_visible_index) {
+    first_visible_index_ = first_visible_index;
+  }
+
+  int leading_inset() const { return leading_inset_; }
+  void set_leading_inset(int leading_inset) { leading_inset_ = leading_inset; }
 
   // Overridden from FocusTraversable:
   virtual views::FocusSearch* GetFocusSearch() OVERRIDE;
@@ -101,6 +114,14 @@ class ASH_EXPORT LauncherView : public views::View,
     return alignment_ == SHELF_ALIGNMENT_BOTTOM;
   }
 
+  bool is_overflow_mode() const {
+    return first_visible_index_ > 0;
+  }
+
+  bool dragging() const {
+    return drag_pointer_ != NONE;
+  }
+
   // Sets the bounds of each view to its ideal bounds.
   void LayoutToIdealBounds();
 
@@ -121,12 +142,12 @@ class ASH_EXPORT LauncherView : public views::View,
   // Fades |view| from an opacity of 0 to 1. This is when adding a new item.
   void FadeIn(views::View* view);
 
-  // Invoked when the mouse has moved enough to trigger a drag. Sets internal
-  // state in preparation for the drag.
-  void PrepareForDrag(const views::MouseEvent& event);
+  // Invoked when the pointer has moved enough to trigger a drag. Sets
+  // internal state in preparation for the drag.
+  void PrepareForDrag(Pointer pointer, const views::LocatedEvent& event);
 
   // Invoked when the mouse is dragged. Updates the models as appropriate.
-  void ContinueDrag(const views::MouseEvent& event);
+  void ContinueDrag(const views::LocatedEvent& event);
 
   // Returns true if |typea| and |typeb| should be in the same drag range.
   bool SameDragType(LauncherItemType typea, LauncherItemType typeb) const;
@@ -146,7 +167,7 @@ class ASH_EXPORT LauncherView : public views::View,
   void GetOverflowItems(std::vector<LauncherItem>* items);
 
   // Shows the overflow menu.
-  void ShowOverflowMenu();
+  void ShowOverflowBubble();
 
   // Update first launcher button's padding. This method adds padding to the
   // first button to include the leading inset. It needs to be called once on
@@ -157,8 +178,6 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
-  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
@@ -168,12 +187,17 @@ class ASH_EXPORT LauncherView : public views::View,
   virtual void LauncherItemMoved(int start_index, int target_index) OVERRIDE;
 
   // Overridden from LauncherButtonHost:
-  virtual void MousePressedOnButton(views::View* view,
-                                    const views::MouseEvent& event) OVERRIDE;
-  virtual void MouseDraggedOnButton(views::View* view,
-                                    const views::MouseEvent& event) OVERRIDE;
-  virtual void MouseReleasedOnButton(views::View* view,
-                                     bool canceled) OVERRIDE;
+  virtual void PointerPressedOnButton(
+      views::View* view,
+      Pointer pointer,
+      const views::LocatedEvent& event) OVERRIDE;
+  virtual void PointerDraggedOnButton(
+      views::View* view,
+      Pointer pointer,
+      const views::LocatedEvent& event) OVERRIDE;
+  virtual void PointerReleasedOnButton(views::View* view,
+                                       Pointer pointer,
+                                       bool canceled) OVERRIDE;
   virtual void MouseMovedOverButton(views::View* view) OVERRIDE;
   virtual void MouseEnteredButton(views::View* view) OVERRIDE;
   virtual void MouseExitedButton(views::View* view) OVERRIDE;
@@ -203,19 +227,26 @@ class ASH_EXPORT LauncherView : public views::View,
   // item in |model_|.
   scoped_ptr<views::ViewModel> view_model_;
 
+  // Index of first visible launcher item. When it it greater than 0,
+  // LauncherView is hosted in an overflow bubble. In this mode, it does not
+  // show browser, app list and overflow button.
+  int first_visible_index_;
+
   // Last index of a launcher button that is visible
   // (does not go into overflow).
   int last_visible_index_;
 
   scoped_ptr<views::BoundsAnimator> bounds_animator_;
 
-  views::ImageButton* overflow_button_;
+  OverflowButton* overflow_button_;
+
+  scoped_ptr<OverflowBubble> overflow_bubble_;
 
   scoped_ptr<LauncherTooltipManager> tooltip_;
 
-  // Are we dragging? This is only set if the mouse is dragged far enough to
-  // trigger a drag.
-  bool dragging_;
+  // Pointer device that initiated the current drag operation. If there is no
+  // current dragging operation, this is NONE.
+  Pointer drag_pointer_;
 
   // The view being dragged. This is set immediately when the mouse is pressed.
   // |dragging_| is set only if the mouse is dragged far enough.
@@ -233,14 +264,16 @@ class ASH_EXPORT LauncherView : public views::View,
   scoped_ptr<views::FocusSearch> focus_search_;
 
 #if !defined(OS_MACOSX)
-  scoped_ptr<views::MenuRunner> overflow_menu_runner_;
-
   scoped_ptr<views::MenuRunner> launcher_menu_runner_;
 #endif
 
   ObserverList<LauncherIconObserver> observers_;
 
   ShelfAlignment alignment_;
+
+  // Amount content is inset on the left edge (or top edge for vertical
+  // alignment).
+  int leading_inset_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

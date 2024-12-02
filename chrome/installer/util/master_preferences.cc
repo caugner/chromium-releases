@@ -17,7 +17,6 @@
 
 namespace {
 
-const char kDistroDict[] = "distribution";
 const char kFirstRunTabs[] = "first_run_tabs";
 
 base::LazyInstance<installer::MasterPreferences> g_master_preferences =
@@ -39,11 +38,11 @@ std::vector<GURL> GetNamedList(const char* name,
   std::vector<GURL> list;
   if (!prefs)
     return list;
-  ListValue* value_list = NULL;
+  const ListValue* value_list = NULL;
   if (!prefs->GetList(name, &value_list))
     return list;
   for (size_t i = 0; i < value_list->GetSize(); ++i) {
-    Value* entry;
+    const Value* entry;
     GURL gurl_entry;
     if (!value_list->Get(i, &entry) || !GetGURLFromValue(entry, &gurl_entry)) {
       NOTREACHED();
@@ -82,6 +81,7 @@ namespace installer {
 MasterPreferences::MasterPreferences() : distribution_(NULL),
                                          preferences_read_from_file_(false),
                                          chrome_(true),
+                                         chrome_app_host_(false),
                                          chrome_frame_(false),
                                          multi_install_(false) {
   InitializeFromCommandLine(*CommandLine::ForCurrentProcess());
@@ -91,6 +91,7 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
     : distribution_(NULL),
       preferences_read_from_file_(false),
       chrome_(true),
+      chrome_app_host_(false),
       chrome_frame_(false),
       multi_install_(false) {
   InitializeFromCommandLine(cmd_line);
@@ -98,7 +99,8 @@ MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
 
 MasterPreferences::MasterPreferences(const FilePath& prefs_path)
     : distribution_(NULL), preferences_read_from_file_(false),
-      chrome_(true), chrome_frame_(false), multi_install_(false) {
+      chrome_(true), chrome_app_host_(false), chrome_frame_(false),
+      multi_install_(false) {
   master_dictionary_.reset(ParseDistributionPreferences(prefs_path));
 
   if (!master_dictionary_.get()) {
@@ -106,7 +108,8 @@ MasterPreferences::MasterPreferences(const FilePath& prefs_path)
   } else {
     preferences_read_from_file_ = true;
     // Cache a pointer to the distribution dictionary.
-    master_dictionary_->GetDictionary(kDistroDict, &distribution_);
+    master_dictionary_->GetDictionary(
+        installer::master_preferences::kDistroDict, &distribution_);
   }
 
   InitializeProductFlags();
@@ -136,6 +139,8 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   } translate_switches[] = {
     { installer::switches::kAutoLaunchChrome,
       installer::master_preferences::kAutoLaunchChrome },
+    { installer::switches::kChromeAppHost,
+      installer::master_preferences::kChromeAppHost },
     { installer::switches::kChrome,
       installer::master_preferences::kChrome },
     { installer::switches::kChromeFrame,
@@ -146,8 +151,6 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
       installer::master_preferences::kCreateAllShortcuts },
     { installer::switches::kDisableLogging,
       installer::master_preferences::kDisableLogging },
-    { installer::switches::kDoNotCreateShortcuts,
-      installer::master_preferences::kDoNotCreateShortcuts },
     { installer::switches::kMsi,
       installer::master_preferences::kMsi },
     { installer::switches::kMultiInstall,
@@ -166,10 +169,10 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
       installer::master_preferences::kAltShortcutText },
   };
 
-  std::string name(kDistroDict);
+  std::string name(installer::master_preferences::kDistroDict);
   for (int i = 0; i < arraysize(translate_switches); ++i) {
     if (cmd_line.HasSwitch(translate_switches[i].cmd_line_switch)) {
-      name.resize(arraysize(kDistroDict) - 1);
+      name.assign(installer::master_preferences::kDistroDict);
       name.append(".").append(translate_switches[i].distribution_switch);
       master_dictionary_->SetBoolean(name, true);
     }
@@ -179,7 +182,7 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
   std::wstring str_value(cmd_line.GetSwitchValueNative(
       installer::switches::kLogFile));
   if (!str_value.empty()) {
-    name.resize(arraysize(kDistroDict) - 1);
+    name.assign(installer::master_preferences::kDistroDict);
     name.append(".").append(installer::master_preferences::kLogFile);
     master_dictionary_->SetString(name, str_value);
   }
@@ -192,14 +195,15 @@ void MasterPreferences::InitializeFromCommandLine(const CommandLine& cmd_line) {
     env->GetVar(kGoogleUpdateIsMachineEnvVar, &is_machine_var);
     if (!is_machine_var.empty() && is_machine_var[0] == '1') {
       VLOG(1) << "Taking system-level from environment.";
-      name.resize(arraysize(kDistroDict) - 1);
+      name.assign(installer::master_preferences::kDistroDict);
       name.append(".").append(installer::master_preferences::kSystemLevel);
       master_dictionary_->SetBoolean(name, true);
     }
   }
 
   // Cache a pointer to the distribution dictionary. Ignore errors if any.
-  master_dictionary_->GetDictionary(kDistroDict, &distribution_);
+  master_dictionary_->GetDictionary(installer::master_preferences::kDistroDict,
+                                    &distribution_);
 
   InitializeProductFlags();
 #endif
@@ -209,10 +213,12 @@ void MasterPreferences::InitializeProductFlags() {
   // Make sure we start out with the correct defaults.
   multi_install_ = false;
   chrome_frame_ = false;
+  chrome_app_host_ = false;
   chrome_ = true;
 
   GetBool(installer::master_preferences::kMultiInstall, &multi_install_);
   GetBool(installer::master_preferences::kChromeFrame, &chrome_frame_);
+  GetBool(installer::master_preferences::kChromeAppHost, &chrome_app_host_);
 
   // When multi-install is specified, the checks are pretty simple (in theory):
   // In order to be installed/uninstalled, each product must have its switch

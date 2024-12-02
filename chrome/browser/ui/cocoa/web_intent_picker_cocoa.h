@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_WEB_INTENT_PICKER_COCOA_H_
 #define CHROME_BROWSER_UI_COCOA_WEB_INTENT_PICKER_COCOA_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -41,6 +40,7 @@ class WebIntentPickerCocoa : public WebIntentPicker,
   void OnExtensionInstallRequested(const std::string& extension_id);
   void OnExtensionLinkClicked(const std::string& extension_id);
   void OnSuggestionsLinkClicked();
+  void OnChooseAnotherService();
 
   // WebIntentPicker implementation.
   virtual void Close() OVERRIDE;
@@ -48,6 +48,7 @@ class WebIntentPickerCocoa : public WebIntentPicker,
   virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
   virtual void OnExtensionInstallFailure(const std::string& id) OVERRIDE;
   virtual void OnInlineDispositionAutoResize(const gfx::Size& size) OVERRIDE;
+  virtual void OnPendingAsyncCompleted() OVERRIDE;
 
   // WebIntentPickerModelObserver implementation.
   virtual void OnModelChanged(WebIntentPickerModel* model) OVERRIDE;
@@ -55,7 +56,7 @@ class WebIntentPickerCocoa : public WebIntentPicker,
                                 size_t index) OVERRIDE;
   virtual void OnExtensionIconChanged(WebIntentPickerModel* model,
                                       const string16& extension_id) OVERRIDE;
-  virtual void OnInlineDisposition(WebIntentPickerModel* model,
+  virtual void OnInlineDisposition(const string16& title,
                                    const GURL& url) OVERRIDE;
 
  private:

@@ -31,6 +31,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
@@ -57,8 +58,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/cryptohome_library.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
@@ -156,11 +157,23 @@ void OnOpenWindowForNewProfile(Profile* profile,
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     ProfileManager::FindOrCreateNewWindowForProfile(
         profile,
-        browser::startup::IS_PROCESS_STARTUP,
-        browser::startup::IS_FIRST_RUN,
+        chrome::startup::IS_PROCESS_STARTUP,
+        chrome::startup::IS_FIRST_RUN,
         false);
   }
 }
+
+#if defined(OS_CHROMEOS)
+void CheckCryptohomeIsMounted(chromeos::DBusMethodCallStatus call_status,
+                              bool is_mounted) {
+  if (call_status != chromeos::DBUS_METHOD_CALL_SUCCESS) {
+    LOG(ERROR) << "IsMounted call failed.";
+    return;
+  }
+  if (!is_mounted)
+    LOG(ERROR) << "Cryptohome is not mounted.";
+}
+#endif
 
 } // namespace
 
@@ -230,7 +243,7 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
       ALLOW_THIS_IN_INITIALIZER_LIST(
           browser_list_observer_(this)),
 #endif
-      shutdown_started_(false) {
+      closing_all_browsers_(false) {
 #if defined(OS_CHROMEOS)
   registrar_.Add(
       this,
@@ -247,7 +260,11 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
       content::NotificationService::AllSources());
   registrar_.Add(
       this,
-      content::NOTIFICATION_APP_EXITING,
+      chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
+      content::NotificationService::AllSources());
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_BROWSER_CLOSE_CANCELLED,
       content::NotificationService::AllSources());
 }
 
@@ -402,7 +419,9 @@ Profile* ProfileManager::GetProfile(const FilePath& profile_dir) {
 }
 
 void ProfileManager::CreateProfileAsync(const FilePath& profile_path,
-                                        const CreateCallback& callback) {
+                                        const CreateCallback& callback,
+                                        const string16& name,
+                                        const string16& icon_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   // Make sure that this profile is not pending deletion.
@@ -426,6 +445,14 @@ void ProfileManager::CreateProfileAsync(const FilePath& profile_path,
     // Initiate asynchronous creation process.
     ProfileInfo* info =
         RegisterProfile(CreateProfileAsyncHelper(profile_path, this), false);
+    ProfileInfoCache& cache = GetProfileInfoCache();
+    // Get the icon index from the user's icon url
+    size_t icon_index;
+    std::string icon_url_std = UTF16ToASCII(icon_url);
+    if (cache.IsDefaultAvatarIconUrl(icon_url_std, &icon_index)) {
+      // add profile to cache with user selected name and avatar
+      cache.AddProfileToCache(profile_path, name, string16(), icon_index);
+    }
     info->callbacks.push_back(callback);
   }
 }
@@ -440,7 +467,8 @@ void ProfileManager::CreateDefaultProfileAsync(const CreateCallback& callback) {
   default_profile_dir = default_profile_dir.Append(
       profile_manager->GetInitialProfileDir());
 
-  profile_manager->CreateProfileAsync(default_profile_dir, callback);
+  profile_manager->CreateProfileAsync(default_profile_dir, callback,
+                                      string16(), string16());
 }
 
 bool ProfileManager::AddProfile(Profile* profile) {
@@ -475,8 +503,8 @@ Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
 // static
 void ProfileManager::FindOrCreateNewWindowForProfile(
     Profile* profile,
-    browser::startup::IsProcessStartup process_startup,
-    browser::startup::IsFirstRun is_first_run,
+    chrome::startup::IsProcessStartup process_startup,
+    chrome::startup::IsFirstRun is_first_run,
     bool always_create) {
   DCHECK(profile);
 
@@ -510,8 +538,8 @@ void ProfileManager::Observe(
       // TODO(davemoore) Once we have better api this check should ensure that
       // our profile directory is the one that's mounted, and that it's mounted
       // as the current user.
-      CHECK(chromeos::CrosLibrary::Get()->GetCryptohomeLibrary()->IsMounted())
-          << "The cryptohome was not mounted at login.";
+      chromeos::DBusThreadManager::Get()->GetCryptohomeClient()->IsMounted(
+          base::Bind(&CheckCryptohomeIsMounted));
 
       // Confirm that we hadn't loaded the new profile previously.
       FilePath default_profile_dir =
@@ -522,14 +550,20 @@ void ProfileManager::Observe(
     return;
   }
 #endif
-  if (shutdown_started_)
-    return;
-
-  bool update_active_profiles = false;
+  bool save_active_profiles = false;
   switch (type) {
-    case content::NOTIFICATION_APP_EXITING: {
+    case chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST: {
       // Ignore any browsers closing from now on.
-      shutdown_started_ = true;
+      closing_all_browsers_ = true;
+      break;
+    }
+    case chrome::NOTIFICATION_BROWSER_CLOSE_CANCELLED: {
+      // This will cancel the shutdown process, so the active profiles are
+      // tracked again. Also, as the active profiles may have changed (i.e. if
+      // some windows were closed) we save the current list of active profiles
+      // again.
+      closing_all_browsers_ = false;
+      save_active_profiles = true;
       break;
     }
     case chrome::NOTIFICATION_BROWSER_OPENED: {
@@ -539,8 +573,13 @@ void ProfileManager::Observe(
       DCHECK(profile);
       if (!profile->IsOffTheRecord() && ++browser_counts_[profile] == 1) {
         active_profiles_.push_back(profile);
-        update_active_profiles = true;
+        save_active_profiles = true;
       }
+      // If browsers are opening, we can't be closing all the browsers. This
+      // can happen if the application was exited, but background mode or
+      // packaged apps prevented the process from shutting down, and then
+      // a new browser window was opened.
+      closing_all_browsers_ = false;
       break;
     }
     case chrome::NOTIFICATION_BROWSER_CLOSED: {
@@ -551,7 +590,7 @@ void ProfileManager::Observe(
       if (!profile->IsOffTheRecord() && --browser_counts_[profile] == 0) {
         active_profiles_.erase(std::find(active_profiles_.begin(),
                                          active_profiles_.end(), profile));
-        update_active_profiles = true;
+        save_active_profiles = !closing_all_browsers_;
       }
       break;
     }
@@ -560,7 +599,8 @@ void ProfileManager::Observe(
       break;
     }
   }
-  if (update_active_profiles) {
+
+  if (save_active_profiles) {
     PrefService* local_state = g_browser_process->local_state();
     DCHECK(local_state);
     ListPrefUpdate update(local_state, prefs::kProfilesLastActive);
@@ -648,12 +688,13 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 void ProfileManager::DoFinalInitForServices(Profile* profile,
                                             bool go_off_the_record) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  ExtensionSystem::Get(profile)->Init(!go_off_the_record);
+  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
+      !go_off_the_record);
   // During tests, when |profile| is an instance of TestingProfile,
   // ExtensionSystem might not create an ExtensionService.
-  if (ExtensionSystem::Get(profile)->extension_service()) {
+  if (extensions::ExtensionSystem::Get(profile)->extension_service()) {
     profile->GetHostContentSettingsMap()->RegisterExtensionService(
-        ExtensionSystem::Get(profile)->extension_service());
+        extensions::ExtensionSystem::Get(profile)->extension_service());
   }
   if (!command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitPromoResources();
@@ -749,7 +790,8 @@ FilePath ProfileManager::GenerateNextProfileDirectoryPath() {
 }
 
 // static
-void ProfileManager::CreateMultiProfileAsync() {
+void ProfileManager::CreateMultiProfileAsync(const string16& name,
+                                             const string16& icon_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -757,7 +799,8 @@ void ProfileManager::CreateMultiProfileAsync() {
   FilePath new_path = profile_manager->GenerateNextProfileDirectoryPath();
 
   profile_manager->CreateProfileAsync(new_path,
-                                      base::Bind(&OnOpenWindowForNewProfile));
+                                      base::Bind(&OnOpenWindowForNewProfile),
+                                      name, icon_url);
 }
 
 // static
@@ -903,7 +946,8 @@ void ProfileManager::ScheduleProfileForDeletion(const FilePath& profile_dir) {
   if (cache.GetNumberOfProfiles() == 1) {
     FilePath new_path = GenerateNextProfileDirectoryPath();
 
-    CreateProfileAsync(new_path, base::Bind(&OnOpenWindowForNewProfile));
+    CreateProfileAsync(new_path, base::Bind(&OnOpenWindowForNewProfile),
+                       string16(), string16());
   }
 
   // Update the last used profile pref before closing browser windows. This way

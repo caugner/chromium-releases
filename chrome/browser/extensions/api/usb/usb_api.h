@@ -4,18 +4,31 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_USB_USB_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_USB_USB_API_H_
-#pragma once
 
 #include <string>
 
 #include "chrome/browser/extensions/api/api_function.h"
+#include "chrome/browser/extensions/api/api_resource_manager.h"
 #include "chrome/common/extensions/api/experimental_usb.h"
 
 namespace extensions {
 
-class APIResourceEventNotifier;
+class ApiResourceEventNotifier;
+class UsbDeviceResource;
 
-class UsbFindDeviceFunction : public AsyncAPIFunction {
+class UsbAsyncApiFunction : public AsyncApiFunction {
+ public:
+  UsbAsyncApiFunction();
+
+ protected:
+  virtual ~UsbAsyncApiFunction();
+
+  virtual bool PrePrepare() OVERRIDE;
+
+  ApiResourceManager<UsbDeviceResource>* manager_;
+};
+
+class UsbFindDeviceFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.findDevice");
 
@@ -29,10 +42,10 @@ class UsbFindDeviceFunction : public AsyncAPIFunction {
 
  private:
   scoped_ptr<extensions::api::experimental_usb::FindDevice::Params> parameters_;
-  APIResourceEventNotifier* event_notifier_;
+  ApiResourceEventNotifier* event_notifier_;
 };
 
-class UsbCloseDeviceFunction : public AsyncAPIFunction {
+class UsbCloseDeviceFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.closeDevice");
 
@@ -49,7 +62,7 @@ class UsbCloseDeviceFunction : public AsyncAPIFunction {
       parameters_;
 };
 
-class UsbControlTransferFunction : public AsyncAPIFunction {
+class UsbControlTransferFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.controlTransfer");
 
@@ -66,7 +79,7 @@ class UsbControlTransferFunction : public AsyncAPIFunction {
       parameters_;
 };
 
-class UsbBulkTransferFunction : public AsyncAPIFunction {
+class UsbBulkTransferFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.bulkTransfer");
 
@@ -83,7 +96,7 @@ class UsbBulkTransferFunction : public AsyncAPIFunction {
       parameters_;
 };
 
-class UsbInterruptTransferFunction : public AsyncAPIFunction {
+class UsbInterruptTransferFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.interruptTransfer");
 
@@ -100,7 +113,7 @@ class UsbInterruptTransferFunction : public AsyncAPIFunction {
       parameters_;
 };
 
-class UsbIsochronousTransferFunction : public AsyncAPIFunction {
+class UsbIsochronousTransferFunction : public UsbAsyncApiFunction {
  public:
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.isochronousTransfer");
 

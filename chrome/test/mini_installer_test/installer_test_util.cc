@@ -112,11 +112,11 @@ bool GetInstalledProducts(
     if (type != InstallationValidator::NO_PRODUCTS) {
       current_dist = BrowserDistribution::GetSpecificDistribution(
           ToBrowserDistributionType(type));
-      scoped_ptr<Version> version(
-        InstallUtil::GetChromeVersion(current_dist, system_level));
-      if (version.get()) {
+      Version version;
+      InstallUtil::GetChromeVersion(current_dist, system_level, &version);
+      if (version.IsValid()) {
         current_prod.type = type;
-        current_prod.version = version->GetString();
+        current_prod.version = version.GetString();
         current_prod.system = system_level;
         products->push_back(current_prod);
       }
@@ -179,7 +179,7 @@ bool Install(const FilePath& installer, const SwitchBuilder& switches) {
 }
 
 bool LaunchChrome(bool close_after_launch, bool system_level) {
-  base::CleanupProcesses(installer::kChromeExe, 0,
+  base::CleanupProcesses(installer::kChromeExe, base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
   FilePath install_path;
   if (!GetChromeInstallDirectory(
@@ -218,9 +218,9 @@ bool LaunchIE(const std::string& url) {
 }
 
 bool UninstallAll() {
-  base::CleanupProcesses(installer::kChromeExe, 0,
+  base::CleanupProcesses(installer::kChromeExe, base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
-  base::CleanupProcesses(installer::kChromeFrameHelperExe, 0,
+  base::CleanupProcesses(installer::kChromeFrameHelperExe, base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
   std::vector<installer_test::InstalledProduct> installed;
   if (!GetInstalledProducts(&installed)) {
@@ -273,7 +273,8 @@ bool Uninstall(bool system_level,
   LOG(INFO) << "Uninstall command: " << uninstall_cmd.GetCommandLineString();
   bool ret_val = RunAndWaitForCommandToFinish(uninstall_cmd);
   // Close IE notification when uninstalling Chrome Frame.
-  base::CleanupProcesses(mini_installer_constants::kIEProcessName, 0,
+  base::CleanupProcesses(mini_installer_constants::kIEProcessName,
+                         base::TimeDelta(),
                          content::RESULT_CODE_HUNG, NULL);
   return ret_val;
 }
@@ -291,7 +292,7 @@ bool RunAndWaitForCommandToFinish(CommandLine command) {
                << command.GetCommandLineString();
     return false;
   }
-  if (!base::WaitForSingleProcess(process, 60 * 1000)) {
+  if (!base::WaitForSingleProcess(process, base::TimeDelta::FromMinutes(1))) {
     LOG(ERROR) << "Launched process did not complete.";
     return false;
   }

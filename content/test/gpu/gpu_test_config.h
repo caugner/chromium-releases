@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_TEST_GPU_GPU_TEST_CONFIG_H_
 #define CONTENT_TEST_GPU_GPU_TEST_CONFIG_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -30,6 +29,7 @@ class GPUTestConfig {
     kOsMac = kOsMacLeopard | kOsMacSnowLeopard | kOsMacLion,
     kOsLinux = 1 << 6,
     kOsChromeOS = 1 << 7,
+    kOsAndroid = 1 << 8,
   };
 
   enum BuildType {

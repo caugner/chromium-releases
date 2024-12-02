@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/format_macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
@@ -150,19 +151,29 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
 
 void PrerenderHistograms::RecordPrerenderStarted(Origin origin) const {
   if (OriginIsOmnibox(origin)) {
-    UMA_HISTOGRAM_COUNTS(
+    UMA_HISTOGRAM_ENUMERATION(
         StringPrintf("Prerender.OmniboxPrerenderCount%s",
-                     PrerenderManager::GetModeString()).c_str(),
-        1);
+                     PrerenderManager::GetModeString()), 1, 2);
+  }
+}
+
+void PrerenderHistograms::RecordConcurrency(size_t prerender_count) const {
+  static const size_t kMaxRecordableConcurrency = 3;
+  const size_t max_concurrency = PrerenderManager::GetMaxConcurrency();
+  DCHECK_GE(kMaxRecordableConcurrency, max_concurrency);
+  if (max_concurrency > 1) {
+    UMA_HISTOGRAM_ENUMERATION(
+        StringPrintf("Prerender.PrerenderCountOf%" PRIuS "Max",
+                     max_concurrency),
+        prerender_count, kMaxRecordableConcurrency + 1);
   }
 }
 
 void PrerenderHistograms::RecordUsedPrerender(Origin origin) const {
   if (OriginIsOmnibox(origin)) {
-    UMA_HISTOGRAM_COUNTS(
+    UMA_HISTOGRAM_ENUMERATION(
         StringPrintf("Prerender.OmniboxNavigationsUsedPrerenderCount%s",
-                     PrerenderManager::GetModeString()).c_str(),
-        1);
+                     PrerenderManager::GetModeString()), 1, 2);
   }
 }
 

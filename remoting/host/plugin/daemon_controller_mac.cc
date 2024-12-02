@@ -23,7 +23,9 @@
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "remoting/host/constants_mac.h"
 #include "remoting/host/json_host_config.h"
+#include "remoting/host/usage_stats_consent.h"
 
 namespace remoting {
 
@@ -35,26 +37,6 @@ namespace {
 // Therefore, we define the needed constants here.
 const int NSLibraryDirectory = 5;
 
-// The name of the Remoting Host service that is registered with launchd.
-#define kServiceName "org.chromium.chromoting"
-
-// Use separate named notifications for success and failure because sandboxed
-// components can't include a dictionary when sending distributed notifications.
-// The preferences panel is not yet sandboxed, but err on the side of caution.
-#define kUpdateSucceededNotificationName kServiceName ".update_succeeded"
-#define kUpdateFailedNotificationName kServiceName ".update_failed"
-
-#define kConfigDir "/Library/PrivilegedHelperTools/"
-
-// This helper script is used to get the installed host version.
-const char kHostHelperScript[] = kConfigDir kServiceName ".me2me.sh";
-
-// Use a single configuration file, instead of separate "auth" and "host" files.
-// This is because the SetConfigAndStart() API only provides a single
-// dictionary, and splitting this into two dictionaries would require
-// knowledge of which keys belong in which files.
-const char kHostConfigFile[] = kConfigDir kServiceName ".json";
-
 class DaemonControllerMac : public remoting::DaemonController {
  public:
   DaemonControllerMac();
@@ -64,18 +46,21 @@ class DaemonControllerMac : public remoting::DaemonController {
   virtual void GetConfig(const GetConfigCallback& callback) OVERRIDE;
   virtual void SetConfigAndStart(
       scoped_ptr<base::DictionaryValue> config,
-      const CompletionCallback& done_callback) OVERRIDE;
+      bool consent,
+      const CompletionCallback& done) OVERRIDE;
   virtual void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
                             const CompletionCallback& done_callback) OVERRIDE;
   virtual void Stop(const CompletionCallback& done_callback) OVERRIDE;
   virtual void SetWindow(void* window_handle) OVERRIDE;
   virtual void GetVersion(const GetVersionCallback& done_callback) OVERRIDE;
+  virtual void GetUsageStatsConsent(
+      const GetUsageStatsConsentCallback& callback) OVERRIDE;
 
  private:
   void DoGetConfig(const GetConfigCallback& callback);
   void DoGetVersion(const GetVersionCallback& callback);
   void DoSetConfigAndStart(scoped_ptr<base::DictionaryValue> config,
-                           const CompletionCallback& done_callback);
+                           const CompletionCallback& done);
   void DoUpdateConfig(scoped_ptr<base::DictionaryValue> config,
                       const CompletionCallback& done_callback);
   void DoStop(const CompletionCallback& done_callback);
@@ -113,12 +98,12 @@ void DaemonControllerMac::DeregisterForPreferencePaneNotifications() {
   CFNotificationCenterRemoveObserver(
       CFNotificationCenterGetDistributedCenter(),
       this,
-      CFSTR(kUpdateSucceededNotificationName),
+      CFSTR(UPDATE_SUCCEEDED_NOTIFICATION_NAME),
       NULL);
   CFNotificationCenterRemoveObserver(
       CFNotificationCenterGetDistributedCenter(),
       this,
-      CFSTR(kUpdateFailedNotificationName),
+      CFSTR(UPDATE_FAILED_NOTIFICATION_NAME),
       NULL);
 }
 
@@ -148,11 +133,12 @@ void DaemonControllerMac::GetConfig(const GetConfigCallback& callback) {
 
 void DaemonControllerMac::SetConfigAndStart(
     scoped_ptr<base::DictionaryValue> config,
-    const CompletionCallback& done_callback) {
+    bool /* consent */,
+    const CompletionCallback& done) {
   auth_thread_.message_loop_proxy()->PostTask(
       FROM_HERE, base::Bind(
           &DaemonControllerMac::DoSetConfigAndStart, base::Unretained(this),
-          base::Passed(&config), done_callback));
+          base::Passed(&config), done));
 }
 
 void DaemonControllerMac::UpdateConfig(
@@ -180,8 +166,15 @@ void DaemonControllerMac::GetVersion(const GetVersionCallback& callback) {
                  callback));
 }
 
+void DaemonControllerMac::GetUsageStatsConsent(
+    const GetUsageStatsConsentCallback& callback) {
+  // Crash dump collection is not implemented on Mac yet.
+  // http://crbug.com/130678.
+  callback.Run(false, false, false);
+}
+
 void DaemonControllerMac::DoGetConfig(const GetConfigCallback& callback) {
-  FilePath config_path(kHostConfigFile);
+  FilePath config_path(kHostConfigFilePath);
   JsonHostConfig host_config(config_path);
   scoped_ptr<base::DictionaryValue> config;
 
@@ -199,7 +192,7 @@ void DaemonControllerMac::DoGetConfig(const GetConfigCallback& callback) {
 
 void DaemonControllerMac::DoGetVersion(const GetVersionCallback& callback) {
   std::string version = "";
-  std::string command_line = kHostHelperScript;
+  std::string command_line = remoting::kHostHelperScriptPath;
   command_line += " --host-version";
   FILE* script_output = popen(command_line.c_str(), "r");
   if (script_output) {
@@ -223,16 +216,16 @@ void DaemonControllerMac::DoGetVersion(const GetVersionCallback& callback) {
 
 void DaemonControllerMac::DoSetConfigAndStart(
     scoped_ptr<base::DictionaryValue> config,
-    const CompletionCallback& done_callback) {
+    const CompletionCallback& done) {
   std::string config_data;
   base::JSONWriter::Write(config.get(), &config_data);
-  ShowPreferencePane(config_data, done_callback);
+  ShowPreferencePane(config_data, done);
 }
 
 void DaemonControllerMac::DoUpdateConfig(
     scoped_ptr<base::DictionaryValue> config,
     const CompletionCallback& done_callback) {
-  FilePath config_file_path(kHostConfigFile);
+  FilePath config_file_path(kHostConfigFilePath);
   JsonHostConfig config_file(config_file_path);
   if (!config_file.Read()) {
     done_callback.Run(RESULT_FAILED);
@@ -269,7 +262,7 @@ bool DaemonControllerMac::DoShowPreferencePane(const std::string& config_data) {
       LOG(ERROR) << "Failed to get filename for saving configuration data.";
       return false;
     }
-    config_path = config_path.Append(kServiceName ".json");
+    config_path = config_path.Append(kHostConfigFileName);
 
     int written = file_util::WriteFile(config_path, config_data.data(),
                                        config_data.size());
@@ -287,8 +280,7 @@ bool DaemonControllerMac::DoShowPreferencePane(const std::string& config_data) {
     LOG(ERROR) << "Failed to get directory for local preference panes.";
     return false;
   }
-  pane_path = pane_path.Append("PreferencePanes")
-      .Append(kServiceName ".prefPane");
+  pane_path = pane_path.Append("PreferencePanes").Append(kPrefPaneFileName);
 
   FSRef pane_path_ref;
   if (!base::mac::FSRefFromPath(pane_path.value(), &pane_path_ref)) {
@@ -304,7 +296,10 @@ bool DaemonControllerMac::DoShowPreferencePane(const std::string& config_data) {
 
   CFNotificationCenterRef center =
       CFNotificationCenterGetDistributedCenter();
-  CFNotificationCenterPostNotification(center, CFSTR(kServiceName), NULL, NULL,
+  base::mac::ScopedCFTypeRef<CFStringRef> service_name(
+        CFStringCreateWithCString(kCFAllocatorDefault, remoting::kServiceName,
+                                  kCFStringEncodingUTF8));
+  CFNotificationCenterPostNotification(center, service_name, NULL, NULL,
                                        TRUE);
   return true;
 }
@@ -329,24 +324,24 @@ void DaemonControllerMac::RegisterForPreferencePaneNotifications(
       CFNotificationCenterGetDistributedCenter(),
       this,
       &DaemonControllerMac::PreferencePaneCallback,
-      CFSTR(kUpdateSucceededNotificationName),
+      CFSTR(UPDATE_SUCCEEDED_NOTIFICATION_NAME),
       NULL,
       CFNotificationSuspensionBehaviorDeliverImmediately);
   CFNotificationCenterAddObserver(
       CFNotificationCenterGetDistributedCenter(),
       this,
       &DaemonControllerMac::PreferencePaneCallback,
-      CFSTR(kUpdateFailedNotificationName),
+      CFSTR(UPDATE_FAILED_NOTIFICATION_NAME),
       NULL,
       CFNotificationSuspensionBehaviorDeliverImmediately);
 }
 
 void DaemonControllerMac::PreferencePaneCallbackDelegate(CFStringRef name) {
   AsyncResult result = RESULT_FAILED;
-  if (CFStringCompare(name, CFSTR(kUpdateSucceededNotificationName), 0) ==
+  if (CFStringCompare(name, CFSTR(UPDATE_SUCCEEDED_NOTIFICATION_NAME), 0) ==
           kCFCompareEqualTo) {
     result = RESULT_OK;
-  } else if (CFStringCompare(name, CFSTR(kUpdateFailedNotificationName), 0) ==
+  } else if (CFStringCompare(name, CFSTR(UPDATE_FAILED_NOTIFICATION_NAME), 0) ==
           kCFCompareEqualTo) {
     result = RESULT_FAILED;
   } else {

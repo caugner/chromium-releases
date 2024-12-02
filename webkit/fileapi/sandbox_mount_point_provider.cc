@@ -10,18 +10,20 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
-#include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/task_runner_util.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "webkit/fileapi/file_system_file_stream_reader.h"
-#include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_options.h"
+#include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/native_file_util.h"
 #include "webkit/fileapi/obfuscated_file_util.h"
 #include "webkit/fileapi/sandbox_file_stream_writer.h"
@@ -268,16 +270,9 @@ void MigrateIfNeeded(
     MigrateAllOldFileSystems(file_util, old_base_path);
 }
 
-void PassPointerErrorByValue(
-    const base::Callback<void(PlatformFileError)>& callback,
-    PlatformFileError* error_ptr) {
-  DCHECK(error_ptr);
-  callback.Run(*error_ptr);
-}
-
 void DidValidateFileSystemRoot(
     base::WeakPtr<SandboxMountPointProvider> mount_point_provider,
-    const base::Callback<void(PlatformFileError)>& callback,
+    const FileSystemMountPointProvider::ValidateFileSystemCallback& callback,
     base::PlatformFileError* error) {
   if (mount_point_provider.get())
     mount_point_provider.get()->CollectOpenFileSystemMetrics(*error);
@@ -297,7 +292,7 @@ void ValidateRootOnFileThread(
   FilePath root_path =
       file_util->GetDirectoryForOriginAndType(
           origin_url, type, create, error_ptr);
-  if (root_path.empty()) {
+  if (*error_ptr != base::PLATFORM_FILE_OK) {
     UMA_HISTOGRAM_ENUMERATION(kOpenFileSystemLabel,
                               kCreateDirectoryError,
                               kFileSystemErrorMax);
@@ -386,10 +381,7 @@ SandboxMountPointProvider::GetFileSystemRootPathOnFileThread(
   if (!IsAllowedScheme(origin_url))
     return FilePath();
 
-  MigrateIfNeeded(sandbox_file_util_.get(), old_base_path());
-
-  return sandbox_file_util_->GetDirectoryForOriginAndType(
-      origin_url, type, create);
+  return GetBaseDirectoryForOriginAndType(origin_url, type, create);
 }
 
 bool SandboxMountPointProvider::IsAccessAllowed(const GURL& origin_url,
@@ -422,7 +414,8 @@ bool SandboxMountPointProvider::IsRestrictedFileName(const FilePath& filename)
   return false;
 }
 
-FileSystemFileUtil* SandboxMountPointProvider::GetFileUtil() {
+FileSystemFileUtil* SandboxMountPointProvider::GetFileUtil(
+    FileSystemType type) {
   return sandbox_file_util_.get();
 }
 
@@ -435,23 +428,23 @@ FilePath SandboxMountPointProvider::GetPathForPermissionsCheck(
 
 FileSystemOperationInterface*
 SandboxMountPointProvider::CreateFileSystemOperation(
-    const GURL& origin_url,
-    FileSystemType file_system_type,
-    const FilePath& virtual_path,
+    const FileSystemURL& url,
     FileSystemContext* context) const {
-  return new FileSystemOperation(context);
+  scoped_ptr<FileSystemOperationContext> operation_context(
+      new FileSystemOperationContext(context));
+  return new LocalFileSystemOperation(context, operation_context.Pass());
 }
 
 webkit_blob::FileStreamReader*
 SandboxMountPointProvider::CreateFileStreamReader(
-    const GURL& url,
+    const FileSystemURL& url,
     int64 offset,
     FileSystemContext* context) const {
   return new FileSystemFileStreamReader(context, url, offset);
 }
 
 fileapi::FileStreamWriter* SandboxMountPointProvider::CreateFileStreamWriter(
-    const GURL& url,
+    const FileSystemURL& url,
     int64 offset,
     FileSystemContext* context) const {
   return new SandboxFileStreamWriter(context, url, offset);
@@ -459,6 +452,24 @@ fileapi::FileStreamWriter* SandboxMountPointProvider::CreateFileStreamWriter(
 
 FileSystemQuotaUtil* SandboxMountPointProvider::GetQuotaUtil() {
   return this;
+}
+
+void SandboxMountPointProvider::DeleteFileSystem(
+    const GURL& origin_url,
+    FileSystemType type,
+    FileSystemContext* context,
+    const DeleteFileSystemCallback& callback) {
+  base::PostTaskAndReplyWithResult(
+      context->task_runners()->file_task_runner(),
+      FROM_HERE,
+      // It is safe to pass Unretained(this) since context owns it.
+      base::Bind(&SandboxMountPointProvider::DeleteOriginDataOnFileThread,
+                 base::Unretained(this),
+                 make_scoped_refptr(context),
+                 base::Unretained(context->quota_manager_proxy()),
+                 origin_url,
+                 type),
+      callback);
 }
 
 FilePath SandboxMountPointProvider::old_base_path() const {
@@ -484,11 +495,16 @@ FilePath SandboxMountPointProvider::GetBaseDirectoryForOriginAndType(
 
   MigrateIfNeeded(sandbox_file_util_.get(), old_base_path());
 
-  return sandbox_file_util_->GetDirectoryForOriginAndType(
-      origin_url, type, create);
+  base::PlatformFileError error = base::PLATFORM_FILE_OK;
+  FilePath path = sandbox_file_util_->GetDirectoryForOriginAndType(
+      origin_url, type, create, &error);
+  if (error != base::PLATFORM_FILE_OK)
+    return FilePath();
+  return path;
 }
 
-bool SandboxMountPointProvider::DeleteOriginDataOnFileThread(
+base::PlatformFileError
+SandboxMountPointProvider::DeleteOriginDataOnFileThread(
     FileSystemContext* file_system_context,
     QuotaManagerProxy* proxy,
     const GURL& origin_url,
@@ -507,7 +523,10 @@ bool SandboxMountPointProvider::DeleteOriginDataOnFileThread(
         FileSystemTypeToQuotaStorageType(type),
         -usage);
   }
-  return result;
+
+  if (result)
+    return base::PLATFORM_FILE_OK;
+  return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
 void SandboxMountPointProvider::GetOriginsForTypeOnFileThread(
@@ -571,9 +590,9 @@ int64 SandboxMountPointProvider::GetOriginUsageOnFileThread(
   FileSystemUsageCache::Delete(usage_file_path);
 
   FileSystemOperationContext context(file_system_context);
-  FileSystemPath path(origin_url, type, FilePath());
+  FileSystemURL url(origin_url, type, FilePath());
   scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator> enumerator(
-      sandbox_file_util_->CreateFileEnumerator(&context, path, true));
+      sandbox_file_util_->CreateFileEnumerator(&context, url, true));
 
   FilePath file_path_each;
   int64 usage = 0;

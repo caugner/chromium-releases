@@ -29,17 +29,15 @@ const SkColor kHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
 SearchBoxView::SearchBoxView(SearchBoxViewDelegate* delegate)
     : delegate_(delegate),
       model_(NULL),
-      icon_view_(NULL),
-      search_box_(NULL),
+      icon_view_(new views::ImageView),
+      search_box_(new views::Textfield),
       contents_view_(NULL) {
-  icon_view_ = new views::ImageView;
   AddChildView(icon_view_);
 
-  search_box_ = new views::Textfield;
   search_box_->RemoveBorder();
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   search_box_->SetFont(gfx::Font(
-      rb.GetFont(ResourceBundle::BaseFont).GetFontName(),
+      rb.GetFont(ui::ResourceBundle::BaseFont).GetFontName(),
       kFontSize));
   search_box_->set_placeholder_text_color(kHintTextColor);
   search_box_->SetController(this);
@@ -84,6 +82,13 @@ void SearchBoxView::Layout() {
   edit_frame.set_x(icon_frame.right());
   edit_frame.set_width(rect.width() - icon_frame.width() - kPadding);
   search_box_->SetBoundsRect(edit_frame);
+}
+
+bool SearchBoxView::OnMouseWheel(const views::MouseWheelEvent& event) {
+  if (contents_view_)
+    return contents_view_->OnMouseWheel(event);
+
+  return false;
 }
 
 void SearchBoxView::UpdateModel() {

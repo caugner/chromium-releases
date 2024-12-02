@@ -20,6 +20,7 @@
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
 using base::Time;
@@ -55,7 +56,7 @@ URLRequestAutomationJob::URLRequestAutomationJob(
     int request_id,
     AutomationResourceMessageFilter* filter,
     bool is_pending)
-    : net::URLRequestJob(request),
+    : net::URLRequestJob(request, request->context()->network_delegate()),
       id_(0),
       tab_(tab),
       message_filter_(filter),
@@ -456,7 +457,7 @@ void URLRequestAutomationJob::StartAsync() {
   automation_request.method = request_->method();
   automation_request.referrer = referrer.spec();
   automation_request.extra_request_headers = new_request_headers.ToString();
-  automation_request.upload_data =request_->get_upload();
+  automation_request.upload_data = request_->get_upload_mutable();
   automation_request.resource_type = resource_type;
   automation_request.load_flags = request_->load_flags();
 

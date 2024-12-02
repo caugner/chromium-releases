@@ -37,11 +37,14 @@
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/gtk/about_chrome_dialog.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/avatar_menu_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/avatar_menu_button_gtk.h"
@@ -90,7 +93,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -428,10 +430,13 @@ void BrowserWindowGtk::Init() {
   SetBackgroundColor();
   HideUnsupportedWindowFeatures();
 
-  // Setting _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED tells gnome-shell to not force
-  // fullscreen on the window when it matches the desktop size.
-  ui::SetHideTitlebarWhenMaximizedProperty(
-      ui::GetX11WindowFromGtkWidget(GTK_WIDGET(window_)));
+  if (UseCustomFrame()) {
+    // Setting _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED tells gnome-shell to not force
+    // fullscreen on the window when it matches the desktop size.
+    ui::SetHideTitlebarWhenMaximizedProperty(
+        ui::GetX11WindowFromGtkWidget(GTK_WIDGET(window_)),
+        ui::HIDE_TITLEBAR_WHEN_MAXIMIZED);
+  }
 }
 
 gboolean BrowserWindowGtk::OnCustomFrameExpose(GtkWidget* widget,
@@ -813,11 +818,6 @@ StatusBubble* BrowserWindowGtk::GetStatusBubble() {
   return status_bubble_.get();
 }
 
-void BrowserWindowGtk::ToolbarSizeChanged(bool is_animating) {
-  // On Windows, this is used for a performance optimization.
-  // http://code.google.com/p/chromium/issues/detail?id=12291
-}
-
 void BrowserWindowGtk::UpdateTitleBar() {
   TRACE_EVENT0("ui::gtk", "BrowserWindowGtk::UpdateTitleBar");
   string16 title = browser_->GetWindowTitleForCurrentTab();
@@ -832,8 +832,7 @@ void BrowserWindowGtk::BookmarkBarStateChanged(
 }
 
 void BrowserWindowGtk::UpdateDevTools() {
-  UpdateDevToolsForContents(
-      browser_->GetActiveWebContents());
+  UpdateDevToolsForContents(chrome::GetActiveWebContents(browser_.get()));
 }
 
 void BrowserWindowGtk::SetDevToolsDockSide(DevToolsDockSide side) {
@@ -876,7 +875,7 @@ void BrowserWindowGtk::LoadingAnimationCallback() {
     tabstrip_->UpdateLoadingAnimations();
   } else if (ShouldShowWindowIcon()) {
     // ... or in the window icon area for popups and app windows.
-    WebContents* web_contents = browser_->GetActiveWebContents();
+    WebContents* web_contents = chrome::GetActiveWebContents(browser_.get());
     // GetSelectedTabContents can return NULL for example under Purify when
     // the animations are running slowly and this function is called on
     // a timer through LoadingAnimationCallback.
@@ -1058,10 +1057,6 @@ void BrowserWindowGtk::ToggleBookmarkBar() {
   bookmark_utils::ToggleWhenVisible(browser_->profile());
 }
 
-void BrowserWindowGtk::ShowAboutChromeDialog() {
-  ShowAboutDialogForProfile(window_, browser_->profile(), browser_.get());
-}
-
 void BrowserWindowGtk::ShowUpdateChromeDialog() {
   UpdateRecommendedDialog::Show(window_);
 }
@@ -1120,12 +1115,12 @@ void BrowserWindowGtk::WebContentsFocused(WebContents* contents) {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowGtk::ShowPageInfo(Profile* profile,
+void BrowserWindowGtk::ShowPageInfo(content::WebContents* web_contents,
                                     const GURL& url,
                                     const SSLStatus& ssl,
                                     bool show_history) {
-  browser::ShowPageInfoBubble(window_, profile, url, ssl, show_history,
-                              browser_.get());
+  chrome::ShowPageInfoBubble(window_, web_contents, url, ssl, show_history,
+                             browser_.get());
 }
 
 void BrowserWindowGtk::ShowWebsiteSettings(
@@ -1183,20 +1178,22 @@ bool BrowserWindowGtk::PreHandleKeyboardEvent(
     // 1. The logic is a little complicated.
     // 2. We should be careful not to introduce any accelerators that trigger
     //    customized code instead of browser commands.
-    browser_->SetBlockCommandExecution(true);
+    browser_->command_controller()->SetBlockCommandExecution(true);
     gtk_window_activate_key(window_, os_event);
     // We don't need to care about the WindowOpenDisposition value,
     // because all commands executed in this path use the default value.
-    id = browser_->GetLastBlockedCommand(NULL);
-    browser_->SetBlockCommandExecution(false);
+    id = browser_->command_controller()->GetLastBlockedCommand(NULL);
+    browser_->command_controller()->SetBlockCommandExecution(false);
   }
 
   if (id == -1)
     return false;
 
   // Executing the command may cause |this| object to be destroyed.
-  if (browser_->IsReservedCommandOrKey(id, event) && !event.match_edit_command)
-    return browser_->ExecuteCommandIfEnabled(id);
+  if (browser_->command_controller()->IsReservedCommandOrKey(id, event) &&
+      !event.match_edit_command) {
+    return chrome::ExecuteCommand(browser_.get(), id);
+  }
 
   // The |event| is a keyboard shortcut.
   DCHECK(is_keyboard_shortcut != NULL);
@@ -1221,14 +1218,9 @@ void BrowserWindowGtk::HandleKeyboardEvent(
   // gtk_window_activate_key() takes care of it automatically.
   int id = GetCustomCommandId(os_event);
   if (id != -1)
-    browser_->ExecuteCommandIfEnabled(id);
+    chrome::ExecuteCommand(browser_.get(), id);
   else
     gtk_window_activate_key(window_, os_event);
-}
-
-void BrowserWindowGtk::ShowCreateWebAppShortcutsDialog(
-    TabContents* tab_contents) {
-  CreateWebApplicationShortcutsDialogGtk::Show(window_, tab_contents);
 }
 
 void BrowserWindowGtk::ShowCreateChromeAppShortcutsDialog(
@@ -1287,7 +1279,7 @@ void BrowserWindowGtk::ShowPasswordGenerationBubble(
     const gfx::Rect& rect,
     autofill::PasswordGenerator* password_generator,
     const webkit::forms::PasswordForm& form) {
-  WebContents* web_contents = browser_->GetActiveWebContents();
+  WebContents* web_contents = chrome::GetActiveWebContents(browser_.get());
   if (!web_contents || !web_contents->GetContentNativeView()) {
     return;
   }
@@ -1296,13 +1288,7 @@ void BrowserWindowGtk::ShowPasswordGenerationBubble(
   if (!tab_contents)
     return;
 
-  new PasswordGenerationBubbleGtk(rect,
-                                  form,
-                                  web_contents->GetContentNativeView(),
-                                  browser()->profile(),
-                                  web_contents->GetRenderViewHost(),
-                                  password_generator,
-                                  tab_contents->password_manager());
+  new PasswordGenerationBubbleGtk(rect, form, tab_contents, password_generator);
 }
 
 void BrowserWindowGtk::ConfirmBrowserCloseWithPendingDownloads() {
@@ -1317,6 +1303,10 @@ void BrowserWindowGtk::Observe(int type,
       std::string* pref_name = content::Details<std::string>(details).ptr();
       if (*pref_name == prefs::kUseCustomChromeFrame) {
         UpdateCustomFrame();
+        ui::SetHideTitlebarWhenMaximizedProperty(
+            ui::GetX11WindowFromGtkWidget(GTK_WIDGET(window_)),
+            UseCustomFrame() ? ui::HIDE_TITLEBAR_WHEN_MAXIMIZED
+                             : ui::SHOW_TITLEBAR_WHEN_MAXIMIZED);
       } else {
         NOTREACHED() << "Got pref change notification we didn't register for!";
       }
@@ -1334,7 +1324,8 @@ void BrowserWindowGtk::Observe(int type,
 void BrowserWindowGtk::TabDetachedAt(TabContents* contents, int index) {
   // We use index here rather than comparing |contents| because by this time
   // the model has already removed |contents| from its list, so
-  // browser_->GetActiveWebContents() will return NULL or something else.
+  // chrome::GetActiveWebContents(browser_.get()) will return NULL or something
+  // else.
   if (index == browser_->active_index()) {
     infobar_container_->ChangeTabContents(NULL);
     UpdateDevToolsForContents(NULL);
@@ -1356,7 +1347,6 @@ void BrowserWindowGtk::ActiveTabChanged(TabContents* old_contents,
   infobar_container_->ChangeTabContents(new_contents->infobar_tab_helper());
   contents_container_->SetTab(new_contents);
 
-  new_contents->web_contents()->DidBecomeSelected();
   // TODO(estade): after we manage browser activation, add a check to make sure
   // we are the active browser before calling RestoreFocus().
   if (!browser_->tab_strip_model()->closing_all()) {
@@ -1456,7 +1446,7 @@ void BrowserWindowGtk::UpdateDevToolsForContents(WebContents* contents) {
     // anything other than user selecting a Tab.
     // See TabContentsViewViews::OnWindowPosChanged for reference on how it
     // should be implemented.
-    devtools_contents->web_contents()->ShowContents();
+    devtools_contents->web_contents()->WasShown();
   }
 
   bool should_show = old_devtools == NULL && devtools_contents != NULL;
@@ -1771,9 +1761,9 @@ void BrowserWindowGtk::SetGeometryHints() {
   // confused and maximizes the window, but doesn't set the
   // GDK_WINDOW_STATE_MAXIMIZED bit.  So instead, we keep track of whether to
   // maximize and call it after gtk_window_present.
-  show_state_after_show_ = browser_->GetSavedWindowShowState();
+  show_state_after_show_ = chrome::GetSavedWindowShowState(browser_.get());
 
-  gfx::Rect bounds = browser_->GetSavedWindowBounds();
+  gfx::Rect bounds = chrome::GetSavedWindowBounds(browser_.get());
   // We don't blindly call SetBounds here: that sets a forced position
   // on the window and we intentionally *don't* do that for normal
   // windows.  Most programs do not restore their window position on
@@ -2107,8 +2097,8 @@ void BrowserWindowGtk::SaveWindowPosition() {
   else if (IsMinimized())
     show_state = ui::SHOW_STATE_MINIMIZED;
 
-  if (browser_->ShouldSaveWindowPlacement())
-    browser_->SaveWindowPlacement(restored_bounds_, show_state);
+  if (chrome::ShouldSaveWindowPlacement(browser_.get()))
+    chrome::SaveWindowPlacement(browser_.get(), restored_bounds_, show_state);
 
   // We also need to save the placement for startup.
   // This is a web of calls between views and delegates on Windows, but the
@@ -2116,7 +2106,7 @@ void BrowserWindowGtk::SaveWindowPosition() {
   if (!browser_->profile()->GetPrefs())
     return;
 
-  std::string window_name = browser_->GetWindowPlacementKey();
+  std::string window_name = chrome::GetWindowPlacementKey(browser_.get());
   DictionaryPrefUpdate update(browser_->profile()->GetPrefs(),
                               window_name.c_str());
   DictionaryValue* window_preferences = update.Get();
@@ -2216,7 +2206,7 @@ gboolean BrowserWindowGtk::OnGtkAccelerator(GtkAccelGroup* accel_group,
   BrowserWindowGtk* browser_window =
       GetBrowserWindowForNativeWindow(GTK_WINDOW(acceleratable));
   DCHECK(browser_window != NULL);
-  return browser_window->browser()->ExecuteCommandIfEnabled(command_id);
+  return chrome::ExecuteCommand(browser_window->browser(), command_id);
 }
 
 // Let the focused widget have first crack at the key event so we don't
@@ -2228,8 +2218,7 @@ gboolean BrowserWindowGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
 
   // If a widget besides the native view is focused, we have to try to handle
   // the custom accelerators before letting it handle them.
-  WebContents* current_web_contents =
-      browser()->GetActiveWebContents();
+  WebContents* current_web_contents = chrome::GetActiveWebContents(browser());
   // The current tab might not have a render view if it crashed.
   if (!current_web_contents || !current_web_contents->GetContentNativeView() ||
       !gtk_widget_is_focus(current_web_contents->GetContentNativeView())) {
@@ -2237,7 +2226,7 @@ gboolean BrowserWindowGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
     if (command_id == -1)
       command_id = GetPreHandleCommandId(event);
 
-    if (command_id != -1 && browser_->ExecuteCommandIfEnabled(command_id))
+    if (command_id != -1 && chrome::ExecuteCommand(browser_.get(), command_id))
       return TRUE;
 
     // Propagate the key event to child widget first, so we don't override their
@@ -2299,10 +2288,10 @@ gboolean BrowserWindowGtk::OnButtonPressEvent(GtkWidget* widget,
   // Handle back/forward.
   if (event->type == GDK_BUTTON_PRESS) {
     if (event->button == 8) {
-      browser_->GoBack(CURRENT_TAB);
+      chrome::GoBack(browser_.get(), CURRENT_TAB);
       return TRUE;
     } else if (event->button == 9) {
-      browser_->GoForward(CURRENT_TAB);
+      chrome::GoForward(browser_.get(), CURRENT_TAB);
       return TRUE;
     }
   }

@@ -26,6 +26,7 @@ CaptureVideoDecoder::CaptureVideoDecoder(
       natural_size_(capability.width, capability.height),
       state_(kUnInitialized),
       got_first_frame_(false),
+      shutting_down_(false),
       video_stream_id_(video_stream_id),
       capture_engine_(NULL) {
   DCHECK(vc_manager);
@@ -60,8 +61,11 @@ void CaptureVideoDecoder::Stop(const base::Closure& closure) {
       base::Bind(&CaptureVideoDecoder::StopOnDecoderThread, this, closure));
 }
 
-const gfx::Size& CaptureVideoDecoder::natural_size() {
-  return natural_size_;
+void CaptureVideoDecoder::PrepareForShutdownHack() {
+  message_loop_proxy_->PostTask(
+      FROM_HERE,
+      base::Bind(&CaptureVideoDecoder::PrepareForShutdownHackOnDecoderThread,
+                 this));
 }
 
 void CaptureVideoDecoder::OnStarted(media::VideoCapture* capture) {
@@ -131,10 +135,11 @@ void CaptureVideoDecoder::InitializeOnDecoderThread(
 }
 
 void CaptureVideoDecoder::ReadOnDecoderThread(const ReadCB& read_cb) {
+  DCHECK_NE(state_, kUnInitialized);
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
   CHECK(read_cb_.is_null());
   read_cb_ = read_cb;
-  if (state_ == kPaused) {
+  if (state_ == kPaused || shutting_down_) {
     DeliverFrame(media::VideoFrame::CreateEmptyFrame());
   }
 }
@@ -144,8 +149,7 @@ void CaptureVideoDecoder::ResetOnDecoderThread(const base::Closure& closure) {
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
   if (!read_cb_.is_null()) {
     scoped_refptr<media::VideoFrame> video_frame =
-        media::VideoFrame::CreateBlackFrame(natural_size_.width(),
-                                            natural_size_.height());
+        media::VideoFrame::CreateBlackFrame(natural_size_);
     DeliverFrame(video_frame);
   }
   closure.Run();
@@ -157,6 +161,15 @@ void CaptureVideoDecoder::StopOnDecoderThread(const base::Closure& closure) {
   pending_stop_cb_ = closure;
   state_ = kStopped;
   capture_engine_->StopCapture(this);
+}
+
+void CaptureVideoDecoder::PrepareForShutdownHackOnDecoderThread() {
+  DVLOG(1) << "PrepareForShutdownHackOnDecoderThread";
+  DCHECK(message_loop_proxy_->BelongsToCurrentThread());
+  shutting_down_ = true;
+  if (!read_cb_.is_null()) {
+    DeliverFrame(media::VideoFrame::CreateEmptyFrame());
+  }
 }
 
 void CaptureVideoDecoder::OnStoppedOnDecoderThread(
@@ -223,10 +236,8 @@ void CaptureVideoDecoder::OnBufferReadyOnDecoderThread(
   // TODO(scherkus): migrate this to proper buffer recycling.
   scoped_refptr<media::VideoFrame> video_frame =
       media::VideoFrame::CreateFrame(media::VideoFrame::YV12,
-                                     natural_size_.width(),
-                                     natural_size_.height(),
-                                     buf->timestamp - start_time_,
-                                     base::TimeDelta::FromMilliseconds(0));
+                                     natural_size_, natural_size_,
+                                     buf->timestamp - start_time_);
 
   last_frame_timestamp_ = buf->timestamp;
   uint8* buffer = buf->memory_pointer;

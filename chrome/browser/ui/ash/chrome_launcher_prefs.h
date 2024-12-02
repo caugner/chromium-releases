@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_ASH_CHROME_LAUNCHER_PREFS_H_
 #define CHROME_BROWSER_UI_ASH_CHROME_LAUNCHER_PREFS_H_
-#pragma once
 
 #include <string>
 
@@ -24,6 +23,11 @@ extern const char kPinnedAppsPrefAppIDPath[];
 extern const char kShelfAutoHideBehaviorAlways[];
 extern const char kShelfAutoHideBehaviorDefault[];
 extern const char kShelfAutoHideBehaviorNever[];
+
+// Values used for prefs::kShelfAlignment.
+extern const char kShelfAlignmentBottom[];
+extern const char kShelfAlignmentLeft[];
+extern const char kShelfAlignmentRight[];
 
 void RegisterChromeLauncherUserPrefs(PrefService* user_prefs);
 

@@ -11,6 +11,9 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -28,16 +31,31 @@ using extensions::Extension;
 
 ExtensionContextMenuModel::ExtensionContextMenuModel(
     const Extension* extension,
+    Browser* browser,
+    PopupDelegate* delegate)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(SimpleMenuModel(this)),
+      extension_id_(extension->id()),
+      browser_(browser),
+      profile_(browser->profile()),
+      delegate_(delegate) {
+  InitMenu(extension);
+
+  if (profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode) &&
+      delegate_) {
+    AddSeparator();
+    AddItemWithStringId(INSPECT_POPUP, IDS_EXTENSION_ACTION_INSPECT_POPUP);
+  }
+}
+
+ExtensionContextMenuModel::ExtensionContextMenuModel(
+    const Extension* extension,
     Browser* browser)
     : ALLOW_THIS_IN_INITIALIZER_LIST(SimpleMenuModel(this)),
       extension_id_(extension->id()),
       browser_(browser),
-      profile_(browser->profile()) {
-  extension_action_ = extension->browser_action();
-  if (!extension_action_)
-    extension_action_ = extension->page_action();
-
-  InitCommonCommands();
+      profile_(browser->profile()),
+      delegate_(NULL) {
+  InitMenu(extension);
 }
 
 bool ExtensionContextMenuModel::IsCommandIdChecked(int command_id) const {
@@ -55,9 +73,15 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     // The NAME links to the Homepage URL. If the extension doesn't have a
     // homepage, we just disable this menu item.
     return extension->GetHomepageURL().is_valid();
+  } else if (command_id == INSPECT_POPUP) {
+    TabContents* tab_contents = chrome::GetActiveTabContents(browser_);
+    if (!tab_contents)
+      return false;
+
+    return extension_action_->HasPopup(SessionID::IdForTab(tab_contents));
   } else if (command_id == DISABLE || command_id == UNINSTALL) {
     // Some extension types can not be disabled or uninstalled.
-    return ExtensionSystem::Get(
+    return extensions::ExtensionSystem::Get(
         profile_)->management_policy()->UserMayModifySettings(extension, NULL);
   }
   return true;
@@ -101,12 +125,16 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
     case UNINSTALL: {
       AddRef();  // Balanced in Accepted() and Canceled()
       extension_uninstall_dialog_.reset(
-          ExtensionUninstallDialog::Create(profile_, this));
+          ExtensionUninstallDialog::Create(browser_, this));
       extension_uninstall_dialog_->ConfirmUninstall(extension);
       break;
     }
     case MANAGE: {
-      browser_->ShowExtensionsTab();
+      chrome::ShowExtensions(browser_);
+      break;
+    }
+    case INSPECT_POPUP: {
+      delegate_->InspectPopup(extension_action_);
       break;
     }
     default:
@@ -129,12 +157,12 @@ void ExtensionContextMenuModel::ExtensionUninstallCanceled() {
 
 ExtensionContextMenuModel::~ExtensionContextMenuModel() {}
 
-void ExtensionContextMenuModel::InitCommonCommands() {
-  const Extension* extension = GetExtension();
-
-  // The extension pointer should only be null if the extension was uninstalled,
-  // and since the menu just opened, it should still be installed.
+void ExtensionContextMenuModel::InitMenu(const Extension* extension) {
   DCHECK(extension);
+
+  extension_action_ = extension->browser_action();
+  if (!extension_action_)
+    extension_action_ = extension->page_action();
 
   AddItem(NAME, UTF8ToUTF16(extension->name()));
   AddSeparator();

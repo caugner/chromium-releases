@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PROFILES_PROFILE_IMPL_IO_DATA_H_
 #define CHROME_BROWSER_PROFILES_PROFILE_IMPL_IO_DATA_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback.h"
@@ -140,6 +139,11 @@ class ProfileImplIOData : public ProfileIOData {
       AcquireIsolatedAppRequestContext(
           ChromeURLRequestContext* main_context,
           const std::string& app_id) const OVERRIDE;
+  virtual chrome_browser_net::CacheStats* GetCacheStats(
+      IOThread::Globals* io_thread_globals) const OVERRIDE;
+
+  void CreateFtpProtocolHandler(net::URLRequestJobFactory* job_factory,
+                                net::FtpAuthCache* ftp_auth_cache) const;
 
   // Clears the networking history since |time|.
   void ClearNetworkingHistorySinceOnIOThread(base::Time time);
@@ -154,6 +158,10 @@ class ProfileImplIOData : public ProfileIOData {
   mutable scoped_ptr<chrome_browser_net::Predictor> predictor_;
 
   mutable scoped_ptr<ChromeURLRequestContext> media_request_context_;
+
+  mutable scoped_ptr<net::URLRequestJobFactory> main_job_factory_;
+  mutable scoped_ptr<net::URLRequestJobFactory> media_request_job_factory_;
+  mutable scoped_ptr<net::URLRequestJobFactory> extensions_job_factory_;
 
   // Parameters needed for isolated apps.
   FilePath app_path_;

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_TEST_TEST_WEB_CONTENTS_VIEW_H_
 #define CONTENT_TEST_TEST_WEB_CONTENTS_VIEW_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/port/browser/render_view_host_delegate_view.h"
@@ -29,7 +28,7 @@ class TestWebContentsView : public WebContentsView,
                              bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_ops,
-                             const SkBitmap& image,
+                             const gfx::ImageSkia& image,
                              const gfx::Point& image_offset) OVERRIDE;
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) OVERRIDE;
   virtual void GotFocus() OVERRIDE;

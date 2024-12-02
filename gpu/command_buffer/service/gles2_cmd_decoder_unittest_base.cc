@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 #include "base/string_number_conversions.h"
 #include "gpu/command_buffer/common/gl_mock.h"
@@ -83,7 +84,9 @@ void GLES2DecoderTestBase::InitDecoder(
     bool bind_generates_resource) {
   gl_.reset(new StrictMock<MockGLInterface>());
   ::gfx::GLInterface::SetGLInterface(gl_.get());
-  group_ = ContextGroup::Ref(new ContextGroup(NULL, bind_generates_resource));
+  group_ = ContextGroup::Ref(new ContextGroup(NULL,
+                                              NULL,
+                                              bind_generates_resource));
 
   InSequence sequence;
 
@@ -188,6 +191,117 @@ void GLES2DecoderTestBase::InitDecoder(
   EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_VIEWPORT_DIMS, _))
       .WillOnce(SetArrayArgument<1>(
           max_viewport_dims, max_viewport_dims + arraysize(max_viewport_dims)))
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, ActiveTexture(GL_TEXTURE0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, LineWidth(1.0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_BLEND))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BlendColor(0.0f, 0.0, 0.0f, 0.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BlendFunc(GL_ONE, GL_ZERO))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BlendEquation(GL_FUNC_ADD))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearColor(0.0f, 0.0, 0.0f, 0.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ColorMask(true, true, true, true))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_CULL_FACE))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, CullFace(GL_BACK))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearDepth(1.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, DepthFunc(GL_LESS))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, DepthRange(0.0f, 1.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_DEPTH_TEST))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Enable(GL_DITHER))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, FrontFace(GL_CCW))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Hint(GL_GENERATE_MIPMAP_HINT, GL_DONT_CARE))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, LineWidth(1.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ALIGNMENT, 4))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PolygonOffset(0.0f, 0.0f))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_POLYGON_OFFSET_FILL))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, SampleCoverage(1.0, false))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Scissor(
+      kViewportX, kViewportY, kViewportWidth, kViewportHeight))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_SCISSOR_TEST))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, Disable(GL_STENCIL_TEST))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearStencil(0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilFunc(GL_ALWAYS, 0, 0xFFFFFFFFU))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilOp(GL_KEEP, GL_KEEP, GL_KEEP))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_FRONT, 0xFFFFFFFFU))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, StencilMaskSeparate(GL_BACK, 0xFFFFFFFFU))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, PixelStorei(GL_UNPACK_ALIGNMENT, 4))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, BindBuffer(GL_ARRAY_BUFFER, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindFramebufferEXT(GL_FRAMEBUFFER, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, BindRenderbufferEXT(GL_RENDERBUFFER, 0))
+      .Times(1)
       .RetiresOnSaturation();
 
   engine_.reset(new StrictMock<MockCommandBufferEngine>());
@@ -490,8 +604,8 @@ void GLES2DecoderTestBase::SetupShaderForUniform() {
     { "goo", 1, GL_FLOAT, 2, },
   };
   static UniformInfo uniforms[] = {
-    { "bar", 1, GL_INT, 0, 2, },
-    { "car", 4, GL_INT, 1, 1, },
+    { "bar", 1, GL_INT, 0, 2, -1, },
+    { "car", 4, GL_INT, 1, 1, -1, },
   };
   const GLuint kClientVertexShaderId = 5001;
   const GLuint kServiceVertexShaderId = 6001;
@@ -763,8 +877,7 @@ void GLES2DecoderTestBase::DoTexImage2DSameSize(
     GLsizei width, GLsizei height, GLint border,
     GLenum format, GLenum type,
     uint32 shared_memory_id, uint32 shared_memory_offset) {
-  if (GLES2Decoder::IsAngle())
-  {
+  if (GLES2Decoder::IsAngle()) {
     EXPECT_CALL(*gl_, TexSubImage2D(
         target, level, 0, 0, width, height, format, type, _))
         .Times(1)
@@ -962,6 +1075,9 @@ const GLint GLES2DecoderTestBase::kUniform1FakeLocation;
 const GLint GLES2DecoderTestBase::kUniform2FakeLocation;
 const GLint GLES2DecoderTestBase::kUniform2ElementFakeLocation;
 const GLint GLES2DecoderTestBase::kUniform3FakeLocation;
+const GLint GLES2DecoderTestBase::kUniform1DesiredLocation;
+const GLint GLES2DecoderTestBase::kUniform2DesiredLocation;
+const GLint GLES2DecoderTestBase::kUniform3DesiredLocation;
 const GLenum GLES2DecoderTestBase::kUniform1Type;
 const GLenum GLES2DecoderTestBase::kUniform2Type;
 const GLenum GLES2DecoderTestBase::kUniform3Type;
@@ -987,11 +1103,14 @@ void GLES2DecoderTestBase::SetupDefaultProgram() {
     };
     static UniformInfo uniforms[] = {
       { kUniform1Name, kUniform1Size, kUniform1Type,
-        kUniform1FakeLocation, kUniform1RealLocation },
+        kUniform1FakeLocation, kUniform1RealLocation,
+        kUniform1DesiredLocation },
       { kUniform2Name, kUniform2Size, kUniform2Type,
-        kUniform2FakeLocation, kUniform2RealLocation },
+        kUniform2FakeLocation, kUniform2RealLocation,
+        kUniform2DesiredLocation },
       { kUniform3Name, kUniform3Size, kUniform3Type,
-        kUniform3FakeLocation, kUniform3RealLocation },
+        kUniform3FakeLocation, kUniform3RealLocation,
+        kUniform3DesiredLocation },
     };
     SetupShader(attribs, arraysize(attribs), uniforms, arraysize(uniforms),
                 client_program_id_, kServiceProgramId,
@@ -1018,11 +1137,14 @@ void GLES2DecoderTestBase::SetupCubemapProgram() {
     };
     static UniformInfo uniforms[] = {
       { kUniform1Name, kUniform1Size, kUniformCubemapType,
-        kUniform1FakeLocation, kUniform1RealLocation, },
+        kUniform1FakeLocation, kUniform1RealLocation,
+        kUniform1DesiredLocation, },
       { kUniform2Name, kUniform2Size, kUniform2Type,
-        kUniform2FakeLocation, kUniform2RealLocation, },
+        kUniform2FakeLocation, kUniform2RealLocation,
+        kUniform2DesiredLocation, },
       { kUniform3Name, kUniform3Size, kUniform3Type,
-        kUniform3FakeLocation, kUniform3RealLocation, },
+        kUniform3FakeLocation, kUniform3RealLocation,
+        kUniform3DesiredLocation, },
     };
     SetupShader(attribs, arraysize(attribs), uniforms, arraysize(uniforms),
                 client_program_id_, kServiceProgramId,

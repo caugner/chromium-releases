@@ -111,7 +111,7 @@ Browser* FindTabbedBrowser(Profile* profile, bool match_original_profiles) {
 Browser* FindOrCreateTabbedBrowser(Profile* profile) {
   Browser* browser = FindTabbedBrowser(profile, false);
   if (!browser)
-    browser = Browser::Create(profile);
+    browser = new Browser(Browser::CreateParams(profile));
   return browser;
 }
 
@@ -119,17 +119,6 @@ Browser* FindAnyBrowser(Profile* profile, bool match_original_profiles) {
   return FindBrowserWithTabbedOrAnyType(profile,
                                         false,
                                         match_original_profiles);
-}
-
-Browser* FindBrowserWithFeature(Profile* profile,
-                                Browser::WindowFeature feature) {
-  Browser* browser = FindBrowserMatching(
-      BrowserList::begin_last_active(), BrowserList::end_last_active(),
-      profile, feature, kMatchCanSupportWindowFeature);
-  // Fall back to a forward scan of all Browsers if no active one was found.
-  return browser ? browser :
-      FindBrowserMatching(BrowserList::begin(), BrowserList::end(), profile,
-                          feature, kMatchCanSupportWindowFeature);
 }
 
 Browser* FindBrowserWithProfile(Profile* profile) {
@@ -155,7 +144,7 @@ Browser* FindBrowserWithWindow(gfx::NativeWindow window) {
   return NULL;
 }
 
-Browser* FindBrowserWithWebContents(WebContents* web_contents) {
+Browser* FindBrowserWithWebContents(const WebContents* web_contents) {
   DCHECK(web_contents);
   for (TabContentsIterator it; !it.done(); ++it) {
     if (it->web_contents() == web_contents)
@@ -163,22 +152,6 @@ Browser* FindBrowserWithWebContents(WebContents* web_contents) {
   }
   return NULL;
 }
-
-Browser* FindBrowserForController(
-    const content::NavigationController* controller,
-    int* index_result) {
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    int index = (*it)->GetIndexOfController(controller);
-    if (index != TabStripModel::kNoTab) {
-      if (index_result)
-        *index_result = index;
-      return *it;
-    }
-  }
-  return NULL;
-}
-
 
 Browser* FindLastActiveWithProfile(Profile* profile) {
   // We are only interested in last active browsers, so we don't fall back to

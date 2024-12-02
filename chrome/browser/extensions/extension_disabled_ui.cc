@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/message_loop.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -19,9 +19,9 @@
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/global_error.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
@@ -30,7 +30,7 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using extensions::Extension;
@@ -98,7 +98,7 @@ ExtensionDisabledDialogDelegate::ExtensionDisabledDialogDelegate(
     : service_(service), extension_(extension) {
   AddRef();  // Balanced in Proceed or Abort.
 
-  install_ui_.reset(new ExtensionInstallPrompt(browser));
+  install_ui_.reset(chrome::CreateExtensionInstallPromptWithBrowser(browser));
   install_ui_->ConfirmReEnable(this, extension_);
 }
 
@@ -106,7 +106,8 @@ ExtensionDisabledDialogDelegate::~ExtensionDisabledDialogDelegate() {
 }
 
 void ExtensionDisabledDialogDelegate::InstallUIProceed() {
-  service_->GrantPermissionsAndEnableExtension(extension_);
+  service_->GrantPermissionsAndEnableExtension(
+      extension_, install_ui_->record_oauth2_grant());
   Release();
 }
 
@@ -263,7 +264,7 @@ void ExtensionDisabledGlobalError::BubbleViewCancelButtonPressed(
     Browser* browser) {
 #if !defined(OS_ANDROID)
   uninstall_dialog_.reset(
-      ExtensionUninstallDialog::Create(service_->profile(), this));
+      ExtensionUninstallDialog::Create(browser, this));
   // Delay showing the uninstall dialog, so that this function returns
   // immediately, to close the bubble properly. See crbug.com/121544.
   MessageLoop::current()->PostTask(FROM_HERE,

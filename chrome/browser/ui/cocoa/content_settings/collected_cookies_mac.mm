@@ -9,13 +9,13 @@
 #include "base/mac/bundle_locations.h"
 #import "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/browsing_data_appcache_helper.h"
-#include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
-#include "chrome/browser/browsing_data_server_bound_cert_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_server_bound_cert_helper.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -32,11 +32,13 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
+#include "third_party/apple_sample_code/ImageAndTextCell.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "third_party/apple_sample_code/ImageAndTextCell.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -58,16 +60,17 @@ enum TabViewItemIndices {
 
 } // namespace
 
-namespace browser {
+namespace chrome {
 
 // Declared in browser_dialogs.h so others don't have to depend on our header.
-void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
-                                TabContents* tab_contents) {
+void ShowCollectedCookiesDialog(TabContents* tab_contents) {
   // Deletes itself on close.
-  new CollectedCookiesMac(parent_window, tab_contents);
+  new CollectedCookiesMac(
+      tab_contents->web_contents()->GetView()->GetTopLevelNativeWindow(),
+      tab_contents);
 }
 
-}  // namespace browser
+}  // namespace chrome
 
 #pragma mark Bridge between the constrained window delegate and the sheet
 
@@ -261,17 +264,17 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
     CocoaCookieTreeNode* node = [treeNode representedObject];
     CookieTreeNode* cookie = static_cast<CookieTreeNode*>([node treeNode]);
     if (cookie->GetDetailedInfo().node_type !=
-        CookieTreeNode::DetailedInfo::TYPE_ORIGIN) {
+        CookieTreeNode::DetailedInfo::TYPE_HOST) {
       continue;
     }
     Profile* profile = tab_contents_->profile();
-    CookieTreeOriginNode* origin_node =
-        static_cast<CookieTreeOriginNode*>(cookie);
-    origin_node->CreateContentException(
+    CookieTreeHostNode* host_node =
+        static_cast<CookieTreeHostNode*>(cookie);
+    host_node->CreateContentException(
         CookieSettings::Factory::GetForProfile(profile), setting);
     if (!lastDomain.empty())
       multipleDomainsChanged = YES;
-    lastDomain = origin_node->GetTitle();
+    lastDomain = host_node->GetTitle();
   }
   if (multipleDomainsChanged)
     [self showInfoBarForMultipleDomainsAndSetting:setting];
@@ -354,12 +357,12 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
     CocoaCookieTreeNode* node = [treeNode representedObject];
     CookieTreeNode* cookie = static_cast<CookieTreeNode*>([node treeNode]);
     if (cookie->GetDetailedInfo().node_type !=
-        CookieTreeNode::DetailedInfo::TYPE_ORIGIN) {
+        CookieTreeNode::DetailedInfo::TYPE_HOST) {
       continue;
     }
-   CookieTreeOriginNode* origin_node =
-       static_cast<CookieTreeOriginNode*>(cookie);
-   if (origin_node->CanCreateContentException()) {
+   CookieTreeHostNode* host_node =
+       static_cast<CookieTreeHostNode*>(cookie);
+   if (host_node->CanCreateContentException()) {
       if (isAllowedOutlineView) {
         [self setAllowedCookiesButtonsEnabled:YES];
       } else {
@@ -381,32 +384,13 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
   TabSpecificContentSettings* content_settings =
       tab_contents_->content_settings();
 
-  const LocalSharedObjectsContainer& allowed_lsos =
+  const LocalSharedObjectsContainer& allowed_data =
       content_settings->allowed_local_shared_objects();
-  allowedTreeModel_.reset(
-      new CookiesTreeModel(allowed_lsos.cookies()->Clone(),
-                           allowed_lsos.databases()->Clone(),
-                           allowed_lsos.local_storages()->Clone(),
-                           allowed_lsos.session_storages()->Clone(),
-                           allowed_lsos.appcaches()->Clone(),
-                           allowed_lsos.indexed_dbs()->Clone(),
-                           allowed_lsos.file_systems()->Clone(),
-                           NULL,
-                           allowed_lsos.server_bound_certs()->Clone(),
-                           true));
-  const LocalSharedObjectsContainer& blocked_lsos =
+  allowedTreeModel_ = allowed_data.CreateCookiesTreeModel();
+
+  const LocalSharedObjectsContainer& blocked_data =
       content_settings->blocked_local_shared_objects();
-  blockedTreeModel_.reset(
-      new CookiesTreeModel(blocked_lsos.cookies()->Clone(),
-                           blocked_lsos.databases()->Clone(),
-                           blocked_lsos.local_storages()->Clone(),
-                           blocked_lsos.session_storages()->Clone(),
-                           blocked_lsos.appcaches()->Clone(),
-                           blocked_lsos.indexed_dbs()->Clone(),
-                           blocked_lsos.file_systems()->Clone(),
-                           NULL,
-                           blocked_lsos.server_bound_certs()->Clone(),
-                           true));
+  blockedTreeModel_ = blocked_data.CreateCookiesTreeModel();
 
   // Convert the model's icons from Skia to Cocoa.
   std::vector<gfx::ImageSkia> skiaIcons;

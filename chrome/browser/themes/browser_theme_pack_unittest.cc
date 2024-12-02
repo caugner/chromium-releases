@@ -15,7 +15,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "content/public/test/test_browser_thread.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 
@@ -127,7 +126,7 @@ class BrowserThemePackTest : public ::testing::Test {
 
   bool LoadRawBitmapsTo(const std::map<int, FilePath>& out_file_paths) {
     return theme_pack_->LoadRawBitmapsTo(out_file_paths,
-                                         &theme_pack_->prepared_images_);
+                                         &theme_pack_->images_on_ui_thread_);
   }
 
   FilePath GetStarGazingPath() {

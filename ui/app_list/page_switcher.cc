@@ -123,8 +123,7 @@ namespace app_list {
 
 PageSwitcher::PageSwitcher(PaginationModel* model)
     : model_(model),
-      buttons_(NULL) {
-  buttons_ = new views::View;
+      buttons_(new views::View) {
   buttons_->SetLayoutManager(new views::BoxLayout(
       views::BoxLayout::kHorizontal, 0, 0, kButtonSpacing));
   AddChildView(buttons_);
@@ -216,7 +215,8 @@ void PageSwitcher::TransitionChanged() {
   }
 
   GetButtonByIndex(buttons_, current_page)->SetSelectedRange(remaining);
-  GetButtonByIndex(buttons_, target_page)->SetSelectedRange(progress);
+  if (model_->is_valid_page(target_page))
+    GetButtonByIndex(buttons_, target_page)->SetSelectedRange(progress);
 }
 
 }  // namespace app_list

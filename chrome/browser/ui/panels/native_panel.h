@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_
 #define CHROME_BROWSER_UI_PANELS_NATIVE_PANEL_H_
-#pragma once
 
 #include "chrome/browser/ui/panels/panel.h"
 #include "ui/gfx/native_widget_types.h"
@@ -59,8 +58,7 @@ class NativePanel {
   virtual void ShowTaskManagerForPanel() {}  // legacy
   virtual FindBar* CreatePanelFindBar() = 0;  // legacy
   virtual void NotifyPanelOnUserChangedTheme() = 0;
-  virtual void PanelWebContentsFocused(
-      content::WebContents* contents) {}  // legacy
+  virtual void PanelWebContentsFocused(content::WebContents* contents) {}
   virtual void PanelCut() = 0;
   virtual void PanelCopy() = 0;
   virtual void PanelPaste() = 0;
@@ -74,6 +72,9 @@ class NativePanel {
   virtual void FullScreenModeChanged(bool is_full_screen) = 0;
   virtual void PanelExpansionStateChanging(Panel::ExpansionState old_state,
                                            Panel::ExpansionState new_state) = 0;
+  // TODO(jennb): Make these new methods pure virtual after panel refactor.
+  virtual void AttachWebContents(content::WebContents* contents) {}
+  virtual void DetachWebContents(content::WebContents* contents) {}
 
   virtual Browser* GetPanelBrowser() const = 0;  // legacy
   virtual void DestroyPanelBrowser() {}  // legacy

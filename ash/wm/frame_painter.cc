@@ -4,18 +4,18 @@
 
 #include "ash/wm/frame_painter.h"
 
+#include "ash/ash_constants.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_util.h"
 #include "base/logging.h"  // DCHECK
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "third_party/skia/include/core/SkShader.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/hit_test.h"
@@ -82,11 +82,11 @@ const int kActivationCrossfadeDurationMs = 200;
 // Alpha/opacity value for fully-opaque headers.
 const int kFullyOpaque = 255;
 
-// Tiles an image into an area, rounding the top corners.  Samples the |bitmap|
+// Tiles an image into an area, rounding the top corners. Samples the |bitmap|
 // starting |bitmap_offset_x| pixels from the left of the image.
 void TileRoundRect(gfx::Canvas* canvas,
                    int x, int y, int w, int h,
-                   SkPaint* paint,
+                   const SkPaint& paint,
                    const gfx::ImageSkia& image,
                    int corner_radius,
                    int image_offset_x) {
@@ -94,7 +94,7 @@ void TileRoundRect(gfx::Canvas* canvas,
   // the whole image, we adjust the target rectangle for the shader to the right
   // and translate the canvas left to compensate.
   SkRect rect;
-  rect.iset(x + image_offset_x, y, x + image_offset_x + w, y + h);
+  rect.iset(x, y, x + w, y + h);
   const SkScalar kRadius = SkIntToScalar(corner_radius);
   SkScalar radii[8] = {
       kRadius, kRadius,  // top-left
@@ -103,19 +103,7 @@ void TileRoundRect(gfx::Canvas* canvas,
       0, 0};  // bottom-left
   SkPath path;
   path.addRoundRect(rect, radii, SkPath::kCW_Direction);
-
-  SkShader* shader = SkShader::CreateBitmapShader(image,
-                                                  SkShader::kRepeat_TileMode,
-                                                  SkShader::kRepeat_TileMode);
-  paint->setShader(shader);
-  // CreateBitmapShader returns a Shader with a reference count of one, we
-  // need to unref after paint takes ownership of the shader.
-  shader->unref();
-  // Adjust canvas to compensate for image sampling offset, draw, then adjust
-  // back. This is cheaper than pushing/popping the entire canvas state.
-  canvas->sk_canvas()->translate(SkIntToScalar(-image_offset_x), 0);
-  canvas->DrawPath(path, *paint);
-  canvas->sk_canvas()->translate(SkIntToScalar(image_offset_x), 0);
+  canvas->DrawImageInPath(image, -image_offset_x, 0, path, paint);
 }
 
 // Returns true if |window| is a visible, normal window.
@@ -133,9 +121,9 @@ bool IsVisibleNormalWindow(aura::Window* window) {
 namespace ash {
 
 // static
-int FramePainter::kActiveWindowOpacity = 230;  // "Linus-approved" values
-int FramePainter::kInactiveWindowOpacity = 204;
-int FramePainter::kSoloWindowOpacity = 51;
+int FramePainter::kActiveWindowOpacity = 255;  // 1.0
+int FramePainter::kInactiveWindowOpacity = 255;  // 1.0
+int FramePainter::kSoloWindowOpacity = 77;  // 0.3
 std::set<FramePainter*>* FramePainter::instances_ = NULL;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -242,10 +230,14 @@ gfx::Rect FramePainter::GetWindowBoundsForClientBounds(
 int FramePainter::NonClientHitTest(views::NonClientFrameView* view,
                                    const gfx::Point& point) {
   gfx::Rect expanded_bounds = view->bounds();
-  int outside_bounds = ui::GetDisplayLayout() == ui::LAYOUT_TOUCH ?
-      kResizeOutsideBoundsSizeTouch :
-      kResizeOutsideBoundsSize;
+  int outside_bounds = kResizeOutsideBoundsSize;
+
+  if (ui::GetDisplayLayout() == ui::LAYOUT_TOUCH &&
+      aura::Env::GetInstance()->is_touch_down()) {
+    outside_bounds = kResizeOutsideBoundsSizeTouch;
+  }
   expanded_bounds.Inset(-outside_bounds, -outside_bounds);
+
   if (!expanded_bounds.Contains(point))
     return HTNOWHERE;
 
@@ -302,6 +294,13 @@ gfx::Size FramePainter::GetMinimumSize(views::NonClientFrameView* view) {
   return min_size;
 }
 
+int FramePainter::GetRightInset() const {
+  gfx::Size close_size = close_button_->GetPreferredSize();
+  gfx::Size size_button_size = size_button_->GetPreferredSize();
+  return close_size.width() + kCloseButtonOffsetX + size_button_size.width() -
+      kButtonOverlap;
+}
+
 void FramePainter::PaintHeader(views::NonClientFrameView* view,
                                gfx::Canvas* canvas,
                                HeaderMode header_mode,
@@ -339,7 +338,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
       paint.setXfermodeMode(SkXfermode::kPlus_Mode);
       TileRoundRect(canvas,
                     0, 0, view->width(), theme_frame->height(),
-                    &paint,
+                    paint,
                     *crossfade_theme_frame,
                     kCornerRadius,
                     kThemeFrameImageOffsetX);
@@ -356,7 +355,7 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
   // Draw the header background, clipping the corners to be rounded.
   TileRoundRect(canvas,
                 0, 0, view->width(), theme_frame->height(),
-                &paint,
+                paint,
                 *theme_frame,
                 kCornerRadius,
                 kThemeFrameImageOffsetX);
@@ -376,9 +375,9 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
 
   // We don't need the extra lightness in the edges when we're at the top edge
   // of the screen.
-  // TODO(oshima): This will not work under multi-monitor, need to add method
-  // like GetWindowBoundsInMonitor().
-  if (frame_->GetWindowScreenBounds().y() == 0)
+  // TODO(oshima): This will not work under multi-display, need to add method
+  // like GetWindowBoundsInDisplay().
+  if (frame_->GetWindowBoundsInScreen().y() == 0)
     return;
 
   // Draw the top corners and edge.
@@ -440,9 +439,12 @@ void FramePainter::PaintTitleBar(views::NonClientFrameView* view,
   views::WidgetDelegate* delegate = frame_->widget_delegate();
   if (delegate && delegate->ShouldShowWindowTitle()) {
     int title_x = GetTitleOffsetX();
+    int title_y = ui::LAYOUT_TOUCH == ui::GetDisplayLayout() ?
+        (view->GetBoundsForClientView().y() - title_font.GetHeight()) / 2
+        : kTitleOffsetY;
     gfx::Rect title_bounds(
         title_x,
-        kTitleOffsetY,
+        std::max(0, title_y),
         std::max(0, size_button_->x() - kTitleLogoSpacing - title_x),
         title_font.GetHeight());
     canvas->DrawStringInt(delegate->GetWindowTitle(),
@@ -464,25 +466,19 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE_H,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE_P);
-    if (size_button_behavior_ == SIZE_BUTTON_MINIMIZES) {
-      SetButtonImages(size_button_,
-                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE,
-                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE_H,
-                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE_P);
-    } else {
-      SetButtonImages(size_button_,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P);
-    }
+    // The chat window cannot be restored but only minimized.
+    // Case: (size_button_behavior_ == SIZE_BUTTON_MINIMIZES). We used to have
+    // a special set of artwork to show this case, but per discussion we
+    // removed this.
+    SetButtonImages(size_button_,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H,
+                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P);
   } else {
     SetButtonImages(close_button_,
                     IDR_AURA_WINDOW_CLOSE,
                     IDR_AURA_WINDOW_CLOSE_H,
                     IDR_AURA_WINDOW_CLOSE_P);
-    // TODO(jamescook): If we ever have normal-layout windows (with the
-    // standard 35 pixel tall headers) that can only minimize, we'll need art
-    // assets for SIZE_BUTTON_MINIMIZES.  As of R19 we don't use them.
     SetButtonImages(size_button_,
                     IDR_AURA_WINDOW_MAXIMIZE,
                     IDR_AURA_WINDOW_MAXIMIZE_H,
@@ -608,7 +604,10 @@ bool FramePainter::UseSoloWindowHeader() {
   for (std::set<FramePainter*>::const_iterator it = instances_->begin();
        it != instances_->end();
        ++it) {
-    if (IsVisibleNormalWindow((*it)->window_)) {
+    // The window needs to be a 'normal window'. To exclude constrained windows
+    // the existence of a layout manager gets additionally tested.
+    if (IsVisibleNormalWindow((*it)->window_) &&
+        (!(*it)->window_->GetProperty(ash::kConstrainedWindowKey))) {
       window_count++;
       if (window_count > 1)
         return false;

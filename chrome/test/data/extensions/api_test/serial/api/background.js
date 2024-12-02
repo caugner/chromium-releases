@@ -2,126 +2,134 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+const serial = chrome.serial;
+
 // TODO(miket): opening Bluetooth ports on OSX is unreliable. Investigate.
 function shouldSkipPort(portName) {
   return portName.match(/[Bb]luetooth/);
 }
 
-var testGetPorts = function() {
-  var onGetPorts = function(ports) {
-    // Any length is potentially valid, because we're on unknown hardware. But
-    // we are testing at least that the ports member was filled in, so it's
-    // still a somewhat meaningful test.
-    chrome.test.assertTrue(ports.length >= 0);
-    chrome.test.succeed();
+var createTestArrayBuffer = function() {
+  var bufferSize = 8;
+  var buffer = new ArrayBuffer(bufferSize);
+
+  var uint8View = new Uint8Array(buffer);
+  for (var i = 0; i < bufferSize; i++) {
+    uint8View[i] = 42 + i * 2;  // An arbitrary pattern.
   }
-
-  chrome.experimental.serial.getPorts(onGetPorts);
-};
-
-var testMaybeOpenPort = function() {
-  var onGetPorts = function(ports) {
-    // We're testing as much as we can here without actually assuming the
-    // existence of attached hardware.
-    //
-    // TODO(miket): is there any chance that just opening a serial port but not
-    // doing anything could be harmful to devices attached to a developer's
-    // machine?
-    if (ports.length > 0) {
-      var currentPort = 0;
-
-      var onFinishedWithPort = function() {
-        if (currentPort >= ports.length)
-          chrome.test.succeed();
-        else
-          onStartTest();
-      };
-
-      var onClose = function(r) {
-        onFinishedWithPort();
-      };
-
-      var onOpen = function(connectionInfo) {
-        var id = connectionInfo.connectionId;
-        if (id > 0)
-          chrome.experimental.serial.close(id, onClose);
-        else
-          onFinishedWithPort();
-      };
-
-      var onStartTest = function() {
-        var port = ports[currentPort++];
-
-        if (shouldSkipPort(port)) {
-          onFinishedWithPort();
-        } else {
-          console.log("Opening serial device " + port);
-          chrome.experimental.serial.open(port, onOpen);
-        }
-      }
-
-      onStartTest();
-    } else {
-      // There aren't any valid ports on this machine. That's OK.
-      chrome.test.succeed();
-    }
-  }
-
-  chrome.experimental.serial.getPorts(onGetPorts);
-};
+  return buffer;
+}
 
 var testSerial = function() {
   var serialPort = null;
   var connectionId = -1;
-  var testBuffer = new ArrayBuffer(1);
   var readTries = 10;
+  var writeBuffer = createTestArrayBuffer();
+  var writeBufferUint8View = new Uint8Array(writeBuffer);
+  var bufferLength = writeBufferUint8View.length;
+  var readBuffer = new ArrayBuffer(bufferLength);
+  var readBufferUint8View = new Uint8Array(readBuffer);
+  var bytesToRead = bufferLength;
 
-  var uint8View = new Uint8Array(testBuffer);
-  uint8View[0] = 42;
+  var operation = 0;
+  var doNextOperation = function() {
+    switch (operation++) {
+      case 0:
+      serial.getPorts(onGetPorts);
+      break;
+      case 1:
+      var bitrate = 57600;
+      console.log('Opening serial device ' + serialPort + ' at ' +
+                  bitrate + ' bps.');
+      serial.open(serialPort, {bitrate: bitrate}, onOpen);
+      break;
+      case 2:
+      serial.setControlSignals(connectionId, {dtr: true}, onSetControlSignals);
+      break;
+      case 3:
+      serial.getControlSignals(connectionId,onGetControlSignals);
+      break;
+      case 4:
+      serial.write(connectionId, writeBuffer, onWrite);
+      break;
+      case 5:
+      serial.read(connectionId, bytesToRead, onRead);
+      break;
+      case 6:
+      serial.flush(connectionId, onFlush);
+      break;
+      case 50:  // GOTO 4 EVER
+      serial.close(connectionId, onClose);
+      break;
+      default:
+      // Beware! If you forget to assign a case for your next test, the whole
+      // test suite will appear to succeed!
+      chrome.test.succeed();
+      break;
+    }
+  }
+
+  var skipToTearDown = function() {
+    operation = 50;
+    doNextOperation();
+  };
+
+  var repeatOperation = function() {
+    operation--;
+    doNextOperation();
+  }
 
   var onClose = function(result) {
     chrome.test.assertTrue(result);
-    chrome.test.succeed();
+    doNextOperation();
   };
 
   var onFlush = function(result) {
     chrome.test.assertTrue(result);
-    chrome.experimental.serial.close(connectionId, onClose);
-  }
-
-  var doRead = function() {
-    chrome.experimental.serial.read(connectionId, onRead);
+    doNextOperation();
   }
 
   var onRead = function(readInfo) {
-    if (readInfo.bytesRead == 1) {
-      var messageUint8View = new Uint8Array(readInfo.data);
-      chrome.test.assertEq(uint8View[0], messageUint8View[0],
-                           'Byte read was not equal to byte written.');
-      chrome.experimental.serial.flush(connectionId, onFlush);
+    bytesToRead -= readInfo.bytesRead;
+    var readBufferIndex = bufferLength - readInfo.bytesRead;
+    var messageUint8View = new Uint8Array(readInfo.data);
+    for (var i = 0; i < readInfo.bytesRead; i++)
+      readBufferUint8View[i + readBufferIndex] = messageUint8View[i];
+    if (bytesToRead == 0) {
+      chrome.test.assertEq(writeBufferUint8View, readBufferUint8View,
+                           'Buffer read was not equal to buffer written.');
+      doNextOperation();
     } else {
-      if (--readTries > 0) {
-        setTimeout(doRead, 100);
-      } else {
-        chrome.test.assertEq(1, readInfo.bytesRead,
-                             'read() failed to return bytesRead 1.');
-      }
+      if (--readTries > 0)
+        setTimeout(repeatOperation, 100);
+      else
+        chrome.test.assertTrue(
+            false,
+            'read() failed to return requested number of bytes.');
     }
   };
 
   var onWrite = function(writeInfo) {
-    chrome.test.assertEq(1, writeInfo.bytesWritten,
+    chrome.test.assertEq(bufferLength, writeInfo.bytesWritten,
                          'Failed to write byte.');
-    if (writeInfo.bytesWritten == 1) {
-      doRead();
-    } else
-      chrome.experimental.serial.close(connectionId, onClose);
+    doNextOperation();
+  };
+
+  var onGetControlSignals = function(options) {
+    chrome.test.assertTrue(typeof options.dcd != 'undefined');
+    chrome.test.assertTrue(typeof options.cts != 'undefined');
+    doNextOperation();
+  };
+
+  var onSetControlSignals = function(result) {
+    chrome.test.assertTrue(result);
+    doNextOperation();
   };
 
   var onOpen = function(connectionInfo) {
     connectionId = connectionInfo.connectionId;
     chrome.test.assertTrue(connectionId > 0, 'Failed to open serial port.');
-    chrome.experimental.serial.write(connectionId, testBuffer, onWrite);
+    doNextOperation();
   };
 
   var onGetPorts = function(ports) {
@@ -136,8 +144,7 @@ var testSerial = function() {
       }
       if (portNumber < ports.length) {
         serialPort = ports[portNumber];
-        console.log('Connecting to serial device at ' + serialPort);
-        chrome.experimental.serial.open(serialPort, onOpen);
+        doNextOperation();
       } else {
         // We didn't find a port that we think we should try.
         chrome.test.succeed();
@@ -149,22 +156,7 @@ var testSerial = function() {
     }
   };
 
-  chrome.experimental.serial.getPorts(onGetPorts);
+  doNextOperation();
 };
 
-var onMessageReply = function(message) {
-  var tests = [testGetPorts, testMaybeOpenPort];
-
-  // Another way to force the test to run.
-  var runTest = false;
-
-  if (runTest || message == 'echo_device_attached') {
-    // We have a specific serial port set up to respond to test traffic. This
-    // is a rare situation. TODO(miket): mock to make it testable under any
-    // hardware conditions.
-    tests.push(testSerial);
-  }
-  chrome.test.runTests(tests);
-};
-
-chrome.test.sendMessage('serial_port', onMessageReply);
+chrome.test.runTests([testSerial]);

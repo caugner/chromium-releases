@@ -4,6 +4,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/protector/base_setting_change.h"
@@ -127,8 +128,8 @@ class DefaultSearchProviderChangeTest : public InProcessBrowserTest {
   void ExpectHistogramCount(const std::string& name,
                             size_t bucket,
                             base::Histogram::Count count) {
-    base::Histogram* histogram;
-    EXPECT_TRUE(base::StatisticsRecorder::FindHistogram(name, &histogram));
+    base::Histogram* histogram = base::StatisticsRecorder::FindHistogram(name);
+    EXPECT_TRUE(histogram != NULL);
     base::Histogram::SampleSet sample;
     histogram->SnapshotSample(&sample);
     EXPECT_EQ(count, sample.counts(bucket)) <<

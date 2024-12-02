@@ -15,6 +15,7 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image_skia.h"
 
 namespace {
 
@@ -85,9 +86,8 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
     item->SetString("label", model->GetLabelAt(i));
     gfx::ImageSkia icon;
     if (model->GetIconAt(i, &icon)) {
-      float icon_scale;
-      SkBitmap icon_bitmap = icon.GetBitmapForScale(
-          web_ui_->GetDeviceScale(), &icon_scale);
+      SkBitmap icon_bitmap = icon.GetRepresentation(
+          ui::GetScaleFactorFromScale(web_ui_->GetDeviceScale())).sk_bitmap();
       item->SetString("icon", web_ui_util::GetImageDataUrl(icon_bitmap));
     }
     if (id >= 0) {
@@ -133,11 +133,6 @@ void NetworkDropdown::OnItemChosen(int id) {
   network_menu_->OnItemChosen(id);
 }
 
-views::MenuButton* NetworkDropdown::GetMenuButton() {
-  NOTREACHED();
-  return NULL;
-}
-
 gfx::NativeWindow NetworkDropdown::GetNativeWindow() const {
   return BaseLoginDisplayHost::default_host()->GetNativeWindow();
 }
@@ -166,9 +161,8 @@ void NetworkDropdown::NetworkMenuIconChanged() {
 void NetworkDropdown::SetNetworkIconAndText() {
   string16 text;
   const gfx::ImageSkia icon_image = network_icon_->GetIconAndText(&text);
-  float icon_scale;
-  SkBitmap icon_bitmap = icon_image.GetBitmapForScale(
-      web_ui_->GetDeviceScale(), &icon_scale);
+  SkBitmap icon_bitmap = icon_image.GetRepresentation(
+      ui::GetScaleFactorFromScale(web_ui_->GetDeviceScale())).sk_bitmap();
   std::string icon_str =
       icon_image.empty() ?
           std::string() : web_ui_util::GetImageDataUrl(icon_bitmap);

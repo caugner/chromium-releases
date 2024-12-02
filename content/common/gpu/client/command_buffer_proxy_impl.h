@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_GPU_CLIENT_COMMAND_BUFFER_PROXY_IMPL_H_
 #define CONTENT_COMMON_GPU_CLIENT_COMMAND_BUFFER_PROXY_IMPL_H_
-#pragma once
 
 #if defined(ENABLE_GPU)
 
@@ -22,8 +21,7 @@
 #include "content/common/gpu/client/gpu_video_decode_accelerator_host.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
-#include "ipc/ipc_channel.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_listener.h"
 
 class GpuChannelHost;
 struct GPUCommandBufferConsoleMessage;
@@ -37,7 +35,7 @@ class SharedMemory;
 // CommandBufferStub.
 class CommandBufferProxyImpl
     : public CommandBufferProxy,
-      public IPC::Channel::Listener,
+      public IPC::Listener,
       public base::SupportsWeakPtr<CommandBufferProxyImpl> {
  public:
   typedef base::Callback<void(
@@ -52,11 +50,11 @@ class CommandBufferProxyImpl
   // Note that the GpuVideoDecodeAccelerator may still fail to be created in
   // the GPU process, even if this returns non-NULL. In this case the client is
   // notified of an error later.
-  scoped_refptr<GpuVideoDecodeAcceleratorHost> CreateVideoDecoder(
+  GpuVideoDecodeAcceleratorHost* CreateVideoDecoder(
       media::VideoCodecProfile profile,
       media::VideoDecodeAccelerator::Client* client);
 
-  // IPC::Channel::Listener implementation:
+  // IPC::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
@@ -109,7 +107,7 @@ class CommandBufferProxyImpl
 
  private:
   typedef std::map<int32, gpu::Buffer> TransferBufferMap;
-  typedef std::map<int, scoped_refptr<GpuVideoDecodeAcceleratorHost> > Decoders;
+  typedef std::map<int, base::WeakPtr<GpuVideoDecodeAcceleratorHost> > Decoders;
   typedef base::hash_map<uint32, base::Closure> SignalTaskMap;
 
   // Send an IPC message over the GPU channel. This is private to fully
@@ -132,8 +130,8 @@ class CommandBufferProxyImpl
   // Local cache of id to transfer buffer mapping.
   TransferBufferMap transfer_buffers_;
 
-  // Zero or more video decoder hosts owned by this proxy, keyed by their
-  // decoder_route_id.
+  // Zero or more (unowned!) video decoder hosts using this proxy, keyed by
+  // their decoder_route_id.
   Decoders video_decoder_hosts_;
 
   // The last cached state received from the service.

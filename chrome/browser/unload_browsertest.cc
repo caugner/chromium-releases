@@ -14,7 +14,9 @@
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -22,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/test/net/url_request_mock_http_job.h"
 #include "net/url_request/url_request_test_util.h"
 
@@ -127,7 +130,7 @@ class UnloadTest : public InProcessBrowserTest {
 
   void CheckTitle(const char* expected_title) {
     string16 expected = ASCIIToUTF16(expected_title);
-    EXPECT_EQ(expected, browser()->GetActiveWebContents()->GetTitle());
+    EXPECT_EQ(expected, chrome::GetActiveWebContents(browser())->GetTitle());
   }
 
   void NavigateToDataURL(const std::string& html_content,
@@ -160,10 +163,10 @@ class UnloadTest : public InProcessBrowserTest {
   void LoadUrlAndQuitBrowser(const std::string& html_content,
                              const char* expected_title) {
     NavigateToDataURL(html_content, expected_title);
-    ui_test_utils::WindowedNotificationObserver window_observer(
+    content::WindowedNotificationObserver window_observer(
         chrome::NOTIFICATION_BROWSER_CLOSED,
         content::NotificationService::AllSources());
-    browser()->CloseWindow();
+    chrome::CloseWindow(browser());
     window_observer.Wait();
   }
 
@@ -227,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, CrossSiteInfiniteBeforeUnloadAsync) {
 // Then two two sync crosssite requests to ensure
 // we correctly nav to each one.
 // If this flakes, reopen bug http://crbug.com/86469.
-IN_PROC_BROWSER_TEST_F(UnloadTest, CrossSiteInfiniteBeforeUnloadSync) {
+IN_PROC_BROWSER_TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteBeforeUnloadSync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -253,10 +256,10 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, DISABLED_BrowserCloseUnload) {
 IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
   NavigateToDataURL(BEFORE_UNLOAD_HTML, "beforeunload");
 
-  ui_test_utils::WindowedNotificationObserver window_observer(
+  content::WindowedNotificationObserver window_observer(
         chrome::NOTIFICATION_BROWSER_CLOSED,
         content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   ClickModalDialogButton(true);
   window_observer.Wait();
 }
@@ -266,22 +269,22 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseBeforeUnloadOK) {
 // If this test flakes, reopen http://crbug.com/123110
 IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
   NavigateToDataURL(BEFORE_UNLOAD_HTML, "beforeunload");
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
 
   // We wait for the title to change after cancelling the popup to ensure that
   // in-flight IPCs from the renderer reach the browser. Otherwise the browser
   // won't put up the beforeunload dialog because it's waiting for an ack from
   // the renderer.
   string16 expected_title = ASCIIToUTF16("cancelled");
-  ui_test_utils::TitleWatcher title_watcher(
-      browser()->GetActiveWebContents(), expected_title);
+  content::TitleWatcher title_watcher(
+      chrome::GetActiveWebContents(browser()), expected_title);
   ClickModalDialogButton(false);
   ASSERT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
-  ui_test_utils::WindowedNotificationObserver window_observer(
+  content::WindowedNotificationObserver window_observer(
         chrome::NOTIFICATION_BROWSER_CLOSED,
         content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   ClickModalDialogButton(true);
   window_observer.Wait();
 }
@@ -301,10 +304,10 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserTerminateBeforeUnload) {
 IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseWithInnerFocusedFrame) {
   NavigateToDataURL(INNER_FRAME_WITH_FOCUS_HTML, "innerframewithfocus");
 
-  ui_test_utils::WindowedNotificationObserver window_observer(
+  content::WindowedNotificationObserver window_observer(
         chrome::NOTIFICATION_BROWSER_CLOSED,
         content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   ClickModalDialogButton(true);
   window_observer.Wait();
 }
@@ -383,21 +386,21 @@ IN_PROC_BROWSER_TEST_F(UnloadTest, BrowserCloseTabWhenOtherTabHasListener) {
   // Simulate a click to force user_gesture to true; if we don't, the resulting
   // popup will be constrained, which isn't what we want to test.
 
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_TAB_ADDED,
         content::NotificationService::AllSources());
-  ui_test_utils::WindowedNotificationObserver load_stop_observer(
+  content::WindowedNotificationObserver load_stop_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  ui_test_utils::SimulateMouseClick(browser()->GetActiveWebContents());
+  content::SimulateMouseClick(chrome::GetActiveWebContents(browser()));
   observer.Wait();
   load_stop_observer.Wait();
   CheckTitle("popup");
 
-  ui_test_utils::WindowedNotificationObserver tab_close_observer(
+  content::WindowedNotificationObserver tab_close_observer(
       content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
-  browser()->CloseTab();
+  chrome::CloseTab(browser());
   tab_close_observer.Wait();
 
   CheckTitle("only_one_unload");

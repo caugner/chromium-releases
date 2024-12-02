@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_POLICY_SERVICE_IMPL_H_
 #define CHROME_BROWSER_POLICY_POLICY_SERVICE_IMPL_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -35,10 +34,8 @@ class PolicyServiceImpl : public PolicyService,
 
   // PolicyService overrides:
   virtual void AddObserver(PolicyDomain domain,
-                           const std::string& component_id,
                            PolicyService::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(PolicyDomain domain,
-                              const std::string& component_id,
                               PolicyService::Observer* observer) OVERRIDE;
   virtual const PolicyMap& GetPolicies(
       PolicyDomain domain,
@@ -48,7 +45,7 @@ class PolicyServiceImpl : public PolicyService,
 
  private:
   typedef ObserverList<PolicyService::Observer, true> Observers;
-  typedef std::map<PolicyBundle::PolicyNamespace, Observers*> ObserverMap;
+  typedef std::map<PolicyDomain, Observers*> ObserverMap;
   typedef std::vector<ConfigurationPolicyObserverRegistrar*> RegistrarList;
 
   // ConfigurationPolicyProvider::Observer overrides:
@@ -84,7 +81,7 @@ class PolicyServiceImpl : public PolicyService,
   // Maps each policy namespace to its current policies.
   PolicyBundle policy_bundle_;
 
-  // Maps each policy namespace to its observer list.
+  // Maps each policy domain to its observer list.
   ObserverMap observers_;
 
   // True if all the providers are initialized.

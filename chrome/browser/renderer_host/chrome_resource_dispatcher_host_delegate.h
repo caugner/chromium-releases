@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_CHROME_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
 #define CHROME_BROWSER_RENDERER_HOST_CHROME_RESOURCE_DISPATCHER_HOST_DELEGATE_H_
-#pragma once
 
 #include <set>
 
@@ -17,7 +16,10 @@
 class DelayedResourceQueue;
 class DownloadRequestLimiter;
 class SafeBrowsingService;
+
+namespace extensions {
 class UserScriptListener;
+}
 
 namespace prerender {
 class PrerenderTracker;
@@ -73,11 +75,15 @@ class ChromeResourceDispatcherHostDelegate
                                       int route_id) OVERRIDE;
   virtual bool ShouldForceDownloadResource(
       const GURL& url, const std::string& mime_type) OVERRIDE;
-  virtual void OnResponseStarted(net::URLRequest* request,
-                                 content::ResourceResponse* response,
-                                 IPC::Sender* sender) OVERRIDE;
-  virtual void OnRequestRedirected(
+  virtual void OnResponseStarted(
       net::URLRequest* request,
+      content::ResourceContext* resource_context,
+      content::ResourceResponse* response,
+      IPC::Sender* sender) OVERRIDE;
+  virtual void OnRequestRedirected(
+      const GURL& redirect_url,
+      net::URLRequest* request,
+      content::ResourceContext* resource_context,
       content::ResourceResponse* response) OVERRIDE;
 
   // base::FieldTrialList::Observer implementation.
@@ -115,7 +121,7 @@ class ChromeResourceDispatcherHostDelegate
 
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
   scoped_refptr<SafeBrowsingService> safe_browsing_;
-  scoped_refptr<UserScriptListener> user_script_listener_;
+  scoped_refptr<extensions::UserScriptListener> user_script_listener_;
   prerender::PrerenderTracker* prerender_tracker_;
 
   // Whether or not we've initialized the Cache.
@@ -125,7 +131,7 @@ class ChromeResourceDispatcherHostDelegate
   // This consists of a list of valid IDs, and the actual transmitted header.
   // Note that since this cache is both initialized and accessed from the IO
   // thread, we do not need to synchronize its uses.
-  std::set<chrome_variations::ID> variation_ids_set_;
+  std::set<chrome_variations::VariationID> variation_ids_set_;
   std::string variation_ids_header_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeResourceDispatcherHostDelegate);

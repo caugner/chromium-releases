@@ -7,10 +7,8 @@
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ash/wm/partial_screenshot_event_filter.h"
+#include "ash/wm/overlay_event_filter.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/window.h"
-#include "ui/base/events.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
@@ -22,17 +20,11 @@ namespace ash {
 PartialScreenshotView::PartialScreenshotView(
     ScreenshotDelegate* screenshot_delegate)
     : is_dragging_(false),
-      screenshot_delegate_(screenshot_delegate),
-      window_(NULL) {
+      screenshot_delegate_(screenshot_delegate) {
 }
 
 PartialScreenshotView::~PartialScreenshotView() {
   screenshot_delegate_ = NULL;
-  // Do not delete the |window_| here because |window_| has the
-  // ownership to this object. In case that finishing browser happens
-  // while |window_| != NULL, |window_| is still removed correctly by
-  // its parent container.
-  window_ = NULL;
 }
 
 // static
@@ -62,15 +54,7 @@ void PartialScreenshotView::StartPartialScreenshot(
   // events.  This will close the context menu.
   widget->GetNativeView()->SetCapture();
 
-  view->set_window(widget->GetNativeWindow());
-  Shell::GetInstance()->partial_screenshot_filter()->Activate(view);
-}
-
-void PartialScreenshotView::Cancel() {
-  DCHECK(window_);
-  window_->Hide();
-  Shell::GetInstance()->partial_screenshot_filter()->Deactivate();
-  MessageLoop::current()->DeleteSoon(FROM_HERE, window_);
+  Shell::GetInstance()->overlay_filter()->Activate(view);
 }
 
 gfx::NativeCursor PartialScreenshotView::GetCursor(
@@ -79,14 +63,31 @@ gfx::NativeCursor PartialScreenshotView::GetCursor(
   return ui::kCursorCross;
 }
 
+void PartialScreenshotView::Cancel() {
+  Shell::GetInstance()->overlay_filter()->Deactivate();
+  views::Widget* widget = GetWidget();
+  if (widget)
+    widget->Close();
+}
+
+bool PartialScreenshotView::IsCancelingKeyEvent(aura::KeyEvent* event) {
+  return event->key_code() == ui::VKEY_ESCAPE;
+}
+
+aura::Window* PartialScreenshotView::GetWindow() {
+  return GetWidget()->GetNativeWindow();
+}
+
 void PartialScreenshotView::OnPaint(gfx::Canvas* canvas) {
   if (is_dragging_) {
     // Screenshot area representation: black rectangle with white
-    // rectangle inside.
+    // rectangle inside.  To avoid capturing these rectangles when mouse
+    // release, they should be outside of the actual capturing area.
     gfx::Rect screenshot_rect = GetScreenshotRect();
-    canvas->DrawRect(screenshot_rect, SK_ColorBLACK);
-    screenshot_rect.Inset(1, 1, 1, 1);
+    screenshot_rect.Inset(-1, -1, -1, -1);
     canvas->DrawRect(screenshot_rect, SK_ColorWHITE);
+    screenshot_rect.Inset(-1, -1, -1, -1);
+    canvas->DrawRect(screenshot_rect, SK_ColorBLACK);
   }
 }
 

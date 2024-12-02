@@ -15,17 +15,18 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/threading/non_thread_safe.h"
+#include "base/threading/thread_checker.h"
 #include "jingle/notifier/listener/push_client_observer.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/notifier/notifications_disabled_reason.h"
 #include "sync/notifier/sync_notifier.h"
+#include "sync/notifier/sync_notifier_registrar.h"
 
 namespace notifier {
 class PushClient;
 }  // namespace notifier
 
-namespace sync_notifier {
+namespace syncer {
 
 // The channel to use for sync notifications.
 extern const char* kSyncP2PNotificationChannel;
@@ -55,14 +56,14 @@ class P2PNotificationData {
   P2PNotificationData();
   P2PNotificationData(const std::string& sender_id,
                       P2PNotificationTarget target,
-                      syncable::ModelTypeSet changed_types);
+                      ModelTypeSet changed_types);
 
   ~P2PNotificationData();
 
   // Returns true if the given ID is targeted by this notification.
   bool IsTargeted(const std::string& id) const;
 
-  syncable::ModelTypeSet GetChangedTypes() const;
+  ModelTypeSet GetChangedTypes() const;
 
   bool Equals(const P2PNotificationData& other) const;
 
@@ -78,12 +79,11 @@ class P2PNotificationData {
   // The intendent recipient(s) of the notification.
   P2PNotificationTarget target_;
   // The types the notification is for.
-  syncable::ModelTypeSet changed_types_;
+  ModelTypeSet changed_types_;
 };
 
-class P2PNotifier
-    : public SyncNotifier,
-      public notifier::PushClientObserver {
+class P2PNotifier : public SyncNotifier,
+                    public notifier::PushClientObserver {
  public:
   // The |send_notification_target| parameter was added to allow us to send
   // self-notifications in some cases, but not others.  The value should be
@@ -96,16 +96,15 @@ class P2PNotifier
   virtual ~P2PNotifier();
 
   // SyncNotifier implementation
-  virtual void AddObserver(SyncNotifierObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(SyncNotifierObserver* observer) OVERRIDE;
+  virtual void RegisterHandler(SyncNotifierObserver* handler) OVERRIDE;
+  virtual void UpdateRegisteredIds(SyncNotifierObserver* handler,
+                                   const ObjectIdSet& ids) OVERRIDE;
+  virtual void UnregisterHandler(SyncNotifierObserver* handler) OVERRIDE;
   virtual void SetUniqueId(const std::string& unique_id) OVERRIDE;
   virtual void SetStateDeprecated(const std::string& state) OVERRIDE;
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
-  virtual void UpdateEnabledTypes(
-      syncable::ModelTypeSet enabled_types) OVERRIDE;
-  virtual void SendNotification(
-      syncable::ModelTypeSet changed_types) OVERRIDE;
+  virtual void SendNotification(ModelTypeSet changed_types) OVERRIDE;
 
   // PushClientObserver implementation.
   virtual void OnNotificationsEnabled() OVERRIDE;
@@ -120,9 +119,9 @@ class P2PNotifier
  private:
   void SendNotificationData(const P2PNotificationData& notification_data);
 
-  base::NonThreadSafe non_thread_safe_;
+  base::ThreadChecker thread_checker_;
 
-  ObserverList<SyncNotifierObserver> observer_list_;
+  SyncNotifierRegistrar registrar_;
 
   // The push client.
   scoped_ptr<notifier::PushClient> push_client_;
@@ -134,9 +133,9 @@ class P2PNotifier
   // Which set of clients should be sent notifications.
   P2PNotificationTarget send_notification_target_;
 
-  syncable::ModelTypeSet enabled_types_;
+  ModelTypeSet enabled_types_;
 };
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_P2P_NOTIFIER_H_

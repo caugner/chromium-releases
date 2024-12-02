@@ -33,9 +33,9 @@
 #include "net/base/network_change_notifier.h"
 #include "net/socket/ssl_server_socket.h"
 #include "remoting/base/constants.h"
-#include "remoting/host/capturer_fake.h"
-#include "remoting/host/chromoting_host.h"
+#include "remoting/host/audio_capturer.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/chromoting_host.h"
 #include "remoting/host/constants.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
@@ -49,6 +49,7 @@
 #include "remoting/host/register_support_host_request.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
+#include "remoting/host/video_frame_capturer_fake.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/it2me_host_authenticator_factory.h"
@@ -153,7 +154,7 @@ class SimpleHost : public HeartbeatSender::Listener {
       xmpp_auth_service_ = kChromotingTokenDefaultServiceName;
     }
 
-    context_.network_message_loop()->PostTask(FROM_HERE, base::Bind(
+    context_.network_task_runner()->PostTask(FROM_HERE, base::Bind(
         &SimpleHost::StartHost, base::Unretained(this)));
 
     message_loop_.MessageLoop::Run();
@@ -216,20 +217,24 @@ class SimpleHost : public HeartbeatSender::Listener {
   }
 
   void StartHost() {
-    signal_strategy_.reset(
-        new XmppSignalStrategy(context_.jingle_thread(), xmpp_login_,
-                               xmpp_auth_token_, xmpp_auth_service_));
+    signal_strategy_.reset(new XmppSignalStrategy(
+        context_.url_request_context_getter(),
+        xmpp_login_, xmpp_auth_token_, xmpp_auth_service_));
     signaling_connector_.reset(new SignalingConnector(
         signal_strategy_.get(),
         base::Bind(&SimpleHost::OnAuthFailed, base::Unretained(this))));
 
     if (fake_) {
-      scoped_ptr<Capturer> capturer(new CapturerFake());
+      scoped_ptr<VideoFrameCapturer> capturer(new VideoFrameCapturerFake());
       scoped_ptr<EventExecutor> event_executor = EventExecutor::Create(
-          context_.desktop_message_loop()->message_loop_proxy(),
-          context_.ui_message_loop(), capturer.get());
+          context_.desktop_task_runner(),
+          context_.ui_task_runner());
+      scoped_ptr<AudioCapturer> audio_capturer(NULL);
       desktop_environment_ = DesktopEnvironment::CreateFake(
-          &context_, capturer.Pass(), event_executor.Pass());
+          &context_,
+          capturer.Pass(),
+          event_executor.Pass(),
+          audio_capturer.Pass());
     } else {
       desktop_environment_ = DesktopEnvironment::Create(&context_);
     }
@@ -280,7 +285,7 @@ class SimpleHost : public HeartbeatSender::Listener {
   }
 
   void Shutdown(int exit_code) {
-    DCHECK(context_.network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_.network_task_runner()->BelongsToCurrentThread());
 
     if (shutting_down_)
       return;
@@ -292,7 +297,7 @@ class SimpleHost : public HeartbeatSender::Listener {
   }
 
   void OnShutdownFinished() {
-    DCHECK(context_.network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_.network_task_runner()->BelongsToCurrentThread());
 
     // Destroy networking objects while we are on the network thread.
     host_ = NULL;
@@ -347,7 +352,19 @@ int main(int argc, char** argv) {
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
   base::AtExitManager exit_manager;
-  crypto::EnsureNSPRInit();
+
+  // Initialize logging with an appropriate log-file location, and default to
+  // log to that on Windows, or to standard error output otherwise.
+  FilePath debug_log(FILE_PATH_LITERAL("debug.log"));
+  InitLogging(debug_log.value().c_str(),
+#if defined(OS_WIN)
+              logging::LOG_ONLY_TO_FILE,
+#else
+              logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+#endif
+              logging::DONT_LOCK_LOG_FILE,
+              logging::APPEND_TO_OLD_LOG_FILE,
+              logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 
 #if defined(TOOLKIT_GTK)
   gfx::GtkInitFromCommandLine(*cmd_line);

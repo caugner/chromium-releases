@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBDATABASE_IMPL_H_
 #define CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBDATABASE_IMPL_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
@@ -22,9 +21,7 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
   virtual ~RendererWebIDBDatabaseImpl();
 
   // WebKit::WebIDBDatabase
-  virtual WebKit::WebString name() const;
-  virtual WebKit::WebString version() const;
-  virtual WebKit::WebDOMStringList objectStoreNames() const;
+  virtual WebKit::WebIDBMetadata metadata() const;
   virtual WebKit::WebIDBObjectStore* createObjectStore(
       const WebKit::WebString& name,
       const WebKit::WebIDBKeyPath& key_path,

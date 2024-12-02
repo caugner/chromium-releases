@@ -15,10 +15,17 @@
           ],
           'actions': [
             {
+              'action_name': 'copy_base_jar',
+              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar'],
+              'outputs': ['<(PRODUCT_DIR)/replaceme_apk/java/libs/chromium_base.jar'],
+              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
+            },
+            {
               'action_name': 'native_test_apk',
               'inputs': [
                 '<(DEPTH)/testing/android/native_test_apk.xml',
                 '<!@(find <(DEPTH)/testing/android -name "*.java")',
+                '<(PRODUCT_DIR)/replaceme_apk/java/libs/chromium_base.jar',
                 'native_test_launcher.cc'
               ],
               'outputs': [
@@ -27,11 +34,16 @@
                 # probably happy to not codesign) but naming should be
                 # fixed.  The -debug name is an aspect of the android
                 # SDK antfiles (e.g. ${sdk.dir}/tools/ant/build.xml)
-                '<(PRODUCT_DIR)/ChromeNativeTests-debug.apk',
+                '<(PRODUCT_DIR)/replaceme_apk/replaceme-debug.apk',
               ],
               'action': [
                 'ant',
                 '-DPRODUCT_DIR=<(ant_build_out)',
+                '-DANDROID_SDK=<(android_sdk)',
+                '-DANDROID_SDK_ROOT=<(android_sdk_root)',
+                '-DANDROID_SDK_TOOLS=<(android_sdk_tools)',
+                '-DANDROID_SDK_VERSION=<(android_sdk_version)',
+                '-DANDROID_TOOLCHAIN=<(android_toolchain)',
                 '-buildfile',
                 '<(DEPTH)/testing/android/native_test_apk.xml',
               ]
@@ -52,7 +64,7 @@
               '-Wl,--exclude-libs=ALL',
             ],
           },
-          'dependencies': [ 
+          'dependencies': [
             '../../base/base.gyp:base',
             '../../base/base.gyp:test_support_base',
             '../gtest.gyp:gtest',
@@ -62,26 +74,13 @@
         {
           'target_name': 'native_test_jni_headers',
           'type': 'none',
-          'actions': [
-            {
-              'action_name': 'generate_jni_headers',
-              'inputs': [
-                '../../base/android/jni_generator/jni_generator.py',
-                'java/src/org/chromium/native_test/ChromeNativeTestActivity.java'
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/testing/android/jni/'
-                'chrome_native_test_activity_jni.h',
-              ],
-              'action': [
-                'python',
-                '../../base/android/jni_generator/jni_generator.py',
-                '-o',
-                '<@(_inputs)',
-                '<@(_outputs)',
-              ],
-            }
+          'sources': [
+            'java/src/org/chromium/native_test/ChromeNativeTestActivity.java'
           ],
+          'variables': {
+            'jni_gen_dir': 'testing',
+          },
+          'includes': [ '../../build/jni_generator.gypi' ],
           # So generated jni headers can be found by targets that
           # depend on this.
           'direct_dependent_settings': {

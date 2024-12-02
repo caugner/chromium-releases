@@ -334,19 +334,6 @@ TEST_F(ToplevelWindowEventFilterTest, BottomRightPastMinimum) {
   EXPECT_EQ(gfx::Size(40, 40), w1->bounds().size());
 }
 
-TEST_F(ToplevelWindowEventFilterTest, DoubleClickCaptionTogglesMaximize) {
-  scoped_ptr<aura::Window> w1(CreateWindow(HTCAPTION));
-  EXPECT_FALSE(wm::IsWindowMaximized(w1.get()));
-
-  aura::test::EventGenerator generator(Shell::GetPrimaryRootWindow(), w1.get());
-  generator.DoubleClickLeftButton();
-
-  EXPECT_TRUE(wm::IsWindowMaximized(w1.get()));
-  generator.DoubleClickLeftButton();
-
-  EXPECT_FALSE(wm::IsWindowMaximized(w1.get()));
-}
-
 TEST_F(ToplevelWindowEventFilterTest, BottomRightWorkArea) {
   scoped_ptr<aura::Window> target(CreateWindow(HTBOTTOMRIGHT));
   gfx::Rect work_area =
@@ -402,7 +389,7 @@ TEST_F(ToplevelWindowEventFilterTest, DontDragToNegativeY) {
   EXPECT_EQ(100, target->bounds().height());
 }
 
-// Verifies we don't let windows go bigger than the monitor width.
+// Verifies we don't let windows go bigger than the display width.
 TEST_F(ToplevelWindowEventFilterTest, DontGotWiderThanScreen) {
   scoped_ptr<aura::Window> target(CreateWindow(HTRIGHT));
   gfx::Rect work_area =

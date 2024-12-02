@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_SUGGESTIONS_INTERNALS_SUGGESTIONS_INTERNALS_UI_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_SUGGESTIONS_INTERNALS_SUGGESTIONS_INTERNALS_UI_HANDLER_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
@@ -12,6 +11,10 @@
 #include "content/public/browser/web_ui_message_handler.h"
 
 class Profile;
+
+namespace base {
+class ListValue;
+}
 
 // UI Handler for chrome://suggestions-internals/
 class SuggestionsInternalsUIHandler : public content::WebUIMessageHandler,

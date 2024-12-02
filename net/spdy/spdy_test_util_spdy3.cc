@@ -10,6 +10,8 @@
 #include "base/compiler_specific.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "crypto/ec_private_key.h"
+#include "crypto/ec_signature_creator.h"
 #include "net/base/mock_cert_verifier.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
@@ -37,6 +39,50 @@ void ParseUrl(const char* const url, std::string* scheme, std::string* host,
     host->append(gurl.port());
   }
 }
+
+// An ECSignatureCreator that returns deterministic signatures.
+class MockECSignatureCreator : public crypto::ECSignatureCreator {
+ public:
+  explicit MockECSignatureCreator(crypto::ECPrivateKey* key) : key_(key) {}
+
+  virtual bool Sign(const uint8* data,
+                    int data_len,
+                    std::vector<uint8>* signature) OVERRIDE {
+    std::vector<uint8> private_key_value;
+    key_->ExportValue(&private_key_value);
+    std::string head = "fakesignature";
+    std::string tail = "/fakesignature";
+
+    signature->clear();
+    signature->insert(signature->end(), head.begin(), head.end());
+    signature->insert(signature->end(), private_key_value.begin(),
+                      private_key_value.end());
+    signature->insert(signature->end(), '-');
+    signature->insert(signature->end(), data, data + data_len);
+    signature->insert(signature->end(), tail.begin(), tail.end());
+    return true;
+  }
+
+ private:
+  crypto::ECPrivateKey* key_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreator);
+};
+
+// An ECSignatureCreatorFactory creates MockECSignatureCreator.
+class MockECSignatureCreatorFactory : public crypto::ECSignatureCreatorFactory {
+ public:
+  MockECSignatureCreatorFactory() {}
+  virtual ~MockECSignatureCreatorFactory() {}
+
+  virtual crypto::ECSignatureCreator* Create(
+      crypto::ECPrivateKey* key) OVERRIDE {
+    return new MockECSignatureCreator(key);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockECSignatureCreatorFactory);
+};
 
 }  // namespace
 
@@ -458,6 +504,35 @@ SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
                                    arraysize(kConnectHeaders));
 }
 
+// Constructs a standard SPDY SYN_STREAM frame for a WebSocket over SPDY
+// opening handshake.
+SpdyFrame* ConstructSpdyWebSocket(int stream_id,
+                                  const char* path,
+                                  const char* host,
+                                  const char* origin) {
+  const char* const kWebSocketHeaders[] = {
+    ":path",
+    path,
+    ":host",
+    host,
+    ":version",
+    "WebSocket/13",
+    ":scheme",
+    "ws",
+    ":origin",
+    origin
+  };
+  return ConstructSpdyControlFrame(/*extra_headers*/ NULL,
+                                   /*extra_header_count*/ 0,
+                                   /*compressed*/ false,
+                                   stream_id,
+                                   LOWEST,
+                                   SYN_STREAM,
+                                   CONTROL_FLAG_NONE,
+                                   kWebSocketHeaders,
+                                   arraysize(kWebSocketHeaders));
+}
+
 // Constructs a standard SPDY push SYN packet.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
@@ -635,6 +710,25 @@ SpdyFrame* ConstructSpdyGetSynReply(const char* const extra_headers[],
                                    arraysize(kStandardGetHeaders));
 }
 
+// Constructs a standard SPDY SYN_REPLY packet to match the WebSocket over SPDY
+// opening handshake.
+// Returns a SpdyFrame.
+SpdyFrame* ConstructSpdyWebSocketSynReply(int stream_id) {
+  static const char* const kStandardWebSocketHeaders[] = {
+    ":status",
+    "101"
+  };
+  return ConstructSpdyControlFrame(NULL,
+                                   0,
+                                   false,
+                                   stream_id,
+                                   LOWEST,
+                                   SYN_REPLY,
+                                   CONTROL_FLAG_NONE,
+                                   kStandardWebSocketHeaders,
+                                   arraysize(kStandardWebSocketHeaders));
+}
+
 // Constructs a standard SPDY POST SYN packet.
 // |content_length| is the size of post data.
 // |extra_headers| are the extra header-value pairs, which typically
@@ -739,6 +833,29 @@ SpdyFrame* ConstructSpdyBodyFrame(int stream_id, const char* data,
   BufferedSpdyFramer framer(3);
   return framer.CreateDataFrame(
       stream_id, data, len, fin ? DATA_FLAG_FIN : DATA_FLAG_NONE);
+}
+
+// Constructs a SPDY HEADERS frame for a WebSocket frame over SPDY.
+SpdyFrame* ConstructSpdyWebSocketHeadersFrame(int stream_id,
+                                              const char* length,
+                                              bool fin) {
+  static const char* const kHeaders[] = {
+    ":opcode",
+    "1",  // text frame
+    ":length",
+    length,
+    ":fin",
+    fin ? "1" : "0"
+  };
+  return ConstructSpdyControlFrame(/*extra_headers*/ NULL,
+                                   /*extra_header_count*/ 0,
+                                   /*compression*/ false,
+                                   stream_id,
+                                   LOWEST,
+                                   HEADERS,
+                                   CONTROL_FLAG_NONE,
+                                   kHeaders,
+                                   arraysize(kHeaders));
 }
 
 // Wraps |frame| in the payload of a data frame in stream |stream_id|.
@@ -996,7 +1113,11 @@ const SpdyHeaderInfo MakeSpdyHeader(SpdyControlType type) {
   return kHeader;
 }
 
-SpdyTestStateHelper::SpdyTestStateHelper() {
+SpdyTestStateHelper::SpdyTestStateHelper()
+    : ec_signature_creator_factory_(new MockECSignatureCreatorFactory()) {
+  // Use the mock signature creator.
+  crypto::ECSignatureCreator::SetFactoryForTesting(
+      ec_signature_creator_factory_.get());
   // Pings can be non-deterministic, because they are sent via timer.
   SpdySession::set_enable_ping_based_connection_checking(false);
   // Avoid sending a non-default initial receive window size settings
@@ -1012,6 +1133,7 @@ SpdyTestStateHelper::~SpdyTestStateHelper() {
   SpdySession::ResetStaticSettingsToInit();
   // TODO(rch): save/restore this value
   BufferedSpdyFramer::set_enable_compression_default(true);
+  crypto::ECSignatureCreator::SetFactoryForTesting(NULL);
 }
 
 }  // namespace test_spdy3

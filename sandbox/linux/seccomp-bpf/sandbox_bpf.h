@@ -135,9 +135,6 @@ struct arch_sigsys {
 namespace playground2 {
 
 class Sandbox {
-  friend class Util;
-  friend class Verifier;
-
  public:
   enum SandboxStatus {
     STATUS_UNKNOWN,      // Status prior to calling supportsSeccompSandbox()
@@ -179,7 +176,10 @@ class Sandbox {
     // field.
     // This is not only quiet efficient, it also makes the API really easy to
     // use.
-    ErrorCode(int err = SB_INVALID) {
+    ErrorCode(int err = SB_INVALID)
+        : id_(0),
+          fnc_(NULL),
+          aux_(NULL) {
       switch (err) {
       case SB_INVALID:
         err_ = SECCOMP_RET_INVALID;
@@ -322,8 +322,10 @@ class Sandbox {
   static int getProcFd() { return proc_fd_; }
 
  private:
+  friend class Util;
+  friend class Verifier;
   struct Range {
-    Range(uint32_t f, uint32_t t, ErrorCode e) :
+    Range(uint32_t f, uint32_t t, const ErrorCode& e) :
       from(f),
       to(t),
       err(e) {
@@ -344,7 +346,13 @@ class Sandbox {
   typedef std::map<std::pair<TrapFnc, const void *>, int> TrapIds;
 
   static ErrorCode probeEvaluator(int signo) __attribute__((const));
+  static void      probeProcess(void);
+  static ErrorCode allowAllEvaluator(int signo);
+  static void      tryVsyscallProcess(void);
   static bool      kernelSupportSeccompBPF(int proc_fd);
+  static bool      RunFunctionInPolicy(void (*function)(),
+                                       EvaluateSyscall syscallEvaluator,
+                                       int proc_fd);
   static bool      isSingleThreaded(int proc_fd);
   static bool      disableFilesystem();
   static void      policySanityChecks(EvaluateSyscall syscallEvaluator,
@@ -367,6 +375,7 @@ class Sandbox {
   static TrapIds       trapIds_;
   static ErrorCode     *trapArray_;
   static size_t        trapArraySize_;
+  DISALLOW_IMPLICIT_CONSTRUCTORS(Sandbox);
 };
 
 }  // namespace

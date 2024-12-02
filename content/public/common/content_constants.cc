@@ -30,4 +30,14 @@ const char    kStatsFilename[] = "ChromiumStats2";
 const int kStatsMaxThreads = 32;
 const int kStatsMaxCounters = 3000;
 
+const int kHistogramSynchronizerReservedSequenceNumber = 0;
+
+const char kGpuCompositingFieldTrialName[] = "ForceCompositingMode";
+const char kGpuCompositingFieldTrialEnabledName[] = "enabled";
+const char kGpuCompositingFieldTrialThreadEnabledName[] = "thread";
+
+const char kStage3DFieldTrialName[] = "EnableStage3D";
+const char kStage3DFieldTrialBlacklistedName[] = "blacklisted";
+const char kStage3DFieldTrialEnabledName[] = "enabled";
+
 }  // namespace content

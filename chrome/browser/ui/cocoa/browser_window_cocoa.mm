@@ -16,7 +16,11 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window_state.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
@@ -25,7 +29,6 @@
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
-#import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
@@ -33,13 +36,15 @@
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
+#import "chrome/browser/ui/cocoa/website_settings_bubble_controller.h"
 #include "chrome/browser/ui/page_info_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -84,7 +89,7 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
 
-  initial_show_state_ = browser_->GetSavedWindowShowState();
+  initial_show_state_ = chrome::GetSavedWindowShowState(browser_);
 }
 
 BrowserWindowCocoa::~BrowserWindowCocoa() {
@@ -121,7 +126,7 @@ void BrowserWindowCocoa::Show() {
     [window() orderOut:controller_];
     [window() miniaturize:controller_];
   } else if (initial_show_state_ == ui::SHOW_STATE_FULLSCREEN) {
-    browser_->ToggleFullscreenMode();
+    chrome::ToggleFullscreenMode(browser_);
   }
   initial_show_state_ = ui::SHOW_STATE_DEFAULT;
 
@@ -212,14 +217,6 @@ StatusBubble* BrowserWindowCocoa::GetStatusBubble() {
   return [controller_ statusBubble];
 }
 
-void BrowserWindowCocoa::ToolbarSizeChanged(bool is_animating) {
-  // According to beng, this is an ugly method that comes from the days when the
-  // download shelf was a ChromeView attached to the WebContents, and as its
-  // size changed via animation it notified through TCD/etc to the browser view
-  // to relayout for each tick of the animation. We don't need anything of the
-  // sort on Mac.
-}
-
 void BrowserWindowCocoa::UpdateTitleBar() {
   NSString* newTitle =
       base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
@@ -237,7 +234,7 @@ void BrowserWindowCocoa::BookmarkBarStateChanged(
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      browser_->GetActiveWebContents()];
+      chrome::GetActiveWebContents(browser_)];
 }
 
 void BrowserWindowCocoa::SetDevToolsDockSide(DevToolsDockSide side) {
@@ -417,11 +414,6 @@ void BrowserWindowCocoa::AddFindBar(
   [controller_ addFindBar:find_bar_cocoa_controller];
 }
 
-void BrowserWindowCocoa::ShowAboutChromeDialog() {
-  // Go through AppController's implementation to bring up the branded panel.
-  [[NSApp delegate] orderFrontStandardAboutPanel:nil];
-}
-
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
   restart_browser::RequestRestart(window());
 }
@@ -487,12 +479,12 @@ void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
+void BrowserWindowCocoa::ShowPageInfo(WebContents* web_contents,
                                       const GURL& url,
                                       const SSLStatus& ssl,
                                       bool show_history) {
-  browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history,
-                              browser_);
+  chrome::ShowPageInfoBubble(window(), web_contents, url, ssl, show_history,
+                             browser_);
 }
 
 void BrowserWindowCocoa::ShowWebsiteSettings(
@@ -501,6 +493,8 @@ void BrowserWindowCocoa::ShowWebsiteSettings(
     const GURL& url,
     const content::SSLStatus& ssl,
     bool show_history) {
+  WebsiteSettingsUIBridge::Show(
+      window(), profile, tab_contents, url, ssl);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -516,7 +510,7 @@ bool BrowserWindowCocoa::PreHandleKeyboardEvent(
   if (id == -1)
     return false;
 
-  if (browser_->IsReservedCommandOrKey(id, event)) {
+  if (browser_->command_controller()->IsReservedCommandOrKey(id, event)) {
       return [BrowserWindowUtils handleKeyboardEvent:event.os_event
                                             inWindow:window()];
   }
@@ -530,11 +524,6 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   if ([BrowserWindowUtils shouldHandleKeyboardEvent:event])
     [BrowserWindowUtils handleKeyboardEvent:event.os_event inWindow:window()];
-}
-
-void BrowserWindowCocoa::ShowCreateWebAppShortcutsDialog(
-    TabContents* tab_contents) {
-  NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(

@@ -7,7 +7,6 @@
 
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_SERVICE_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_SERVICE_H_
-#pragma once
 
 #include <deque>
 #include <map>
@@ -16,11 +15,12 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/file_path.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop_helpers.h"
 #include "base/observer_list.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
@@ -139,11 +139,11 @@ class SafeBrowsingService
 
   class Client {
    public:
-    virtual ~Client() {}
-
     void OnSafeBrowsingResult(const SafeBrowsingCheck& check);
 
    protected:
+    virtual ~Client() {}
+
     // Called when the result of checking a browse URL is known.
     virtual void OnBrowseUrlCheckResult(const GURL& url,
                                         UrlCheckResult result) {}
@@ -162,6 +162,8 @@ class SafeBrowsingService
   static void RegisterFactory(SafeBrowsingServiceFactory* factory) {
     factory_ = factory;
   }
+
+  static FilePath GetCookieFilePathForTesting();
 
   // Create an instance of the safe browsing service.
   static SafeBrowsingService* CreateSafeBrowsingService();
@@ -340,6 +342,7 @@ class SafeBrowsingService
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<SafeBrowsingService>;
   friend class SafeBrowsingServiceTest;
+  friend class SafeBrowsingServiceCookieTest;
   friend class SafeBrowsingURLRequestContextGetter;
 
   void InitURLRequestContextOnIOThread(
@@ -407,6 +410,8 @@ class SafeBrowsingService
   void NotifyClientBlockingComplete(Client* client, bool proceed);
 
   void DatabaseUpdateFinished(bool update_succeeded);
+
+  void NotifyDatabaseUpdateFinished(bool update_succeeded);
 
   // Start up SafeBrowsing objects. This can be called at browser start, or when
   // the user checks the "Enable SafeBrowsing" option in the Advanced options

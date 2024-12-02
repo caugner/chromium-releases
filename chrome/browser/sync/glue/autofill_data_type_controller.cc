@@ -27,13 +27,13 @@ AutofillDataTypeController::AutofillDataTypeController(
         profile_sync_factory, profile, sync_service) {
 }
 
-syncable::ModelType AutofillDataTypeController::type() const {
-  return syncable::AUTOFILL;
+syncer::ModelType AutofillDataTypeController::type() const {
+  return syncer::AUTOFILL;
 }
 
-browser_sync::ModelSafeGroup AutofillDataTypeController::model_safe_group()
+syncer::ModelSafeGroup AutofillDataTypeController::model_safe_group()
     const {
-  return browser_sync::GROUP_DB;
+  return syncer::GROUP_DB;
 }
 
 void AutofillDataTypeController::Observe(

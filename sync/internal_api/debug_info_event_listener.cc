@@ -4,8 +4,9 @@
 
 #include "sync/internal_api/debug_info_event_listener.h"
 
-using browser_sync::sessions::SyncSessionSnapshot;
-namespace sync_api {
+namespace syncer {
+
+using sessions::SyncSessionSnapshot;
 
 DebugInfoEventListener::DebugInfoEventListener()
     : events_dropped_(false),
@@ -32,9 +33,9 @@ void DebugInfoEventListener::OnSyncCycleCompleted(
       snapshot.num_server_conflicts());
 
   sync_completed_event_info->set_num_updates_downloaded(
-      snapshot.syncer_status().num_updates_downloaded_total);
+      snapshot.model_neutral_state().num_updates_downloaded_total);
   sync_completed_event_info->set_num_reflected_updates_downloaded(
-      snapshot.syncer_status().num_reflected_updates_downloaded_total);
+      snapshot.model_neutral_state().num_reflected_updates_downloaded_total);
   sync_completed_event_info->mutable_caller_info()->set_source(
       snapshot.source().updates_source);
   sync_completed_event_info->mutable_caller_info()->set_notifications_enabled(
@@ -44,18 +45,18 @@ void DebugInfoEventListener::OnSyncCycleCompleted(
 }
 
 void DebugInfoEventListener::OnInitializationComplete(
-    const browser_sync::WeakHandle<browser_sync::JsBackend>& js_backend,
-    bool success) {
+    const WeakHandle<JsBackend>& js_backend,
+    bool success, ModelTypeSet restored_types) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::INITIALIZATION_COMPLETE);
 }
 
 void DebugInfoEventListener::OnConnectionStatusChange(
-    sync_api::ConnectionStatus status) {
+    ConnectionStatus status) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::CONNECTION_STATUS_CHANGE);
 }
 
 void DebugInfoEventListener::OnPassphraseRequired(
-    sync_api::PassphraseRequiredReason reason,
+    PassphraseRequiredReason reason,
     const sync_pb::EncryptedData& pending_keys) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::PASSPHRASE_REQUIRED);
 }
@@ -77,18 +78,8 @@ void DebugInfoEventListener::OnUpdatedToken(const std::string& token) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::UPDATED_TOKEN);
 }
 
-void DebugInfoEventListener::OnClearServerDataFailed() {
-  // This command is not implemented on the client side.
-  NOTREACHED();
-}
-
-void DebugInfoEventListener::OnClearServerDataSucceeded() {
-  // This command is not implemented on the client side.
-  NOTREACHED();
-}
-
 void DebugInfoEventListener::OnEncryptedTypesChanged(
-    syncable::ModelTypeSet encrypted_types,
+    ModelTypeSet encrypted_types,
     bool encrypt_everything) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ENCRYPTED_TYPES_CHANGED);
 }
@@ -98,7 +89,7 @@ void DebugInfoEventListener::OnEncryptionComplete() {
 }
 
 void DebugInfoEventListener::OnActionableError(
-    const browser_sync::SyncProtocolError& sync_error) {
+    const SyncProtocolError& sync_error) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ACTIONABLE_ERROR);
 }
 
@@ -110,23 +101,21 @@ void DebugInfoEventListener::SetCryptographerReady(bool ready) {
   cryptographer_ready_ = ready;
 }
 
-void DebugInfoEventListener::OnNudgeFromDatatype(
-    syncable::ModelType datatype) {
+void DebugInfoEventListener::OnNudgeFromDatatype(ModelType datatype) {
   sync_pb::DebugEventInfo event_info;
   event_info.set_nudging_datatype(
-      syncable::GetSpecificsFieldNumberFromModelType(datatype));
+      GetSpecificsFieldNumberFromModelType(datatype));
   AddEventToQueue(event_info);
 }
 
 void DebugInfoEventListener::OnIncomingNotification(
-     const syncable::ModelTypePayloadMap& type_payloads) {
+     const ModelTypePayloadMap& type_payloads) {
   sync_pb::DebugEventInfo event_info;
-  syncable::ModelTypeSet types = ModelTypePayloadMapToEnumSet(type_payloads);
+  ModelTypeSet types = ModelTypePayloadMapToEnumSet(type_payloads);
 
-  for (syncable::ModelTypeSet::Iterator it = types.First();
-       it.Good(); it.Inc()) {
+  for (ModelTypeSet::Iterator it = types.First(); it.Good(); it.Inc()) {
     event_info.add_datatypes_notified_from_server(
-        syncable::GetSpecificsFieldNumberFromModelType(it.Get()));
+        GetSpecificsFieldNumberFromModelType(it.Get()));
   }
 
   AddEventToQueue(event_info);
@@ -134,7 +123,7 @@ void DebugInfoEventListener::OnIncomingNotification(
 
 void DebugInfoEventListener::GetAndClearDebugInfo(
     sync_pb::DebugInfo* debug_info) {
-  DCHECK(events_.size() <= sync_api::kMaxEntries);
+  DCHECK_LE(events_.size(), kMaxEntries);
   while (!events_.empty()) {
     sync_pb::DebugEventInfo* event_info = debug_info->add_events();
     const sync_pb::DebugEventInfo& debug_event_info = events_.front();
@@ -159,7 +148,7 @@ void DebugInfoEventListener::CreateAndAddEvent(
 
 void DebugInfoEventListener::AddEventToQueue(
   const sync_pb::DebugEventInfo& event_info) {
-  if (events_.size() >= sync_api::kMaxEntries) {
+  if (events_.size() >= kMaxEntries) {
     DVLOG(1) << "DebugInfoEventListener::AddEventToQueue Dropping an old event "
              << "because of full queue";
 
@@ -168,4 +157,5 @@ void DebugInfoEventListener::AddEventToQueue(
   }
   events_.push(event_info);
 }
-}  // namespace sync_api
+
+}  // namespace syncer

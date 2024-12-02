@@ -4,13 +4,11 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_HOST_MAC_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_HOST_MAC_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_host.h"
 
 namespace extensions {
 class Extension;
-}
 
 // TODO(mpcomplete): I don't know what this does or if it is needed anymore,
 // now that ExtensionHost is restructured to rely on WebContents.
@@ -28,5 +26,7 @@ class ExtensionHostMac : public ExtensionHost {
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHostMac);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_HOST_MAC_H_

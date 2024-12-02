@@ -15,6 +15,7 @@
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 
 using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::ReturnRef;
 using ::testing::StrEq;
 using content::BrowserContext;
@@ -28,6 +29,7 @@ struct TestDiskInfo {
   const char* file_path;
   const char* device_label;
   const char* drive_label;
+  const char* fs_uuid;
   const char* system_path_prefix;
   chromeos::DeviceType device_type;
   uint64 size_in_bytes;
@@ -54,6 +56,7 @@ TestDiskInfo kTestDisks[] = {
     "file_path1",
     "device_label1",
     "drive_label1",
+    "FFFF-FFFF",
     "system_path_prefix1",
     chromeos::DEVICE_TYPE_USB,
     1073741824,
@@ -68,6 +71,7 @@ TestDiskInfo kTestDisks[] = {
     "file_path2",
     "device_label2",
     "drive_label2",
+    "0FFF-FFFF",
     "system_path_prefix2",
     chromeos::DEVICE_TYPE_MOBILE,
     47723,
@@ -82,6 +86,7 @@ TestDiskInfo kTestDisks[] = {
     "file_path3",
     "device_label3",
     "drive_label3",
+    "00FF-FFFF",
     "system_path_prefix3",
     chromeos::DEVICE_TYPE_OPTICAL_DISC,
     0,
@@ -148,6 +153,11 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
     chromeos::disks::DiskMountManager::InitializeForTesting(
         disk_mount_manager_mock_);
     disk_mount_manager_mock_->SetupDefaultReplies();
+
+    // OVERRIDE FindDiskBySourcePath mock function.
+    ON_CALL(*disk_mount_manager_mock_, FindDiskBySourcePath(_)).
+        WillByDefault(Invoke(
+            this, &ExtensionFileBrowserPrivateApiTest::FindVolumeBySourcePath));
   }
 
   // ExtensionApiTest override
@@ -190,6 +200,7 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
                 kTestDisks[disk_info_index].file_path,
                 kTestDisks[disk_info_index].device_label,
                 kTestDisks[disk_info_index].drive_label,
+                kTestDisks[disk_info_index].fs_uuid,
                 kTestDisks[disk_info_index].system_path_prefix,
                 kTestDisks[disk_info_index].device_type,
                 kTestDisks[disk_info_index].size_in_bytes,
@@ -203,6 +214,13 @@ class ExtensionFileBrowserPrivateApiTest : public ExtensionApiTest {
 
       }
     }
+  }
+
+  const DiskMountManager::Disk* FindVolumeBySourcePath(
+      const std::string& source_path) {
+    DiskMountManager::DiskMap::const_iterator volume_it =
+        volumes_.find(source_path);
+    return (volume_it == volumes_.end()) ? NULL : volume_it->second;
   }
 
  protected:

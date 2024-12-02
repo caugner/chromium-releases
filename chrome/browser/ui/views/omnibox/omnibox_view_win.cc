@@ -24,14 +24,16 @@
 #include "base/win/scoped_select_object.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_edit_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -68,9 +70,6 @@
 using content::UserMetricsAction;
 using content::WebContents;
 
-///////////////////////////////////////////////////////////////////////////////
-// AutocompleteEditModel
-
 namespace {
 
 // A helper method for determining a valid DROPEFFECT given the allowed
@@ -94,17 +93,17 @@ int CopyOrLinkDragOperation(int drag_operation) {
 }
 
 // The AutocompleteEditState struct contains enough information about the
-// AutocompleteEditModel and OmniboxViewWin to save/restore a user's
+// OmniboxEditModel and OmniboxViewWin to save/restore a user's
 // typing, caret position, etc. across tab changes.  We explicitly don't
 // preserve things like whether the popup was open as this might be weird.
 struct AutocompleteEditState {
-  AutocompleteEditState(const AutocompleteEditModel::State& model_state,
+  AutocompleteEditState(const OmniboxEditModel::State& model_state,
                         const OmniboxViewWin::State& view_state)
       : model_state(model_state),
         view_state(view_state) {
   }
 
-  const AutocompleteEditModel::State model_state;
+  const OmniboxEditModel::State model_state;
   const OmniboxViewWin::State view_state;
 };
 
@@ -433,16 +432,17 @@ const int kTwipsPerInch = 1440;
 
 }  // namespace
 
-OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
+OmniboxViewWin::OmniboxViewWin(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                LocationBarView* parent_view,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               views::View* location_bar)
-    : model_(new AutocompleteEditModel(this, controller,
-                                       parent_view->profile())),
-      popup_view_(AutocompletePopupContentsView::CreateForEnvironment(
-          parent_view->font(), this, model_.get(), location_bar)),
+                               views::View* location_bar,
+                               views::View* popup_parent_view)
+    : model_(new OmniboxEditModel(this, controller, parent_view->profile())),
+      popup_view_(OmniboxPopupContentsView::Create(
+          parent_view->font(), this, model_.get(), location_bar,
+          popup_parent_view)),
       controller_(controller),
       parent_view_(parent_view),
       toolbar_model_(toolbar_model),
@@ -546,8 +546,7 @@ views::View* OmniboxViewWin::parent_view() const {
 void OmniboxViewWin::SaveStateToTab(WebContents* tab) {
   DCHECK(tab);
 
-  const AutocompleteEditModel::State model_state(
-      model_->GetStateForTabSwitch());
+  const OmniboxEditModel::State model_state(model_->GetStateForTabSwitch());
 
   CHARRANGE selection;
   GetSelection(selection);
@@ -929,8 +928,8 @@ gfx::NativeView OmniboxViewWin::GetNativeView() const {
 gfx::NativeView OmniboxViewWin::GetRelativeWindowForNativeView(
     gfx::NativeView edit_native_view) {
   // When an IME is attached to the rich-edit control, retrieve its window
-  // handle, and the popup window of AutocompletePopupView will be shown
-  // under the IME windows.
+  // handle, and the popup window of OmniboxPopupView will be shown under the
+  // IME windows.
   // Otherwise, the popup window will be shown under top-most windows.
   // TODO(hbono): http://b/1111369 if we exclude this popup window from the
   // display area of IME windows, this workaround becomes unnecessary.
@@ -1028,18 +1027,15 @@ int OmniboxViewWin::OnPerformDropImpl(const views::DropTargetEvent& event,
         else
           InsertText(string_drop_position, text);
       } else {
-        PasteAndGo(CollapseWhitespace(text, true));
+        string16 collapsed_text(CollapseWhitespace(text, true));
+        if (model_->CanPasteAndGo(collapsed_text))
+          model_->PasteAndGo(collapsed_text);
       }
       return CopyOrLinkDragOperation(event.source_operations());
     }
   }
 
   return ui::DragDropTypes::DRAG_NONE;
-}
-
-void OmniboxViewWin::PasteAndGo(const string16& text) {
-  if (CanPasteAndGo(text))
-    model_->PasteAndGo();
 }
 
 bool OmniboxViewWin::SkipDefaultKeyEventProcessing(
@@ -1113,7 +1109,7 @@ bool OmniboxViewWin::IsCommandIdEnabled(int command_id) const {
     case IDC_CUT:          return !!CanCut();
     case IDC_COPY:         return !!CanCopy();
     case IDC_PASTE:        return !!CanPaste();
-    case IDS_PASTE_AND_GO: return CanPasteAndGo(GetClipboardText());
+    case IDS_PASTE_AND_GO: return model_->CanPasteAndGo(GetClipboardText());
     case IDS_SELECT_ALL:   return !!CanSelectAll();
     case IDS_EDIT_SEARCH_ENGINES:
       return command_updater_->IsCommandEnabled(IDC_EDIT_SEARCH_ENGINES);
@@ -1137,7 +1133,8 @@ bool OmniboxViewWin::IsItemForCommandIdDynamic(int command_id) const {
 
 string16 OmniboxViewWin::GetLabelForCommandId(int command_id) const {
   DCHECK_EQ(IDS_PASTE_AND_GO, command_id);
-  return l10n_util::GetStringUTF16(model_->is_paste_and_search() ?
+  return l10n_util::GetStringUTF16(
+      model_->IsPasteAndSearch(GetClipboardText()) ?
       IDS_PASTE_AND_SEARCH : IDS_PASTE_AND_GO);
 }
 
@@ -1146,7 +1143,7 @@ void OmniboxViewWin::ExecuteCommand(int command_id) {
   if (command_id == IDS_PASTE_AND_GO) {
     // This case is separate from the switch() below since we don't want to wrap
     // it in OnBefore/AfterPossibleChange() calls.
-    model_->PasteAndGo();
+    model_->PasteAndGo(GetClipboardText());
     return;
   }
 
@@ -2119,7 +2116,7 @@ bool OmniboxViewWin::OnKeyDownOnlyWritable(TCHAR key,
         model_->AcceptKeyword();
       } else if (shift_pressed &&
                  model_->popup_model()->selected_line_state() ==
-                    AutocompletePopupModel::KEYWORD) {
+                    OmniboxPopupModel::KEYWORD) {
         model_->ClearKeyword(GetText());
       } else {
         model_->OnUpOrDownKeyPressed(shift_pressed ? -count : count);
@@ -2383,7 +2380,7 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
   gfx::Canvas canvas(gfx::Size(scheme_rect.Width(), scheme_rect.Height()),
-                     false);
+                     ui::SCALE_FACTOR_100P, false);
   SkCanvas* sk_canvas = canvas.sk_canvas();
   sk_canvas->getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
@@ -2464,10 +2461,6 @@ void OmniboxViewWin::TextChanged() {
   model_->OnChanged();
 }
 
-bool OmniboxViewWin::CanPasteAndGo(const string16& text) const {
-  return !popup_window_mode_ && model_->CanPasteAndGo(text);
-}
-
 ITextDocument* OmniboxViewWin::GetTextObjectModel() const {
   if (!text_object_model_) {
     // This is lazily initialized, instead of being initialized in the
@@ -2524,7 +2517,8 @@ void OmniboxViewWin::StartDragIfNecessary(const CPoint& point) {
     SkBitmap favicon;
     if (is_all_selected)
       model_->GetDataForURLExport(&url, &title, &favicon);
-    button_drag_utils::SetURLAndDragImage(url, title, favicon, &data);
+    button_drag_utils::SetURLAndDragImage(url, title, favicon, &data,
+                                          native_view_host_->GetWidget());
     supported_modes |= DROPEFFECT_LINK;
     content::RecordAction(UserMetricsAction("Omnibox_DragURL"));
   } else {

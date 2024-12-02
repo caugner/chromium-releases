@@ -37,15 +37,14 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/syncable/syncable.h"
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,10 +55,10 @@ using browser_sync::SessionDataTypeController;
 using browser_sync::SessionModelAssociator;
 using browser_sync::SyncBackendHost;
 using content::BrowserThread;
-using sync_api::ChangeRecord;
+using syncer::ChangeRecord;
 using testing::_;
 using testing::Return;
-using browser_sync::TestIdFactory;
+using syncer::TestIdFactory;
 
 namespace browser_sync {
 
@@ -289,7 +288,7 @@ class CreateRootHelper {
  private:
   void CreateRootCallback(ProfileSyncServiceSessionTest* test) {
     success_ = ProfileSyncServiceTestHelper::CreateRoot(
-        syncable::SESSIONS, test->sync_service()->GetUserShare(), test->ids());
+        syncer::SESSIONS, test->sync_service()->GetUserShare(), test->ids());
   }
 
   base::Closure callback_;
@@ -308,13 +307,13 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_TRUE(has_nodes);
   std::string machine_tag = model_associator_->GetCurrentMachineTag();
   int64 sync_id = model_associator_->GetSyncIdFromSessionTag(machine_tag);
-  ASSERT_NE(sync_api::kInvalidId, sync_id);
+  ASSERT_NE(syncer::kInvalidId, sync_id);
 
   // Check that we can get the correct session specifics back from the node.
-  sync_api::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-  sync_api::ReadNode node(&trans);
-  ASSERT_EQ(sync_api::BaseNode::INIT_OK,
-            node.InitByClientTagLookup(syncable::SESSIONS, machine_tag));
+  syncer::ReadTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+  syncer::ReadNode node(&trans);
+  ASSERT_EQ(syncer::BaseNode::INIT_OK,
+            node.InitByClientTagLookup(syncer::SESSIONS, machine_tag));
   const sync_pb::SessionSpecifics& specifics(node.GetSessionSpecifics());
   ASSERT_EQ(machine_tag, specifics.session_tag());
   ASSERT_TRUE(specifics.has_header());
@@ -345,7 +344,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_WriteFilledSessionToNode) {
   ASSERT_TRUE(has_nodes);
   std::string machine_tag = model_associator_->GetCurrentMachineTag();
   int64 sync_id = model_associator_->GetSyncIdFromSessionTag(machine_tag);
-  ASSERT_NE(sync_api::kInvalidId, sync_id);
+  ASSERT_NE(syncer::kInvalidId, sync_id);
 
   // Check that this machine's data is not included in the foreign windows.
   std::vector<const SyncedSession*> foreign_sessions;
@@ -649,7 +648,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
       model_associator_->GetCurrentMachineTag());
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
         &trans,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
@@ -668,7 +667,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
       model_associator_->GetCurrentMachineTag());
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
         &trans,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
@@ -689,7 +688,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
   deleted_specifics.mutable_session()->set_session_tag("tag");
   ASSERT_FALSE(notified_of_update_);
   {
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
         &trans,
         ProfileSyncServiceTestHelper::MakeSingletonDeletionChangeRecordList(
@@ -979,7 +978,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_ExistingTabs) {
 
   std::string machine_tag = model_associator_->GetCurrentMachineTag();
   int64 sync_id = model_associator_->GetSyncIdFromSessionTag(machine_tag);
-  ASSERT_NE(sync_api::kInvalidId, sync_id);
+  ASSERT_NE(syncer::kInvalidId, sync_id);
 
   // Check that this machine's data is not included in the foreign windows.
   std::vector<const SyncedSession*> foreign_sessions;
@@ -1014,20 +1013,20 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingHeaderAndTab) {
   NavigateAndCommitActiveTab(GURL("http://bar2"));
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
-  SyncError error;
+  syncer::SyncError error;
   std::string local_tag = model_associator_->GetCurrentMachineTag();
 
   error = model_associator_->DisassociateModels();
   ASSERT_FALSE(error.IsSet());
   {
     // Create a sync node with the local tag but neither header nor tab field.
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode root(&trans);
-    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
-    sync_api::WriteNode extra_header(&trans);
-    sync_api::WriteNode::InitUniqueByCreationResult result =
-        extra_header.InitUniqueByCreation(syncable::SESSIONS, root, "new_tag");
-    ASSERT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode root(&trans);
+    root.InitByTagLookup(syncer::ModelTypeToRootTag(syncer::SESSIONS));
+    syncer::WriteNode extra_header(&trans);
+    syncer::WriteNode::InitUniqueByCreationResult result =
+        extra_header.InitUniqueByCreation(syncer::SESSIONS, root, "new_tag");
+    ASSERT_EQ(syncer::WriteNode::INIT_SUCCESS, result);
     sync_pb::SessionSpecifics specifics;
     specifics.set_session_tag(local_tag);
     extra_header.SetSessionSpecifics(specifics);
@@ -1045,21 +1044,21 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MultipleHeaders) {
   NavigateAndCommitActiveTab(GURL("http://bar2"));
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
-  SyncError error;
+  syncer::SyncError error;
   std::string local_tag = model_associator_->GetCurrentMachineTag();
 
   error = model_associator_->DisassociateModels();
   ASSERT_FALSE(error.IsSet());
   {
     // Create another sync node with a header field and the local tag.
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode root(&trans);
-    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
-    sync_api::WriteNode extra_header(&trans);
-    sync_api::WriteNode::InitUniqueByCreationResult result =
-        extra_header.InitUniqueByCreation(syncable::SESSIONS,
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode root(&trans);
+    root.InitByTagLookup(syncer::ModelTypeToRootTag(syncer::SESSIONS));
+    syncer::WriteNode extra_header(&trans);
+    syncer::WriteNode::InitUniqueByCreationResult result =
+        extra_header.InitUniqueByCreation(syncer::SESSIONS,
                                           root, local_tag + "_");
-    ASSERT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
+    ASSERT_EQ(syncer::WriteNode::INIT_SUCCESS, result);
     sync_pb::SessionSpecifics specifics;
     specifics.set_session_tag(local_tag);
     specifics.mutable_header();
@@ -1077,7 +1076,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedForeign) {
   NavigateAndCommitActiveTab(GURL("http://bar2"));
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
-  SyncError error;
+  syncer::SyncError error;
 
   error = model_associator_->DisassociateModels();
   ASSERT_FALSE(error.IsSet());
@@ -1085,14 +1084,14 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedForeign) {
     // Create another sync node with neither header nor tab field and a foreign
     // tag.
     std::string foreign_tag = "foreign_tag";
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode root(&trans);
-    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
-    sync_api::WriteNode extra_header(&trans);
-    sync_api::WriteNode::InitUniqueByCreationResult result =
-        extra_header.InitUniqueByCreation(syncable::SESSIONS,
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode root(&trans);
+    root.InitByTagLookup(syncer::ModelTypeToRootTag(syncer::SESSIONS));
+    syncer::WriteNode extra_header(&trans);
+    syncer::WriteNode::InitUniqueByCreationResult result =
+        extra_header.InitUniqueByCreation(syncer::SESSIONS,
                                           root, foreign_tag);
-    ASSERT_EQ(sync_api::WriteNode::INIT_SUCCESS, result);
+    ASSERT_EQ(syncer::WriteNode::INIT_SUCCESS, result);
     sync_pb::SessionSpecifics specifics;
     specifics.set_session_tag(foreign_tag);
     extra_header.SetSessionSpecifics(specifics);
@@ -1110,7 +1109,7 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingLocalTabNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   std::string local_tag = model_associator_->GetCurrentMachineTag();
-  SyncError error;
+  syncer::SyncError error;
 
   error = model_associator_->DisassociateModels();
   ASSERT_FALSE(error.IsSet());
@@ -1118,11 +1117,11 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_MissingLocalTabNode) {
     // Delete the first sync tab node.
     std::string tab_tag = SessionModelAssociator::TabIdToTag(local_tag, 0);
 
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::ReadNode root(&trans);
-    root.InitByTagLookup(syncable::ModelTypeToRootTag(syncable::SESSIONS));
-    sync_api::WriteNode tab_node(&trans);
-    ASSERT_TRUE(tab_node.InitByClientTagLookup(syncable::SESSIONS, tab_tag));
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::ReadNode root(&trans);
+    root.InitByTagLookup(syncer::ModelTypeToRootTag(syncer::SESSIONS));
+    syncer::WriteNode tab_node(&trans);
+    ASSERT_TRUE(tab_node.InitByClientTagLookup(syncer::SESSIONS, tab_tag));
     tab_node.Remove();
   }
   error = model_associator_->AssociateModels();
@@ -1183,16 +1182,16 @@ TEST_F(ProfileSyncServiceSessionTest, DISABLED_CorruptedLocalHeader) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   std::string local_tag = model_associator_->GetCurrentMachineTag();
-  SyncError error;
+  syncer::SyncError error;
 
   error = model_associator_->DisassociateModels();
   ASSERT_FALSE(error.IsSet());
   {
     // Load the header node and clear it.
-    sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
-    sync_api::WriteNode header(&trans);
-    ASSERT_EQ(sync_api::BaseNode::INIT_OK,
-              header.InitByClientTagLookup(syncable::SESSIONS, local_tag));
+    syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
+    syncer::WriteNode header(&trans);
+    ASSERT_EQ(syncer::BaseNode::INIT_OK,
+              header.InitByClientTagLookup(syncer::SESSIONS, local_tag));
     sync_pb::SessionSpecifics specifics;
     header.SetSessionSpecifics(specifics);
   }

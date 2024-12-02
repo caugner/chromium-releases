@@ -12,6 +12,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
@@ -79,15 +80,13 @@ bool ToplevelWindowEventFilter::PreHandleMouseEvent(aura::Window* target,
       if ((event->flags() &
            (ui::EF_IS_DOUBLE_CLICK | ui::EF_IS_TRIPLE_CLICK)) == 0 &&
           WindowResizer::GetBoundsChangeForWindowComponent(component)) {
-        gfx::Point parent_location(
+        gfx::Point location_in_parent(
             ConvertPointToParent(target, event->location()));
         window_resizer_.reset(
-            CreateWindowResizer(target, parent_location, component));
+            CreateWindowResizer(target, location_in_parent, component));
       } else {
         window_resizer_.reset();
       }
-      if (component == HTCAPTION && event->flags() & ui::EF_IS_DOUBLE_CLICK)
-        ToggleMaximizedState(target);
       return WindowResizer::GetBoundsChangeForWindowComponent(component) != 0;
     }
     case ui::ET_MOUSE_DRAGGED:
@@ -98,7 +97,7 @@ bool ToplevelWindowEventFilter::PreHandleMouseEvent(aura::Window* target,
                        DRAG_COMPLETE : DRAG_REVERT,
                    event->flags());
       if (in_move_loop_) {
-        MessageLoop::current()->Quit();
+        quit_closure_.Run();
         in_move_loop_ = false;
       }
       // Completing the drag may result in hiding the window. If this happens
@@ -137,10 +136,10 @@ ui::GestureStatus ToplevelWindowEventFilter::PreHandleGestureEvent(
         return ui::GESTURE_STATUS_UNKNOWN;
       }
       in_gesture_resize_ = true;
-      gfx::Point parent_location(
+      gfx::Point location_in_parent(
           ConvertPointToParent(target, event->location()));
       window_resizer_.reset(
-          CreateWindowResizer(target, parent_location, component));
+          CreateWindowResizer(target, location_in_parent, component));
       break;
     }
     case ui::ET_GESTURE_SCROLL_UPDATE: {
@@ -154,7 +153,7 @@ ui::GestureStatus ToplevelWindowEventFilter::PreHandleGestureEvent(
         return ui::GESTURE_STATUS_UNKNOWN;
       CompleteDrag(DRAG_COMPLETE, event->flags());
       if (in_move_loop_) {
-        MessageLoop::current()->Quit();
+        quit_closure_.Run();
         in_move_loop_ = false;
       }
       in_gesture_resize_ = false;
@@ -210,7 +209,7 @@ void ToplevelWindowEventFilter::RunMoveLoop(aura::Window* source) {
         GetLastTouchPointForTarget(source, &drag_location);
     DCHECK(has_point);
   } else {
-    drag_location = gfx::Screen::GetCursorScreenPoint();
+    drag_location = root_window->GetLastMouseLocationInRoot();
     aura::Window::ConvertPointToWindow(
         root_window, source->parent(), &drag_location);
   }
@@ -220,7 +219,9 @@ void ToplevelWindowEventFilter::RunMoveLoop(aura::Window* source) {
 #if !defined(OS_MACOSX)
   MessageLoopForUI* loop = MessageLoopForUI::current();
   MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
-  loop->RunWithDispatcher(aura::Env::GetInstance()->GetDispatcher());
+  base::RunLoop run_loop(aura::Env::GetInstance()->GetDispatcher());
+  quit_closure_ = run_loop.QuitClosure();
+  run_loop.Run();
 #endif  // !defined(OS_MACOSX)
   in_gesture_resize_ = in_move_loop_ = false;
 }
@@ -234,17 +235,18 @@ void ToplevelWindowEventFilter::EndMoveLoop() {
     window_resizer_->RevertDrag();
     window_resizer_.reset();
   }
-  MessageLoopForUI::current()->Quit();
+  quit_closure_.Run();
 }
 
 // static
 WindowResizer* ToplevelWindowEventFilter::CreateWindowResizer(
     aura::Window* window,
-    const gfx::Point& point,
+    const gfx::Point& point_in_parent,
     int window_component) {
   if (!wm::IsWindowNormal(window))
     return NULL;  // Don't allow resizing/dragging maximized/fullscreen windows.
-  return DefaultWindowResizer::Create(window, point, window_component);
+  return DefaultWindowResizer::Create(
+      window, point_in_parent, window_component);
 }
 
 void ToplevelWindowEventFilter::CompleteDrag(DragCompletionStatus status,

@@ -29,6 +29,7 @@
 
 using std::string;
 
+namespace syncer {
 namespace syncable {
 
 // This just has to be big enough to hold an UPDATE or INSERT statement that
@@ -50,7 +51,7 @@ void BindFields(const EntryKernel& entry,
   }
   for ( ; i < TIME_FIELDS_END; ++i) {
     statement->BindInt64(index++,
-                         browser_sync::TimeToProtoTime(
+                         TimeToProtoTime(
                              entry.ref(static_cast<TimeField>(i))));
   }
   for ( ; i < ID_FIELDS_END; ++i) {
@@ -80,7 +81,7 @@ EntryKernel* UnpackEntry(sql::Statement* statement) {
   }
   for ( ; i < TIME_FIELDS_END; ++i) {
     kernel->put(static_cast<TimeField>(i),
-                browser_sync::ProtoTimeToTime(statement->ColumnInt64(i)));
+                ProtoTimeToTime(statement->ColumnInt64(i)));
   }
   for ( ; i < ID_FIELDS_END; ++i) {
     kernel->mutable_ref(static_cast<IdField>(i)).s_ =
@@ -543,14 +544,14 @@ ModelType DirectoryBackingStore::ModelIdToModelTypeEnum(
     const void* data, int size) {
   sync_pb::EntitySpecifics specifics;
   if (!specifics.ParseFromArray(data, size))
-    return syncable::UNSPECIFIED;
-  return syncable::GetModelTypeFromSpecifics(specifics);
+    return UNSPECIFIED;
+  return GetModelTypeFromSpecifics(specifics);
 }
 
 // static
 string DirectoryBackingStore::ModelTypeEnumToModelId(ModelType model_type) {
   sync_pb::EntitySpecifics specifics;
-  syncable::AddDefaultFieldValue(model_type, &specifics);
+  AddDefaultFieldValue(model_type, &specifics);
   return specifics.SerializeAsString();
 }
 
@@ -996,7 +997,7 @@ bool DirectoryBackingStore::CreateTables() {
 
   {
     // Insert the entry for the root into the metas table.
-    const int64 now = browser_sync::TimeToProtoTime(base::Time::Now());
+    const int64 now = TimeToProtoTime(base::Time::Now());
     sql::Statement s(db_->GetUniqueStatement(
             "INSERT INTO metas "
             "( id, metahandle, is_dir, ctime, mtime) "
@@ -1083,3 +1084,4 @@ bool DirectoryBackingStore::CreateShareInfoTableVersion71(
 }
 
 }  // namespace syncable
+}  // namespace syncer

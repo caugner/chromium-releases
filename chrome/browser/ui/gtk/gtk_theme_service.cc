@@ -31,9 +31,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -114,6 +112,7 @@ const int kAutocompleteImages[] = {
   IDR_OMNIBOX_TTS_DARK,
   IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON,
   IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON,
+  IDR_REGISTER_PROTOCOL_HANDLER_LOCATIONBAR_ICON,
 };
 
 bool IsOverridableImage(int id) {
@@ -617,11 +616,17 @@ bool GtkThemeService::DefaultUsesSystemTheme() {
 
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
     case base::nix::DESKTOP_ENVIRONMENT_XFCE:
       return true;
-    default:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+    case base::nix::DESKTOP_ENVIRONMENT_OTHER:
       return false;
   }
+  // Unless GetDesktopEnvironment() badly misbehaves, this should never happen.
+  NOTREACHED();
+  return false;
 }
 
 void GtkThemeService::ClearAllThemeData() {
@@ -978,7 +983,8 @@ SkBitmap GtkThemeService::GenerateGtkThemeBitmap(int id) const {
     case IDR_OMNIBOX_STAR:
     case IDR_OMNIBOX_TTS:
     case IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON:
-    case IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON: {
+    case IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON:
+    case IDR_REGISTER_PROTOCOL_HANDLER_LOCATIONBAR_ICON: {
       return GenerateTintedIcon(id, entry_tint_);
     }
     // In GTK mode, the dark versions of the omnibox icons only ever appear in
@@ -1008,7 +1014,8 @@ SkBitmap GtkThemeService::GenerateFrameImage(
   DCHECK(it != colors_.end());
   SkColor base = it->second;
 
-  gfx::Canvas canvas(gfx::Size(kToolbarImageWidth, kToolbarImageHeight), true);
+  gfx::Canvas canvas(gfx::Size(kToolbarImageWidth, kToolbarImageHeight),
+      ui::SCALE_FACTOR_100P, true);
 
   int gradient_size;
   GdkColor* gradient_top_color = NULL;
@@ -1035,7 +1042,7 @@ SkBitmap GtkThemeService::GenerateFrameImage(
 
   canvas.FillRect(gfx::Rect(0, gradient_size, kToolbarImageWidth,
                             kToolbarImageHeight - gradient_size), base);
-  return canvas.ExtractBitmap();
+  return canvas.ExtractImageRep().sk_bitmap();
 }
 
 SkBitmap GtkThemeService::GenerateTabImage(int base_id) const {

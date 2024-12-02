@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_HISTOGRAMS_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_HISTOGRAMS_H_
-#pragma once
 
 #include <string>
 
@@ -79,6 +78,10 @@ class PrerenderHistograms {
 
   // To be called when a new prerender is started.
   void RecordPrerenderStarted(Origin origin) const;
+
+  // To be called when we know how many prerenders are running after starting
+  // a prerender.
+  void RecordConcurrency(size_t prerender_count) const;
 
   // Called when we swap in a prerender.
   void RecordUsedPrerender(Origin origin) const;

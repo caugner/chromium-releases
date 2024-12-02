@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
@@ -51,10 +52,9 @@ TEST_F(PinnedTabServiceTest, Popup) {
   browser()->tab_strip_model()->SetTabPinned(0, true);
 
   // Create a popup.
-  scoped_ptr<Browser> popup(new Browser(Browser::TYPE_POPUP, profile()));
-  scoped_ptr<TestBrowserWindow> popup_window(
-      new TestBrowserWindow(popup.get()));
-  popup->SetWindowForTesting(popup_window.get());
+  Browser::CreateParams params(Browser::TYPE_POPUP, profile());
+  scoped_ptr<Browser> popup(
+      chrome::CreateBrowserWithTestWindowForParams(&params));
 
   // Close the browser. This should trigger saving the tabs. No need to destroy
   // the browser (this happens automatically in the test destructor).
@@ -65,9 +65,8 @@ TEST_F(PinnedTabServiceTest, Popup) {
   EXPECT_EQ("http://www.google.com/::pinned:", result);
 
   // Close the popup. This shouldn't reset the saved state.
-  popup->CloseAllTabs();
+  chrome::CloseAllTabs(popup.get());
   popup.reset(NULL);
-  popup_window.reset(NULL);
 
   // Check the state to make sure it hasn't changed.
   result = PinnedTabTestUtils::TabsToString(

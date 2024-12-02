@@ -33,7 +33,7 @@ class InfobarTest(pyauto.PyUITest):
   def setUp(self):
     pyauto.PyUITest.setUp(self)
     self._flash_plugin_type = 'Plug-in'
-    if (self.IsLinux() and
+    if ((self.IsLinux() or self.IsWin()) and
         self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome'):
       self._flash_plugin_type = 'Pepper Plugin'
     # Forcibly trigger all plugins to get registered.  crbug.com/94123
@@ -51,7 +51,7 @@ class InfobarTest(pyauto.PyUITest):
 
   def testPluginCrashInfobar(self):
     """Verify the "plugin crashed" infobar."""
-    flash_url = self.GetFileURLForDataPath('plugin', 'flash.swf')
+    flash_url = self.GetFileURLForContentDataPath('plugin', 'flash.swf')
     # Trigger flash plugin
     self.NavigateToURL(flash_url)
     child_processes = self.GetBrowserInfo()['child_processes']
@@ -144,14 +144,25 @@ class InfobarTest(pyauto.PyUITest):
     for zip_file in zip_files:
       test_utils.RemoveDownloadedTestFile(self, zip_file)
 
+  def _GetFlashCrashInfobarCount(self, windex=0, tab_index=0):
+    """Returns the count of 'Shockwave Flash has crashed' infobars."""
+    browser_window = self.GetBrowserInfo()['windows'][windex]
+    infobars = browser_window['tabs'][tab_index]['infobars']
+    flash_crash_infobar_count = 0
+    for infobar in infobars:
+      if (('text' in infobar) and
+          infobar['text'].startswith('Shockwave Flash has crashed')):
+        flash_crash_infobar_count += 1
+    return flash_crash_infobar_count
+
   def testPluginCrashForMultiTabs(self):
     """Verify plugin crash infobar shows up only on the tabs using plugin."""
     non_flash_url = self.GetFileURLForDataPath('english_page.html')
-    flash_url = self.GetFileURLForDataPath('plugin', 'FlashSpin.swf')
+    flash_url = self.GetFileURLForContentDataPath('plugin', 'FlashSpin.swf')
     # False = Non flash url, True = Flash url
     # We have set of these values to compare a flash page and a non-flash page
     urls_type = [False, True, False, True, False]
-    for count in range(2):
+    for _ in range(2):
       self.AppendTab(pyauto.GURL(flash_url))
       self.AppendTab(pyauto.GURL(non_flash_url))
     # Killing flash process
@@ -169,13 +180,12 @@ class InfobarTest(pyauto.PyUITest):
       # it should not have infobar popped-up
       self.ActivateTab(i)
       if not urls_type[i]:
-        info = self.GetBrowserInfo()
-        self.assertFalse(
-            info['windows'][0]['tabs'][i]['infobars'],
+        self.assertEqual(
+            self._GetFlashCrashInfobarCount(0, i), 0,
             msg='Did not expect crash infobar in tab at index %d' % i)
       elif urls_type[i]:
-        self.assertTrue(
-            self.WaitForInfobarCount(1, windex=0, tab_index=i),
+        self.assertEqual(
+            self._GetFlashCrashInfobarCount(0, i), 1,
             msg='Expected crash infobar in tab at index %d' % i)
         infobar = self.GetBrowserInfo()['windows'][0]['tabs'][i]['infobars']
         self.assertEqual(infobar[0]['type'], 'confirm_infobar')
@@ -289,20 +299,10 @@ class OneClickInfobarTest(pyauto.PyUITest):
     test_utils.WaitForInfobarTypeAndGetIndex(self, self.OC_INFOBAR_TYPE)
     test_utils.AssertInfobarTypeDoesNotAppear(self, self.PW_INFOBAR_TYPE)
 
-  def _IsNumProfiles(self, expected_number):
-    """Returns True if |expected_number| is equal to the number of profiles."""
-    # TODO(dyu): Remove when crbug.com/108761 is fixed.
-    multi_profile = self.GetMultiProfileInfo()
-    return expected_number == len(multi_profile['profiles'])
-
   def _OpenSecondProfile(self):
     """Create a second profile."""
     self.OpenNewBrowserWindowWithNewProfile()
-    # Wait until the profile has been created.
-    # TODO(dyu): Remove when crbug.com/108761 is fixed.
-    # Verify 2 profiles exist.
-    self.assertTrue(
-        self.WaitUntil(self._IsNumProfiles, args=[2]),
+    self.assertEqual(2, len(self.GetMultiProfileInfo()['profiles']),
         msg='The second profile was not created.')
 
   def testDisplayOneClickInfobarPerProfile(self):

@@ -8,10 +8,11 @@
 #include <iterator>
 
 #include "base/logging.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/syncable/syncable.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/syncable/directory.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
 namespace {
@@ -45,6 +46,23 @@ std::set<ModelSafeGroup> ComputeEnabledGroups(
     }
   }
   return enabled_groups;
+}
+
+void PurgeStalePayload(ModelTypePayloadMap* original,
+                       const ModelSafeRoutingInfo& routing_info) {
+  std::vector<ModelTypePayloadMap::iterator> iterators_to_delete;
+  for (ModelTypePayloadMap::iterator i = original->begin();
+       i != original->end(); ++i) {
+    if (routing_info.end() == routing_info.find(i->first)) {
+      iterators_to_delete.push_back(i);
+    }
+  }
+
+  for (std::vector<ModelTypePayloadMap::iterator>::iterator
+       it = iterators_to_delete.begin(); it != iterators_to_delete.end();
+       ++it) {
+    original->erase(*it);
+  }
 }
 
 }  // namesepace
@@ -138,11 +156,10 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
   syncable::Directory* dir = context_->directory();
 
   bool is_share_useable = true;
-  syncable::ModelTypeSet initial_sync_ended;
-  syncable::ModelTypePayloadMap download_progress_markers;
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT; ++i) {
-    syncable::ModelType type(syncable::ModelTypeFromInt(i));
+  ModelTypeSet initial_sync_ended;
+  ModelTypePayloadMap download_progress_markers;
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    ModelType type(ModelTypeFromInt(i));
     if (routing_info_.count(type) != 0) {
       if (dir->initial_sync_ended_for_type(type))
         initial_sync_ended.Put(type);
@@ -153,9 +170,7 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
   }
 
   return SyncSessionSnapshot(
-      status_controller_->syncer_status(),
-      status_controller_->error(),
-      status_controller_->num_server_changes_remaining(),
+      status_controller_->model_neutral_state(),
       is_share_useable,
       initial_sync_ended,
       download_progress_markers,
@@ -226,33 +241,33 @@ std::set<ModelSafeGroup>
 namespace {
 // Return true if the command in question was attempted and did not complete
 // successfully.
-//
 bool IsError(SyncerError error) {
   return error != UNSET && error != SYNCER_OK;
 }
 
 // Returns false iff one of the command results had an error.
-bool HadErrors(const ErrorCounters& error) {
+bool HadErrors(const ModelNeutralState& state) {
+  const bool get_key_error = IsError(state.last_get_key_result);
   const bool download_updates_error =
-      IsError(error.last_download_updates_result);
-  const bool commit_error = IsError(error.commit_result);
-  return download_updates_error || commit_error;
+      IsError(state.last_download_updates_result);
+  const bool commit_error = IsError(state.commit_result);
+  return get_key_error || download_updates_error || commit_error;
 }
 }  // namespace
 
 bool SyncSession::Succeeded() const {
-  const ErrorCounters& error = status_controller_->error();
-  return finished_ && !HadErrors(error);
+  return finished_ && !HadErrors(status_controller_->model_neutral_state());
 }
 
 bool SyncSession::SuccessfullyReachedServer() const {
-  const ErrorCounters& error = status_controller_->error();
-  bool reached_server = error.last_download_updates_result == SYNCER_OK;
+  const ModelNeutralState& state = status_controller_->model_neutral_state();
+  bool reached_server = state.last_get_key_result == SYNCER_OK ||
+                        state.last_download_updates_result == SYNCER_OK;
   // It's possible that we reached the server on one attempt, then had an error
   // on the next (or didn't perform some of the server-communicating commands).
   // We want to verify that, for all commands attempted, we successfully spoke
   // with the server. Therefore, we verify no errors and at least one SYNCER_OK.
-  return reached_server && !HadErrors(error);
+  return reached_server && !HadErrors(state);
 }
 
 void SyncSession::SetFinished() {
@@ -260,4 +275,4 @@ void SyncSession::SetFinished() {
 }
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer

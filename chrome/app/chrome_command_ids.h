@@ -4,7 +4,6 @@
 
 #ifndef CHROME_APP_CHROME_COMMAND_IDS_H_
 #define CHROME_APP_CHROME_COMMAND_IDS_H_
-#pragma once
 
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
@@ -32,6 +31,8 @@
 #define IDC_OPEN_CURRENT_URL            33004
 #define IDC_STOP                        33006
 #define IDC_RELOAD_IGNORING_CACHE       33007
+#define IDC_LOAD_NEW_TAB_PAGE           33008
+#define IDC_RELOAD_CLEARING_CACHE       33009
 
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
@@ -76,6 +77,7 @@
 #define IDC_EMAIL_PAGE_LOCATION         35006
 #define IDC_ADVANCED_PRINT              35007
 #define IDC_CHROME_TO_MOBILE_PAGE       35008
+#define IDC_PRINT_TO_DESTINATION        35009
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -122,7 +124,6 @@
 // Clipboard commands
 #define IDC_CUT                         36000
 #define IDC_COPY                        36001
-#define IDC_COPY_URL                    36002
 #define IDC_PASTE                       36003
 #define IDC_EDIT_MENU                   36004
 
@@ -315,6 +316,7 @@
 #define IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY 51300
 #define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_FIRST 51301
 #define IDC_MEDIA_CONTEXT_MEDIA_STREAM_CAPTURE_LIST_LAST 51399
+#define IDC_MEDIA_STREAM_DEVICE_ALWAYS_ALLOW 51400
 
 // Protocol handler menu entries
 #define IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST     52000

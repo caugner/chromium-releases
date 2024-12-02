@@ -55,14 +55,35 @@
 <pre>script-src 'self'; object-src 'self'</pre>
 
 <p>
-  This policy adds security by limiting extensions and applications in two ways:
+  This policy adds security by limiting extensions and applications in three 
+  ways:
 </p>
+
+<h3 id="JSEval">Eval and related functions are disabled</h3>
+
+<p>Code like the following does not work:</p>
+
+<pre>
+alert(eval("foo.bar.baz"));
+window.setTimeout("alert('hi')", 10);
+window.setInteral("alert('hi')", 10);
+new Function("return foo.bar.baz");
+</pre>
+
+<p>Evaluating strings of JavaScript like this is a common XSS attack vector.
+Instead, you should write code like:
+
+<pre>
+alert(foo && foo.bar && foo.bar.baz);
+window.setTimeout(function() { alert('hi'); }, 10);
+window.setInterval(function() { alert('hi'); }, 10);
+function() { return foo && foo.bar && foo.bar.baz };
+</pre>
 
 <h3 id="JSExecution">Inline JavaScript will not be executed</h3>
 
 <p>
-  Inline JavaScript, as well as dangerous string-to-JavaScript methods like
- <code>eval</code>, will not be executed. This restriction bans both inline
+  Inline JavaScript will not be executed. This restriction bans both inline
  <code>&lt;script&gt;</code> blocks <strong>and</strong> inline event handlers
  (e.g. <code>&lt;button onclick="..."&gt;</code>).
 </p>
@@ -164,7 +185,6 @@ popup.html:
   &lt;head&gt;
     &lt;title&gt;My Awesome Popup!&lt;/title&gt;
     &lt;script <strong>src="popup.js"</strong>&gt;&lt;/script&gt;
-    &lt;/script&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;button&gt;Click for awesomeness!&lt;/button&gt;
@@ -172,7 +192,7 @@ popup.html:
 &lt;/html&gt;</pre>
 
 <p>
-  
+
 
 <h3 id="resourceLoading">Only local script and and object resources are loaded</h3>
 
@@ -194,7 +214,6 @@ popup.html:
   &lt;head&gt;
     &lt;title&gt;My Awesome Popup!&lt;/title&gt;
     &lt;script src="<strong>http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js</strong>"&gt;&lt;/script&gt;
-    &lt;/script&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;button&gt;Click for awesomeness!&lt;/button&gt;
@@ -210,7 +229,6 @@ popup.html:
   &lt;head&gt;
     &lt;title&gt;My Awesome Popup!&lt;/title&gt;
     &lt;script src="<strong>jquery.min.js</strong>"&gt;&lt;/script&gt;
-    &lt;/script&gt;
   &lt;/head&gt;
   &lt;body&gt;
     &lt;button&gt;Click for awesomeness!&lt;/button&gt;
@@ -219,23 +237,43 @@ popup.html:
 
 <h2 id="relaxing">Relaxing the default policy</h2>
 
+<h3 id="relaxing-inline-script">Inline Script</h3>
+
 <p>
   There is no mechanism for relaxing the restriction against executing inline
   JavaScript. In particular, setting a script policy that includes
-  <code>unsafe-inline</code> will have no effect. This is intentional.
+  <code>'unsafe-inline'</code> will have no effect.
+</p>
+
+<h3 id="relaxing-remote-script">Remote Script</h3>
+
+<p>
+  If you have a need for some external JavaScript or object
+  resources, you can relax the policy to a limited extent by whitelisting
+  secure origins from which scripts should be accepted. We want to ensure that
+  executable resources loaded with an extension's elevated permissions are
+  exactly the resources you expect, and haven't been replaced by an active
+  network attacker. As <a
+  href="http://en.wikipedia.org/wiki/Man-in-the-middle_attack">man-in-the-middle
+  attacks</a> are both trivial and undetectable over HTTP, those origins will
+  not be accepted. Currently, we allow whitelisting origins with the following
+  schemes: <code>HTTPS</code>, <code>chrome-extension</code>, and
+  <code>chrome-extension-resource</code>.
 </p>
 
 <p>
-  If, on the other hand, you have a need for some external JavaScript or object
-  resources, you can relax the policy to a limited extent by whitelisting
-  specific HTTPS origins from which scripts should be accepted. Whitelisting
-  insecure HTTP resources will have no effect. This is intentional, because
-  we want to ensure that executable resources loaded with an extension's
-  elevated permissions is exactly the resource you expect, and hasn't been
-  replaced by an active network attacker. As <a
-  href="http://en.wikipedia.org/wiki/Man-in-the-middle_attack">man-in-the-middle
-  attacks</a> are both trivial and undetectable over HTTP, only HTTPS origins
-  will be accepted.
+  To ease development, we're also allowing the whitelisting of resources loaded
+  over HTTP from servers on your local machine. You may whitelist script and
+  object sources on any port of either <code>http://127.0.0.1</code> or
+  <code>http://localhost</code>.
+</p>
+
+<p class="note">
+  The restriction against resources loaded over HTTP applies only to those
+  resources which are directly executed. You're still free, for example, to
+  make XMLHTTPRequest connections to any origin you like; the default policy
+  doesn't restrict <code>connect-src</code> or any of the other CSP directives
+  in any way.
 </p>
 
 <p>
@@ -243,11 +281,7 @@ popup.html:
   <code>example.com</code> over HTTPS might look like:
 </p>
 
-<pre>{
-  ...,
-  "content_security_policy": "script-src 'self' https://example.com; object-src 'self'",
-  ...
-}</pre>
+<pre>"content_security_policy": "script-src 'self' https://example.com; object-src 'self'"</pre>
 
 <p class="note">
   Note that both <code>script-src</code> and <code>object-src</code> are defined
@@ -261,6 +295,22 @@ popup.html:
   boilerplate of sorts in the <a href="samples.html#analytics">Event Tracking
   with Google Analytics</a> sample extension, and a
 <a href="tut_analytics.html">brief tutorial</a> that goes into more detail.
+</p>
+
+<h3 id="relaxing-eval">Evaluated JavaScript</h3>
+
+<p>
+  The policy against <code>eval()</code> and its relatives like
+  <code>setTimeout(String)</code>, <code>setInterval(String)</code>, and
+  <code>new Function(String)</code> can be relaxed by adding
+  <code>'unsafe-eval'</code> to your policy:
+</p>
+
+<pre>"content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'"</pre>
+
+<p>
+  However, we strongly recommend against doing this. These functions are
+  notorious XSS attack vectors.
 </p>
 
 <h2 id="tightening">Tightening the default policy</h2>

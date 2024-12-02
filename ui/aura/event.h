@@ -4,7 +4,6 @@
 
 #ifndef UI_AURA_EVENT_H_
 #define UI_AURA_EVENT_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -367,8 +366,7 @@ class AURA_EXPORT GestureEvent : public LocatedEvent,
                int y,
                int flags,
                base::Time time_stamp,
-               float delta_x,
-               float delta_y,
+               const ui::GestureEventDetails& details,
                unsigned int touch_ids_bitfield);
 
   // Create a new GestureEvent which is identical to the provided model.

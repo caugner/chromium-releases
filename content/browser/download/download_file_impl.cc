@@ -52,17 +52,19 @@ DownloadFileImpl::DownloadFileImpl(
           weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
           power_save_blocker_(power_save_blocker.Pass()) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(download_manager.get());
 }
 
 DownloadFileImpl::~DownloadFileImpl() {
 }
 
-// BaseFile delegated functions.
-net::Error DownloadFileImpl::Initialize() {
+content::DownloadInterruptReason DownloadFileImpl::Initialize() {
   update_timer_.reset(new base::RepeatingTimer<DownloadFileImpl>());
   net::Error result = file_.Initialize();
-  if (result != net::OK)
-    return result;
+  if (result != net::OK) {
+    return content::ConvertNetErrorToInterruptReason(
+        result, content::DOWNLOAD_INTERRUPT_FROM_DISK);
+  }
 
   stream_reader_->RegisterCallback(
       base::Bind(&DownloadFileImpl::StreamActive, weak_factory_.GetWeakPtr()));
@@ -71,21 +73,56 @@ net::Error DownloadFileImpl::Initialize() {
   // Initial pull from the straw.
   StreamActive();
 
-  return result;
+  return content::DOWNLOAD_INTERRUPT_REASON_NONE;
 }
 
-net::Error DownloadFileImpl::AppendDataToFile(const char* data,
-                                              size_t data_len) {
+content::DownloadInterruptReason DownloadFileImpl::AppendDataToFile(
+    const char* data, size_t data_len) {
   if (!update_timer_->IsRunning()) {
     update_timer_->Start(FROM_HERE,
                          base::TimeDelta::FromMilliseconds(kUpdatePeriodMs),
                          this, &DownloadFileImpl::SendUpdate);
   }
-  return file_.AppendDataToFile(data, data_len);
+  return content::ConvertNetErrorToInterruptReason(
+      file_.AppendDataToFile(data, data_len),
+      content::DOWNLOAD_INTERRUPT_FROM_DISK);
 }
 
-net::Error DownloadFileImpl::Rename(const FilePath& full_path) {
-  return file_.Rename(full_path);
+void DownloadFileImpl::Rename(const FilePath& full_path,
+                              bool overwrite_existing_file,
+                              const RenameCompletionCallback& callback) {
+  FilePath new_path(full_path);
+  if (!overwrite_existing_file) {
+    // Make the file unique if requested.
+    int uniquifier =
+        file_util::GetUniquePathNumber(new_path, FILE_PATH_LITERAL(""));
+    if (uniquifier > 0) {
+      new_path = new_path.InsertBeforeExtensionASCII(
+          StringPrintf(" (%d)", uniquifier));
+    }
+  }
+
+  net::Error rename_error = file_.Rename(new_path);
+  content::DownloadInterruptReason reason(
+      content::DOWNLOAD_INTERRUPT_REASON_NONE);
+  if (net::OK != rename_error) {
+    // Make sure our information is updated, since we're about to
+    // error out.
+    SendUpdate();
+
+    // Null out callback so that we don't do any more stream processing.
+    stream_reader_->RegisterCallback(base::Closure());
+
+    reason =
+        content::ConvertNetErrorToInterruptReason(
+            rename_error,
+            content::DOWNLOAD_INTERRUPT_FROM_DISK);
+    new_path.clear();
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(callback, reason, new_path));
 }
 
 void DownloadFileImpl::Detach() {
@@ -97,7 +134,9 @@ void DownloadFileImpl::Cancel() {
 }
 
 void DownloadFileImpl::AnnotateWithSourceInformation() {
+  bound_net_log_.BeginEvent(net::NetLog::TYPE_DOWNLOAD_FILE_ANNOTATED);
   file_.AnnotateWithSourceInformation();
+  bound_net_log_.EndEvent(net::NetLog::TYPE_DOWNLOAD_FILE_ANNOTATED);
 }
 
 FilePath DownloadFileImpl::FullPath() const {
@@ -172,7 +211,6 @@ void DownloadFileImpl::StreamActive() {
   do {
     state = stream_reader_->Read(&incoming_data, &incoming_data_size);
 
-    net::Error result = net::OK;
     switch (state) {
       case content::ByteStreamReader::STREAM_EMPTY:
         break;
@@ -180,12 +218,11 @@ void DownloadFileImpl::StreamActive() {
         {
           ++num_buffers;
           base::TimeTicks write_start(base::TimeTicks::Now());
-          result = AppendDataToFile(
+          reason = AppendDataToFile(
               incoming_data.get()->data(), incoming_data_size);
           disk_writes_time_ += (base::TimeTicks::Now() - write_start);
+          bytes_seen_ += incoming_data_size;
           total_incoming_data_size += incoming_data_size;
-          reason = content::ConvertNetErrorToInterruptReason(
-              result, content::DOWNLOAD_INTERRUPT_FROM_DISK);
         }
         break;
       case content::ByteStreamReader::STREAM_COMPLETE:
@@ -221,7 +258,6 @@ void DownloadFileImpl::StreamActive() {
 
   if (total_incoming_data_size)
     download_stats::RecordFileThreadReceiveBuffers(num_buffers);
-  bytes_seen_ += total_incoming_data_size;
 
   download_stats::RecordContiguousWriteTime(now - start);
 
@@ -232,27 +268,23 @@ void DownloadFileImpl::StreamActive() {
     // Our controller will clean us up.
     stream_reader_->RegisterCallback(base::Closure());
     weak_factory_.InvalidateWeakPtrs();
-    if (download_manager_.get()) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&DownloadManager::OnDownloadInterrupted,
-                     download_manager_, id_.local(),
-                     BytesSoFar(), GetHashState(), reason));
-    }
+    SendUpdate();                       // Make info up to date before error.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&DownloadManager::OnDownloadInterrupted,
+                   download_manager_, id_.local(), reason));
   } else if (state == content::ByteStreamReader::STREAM_COMPLETE) {
     // Signal successful completion and shut down processing.
     stream_reader_->RegisterCallback(base::Closure());
     weak_factory_.InvalidateWeakPtrs();
-    if (download_manager_.get()) {
-      std::string hash;
-      if (!GetHash(&hash) || file_.IsEmptyHash(hash))
-        hash.clear();
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&DownloadManager::OnResponseCompleted,
-                     download_manager_, id_.local(),
-                     BytesSoFar(), hash));
-    }
+    std::string hash;
+    if (!GetHash(&hash) || file_.IsEmptyHash(hash))
+      hash.clear();
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&DownloadManager::OnResponseCompleted,
+                   download_manager_, id_.local(),
+                   BytesSoFar(), hash));
   }
   if (bound_net_log_.IsLoggingAllEvents()) {
     bound_net_log_.AddEvent(
@@ -263,11 +295,9 @@ void DownloadFileImpl::StreamActive() {
 }
 
 void DownloadFileImpl::SendUpdate() {
-  if (download_manager_.get()) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&DownloadManager::UpdateDownload,
-                   download_manager_, id_.local(),
-                   BytesSoFar(), CurrentSpeed(), GetHashState()));
-  }
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&DownloadManager::UpdateDownload,
+                 download_manager_, id_.local(),
+                 BytesSoFar(), CurrentSpeed(), GetHashState()));
 }

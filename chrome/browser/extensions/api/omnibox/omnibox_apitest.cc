@@ -6,10 +6,9 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
+#include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -18,12 +17,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 
 #if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -59,7 +59,7 @@ class OmniboxApiTest : public ExtensionApiTest {
   // TODO(phajdan.jr): Get rid of this wait-in-a-loop pattern.
   void WaitForAutocompleteDone(AutocompleteController* controller) {
     while (!controller->done()) {
-      ui_test_utils::WindowedNotificationObserver ready_observer(
+      content::WindowedNotificationObserver ready_observer(
           chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
           content::Source<AutocompleteController>(controller));
       ready_observer.Wait();
@@ -194,7 +194,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, DISABLED_PopupStaysClosed) {
   OmniboxView* omnibox_view = location_bar->GetLocationEntry();
   AutocompleteController* autocomplete_controller =
       GetAutocompleteController(browser());
-  AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+  OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
 
   // Input a keyword query and wait for suggestions from the extension.
   omnibox_view->OnBeforePossibleChange();

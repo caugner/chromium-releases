@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_ANIMATION_BOUNDS_ANIMATOR_H_
 #define UI_VIEWS_ANIMATION_BOUNDS_ANIMATOR_H_
-#pragma once
 
 #include <map>
 
@@ -59,6 +58,10 @@ class VIEWS_EXPORT BoundsAnimator : public ui::AnimationDelegate,
   // target bounds. If |view| is not being animated this is the same as
   // invoking |AnimateViewTo|.
   void SetTargetBounds(View* view, const gfx::Rect& target);
+
+  // Returns the target bounds for the specified view. If |view| is not
+  // animating its current bounds is returned.
+  gfx::Rect GetTargetBounds(View* view);
 
   // Sets the animation for the specified view. BoundsAnimator takes ownership
   // of the specified animation.

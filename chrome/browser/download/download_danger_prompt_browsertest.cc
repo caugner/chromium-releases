@@ -6,6 +6,8 @@
 #include "base/file_path.h"
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -50,7 +52,7 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
   }
 
   void VerifyExpectations() {
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
     // At the end of each test, we expect no more activity from the prompt. The
     // prompt shouldn't exist anymore either.
     EXPECT_TRUE(did_receive_callback_);
@@ -82,12 +84,12 @@ class DownloadDangerPromptTest : public InProcessBrowserTest {
   void CreatePrompt() {
     prompt_ = DownloadDangerPrompt::Create(
         &download_,
-        browser()->GetActiveTabContents(),
+        chrome::GetActiveTabContents(browser()),
         base::Bind(&DownloadDangerPromptTest::PromptCallback, this,
                    DownloadDangerPrompt::ACCEPT),
         base::Bind(&DownloadDangerPromptTest::PromptCallback, this,
                    DownloadDangerPrompt::CANCEL));
-    ui_test_utils::RunAllPendingInMessageLoop();
+    content::RunAllPendingInMessageLoop();
   }
 
   void PromptCallback(DownloadDangerPrompt::Action action) {
@@ -136,6 +138,6 @@ IN_PROC_BROWSER_TEST_F(DownloadDangerPromptTest, TestAll) {
   // If the containing tab is closed, the dialog should be canceled.
   OpenNewTab();
   SetUpExpectations(DownloadDangerPrompt::CANCEL);
-  browser()->CloseTab();
+  chrome::CloseTab(browser());
   VerifyExpectations();
 }

@@ -11,13 +11,13 @@
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_item_view.h"
+#include "ash/system/tray/tray_notification_view.h"
 #include "ash/system/tray/tray_views.h"
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/image_view.h"
@@ -209,7 +209,7 @@ class TraySms::SmsDetailedView : public TrayDetailsView,
     const base::ListValue& messages = tray_->messages();
     scroll_content()->RemoveAllChildViews(true);
     for (size_t index = 0; index < messages.GetSize(); ++index) {
-      base::DictionaryValue* message = NULL;
+      const base::DictionaryValue* message = NULL;
       if (!messages.GetDictionary(index, &message)) {
         LOG(ERROR) << "SMS message not a dictionary at: " << index;
         continue;
@@ -243,11 +243,10 @@ class TraySms::SmsNotificationView : public TrayNotificationView {
                       size_t message_index,
                       const std::string& number,
                       const std::string& text)
-      : TrayNotificationView(IDR_AURA_UBER_TRAY_SMS),
-        tray_(tray),
+      : TrayNotificationView(tray, IDR_AURA_UBER_TRAY_SMS),
         message_index_(message_index) {
     SmsMessageView* message_view = new SmsMessageView(
-        tray_, SmsMessageView::VIEW_NOTIFICATION, message_index_, number, text);
+        tray, SmsMessageView::VIEW_NOTIFICATION, message_index_, number, text);
     InitView(message_view);
   }
 
@@ -255,24 +254,25 @@ class TraySms::SmsNotificationView : public TrayNotificationView {
               const std::string& number,
               const std::string& text) {
     SmsMessageView* message_view = new SmsMessageView(
-        tray_, SmsMessageView::VIEW_NOTIFICATION, message_index_, number, text);
+        tray_sms(), SmsMessageView::VIEW_NOTIFICATION,
+        message_index_, number, text);
     UpdateView(message_view);
-  }
-
-  // Overridden from views::View.
-  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
-    tray_->PopupDetailedView(0, true);
-    return true;
   }
 
   // Overridden from TrayNotificationView:
   virtual void OnClose() OVERRIDE {
-    tray_->RemoveMessage(message_index_);
-    tray_->HideNotificationView();
+    tray_sms()->RemoveMessage(message_index_);
+  }
+
+  virtual void OnClickAction() OVERRIDE {
+    tray()->PopupDetailedView(0, true);
   }
 
  private:
-  TraySms* tray_;
+  TraySms* tray_sms() {
+    return static_cast<TraySms*>(tray());
+  }
+
   size_t message_index_;
 
   DISALLOW_COPY_AND_ASSIGN(SmsNotificationView);

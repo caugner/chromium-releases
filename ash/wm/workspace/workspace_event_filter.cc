@@ -4,6 +4,7 @@
 
 #include "ash/wm/workspace/workspace_event_filter.h"
 
+#include "ash/screen_ash.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_frame.h"
 #include "ash/wm/window_util.h"
@@ -17,6 +18,7 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
 
+namespace ash {
 namespace {
 
 // Sends OnWindowHoveredChanged(|hovered|) to the WindowFrame for |window|,
@@ -24,28 +26,45 @@ namespace {
 void WindowHoverChanged(aura::Window* window, bool hovered) {
   if (!window)
     return;
-  ash::WindowFrame* window_frame = window->GetProperty(ash::kWindowFrameKey);
+  WindowFrame* window_frame = window->GetProperty(kWindowFrameKey);
   if (!window_frame)
     return;
   window_frame->OnWindowHoverChanged(hovered);
 }
 
 void SingleAxisMaximize(aura::Window* window, const gfx::Rect& maximize_rect) {
+  gfx::Rect bounds_in_screen =
+      ScreenAsh::ConvertRectToScreen(window->parent(), window->bounds());
+
   window->ClearProperty(aura::client::kRestoreBoundsKey);
   window->SetProperty(aura::client::kRestoreBoundsKey,
-                      new gfx::Rect(window->bounds()));
+                      new gfx::Rect(bounds_in_screen));
   window->SetBounds(maximize_rect);
 }
 
 void SingleAxisUnmaximize(aura::Window* window,
-                          const gfx::Rect& restore_bounds) {
+                          const gfx::Rect& restore_bounds_in_screen) {
+  gfx::Rect restore_bounds = ScreenAsh::ConvertRectFromScreen(
+      window->parent(), restore_bounds_in_screen);
   window->SetBounds(restore_bounds);
   window->ClearProperty(aura::client::kRestoreBoundsKey);
 }
 
+void ToggleMaximizedState(aura::Window* window) {
+  if (GetRestoreBoundsInScreen(window)) {
+    if (window->GetProperty(aura::client::kShowStateKey) ==
+        ui::SHOW_STATE_NORMAL) {
+      window->SetBounds(GetRestoreBoundsInParent(window));
+    } else {
+      window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+    }
+  } else {
+    window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  }
+}
+
 }  // namespace
 
-namespace ash {
 namespace internal {
 
 WorkspaceEventFilter::WorkspaceEventFilter(aura::Window* owner)
@@ -77,6 +96,10 @@ bool WorkspaceEventFilter::PreHandleMouseEvent(aura::Window* target,
       UpdateHoveredWindow(NULL);
       break;
     case ui::ET_MOUSE_PRESSED:
+      if (event->flags() & ui::EF_IS_DOUBLE_CLICK &&
+          target->delegate()->GetNonClientComponent(event->location()) ==
+          HTCAPTION)
+        ToggleMaximizedState(target);
       multi_window_resize_controller_.Hide();
       HandleVerticalResizeDoubleClick(target, event);
       break;
@@ -94,7 +117,7 @@ void WorkspaceEventFilter::OnWindowDestroyed(aura::Window* window) {
 
 WindowResizer* WorkspaceEventFilter::CreateWindowResizer(
     aura::Window* window,
-    const gfx::Point& point,
+    const gfx::Point& point_in_parent,
     int window_component) {
   // Allow dragging maximized windows if it's not tracked by workspace. This is
   // set by tab dragging code.
@@ -103,7 +126,7 @@ WindowResizer* WorkspaceEventFilter::CreateWindowResizer(
     return NULL;
   }
   return WorkspaceWindowResizer::Create(
-      window, point, window_component,
+      window, point_in_parent, window_component,
       std::vector<aura::Window*>());
 }
 

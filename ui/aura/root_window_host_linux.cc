@@ -13,11 +13,11 @@
 #include <X11/extensions/Xrandr.h>
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/message_pump_aurax11.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
-#include "grit/ui_resources_standard.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "grit/ui_resources.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/dispatcher_linux.h"
@@ -28,6 +28,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/touch/touch_factory.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/layer.h"
@@ -301,6 +302,11 @@ bool ShouldSendCharEventForKeyboardCode(ui::KeyboardCode keycode) {
   }
 }
 
+bool HasLoaded2xResources() {
+  return gfx::Display::GetForcedDeviceScaleFactor() > 1.0f ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoad2xResources);
+}
+
 }  // namespace
 
 // A utility class that provides X Cursor for NativeCursors for which we have
@@ -315,12 +321,13 @@ class RootWindowHostLinux::ImageCursors {
       return;
     scale_factor_ = scale_factor;
     UnloadAll();
-    // The cursor's hot points are defined in chromeos's
-    // src/platforms/assets/cursors/*.cfg files.
-    LoadImageCursor(ui::kCursorNull, IDR_AURA_CURSOR_PTR, 9, 5);
-    LoadImageCursor(ui::kCursorPointer, IDR_AURA_CURSOR_PTR, 9, 5);
-    LoadImageCursor(ui::kCursorNoDrop, IDR_AURA_CURSOR_NO_DROP, 9, 5);
-    LoadImageCursor(ui::kCursorCopy, IDR_AURA_CURSOR_COPY, 9, 5);
+    // The cursor's hot points are defined in chromeos cursor images at:
+    // http://folder/kuscher/projects/Chrome_OS/Pointers/focuspoint
+    LoadImageCursor(ui::kCursorNull, IDR_AURA_CURSOR_PTR, 8, 3);
+    LoadImageCursor(ui::kCursorPointer, IDR_AURA_CURSOR_PTR, 8, 3);
+    LoadImageCursor(ui::kCursorNoDrop, IDR_AURA_CURSOR_NO_DROP, 5, 4);
+    LoadImageCursor(ui::kCursorNotAllowed, IDR_AURA_CURSOR_NO_DROP, 5, 4);
+    LoadImageCursor(ui::kCursorCopy, IDR_AURA_CURSOR_COPY, 5, 5);
     LoadImageCursor(ui::kCursorHand, IDR_AURA_CURSOR_HAND, 9, 4);
     LoadImageCursor(ui::kCursorMove, IDR_AURA_CURSOR_MOVE, 12, 12);
     LoadImageCursor(ui::kCursorNorthEastResize,
@@ -400,18 +407,12 @@ class RootWindowHostLinux::ImageCursors {
   void LoadImageCursor(int id, int resource_id, int hot_x, int hot_y) {
     const gfx::ImageSkia* image =
         ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
-    float actual_scale = 0;
-    const SkBitmap& bitmap = image->GetBitmapForScale(scale_factor_,
-                                                      scale_factor_,
-                                                      &actual_scale);
-    // We never use scaled cursor, but the following DCHECK fails
-    // because the method above computes the actual scale from the image
-    // size instead of obtaining from the resource data, and the some
-    // of cursors are indeed not 2x size of the 2x images.
-    // TODO(oshima): Fix this and enable the following DCHECK.
-    // DCHECK_EQ(actual_scale, scale_factor_);
-    XcursorImage* x_image = ui::SkBitmapToXcursorImage(
-        &bitmap, gfx::Point(hot_x * actual_scale, hot_y * actual_scale));
+    const gfx::ImageSkiaRep& image_rep = image->GetRepresentation(
+        ui::GetScaleFactorFromScale(scale_factor_));
+    DCHECK(!HasLoaded2xResources() || scale_factor_ == image_rep.GetScale());
+    gfx::Point hot(hot_x * scale_factor_, hot_y * scale_factor_);
+    XcursorImage* x_image =
+        ui::SkBitmapToXcursorImage(&image_rep.sk_bitmap(), hot);
     cursors_[id] = ui::CreateReffedCustomXCursor(x_image);
     // |bitmap| is owned by the resource bundle. So we do not need to free it.
   }
@@ -422,10 +423,10 @@ class RootWindowHostLinux::ImageCursors {
   void LoadAnimatedCursor(int id, int resource_id, int hot_x, int hot_y) {
     const gfx::ImageSkia* image =
         ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
-    float actual_scale = 0;
-    const SkBitmap& bitmap = image->GetBitmapForScale(scale_factor_,
-                                                      scale_factor_,
-                                                      &actual_scale);
+    const gfx::ImageSkiaRep& image_rep = image->GetRepresentation(
+        ui::GetScaleFactorFromScale(scale_factor_));
+    DCHECK(!HasLoaded2xResources() || scale_factor_ == image_rep.GetScale());
+    const SkBitmap bitmap = image_rep.sk_bitmap();
     DCHECK_EQ(bitmap.config(), SkBitmap::kARGB_8888_Config);
     int frame_width = bitmap.height();
     int frame_height = frame_width;
@@ -446,8 +447,8 @@ class RootWindowHostLinux::ImageCursors {
                pixels + i * frame_width + j * total_width,
                frame_width * 4);
       }
-      x_image->xhot = hot_x * actual_scale;
-      x_image->yhot = hot_y * actual_scale;
+      x_image->xhot = hot_x * scale_factor_;
+      x_image->yhot = hot_y * scale_factor_;
       x_image->delay = kAnimatedCursorFrameDelayMs;
       x_images->images[i] = x_image;
     }
@@ -472,8 +473,9 @@ class RootWindowHostLinux::ImageCursors {
   DISALLOW_COPY_AND_ASSIGN(ImageCursors);
 };
 
-RootWindowHostLinux::RootWindowHostLinux(const gfx::Rect& bounds)
-    : root_window_(NULL),
+RootWindowHostLinux::RootWindowHostLinux(RootWindowHostDelegate* delegate,
+                                         const gfx::Rect& bounds)
+    : delegate_(delegate),
       xdisplay_(base::MessagePumpAuraX11::GetDefaultXDisplay()),
       xwindow_(0),
       x_root_window_(DefaultRootWindow(xdisplay_)),
@@ -580,23 +582,23 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
 
   switch (xev->type) {
     case Expose:
-      root_window_->ScheduleFullDraw();
+      delegate_->AsRootWindow()->ScheduleFullDraw();
       break;
     case KeyPress: {
       KeyEvent keydown_event(xev, false);
-      root_window_->DispatchKeyEvent(&keydown_event);
+      delegate_->OnHostKeyEvent(&keydown_event);
       break;
     }
     case KeyRelease: {
       KeyEvent keyup_event(xev, false);
-      root_window_->DispatchKeyEvent(&keyup_event);
+      delegate_->OnHostKeyEvent(&keyup_event);
       break;
     }
     case ButtonPress: {
       if (static_cast<int>(xev->xbutton.button) == kBackMouseButton ||
           static_cast<int>(xev->xbutton.button) == kForwardMouseButton) {
         client::UserActionClient* gesture_client =
-            client::GetUserActionClient(root_window_);
+            client::GetUserActionClient(delegate_->AsRootWindow());
         if (gesture_client) {
           gesture_client->OnUserAction(
               static_cast<int>(xev->xbutton.button) == kBackMouseButton ?
@@ -608,15 +610,12 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
     }  // fallthrough
     case ButtonRelease: {
       MouseEvent mouseev(xev);
-      root_window_->DispatchMouseEvent(&mouseev);
+      delegate_->OnHostMouseEvent(&mouseev);
       break;
     }
     case FocusOut:
-      if (xev->xfocus.mode != NotifyGrab) {
-        Window* capture_window = client::GetCaptureWindow(root_window_);
-        if (capture_window && capture_window->GetRootWindow() == root_window_)
-          capture_window->ReleaseCapture();
-      }
+      if (xev->xfocus.mode != NotifyGrab)
+        delegate_->OnHostLostCapture();
       break;
     case ConfigureNotify: {
       DCHECK_EQ(xwindow_, xev->xconfigure.window);
@@ -632,12 +631,12 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       // moved/resized.
       if (pointer_barriers_.get()) {
         UnConfineCursor();
-        gfx::Point p = root_window_->last_mouse_location();
+        gfx::Point p = gfx::Screen::GetCursorScreenPoint();
         XWarpPointer(xdisplay_, None,  xwindow_, 0, 0, 0, 0, p.x(), p.y());
         ConfineCursorToRootWindow();
       }
       if (size_changed)
-        root_window_->OnHostResized(bounds.size());
+        delegate_->OnHostResized(bounds.size());
       break;
     }
     case GenericEvent: {
@@ -654,7 +653,7 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
         case ui::ET_TOUCH_RELEASED:
         case ui::ET_TOUCH_MOVED: {
           TouchEvent touchev(xev);
-          root_window_->DispatchTouchEvent(&touchev);
+          delegate_->OnHostTouchEvent(&touchev);
           break;
         }
         case ui::ET_MOUSE_MOVED:
@@ -676,7 +675,7 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
             int button = xievent->detail;
             if (button == kBackMouseButton || button == kForwardMouseButton) {
               client::UserActionClient* gesture_client =
-                  client::GetUserActionClient(root_window_);
+                  client::GetUserActionClient(delegate_->AsRootWindow());
               if (gesture_client) {
                 bool reverse_direction =
                     ui::IsTouchpadEvent(xev) && ui::IsNaturalScrollEnabled();
@@ -690,14 +689,14 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
             }
           }
           MouseEvent mouseev(xev);
-          root_window_->DispatchMouseEvent(&mouseev);
+          delegate_->OnHostMouseEvent(&mouseev);
           break;
         }
         case ui::ET_SCROLL_FLING_START:
         case ui::ET_SCROLL_FLING_CANCEL:
         case ui::ET_SCROLL: {
           ScrollEvent scrollev(xev);
-          root_window_->DispatchScrollEvent(&scrollev);
+          delegate_->OnHostScrollEvent(&scrollev);
           break;
         }
         case ui::ET_UNKNOWN:
@@ -722,7 +721,7 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       Atom message_type = static_cast<Atom>(xev->xclient.data.l[0]);
       if (message_type == atom_cache_.GetAtom("WM_DELETE_WINDOW")) {
         // We have received a close message from the window manager.
-        root_window_->OnRootWindowHostClosed();
+        delegate_->AsRootWindow()->OnRootWindowHostClosed();
       } else if (message_type == atom_cache_.GetAtom("_NET_WM_PING")) {
         XEvent reply_event = *xev;
         reply_event.xclient.window = x_root_window_;
@@ -740,7 +739,7 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
         case MappingModifier:
         case MappingKeyboard:
           XRefreshKeyboardMapping(&xev->xmapping);
-          root_window_->OnKeyboardMappingChanged();
+          delegate_->AsRootWindow()->OnKeyboardMappingChanged();
           break;
         case MappingPointer:
           ui::UpdateButtonMap();
@@ -770,21 +769,15 @@ bool RootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       }
 
       MouseEvent mouseev(xev);
-      root_window_->DispatchMouseEvent(&mouseev);
+      delegate_->OnHostMouseEvent(&mouseev);
       break;
     }
   }
   return true;
 }
 
-void RootWindowHostLinux::SetRootWindow(RootWindow* root_window) {
-  root_window_ = root_window;
-  // The device scale factor is now accessible, so load cursors now.
-  image_cursors_->Reload(root_window_->layer()->device_scale_factor());
-}
-
 RootWindow* RootWindowHostLinux::GetRootWindow() {
-  return root_window_;
+  return delegate_->AsRootWindow();
 }
 
 gfx::AcceleratedWidget RootWindowHostLinux::GetAcceleratedWidget() {
@@ -792,6 +785,9 @@ gfx::AcceleratedWidget RootWindowHostLinux::GetAcceleratedWidget() {
 }
 
 void RootWindowHostLinux::Show() {
+  // The device scale factor is now accessible, so load cursors now.
+  image_cursors_->Reload(delegate_->GetDeviceScaleFactor());
+
   // Before we map the window, set size hints. Otherwise, some window managers
   // will ignore toplevel XMoveWindow commands.
   XSizeHints size_hints;
@@ -814,9 +810,9 @@ gfx::Rect RootWindowHostLinux::GetBounds() const {
 void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
   // Even if the host window's size doesn't change, aura's root window
   // size, which is in DIP, changes when the scale changes.
-  float current_scale = root_window_->compositor()->device_scale_factor();
-  float new_scale =
-      gfx::Screen::GetDisplayNearestWindow(root_window_).device_scale_factor();
+  float current_scale = delegate_->GetDeviceScaleFactor();
+  float new_scale = gfx::Screen::GetDisplayNearestWindow(
+      delegate_->AsRootWindow()).device_scale_factor();
   bool size_changed = bounds_.size() != bounds.size() ||
       current_scale != new_scale;
 
@@ -832,10 +828,12 @@ void RootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
   // (possibly synthetic) ConfigureNotify about the actual size and correct
   // |bounds_| later.
   bounds_ = bounds;
-  if (size_changed)
-    root_window_->OnHostResized(bounds.size());
-  else
-    root_window_->SchedulePaintInRect(root_window_->bounds());
+  if (size_changed) {
+    delegate_->OnHostResized(bounds.size());
+  } else {
+    delegate_->AsRootWindow()->SchedulePaintInRect(
+        delegate_->AsRootWindow()->bounds());
+  }
 }
 
 gfx::Point RootWindowHostLinux::GetLocationOnNativeScreen() const {
@@ -866,7 +864,7 @@ void RootWindowHostLinux::ShowCursor(bool show) {
   SetCursorInternal(show ? current_cursor_ : ui::kCursorNone);
 }
 
-gfx::Point RootWindowHostLinux::QueryMouseLocation() {
+bool RootWindowHostLinux::QueryMouseLocation(gfx::Point* location_return) {
   ::Window root_return, child_return;
   int root_x_return, root_y_return, win_x_return, win_y_return;
   unsigned int mask_return;
@@ -877,8 +875,10 @@ gfx::Point RootWindowHostLinux::QueryMouseLocation() {
                 &root_x_return, &root_y_return,
                 &win_x_return, &win_y_return,
                 &mask_return);
-  return gfx::Point(max(0, min(bounds_.width(), win_x_return)),
-                    max(0, min(bounds_.height(), win_y_return)));
+  *location_return = gfx::Point(max(0, min(bounds_.width(), win_x_return)),
+                                max(0, min(bounds_.height(), win_y_return)));
+  return (win_x_return >= 0 && win_x_return < bounds_.width() &&
+          win_y_return >= 0 && win_y_return < bounds_.height());
 }
 
 bool RootWindowHostLinux::ConfineCursorToRootWindow() {
@@ -886,32 +886,33 @@ bool RootWindowHostLinux::ConfineCursorToRootWindow() {
   DCHECK(!pointer_barriers_.get());
   if (pointer_barriers_.get())
     return false;
-  // Pointer barriers extend all the way across the screen to
-  // avoid leaks at the corners.
-  gfx::Size screen_size = RootWindowHost::GetNativeScreenSize();
+  // TODO(oshima): There is a know issue where the pointer barrier
+  // leaks mouse pointer under certain conditions. crbug.com/133694.
   pointer_barriers_.reset(new XID[4]);
-  // Horizontal barriers.
+  // Horizontal, top barriers.
   pointer_barriers_[0] = XFixesCreatePointerBarrier(
       xdisplay_, x_root_window_,
-      0, bounds_.y(), screen_size.width(), bounds_.y(),
+      bounds_.x(), bounds_.y(), bounds_.right(), bounds_.y(),
       BarrierPositiveY,
-      0, NULL);  // default device
+      0, XIAllDevices);
+  // Horizontal, bottom barriers.
   pointer_barriers_[1] = XFixesCreatePointerBarrier(
       xdisplay_, x_root_window_,
-      0, bounds_.bottom(), screen_size.width(),  bounds_.bottom(),
+      bounds_.x(), bounds_.bottom(), bounds_.right(),  bounds_.bottom(),
       BarrierNegativeY,
-      0, NULL);  // default device
-  // Vertical barriers.
+      0, XIAllDevices);
+  // Vertical, left  barriers.
   pointer_barriers_[2] = XFixesCreatePointerBarrier(
       xdisplay_, x_root_window_,
-      bounds_.x(), 0, bounds_.x(), screen_size.height(),
+      bounds_.x(), bounds_.y(), bounds_.x(), bounds_.bottom(),
       BarrierPositiveX,
-      0, NULL);  // default device
+      0, XIAllDevices);
+  // Vertical, right barriers.
   pointer_barriers_[3] = XFixesCreatePointerBarrier(
       xdisplay_, x_root_window_,
-      bounds_.right(), 0, bounds_.right(), screen_size.height(),
+      bounds_.right(), bounds_.y(), bounds_.right(), bounds_.bottom(),
       BarrierNegativeX,
-      0, NULL);  // default device
+      0, XIAllDevices);
 #endif
   return true;
 }
@@ -929,8 +930,9 @@ void RootWindowHostLinux::UnConfineCursor() {
 }
 
 void RootWindowHostLinux::MoveCursorTo(const gfx::Point& location) {
-  XWarpPointer(xdisplay_, None, xwindow_, 0, 0, 0, 0, location.x(),
-      location.y());
+  XWarpPointer(xdisplay_, None, x_root_window_, 0, 0, 0, 0,
+               bounds_.x() + location.x(),
+               bounds_.y() + location.y());
 }
 
 void RootWindowHostLinux::SetFocusWhenShown(bool focus_when_shown) {
@@ -1014,7 +1016,7 @@ void RootWindowHostLinux::PostNativeEvent(
       xevent.xmotion.time = CurrentTime;
 
       gfx::Point point(xevent.xmotion.x, xevent.xmotion.y);
-      root_window_->ConvertPointToNativeScreen(&point);
+      delegate_->AsRootWindow()->ConvertPointToNativeScreen(&point);
       xevent.xmotion.x_root = point.x();
       xevent.xmotion.y_root = point.y();
     }
@@ -1047,8 +1049,9 @@ void RootWindowHostLinux::SetCursorInternal(gfx::NativeCursor cursor) {
 }
 
 // static
-RootWindowHost* RootWindowHost::Create(const gfx::Rect& bounds) {
-  return new RootWindowHostLinux(bounds);
+RootWindowHost* RootWindowHost::Create(RootWindowHostDelegate* delegate,
+                                       const gfx::Rect& bounds) {
+  return new RootWindowHostLinux(delegate, bounds);
 }
 
 // static

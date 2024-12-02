@@ -23,7 +23,6 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/virtual_driver_install_helper.h"
@@ -38,11 +37,12 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_mac.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/startup/startup_browser_creator.h"
-#include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -50,10 +50,13 @@
 #import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/history_menu_bridge.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/profile_menu_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
+#include "chrome/browser/ui/startup/startup_browser_creator.h"
+#include "chrome/browser/ui/startup/startup_browser_creator_impl.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -79,16 +82,6 @@ using content::BrowserThread;
 using content::DownloadManager;
 using content::UserMetricsAction;
 
-// 10.6 adds a public API for the Spotlight-backed search menu item in the Help
-// menu.  Provide the declaration so it can be called below when building with
-// the 10.5 SDK.
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-@interface NSApplication (SnowLeopardSDKDeclarations)
-- (void)setHelpMenu:(NSMenu*)helpMenu;
-@end
-#endif
-
 namespace {
 
 // Declare notification names from the 10.7 SDK.
@@ -98,7 +91,7 @@ NSString* NSPopoverDidShowNotification = @"NSPopoverDidShowNotification";
 NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
 #endif
 
-// True while AppController is calling Browser::NewEmptyWindow(). We need a
+// True while AppController is calling chrome::NewEmptyWindow(). We need a
 // global flag here, analogue to StartupBrowserCreator::InProcessStartup()
 // because otherwise the SessionService will try to restore sessions when we
 // make a new window while there are no other active windows.
@@ -120,7 +113,7 @@ Browser* ActivateBrowser(Profile* profile) {
 Browser* CreateBrowser(Profile* profile) {
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    Browser::NewEmptyWindow(profile);
+    chrome::NewEmptyWindow(profile);
   }
 
   Browser* browser = browser::GetLastActiveBrowser();
@@ -320,7 +313,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   // already shutting down.
   if (!browser_shutdown::IsTryingToQuit()) {
     content::NotificationService::current()->Notify(
-        content::NOTIFICATION_APP_EXITING,
+        chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
         content::NotificationService::AllSources(),
         content::NotificationService::NoDetails());
     browser::CloseAllBrowsers();
@@ -542,7 +535,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     return;
 
   content::NotificationService::current()->Notify(
-      content::NOTIFICATION_NO_KEY_WINDOW,
+      chrome::NOTIFICATION_NO_KEY_WINDOW,
       content::NotificationService::AllSources(),
       content::NotificationService::NoDetails());
 }
@@ -588,8 +581,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   // Since Chrome is localized to more languages than the OS, tell Cocoa which
   // menu is the Help so it can add the search item to it.
-  if (helpMenu_ && [NSApp respondsToSelector:@selector(setHelpMenu:)])
-    [NSApp setHelpMenu:helpMenu_];
+  [NSApp setHelpMenu:helpMenu_];
 
   // Record the path to the (browser) app bundle; this is used by the app mode
   // shim.
@@ -612,9 +604,6 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   if (!parsed_command_line.HasSwitch(switches::kEnableExposeForTabs)) {
     [tabposeMenuItem_ setHidden:YES];
   }
-
-  // TODO(rsesek): Remove from trunk when Mstone-20 goes to stable.
-  confirm_quit::MigratePrefToLocalState();
 }
 
 // This is called after profiles have been loaded and preferences registered.
@@ -685,11 +674,11 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
         // downloads page if the user chooses to wait.
         Browser* browser = browser::FindBrowserWithProfile(profiles[i]);
         if (!browser) {
-          browser = Browser::Create(profiles[i]);
+          browser = new Browser(Browser::CreateParams(profiles[i]));
           browser->window()->Show();
         }
         DCHECK(browser);
-        browser->ShowDownloadsTab();
+        chrome::ShowDownloads(browser);
         return NO;
       }
 
@@ -824,7 +813,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       // Create a new tab in an existing browser window (which we activate) if
       // possible.
       if (Browser* browser = ActivateBrowser(lastProfile)) {
-        browser->ExecuteCommand(IDC_NEW_TAB);
+        chrome::ExecuteCommand(browser, IDC_NEW_TAB);
         break;
       }
       // Else fall through to create new window.
@@ -832,76 +821,77 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       CreateBrowser(lastProfile);
       break;
     case IDC_FOCUS_LOCATION:
-      ActivateOrCreateBrowser(lastProfile)->ExecuteCommand(IDC_FOCUS_LOCATION);
+      chrome::ExecuteCommand(ActivateOrCreateBrowser(lastProfile),
+                             IDC_FOCUS_LOCATION);
       break;
     case IDC_FOCUS_SEARCH:
-      ActivateOrCreateBrowser(lastProfile)->ExecuteCommand(IDC_FOCUS_SEARCH);
+      chrome::ExecuteCommand(ActivateOrCreateBrowser(lastProfile),
+                             IDC_FOCUS_SEARCH);
       break;
     case IDC_NEW_INCOGNITO_WINDOW:
       CreateBrowser(lastProfile->GetOffTheRecordProfile());
       break;
     case IDC_RESTORE_TAB:
-      Browser::OpenWindowWithRestoredTabs(lastProfile);
+      chrome::OpenWindowWithRestoredTabs(lastProfile);
       break;
     case IDC_OPEN_FILE:
-      CreateBrowser(lastProfile)->ExecuteCommand(IDC_OPEN_FILE);
+      chrome::ExecuteCommand(CreateBrowser(lastProfile), IDC_OPEN_FILE);
       break;
     case IDC_CLEAR_BROWSING_DATA: {
       // There may not be a browser open, so use the default profile.
       if (Browser* browser = ActivateBrowser(lastProfile)) {
-        browser->OpenClearBrowsingDataDialog();
+        chrome::ShowClearBrowsingDataDialog(browser);
       } else {
-        Browser::OpenClearBrowsingDataDialogWindow(lastProfile);
+        chrome::OpenClearBrowsingDataDialogWindow(lastProfile);
       }
       break;
     }
     case IDC_IMPORT_SETTINGS: {
       if (Browser* browser = ActivateBrowser(lastProfile)) {
-        browser->OpenImportSettingsDialog();
+        chrome::ShowImportDialog(browser);
       } else {
-        Browser::OpenImportSettingsDialogWindow(lastProfile);
+        chrome::OpenImportSettingsDialogWindow(lastProfile);
       }
       break;
     }
     case IDC_SHOW_BOOKMARK_MANAGER:
       content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
       if (Browser* browser = ActivateBrowser(lastProfile)) {
-        // Open a bookmark manager tab.
-        browser->OpenBookmarkManager();
+        chrome::ShowBookmarkManager(browser);
       } else {
         // No browser window, so create one for the bookmark manager tab.
-        Browser::OpenBookmarkManagerWindow(lastProfile);
+        chrome::OpenBookmarkManagerWindow(lastProfile);
       }
       break;
     case IDC_SHOW_HISTORY:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowHistoryTab();
+        chrome::ShowHistory(browser);
       else
-        Browser::OpenHistoryWindow(lastProfile);
+        chrome::OpenHistoryWindow(lastProfile);
       break;
     case IDC_SHOW_DOWNLOADS:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowDownloadsTab();
+        chrome::ShowDownloads(browser);
       else
-        Browser::OpenDownloadsWindow(lastProfile);
+        chrome::OpenDownloadsWindow(lastProfile);
       break;
     case IDC_MANAGE_EXTENSIONS:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowExtensionsTab();
+        chrome::ShowExtensions(browser);
       else
-        Browser::OpenExtensionsWindow(lastProfile);
+        chrome::OpenExtensionsWindow(lastProfile);
       break;
     case IDC_HELP_PAGE_VIA_MENU:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowHelpTab(Browser::HELP_SOURCE_MENU);
+        chrome::ShowHelp(browser, chrome::HELP_SOURCE_MENU);
       else
-        Browser::OpenHelpWindow(lastProfile, Browser::HELP_SOURCE_MENU);
+        chrome::OpenHelpWindow(lastProfile, chrome::HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SYNC_SETUP:
       if (Browser* browser = ActivateBrowser(lastProfile))
-        browser->ShowSyncSetup(SyncPromoUI::SOURCE_MENU);
+        chrome::ShowSyncSetup(browser, SyncPromoUI::SOURCE_MENU);
       else
-        Browser::OpenSyncSetupWindow(lastProfile, SyncPromoUI::SOURCE_MENU);
+        chrome::OpenSyncSetupWindow(lastProfile, SyncPromoUI::SOURCE_MENU);
       break;
     case IDC_TASK_MANAGER:
       content::RecordAction(UserMetricsAction("TaskManager"));
@@ -1001,8 +991,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     StartupBrowserCreator browser_creator;
     browser_creator.LaunchBrowser(
         command_line, [self lastProfile], FilePath(),
-        browser::startup::IS_NOT_PROCESS_STARTUP,
-        browser::startup::IS_NOT_FIRST_RUN, &return_code);
+        chrome::startup::IS_NOT_PROCESS_STARTUP,
+        chrome::startup::IS_NOT_FIRST_RUN, &return_code);
   }
 
   // We've handled the reopen event, so return NO to tell AppKit not
@@ -1102,13 +1092,13 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   Browser* browser = browser::GetLastActiveBrowser();
   // if no browser window exists then create one with no tabs to be filled in
   if (!browser) {
-    browser = Browser::Create([self lastProfile]);
+    browser = new Browser(Browser::CreateParams([self lastProfile]));
     browser->window()->Show();
   }
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  browser::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
-      browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+  chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
+      chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(FilePath(), dummy, first_run);
   launch.OpenURLsInBrowser(browser, false, urls);
 }
@@ -1180,20 +1170,19 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 - (IBAction)showPreferences:(id)sender {
   if (Browser* browser = ActivateBrowser([self lastProfile])) {
     // Show options tab in the active browser window.
-    browser->OpenOptionsDialog();
+    chrome::ShowSettings(browser);
   } else {
     // No browser window, so create one for the options tab.
-    Browser::OpenOptionsWindow([self lastProfile]);
+    chrome::OpenOptionsWindow([self lastProfile]);
   }
 }
 
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
   if (Browser* browser = ActivateBrowser([self lastProfile])) {
-    // Show about tab in the active browser window.
-    browser->OpenAboutChromeDialog();
+    chrome::ShowAboutChrome(browser);
   } else {
     // No browser window, so create one for the about tab.
-    Browser::OpenAboutWindow([self lastProfile]);
+    chrome::OpenAboutWindow([self lastProfile]);
   }
 }
 
@@ -1305,18 +1294,6 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 @end  // @implementation AppController
 
 //---------------------------------------------------------------------------
-
-namespace browser {
-
-void ShowInstantConfirmDialog(gfx::NativeWindow parent, Profile* profile) {
-  if (Browser* browser = ActivateBrowser(profile)) {
-    browser->OpenInstantConfirmDialog();
-  } else {
-    Browser::OpenInstantConfirmDialogWindow(profile);
-  }
-}
-
-}  // namespace browser
 
 namespace app_controller_mac {
 

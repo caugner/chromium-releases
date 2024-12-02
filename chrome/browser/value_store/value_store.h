@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_VALUE_STORE_VALUE_STORE_H_
 #define CHROME_BROWSER_VALUE_STORE_VALUE_STORE_H_
-#pragma once
 
 #include <set>
 
@@ -14,9 +13,6 @@
 #include "chrome/browser/value_store/value_store_change.h"
 
 // Interface for a storage area for Value objects.
-
-// All methods *must* be run on the FILE thread, including construction and
-// destruction.
 class ValueStore {
  public:
   // The result of a read operation (Get).

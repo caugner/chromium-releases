@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_WORKSPACE_WORKSPACE_EVENT_FILTER_H_
 #define ASH_WM_WORKSPACE_WORKSPACE_EVENT_FILTER_H_
-#pragma once
 
 #include "ash/wm/toplevel_window_event_filter.h"
 #include "ash/wm/workspace/multi_window_resize_controller.h"
@@ -35,9 +34,10 @@ class WorkspaceEventFilter : public ToplevelWindowEventFilter,
 
  protected:
   // Overridden from ToplevelWindowEventFilter:
-  virtual WindowResizer* CreateWindowResizer(aura::Window* window,
-                                             const gfx::Point& point,
-                                             int window_component) OVERRIDE;
+  virtual WindowResizer* CreateWindowResizer(
+      aura::Window* window,
+      const gfx::Point& point_in_parent,
+      int window_component) OVERRIDE;
 
  private:
   friend class WorkspaceEventFilterTestHelper;

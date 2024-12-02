@@ -19,7 +19,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/stl_util.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
@@ -115,7 +115,6 @@ class DriveDetailedView : public TrayDetailsView,
     AppendSettings();
     AppendHeaderEntry(list);
 
-    PreferredSizeChanged();
     SchedulePaint();
   }
 

@@ -19,13 +19,15 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/common/content_client.h"
 #include "content/public/test/test_browser_thread.h"
+#include "google/cacheinvalidation/include/types.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_test_util.h"
+#include "sync/notifier/mock_sync_notifier_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 
 // TODO(akalin): Add tests here that exercise the whole
@@ -40,6 +42,7 @@ using content::BrowserThread;
 using testing::_;
 using testing::AtLeast;
 using testing::AtMost;
+using testing::Mock;
 using testing::Return;
 using testing::StrictMock;
 
@@ -61,10 +64,7 @@ class ProfileSyncServiceTest : public testing::Test {
 
     // We need to set the user agent before the backend host can call
     // webkit_glue::GetUserAgent().
-    chrome::VersionInfo version_info;
-    std::string product("Chrome/");
-    product += version_info.is_valid() ? version_info.Version() : "0.0.0.0";
-    webkit_glue::SetUserAgent(webkit_glue::BuildUserAgentFromProduct(product),
+    webkit_glue::SetUserAgent(content::GetContentClient()->GetUserAgent(),
                               false);
   }
 
@@ -85,7 +85,7 @@ class ProfileSyncServiceTest : public testing::Test {
 
   void StartSyncService() {
     StartSyncServiceAndSetInitialSyncEnded(
-        true, true, false, true, true, false);
+        true, true, false, true, syncer::STORAGE_IN_MEMORY);
   }
 
   void StartSyncServiceAndSetInitialSyncEnded(
@@ -93,8 +93,7 @@ class ProfileSyncServiceTest : public testing::Test {
       bool issue_auth_token,
       bool synchronous_sync_configuration,
       bool sync_setup_completed,
-      bool expect_create_dtm,
-      bool use_real_database) {
+      syncer::StorageOption storage_option) {
     if (!service_.get()) {
       SigninManager* signin =
           SigninManagerFactory::GetForProfile(profile_.get());
@@ -112,19 +111,13 @@ class ProfileSyncServiceTest : public testing::Test {
         service_->dont_set_initial_sync_ended_on_init();
       if (synchronous_sync_configuration)
         service_->set_synchronous_sync_configuration();
-      if (use_real_database)
-        service_->set_use_real_database();
+      service_->set_storage_option(storage_option);
       if (!sync_setup_completed)
         profile_->GetPrefs()->SetBoolean(prefs::kSyncHasSetupCompleted, false);
 
-      if (expect_create_dtm) {
-        // Register the bookmark data type.
-        EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
-            WillOnce(ReturnNewDataTypeManager());
-      } else {
-        EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
-            Times(0);
-      }
+      // Register the bookmark data type.
+      ON_CALL(*factory, CreateDataTypeManager(_, _)).
+          WillByDefault(ReturnNewDataTypeManager());
 
       if (issue_auth_token) {
         IssueTestTokens();
@@ -248,23 +241,24 @@ TEST_F(ProfileSyncServiceTest, JsControllerHandlersBasic) {
   EXPECT_TRUE(service_->sync_initialized());
   EXPECT_TRUE(service_->GetBackendForTest() != NULL);
 
-  JsController* js_controller = service_->GetJsController();
-  StrictMock<MockJsEventHandler> event_handler;
+  syncer::JsController* js_controller = service_->GetJsController();
+  StrictMock<syncer::MockJsEventHandler> event_handler;
   js_controller->AddJsEventHandler(&event_handler);
   js_controller->RemoveJsEventHandler(&event_handler);
 }
 
 TEST_F(ProfileSyncServiceTest,
        JsControllerHandlersDelayedBackendInitialization) {
-  StartSyncServiceAndSetInitialSyncEnded(true, false, false, true, true, false);
+  StartSyncServiceAndSetInitialSyncEnded(true, false, false, true,
+                                         syncer::STORAGE_IN_MEMORY);
 
-  StrictMock<MockJsEventHandler> event_handler;
+  StrictMock<syncer::MockJsEventHandler> event_handler;
   EXPECT_CALL(event_handler, HandleJsEvent(_, _)).Times(AtLeast(1));
 
   EXPECT_EQ(NULL, service_->GetBackendForTest());
   EXPECT_FALSE(service_->sync_initialized());
 
-  JsController* js_controller = service_->GetJsController();
+  syncer::JsController* js_controller = service_->GetJsController();
   js_controller->AddJsEventHandler(&event_handler);
   // Since we're doing synchronous initialization, backend should be
   // initialized by this call.
@@ -276,16 +270,16 @@ TEST_F(ProfileSyncServiceTest,
 TEST_F(ProfileSyncServiceTest, JsControllerProcessJsMessageBasic) {
   StartSyncService();
 
-  StrictMock<MockJsReplyHandler> reply_handler;
+  StrictMock<syncer::MockJsReplyHandler> reply_handler;
 
   ListValue arg_list1;
-  arg_list1.Append(Value::CreateBooleanValue(false));
-  JsArgList args1(&arg_list1);
+  arg_list1.Append(Value::CreateStringValue("TRANSIENT_NOTIFICATION_ERROR"));
+  syncer::JsArgList args1(&arg_list1);
   EXPECT_CALL(reply_handler,
               HandleJsReply("getNotificationState", HasArgs(args1)));
 
   {
-    JsController* js_controller = service_->GetJsController();
+    syncer::JsController* js_controller = service_->GetJsController();
     js_controller->ProcessJsMessage("getNotificationState", args1,
                                     reply_handler.AsWeakHandle());
   }
@@ -297,18 +291,19 @@ TEST_F(ProfileSyncServiceTest, JsControllerProcessJsMessageBasic) {
 
 TEST_F(ProfileSyncServiceTest,
        JsControllerProcessJsMessageBasicDelayedBackendInitialization) {
-  StartSyncServiceAndSetInitialSyncEnded(true, false, false, true, true, false);
+  StartSyncServiceAndSetInitialSyncEnded(true, false, false, true,
+                                         syncer::STORAGE_IN_MEMORY);
 
-  StrictMock<MockJsReplyHandler> reply_handler;
+  StrictMock<syncer::MockJsReplyHandler> reply_handler;
 
   ListValue arg_list1;
-  arg_list1.Append(Value::CreateBooleanValue(false));
-  JsArgList args1(&arg_list1);
+  arg_list1.Append(Value::CreateStringValue("TRANSIENT_NOTIFICATION_ERROR"));
+  syncer::JsArgList args1(&arg_list1);
   EXPECT_CALL(reply_handler,
               HandleJsReply("getNotificationState", HasArgs(args1)));
 
   {
-    JsController* js_controller = service_->GetJsController();
+    syncer::JsController* js_controller = service_->GetJsController();
     js_controller->ProcessJsMessage("getNotificationState",
                                     args1, reply_handler.AsWeakHandle());
   }
@@ -339,7 +334,8 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
   ASSERT_NE(-1,
             file_util::WriteFile(sync_file3, nonsense3, strlen(nonsense3)));
 
-  StartSyncServiceAndSetInitialSyncEnded(false, false, true, false, true, true);
+  StartSyncServiceAndSetInitialSyncEnded(false, false, true, false,
+                                         syncer::STORAGE_ON_DISK);
   EXPECT_FALSE(service_->HasSyncSetupCompleted());
   EXPECT_FALSE(service_->sync_initialized());
 
@@ -362,29 +358,89 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
   ASSERT_NE(file2text.compare(nonsense2), 0);
 }
 
-// Disabled because of crbug.com/109668.
-TEST_F(ProfileSyncServiceTest, DISABLED_CorruptDatabase) {
-  const char* nonesense = "not a database";
-
-  FilePath temp_directory = profile_->GetPath().AppendASCII("Sync Data");
-  FilePath sync_db_file = temp_directory.AppendASCII("SyncData.sqlite3");
-
-  ASSERT_TRUE(file_util::CreateDirectory(temp_directory));
-  ASSERT_NE(-1,
-            file_util::WriteFile(sync_db_file, nonesense, strlen(nonesense)));
-
-  // Initialize with HasSyncSetupCompleted() set to true and InitialSyncEnded
-  // false.  This is to model the scenario that would result when opening the
-  // sync database fails.
-  StartSyncServiceAndSetInitialSyncEnded(false, true, true, true, false, true);
+// Simulates a scenario where a database is corrupted and it is impossible to
+// recreate it.  This test is useful mainly when it is run under valgrind.  Its
+// expectations are not very interesting.
+TEST_F(ProfileSyncServiceTest, FailToOpenDatabase) {
+  StartSyncServiceAndSetInitialSyncEnded(false, true, true, true,
+                                         syncer::STORAGE_INVALID);
 
   // The backend is not ready.  Ensure the PSS knows this.
   EXPECT_FALSE(service_->sync_initialized());
+}
 
-  // Ensure we will be prepared to initialize a fresh DB next time.
-  EXPECT_FALSE(service_->HasSyncSetupCompleted());
+// Register for some IDs with the ProfileSyncService and trigger some
+// invalidation messages.  They should be received by the observer.
+// Then unregister and trigger the invalidation messages again.  Those
+// shouldn't be received by the observer.
+TEST_F(ProfileSyncServiceTest, UpdateRegisteredInvalidationIds) {
+  StartSyncService();
+
+  syncer::ObjectIdSet ids;
+  ids.insert(invalidation::ObjectId(1, "id1"));
+  ids.insert(invalidation::ObjectId(2, "id2"));
+  const syncer::ObjectIdPayloadMap& payloads =
+      syncer::ObjectIdSetToPayloadMap(ids, "payload");
+
+  StrictMock<syncer::MockSyncNotifierObserver> observer;
+  EXPECT_CALL(observer, OnNotificationsEnabled());
+  EXPECT_CALL(observer, OnIncomingNotification(
+      payloads, syncer::REMOTE_NOTIFICATION));
+  EXPECT_CALL(observer, OnNotificationsDisabled(
+      syncer::TRANSIENT_NOTIFICATION_ERROR));
+
+  service_->RegisterInvalidationHandler(&observer);
+  service_->UpdateRegisteredInvalidationIds(&observer, ids);
+
+  SyncBackendHostForProfileSyncTest* const backend =
+      service_->GetBackendForTest();
+
+  backend->EmitOnNotificationsEnabled();
+  backend->EmitOnIncomingNotification(payloads, syncer::REMOTE_NOTIFICATION);
+  backend->EmitOnNotificationsDisabled(syncer::TRANSIENT_NOTIFICATION_ERROR);
+
+  Mock::VerifyAndClearExpectations(&observer);
+
+  service_->UnregisterInvalidationHandler(&observer);
+
+  backend->EmitOnNotificationsEnabled();
+  backend->EmitOnIncomingNotification(payloads, syncer::REMOTE_NOTIFICATION);
+  backend->EmitOnNotificationsDisabled(syncer::TRANSIENT_NOTIFICATION_ERROR);
+}
+
+// Register for some IDs with the ProfileSyncService, restart sync,
+// and trigger some invalidation messages.  They should still be
+// received by the observer.
+TEST_F(ProfileSyncServiceTest, UpdateRegisteredInvalidationIdsPersistence) {
+  StartSyncService();
+
+  syncer::ObjectIdSet ids;
+  ids.insert(invalidation::ObjectId(3, "id3"));
+  const syncer::ObjectIdPayloadMap& payloads =
+      syncer::ObjectIdSetToPayloadMap(ids, "payload");
+
+  StrictMock<syncer::MockSyncNotifierObserver> observer;
+  EXPECT_CALL(observer, OnNotificationsEnabled());
+  EXPECT_CALL(observer, OnIncomingNotification(
+      payloads, syncer::REMOTE_NOTIFICATION));
+  // This may get called more than once, as a real notifier is
+  // created.
+  EXPECT_CALL(observer, OnNotificationsDisabled(
+      syncer::TRANSIENT_NOTIFICATION_ERROR)).Times(AtLeast(1));
+
+  service_->RegisterInvalidationHandler(&observer);
+  service_->UpdateRegisteredInvalidationIds(&observer, ids);
+
+  service_->StopAndSuppress();
+  service_->UnsuppressAndStart();
+
+  SyncBackendHostForProfileSyncTest* const backend =
+      service_->GetBackendForTest();
+
+  backend->EmitOnNotificationsEnabled();
+  backend->EmitOnIncomingNotification(payloads, syncer::REMOTE_NOTIFICATION);
+  backend->EmitOnNotificationsDisabled(syncer::TRANSIENT_NOTIFICATION_ERROR);
 }
 
 }  // namespace
-
 }  // namespace browser_sync

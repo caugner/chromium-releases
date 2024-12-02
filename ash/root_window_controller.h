@@ -4,7 +4,6 @@
 
 #ifndef ASH_ROOT_WINDOW_CONTROLLER_H_
 #define ASH_ROOT_WINDOW_CONTROLLER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -65,6 +64,9 @@ class RootWindowController {
 
   // Returns true if the workspace has a maximized or fullscreen window.
   bool IsInMaximizedMode() const;
+
+  // Moves child windows to |dest|.
+  void MoveWindowsTo(aura::RootWindow* dest);
 
  private:
   scoped_ptr<aura::RootWindow> root_window_;

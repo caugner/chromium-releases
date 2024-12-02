@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/startup/obsolete_os_info_bar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -14,7 +15,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-namespace browser {
+namespace chrome {
 
 void ShowObsoleteOSPrompt(Browser* browser) {
   // We've deprecated support for Ubuntu Hardy.  Rather than attempting to
@@ -30,7 +31,7 @@ void ShowObsoleteOSPrompt(Browser* browser) {
     // Link to an article in the help center on minimum system requirements.
     const char* kLearnMoreURL =
         "http://www.google.com/support/chrome/bin/answer.py?answer=95411";
-    TabContents* tab = browser->GetActiveTabContents();
+    TabContents* tab = chrome::GetActiveTabContents(browser);
     if (!tab)
       return;
     tab->infobar_tab_helper()->AddInfoBar(
@@ -40,4 +41,4 @@ void ShowObsoleteOSPrompt(Browser* browser) {
   }
 }
 
-}  // namespace browser
+}  // namespace chrome

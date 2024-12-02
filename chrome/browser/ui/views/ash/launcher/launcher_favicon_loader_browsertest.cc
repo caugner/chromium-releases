@@ -7,6 +7,7 @@
 #include "base/file_path.h"
 #include "base/time.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/views/ash/launcher/browser_launcher_item_controller.h"
 #include "chrome/browser/ui/views/ash/launcher/launcher_favicon_loader.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -59,7 +60,8 @@ class ContentsObserver : public content::WebContentsObserver {
   void OnDidDownloadFavicon(int id,
                             const GURL& image_url,
                             bool errored,
-                            const SkBitmap& bitmap) {
+                            int requested_size,
+                            const std::vector<SkBitmap>& bitmaps) {
     ++downloads_received_;
   }
 
@@ -77,7 +79,7 @@ class LauncherFaviconLoaderBrowsertest : public InProcessBrowserTest {
   }
 
   void CreatePanelBrowser(const char* url, Browser** result) {
-    Browser* panel_browser =  Browser::CreateWithParams(
+    Browser* panel_browser =  new Browser(
         Browser::CreateParams::CreateForApp(
             Browser::TYPE_PANEL, "Test Panel", gfx::Rect(),
             browser()->profile()));
@@ -86,7 +88,7 @@ class LauncherFaviconLoaderBrowsertest : public InProcessBrowserTest {
     // Load initial tab contents before setting the observer.
     ui_test_utils::NavigateToURL(panel_browser, GURL());
     contents_observer_.reset(
-        new ContentsObserver(panel_browser->GetWebContentsAt(0)));
+        new ContentsObserver(chrome::GetWebContentsAt(panel_browser, 0)));
     NavigateTo(panel_browser, url);
     *result = panel_browser;
   }
@@ -113,7 +115,7 @@ class LauncherFaviconLoaderBrowsertest : public InProcessBrowserTest {
     base::Time start_time = base::Time::Now();
     while (!contents_observer_->got_favicons() ||
            contents_observer_->downloads_received() < expected) {
-      ui_test_utils::RunAllPendingInMessageLoop();
+      content::RunAllPendingInMessageLoop();
       base::TimeDelta delta = base::Time::Now() - start_time;
       if (delta.InSeconds() >= max_seconds) {
         LOG(ERROR) << " WaitForFaviconDownlads timed out:"

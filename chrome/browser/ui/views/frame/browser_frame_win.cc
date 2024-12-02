@@ -16,6 +16,8 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/system_menu_model.h"
@@ -63,6 +65,7 @@ extern "C" {
 typedef void (*SetFrameWindow)(HWND window);
 typedef void (*CloseFrameWindow)(HWND window);
 typedef void (*FlipFrameWindows)();
+typedef void (*MetroSetFullscreen)(bool fullscreen);
 }
 #endif  // USE_AURA
 
@@ -271,6 +274,39 @@ void BrowserFrameWin::OnActivate(UINT action, BOOL minimized, HWND window) {
   views::NativeWidgetWin::OnActivate(action, minimized, window);
 }
 
+void BrowserFrameWin::FrameTypeChanged() {
+  // In Windows 8 metro mode the frame type is set to FRAME_TYPE_FORCE_CUSTOM
+  // by default. We reset it back to FRAME_TYPE_DEFAULT to ensure that we
+  // don't end up defaulting to BrowserNonClientFrameView in all cases.
+  if (base::win::IsMetroProcess())
+    browser_frame_->set_frame_type(views::Widget::FRAME_TYPE_DEFAULT);
+
+  views::NativeWidgetWin::FrameTypeChanged();
+
+  // In Windows 8 metro mode we call Show on the BrowserFrame instance to
+  // ensure that the window can be styled appropriately, i.e. no sysmenu,
+  // etc.
+  if (base::win::IsMetroProcess())
+    Show();
+}
+
+void BrowserFrameWin::SetFullscreen(bool fullscreen) {
+  if (base::win::IsMetroProcess()) {
+    HMODULE metro = base::win::GetMetroModule();
+    if (metro) {
+      MetroSetFullscreen set_full_screen = reinterpret_cast<MetroSetFullscreen>(
+        ::GetProcAddress(metro, "SetFullscreen"));
+      DCHECK(set_full_screen);
+      if (set_full_screen)
+        set_full_screen(fullscreen);
+    } else {
+      NOTREACHED() << "Failed to get metro driver module";
+    }
+  }
+  views::NativeWidgetWin::SetFullscreen(fullscreen);
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserFrameWin, NativeBrowserFrame implementation:
 
@@ -408,8 +444,11 @@ void BrowserFrameWin::UpdateDWMFrame() {
 
 void BrowserFrameWin::BuildSystemMenuForBrowserWindow() {
   system_menu_contents_->AddSeparator();
-  system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
-                                             IDS_TASK_MANAGER);
+
+  if (chrome::CanOpenTaskManager()) {
+    system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
+                                               IDS_TASK_MANAGER);
+  }
   system_menu_contents_->AddSeparator();
   system_menu_contents_->AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
   system_menu_contents_->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
@@ -420,7 +459,7 @@ void BrowserFrameWin::BuildSystemMenuForBrowserWindow() {
 
 void BrowserFrameWin::BuildSystemMenuForAppOrPopupWindow() {
   Browser* browser = browser_view()->browser();
-  if (browser->is_app()) {
+  if (browser->is_app() && chrome::CanOpenTaskManager()) {
     system_menu_contents_->AddSeparator();
     system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
                                                IDS_TASK_MANAGER);
@@ -447,8 +486,6 @@ void BrowserFrameWin::BuildSystemMenuForAppOrPopupWindow() {
     system_menu_contents_->AddItemWithStringId(IDC_SHOW_AS_TAB,
                                                IDS_SHOW_AS_TAB);
   }
-  system_menu_contents_->AddItemWithStringId(IDC_COPY_URL,
-                                             IDS_APP_MENU_COPY_URL);
   system_menu_contents_->AddSeparator();
   system_menu_contents_->AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
   system_menu_contents_->AddItemWithStringId(IDC_FORWARD,
@@ -496,9 +533,8 @@ void BrowserFrameWin::HandleMetroNavSearchRequest(WPARAM w_param,
     if (default_provider) {
       const TemplateURLRef& search_url = default_provider->url_ref();
       DCHECK(search_url.SupportsReplacement());
-      request_url = GURL(search_url.ReplaceSearchTerms(search_string,
-                            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-                            string16()));
+      request_url = GURL(search_url.ReplaceSearchTerms(
+          TemplateURLRef::SearchTermsArgs(search_string)));
     }
   }
   if (request_url.is_valid()) {
@@ -529,7 +565,7 @@ void BrowserFrameWin::GetMetroCurrentTabInfo(WPARAM w_param) {
   current_tab_info->title = base::win::LocalAllocAndCopyString(
       browser->GetWindowTitleForCurrentTab());
 
-  WebContents* current_tab = browser->GetActiveWebContents();
+  WebContents* current_tab = chrome::GetActiveWebContents(browser);
   DCHECK(current_tab);
 
   current_tab_info->url = base::win::LocalAllocAndCopyString(

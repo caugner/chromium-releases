@@ -23,8 +23,8 @@ using webkit_blob::ShareableFileReference;
 
 namespace content {
 
-// TODO(darin): Use the buffer sizing algorithm from AsyncResourceHandler.
-static const int kReadBufSize = 32768;
+static const int kInitialReadBufSize = 32768;
+static const int kMaxReadBufSize = 524288;
 
 RedirectToFileResourceHandler::RedirectToFileResourceHandler(
     scoped_ptr<ResourceHandler> next_handler,
@@ -39,6 +39,7 @@ RedirectToFileResourceHandler::RedirectToFileResourceHandler(
       buf_write_pending_(false),
       write_cursor_(0),
       write_callback_pending_(false),
+      next_buffer_size_(kInitialReadBufSize),
       did_defer_(false),
       completed_during_write_(false) {
 }
@@ -60,9 +61,9 @@ bool RedirectToFileResourceHandler::OnResponseStarted(
     int request_id,
     ResourceResponse* response,
     bool* defer) {
-  if (response->status.is_success()) {
+  if (response->head.status.is_success()) {
     DCHECK(deletable_file_ && !deletable_file_->path().empty());
-    response->download_file_path = deletable_file_->path();
+    response->head.download_file_path = deletable_file_->path();
   }
   return next_handler_->OnResponseStarted(request_id, response, defer);
 }
@@ -92,8 +93,8 @@ bool RedirectToFileResourceHandler::OnWillRead(int request_id,
                                                int min_size) {
   DCHECK_EQ(-1, min_size);
 
-  if (!buf_->capacity())
-    buf_->SetCapacity(kReadBufSize);
+  if (buf_->capacity() < next_buffer_size_)
+    buf_->SetCapacity(next_buffer_size_);
 
   // We should have paused this network request already if the buffer is full.
   DCHECK(!BufIsFull());
@@ -106,24 +107,20 @@ bool RedirectToFileResourceHandler::OnWillRead(int request_id,
 }
 
 bool RedirectToFileResourceHandler::OnReadCompleted(int request_id,
-                                                    int* bytes_read,
+                                                    int bytes_read,
                                                     bool* defer) {
-  if (!buf_write_pending_) {
-    // Ignore spurious OnReadCompleted!  Deferring from OnReadCompleted tells
-    // the ResourceDispatcherHost that we did not consume the data.
-    // ResumeDeferredRequest then repeats the last OnReadCompleted call.  We
-    // pause the request so that we can copy our buffer to disk, so we need to
-    // consume the data now.  The ResourceDispatcherHost pause mechanism does
-    // not fit our use case very well.  TODO(darin): Fix the
-    // ResourceDispatcherHost to avoid this hack!
-    return true;
-  }
-
+  DCHECK(buf_write_pending_);
   buf_write_pending_ = false;
 
-  // We use the buffer's offset field to record the end of the buffer.
+  if (buf_->capacity() == bytes_read) {
+    // The network layer has saturated our buffer. Next time, we should give it
+    // a bigger buffer for it to fill, to minimize the number of round trips we
+    // do with the renderer process.
+    next_buffer_size_ = std::min(next_buffer_size_ * 2, kMaxReadBufSize);
+  }
 
-  int new_offset = buf_->offset() + *bytes_read;
+  // We use the buffer's offset field to record the end of the buffer.
+  int new_offset = buf_->offset() + bytes_read;
   DCHECK(new_offset <= buf_->capacity());
   buf_->set_offset(new_offset);
 

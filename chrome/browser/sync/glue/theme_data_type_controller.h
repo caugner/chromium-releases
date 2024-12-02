@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_THEME_DATA_TYPE_CONTROLLER_H_
 #define CHROME_BROWSER_SYNC_GLUE_THEME_DATA_TYPE_CONTROLLER_H_
-#pragma once
 
 #include <string>
 
@@ -21,7 +20,7 @@ class ThemeDataTypeController : public FrontendDataTypeController {
       ProfileSyncService* sync_service);
 
   // DataTypeController implementation.
-  virtual syncable::ModelType type() const OVERRIDE;
+  virtual syncer::ModelType type() const OVERRIDE;
 
  private:
   virtual ~ThemeDataTypeController();

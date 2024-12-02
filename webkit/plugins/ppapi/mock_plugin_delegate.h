@@ -33,6 +33,8 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void PluginCrashed(PluginInstance* instance);
   virtual void InstanceCreated(PluginInstance* instance);
   virtual void InstanceDeleted(PluginInstance* instance);
+  virtual scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>
+      CreateResourceCreationAPI(PluginInstance* instance);
   virtual SkBitmap* GetSadPluginBitmap();
   virtual WebKit::WebPlugin* CreatePluginReplacement(const FilePath& file_path);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
@@ -59,17 +61,15 @@ class MockPluginDelegate : public PluginDelegate {
                                           int total,
                                           bool final_result);
   virtual void SelectedFindResultChanged(int identifier, int index);
-  virtual bool RunFileChooser(
-      const WebKit::WebFileChooserParams& params,
-      WebKit::WebFileChooserCompletion* chooser_completion);
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
                              const AsyncOpenFileCallback& callback);
-  virtual bool AsyncOpenFileSystemURL(const GURL& path,
-                                      int flags,
-                                      const AsyncOpenFileCallback& callback);
+  virtual bool AsyncOpenFileSystemURL(
+      const GURL& path,
+      int flags,
+      const AsyncOpenFileSystemURLCallback& callback);
   virtual bool OpenFileSystem(
-      const GURL& url,
+      const GURL& origin_url,
       fileapi::FileSystemType type,
       long long size,
       fileapi::FileSystemCallbackDispatcher* dispatcher);
@@ -204,6 +204,9 @@ class MockPluginDelegate : public PluginDelegate {
                                const EnumerateDevicesCallback& callback);
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const;
   virtual std::string GetDeviceID();
+  virtual PP_FlashLSORestrictions GetLocalDataRestrictions(
+      const GURL& document_url,
+      const GURL& plugin_url);
 };
 
 }  // namespace ppapi

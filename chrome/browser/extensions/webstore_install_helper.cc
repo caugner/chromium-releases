@@ -11,8 +11,8 @@
 #include "chrome/common/chrome_utility_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 
@@ -24,6 +24,8 @@ namespace {
 const char kImageDecodeError[] = "Image decode failed";
 
 }  // namespace
+
+namespace extensions {
 
 WebstoreInstallHelper::WebstoreInstallHelper(
     Delegate* delegate,
@@ -58,7 +60,7 @@ void WebstoreInstallHelper::Start() {
 
   if (!icon_url_.is_empty()) {
     CHECK(context_getter_);
-    url_fetcher_.reset(content::URLFetcher::Create(
+    url_fetcher_.reset(net::URLFetcher::Create(
         icon_url_, net::URLFetcher::GET, this));
     url_fetcher_->SetRequestContext(context_getter_);
     url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -150,11 +152,11 @@ void WebstoreInstallHelper::OnDecodeImageFailed() {
 void WebstoreInstallHelper::OnJSONParseSucceeded(const ListValue& wrapper) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   manifest_parse_complete_ = true;
-  Value* value = NULL;
+  const Value* value = NULL;
   CHECK(wrapper.Get(0, &value));
   if (value->IsType(Value::TYPE_DICTIONARY)) {
     parsed_manifest_.reset(
-        static_cast<DictionaryValue*>(value)->DeepCopy());
+        static_cast<const DictionaryValue*>(value)->DeepCopy());
   } else {
     parse_error_ = Delegate::MANIFEST_ERROR;
   }
@@ -195,3 +197,5 @@ void WebstoreInstallHelper::ReportResultFromUIThread() {
   else
     delegate_->OnWebstoreParseFailure(id_, parse_error_, error_);
 }
+
+}  // namespace extensions

@@ -10,6 +10,7 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
+#include "ash/system/keyboard_brightness/keyboard_brightness_control_delegate.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/volume_control_delegate.h"
@@ -64,8 +65,7 @@ class ReleaseAccelerator : public ui::Accelerator {
 class DummyScreenshotDelegate : public ScreenshotDelegate {
  public:
   DummyScreenshotDelegate()
-      : handle_take_screenshot_count_(0),
-        handle_take_partial_screenshot_count_(0) {
+      : handle_take_screenshot_count_(0) {
   }
   virtual ~DummyScreenshotDelegate() {}
 
@@ -77,20 +77,18 @@ class DummyScreenshotDelegate : public ScreenshotDelegate {
 
   virtual void HandleTakePartialScreenshot(
       aura::Window* window, const gfx::Rect& rect) OVERRIDE {
-    ++handle_take_partial_screenshot_count_;
+  }
+
+  virtual bool CanTakeScreenshot() OVERRIDE {
+    return true;
   }
 
   int handle_take_screenshot_count() const {
     return handle_take_screenshot_count_;
   }
 
-  int handle_take_partial_screenshot_count() const {
-    return handle_take_partial_screenshot_count_;
-  }
-
  private:
   int handle_take_screenshot_count_;
-  int handle_take_partial_screenshot_count_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyScreenshotDelegate);
 };
@@ -264,6 +262,51 @@ class DummyImeControlDelegate : public ImeControlDelegate {
   ui::Accelerator last_accelerator_;
 
   DISALLOW_COPY_AND_ASSIGN(DummyImeControlDelegate);
+};
+
+class DummyKeyboardBrightnessControlDelegate
+    : public KeyboardBrightnessControlDelegate {
+ public:
+  explicit DummyKeyboardBrightnessControlDelegate(bool consume)
+      : consume_(consume),
+        handle_keyboard_brightness_down_count_(0),
+        handle_keyboard_brightness_up_count_(0) {
+  }
+  virtual ~DummyKeyboardBrightnessControlDelegate() {}
+
+  virtual bool HandleKeyboardBrightnessDown(
+      const ui::Accelerator& accelerator) OVERRIDE {
+    ++handle_keyboard_brightness_down_count_;
+    last_accelerator_ = accelerator;
+    return consume_;
+  }
+
+  virtual bool HandleKeyboardBrightnessUp(
+      const ui::Accelerator& accelerator) OVERRIDE {
+    ++handle_keyboard_brightness_up_count_;
+    last_accelerator_ = accelerator;
+    return consume_;
+  }
+
+  int handle_keyboard_brightness_down_count() const {
+    return handle_keyboard_brightness_down_count_;
+  }
+
+  int handle_keyboard_brightness_up_count() const {
+    return handle_keyboard_brightness_up_count_;
+  }
+
+  const ui::Accelerator& last_accelerator() const {
+    return last_accelerator_;
+  }
+
+ private:
+  const bool consume_;
+  int handle_keyboard_brightness_down_count_;
+  int handle_keyboard_brightness_up_count_;
+  ui::Accelerator last_accelerator_;
+
+  DISALLOW_COPY_AND_ASSIGN(DummyKeyboardBrightnessControlDelegate);
 };
 
 bool TestTarget::AcceleratorPressed(const ui::Accelerator& accelerator) {
@@ -455,15 +498,18 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
 #if defined(OS_WIN)
   MSG msg1 = { NULL, WM_KEYDOWN, ui::VKEY_A, 0 };
   aura::TranslatedKeyEvent key_event1(msg1, false);
-  EXPECT_TRUE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event1));
+  EXPECT_TRUE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event1));
 
   MSG msg2 = { NULL, WM_CHAR, L'A', 0 };
   aura::TranslatedKeyEvent key_event2(msg2, true);
-  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event2));
+  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event2));
 
   MSG msg3 = { NULL, WM_KEYUP, ui::VKEY_A, 0 };
   aura::TranslatedKeyEvent key_event3(msg3, false);
-  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event3));
+  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event3));
 #elif defined(USE_X11)
   XEvent key_event;
   ui::InitXKeyEventForTesting(ui::ET_KEY_PRESSED,
@@ -471,17 +517,20 @@ TEST_F(AcceleratorControllerTest, ProcessOnce) {
                               0,
                               &key_event);
   aura::TranslatedKeyEvent key_event1(&key_event, false);
-  EXPECT_TRUE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event1));
+  EXPECT_TRUE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event1));
 
   aura::TranslatedKeyEvent key_event2(&key_event, true);
-  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event2));
+  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event2));
 
   ui::InitXKeyEventForTesting(ui::ET_KEY_RELEASED,
                               ui::VKEY_A,
                               0,
                               &key_event);
   aura::TranslatedKeyEvent key_event3(&key_event, false);
-  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->DispatchKeyEvent(&key_event3));
+  EXPECT_FALSE(Shell::GetPrimaryRootWindow()->AsRootWindowHostDelegate()->
+      OnHostKeyEvent(&key_event3));
 #endif
   EXPECT_EQ(1, target.accelerator_pressed_count());
 }
@@ -511,19 +560,15 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     GetController()->SetScreenshotDelegate(
         scoped_ptr<ScreenshotDelegate>(delegate).Pass());
     EXPECT_EQ(0, delegate->handle_take_screenshot_count());
-    EXPECT_EQ(0, delegate->handle_take_partial_screenshot_count());
     EXPECT_TRUE(GetController()->Process(
         ui::Accelerator(ui::VKEY_F5, ui::EF_CONTROL_DOWN)));
     EXPECT_EQ(1, delegate->handle_take_screenshot_count());
-    EXPECT_EQ(0, delegate->handle_take_partial_screenshot_count());
     EXPECT_TRUE(GetController()->Process(
         ui::Accelerator(ui::VKEY_PRINT, ui::EF_NONE)));
     EXPECT_EQ(2, delegate->handle_take_screenshot_count());
-    EXPECT_EQ(0, delegate->handle_take_partial_screenshot_count());
     EXPECT_TRUE(GetController()->Process(
         ui::Accelerator(ui::VKEY_F5, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN)));
     EXPECT_EQ(2, delegate->handle_take_screenshot_count());
-    EXPECT_EQ(1, delegate->handle_take_partial_screenshot_count());
   }
   // ToggleAppList
   {
@@ -712,6 +757,41 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
     EXPECT_EQ(brightness_up, delegate->last_accelerator());
   }
 #endif
+
+  // Keyboard brightness
+  const ui::Accelerator alt_f6(ui::VKEY_F6, ui::EF_ALT_DOWN);
+  const ui::Accelerator alt_f7(ui::VKEY_F7, ui::EF_ALT_DOWN);
+  {
+    EXPECT_FALSE(GetController()->Process(alt_f6));
+    EXPECT_FALSE(GetController()->Process(alt_f7));
+    DummyKeyboardBrightnessControlDelegate* delegate =
+        new DummyKeyboardBrightnessControlDelegate(false);
+    GetController()->SetKeyboardBrightnessControlDelegate(
+        scoped_ptr<KeyboardBrightnessControlDelegate>(delegate).Pass());
+    EXPECT_EQ(0, delegate->handle_keyboard_brightness_down_count());
+    EXPECT_FALSE(GetController()->Process(alt_f6));
+    EXPECT_EQ(1, delegate->handle_keyboard_brightness_down_count());
+    EXPECT_EQ(alt_f6, delegate->last_accelerator());
+    EXPECT_EQ(0, delegate->handle_keyboard_brightness_up_count());
+    EXPECT_FALSE(GetController()->Process(alt_f7));
+    EXPECT_EQ(1, delegate->handle_keyboard_brightness_up_count());
+    EXPECT_EQ(alt_f7, delegate->last_accelerator());
+  }
+  {
+    DummyKeyboardBrightnessControlDelegate* delegate =
+        new DummyKeyboardBrightnessControlDelegate(true);
+    GetController()->SetKeyboardBrightnessControlDelegate(
+        scoped_ptr<KeyboardBrightnessControlDelegate>(delegate).Pass());
+    EXPECT_EQ(0, delegate->handle_keyboard_brightness_down_count());
+    EXPECT_TRUE(GetController()->Process(alt_f6));
+    EXPECT_EQ(1, delegate->handle_keyboard_brightness_down_count());
+    EXPECT_EQ(alt_f6, delegate->last_accelerator());
+    EXPECT_EQ(0, delegate->handle_keyboard_brightness_up_count());
+    EXPECT_TRUE(GetController()->Process(alt_f7));
+    EXPECT_EQ(1, delegate->handle_keyboard_brightness_up_count());
+    EXPECT_EQ(alt_f7, delegate->last_accelerator());
+  }
+
 #if !defined(NDEBUG)
   // RotateScreen
   EXPECT_TRUE(GetController()->Process(
@@ -876,15 +956,32 @@ TEST_F(AcceleratorControllerTest, ImeGlobalAccelerators) {
 }
 
 TEST_F(AcceleratorControllerTest, ReservedAccelerators) {
-  // (Shift+)Alt+Tab is reserved, while (Shift+)F5 is not.
-  EXPECT_FALSE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F5, ui::EF_NONE)));
+  // (Shift+)Alt+Tab and Chrome OS top-row keys are reserved.
   EXPECT_TRUE(GetController()->IsReservedAccelerator(
       ui::Accelerator(ui::VKEY_TAB, ui::EF_ALT_DOWN)));
-  EXPECT_FALSE(GetController()->IsReservedAccelerator(
-      ui::Accelerator(ui::VKEY_F5, ui::EF_SHIFT_DOWN)));
   EXPECT_TRUE(GetController()->IsReservedAccelerator(
       ui::Accelerator(ui::VKEY_TAB, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)));
+#if defined(OS_CHROMEOS)
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F5, ui::EF_NONE)));
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F6, ui::EF_NONE)));
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F7, ui::EF_NONE)));
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F8, ui::EF_NONE)));
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F9, ui::EF_NONE)));
+  EXPECT_TRUE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_F10, ui::EF_NONE)));
+#endif
+  // Others are not reserved.
+  EXPECT_FALSE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_PRINT, ui::EF_NONE)));
+  EXPECT_FALSE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_TAB, ui::EF_NONE)));
+  EXPECT_FALSE(GetController()->IsReservedAccelerator(
+      ui::Accelerator(ui::VKEY_A, ui::EF_NONE)));
 }
 
 }  // namespace test

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_MANAGER_IMPL_H__
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_MANAGER_IMPL_H__
-#pragma once
 
 #include "chrome/browser/sync/glue/data_type_manager.h"
 
@@ -32,12 +31,12 @@ class DataTypeManagerImpl : public DataTypeManager,
 
   // DataTypeManager interface.
   virtual void Configure(TypeSet desired_types,
-                         sync_api::ConfigureReason reason) OVERRIDE;
+                         syncer::ConfigureReason reason) OVERRIDE;
 
   // Needed only for backend migration.
   virtual void ConfigureWithoutNigori(
       TypeSet desired_types,
-      sync_api::ConfigureReason reason) OVERRIDE;
+      syncer::ConfigureReason reason) OVERRIDE;
 
   virtual void Stop() OVERRIDE;
   virtual State state() const OVERRIDE;
@@ -57,15 +56,15 @@ class DataTypeManagerImpl : public DataTypeManager,
   // Stops all data types.
   void FinishStop();
   void Abort(ConfigureStatus status,
-             const SyncError& error);
+             const syncer::SyncError& error);
 
   // If there's a pending reconfigure, processes it and returns true.
   // Otherwise, returns false.
   bool ProcessReconfigure();
 
-  void Restart(sync_api::ConfigureReason reason,
+  void Restart(syncer::ConfigureReason reason,
                BackendDataTypeConfigurer::NigoriState nigori_state);
-  void DownloadReady(syncable::ModelTypeSet failed_configuration_types);
+  void DownloadReady(syncer::ModelTypeSet failed_configuration_types);
 
   // Notification from the SBH that download failed due to a transient
   // error and it will be retried.
@@ -80,7 +79,7 @@ class DataTypeManagerImpl : public DataTypeManager,
 
   void ConfigureImpl(
       TypeSet desired_types,
-      sync_api::ConfigureReason reason,
+      syncer::ConfigureReason reason,
       BackendDataTypeConfigurer::NigoriState nigori_state);
 
   BackendDataTypeConfigurer* configurer_;
@@ -88,7 +87,7 @@ class DataTypeManagerImpl : public DataTypeManager,
   // This list is determined at startup by various command line flags.
   const DataTypeController::TypeMap* controllers_;
   State state_;
-  std::map<syncable::ModelType, int> start_order_;
+  std::map<syncer::ModelType, int> start_order_;
   TypeSet last_requested_types_;
 
   // Whether an attempt to reconfigure was made while we were busy configuring.
@@ -97,7 +96,7 @@ class DataTypeManagerImpl : public DataTypeManager,
 
   // The reason for the last reconfigure attempt. Not this will be set to a
   // valid value only when |needs_reconfigure_| is set.
-  sync_api::ConfigureReason last_configure_reason_;
+  syncer::ConfigureReason last_configure_reason_;
   // The value of |nigori_state| on the last reconfigure attempt.
   // Like |last_configure_reason_|, set to a valid value only when
   // |needs_reconfigure_| is set.
@@ -115,7 +114,7 @@ class DataTypeManagerImpl : public DataTypeManager,
   // Collects the list of errors resulting from failing to start a type. This
   // would eventually be sent to the listeners after all the types have
   // been given a chance to start.
-  std::list<SyncError> failed_datatypes_info_;
+  std::list<syncer::SyncError> failed_datatypes_info_;
   ModelAssociationManager model_association_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(DataTypeManagerImpl);

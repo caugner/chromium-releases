@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/app_notification_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -88,7 +89,7 @@ ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
     : profile_(profile),
       command_line_(command_line),
       extension_system_(
-          ExtensionSystemFactory::GetForProfile(profile)),
+          extensions::ExtensionSystemFactory::GetForProfile(profile)),
       web_data_service_(WebDataServiceFactory::GetForProfile(
           profile_, Profile::IMPLICIT_ACCESS)) {
 }
@@ -102,7 +103,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncApps)) {
     pss->RegisterDataTypeController(
-        new ExtensionDataTypeController(syncable::APPS, this, profile_, pss));
+        new ExtensionDataTypeController(syncer::APPS, this, profile_, pss));
   }
 
   // Autofill sync is enabled by default.  Register unless explicitly
@@ -123,7 +124,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncExtensions)) {
     pss->RegisterDataTypeController(
-        new ExtensionDataTypeController(syncable::EXTENSIONS,
+        new ExtensionDataTypeController(syncer::EXTENSIONS,
                                         this, profile_, pss));
   }
 
@@ -138,7 +139,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   // disabled.
   if (!command_line_->HasSwitch(switches::kDisableSyncPreferences)) {
     pss->RegisterDataTypeController(
-        new UIDataTypeController(syncable::PREFERENCES, this, profile_, pss));
+        new UIDataTypeController(syncer::PREFERENCES, this, profile_, pss));
   }
 
 #if defined(ENABLE_THEMES)
@@ -175,7 +176,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   if (!command_line_->HasSwitch(switches::kDisableSyncExtensionSettings)) {
     pss->RegisterDataTypeController(
         new ExtensionSettingDataTypeController(
-            syncable::EXTENSION_SETTINGS, this, profile_, pss));
+            syncer::EXTENSION_SETTINGS, this, profile_, pss));
   }
 
   // App setting sync is enabled by default.  Register unless explicitly
@@ -183,7 +184,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDataTypes(
   if (!command_line_->HasSwitch(switches::kDisableSyncAppSettings)) {
     pss->RegisterDataTypeController(
         new ExtensionSettingDataTypeController(
-            syncable::APP_SETTINGS, this, profile_, pss));
+            syncer::APP_SETTINGS, this, profile_, pss));
   }
 
   if (!command_line_->HasSwitch(switches::kDisableSyncAutofillProfile)) {
@@ -209,8 +210,8 @@ browser_sync::GenericChangeProcessor*
     ProfileSyncComponentsFactoryImpl::CreateGenericChangeProcessor(
         ProfileSyncService* profile_sync_service,
         browser_sync::DataTypeErrorHandler* error_handler,
-        const base::WeakPtr<SyncableService>& local_service) {
-  sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
+        const base::WeakPtr<syncer::SyncableService>& local_service) {
+  syncer::UserShare* user_share = profile_sync_service->GetUserShare();
   return new GenericChangeProcessor(error_handler,
                                     local_service,
                                     user_share);
@@ -221,47 +222,47 @@ browser_sync::SharedChangeProcessor* ProfileSyncComponentsFactoryImpl::
   return new SharedChangeProcessor();
 }
 
-base::WeakPtr<SyncableService> ProfileSyncComponentsFactoryImpl::
-    GetSyncableServiceForType(syncable::ModelType type) {
+base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
+    GetSyncableServiceForType(syncer::ModelType type) {
   if (!profile_) {  // For tests.
-     return base::WeakPtr<SyncableService>();
+     return base::WeakPtr<syncer::SyncableService>();
   }
   switch (type) {
-    case syncable::PREFERENCES:
+    case syncer::PREFERENCES:
       return profile_->GetPrefs()->GetSyncableService()->AsWeakPtr();
-    case syncable::AUTOFILL:
-    case syncable::AUTOFILL_PROFILE: {
+    case syncer::AUTOFILL:
+    case syncer::AUTOFILL_PROFILE: {
       if (!web_data_service_.get())
-        return base::WeakPtr<SyncableService>();
-      if (type == syncable::AUTOFILL) {
+        return base::WeakPtr<syncer::SyncableService>();
+      if (type == syncer::AUTOFILL) {
         return web_data_service_->GetAutocompleteSyncableService()->AsWeakPtr();
       } else {
         return web_data_service_->
                    GetAutofillProfileSyncableService()->AsWeakPtr();
       }
     }
-    case syncable::APPS:
-    case syncable::EXTENSIONS:
+    case syncer::APPS:
+    case syncer::EXTENSIONS:
       return extension_system_->extension_service()->AsWeakPtr();
-    case syncable::SEARCH_ENGINES:
+    case syncer::SEARCH_ENGINES:
       return TemplateURLServiceFactory::GetForProfile(profile_)->AsWeakPtr();
-    case syncable::APP_SETTINGS:
-    case syncable::EXTENSION_SETTINGS:
+    case syncer::APP_SETTINGS:
+    case syncer::EXTENSION_SETTINGS:
       return extension_system_->extension_service()->settings_frontend()->
           GetBackendForSync(type)->AsWeakPtr();
-    case syncable::APP_NOTIFICATIONS:
+    case syncer::APP_NOTIFICATIONS:
       return extension_system_->extension_service()->
           app_notification_manager()->AsWeakPtr();
     default:
       // The following datatypes still need to be transitioned to the
-      // SyncableService API:
+      // syncer::SyncableService API:
       // Bookmarks
       // Passwords
       // Sessions
       // Themes
       // Typed URLs
       NOTREACHED();
-      return base::WeakPtr<SyncableService>();
+      return base::WeakPtr<syncer::SyncableService>();
   }
 }
 
@@ -270,8 +271,8 @@ ProfileSyncComponentsFactory::SyncComponents
         ProfileSyncService* profile_sync_service,
         DataTypeErrorHandler* error_handler) {
   BookmarkModel* bookmark_model =
-      profile_sync_service->profile()->GetBookmarkModel();
-  sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
+      BookmarkModelFactory::GetForProfile(profile_sync_service->profile());
+  syncer::UserShare* user_share = profile_sync_service->GetUserShare();
   // TODO(akalin): We may want to propagate this switch up eventually.
 #if defined(OS_ANDROID)
   const bool kExpectMobileBookmarksFolder = true;

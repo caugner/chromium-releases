@@ -4,7 +4,6 @@
 
 #ifndef BASE_NIX_XDG_UTIL_H_
 #define BASE_NIX_XDG_UTIL_H_
-#pragma once
 
 // XDG refers to http://en.wikipedia.org/wiki/Freedesktop.org .
 // This file contains utilities found across free desktop environments.
@@ -54,6 +53,7 @@ enum DesktopEnvironment {
   // them as two different desktop environments here.
   DESKTOP_ENVIRONMENT_KDE3,
   DESKTOP_ENVIRONMENT_KDE4,
+  DESKTOP_ENVIRONMENT_UNITY,
   DESKTOP_ENVIRONMENT_XFCE,
 };
 

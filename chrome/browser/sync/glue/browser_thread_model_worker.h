@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_BROWSER_THREAD_MODEL_WORKER_H_
 #define CHROME_BROWSER_SYNC_GLUE_BROWSER_THREAD_MODEL_WORKER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
@@ -19,18 +18,19 @@ class WaitableEvent;
 
 namespace browser_sync {
 
-// A ModelSafeWorker for models that accept requests from the syncapi that need
-// to be fulfilled on a browser thread, for example autofill on the DB thread.
-// TODO(sync): Try to generalize other ModelWorkers (e.g. history, etc).
-class BrowserThreadModelWorker : public ModelSafeWorker {
+// A syncer::ModelSafeWorker for models that accept requests from the
+// syncapi that need to be fulfilled on a browser thread, for example
+// autofill on the DB thread.  TODO(sync): Try to generalize other
+// ModelWorkers (e.g. history, etc).
+class BrowserThreadModelWorker : public syncer::ModelSafeWorker {
  public:
   BrowserThreadModelWorker(content::BrowserThread::ID thread,
-                           ModelSafeGroup group);
+                           syncer::ModelSafeGroup group);
 
-  // ModelSafeWorker implementation. Called on the sync thread.
-  virtual SyncerError DoWorkAndWaitUntilDone(
-      const WorkCallback& work) OVERRIDE;
-  virtual ModelSafeGroup GetModelSafeGroup() OVERRIDE;
+  // syncer::ModelSafeWorker implementation. Called on the sync thread.
+  virtual syncer::SyncerError DoWorkAndWaitUntilDone(
+      const syncer::WorkCallback& work) OVERRIDE;
+  virtual syncer::ModelSafeGroup GetModelSafeGroup() OVERRIDE;
 
  protected:
   virtual ~BrowserThreadModelWorker();
@@ -39,13 +39,13 @@ class BrowserThreadModelWorker : public ModelSafeWorker {
   // an implementation that subclasses should use.  This is so that
   // (subclass)::CallDoWorkAndSignalTask shows up in callstacks.
   virtual void CallDoWorkAndSignalTask(
-      const WorkCallback& work,
+      const syncer::WorkCallback& work,
       base::WaitableEvent* done,
-      SyncerError* error) = 0;
+      syncer::SyncerError* error) = 0;
 
  private:
   content::BrowserThread::ID thread_;
-  ModelSafeGroup group_;
+  syncer::ModelSafeGroup group_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserThreadModelWorker);
 };
@@ -59,9 +59,9 @@ class DatabaseModelWorker : public BrowserThreadModelWorker {
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      const WorkCallback& work,
+      const syncer::WorkCallback& work,
       base::WaitableEvent* done,
-      SyncerError* error) OVERRIDE;
+      syncer::SyncerError* error) OVERRIDE;
 
  private:
   virtual ~DatabaseModelWorker();
@@ -73,9 +73,9 @@ class FileModelWorker : public BrowserThreadModelWorker {
 
  protected:
   virtual void CallDoWorkAndSignalTask(
-      const WorkCallback& work,
+      const syncer::WorkCallback& work,
       base::WaitableEvent* done,
-      SyncerError* error) OVERRIDE;
+      syncer::SyncerError* error) OVERRIDE;
 
  private:
   virtual ~FileModelWorker();

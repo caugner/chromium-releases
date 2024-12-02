@@ -16,6 +16,7 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -150,7 +151,7 @@ void ConfirmBubbleViews::Init() {
   }
 }
 
-namespace browser {
+namespace chrome {
 
 void ShowConfirmBubble(gfx::NativeView view,
                        const gfx::Point& origin,
@@ -160,4 +161,4 @@ void ShowConfirmBubble(gfx::NativeView view,
   bubble->Show();
 }
 
-}  // namespace browser
+}  // namespace chrome

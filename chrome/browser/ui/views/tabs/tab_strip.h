@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_H_
-#pragma once
 
 #include <vector>
 
@@ -54,7 +53,8 @@ class TabStrip : public views::View,
  public:
   static const char kViewClassName[];
 
-  explicit TabStrip(TabStripController* controller);
+  TabStrip(TabStripController* controller,
+           bool instant_extended_api_enabled);
   virtual ~TabStrip();
 
   // Sets the layout type. If |adjust_layout| is true the layout type changes
@@ -173,10 +173,9 @@ class TabStrip : public views::View,
   virtual bool IsActiveTab(const BaseTab* tab) const OVERRIDE;
   virtual bool IsTabSelected(const BaseTab* tab) const OVERRIDE;
   virtual bool IsTabPinned(const BaseTab* tab) const OVERRIDE;
-  virtual bool IsTabCloseable(const BaseTab* tab) const OVERRIDE;
   virtual void MaybeStartDrag(
       BaseTab* tab,
-      const views::MouseEvent& event,
+      const views::LocatedEvent& event,
       const TabStripSelectionModel& original_selection) OVERRIDE;
   virtual void ContinueDrag(views::View* view,
                             const gfx::Point& location) OVERRIDE;
@@ -187,6 +186,7 @@ class TabStrip : public views::View,
   virtual void OnMouseEventInTab(views::View* source,
                                  const views::MouseEvent& event) OVERRIDE;
   virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) OVERRIDE;
+  virtual bool IsInstantExtendedAPIEnabled() OVERRIDE;
 
   // MouseWatcherListener overrides:
   virtual void MouseMovedOutOfHost() OVERRIDE;
@@ -228,6 +228,8 @@ class TabStrip : public views::View,
   virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
 
  private:
   typedef std::map<int, std::vector<BaseTab*> > TabsClosingMap;
@@ -472,6 +474,8 @@ class TabStrip : public views::View,
   TabsClosingMap tabs_closing_map_;
 
   scoped_ptr<TabStripController> controller_;
+
+  const bool instant_extended_api_enabled_;
 
   // The "New Tab" button.
   NewTabButton* newtab_button_;

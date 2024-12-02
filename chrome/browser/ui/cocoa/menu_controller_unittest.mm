@@ -10,11 +10,13 @@
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/menu_controller.h"
 #include "grit/generated_resources.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
+
+namespace {
 
 class MenuControllerTest : public CocoaTest {
 };
@@ -330,3 +332,5 @@ TEST_F(MenuControllerTest, OpenClose) {
   // Expect that the delegate got notified properly.
   EXPECT_TRUE(delegate.did_close_);
 }
+
+}  // namespace

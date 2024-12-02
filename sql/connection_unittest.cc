@@ -6,6 +6,7 @@
 #include "base/scoped_temp_dir.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
+#include "sql/meta_table.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/sqlite/sqlite3.h"
 
@@ -141,10 +142,21 @@ TEST_F(SQLConnectionTest, Raze) {
   ASSERT_TRUE(db().Execute(kCreateSql));
   ASSERT_TRUE(db().Execute("INSERT INTO foo (value) VALUES (12)"));
 
+  int pragma_auto_vacuum = 0;
+  {
+    sql::Statement s(db().GetUniqueStatement("PRAGMA auto_vacuum"));
+    ASSERT_TRUE(s.Step());
+    pragma_auto_vacuum = s.ColumnInt(0);
+    ASSERT_TRUE(pragma_auto_vacuum == 0 || pragma_auto_vacuum == 1);
+  }
+
+  // If auto_vacuum is set, there's an extra page to maintain a freelist.
+  const int kExpectedPageCount = 2 + pragma_auto_vacuum;
+
   {
     sql::Statement s(db().GetUniqueStatement("PRAGMA page_count"));
     ASSERT_TRUE(s.Step());
-    EXPECT_EQ(2, s.ColumnInt(0));
+    EXPECT_EQ(kExpectedPageCount, s.ColumnInt(0));
   }
 
   {
@@ -153,7 +165,8 @@ TEST_F(SQLConnectionTest, Raze) {
     EXPECT_EQ("table", s.ColumnString(0));
     EXPECT_EQ("foo", s.ColumnString(1));
     EXPECT_EQ("foo", s.ColumnString(2));
-    EXPECT_EQ(2, s.ColumnInt(3));
+    // Table "foo" is stored in the last page of the file.
+    EXPECT_EQ(kExpectedPageCount, s.ColumnInt(3));
     EXPECT_EQ(kCreateSql, s.ColumnString(4));
   }
 
@@ -169,19 +182,27 @@ TEST_F(SQLConnectionTest, Raze) {
     sql::Statement s(db().GetUniqueStatement("SELECT * FROM sqlite_master"));
     ASSERT_FALSE(s.Step());
   }
+
+  {
+    sql::Statement s(db().GetUniqueStatement("PRAGMA auto_vacuum"));
+    ASSERT_TRUE(s.Step());
+    // auto_vacuum must be preserved across a Raze.
+    EXPECT_EQ(pragma_auto_vacuum, s.ColumnInt(0));
+  }
 }
 
 // Test that Raze() maintains page_size.
 TEST_F(SQLConnectionTest, RazePageSize) {
-  const int kPageSize = 4096;
-
-  // Make sure that the default size isn't already |kPageSize|.
+  // Fetch the default page size and double it for use in this test.
   // Scoped to release statement before Close().
+  int default_page_size = 0;
   {
     sql::Statement s(db().GetUniqueStatement("PRAGMA page_size"));
     ASSERT_TRUE(s.Step());
-    ASSERT_NE(kPageSize, s.ColumnInt(0));
+    default_page_size = s.ColumnInt(0);
   }
+  ASSERT_GT(default_page_size, 0);
+  const int kPageSize = 2 * default_page_size;
 
   // Re-open the database to allow setting the page size.
   db().Close();
@@ -257,6 +278,19 @@ TEST_F(SQLConnectionTest, RazeLocked) {
   ASSERT_FALSE(s.Step());
   ASSERT_TRUE(db().Raze());
 }
+
+#if defined(OS_ANDROID)
+TEST_F(SQLConnectionTest, SetTempDirForSQL) {
+
+  sql::MetaTable meta_table;
+  // Below call needs a temporary directory in sqlite3
+  // On Android, it can pass only when the temporary directory is set.
+  // Otherwise, sqlite3 doesn't find the correct directory to store
+  // temporary files and will report the error 'unable to open
+  // database file'.
+  ASSERT_TRUE(meta_table.Init(&db(), 4, 4));
+}
+#endif
 
 // TODO(shess): Spin up a background thread to hold other_db, to more
 // closely match real life.  That would also allow testing

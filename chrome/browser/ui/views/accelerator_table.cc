@@ -7,9 +7,8 @@
 #include "base/basictypes.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "ui/base/events.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 
-namespace browser {
+namespace chrome {
 
 // NOTE: Keep this list in the same (mostly-alphabetical) order as
 // the Windows accelerators in ../../app/chrome_dll.rc.
@@ -99,7 +98,6 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_F1, ui::EF_NONE, IDC_BACK },
   { ui::VKEY_BACK, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_CLEAR_BROWSING_DATA },
-  { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FEEDBACK },
   { ui::VKEY_BROWSER_FORWARD, ui::EF_NONE, IDC_FORWARD },
   { ui::VKEY_F2, ui::EF_NONE, IDC_FORWARD },
   { ui::VKEY_F4, ui::EF_NONE, IDC_FULLSCREEN },
@@ -121,7 +119,9 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_F3, ui::EF_NONE, IDC_FIND_NEXT },
   { ui::VKEY_F3, ui::EF_SHIFT_DOWN, IDC_FIND_PREVIOUS },
   { ui::VKEY_F10, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
+  { ui::VKEY_LMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
   { ui::VKEY_MENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
+  { ui::VKEY_RMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
   { ui::VKEY_F6, ui::EF_NONE, IDC_FOCUS_NEXT_PANE },
   { ui::VKEY_F6, ui::EF_SHIFT_DOWN, IDC_FOCUS_PREVIOUS_PANE },
   // On Windows, all VKEY_BROWSER_* keys except VKEY_BROWSER_SEARCH are handled
@@ -135,6 +135,7 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_SHOW_AVATAR_MENU},
 #endif  // OS_CHROMEOS
 #if !defined(USE_ASH)
+  { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FEEDBACK },
   { ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_EXIT },
   { ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     IDC_NEW_INCOGNITO_WINDOW },
@@ -148,4 +149,4 @@ const AcceleratorMapping kAcceleratorMap[] = {
 
 const size_t kAcceleratorMapLength = arraysize(kAcceleratorMap);
 
-}  // namespace browser
+}  // namespace chrome

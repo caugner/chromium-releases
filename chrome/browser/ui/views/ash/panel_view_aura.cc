@@ -11,12 +11,13 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
-#include "chrome/browser/extensions/extension_window_list.h"
+#include "chrome/browser/extensions/window_controller.h"
+#include "chrome/browser/extensions/window_controller_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -57,7 +58,7 @@ class PanelHost : public content::WebContentsDelegate,
   Profile* profile() const { return profile_; }
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual ExtensionWindowController* GetExtensionWindowController()
+  virtual extensions::WindowController* GetExtensionWindowController()
       const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
@@ -115,7 +116,7 @@ void PanelHost::Init(const GURL& url) {
       url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
-ExtensionWindowController* PanelHost::GetExtensionWindowController() const {
+extensions::WindowController* PanelHost::GetExtensionWindowController() const {
   return panel_view_->extension_window_controller();
 }
 
@@ -145,9 +146,10 @@ void PanelHost::AddNewContents(content::WebContents* source,
                                bool user_gesture) {
   Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
-  if (!browser)
-    return;
-  browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
+  if (browser) {
+    chrome::AddWebContents(browser, NULL, new_contents, disposition,
+                           initial_pos, user_gesture);
+  }
 }
 
 void PanelHost::RenderViewCreated(content::RenderViewHost* render_view_host) {
@@ -177,12 +179,13 @@ void PanelHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
 ////////////////////////////////////////////////////////////////////////////////
 // PanelExtensionWindowController
 
-class PanelExtensionWindowController : public ExtensionWindowController {
+class PanelExtensionWindowController : public extensions::WindowController {
  public:
   PanelExtensionWindowController(PanelViewAura* panel_view,
                                  PanelHost* panel_host);
+  virtual ~PanelExtensionWindowController();
 
-  // Overriden from ExtensionWindowController:
+  // Overriden from extensions::WindowController:
   virtual int GetWindowId() const OVERRIDE;
   virtual std::string GetWindowTypeText() const OVERRIDE;
   virtual base::DictionaryValue* CreateWindowValue() const OVERRIDE;
@@ -203,9 +206,14 @@ class PanelExtensionWindowController : public ExtensionWindowController {
 PanelExtensionWindowController::PanelExtensionWindowController(
     PanelViewAura* panel_view,
     PanelHost* panel_host)
-    : ExtensionWindowController(panel_view, panel_host->profile()),
+    : extensions::WindowController(panel_view, panel_host->profile()),
       panel_view_(panel_view),
       panel_host_(panel_host) {
+  extensions::WindowControllerList::GetInstance()->AddExtensionWindow(this);
+}
+
+PanelExtensionWindowController::~PanelExtensionWindowController() {
+  extensions::WindowControllerList::GetInstance()->RemoveExtensionWindow(this);
 }
 
 int PanelExtensionWindowController::GetWindowId() const {
@@ -218,7 +226,7 @@ std::string PanelExtensionWindowController::GetWindowTypeText() const {
 
 base::DictionaryValue*
 PanelExtensionWindowController::CreateWindowValue() const {
-  DictionaryValue* result = ExtensionWindowController::CreateWindowValue();
+  DictionaryValue* result = extensions::WindowController::CreateWindowValue();
   return result;
 }
 
@@ -244,8 +252,9 @@ void PanelExtensionWindowController::SetFullscreenMode(
 
 bool PanelExtensionWindowController::IsVisibleToExtension(
     const extensions::Extension* extension) const {
- ExtensionProcessManager* process_manager =
-      ExtensionSystem::Get(panel_host_->profile())->process_manager();
+  ExtensionProcessManager* process_manager =
+      extensions::ExtensionSystem::Get(
+          panel_host_->profile())->process_manager();
   const extensions::Extension* panel_extension = process_manager->
       GetExtensionForRenderViewHost(
           panel_view_->WebContents()->GetRenderViewHost());
@@ -396,7 +405,7 @@ gfx::Rect PanelViewAura::GetRestoredBounds() const {
 }
 
 gfx::Rect PanelViewAura::GetBounds() const {
-  return GetWidget()->GetWindowScreenBounds();
+  return GetWidget()->GetWindowBoundsInScreen();
 }
 
 void PanelViewAura::Show() {

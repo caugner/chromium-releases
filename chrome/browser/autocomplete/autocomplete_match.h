@@ -4,18 +4,23 @@
 
 #ifndef CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_MATCH_H_
 #define CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_MATCH_H_
-#pragma once
 
-#include <vector>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/search_engines/template_url.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 
 class AutocompleteProvider;
 class Profile;
 class TemplateURL;
+
+namespace base {
+class Time;
+}  // namespace base
 
 // AutocompleteMatch ----------------------------------------------------------
 
@@ -63,6 +68,10 @@ struct AutocompleteMatch {
   };
 
   typedef std::vector<ACMatchClassification> ACMatchClassifications;
+
+  // Type used by providers to attach additional, optional information to
+  // an AutocompleteMatch.
+  typedef std::map<std::string, std::string> AdditionalInfo;
 
   // The type of this match.
   enum Type {
@@ -189,6 +198,13 @@ struct AutocompleteMatch {
   // TemplateURL.  See comments on |keyword| below.
   TemplateURL* GetTemplateURL(Profile* profile) const;
 
+  // Adds optional information to the |additional_info| dictionary.
+  void RecordAdditionalInfo(const std::string& property,
+                            const std::string& value);
+  void RecordAdditionalInfo(const std::string& property, int value);
+  void RecordAdditionalInfo(const std::string& property,
+                            const base::Time& value);
+
   // The provider of this match, used to remember which provider the user had
   // selected when the input changes. This may be NULL, in which case there is
   // no provider (or memory of the user's selection).
@@ -274,6 +290,19 @@ struct AutocompleteMatch {
   // True if this match is from a previous result.
   bool from_previous;
 
+  // Optional search terms args.  If present,
+  // AutocompleteController::UpdateAssistedQueryStats() will incorporate this
+  // data with additional data it calculates and pass the completed struct to
+  // TemplateURLRef::ReplaceSearchTerms() to reset the match's |destination_url|
+  // after the complete set of matches in the AutocompleteResult has been chosen
+  // and sorted.  Most providers will leave this as NULL, which will cause the
+  // AutocompleteController to do no additional transformations.
+  scoped_ptr<TemplateURLRef::SearchTermsArgs> search_terms_args;
+
+  // Information dictionary into which each provider can optionally record a
+  // property and associated value and which is presented in chrome://omnibox.
+  AdditionalInfo additional_info;
+
 #ifndef NDEBUG
   // Does a data integrity check on this match.
   void Validate() const;
@@ -287,5 +316,6 @@ struct AutocompleteMatch {
 
 typedef AutocompleteMatch::ACMatchClassification ACMatchClassification;
 typedef std::vector<ACMatchClassification> ACMatchClassifications;
+typedef std::vector<AutocompleteMatch> ACMatches;
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_MATCH_H_

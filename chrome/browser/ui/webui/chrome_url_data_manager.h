@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROME_URL_DATA_MANAGER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROME_URL_DATA_MANAGER_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 

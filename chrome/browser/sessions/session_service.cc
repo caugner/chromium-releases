@@ -18,7 +18,7 @@
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
@@ -27,6 +27,7 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -37,6 +38,7 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_MACOSX)
@@ -72,6 +74,7 @@ static const SessionCommand::id_type kCommandSetWindowAppName = 15;
 static const SessionCommand::id_type kCommandTabClosed = 16;
 static const SessionCommand::id_type kCommandWindowClosed = 17;
 static const SessionCommand::id_type kCommandSetTabUserAgentOverride = 18;
+static const SessionCommand::id_type kCommandSessionStorageAssociated = 19;
 
 // Every kWritesPerReset commands triggers recreating the file.
 static const int kWritesPerReset = 250;
@@ -599,6 +602,15 @@ void SessionService::Observe(int type,
             tab->restore_tab_helper()->session_id(),
             tab->extension_tab_helper()->extension_app()->id());
       }
+
+      // Record the association between the SessionStorageNamespace and the
+      // tab.
+      content::SessionStorageNamespace* session_storage_namespace =
+          tab->web_contents()->GetController().GetSessionStorageNamespace();
+      ScheduleCommand(CreateSessionStorageAssociatedCommand(
+          tab->restore_tab_helper()->session_id(),
+          session_storage_namespace->persistent_id()));
+      session_storage_namespace->SetShouldPersist(true);
       break;
     }
 
@@ -606,6 +618,11 @@ void SessionService::Observe(int type,
       TabContents* tab = content::Source<TabContents>(source).ptr();
       if (!tab || tab->profile() != profile())
         return;
+      // Allow the associated sessionStorage to get deleted; it won't be needed
+      // in the session restore.
+      content::SessionStorageNamespace* session_storage_namespace =
+          tab->web_contents()->GetController().GetSessionStorageNamespace();
+      session_storage_namespace->SetShouldPersist(false);
       TabClosed(tab->restore_tab_helper()->window_id(),
                 tab->restore_tab_helper()->session_id(),
                 tab->web_contents()->GetClosedByUserGesture());
@@ -678,8 +695,8 @@ void SessionService::Observe(int type,
     }
 
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
-      ExtensionTabHelper* extension_tab_helper =
-          content::Source<ExtensionTabHelper>(source).ptr();
+      extensions::TabHelper* extension_tab_helper =
+          content::Source<extensions::TabHelper>(source).ptr();
       if (extension_tab_helper->tab_contents()->profile() != profile())
         return;
       if (extension_tab_helper->extension_app()) {
@@ -836,6 +853,15 @@ SessionCommand* SessionService::CreatePinnedStateCommand(
       new SessionCommand(kCommandSetPinnedState, sizeof(payload));
   memcpy(command->contents(), &payload, sizeof(payload));
   return command;
+}
+
+SessionCommand* SessionService::CreateSessionStorageAssociatedCommand(
+    const SessionID& tab_id,
+    const std::string& session_storage_persistent_id) {
+  Pickle pickle;
+  pickle.WriteInt(tab_id.id());
+  pickle.WriteString(session_storage_persistent_id);
+  return new SessionCommand(kCommandSessionStorageAssociated, pickle);
 }
 
 void SessionService::OnGotSessionCommands(
@@ -1234,6 +1260,20 @@ bool SessionService::CreateTabsAndWindows(
         break;
       }
 
+      case kCommandSessionStorageAssociated: {
+        scoped_ptr<Pickle> command_pickle(command->PayloadAsPickle());
+        SessionID::id_type command_tab_id;
+        std::string session_storage_persistent_id;
+        PickleIterator iter(*command_pickle.get());
+        if (!command_pickle->ReadInt(&iter, &command_tab_id) ||
+            !command_pickle->ReadString(&iter, &session_storage_persistent_id))
+          return true;
+        // Associate the session storage back.
+        GetTab(command_tab_id, tabs)->session_storage_persistent_id =
+            session_storage_persistent_id;
+        break;
+      }
+
       default:
         VLOG(1) << "Failed reading an unknown command " << command->id();
         return true;
@@ -1303,6 +1343,13 @@ void SessionService::BuildCommandsForTab(
     commands->push_back(
         CreateSetTabIndexInWindowCommand(session_id, index_in_window));
   }
+
+  // Record the association between the sessionStorage namespace and the tab.
+  content::SessionStorageNamespace* session_storage_namespace =
+      tab->web_contents()->GetController().GetSessionStorageNamespace();
+  ScheduleCommand(CreateSessionStorageAssociatedCommand(
+      tab->restore_tab_helper()->session_id(),
+      session_storage_namespace->persistent_id()));
 }
 
 void SessionService::BuildCommandsForBrowser(
@@ -1336,11 +1383,11 @@ void SessionService::BuildCommandsForBrowser(
 
   bool added_to_windows_to_track = false;
   for (int i = 0; i < browser->tab_count(); ++i) {
-    TabContents* tab = browser->GetTabContentsAt(i);
+    TabContents* tab = chrome::GetTabContentsAt(browser, i);
     DCHECK(tab);
     if (tab->profile() == profile() || profile() == NULL) {
       BuildCommandsForTab(browser->session_id(), tab, i,
-                          browser->IsTabPinned(i),
+                          browser->tab_strip_model()->IsTabPinned(i),
                           commands, tab_to_available_range);
       if (windows_to_track && !added_to_windows_to_track) {
         windows_to_track->insert(browser->session_id().id());

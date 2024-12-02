@@ -11,28 +11,27 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "remoting/base/encoder.h"
-#include "remoting/host/capturer.h"
 #include "remoting/host/capture_scheduler.h"
 #include "remoting/proto/video.pb.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace remoting {
+
+class CaptureData;
+class VideoFrameCapturer;
 
 namespace protocol {
 class ConnectionToClient;
 class CursorShapeInfo;
 }  // namespace protocol
 
-class CaptureData;
-
-// A class for controlling and coordinate Capturer, Encoder
+// A class for controlling and coordinate VideoFrameCapturer, Encoder
 // and NetworkChannel in a record session.
 //
 // THREADING
@@ -76,14 +75,14 @@ class CaptureData;
 //                      if set to false.
 class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
  public:
-
   // Construct a ScreenRecorder. Message loops and threads are provided.
   // This object does not own capturer but owns encoder.
-  ScreenRecorder(MessageLoop* capture_loop,
-                 MessageLoop* encode_loop,
-                 base::MessageLoopProxy* network_loop,
-                 Capturer* capturer,
-                 Encoder* encoder);
+  ScreenRecorder(
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
+      VideoFrameCapturer* capturer,
+      Encoder* encoder);
 
   // Start recording.
   void Start();
@@ -109,7 +108,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   virtual ~ScreenRecorder();
 
   // Getters for capturer and encoder.
-  Capturer* capturer();
+  VideoFrameCapturer* capturer();
   Encoder* encoder();
 
   bool is_recording();
@@ -156,14 +155,14 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   void EncodedDataAvailableCallback(scoped_ptr<VideoPacket> packet);
   void SendVideoPacket(VideoPacket* packet);
 
-  // Message loops used by this class.
-  MessageLoop* capture_loop_;
-  MessageLoop* encode_loop_;
-  scoped_refptr<base::MessageLoopProxy> network_loop_;
+  // Task runners used by this class.
+  scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   // Reference to the capturer. This member is always accessed on the capture
   // thread.
-  Capturer* capturer_;
+  VideoFrameCapturer* capturer_;
 
   // Reference to the encoder. This member is always accessed on the encode
   // thread.

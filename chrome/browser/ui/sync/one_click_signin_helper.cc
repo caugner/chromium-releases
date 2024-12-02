@@ -12,6 +12,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -36,7 +37,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -70,6 +71,10 @@ class OneClickLoginInfoBarDelegate : public ConfirmInfoBarDelegate {
   // Set the profile preference to turn off one-click sign in so that it won't
   // show again in this profile.
   void DisableOneClickSignIn();
+
+  // Add a specific email to the list of emails rejected for one-click
+  // sign-in, for this profile.
+  void AddEmailToOneClickRejectedList(const std::string& email);
 
   // Record the specified action in the histogram for one-click sign in.
   void RecordHistogramAction(int action);
@@ -137,15 +142,16 @@ void StartSync(content::WebContents* web_contents,
                const std::string& password,
                OneClickSigninSyncStarter::StartSyncMode start_mode) {
   // The starter deletes itself once its done.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  new OneClickSigninSyncStarter(profile, session_index, email, password,
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
+  new OneClickSigninSyncStarter(browser, session_index, email, password,
                                 start_mode);
 }
 
 }  // namespace
 
 bool OneClickLoginInfoBarDelegate::Accept() {
+  // User has accepted one-click sign-in for this account. Never ask again for
+  // this profile.
   DisableOneClickSignIn();
   content::WebContents* web_contents = owner()->web_contents();
   RecordHistogramAction(one_click_signin::HISTOGRAM_ACCEPTED);
@@ -157,7 +163,7 @@ bool OneClickLoginInfoBarDelegate::Accept() {
 }
 
 bool OneClickLoginInfoBarDelegate::Cancel() {
-  DisableOneClickSignIn();
+  AddEmailToOneClickRejectedList(email_);
   RecordHistogramAction(one_click_signin::HISTOGRAM_REJECTED);
   button_pressed_ = true;
   return true;
@@ -190,6 +196,16 @@ void OneClickLoginInfoBarDelegate::DisableOneClickSignIn() {
   pref_service->SetBoolean(prefs::kReverseAutologinEnabled, false);
 }
 
+void OneClickLoginInfoBarDelegate::AddEmailToOneClickRejectedList(
+    const std::string& email) {
+  PrefService* pref_service =
+      TabContents::FromWebContents(owner()->web_contents())->
+          profile()->GetPrefs();
+  ListPrefUpdate updater(pref_service,
+                         prefs::kReverseAutologinRejectedEmailList);
+  updater->AppendIfNotPresent(base::Value::CreateStringValue(email));
+}
+
 void OneClickLoginInfoBarDelegate::RecordHistogramAction(int action) {
   UMA_HISTOGRAM_ENUMERATION("AutoLogin.Reverse", action,
                             one_click_signin::HISTOGRAM_MAX);
@@ -197,6 +213,7 @@ void OneClickLoginInfoBarDelegate::RecordHistogramAction(int action) {
 
 // static
 bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
+                                    const std::string& email,
                                     bool check_connected) {
   if (!web_contents)
     return false;
@@ -226,6 +243,38 @@ bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
 
     if (!manager->GetAuthenticatedUsername().empty())
       return false;
+
+    // Make sure this username is not prohibited by policy.
+    if (!manager->IsAllowedUsername(email))
+      return false;
+
+    // If some profile, not just the current one, is already connected to this
+    // account, don't show the infobar.
+    if (g_browser_process) {
+      ProfileManager* manager = g_browser_process->profile_manager();
+      if (manager) {
+        string16 email16 = UTF8ToUTF16(email);
+        ProfileInfoCache& cache = manager->GetProfileInfoCache();
+
+        for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+          if (email16 == cache.GetUserNameOfProfileAtIndex(i))
+            return false;
+        }
+      }
+    }
+
+    // If email was already rejected by this profile for one-click sign-in.
+    if (!email.empty()) {
+      const ListValue* rejected_emails = profile->GetPrefs()->GetList(
+          prefs::kReverseAutologinRejectedEmailList);
+      if (!rejected_emails->empty()) {
+        const scoped_ptr<Value> email_value(Value::CreateStringValue(email));
+        ListValue::const_iterator iter = rejected_emails->Find(
+            *email_value);
+        if (iter != rejected_emails->end())
+          return false;
+      }
+    }
   }
 
   return true;
@@ -283,29 +332,10 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
 
   content::WebContents* web_contents = tab_util::GetWebContentsByID(child_id,
                                                                     route_id);
-  if (!web_contents || !CanOffer(web_contents, true))
-    return;
 
-  // If some profile, not just the current one, is already connected to this
-  // account, don't show the infobar.
-  if (g_browser_process) {
-    ProfileManager* manager = g_browser_process->profile_manager();
-    if (manager) {
-      string16 email16 = UTF8ToUTF16(email);
-      ProfileInfoCache& cache = manager->GetProfileInfoCache();
-
-      for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-        if (email16 == cache.GetUserNameOfProfileAtIndex(i))
-          return;
-      }
-    }
-  }
-
-  // Make sure this username is not prohibited by policy.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  SigninManager* signin = SigninManagerFactory::GetForProfile(profile);
-  if (!signin->IsAllowedUsername(email))
+  // TODO(mathp): The appearance of this infobar should be tested using a
+  // browser_test.
+  if (!web_contents || !CanOffer(web_contents, email, true))
     return;
 
   TabContents* tab_contents = TabContents::FromWebContents(web_contents);
@@ -327,7 +357,8 @@ void OneClickSigninHelper::DidNavigateAnyFrame(
     SavePassword(UTF16ToUTF8(params.password_form.password_value));
 }
 
-void OneClickSigninHelper::DidStopLoading() {
+void OneClickSigninHelper::DidStopLoading(
+    content::RenderViewHost* render_view_host) {
   if (email_.empty() || password_.empty())
     return;
 

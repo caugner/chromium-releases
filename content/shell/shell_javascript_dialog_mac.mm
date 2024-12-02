@@ -6,7 +6,6 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/mac/cocoa_protocols.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
 #include "content/shell/shell_javascript_dialog_creator.h"
@@ -88,6 +87,7 @@ namespace content {
 
 ShellJavaScriptDialog::ShellJavaScriptDialog(
     ShellJavaScriptDialogCreator* creator,
+    gfx::NativeWindow parent_window,
     JavaScriptMessageType message_type,
     const string16& message_text,
     const string16& default_prompt_text,

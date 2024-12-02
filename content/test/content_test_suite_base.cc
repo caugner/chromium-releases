@@ -11,17 +11,22 @@
 #include "content/common/url_schemes.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
+#include "media/base/media.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/compositor/compositor_setup.h"
 
 namespace content {
 
 ContentTestSuiteBase::ContentTestSuiteBase(int argc, char** argv)
-    : base::TestSuite(argc, argv) {
+    : base::TestSuite(argc, argv),
+      external_libraries_enabled_(true) {
 }
 
 void ContentTestSuiteBase::Initialize() {
   base::TestSuite::Initialize();
+
+  if (external_libraries_enabled_)
+    media::InitializeMediaLibraryForTesting();
 
   scoped_ptr<ContentClient> client_for_init(CreateClientForInitialization());
   SetContentClient(client_for_init.get());

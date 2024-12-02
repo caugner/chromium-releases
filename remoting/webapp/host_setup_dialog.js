@@ -17,6 +17,7 @@ remoting.HostSetupFlow = function(sequence) {
   this.currentStep_ = 0;
   this.state_ = sequence[0];
   this.pin = '';
+  this.consent = false;
 };
 
 /** @enum {number} */
@@ -136,6 +137,10 @@ remoting.HostSetupDialog = function(hostController) {
   this.pinEntry_.addEventListener('keypress', onDaemonPinEntryKeyPress, false);
   this.pinEntry_.addEventListener('keypress', noDigitsInPin, false);
   this.pinConfirm_.addEventListener('keypress', noDigitsInPin, false);
+
+  this.usageStats_ = document.getElementById('usagestats-consent');
+  this.usageStatsCheckbox_ =
+      document.getElementById('usagestats-consent-checkbox');
 };
 
 /**
@@ -145,6 +150,37 @@ remoting.HostSetupDialog = function(hostController) {
  * @return {void} Nothing.
  */
 remoting.HostSetupDialog.prototype.showForStart = function() {
+  // Although we don't need an access token in order to start the host,
+  // using callWithToken here ensures consistent error handling in the
+  // case where the refresh token is invalid.
+  remoting.oauth2.callWithToken(this.showForStartWithToken_.bind(this),
+                                remoting.showErrorMessage);
+};
+
+/**
+ * @param {string} token The OAuth2 token.
+ * @private
+ */
+remoting.HostSetupDialog.prototype.showForStartWithToken_ = function(token) {
+  /** @type {remoting.HostSetupDialog} */
+  var that = this;
+
+  /**
+   * @param {boolean} supported True if crash dump reporting is supported by
+   *     the host.
+   * @param {boolean} allowed True if crash dump reporting is allowed.
+   * @param {boolean} set_by_policy True if crash dump reporting is controlled
+   *     by policy.
+   */
+  var onGetConsent = function(supported, allowed, set_by_policy) {
+    that.usageStats_.hidden = !supported;
+    that.usageStatsCheckbox_.checked = allowed;
+    that.usageStatsCheckbox_.disabled = set_by_policy;
+  };
+  this.usageStats_.hidden = false;
+  this.usageStatsCheckbox_.checked = true;
+  this.hostController_.getConsent(onGetConsent);
+
   var flow = [
       remoting.HostSetupFlow.State.ASK_PIN,
       remoting.HostSetupFlow.State.STARTING_HOST,
@@ -165,6 +201,7 @@ remoting.HostSetupDialog.prototype.showForStart = function() {
  * @return {void} Nothing.
  */
 remoting.HostSetupDialog.prototype.showForPin = function() {
+  this.usageStats_.hidden = true;
   this.startNewFlow_(
       [remoting.HostSetupFlow.State.ASK_PIN,
        remoting.HostSetupFlow.State.UPDATING_PIN,
@@ -246,7 +283,7 @@ remoting.HostSetupDialog.prototype.updateState_ = function() {
   } else if (state == remoting.HostSetupFlow.State.INSTALL_HOST) {
     remoting.setMode(remoting.AppMode.HOST_SETUP_INSTALL);
     window.location =
-        'http://dl.google.com/chrome-remote-desktop/chromeremotedesktop.dmg';
+        'https://dl.google.com/chrome-remote-desktop/chromeremotedesktop.dmg';
   } else if (state == remoting.HostSetupFlow.State.STARTING_HOST) {
     showProcessingMessage(/*i18n-content*/'HOST_SETUP_STARTING');
     this.startHost_();
@@ -296,7 +333,7 @@ remoting.HostSetupDialog.prototype.startHost_ = function() {
     flow.switchToNextStep(result);
     that.updateState_();
   }
-  this.hostController_.start(this.flow_.pin, onHostStarted);
+  this.hostController_.start(this.flow_.pin, this.flow_.consent, onHostStarted);
 };
 
 remoting.HostSetupDialog.prototype.updatePin_ = function() {
@@ -367,6 +404,8 @@ remoting.HostSetupDialog.prototype.onPinSubmit_ = function() {
   }
   this.pinErrorDiv_.hidden = true;
   this.flow_.pin = pin1;
+  this.flow_.consent = !this.usageStats_.hidden &&
+      (this.usageStatsCheckbox_.value == "on");
   this.flow_.switchToNextStep(remoting.HostController.AsyncResult.OK);
   this.updateState_();
 };
@@ -386,7 +425,7 @@ remoting.HostSetupDialog.prototype.prepareForPinEntry_ = function() {
  * @return {boolean} Whether the PIN is valid.
  */
 remoting.HostSetupDialog.validPin_ = function(pin) {
-  if (pin.length < 4) {
+  if (pin.length < 6) {
     return false;
   }
   for (var i = 0; i < pin.length; i++) {
@@ -396,7 +435,7 @@ remoting.HostSetupDialog.validPin_ = function(pin) {
     }
   }
   return true;
-}
+};
 
 /**
  * @return {void} Nothing.
@@ -409,14 +448,14 @@ remoting.HostSetupDialog.prototype.onInstallDialogOk = function() {
   } else {
     remoting.setMode(remoting.AppMode.HOST_SETUP_INSTALL_PENDING);
   }
-}
+};
 
 /**
  * @return {void} Nothing.
  */
 remoting.HostSetupDialog.prototype.onInstallDialogRetry = function() {
   remoting.setMode(remoting.AppMode.HOST_SETUP_INSTALL);
-}
+};
 
 /** @type {remoting.HostSetupDialog} */
 remoting.hostSetupDialog = null;

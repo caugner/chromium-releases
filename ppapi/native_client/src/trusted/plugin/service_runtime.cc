@@ -59,6 +59,14 @@
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/file_io.h"
 
+namespace {
+
+// For doing crude quota enforcement on writes to temp files.
+// We do not allow a temp file bigger than 512 MB for now.
+const uint64_t kMaxTempQuota = 0x20000000;
+
+}  // namespace
+
 namespace plugin {
 
 PluginReverseInterface::PluginReverseInterface(
@@ -412,6 +420,7 @@ void PluginReverseInterface::CloseManifestEntry_MainThreadContinuation(
 
 void PluginReverseInterface::ReportCrash() {
   NaClLog(4, "PluginReverseInterface::ReportCrash\n");
+
   if (crash_cb_.pp_completion_callback().func != NULL) {
     NaClLog(4, "PluginReverseInterface::ReportCrash: invoking CB\n");
     pp::Module::Get()->core()->CallOnMainThread(0, crash_cb_, PP_OK);
@@ -432,23 +441,44 @@ void PluginReverseInterface::QuotaRequest_MainThreadContinuation(
   if (err != PP_OK) {
     return;
   }
-  const PPB_FileIOTrusted* file_io_trusted =
-      static_cast<const PPB_FileIOTrusted*>(
-          pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
-  // Copy the request object because this one will be deleted on return.
-  QuotaRequest* cont_for_response = new QuotaRequest(*request);  // copy ctor!
-  pp::CompletionCallback quota_cc = WeakRefNewCallback(
-      anchor_,
-      this,
-      &PluginReverseInterface::QuotaRequest_MainThreadResponse,
-      cont_for_response);
-  file_io_trusted->WillWrite(request->resource,
-                             request->offset,
-                             // TODO(sehr): remove need for cast.
-                             // Unify WillWrite interface vs Quota request.
-                             nacl::assert_cast<int32_t>(
-                                 request->bytes_requested),
-                             quota_cc.pp_completion_callback());
+
+  switch (request->data.type) {
+    case plugin::PepperQuotaType: {
+      const PPB_FileIOTrusted* file_io_trusted =
+          static_cast<const PPB_FileIOTrusted*>(
+              pp::Module::Get()->GetBrowserInterface(
+                  PPB_FILEIOTRUSTED_INTERFACE));
+      // Copy the request object because this one will be deleted on return.
+      // copy ctor!
+      QuotaRequest* cont_for_response = new QuotaRequest(*request);
+      pp::CompletionCallback quota_cc = WeakRefNewCallback(
+          anchor_,
+          this,
+          &PluginReverseInterface::QuotaRequest_MainThreadResponse,
+          cont_for_response);
+      file_io_trusted->WillWrite(request->data.resource,
+                                 request->offset,
+                                 // TODO(sehr): remove need for cast.
+                                 // Unify WillWrite interface vs Quota request.
+                                 nacl::assert_cast<int32_t>(
+                                     request->bytes_requested),
+                                 quota_cc.pp_completion_callback());
+      break;
+    }
+    case plugin::TempQuotaType: {
+      uint64_t len = request->offset + request->bytes_requested;
+      nacl::MutexLocker take(&mu_);
+      // Do some crude quota enforcement.
+      if (len > kMaxTempQuota) {
+        *request->bytes_granted = 0;
+      } else {
+        *request->bytes_granted = request->bytes_requested;
+      }
+      *request->op_complete_ptr = true;
+      NaClXCondVarBroadcast(&cv_);
+      break;
+    }
+  }
   // request automatically deleted
 }
 
@@ -459,7 +489,8 @@ void PluginReverseInterface::QuotaRequest_MainThreadResponse(
           "PluginReverseInterface::QuotaRequest_MainThreadResponse:"
           " (resource=%"NACL_PRIx32", offset=%"NACL_PRId64", requested=%"
           NACL_PRId64", err=%"NACL_PRId32")\n",
-          request->resource, request->offset, request->bytes_requested, err);
+          request->data.resource,
+          request->offset, request->bytes_requested, err);
   nacl::MutexLocker take(&mu_);
   if (err >= PP_OK) {
     *request->bytes_granted = err;
@@ -477,7 +508,7 @@ int64_t PluginReverseInterface::RequestQuotaForWrite(
           "PluginReverseInterface::RequestQuotaForWrite:"
           " (file_id='%s', offset=%"NACL_PRId64", bytes_to_write=%"
           NACL_PRId64")\n", file_id.c_str(), offset, bytes_to_write);
-  PP_Resource resource;
+  QuotaData quota_data;
   {
     nacl::MutexLocker take(&mu_);
     uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
@@ -486,13 +517,13 @@ int64_t PluginReverseInterface::RequestQuotaForWrite(
       NaClLog(4, "PluginReverseInterface::RequestQuotaForWrite: failed...\n");
       return 0;
     }
-    resource = quota_map_[file_key];
+    quota_data = quota_map_[file_key];
   }
   // Variables set by requesting quota.
   int64_t quota_granted = 0;
   bool op_complete = false;
   QuotaRequest* continuation =
-      new QuotaRequest(resource, offset, bytes_to_write, &quota_granted,
+      new QuotaRequest(quota_data, offset, bytes_to_write, &quota_granted,
                        &op_complete);
   // The reverse service is running on a background thread and the PPAPI quota
   // methods must be invoked only from the main thread.
@@ -528,7 +559,18 @@ void PluginReverseInterface::AddQuotaManagedFile(const nacl::string& file_id,
           file_id.c_str(), resource);
   nacl::MutexLocker take(&mu_);
   uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
-  quota_map_[file_key] = resource;
+  QuotaData data(plugin::PepperQuotaType, resource);
+  quota_map_[file_key] = data;
+}
+
+void PluginReverseInterface::AddTempQuotaManagedFile(
+    const nacl::string& file_id) {
+  PLUGIN_PRINTF(("PluginReverseInterface::AddTempQuotaManagedFile: "
+                 "(file_id='%s')\n", file_id.c_str()));
+  nacl::MutexLocker take(&mu_);
+  uint64_t file_key = STRTOULL(file_id.c_str(), NULL, 10);
+  QuotaData data(plugin::TempQuotaType, 0);
+  quota_map_[file_key] = data;
 }
 
 ServiceRuntime::ServiceRuntime(Plugin* plugin,
@@ -587,6 +629,8 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
     return false;
   }
   out_conn_cap = NULL;  // ownership passed
+  PLUGIN_PRINTF(("ServiceRuntime::InitCommunication"
+                 " starting reverse service\n"));
   reverse_service_ = new nacl::ReverseService(conn_cap, rev_interface_->Ref());
   if (!reverse_service_->Start()) {
     error_info->SetReport(ERROR_SEL_LDR_COMMUNICATION_REV_SERVICE,
@@ -623,7 +667,8 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
 }
 
 bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
-                           ErrorInfo* error_info, const nacl::string& url) {
+                           ErrorInfo* error_info, const nacl::string& url,
+                           pp::CompletionCallback crash_cb) {
   PLUGIN_PRINTF(("ServiceRuntime::Start (nacl_desc=%p)\n",
                  reinterpret_cast<void*>(nacl_desc)));
 
@@ -654,7 +699,22 @@ bool ServiceRuntime::Start(nacl::DescWrapper* nacl_desc,
 
   subprocess_.reset(tmp_subprocess.release());
   if (!InitCommunication(nacl_desc, error_info)) {
-    subprocess_.reset(NULL);
+    // On a load failure the service runtime does not crash itself to
+    // avoid a race where the no-more-senders error on the reverse
+    // channel esrvice thread might cause the crash-detection logic to
+    // kick in before the start_module RPC reply has been received. So
+    // we induce a service runtime crash here. We do not release
+    // subprocess_ since it's needed to collect crash log output after
+    // the error is reported.
+    Log(LOG_FATAL, "reap logs");
+    if (NULL == reverse_service_) {
+      // No crash detector thread.
+      PLUGIN_PRINTF(("scheduling to get crash log\n"));
+      pp::Module::Get()->core()->CallOnMainThread(0, crash_cb, PP_OK);
+      PLUGIN_PRINTF(("should fire soon\n"));
+    } else {
+      PLUGIN_PRINTF(("Reverse service thread will pick up crash log\n"));
+    }
     return false;
   }
 
@@ -680,7 +740,7 @@ SrpcClient* ServiceRuntime::SetupAppChannel() {
   }
 }
 
-bool ServiceRuntime::Log(int severity, nacl::string msg) {
+bool ServiceRuntime::Log(int severity, const nacl::string& msg) {
   NaClSrpcResultCodes rpc_result =
       NaClSrpcInvokeBySignature(&command_channel_,
                                 "log:is:",
@@ -739,6 +799,14 @@ int ServiceRuntime::exit_status() {
 void ServiceRuntime::set_exit_status(int exit_status) {
   nacl::MutexLocker take(&mu_);
   exit_status_ = exit_status & 0xff;
+}
+
+nacl::string ServiceRuntime::GetCrashLogOutput() {
+  if (NULL != subprocess_.get()) {
+    return subprocess_->GetCrashLogOutput();
+  } else {
+    return "";
+  }
 }
 
 }  // namespace plugin

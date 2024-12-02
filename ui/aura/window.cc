@@ -15,6 +15,7 @@
 #include "base/stringprintf.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/event_client.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/stacking_client.h"
 #include "ui/aura/client/visibility_client.h"
 #include "ui/aura/env.h"
@@ -40,7 +41,7 @@ Window* GetParentForWindow(Window* window, Window* suggested_parent) {
   if (suggested_parent)
     return suggested_parent;
   if (client::GetStackingClient())
-    return client::GetStackingClient()->GetDefaultParent(window);
+    return client::GetStackingClient()->GetDefaultParent(window, gfx::Rect());
   return NULL;
 }
 
@@ -50,6 +51,10 @@ Window::TestApi::TestApi(Window* window) : window_(window) {}
 
 bool Window::TestApi::OwnsLayer() const {
   return !!window_->layer_owner_.get();
+}
+
+bool Window::TestApi::ContainsMouse() {
+  return window_->ContainsMouse();
 }
 
 Window::Window(WindowDelegate* delegate)
@@ -233,7 +238,7 @@ bool Window::IsVisible() const {
 
 gfx::Rect Window::GetBoundsInRootWindow() const {
   // TODO(beng): There may be a better way to handle this, and the existing code
-  //             is likely wrong anyway in a multi-monitor world, but this will
+  //             is likely wrong anyway in a multi-display world, but this will
   //             do for now.
   if (!GetRootWindow())
     return bounds();
@@ -242,10 +247,25 @@ gfx::Rect Window::GetBoundsInRootWindow() const {
   return gfx::Rect(origin, bounds().size());
 }
 
+gfx::Rect Window::GetBoundsInScreen() const {
+  gfx::Rect bounds(GetBoundsInRootWindow());
+  const RootWindow* root = GetRootWindow();
+  if (root) {
+    aura::client::ScreenPositionClient* screen_position_client =
+        aura::client::GetScreenPositionClient(root);
+    if (screen_position_client) {
+      gfx::Point origin = bounds.origin();
+      screen_position_client->ConvertPointToScreen(root, &origin);
+      bounds.set_origin(origin);
+    }
+  }
+  return bounds;
+}
+
 void Window::SetTransform(const ui::Transform& transform) {
   RootWindow* root_window = GetRootWindow();
   bool contained_mouse = IsVisible() && root_window &&
-      ContainsPointInRoot(root_window->last_mouse_location());
+      ContainsPointInRoot(root_window->GetLastMouseLocationInRoot());
   layer()->SetTransform(transform);
   if (root_window)
     root_window->OnWindowTransformed(this, contained_mouse);
@@ -270,6 +290,18 @@ void Window::SetBounds(const gfx::Rect& new_bounds) {
     parent_->layout_manager()->SetChildBounds(this, new_bounds);
   else
     SetBoundsInternal(new_bounds);
+}
+
+void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen) {
+  RootWindow* root = GetRootWindow();
+  if (root) {
+    gfx::Point origin = new_bounds_in_screen.origin();
+    aura::client::ScreenPositionClient* screen_position_client =
+        aura::client::GetScreenPositionClient(root);
+    screen_position_client->SetBounds(this, new_bounds_in_screen);
+    return;
+  }
+  SetBounds(new_bounds_in_screen);
 }
 
 gfx::Rect Window::GetTargetBounds() const {
@@ -405,7 +437,22 @@ void Window::ConvertPointToWindow(const Window* source,
                                   gfx::Point* point) {
   if (!source)
     return;
-  ui::Layer::ConvertPointToLayer(source->layer(), target->layer(), point);
+  if (source->GetRootWindow() != target->GetRootWindow()) {
+    const gfx::Point source_origin =
+        gfx::Screen::GetDisplayNearestWindow(
+            const_cast<Window*>(source)).bounds().origin();
+    const gfx::Point target_origin =
+        gfx::Screen::GetDisplayNearestWindow(
+            const_cast<Window*>(target)).bounds().origin();
+    ui::Layer::ConvertPointToLayer(
+        source->layer(), source->GetRootWindow()->layer(), point);
+    const gfx::Point offset = source_origin.Subtract(target_origin);
+    point->Offset(offset.x(), offset.y());
+    ui::Layer::ConvertPointToLayer(
+        target->GetRootWindow()->layer(), target->layer(), point);
+  } else {
+    ui::Layer::ConvertPointToLayer(source->layer(), target->layer(), point);
+  }
 }
 
 void Window::MoveCursorTo(const gfx::Point& point_in_window) {
@@ -432,18 +479,17 @@ void Window::RemoveObserver(WindowObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool Window::ContainsPointInRoot(const gfx::Point& point_in_root) {
-  Window* root_window = GetRootWindow();
+bool Window::ContainsPointInRoot(const gfx::Point& point_in_root) const {
+  const Window* root_window = GetRootWindow();
   if (!root_window)
     return false;
   gfx::Point local_point(point_in_root);
   ConvertPointToWindow(root_window, this, &local_point);
-  return GetTargetBounds().Contains(local_point);
+  return gfx::Rect(GetTargetBounds().size()).Contains(local_point);
 }
 
-bool Window::ContainsPoint(const gfx::Point& local_point) {
-  gfx::Rect local_bounds(gfx::Point(), bounds().size());
-  return local_bounds.Contains(local_point);
+bool Window::ContainsPoint(const gfx::Point& local_point) const {
+  return gfx::Rect(bounds().size()).Contains(local_point);
 }
 
 bool Window::HitTest(const gfx::Point& local_point) {
@@ -648,7 +694,7 @@ void Window::SetVisible(bool visible) {
   visible_ = visible;
   SchedulePaint();
   if (delegate_)
-    delegate_->OnWindowVisibilityChanged(visible);
+    delegate_->OnWindowTargetVisibilityChanged(visible);
 
   if (parent_ && parent_->layout_manager_.get())
     parent_->layout_manager_->OnChildWindowVisibilityChanged(this, visible);
@@ -876,8 +922,8 @@ bool Window::ContainsMouse() {
   bool contains_mouse = false;
   if (IsVisible()) {
     RootWindow* root_window = GetRootWindow();
-    contains_mouse =
-        root_window && ContainsPointInRoot(root_window->last_mouse_location());
+    contains_mouse = root_window &&
+        ContainsPointInRoot(root_window->GetLastMouseLocationInRoot());
   }
   return contains_mouse;
 }

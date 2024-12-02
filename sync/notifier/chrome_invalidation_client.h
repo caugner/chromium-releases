@@ -7,7 +7,6 @@
 
 #ifndef SYNC_NOTIFIER_CHROME_INVALIDATION_CLIENT_H_
 #define SYNC_NOTIFIER_CHROME_INVALIDATION_CLIENT_H_
-#pragma once
 
 #include <string>
 
@@ -18,12 +17,11 @@
 #include "base/threading/non_thread_safe.h"
 #include "google/cacheinvalidation/include/invalidation-listener.h"
 #include "jingle/notifier/listener/push_client_observer.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
 #include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/chrome_system_resources.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/notifications_disabled_reason.h"
+#include "sync/notifier/object_id_payload_map.h"
 #include "sync/notifier/state_writer.h"
 
 namespace buzz {
@@ -34,16 +32,14 @@ namespace notifier {
 class PushClient;
 }  // namespace notifier
 
-namespace sync_notifier {
-
-using invalidation::InvalidationListener;
+namespace syncer {
 
 class RegistrationManager;
 
 // ChromeInvalidationClient is not thread-safe and lives on the sync
 // thread.
 class ChromeInvalidationClient
-    : public InvalidationListener,
+    : public invalidation::InvalidationListener,
       public StateWriter,
       public notifier::PushClientObserver,
       public base::NonThreadSafe {
@@ -52,8 +48,7 @@ class ChromeInvalidationClient
    public:
     virtual ~Listener();
 
-    virtual void OnInvalidate(
-        const syncable::ModelTypePayloadMap& type_payloads) = 0;
+    virtual void OnInvalidate(const ObjectIdPayloadMap& id_payloads) = 0;
 
     virtual void OnNotificationsEnabled() = 0;
 
@@ -73,15 +68,14 @@ class ChromeInvalidationClient
       const std::string& client_id, const std::string& client_info,
       const std::string& state,
       const InvalidationVersionMap& initial_max_invalidation_versions,
-      const browser_sync::WeakHandle<InvalidationStateTracker>&
-          invalidation_state_tracker,
+      const WeakHandle<InvalidationStateTracker>& invalidation_state_tracker,
       Listener* listener);
 
   void UpdateCredentials(const std::string& email, const std::string& token);
 
-  // Register the sync types that we're interested in getting
+  // Register the object IDs that we're interested in getting
   // notifications for.  May be called at any time.
-  void RegisterTypes(syncable::ModelTypeSet types);
+  void RegisterIds(const ObjectIdSet& ids);
 
   // invalidation::InvalidationListener implementation.
   virtual void Ready(
@@ -100,7 +94,7 @@ class ChromeInvalidationClient
   virtual void InformRegistrationStatus(
       invalidation::InvalidationClient* client,
       const invalidation::ObjectId& object_id,
-      InvalidationListener::RegistrationState reg_state) OVERRIDE;
+      invalidation::InvalidationListener::RegistrationState reg_state) OVERRIDE;
   virtual void InformRegistrationFailure(
       invalidation::InvalidationClient* client,
       const invalidation::ObjectId& object_id,
@@ -133,20 +127,18 @@ class ChromeInvalidationClient
 
   void EmitStateChange();
 
-  void EmitInvalidation(
-      syncable::ModelTypeSet types, const std::string& payload);
+  void EmitInvalidation(const ObjectIdPayloadMap& id_payloads);
 
   // Owned by |chrome_system_resources_|.
   notifier::PushClient* const push_client_;
   ChromeSystemResources chrome_system_resources_;
   InvalidationVersionMap max_invalidation_versions_;
-  browser_sync::WeakHandle<InvalidationStateTracker>
-      invalidation_state_tracker_;
+  WeakHandle<InvalidationStateTracker> invalidation_state_tracker_;
   Listener* listener_;
   scoped_ptr<invalidation::InvalidationClient> invalidation_client_;
   scoped_ptr<RegistrationManager> registration_manager_;
   // Stored to pass to |registration_manager_| on start.
-  syncable::ModelTypeSet registered_types_;
+  ObjectIdSet registered_ids_;
 
   // The states of the ticl and the push client (with
   // NO_NOTIFICATION_ERROR meaning notifications are enabled).
@@ -156,6 +148,6 @@ class ChromeInvalidationClient
   DISALLOW_COPY_AND_ASSIGN(ChromeInvalidationClient);
 };
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_CHROME_INVALIDATION_CLIENT_H_

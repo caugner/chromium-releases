@@ -14,6 +14,7 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_quota_client.h"
+#include "webkit/fileapi/file_system_task_runners.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
@@ -47,8 +48,7 @@ class FileSystemQuotaClientTest : public testing::Test {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     file_system_context_ =
         new FileSystemContext(
-            base::MessageLoopProxy::current(),
-            base::MessageLoopProxy::current(),
+            FileSystemTaskRunners::CreateMockTaskRunners(),
             NULL, NULL,
             data_dir_.path(),
             CreateDisallowFileAccessOptions());
@@ -130,12 +130,12 @@ class FileSystemQuotaClientTest : public testing::Test {
     FileSystemType type = QuotaStorageTypeToFileSystemType(storage_type);
     FileSystemFileUtil* file_util = file_system_context_->GetFileUtil(type);
 
-    FileSystemPath path(GURL(origin_url), type, file_path);
+    FileSystemURL url(GURL(origin_url), type, file_path);
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext());
 
     base::PlatformFileError result =
-        file_util->CreateDirectory(context.get(), path, false, false);
+        file_util->CreateDirectory(context.get(), url, false, false);
     if (result != base::PLATFORM_FILE_OK)
       return false;
     return true;
@@ -148,21 +148,21 @@ class FileSystemQuotaClientTest : public testing::Test {
     if (file_path.empty())
       return false;
 
-    FileSystemFileUtil* file_util = file_system_context_->
-        sandbox_provider()->GetFileUtil();
-
     FileSystemType type = QuotaStorageTypeToFileSystemType(storage_type);
-    FileSystemPath path(GURL(origin_url), type, file_path);
+    FileSystemFileUtil* file_util = file_system_context_->
+        sandbox_provider()->GetFileUtil(type);
+
+    FileSystemURL url(GURL(origin_url), type, file_path);
     scoped_ptr<FileSystemOperationContext> context(
         CreateFileSystemOperationContext());
 
     bool created = false;
     if (base::PLATFORM_FILE_OK !=
-        file_util->EnsureFileExists(context.get(), path, &created))
+        file_util->EnsureFileExists(context.get(), url, &created))
       return false;
     EXPECT_TRUE(created);
     if (base::PLATFORM_FILE_OK !=
-        file_util->Truncate(context.get(), path, file_size))
+        file_util->Truncate(context.get(), url, file_size))
       return false;
     return true;
   }

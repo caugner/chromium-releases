@@ -11,17 +11,20 @@
 #include "base/platform_file.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "content/public/browser/browser_thread.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system_interface.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
+#include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "webkit/blob/shareable_file_reference.h"
 #include "webkit/fileapi/file_system_file_util_proxy.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/file_system_util.h"
 
 using base::MessageLoopProxy;
 using content::BrowserThread;
+using fileapi::FileSystemURL;
 using fileapi::FileSystemOperationInterface;
 using webkit_blob::ShareableFileReference;
 
@@ -30,9 +33,8 @@ namespace {
 const char kGDataRootDirectory[] = "drive";
 const char kFeedField[] = "feed";
 
-
-// Helper function that creates platform file on bocking IO thread pool.
-void CreatePlatformFileOnIOPool(const FilePath& local_path,
+// Helper function that creates platform file on blocking IO thread pool.
+void OpenPlatformFileOnIOPool(const FilePath& local_path,
                                 int file_flags,
                                 base::PlatformFile* platform_file,
                                 base::PlatformFileError* open_error) {
@@ -43,9 +45,9 @@ void CreatePlatformFileOnIOPool(const FilePath& local_path,
                                             open_error);
 }
 
-// Helper function to run reply on results of CreatePlatformFileOnIOPool() on
+// Helper function to run reply on results of OpenPlatformFileOnIOPool() on
 // IO thread.
-void OnPlatformFileCreated(
+void OnPlatformFileOpened(
     const FileSystemOperationInterface::OpenFileCallback& callback,
     base::ProcessHandle peer_handle,
     base::PlatformFile* platform_file,
@@ -59,10 +61,12 @@ void OnGetFileByPathForOpen(
     const FileSystemOperationInterface::OpenFileCallback& callback,
     int file_flags,
     base::ProcessHandle peer_handle,
-    base::PlatformFileError error,
+    gdata::GDataFileError gdata_error,
     const FilePath& local_path,
     const std::string& unused_mime_type,
     gdata::GDataFileType file_type) {
+  base::PlatformFileError error =
+      gdata::util::GDataFileErrorToPlatformError(gdata_error);
   if (error != base::PLATFORM_FILE_OK) {
     callback.Run(error, base::kInvalidPlatformFileValue, peer_handle);
     return;
@@ -73,12 +77,12 @@ void OnGetFileByPathForOpen(
   base::PlatformFileError* open_error =
       new base::PlatformFileError(base::PLATFORM_FILE_ERROR_FAILED);
   BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
-      base::Bind(&CreatePlatformFileOnIOPool,
+      base::Bind(&OpenPlatformFileOnIOPool,
                  local_path,
                  file_flags,
                  platform_file,
                  open_error),
-      base::Bind(&OnPlatformFileCreated,
+      base::Bind(&OnPlatformFileOpened,
                  callback,
                  peer_handle,
                  base::Owned(platform_file),
@@ -91,11 +95,13 @@ void OnGetFileByPathForOpen(
 void CallSnapshotFileCallback(
     const FileSystemOperationInterface::SnapshotFileCallback& callback,
     const base::PlatformFileInfo& file_info,
-    base::PlatformFileError error,
+    gdata::GDataFileError gdata_error,
     const FilePath& local_path,
     const std::string& unused_mime_type,
     gdata::GDataFileType file_type) {
   scoped_refptr<ShareableFileReference> file_ref;
+  base::PlatformFileError error =
+      gdata::util::GDataFileErrorToPlatformError(gdata_error);
 
   // If the file is a hosted document, a temporary JSON file is created to
   // represent the document. The JSON file is not cached and its lifetime
@@ -118,7 +124,7 @@ void CallSnapshotFileCallback(
   callback.Run(error, final_file_info, local_path, file_ref);
 }
 
-void OnClose(const FilePath& local_path, base::PlatformFileError error_code) {
+void OnClose(const FilePath& local_path, gdata::GDataFileError error_code) {
   DVLOG(1) << "Closed: " << local_path.AsUTF8Unsafe() << ": " << error_code;
 }
 
@@ -142,12 +148,13 @@ void DoTruncateOnFileThread(
 }
 
 void DidCloseFileForTruncate(
-    const fileapi::FileSystemOperationInterface::StatusCallback& callback,
+    const FileSystemOperationInterface::StatusCallback& callback,
     base::PlatformFileError truncate_result,
-    base::PlatformFileError close_result) {
+    gdata::GDataFileError close_result) {
   // Reports the first error.
-  callback.Run(truncate_result == base::PLATFORM_FILE_OK ? close_result
-                                                         : truncate_result);
+  callback.Run(truncate_result == base::PLATFORM_FILE_OK ?
+               gdata::util::GDataFileErrorToPlatformError(close_result) :
+               truncate_result);
 }
 
 }  // namespace
@@ -160,7 +167,7 @@ base::FileUtilProxy::Entry GDataEntryProtoToFileUtilProxyEntry(
   GDataEntry::ConvertProtoToPlatformFileInfo(proto.file_info(), &file_info);
 
   base::FileUtilProxy::Entry entry;
-  entry.name = proto.file_name();
+  entry.name = proto.base_name();
   entry.is_directory = file_info.is_directory;
   entry.size = file_info.size;
   entry.last_modified_time = file_info.last_modified;
@@ -177,23 +184,16 @@ GDataFileSystemProxy::GDataFileSystemProxy(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
-GDataFileSystemProxy::~GDataFileSystemProxy() {
-  // Should be deleted from the CrosMountPointProvider on IO thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-}
-
-void GDataFileSystemProxy::GetFileInfo(const GURL& file_url,
+void GDataFileSystemProxy::GetFileInfo(const FileSystemURL& file_url,
     const FileSystemOperationInterface::GetMetadataCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
   FilePath file_path;
   if (!ValidateUrl(file_url, &file_path)) {
-    base::MessageLoopProxy::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback,
-                   base::PLATFORM_FILE_ERROR_NOT_FOUND,
-                   base::PlatformFileInfo(),
-                   FilePath()));
+    MessageLoopProxy::current()->PostTask(FROM_HERE,
+         base::Bind(callback,
+                    base::PLATFORM_FILE_ERROR_NOT_FOUND,
+                    base::PlatformFileInfo(),
+                    FilePath()));
     return;
   }
 
@@ -205,8 +205,8 @@ void GDataFileSystemProxy::GetFileInfo(const GURL& file_url,
                  callback));
 }
 
-void GDataFileSystemProxy::Copy(const GURL& src_file_url,
-    const GURL& dest_file_url,
+void GDataFileSystemProxy::Copy(const FileSystemURL& src_file_url,
+    const FileSystemURL& dest_file_url,
     const FileSystemOperationInterface::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -218,11 +218,14 @@ void GDataFileSystemProxy::Copy(const GURL& src_file_url,
     return;
   }
 
-  file_system_->Copy(src_file_path, dest_file_path, callback);
+  file_system_->Copy(
+      src_file_path,
+      dest_file_path,
+      base::Bind(&GDataFileSystemProxy::OnStatusCallback, this, callback));
 }
 
-void GDataFileSystemProxy::Move(const GURL& src_file_url,
-    const GURL& dest_file_url,
+void GDataFileSystemProxy::Move(const FileSystemURL& src_file_url,
+    const FileSystemURL& dest_file_url,
     const FileSystemOperationInterface::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -234,10 +237,13 @@ void GDataFileSystemProxy::Move(const GURL& src_file_url,
     return;
   }
 
-  file_system_->Move(src_file_path, dest_file_path, callback);
+  file_system_->Move(
+      src_file_path,
+      dest_file_path,
+      base::Bind(&GDataFileSystemProxy::OnStatusCallback, this, callback));
 }
 
-void GDataFileSystemProxy::ReadDirectory(const GURL& file_url,
+void GDataFileSystemProxy::ReadDirectory(const FileSystemURL& file_url,
     const FileSystemOperationInterface::ReadDirectoryCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -259,7 +265,7 @@ void GDataFileSystemProxy::ReadDirectory(const GURL& file_url,
                  callback));
 }
 
-void GDataFileSystemProxy::Remove(const GURL& file_url, bool recursive,
+void GDataFileSystemProxy::Remove(const FileSystemURL& file_url, bool recursive,
     const FileSystemOperationInterface::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -270,11 +276,14 @@ void GDataFileSystemProxy::Remove(const GURL& file_url, bool recursive,
     return;
   }
 
-  file_system_->Remove(file_path, recursive, callback);
+  file_system_->Remove(
+      file_path,
+      recursive,
+      base::Bind(&GDataFileSystemProxy::OnStatusCallback, this, callback));
 }
 
 void GDataFileSystemProxy::CreateDirectory(
-    const GURL& file_url,
+    const FileSystemURL& file_url,
     bool exclusive,
     bool recursive,
     const FileSystemOperationInterface::StatusCallback& callback) {
@@ -287,11 +296,15 @@ void GDataFileSystemProxy::CreateDirectory(
     return;
   }
 
-  file_system_->CreateDirectory(file_path, exclusive, recursive, callback);
+  file_system_->CreateDirectory(
+      file_path,
+      exclusive,
+      recursive,
+      base::Bind(&GDataFileSystemProxy::OnStatusCallback, this, callback));
 }
 
 void GDataFileSystemProxy::CreateFile(
-    const GURL& file_url,
+    const FileSystemURL& file_url,
     bool exclusive,
     const FileSystemOperationInterface::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -303,11 +316,15 @@ void GDataFileSystemProxy::CreateFile(
     return;
   }
 
-  file_system_->CreateFile(file_path, exclusive, callback);
+  file_system_->CreateFile(
+      file_path,
+      exclusive,
+      base::Bind(&GDataFileSystemProxy::OnStatusCallback, this, callback));
 }
 
-void GDataFileSystemProxy::Truncate(const GURL& file_url, int64 length,
-    const fileapi::FileSystemOperationInterface::StatusCallback& callback) {
+void GDataFileSystemProxy::Truncate(
+    const FileSystemURL& file_url, int64 length,
+    const FileSystemOperationInterface::StatusCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (length < 0) {
@@ -335,16 +352,85 @@ void GDataFileSystemProxy::Truncate(const GURL& file_url, int64 length,
                  callback));
 }
 
+void GDataFileSystemProxy::OnOpenFileForWriting(
+    int file_flags,
+    base::ProcessHandle peer_handle,
+    const FileSystemOperationInterface::OpenFileCallback& callback,
+    GDataFileError gdata_error,
+    const FilePath& local_cache_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  base::PlatformFileError error =
+      gdata::util::GDataFileErrorToPlatformError(gdata_error);
+
+  if (error != base::PLATFORM_FILE_OK) {
+    callback.Run(error, base::kInvalidPlatformFileValue, peer_handle);
+    return;
+  }
+
+  // Cache file prepared for modification is available. Truncate it.
+  // File operation must be done on FILE thread, so relay the operation.
+  base::PlatformFileError* result =
+      new base::PlatformFileError(base::PLATFORM_FILE_ERROR_FAILED);
+  base::PlatformFile* platform_file = new base::PlatformFile(
+      base::kInvalidPlatformFileValue);
+  bool posted = BrowserThread::GetBlockingPool()->PostTaskAndReply(FROM_HERE,
+        base::Bind(&OpenPlatformFileOnIOPool,
+                   local_cache_path,
+                   file_flags,
+                   platform_file,
+                   result),
+        base::Bind(&OnPlatformFileOpened,
+                   callback,
+                   peer_handle,
+                   base::Owned(platform_file),
+                   base::Owned(result)));
+  DCHECK(posted);
+}
+
+void GDataFileSystemProxy::OnCreateFileForOpen(
+    const FilePath& file_path,
+    int file_flags,
+    base::ProcessHandle peer_handle,
+    const FileSystemOperationInterface::OpenFileCallback& callback,
+    GDataFileError gdata_error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  base::PlatformFileError create_result =
+      gdata::util::GDataFileErrorToPlatformError(gdata_error);
+
+  if ((create_result == base::PLATFORM_FILE_OK) ||
+      ((create_result == base::PLATFORM_FILE_ERROR_EXISTS) &&
+       (file_flags & base::PLATFORM_FILE_CREATE_ALWAYS))) {
+    // If we are trying to always create an existing file, then
+    // if it really exists open it as truncated.
+    file_flags &= ~base::PLATFORM_FILE_CREATE;
+    file_flags &= ~base::PLATFORM_FILE_CREATE_ALWAYS;
+    file_flags |= base::PLATFORM_FILE_OPEN_TRUNCATED;
+  } else {
+    callback.Run(create_result, base::kInvalidPlatformFileValue, peer_handle);
+    return;
+  }
+
+  // Open created (or existing) file for writing.
+  file_system_->OpenFile(
+      file_path,
+      base::Bind(&GDataFileSystemProxy::OnOpenFileForWriting,
+                 this,
+                 file_flags,
+                 peer_handle,
+                 callback));
+}
+
 void GDataFileSystemProxy::OnFileOpenedForTruncate(
     const FilePath& virtual_path,
     int64 length,
     const fileapi::FileSystemOperationInterface::StatusCallback& callback,
-    base::PlatformFileError open_result,
+    GDataFileError open_result,
     const FilePath& local_cache_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (open_result != base::PLATFORM_FILE_OK) {
-    callback.Run(open_result);
+  if (open_result != GDATA_FILE_OK) {
+    callback.Run(util::GDataFileErrorToPlatformError(open_result));
     return;
   }
 
@@ -369,19 +455,21 @@ void GDataFileSystemProxy::OnFileOpenedForTruncate(
 
 void GDataFileSystemProxy::DidTruncate(
     const FilePath& virtual_path,
-    const fileapi::FileSystemOperationInterface::StatusCallback& callback,
+    const FileSystemOperationInterface::StatusCallback& callback,
     base::PlatformFileError* truncate_result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // Truncation finished. We must close the file no matter |truncate_result|
   // indicates an error or not.
-  file_system_->CloseFile(virtual_path, base::Bind(&DidCloseFileForTruncate,
-                                                   callback,
-                                                   *truncate_result));
+  file_system_->CloseFile(
+      virtual_path,
+      base::Bind(&DidCloseFileForTruncate,
+                 callback,
+                 base::PlatformFileError(*truncate_result)));
 }
 
 void GDataFileSystemProxy::OpenFile(
-    const GURL& file_url,
+    const FileSystemURL& file_url,
     int file_flags,
     base::ProcessHandle peer_handle,
     const FileSystemOperationInterface::OpenFileCallback& callback) {
@@ -397,16 +485,74 @@ void GDataFileSystemProxy::OpenFile(
     return;
   }
 
-  file_system_->GetFileByPath(file_path,
-                              base::Bind(&OnGetFileByPathForOpen,
-                                         callback,
-                                         file_flags,
-                                         peer_handle),
-                              GetDownloadDataCallback());
+  // TODO(zelidrag): Wire all other file open operations.
+  if ((file_flags & base::PLATFORM_FILE_DELETE_ON_CLOSE)) {
+    NOTIMPLEMENTED() << "File create/write operations not yet supported "
+                     << file_path.value();
+    MessageLoopProxy::current()->PostTask(FROM_HERE,
+         base::Bind(callback,
+                    base::PLATFORM_FILE_ERROR_FAILED,
+                    base::kInvalidPlatformFileValue,
+                    peer_handle));
+    return;
+  }
+
+  if ((file_flags & base::PLATFORM_FILE_OPEN) ||
+      (file_flags & base::PLATFORM_FILE_OPEN_ALWAYS) ||
+      (file_flags & base::PLATFORM_FILE_OPEN_TRUNCATED)) {
+    if ((file_flags & base::PLATFORM_FILE_OPEN_TRUNCATED) ||
+        (file_flags & base::PLATFORM_FILE_OPEN_ALWAYS) ||
+        (file_flags & base::PLATFORM_FILE_WRITE) ||
+        (file_flags & base::PLATFORM_FILE_EXCLUSIVE_WRITE)) {
+      // Open existing file for writing.
+      file_system_->OpenFile(
+          file_path,
+          base::Bind(&GDataFileSystemProxy::OnOpenFileForWriting,
+                     this,
+                     file_flags,
+                     peer_handle,
+                     callback));
+    } else {
+      // Read-only file open.
+      file_system_->GetFileByPath(file_path,
+                                  base::Bind(&OnGetFileByPathForOpen,
+                                             callback,
+                                             file_flags,
+                                             peer_handle),
+                                  GetDownloadDataCallback());
+    }
+  } else if ((file_flags & base::PLATFORM_FILE_CREATE) ||
+             (file_flags & base::PLATFORM_FILE_CREATE_ALWAYS)) {
+    // Open existing file for writing.
+    file_system_->CreateFile(
+        file_path,
+        file_flags & base::PLATFORM_FILE_EXCLUSIVE_WRITE,
+        base::Bind(&GDataFileSystemProxy::OnCreateFileForOpen,
+                   this,
+                   file_path,
+                   file_flags,
+                   peer_handle,
+                   callback));
+  } else {
+    NOTREACHED() << "Unhandled file flags combination " << file_flags;
+    MessageLoopProxy::current()->PostTask(FROM_HERE,
+         base::Bind(callback,
+                    base::PLATFORM_FILE_ERROR_FAILED,
+                    base::kInvalidPlatformFileValue,
+                    peer_handle));
+  }
+}
+
+void GDataFileSystemProxy::NotifyCloseFile(const FileSystemURL& url) {
+  FilePath file_path;
+  if (!ValidateUrl(url, &file_path))
+    return;
+
+  file_system_->CloseFile(file_path, FileOperationCallback());
 }
 
 void GDataFileSystemProxy::CreateSnapshotFile(
-    const GURL& file_url,
+    const FileSystemURL& file_url,
     const FileSystemOperationInterface::SnapshotFileCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -424,17 +570,19 @@ void GDataFileSystemProxy::CreateSnapshotFile(
   file_system_->GetEntryInfoByPath(
       file_path,
       base::Bind(&GDataFileSystemProxy::OnGetEntryInfoByPath,
-                 this, callback));
+                 this,
+                 file_path,
+                 callback));
 }
 
 void GDataFileSystemProxy::OnGetEntryInfoByPath(
-    const FileSystemOperationInterface::SnapshotFileCallback& callback,
-    base::PlatformFileError error,
     const FilePath& entry_path,
+    const FileSystemOperationInterface::SnapshotFileCallback& callback,
+    GDataFileError error,
     scoped_ptr<GDataEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (error != base::PLATFORM_FILE_OK || !entry_proto.get()) {
+  if (error != GDATA_FILE_OK || !entry_proto.get()) {
     MessageLoopProxy::current()->PostTask(FROM_HERE,
          base::Bind(callback,
                     base::PLATFORM_FILE_ERROR_NOT_FOUND,
@@ -457,7 +605,7 @@ void GDataFileSystemProxy::OnGetEntryInfoByPath(
 }
 
 void GDataFileSystemProxy::CreateWritableSnapshotFile(
-    const GURL& file_url,
+    const FileSystemURL& file_url,
     const fileapi::WritableSnapshotFile& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -479,28 +627,39 @@ void GDataFileSystemProxy::CreateWritableSnapshotFile(
                  callback));
 }
 
+GDataFileSystemProxy::~GDataFileSystemProxy() {
+  // Should be deleted from the CrosMountPointProvider on UI thread.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
 // static.
-bool GDataFileSystemProxy::ValidateUrl(const GURL& url, FilePath* file_path) {
+bool GDataFileSystemProxy::ValidateUrl(
+    const FileSystemURL& url, FilePath* file_path) {
   // what platform you're on.
-  FilePath raw_path;
-  fileapi::FileSystemType type = fileapi::kFileSystemTypeUnknown;
-  if (!fileapi::CrackFileSystemURL(url, NULL, &type, file_path) ||
-      type != fileapi::kFileSystemTypeExternal) {
+  if (!url.is_valid() || url.type() != fileapi::kFileSystemTypeExternal) {
     return false;
   }
+  *file_path = url.path();
   return true;
+}
+
+void GDataFileSystemProxy::OnStatusCallback(
+    const fileapi::FileSystemOperationInterface::StatusCallback& callback,
+    gdata::GDataFileError error) {
+  callback.Run(util::GDataFileErrorToPlatformError(error));
 }
 
 void GDataFileSystemProxy::OnGetMetadata(
     const FilePath& file_path,
     const FileSystemOperationInterface::GetMetadataCallback& callback,
-    base::PlatformFileError error,
-    const FilePath& entry_path,
+    GDataFileError error,
     scoped_ptr<gdata::GDataEntryProto> entry_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (error != base::PLATFORM_FILE_OK) {
-    callback.Run(error, base::PlatformFileInfo(), FilePath());
+  if (error != GDATA_FILE_OK) {
+    callback.Run(util::GDataFileErrorToPlatformError(error),
+                 base::PlatformFileInfo(),
+                 FilePath());
     return;
   }
   DCHECK(entry_proto.get());
@@ -516,28 +675,29 @@ void GDataFileSystemProxy::OnGetMetadata(
 void GDataFileSystemProxy::OnReadDirectory(
     const FileSystemOperationInterface::ReadDirectoryCallback&
     callback,
-    base::PlatformFileError error,
+    GDataFileError error,
     bool hide_hosted_documents,
-    scoped_ptr<gdata::GDataDirectoryProto> directory_proto) {
+    scoped_ptr<gdata::GDataEntryProtoVector> proto_entries) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (error != base::PLATFORM_FILE_OK) {
-    callback.Run(error, std::vector<base::FileUtilProxy::Entry>(), false);
+  if (error != GDATA_FILE_OK) {
+    callback.Run(util::GDataFileErrorToPlatformError(error),
+                 std::vector<base::FileUtilProxy::Entry>(),
+                 false);
     return;
   }
+  DCHECK(proto_entries.get());
+
   std::vector<base::FileUtilProxy::Entry> entries;
   // Convert gdata files to something File API stack can understand.
-  for (int i = 0; i < directory_proto->child_directories_size(); ++i) {
-    const GDataDirectoryProto& proto = directory_proto->child_directories(i);
-    entries.push_back(
-        GDataEntryProtoToFileUtilProxyEntry(proto.gdata_entry()));
-  }
-  for (int i = 0; i < directory_proto->child_files_size(); ++i) {
-    const GDataFileProto& proto = directory_proto->child_files(i);
-    if (hide_hosted_documents && proto.is_hosted_document())
-        continue;
-    entries.push_back(
-        GDataEntryProtoToFileUtilProxyEntry(proto.gdata_entry()));
+  for (size_t i = 0; i < proto_entries->size(); ++i) {
+    const GDataEntryProto& proto = (*proto_entries)[i];
+    if (proto.has_file_specific_info() &&
+        proto.file_specific_info().is_hosted_document() &&
+        hide_hosted_documents) {
+      continue;
+    }
+    entries.push_back(GDataEntryProtoToFileUtilProxyEntry(proto));
   }
 
   callback.Run(base::PLATFORM_FILE_OK, entries, false);
@@ -546,13 +706,13 @@ void GDataFileSystemProxy::OnReadDirectory(
 void GDataFileSystemProxy::OnCreateWritableSnapshotFile(
     const FilePath& virtual_path,
     const fileapi::WritableSnapshotFile& callback,
-    base::PlatformFileError result,
+    GDataFileError result,
     const FilePath& local_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   scoped_refptr<ShareableFileReference> file_ref;
 
-  if (result == base::PLATFORM_FILE_OK) {
+  if (result == GDATA_FILE_OK) {
     file_ref = ShareableFileReference::GetOrCreate(
         local_path,
         ShareableFileReference::DONT_DELETE_ON_FINAL_RELEASE,
@@ -563,7 +723,8 @@ void GDataFileSystemProxy::OnCreateWritableSnapshotFile(
                    virtual_path));
   }
 
-  callback.Run(result, local_path, file_ref);
+  callback.Run(
+      util::GDataFileErrorToPlatformError(result), local_path, file_ref);
 }
 
 void GDataFileSystemProxy::CloseWritableSnapshotFile(

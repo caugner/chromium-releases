@@ -21,6 +21,7 @@
 #include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/cert_test_util.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_cache.h"
 #include "net/base/mock_cert_verifier.h"
@@ -413,7 +414,7 @@ CaptureGroupNameSSLSocketPool::CaptureGroupNameSocketPool(
     HostResolver* host_resolver,
     CertVerifier* cert_verifier)
     : SSLClientSocketPool(0, 0, NULL, host_resolver, cert_verifier, NULL,
-                          NULL, NULL, "", NULL, NULL, NULL, NULL, NULL, NULL) {}
+                          NULL, "", NULL, NULL, NULL, NULL, NULL, NULL) {}
 
 //-----------------------------------------------------------------------------
 
@@ -2184,12 +2185,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, HttpsProxySpdyGet) {
     MockRead(ASYNC, 0, 0),
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  DelayedSocketData spdy_data(
+      1,  // wait for one write to finish before reading.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -2270,10 +2270,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, HttpsProxySpdyGetWithProxyAuth) {
     MockRead(ASYNC, 0, 7),
   };
 
-  scoped_ptr<OrderedSocketData> data(
-      new OrderedSocketData(spdy_reads, arraysize(spdy_reads),
-                            spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  OrderedSocketData data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -2364,11 +2364,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, HttpsProxySpdyConnectHttps) {
     MockRead(ASYNC, 0, 8),
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -2443,11 +2442,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, HttpsProxySpdyConnectSpdy) {
     MockRead(ASYNC, 0, 8),
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -2507,11 +2505,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, HttpsProxySpdyConnectFailure) {
     MockRead(ASYNC, 0, 4),
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -4756,15 +4753,14 @@ TEST_F(HttpNetworkTransactionSpdy2Test, RedirectOfHttpsConnectViaSpdyProxy) {
     MockRead(ASYNC, 0, 2),  // EOF
   };
 
-  scoped_ptr<DelayedSocketData> data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          data_reads, arraysize(data_reads),
-          data_writes, arraysize(data_writes)));
+  DelayedSocketData data(
+      1,  // wait for one write to finish before reading.
+      data_reads, arraysize(data_reads),
+      data_writes, arraysize(data_writes));
   SSLSocketDataProvider proxy_ssl(ASYNC, OK);  // SSL to the proxy
   proxy_ssl.SetNextProto(kProtoSPDY2);
 
-  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
   TestCompletionCallback callback;
@@ -4875,15 +4871,14 @@ TEST_F(HttpNetworkTransactionSpdy2Test,
     MockRead(ASYNC, 0, 3),  // EOF
   };
 
-  scoped_ptr<DelayedSocketData> data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          data_reads, arraysize(data_reads),
-          data_writes, arraysize(data_writes)));
+  DelayedSocketData data(
+      1,  // wait for one write to finish before reading.
+      data_reads, arraysize(data_reads),
+      data_writes, arraysize(data_writes));
   SSLSocketDataProvider proxy_ssl(ASYNC, OK);  // SSL to the proxy
   proxy_ssl.SetNextProto(kProtoSPDY2);
 
-  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
   TestCompletionCallback callback;
@@ -4943,10 +4938,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, BasicAuthSpdyProxy) {
       ConstructSpdyBodyFrame(3, get, strlen(get), false));
 
   MockWrite spdy_writes[] = {
-    CreateMockWrite(*req, 0, ASYNC),
-    CreateMockWrite(*connect2, 2),
-    CreateMockWrite(*rst, 3, ASYNC),
-    CreateMockWrite(*wrapped_get, 5),
+    CreateMockWrite(*req, 1, ASYNC),
+    CreateMockWrite(*rst, 4, ASYNC),
+    CreateMockWrite(*connect2, 5),
+    CreateMockWrite(*wrapped_get, 8),
   };
 
   // The proxy responds to the connect with a 407, using a persistent
@@ -4977,18 +4972,17 @@ TEST_F(HttpNetworkTransactionSpdy2Test, BasicAuthSpdyProxy) {
   scoped_ptr<SpdyFrame> wrapped_body(
       ConstructSpdyBodyFrame(3, "hello", 5, false));
   MockRead spdy_reads[] = {
-    CreateMockRead(*conn_auth_resp, 1, ASYNC),
-    CreateMockRead(*conn_resp, 4, ASYNC),
-    CreateMockRead(*wrapped_get_resp, 5, ASYNC),
-    CreateMockRead(*wrapped_body, 6, ASYNC),
-    MockRead(SYNCHRONOUS, ERR_IO_PENDING),
+    CreateMockRead(*conn_auth_resp, 2, ASYNC),
+    CreateMockRead(*conn_resp, 6, ASYNC),
+    CreateMockRead(*wrapped_get_resp, 9, ASYNC),
+    CreateMockRead(*wrapped_body, 10, ASYNC),
+    MockRead(ASYNC, OK, 11),  // EOF.  May or may not be read.
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
   // Negotiate SPDY to the proxy
   SSLSocketDataProvider proxy(ASYNC, OK);
   proxy.SetNextProto(kProtoSPDY2);
@@ -5105,11 +5099,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, CrossOriginProxyPush) {
     MockRead(ASYNC, ERR_IO_PENDING, 6),  // Force a pause
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
   // Negotiate SPDY to the proxy
   SSLSocketDataProvider proxy(ASYNC, OK);
   proxy.SetNextProto(kProtoSPDY2);
@@ -5205,11 +5198,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test, CrossOriginProxyPushCorrectness) {
     MockRead(ASYNC, ERR_IO_PENDING, 6),  // Force a pause
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
   // Negotiate SPDY to the proxy
   SSLSocketDataProvider proxy(ASYNC, OK);
   proxy.SetNextProto(kProtoSPDY2);
@@ -5782,8 +5774,8 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SOCKS4_SSL_GET) {
   };
 
   MockRead data_reads[] = {
-    MockWrite(ASYNC, reinterpret_cast<char*>(read_buffer),
-              arraysize(read_buffer)),
+    MockRead(ASYNC, reinterpret_cast<char*>(read_buffer),
+             arraysize(read_buffer)),
     MockRead("HTTP/1.0 200 OK\r\n"),
     MockRead("Content-Type: text/html; charset=iso-8859-1\r\n\r\n"),
     MockRead("Payload"),
@@ -5850,8 +5842,8 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SOCKS5_HTTP_GET) {
   };
 
   MockRead data_reads[] = {
-    MockWrite(ASYNC, kSOCKS5GreetResponse, arraysize(kSOCKS5GreetResponse)),
-    MockWrite(ASYNC, kSOCKS5OkResponse, arraysize(kSOCKS5OkResponse)),
+    MockRead(ASYNC, kSOCKS5GreetResponse, arraysize(kSOCKS5GreetResponse)),
+    MockRead(ASYNC, kSOCKS5OkResponse, arraysize(kSOCKS5OkResponse)),
     MockRead("HTTP/1.0 200 OK\r\n"),
     MockRead("Content-Type: text/html; charset=iso-8859-1\r\n\r\n"),
     MockRead("Payload"),
@@ -5917,8 +5909,8 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SOCKS5_SSL_GET) {
   };
 
   MockRead data_reads[] = {
-    MockWrite(ASYNC, kSOCKS5GreetResponse, arraysize(kSOCKS5GreetResponse)),
-    MockWrite(ASYNC, kSOCKS5OkResponse, arraysize(kSOCKS5OkResponse)),
+    MockRead(ASYNC, kSOCKS5GreetResponse, arraysize(kSOCKS5GreetResponse)),
+    MockRead(ASYNC, kSOCKS5OkResponse, arraysize(kSOCKS5OkResponse)),
     MockRead("HTTP/1.0 200 OK\r\n"),
     MockRead("Content-Type: text/html; charset=iso-8859-1\r\n\r\n"),
     MockRead("Payload"),
@@ -7273,12 +7265,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, UseAlternateProtocolForNpnSpdy) {
     MockRead(ASYNC, 0, 0),
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  DelayedSocketData spdy_data(
+      1,  // wait for one write to finish before reading.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   MockConnect never_finishing_connect(SYNCHRONOUS, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -7379,13 +7370,12 @@ TEST_F(HttpNetworkTransactionSpdy2Test, AlternateProtocolWithSpdyLateBinding) {
     MockRead(ASYNC, 0, 0),
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          2,  // wait for writes to finish before reading.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
+  DelayedSocketData spdy_data(
+      2,  // wait for writes to finish before reading.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
   // Socket 4 is the successful Alternate-Protocol for transaction 3.
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   // Socket 5 is the unsuccessful non-Alternate-Protocol for transaction 3.
   session_deps.socket_factory.AddSocketDataProvider(&hanging_socket);
@@ -7619,11 +7609,10 @@ TEST_F(HttpNetworkTransactionSpdy2Test,
     MockRead(ASYNC, 0, 0, 4),  // 6
   };
 
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   MockConnect never_finishing_connect(SYNCHRONOUS, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -7715,12 +7704,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test,
     MockRead(ASYNC, 0, 0),
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  DelayedSocketData spdy_data(
+      1,  // wait for one write to finish before reading.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   TestCompletionCallback callback;
 
@@ -7767,8 +7755,7 @@ TEST_F(HttpNetworkTransactionSpdy2Test,
   SSLClientSocketContext context;
   context.cert_verifier = session_deps.cert_verifier.get();
   ssl_connection->set_socket(session_deps.socket_factory.CreateSSLClientSocket(
-      connection.release(), HostPortPair("" , 443), ssl_config,
-      NULL /* ssl_host_info */, context));
+      connection.release(), HostPortPair("" , 443), ssl_config, context));
   EXPECT_EQ(ERR_IO_PENDING,
             ssl_connection->socket()->Connect(callback.callback()));
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -7906,7 +7893,7 @@ TEST_F(HttpNetworkTransactionSpdy2Test, GenerateAuthToken) {
     }
     TestRound(const MockWrite& write_arg, const MockRead& read_arg,
               int expected_rv_arg, const MockWrite* extra_write_arg,
-              const MockWrite* extra_read_arg)
+              const MockRead* extra_read_arg)
         : write(write_arg),
           read(read_arg),
           expected_rv(expected_rv_arg),
@@ -8595,12 +8582,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SpdyPostNPNServerHangup) {
     MockRead(SYNCHRONOUS, 0, 0)   // Not async - return 0 immediately.
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          0,  // don't wait in this case, immediate hangup.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  DelayedSocketData spdy_data(
+      0,  // don't wait in this case, immediate hangup.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   TestCompletionCallback callback;
 
@@ -8711,9 +8697,9 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SpdyAlternateProtocolThroughProxy) {
     CreateMockRead(*data.get(), 6),
     MockRead(ASYNC, 0, 0, 6),
   };
-  scoped_ptr<OrderedSocketData> data_2(
-      new OrderedSocketData(data_reads_2, arraysize(data_reads_2),
-                            data_writes_2, arraysize(data_writes_2)));
+  OrderedSocketData data_2(
+      data_reads_2, arraysize(data_reads_2),
+      data_writes_2, arraysize(data_writes_2));
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -8725,7 +8711,7 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SpdyAlternateProtocolThroughProxy) {
       never_finishing_connect);
 
   session_deps.socket_factory.AddSocketDataProvider(&data_1);
-  session_deps.socket_factory.AddSocketDataProvider(data_2.get());
+  session_deps.socket_factory.AddSocketDataProvider(&data_2);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   session_deps.socket_factory.AddSocketDataProvider(
       &hanging_non_alternate_protocol_socket);
@@ -8989,12 +8975,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, PreconnectWithExistingSpdySession) {
     MockRead(ASYNC, 0, 0),
   };
 
-  scoped_ptr<DelayedSocketData> spdy_data(
-      new DelayedSocketData(
-          1,  // wait for one write to finish before reading.
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  DelayedSocketData spdy_data(
+      1,  // wait for one write to finish before reading.
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.SetNextProto(kProtoSPDY2);
@@ -9457,12 +9442,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, MAYBE_UseIPConnectionPooling) {
   ASSERT_TRUE(ParseIPLiteralToNumber("127.0.0.1", &ip));
   IPEndPoint peer_addr = IPEndPoint(ip, 443);
   MockConnect connect(ASYNC, OK, peer_addr);
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          connect,
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      connect,
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   TestCompletionCallback callback;
   HttpRequestInfo request1;
@@ -9568,12 +9552,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test, UseIPConnectionPoolingAfterResolution) {
   ASSERT_TRUE(ParseIPLiteralToNumber("127.0.0.1", &ip));
   IPEndPoint peer_addr = IPEndPoint(ip, 443);
   MockConnect connect(ASYNC, OK, peer_addr);
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          connect,
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      connect,
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   TestCompletionCallback callback;
   HttpRequestInfo request1;
@@ -9715,12 +9698,11 @@ TEST_F(HttpNetworkTransactionSpdy2Test,
   ASSERT_TRUE(ParseIPLiteralToNumber("127.0.0.1", &ip));
   IPEndPoint peer_addr = IPEndPoint(ip, 443);
   MockConnect connect(ASYNC, OK, peer_addr);
-  scoped_ptr<OrderedSocketData> spdy_data(
-      new OrderedSocketData(
-          connect,
-          spdy_reads, arraysize(spdy_reads),
-          spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  OrderedSocketData spdy_data(
+      connect,
+      spdy_reads, arraysize(spdy_reads),
+      spdy_writes, arraysize(spdy_writes));
+  session_deps.socket_factory.AddSocketDataProvider(&spdy_data);
 
   TestCompletionCallback callback;
   HttpRequestInfo request1;
@@ -9820,6 +9802,395 @@ TEST_F(HttpNetworkTransactionSpdy2Test, SendPipelineEvictionFallback) {
   EXPECT_EQ(OK, out.rv);
   EXPECT_EQ("HTTP/1.0 200 OK", out.status_line);
   EXPECT_EQ("hello world", out.response_data);
+}
+
+TEST_F(HttpNetworkTransactionSpdy2Test, DoNotUseSpdySessionForHttp) {
+  const std::string https_url = "https://www.google.com/";
+  const std::string http_url = "http://www.google.com:443/";
+
+  // SPDY GET for HTTPS URL
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(https_url.c_str(),
+                                              false, 1, LOWEST));
+
+  MockWrite writes1[] = {
+    CreateMockWrite(*req1, 0),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, true));
+  MockRead reads1[] = {
+    CreateMockRead(*resp1, 1),
+    CreateMockRead(*body1, 2),
+    MockRead(ASYNC, ERR_IO_PENDING, 3)
+  };
+
+  DelayedSocketData data1(
+      1, reads1, arraysize(reads1),
+      writes1, arraysize(writes1));
+  MockConnect connect_data1(ASYNC, OK);
+  data1.set_connect_data(connect_data1);
+
+  // HTTP GET for the HTTP URL
+  MockWrite writes2[] = {
+    MockWrite(ASYNC, 4,
+              "GET / HTTP/1.1\r\n"
+              "Host: www.google.com:443\r\n"
+              "Connection: keep-alive\r\n\r\n"),
+  };
+
+  MockRead reads2[] = {
+    MockRead(ASYNC, 5, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"),
+    MockRead(ASYNC, 6, "hello"),
+    MockRead(ASYNC, 7, OK),
+  };
+
+  DelayedSocketData data2(
+      1, reads2, arraysize(reads2),
+      writes2, arraysize(writes2));
+
+  SessionDependencies session_deps;
+  SSLSocketDataProvider ssl(ASYNC, OK);
+  ssl.SetNextProto(kProtoSPDY2);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
+  session_deps.socket_factory.AddSocketDataProvider(&data1);
+  session_deps.socket_factory.AddSocketDataProvider(&data2);
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  // Start the first transaction to set up the SpdySession
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL(https_url);
+  request1.priority = LOWEST;
+  request1.load_flags = 0;
+  HttpNetworkTransaction trans1(session);
+  TestCompletionCallback callback1;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans1.Start(&request1, callback1.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  EXPECT_TRUE(trans1.GetResponseInfo()->was_fetched_via_spdy);
+
+  // Now, start the HTTP request
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL(http_url);
+  request2.priority = MEDIUM;
+  request2.load_flags = 0;
+  HttpNetworkTransaction trans2(session);
+  TestCompletionCallback callback2;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans2.Start(&request2, callback2.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(OK, callback2.WaitForResult());
+  EXPECT_FALSE(trans2.GetResponseInfo()->was_fetched_via_spdy);
+}
+
+TEST_F(HttpNetworkTransactionSpdy2Test, DoNotUseSpdySessionForHttpOverTunnel) {
+  const std::string https_url = "https://www.google.com/";
+  const std::string http_url = "http://www.google.com:443/";
+
+  // SPDY GET for HTTPS URL (through CONNECT tunnel)
+  scoped_ptr<SpdyFrame> connect(ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(https_url.c_str(),
+                                              false, 1, LOWEST));
+
+  // SPDY GET for HTTP URL (through the proxy, but not the tunnel)
+  scoped_ptr<SpdyFrame> wrapped_req1(ConstructWrappedSpdyFrame(req1, 1));
+  const char* const headers[] = {
+    "method", "GET",
+    "url", http_url.c_str(),
+    "host",  "www.google.com:443",
+    "scheme", "http",
+    "version", "HTTP/1.1"
+  };
+  scoped_ptr<SpdyFrame> req2(ConstructSpdyControlFrame(NULL, 0, false, 3,
+                                                       MEDIUM, SYN_STREAM,
+                                                       CONTROL_FLAG_FIN,
+                                                       headers,
+                                                       arraysize(headers)));
+
+  MockWrite writes1[] = {
+    CreateMockWrite(*connect, 0),
+    CreateMockWrite(*wrapped_req1, 2),
+    CreateMockWrite(*req2, 5),
+  };
+
+  scoped_ptr<SpdyFrame> conn_resp(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, true));
+  scoped_ptr<SpdyFrame> wrapped_resp1(ConstructWrappedSpdyFrame(resp1, 1));
+  scoped_ptr<SpdyFrame> wrapped_body1(ConstructWrappedSpdyFrame(body1, 1));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(3, true));
+  MockRead reads1[] = {
+    CreateMockRead(*conn_resp, 1),
+    CreateMockRead(*wrapped_resp1, 3),
+    CreateMockRead(*wrapped_body1, 4),
+    CreateMockRead(*resp2, 6),
+    CreateMockRead(*body2, 7),
+    MockRead(ASYNC, ERR_IO_PENDING, 8)
+  };
+
+  DeterministicSocketData data1(reads1, arraysize(reads1),
+                                writes1, arraysize(writes1));
+  MockConnect connect_data1(ASYNC, OK);
+  data1.set_connect_data(connect_data1);
+
+  SpdySessionDependencies session_deps(ProxyService::CreateFixed(
+      "https://proxy:70"));
+  SSLSocketDataProvider ssl1(ASYNC, OK);  // to the proxy
+  ssl1.SetNextProto(kProtoSPDY2);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl1);
+  SSLSocketDataProvider ssl2(ASYNC, OK);  // to the server
+  ssl2.SetNextProto(kProtoSPDY2);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl2);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(&data1);
+
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSessionDeterministic(&session_deps));
+
+  // Start the first transaction to set up the SpdySession
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL(https_url);
+  request1.priority = LOWEST;
+  request1.load_flags = 0;
+  HttpNetworkTransaction trans1(session);
+  TestCompletionCallback callback1;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans1.Start(&request1, callback1.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+  data1.RunFor(4);
+
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  EXPECT_TRUE(trans1.GetResponseInfo()->was_fetched_via_spdy);
+
+  // Now, start the HTTP request
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL(http_url);
+  request2.priority = MEDIUM;
+  request2.load_flags = 0;
+  HttpNetworkTransaction trans2(session);
+  TestCompletionCallback callback2;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans2.Start(&request2, callback2.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+  data1.RunFor(3);
+
+  EXPECT_EQ(OK, callback2.WaitForResult());
+  EXPECT_TRUE(trans2.GetResponseInfo()->was_fetched_via_spdy);
+}
+
+TEST_F(HttpNetworkTransactionSpdy2Test, UseSpdySessionForHttpWhenForced) {
+  HttpStreamFactory::set_force_spdy_always(true);
+  const std::string https_url = "https://www.google.com/";
+  const std::string http_url = "http://www.google.com:443/";
+
+  // SPDY GET for HTTPS URL
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(https_url.c_str(),
+                                              false, 1, LOWEST));
+  // SPDY GET for the HTTP URL
+  scoped_ptr<SpdyFrame> req2(ConstructSpdyGet(http_url.c_str(),
+                                              false, 3, MEDIUM));
+
+  MockWrite writes[] = {
+    CreateMockWrite(*req1, 1),
+    CreateMockWrite(*req2, 4),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, true));
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 3));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(3, true));
+  MockRead reads[] = {
+    CreateMockRead(*resp1, 2),
+    CreateMockRead(*body1, 3),
+    CreateMockRead(*resp2, 5),
+    CreateMockRead(*body2, 6),
+    MockRead(ASYNC, ERR_IO_PENDING, 7)
+  };
+
+  OrderedSocketData data(reads, arraysize(reads),
+                         writes, arraysize(writes));
+
+  SessionDependencies session_deps;
+  SSLSocketDataProvider ssl(ASYNC, OK);
+  ssl.SetNextProto(kProtoSPDY2);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
+  session_deps.socket_factory.AddSocketDataProvider(&data);
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  // Start the first transaction to set up the SpdySession
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL(https_url);
+  request1.priority = LOWEST;
+  request1.load_flags = 0;
+  HttpNetworkTransaction trans1(session);
+  TestCompletionCallback callback1;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans1.Start(&request1, callback1.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  EXPECT_TRUE(trans1.GetResponseInfo()->was_fetched_via_spdy);
+
+  // Now, start the HTTP request
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL(http_url);
+  request2.priority = MEDIUM;
+  request2.load_flags = 0;
+  HttpNetworkTransaction trans2(session);
+  TestCompletionCallback callback2;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans2.Start(&request2, callback2.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+
+  EXPECT_EQ(OK, callback2.WaitForResult());
+  EXPECT_TRUE(trans2.GetResponseInfo()->was_fetched_via_spdy);
+}
+
+// Test that in the case where we have a SPDY session to a SPDY proxy
+// that we do not pool other origins that resolve to the same IP when
+// the certificate does not match the new origin.
+// http://crbug.com/134690
+TEST_F(HttpNetworkTransactionSpdy2Test, DoNotUseSpdySessionIfCertDoesNotMatch) {
+  const std::string url1 = "http://www.google.com/";
+  const std::string url2 = "https://mail.google.com/";
+  const std::string ip_addr = "1.2.3.4";
+
+  // SPDY GET for HTTP URL (through SPDY proxy)
+  const char* const headers[] = {
+    "method", "GET",
+    "url", url1.c_str(),
+    "host",  "www.google.com",
+    "scheme", "http",
+    "version", "HTTP/1.1"
+  };
+  scoped_ptr<SpdyFrame> req1(ConstructSpdyControlFrame(NULL, 0, false, 1,
+                                                       LOWEST, SYN_STREAM,
+                                                       CONTROL_FLAG_FIN,
+                                                       headers,
+                                                       arraysize(headers)));
+
+  MockWrite writes1[] = {
+    CreateMockWrite(*req1, 0),
+  };
+
+  scoped_ptr<SpdyFrame> resp1(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body1(ConstructSpdyBodyFrame(1, true));
+  MockRead reads1[] = {
+    CreateMockRead(*resp1, 1),
+    CreateMockRead(*body1, 2),
+    MockRead(ASYNC, OK, 3) // EOF
+  };
+
+  scoped_ptr<DeterministicSocketData> data1(
+      new DeterministicSocketData(reads1, arraysize(reads1),
+                                  writes1, arraysize(writes1)));
+  IPAddressNumber ip;
+  ASSERT_TRUE(ParseIPLiteralToNumber(ip_addr, &ip));
+  IPEndPoint peer_addr = IPEndPoint(ip, 443);
+  MockConnect connect_data1(ASYNC, OK, peer_addr);
+  data1->set_connect_data(connect_data1);
+
+  // SPDY GET for HTTPS URL (direct)
+  scoped_ptr<SpdyFrame> req2(ConstructSpdyGet(url2.c_str(),
+                                              false, 1, MEDIUM));
+
+  MockWrite writes2[] = {
+    CreateMockWrite(*req2, 0),
+  };
+
+  scoped_ptr<SpdyFrame> resp2(ConstructSpdyGetSynReply(NULL, 0, 1));
+  scoped_ptr<SpdyFrame> body2(ConstructSpdyBodyFrame(1, true));
+  MockRead reads2[] = {
+    CreateMockRead(*resp2, 1),
+    CreateMockRead(*body2, 2),
+    MockRead(ASYNC, OK, 3) // EOF
+  };
+
+  scoped_ptr<DeterministicSocketData> data2(
+      new DeterministicSocketData(reads2, arraysize(reads2),
+                                  writes2, arraysize(writes2)));
+  MockConnect connect_data2(ASYNC, OK);
+  data2->set_connect_data(connect_data2);
+
+  // Set up a proxy config that sends HTTP requests to a proxy, and
+  // all others direct.
+  ProxyConfig proxy_config;
+  proxy_config.proxy_rules().ParseFromString("http=https://proxy:443");
+  CapturingProxyResolver* capturing_proxy_resolver =
+      new CapturingProxyResolver();
+  SpdySessionDependencies session_deps(new ProxyService(
+      new ProxyConfigServiceFixed(proxy_config), capturing_proxy_resolver,
+      NULL));
+
+  // Load a valid cert.  Note, that this does not need to
+  // be valid for proxy because the MockSSLClientSocket does
+  // not actually verify it.  But SpdySession will use this
+  // to see if it is valid for the new origin
+  FilePath certs_dir = GetTestCertsDirectory();
+  scoped_refptr<X509Certificate> server_cert(
+      ImportCertFromFile(certs_dir, "ok_cert.pem"));
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);
+
+  SSLSocketDataProvider ssl1(ASYNC, OK);  // to the proxy
+  ssl1.SetNextProto(kProtoSPDY2);
+  ssl1.cert = server_cert;
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl1);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(data1.get());
+
+  SSLSocketDataProvider ssl2(ASYNC, OK);  // to the server
+  ssl2.SetNextProto(kProtoSPDY2);
+  session_deps.deterministic_socket_factory->AddSSLSocketDataProvider(&ssl2);
+  session_deps.deterministic_socket_factory->AddSocketDataProvider(data2.get());
+
+  session_deps.host_resolver.reset(new MockCachingHostResolver());
+  session_deps.host_resolver->rules()->AddRule("mail.google.com", ip_addr);
+  session_deps.host_resolver->rules()->AddRule("proxy", ip_addr);
+
+  scoped_refptr<HttpNetworkSession> session(
+      SpdySessionDependencies::SpdyCreateSessionDeterministic(&session_deps));
+
+  // Start the first transaction to set up the SpdySession
+  HttpRequestInfo request1;
+  request1.method = "GET";
+  request1.url = GURL(url1);
+  request1.priority = LOWEST;
+  request1.load_flags = 0;
+  HttpNetworkTransaction trans1(session);
+  TestCompletionCallback callback1;
+  ASSERT_EQ(ERR_IO_PENDING,
+            trans1.Start(&request1, callback1.callback(), BoundNetLog()));
+  data1->RunFor(3);
+
+  ASSERT_TRUE(callback1.have_result());
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  EXPECT_TRUE(trans1.GetResponseInfo()->was_fetched_via_spdy);
+
+  // Now, start the HTTP request
+  HttpRequestInfo request2;
+  request2.method = "GET";
+  request2.url = GURL(url2);
+  request2.priority = MEDIUM;
+  request2.load_flags = 0;
+  HttpNetworkTransaction trans2(session);
+  TestCompletionCallback callback2;
+  EXPECT_EQ(ERR_IO_PENDING,
+            trans2.Start(&request2, callback2.callback(), BoundNetLog()));
+  MessageLoop::current()->RunAllPending();
+  data2->RunFor(3);
+
+  ASSERT_TRUE(callback2.have_result());
+  EXPECT_EQ(OK, callback2.WaitForResult());
+  EXPECT_TRUE(trans2.GetResponseInfo()->was_fetched_via_spdy);
 }
 
 }  // namespace net

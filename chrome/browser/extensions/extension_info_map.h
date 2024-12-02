@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_INFO_MAP_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_INFO_MAP_H_
-#pragma once
 
 #include <string>
 
@@ -53,7 +52,7 @@ class ExtensionInfoMap : public base::RefCountedThreadSafe<ExtensionInfoMap> {
 
   // Returns true if the given extension can see events and data from another
   // sub-profile (incognito to original profile, or vice versa).
-  bool CanCrossIncognito(const extensions::Extension* extension);
+  bool CanCrossIncognito(const extensions::Extension* extension) const;
 
   // Adds an entry to process_map_.
   void RegisterExtensionProcess(const std::string& extension_id,
@@ -70,7 +69,7 @@ class ExtensionInfoMap : public base::RefCountedThreadSafe<ExtensionInfoMap> {
   // |origin| in |process_id| with |permission|.
   bool SecurityOriginHasAPIPermission(
       const GURL& origin, int process_id,
-      ExtensionAPIPermission::ID permission) const;
+      extensions::APIPermission::ID permission) const;
 
   ExtensionsQuotaService* GetQuotaService();
 

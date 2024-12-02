@@ -4,21 +4,30 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_SYSTEM_SERVICE_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_SYSTEM_SERVICE_H_
-#pragma once
+
+#include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
+#include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/profiles/profile_keyed_service_factory.h"
 
+class FilePath;
+
 namespace gdata {
 
+class DocumentsServiceInterface;
 class DriveWebAppsRegistry;
+class FileWriteHelper;
+class GDataCache;
+class GDataContactsService;
 class GDataDownloadObserver;
-class GDataFileSystem;
+class GDataFileSystemInterface;
 class GDataSyncClient;
 class GDataUploader;
-class DocumentsServiceInterface;
 
 // GDataSystemService runs the GData system, including the GData file system
 // implementation for the file manager, and some other sub systems.
@@ -28,20 +37,18 @@ class DocumentsServiceInterface;
 // created per-profile.
 class GDataSystemService : public ProfileKeyedService  {
  public:
-  // Returns the documents service instance.
   DocumentsServiceInterface* docs_service() { return documents_service_.get(); }
-
-  // Returns the cache instance.
   GDataCache* cache() { return cache_; }
-
-  // Returns the file system instance.
-  GDataFileSystem* file_system() { return file_system_.get(); }
-
-  // Returns the uploader instance.
+  GDataFileSystemInterface* file_system() { return file_system_.get(); }
+  FileWriteHelper* file_write_helper() { return file_write_helper_.get(); }
   GDataUploader* uploader() { return uploader_.get(); }
-
-  // Returns the file system instance.
+  GDataContactsService* contacts_service() { return contacts_service_.get(); }
   DriveWebAppsRegistry* webapps_registry() { return webapps_registry_.get(); }
+
+  // Clears all the local cache files and in-memory data, and remounts the file
+  // system.
+  void ClearCacheAndRemountFileSystem(
+      const base::Callback<void(bool)>& callback);
 
   // ProfileKeyedService override:
   virtual void Shutdown() OVERRIDE;
@@ -52,24 +59,33 @@ class GDataSystemService : public ProfileKeyedService  {
 
   // Initializes the object. This function should be called before any
   // other functions.
-  void Initialize();
+  void Initialize(DocumentsServiceInterface* documents_service,
+                  const FilePath& cache_root);
 
   // Registers remote file system proxy for drive mount point.
   void AddDriveMountPoint();
   // Unregisters drive mount point from File API.
   void RemoveDriveMountPoint();
 
+  // Adds back the drive mount point. Used to implement ClearCache().
+  void AddBackDriveMountPoint(const base::Callback<void(bool)>& callback,
+                              GDataFileError error,
+                              const FilePath& file_path);
+
   friend class GDataSystemServiceFactory;
 
   Profile* profile_;
-  const base::SequencedWorkerPool::SequenceToken sequence_token_;
+  scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
   GDataCache* cache_;
   scoped_ptr<DocumentsServiceInterface> documents_service_;
   scoped_ptr<GDataUploader> uploader_;
-  scoped_ptr<GDataFileSystem> file_system_;
+  scoped_ptr<DriveWebAppsRegistry> webapps_registry_;
+  scoped_ptr<GDataFileSystemInterface> file_system_;
+  scoped_ptr<FileWriteHelper> file_write_helper_;
   scoped_ptr<GDataDownloadObserver> download_observer_;
   scoped_ptr<GDataSyncClient> sync_client_;
-  scoped_ptr<DriveWebAppsRegistry> webapps_registry_;
+  scoped_ptr<GDataContactsService> contacts_service_;
+  base::WeakPtrFactory<GDataSystemService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GDataSystemService);
 };
@@ -87,6 +103,20 @@ class GDataSystemServiceFactory : public ProfileKeyedServiceFactory {
 
   // Returns the GDataSystemServiceFactory instance.
   static GDataSystemServiceFactory* GetInstance();
+
+  // Sets documents service that should be used to initialize file system in
+  // test. Should be called before the service is created.
+  // Please, make sure |documents_service| gets deleted if no system service is
+  // created (e.g. by calling this method with NULL).
+  static void set_documents_service_for_test(
+      DocumentsServiceInterface* documents_service);
+
+  // Sets root path for the cache used in test. Should be called before the
+  // service is created.
+  // If |cache_root| is not empty, new string object will be created. Please,
+  // make sure it gets deleted if no system service is created (e.g. by calling
+  // this method with empty string).
+  static void set_cache_root_for_test(const std::string& cache_root);
 
  private:
   friend struct DefaultSingletonTraits<GDataSystemServiceFactory>;

@@ -22,10 +22,11 @@
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/common/pepper_flash.h"
 #include "chrome/browser/plugin_prefs.h"
+#include "chrome/common/pepper_flash.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/pepper_flash.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/pepper_plugin_info.h"
@@ -122,12 +123,12 @@ bool GetPepperFlashDirectory(FilePath* latest_dir,
 // Returns true if the Pepper |interface_name| is implemented  by this browser.
 // It does not check if the interface is proxied.
 bool SupportsPepperInterface(const char* interface_name) {
-  static webkit::ppapi::PluginModule::GetInterfaceFunc get_itf =
-      webkit::ppapi::PluginModule::GetLocalGetInterfaceFunc();
-  if (get_itf(interface_name))
+  if (webkit::ppapi::PluginModule::SupportsInterface(interface_name))
     return true;
-  // It might be that flapper is using as a temporary hack the PDF interface
-  // so we need to check for that as well. TODO(cpu): make this more sane.
+  // The PDF interface is invisible to SupportsInterface() on the browser
+  // process because it is provided using PpapiInterfaceFactoryManager. We need
+  // to check for that as well.
+  // TODO(cpu): make this more sane.
   return (strcmp(interface_name, PPB_PDF_INTERFACE) == 0);
 }
 
@@ -145,6 +146,7 @@ bool MakePepperFlashPluginInfo(const FilePath& flash_path,
   plugin_info->is_out_of_process = out_of_process;
   plugin_info->path = flash_path;
   plugin_info->name = kFlashPluginName;
+  plugin_info->permissions = kPepperFlashPermissions;
 
   // The description is like "Shockwave Flash 10.2 r154".
   plugin_info->description = StringPrintf("%s %d.%d r%d",
@@ -360,7 +362,7 @@ void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
 }  // namespace
 
 void RegisterPepperFlashComponent(ComponentUpdateService* cus) {
-#if defined(GOOGLE_CHROME_BUILD) && !defined(FLAPPER_AVAILABLE)
+#if defined(GOOGLE_CHROME_BUILD)
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                           base::Bind(&StartPepperFlashUpdateRegistration, cus));
 #endif

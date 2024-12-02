@@ -18,7 +18,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
-#include "remoting/base/plugin_message_loop_proxy.h"
+#include "remoting/base/plugin_thread_task_runner.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_observer.h"
@@ -34,6 +34,7 @@ namespace remoting {
 
 class ChromotingHost;
 class DesktopEnvironment;
+class HostEventLogger;
 class It2MeHostUserInterface;
 class MutableHostConfig;
 class RegisterSupportHostRequest;
@@ -41,17 +42,17 @@ class SignalStrategy;
 class SupportAccessVerifier;
 
 namespace policy_hack {
-class NatPolicy;
+class PolicyWatcher;
 }  // namespace policy_hack
 
 // NPAPI plugin implementation for remoting host script object.
 // HostNPScriptObject creates threads that are required to run
 // ChromotingHost and starts/stops the host on those threads. When
-// destroyed it sychronously shuts down the host and all threads.
+// destroyed it synchronously shuts down the host and all threads.
 class HostNPScriptObject : public HostStatusObserver {
  public:
   HostNPScriptObject(NPP plugin, NPObject* parent,
-                     PluginMessageLoopProxy::Delegate* plugin_thread_delegate);
+                     PluginThreadTaskRunner::Delegate* plugin_thread_delegate);
   virtual ~HostNPScriptObject();
 
   bool Init();
@@ -145,20 +146,27 @@ class HostNPScriptObject : public HostStatusObserver {
                           uint32_t arg_count,
                           NPVariant* result);
 
-  // Loads daemon config config. The first argument specifies the
-  // callback to be called with the config is loaded. The config is
-  // returned as a JSON formatted string. Args are:
+  // Loads daemon config. The first argument specifies the callback to be
+  // called once the config has been loaded. The config is passed as a JSON
+  // formatted string. Args are:
   //   function(string) callback
   bool GetDaemonConfig(const NPVariant* args,
                        uint32_t arg_count,
                        NPVariant* result);
 
-  // Loads daemon config version. The first argument specifies the
-  // callback to be called with the config is loaded. The version is
-  // returned as a dotted version string, described in daemon_controller.h.
+  // Retrieves daemon version. The first argument specifies the callback to be
+  // called with the obtained version. The version is passed as a dotted
+  // version string, described in daemon_controller.h.
   bool GetDaemonVersion(const NPVariant* args,
                         uint32_t arg_count,
                         NPVariant* result);
+
+  // Retrieves the user's consent to report crash dumps. The first argument
+  // specifies the callback to be called with the recorder consent. Possible
+  // consent codes are defined in remoting/host/breakpad.h.
+  bool GetUsageStatsConsent(const NPVariant* args,
+                            uint32_t arg_count,
+                            NPVariant* result);
 
   // Start the daemon process with the specified config. Args are:
   //   string config
@@ -201,17 +209,32 @@ class HostNPScriptObject : public HostStatusObserver {
   // Callback for ChromotingHost::Shutdown().
   void OnShutdownFinished();
 
+  // Called when a policy is updated.
+  void OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies);
+
   // Called when the nat traversal policy is updated.
-  void OnNatPolicyUpdate(bool nat_traversal_enabled);
+  void UpdateNatPolicy(bool nat_traversal_enabled);
+
+  // Called when the host domain policy is updated.
+  void UpdateHostDomainPolicy(const std::string& host_domain);
 
   void LocalizeStrings(NPObject* localize_func);
 
   // Helper function for executing InvokeDefault on an NPObject that performs
-  // a string->string mapping with one optional substitution parameter. Stores
-  // the translation in |result| and returns true on success, or leaves it
-  // unchanged and returns false on failure.
+  // a string->string mapping without substitution. Stores the translation in
+  // |result| and returns true on success, or leaves it unchanged and returns
+  // false on failure.
   bool LocalizeString(NPObject* localize_func, const char* tag,
                       string16* result);
+
+  // Helper function for executing InvokeDefault on an NPObject that performs
+  // a string->string mapping with one substitution. Stores the translation in
+  // |result| and returns true on success, or leaves it unchanged and returns
+  // false on failure.
+  bool LocalizeStringWithSubstitution(NPObject* localize_func,
+                                      const char* tag,
+                                      const char* substitution,
+                                      string16* result);
 
   // If the web-app has registered a callback to be notified of changes to the
   // NAT traversal policy, notify it.
@@ -227,8 +250,8 @@ class HostNPScriptObject : public HostStatusObserver {
                                      const std::string& public_key);
 
 
-  // Callback handler for SetConfigAndStart(), Stop() and SetPin() in
-  // DaemonController.
+  // Callback handler for SetConfigAndStart(), Stop(), SetPin() and
+  // SetUsageStatsConsent() in DaemonController.
   void InvokeAsyncResultCallback(const ScopedRefNPObject& callback,
                                  DaemonController::AsyncResult result);
 
@@ -239,6 +262,12 @@ class HostNPScriptObject : public HostStatusObserver {
   // Callback handler for DaemonController::GetVersion().
   void InvokeGetDaemonVersionCallback(const ScopedRefNPObject& callback,
                                       const std::string& version);
+
+  // Callback handler for DaemonController::GetUsageStatsConsent().
+  void InvokeGetUsageStatsConsentCallback(const ScopedRefNPObject& callback,
+                                          bool supported,
+                                          bool allowed,
+                                          bool set_by_policy);
 
   //////////////////////////////////////////////////////////
   // Basic helper methods used for both It2Me and Me2me.
@@ -277,7 +306,7 @@ class HostNPScriptObject : public HostStatusObserver {
   ScopedRefNPObject on_nat_traversal_policy_changed_func_;
   ScopedRefNPObject on_state_changed_func_;
   base::PlatformThreadId np_thread_id_;
-  scoped_refptr<PluginMessageLoopProxy> plugin_message_loop_proxy_;
+  scoped_refptr<PluginThreadTaskRunner> plugin_task_runner_;
 
   scoped_ptr<ChromotingHostContext> host_context_;
   HostKeyPair host_key_pair_;
@@ -286,6 +315,7 @@ class HostNPScriptObject : public HostStatusObserver {
   scoped_ptr<LogToServer> log_to_server_;
   scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
+  scoped_ptr<HostEventLogger> host_event_logger_;
 
   scoped_refptr<ChromotingHost> host_;
   int failed_login_attempts_;
@@ -297,10 +327,13 @@ class HostNPScriptObject : public HostStatusObserver {
 
   base::Lock nat_policy_lock_;
 
-  scoped_ptr<policy_hack::NatPolicy> nat_policy_;
+  scoped_ptr<policy_hack::PolicyWatcher> policy_watcher_;
 
   // Host the current nat traversal policy setting.
   bool nat_traversal_enabled_;
+
+  // The host domain policy setting.
+  std::string required_host_domain_;
 
   // Indicates whether or not a policy has ever been read. This is to ensure
   // that on startup, we do not accidentally start a connection before we have

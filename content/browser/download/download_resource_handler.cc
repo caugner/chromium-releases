@@ -136,7 +136,7 @@ bool DownloadResourceHandler::OnResponseStarted(
   request_->GetResponseHeaderByName("content-disposition",
                                     &content_disposition);
   SetContentDisposition(content_disposition);
-  SetContentLength(response->content_length);
+  SetContentLength(response->head.content_length);
 
   const ResourceRequestInfoImpl* request_info =
       ResourceRequestInfoImpl::ForRequest(request_);
@@ -144,7 +144,7 @@ bool DownloadResourceHandler::OnResponseStarted(
   // Deleted in DownloadManager.
   scoped_ptr<DownloadCreateInfo> info(new DownloadCreateInfo(
       base::Time::Now(), 0, content_length_, DownloadItem::IN_PROGRESS,
-      request_->net_log(), request_info->has_user_gesture(),
+      request_->net_log(), request_info->HasUserGesture(),
       request_info->transition_type()));
 
   // Create the ByteStream for sending data to the download sink.
@@ -162,9 +162,9 @@ bool DownloadResourceHandler::OnResponseStarted(
   info->received_bytes = save_info_.offset;
   info->total_bytes = content_length_;
   info->state = DownloadItem::IN_PROGRESS;
-  info->has_user_gesture = request_info->has_user_gesture();
+  info->has_user_gesture = request_info->HasUserGesture();
   info->content_disposition = content_disposition_;
-  info->mime_type = response->mime_type;
+  info->mime_type = response->head.mime_type;
   info->remote_address = request_->GetSocketAddress().host();
   download_stats::RecordDownloadMimeType(info->mime_type);
 
@@ -184,15 +184,14 @@ bool DownloadResourceHandler::OnResponseStarted(
   }
 
   std::string content_type_header;
-  if (!response->headers ||
-      !response->headers->GetMimeType(&content_type_header))
+  if (!response->head.headers ||
+      !response->head.headers->GetMimeType(&content_type_header))
     content_type_header = "";
   info->original_mime_type = content_type_header;
 
-  if (!response->headers ||
-      !response->headers->EnumerateHeader(NULL,
-                                          "Accept-Ranges",
-                                          &accept_ranges_)) {
+  if (!response->head.headers ||
+      !response->head.headers->EnumerateHeader(
+          NULL, "Accept-Ranges", &accept_ranges_)) {
     accept_ranges_ = "";
   }
 
@@ -238,31 +237,20 @@ bool DownloadResourceHandler::OnWillRead(int request_id, net::IOBuffer** buf,
                                          int* buf_size, int min_size) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(buf && buf_size);
-  if (!read_buffer_) {
-    *buf_size = min_size < 0 ? kReadBufSize : min_size;
-    last_buffer_size_ = *buf_size;
-    read_buffer_ = new net::IOBuffer(*buf_size);
-  }
+  DCHECK(!read_buffer_);
+
+  *buf_size = min_size < 0 ? kReadBufSize : min_size;
+  last_buffer_size_ = *buf_size;
+  read_buffer_ = new net::IOBuffer(*buf_size);
   *buf = read_buffer_.get();
   return true;
 }
 
 // Pass the buffer to the download file writer.
-bool DownloadResourceHandler::OnReadCompleted(int request_id, int* bytes_read,
+bool DownloadResourceHandler::OnReadCompleted(int request_id, int bytes_read,
                                               bool* defer) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (!read_buffer_) {
-    // Ignore spurious OnReadCompleted!  Deferring from OnReadCompleted tells
-    // the ResourceDispatcherHost that we did not consume the data.
-    // ResumeDeferredRequest then repeats the last OnReadCompleted call.
-    // TODO(darin): Fix the ResourceDispatcherHost to avoid this hack!
-    return true;
-  }
-
-  if (pause_count_ > 0) {
-    *defer = was_deferred_ = true;
-    return true;
-  }
+  DCHECK(read_buffer_);
 
   base::TimeTicks now(base::TimeTicks::Now());
   if (!last_read_time_.is_null()) {
@@ -272,26 +260,29 @@ bool DownloadResourceHandler::OnReadCompleted(int request_id, int* bytes_read,
       // divide-by-zero error and still record a very high potential bandwidth.
       seconds_since_last_read = 0.00001;
 
-    double actual_bandwidth = (*bytes_read)/seconds_since_last_read;
+    double actual_bandwidth = (bytes_read)/seconds_since_last_read;
     double potential_bandwidth = last_buffer_size_/seconds_since_last_read;
     download_stats::RecordBandwidth(actual_bandwidth, potential_bandwidth);
   }
   last_read_time_ = now;
 
-  if (!*bytes_read)
+  if (!bytes_read)
     return true;
-  bytes_read_ += *bytes_read;
+  bytes_read_ += bytes_read;
   DCHECK(read_buffer_);
 
   // Take the data ship it down the stream.  If the stream is full, pause the
   // request; the stream callback will resume it.
-  if (!stream_writer_->Write(read_buffer_, *bytes_read)) {
+  if (!stream_writer_->Write(read_buffer_, bytes_read)) {
     PauseRequest();
     *defer = was_deferred_ = true;
     last_stream_pause_time_ = now;
   }
 
   read_buffer_ = NULL;  // Drop our reference.
+
+  if (pause_count_ > 0)
+    *defer = was_deferred_ = true;
 
   return true;
 }
@@ -349,6 +340,8 @@ bool DownloadResourceHandler::OnResponseCompleted(
   }
 
   download_stats::RecordAcceptsRanges(accept_ranges_, bytes_read_);
+  download_stats::RecordNetworkBlockage(
+      base::TimeTicks::Now() - download_start_time_, total_pause_time_);
 
   CallStartedCB(DownloadId(), error_code);
 
@@ -359,11 +352,6 @@ bool DownloadResourceHandler::OnResponseCompleted(
 
   stream_writer_.reset();  // We no longer need the stream.
   read_buffer_ = NULL;
-
-  // Stats
-  download_stats::RecordNetworkBandwidth(
-      bytes_read_, base::TimeTicks::Now() - download_start_time_,
-      total_pause_time_);
 
   return true;
 }

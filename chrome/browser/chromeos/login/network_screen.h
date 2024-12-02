@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_NETWORK_SCREEN_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -35,6 +34,7 @@ class NetworkScreen : public WizardScreen,
   virtual void OnNetworkManagerChanged(NetworkLibrary* network_lib) OVERRIDE;
 
   // NetworkScreenActor::Delegate implementation:
+  virtual void OnActorDestroyed(NetworkScreenActor* actor) OVERRIDE;
   virtual void OnContinuePressed() OVERRIDE;
 
   NetworkScreenActor* actor() const { return actor_; }

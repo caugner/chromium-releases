@@ -25,6 +25,8 @@ FileType.types = [
    pattern: /\.png$/i},
   {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'WebP',
    pattern: /\.webp$/i},
+  {type: 'image', name: 'IMAGE_FILE_TYPE', subtype: 'TIFF',
+   pattern: /\.tiff?$/i},
 
   // Video
   {type: 'video', name: 'VIDEO_FILE_TYPE', subtype: '3GP',
@@ -53,14 +55,8 @@ FileType.types = [
    pattern: /\.wav$/i},
 
   // Text
-  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'POD',
-   pattern: /\.pod$/i},
-  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'RST',
-   pattern: /\.rst$/i},
   {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'TXT',
    pattern: /\.txt$/i},
-  {type: 'text', name: 'PLAIN_TEXT_FILE_TYPE', subtype: 'LOG',
-   pattern: /\.log$/i},
 
   // Archive
   {type: 'archive', name: 'ZIP_ARCHIVE_FILE_TYPE', subtype: 'ZIP',
@@ -91,7 +87,7 @@ FileType.types = [
   // Others
   {type: 'document', icon: 'pdf', name: 'PDF_DOCUMENT_FILE_TYPE',
    subtype: 'PDF', pattern: /\.pdf$/i},
-  {type: 'document', icon: 'generic', name: 'HTML_DOCUMENT_FILE_TYPE',
+  {type: 'document', name: 'HTML_DOCUMENT_FILE_TYPE',
    subtype: 'HTML', pattern: /\.(html?|mht|mhtml)$/i},
   {type: 'document', icon: 'word', name: 'WORD_DOCUMENT_FILE_TYPE',
    subtype: 'Word', pattern: /\.(doc|docx)$/i},
@@ -100,17 +96,6 @@ FileType.types = [
   {type: 'document', icon: 'excel', name: 'EXCEL_FILE_TYPE',
    subtype: 'Excel', pattern: /\.(xls|xlsx)$/i}
 ];
-
-/**
- * Map from file type to preview art.
- */
-FileType.previewArt = {
-  'audio': 'images/filetype_large_audio.png',
-  'folder': 'images/filetype_large_folder.png',
-  'unknown': 'images/filetype_large_generic.png',
-  'image': 'images/filetype_large_image.png',
-  'video': 'images/filetype_large_video.png'
-};
 
 /**
  * A special type for directory.
@@ -227,14 +212,4 @@ FileType.isHosted = function(file) {
 FileType.getIcon = function(file) {
   var fileType = FileType.getType(file);
   return fileType.icon || fileType.type || 'unknown';
-};
-
-/**
- * Get the preview url for a given type.
- *
- * @param {string} type File type from FileType.types.
- * @return {string} Path to preview art.
- */
-FileType.getPreviewArt = function(type) {
-  return FileType.previewArt[type] || FileType.previewArt['unknown'];
 };

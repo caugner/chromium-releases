@@ -4,12 +4,11 @@
 
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_FILE_STREAM_READER_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_FILE_STREAM_READER_H_
-#pragma once
 
 #include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
-#include "googleurl/src/gurl.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/blob/file_stream_reader.h"
 
 class FilePath;
@@ -35,7 +34,7 @@ class FileSystemFileStreamReader : public webkit_blob::FileStreamReader {
  public:
   // Creates a new FileReader for a filesystem URL |url| form |initial_offset|.
   FileSystemFileStreamReader(FileSystemContext* file_system_context,
-                             const GURL& url,
+                             const FileSystemURL& url,
                              int64 initial_offset);
   virtual ~FileSystemFileStreamReader();
 
@@ -53,7 +52,7 @@ class FileSystemFileStreamReader : public webkit_blob::FileStreamReader {
       const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref);
 
   scoped_refptr<FileSystemContext> file_system_context_;
-  const GURL url_;
+  FileSystemURL url_;
   const int64 initial_offset_;
   scoped_ptr<webkit_blob::LocalFileStreamReader> local_file_reader_;
   scoped_refptr<webkit_blob::ShareableFileReference> snapshot_ref_;

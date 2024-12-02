@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
+#include "base/string16.h"
 #include "chrome/common/net/gaia/oauth2_api_call_flow.h"
 
 class GoogleServiceAuthError;
@@ -27,7 +29,7 @@ class URLRequestContextGetter;
 
 // IssueAdvice: messages to show to the user to get a user's approval.
 // The structure is as follows:
-// * Descritpion 1
+// * Description 1
 //   - Detail 1.1
 //   - Details 1.2
 // * Description 2
@@ -41,8 +43,8 @@ struct IssueAdviceInfoEntry {
   IssueAdviceInfoEntry();
   ~IssueAdviceInfoEntry();
 
-  std::string description;
-  std::vector<std::string> details;
+  string16 description;
+  std::vector<string16> details;
 
   bool operator==(const IssueAdviceInfoEntry& rhs) const;
 };
@@ -88,30 +90,22 @@ class OAuth2MintTokenFlow : public OAuth2ApiCallFlow {
 
   class Delegate {
    public:
-    Delegate() {}
-    virtual ~Delegate() {}
     virtual void OnMintTokenSuccess(const std::string& access_token) {}
     virtual void OnIssueAdviceSuccess(const IssueAdviceInfo& issue_advice)  {}
     virtual void OnMintTokenFailure(const GoogleServiceAuthError& error) {}
-  };
 
-  // An interceptor for tests.
-  class InterceptorForTests {
-   public:
-    // Returns true if the success callback should be called and false for
-    // failures.
-    virtual bool DoIntercept(const OAuth2MintTokenFlow* flow,
-                             std::string* access_token,
-                             GoogleServiceAuthError* error) = 0;
+   protected:
+    virtual ~Delegate() {}
   };
-  static void SetInterceptorForTests(InterceptorForTests* interceptor);
 
   OAuth2MintTokenFlow(net::URLRequestContextGetter* context,
                       Delegate* delegate,
                       const Parameters& parameters);
   virtual ~OAuth2MintTokenFlow();
 
-  virtual void Start() OVERRIDE;
+  // Starts the flow, and deletes |this| when done. Useful when the caller
+  // does not care about the response (|delegate_| is NULL).
+  void FireAndForget();
 
  protected:
   // Implementation of template methods in OAuth2ApiCallFlow.
@@ -137,7 +131,7 @@ class OAuth2MintTokenFlow : public OAuth2ApiCallFlow {
       ProcessMintAccessTokenFailure);
 
   void ReportSuccess(const std::string& access_token);
-  void ReportSuccess(const IssueAdviceInfo& issue_advice);
+  void ReportIssueAdviceSuccess(const IssueAdviceInfo& issue_advice);
   void ReportFailure(const GoogleServiceAuthError& error);
 
   static bool ParseIssueAdviceResponse(
@@ -148,6 +142,10 @@ class OAuth2MintTokenFlow : public OAuth2ApiCallFlow {
   net::URLRequestContextGetter* context_;
   Delegate* delegate_;
   Parameters parameters_;
+  // If true, |this| owns itself and will delete itself after reporting
+  // success or failure.
+  bool delete_when_done_;
+  base::WeakPtrFactory<OAuth2MintTokenFlow> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OAuth2MintTokenFlow);
 };

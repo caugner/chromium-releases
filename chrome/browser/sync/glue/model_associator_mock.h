@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SYNC_GLUE_MODEL_ASSOCIATOR_MOCK_H__
 #define CHROME_BROWSER_SYNC_GLUE_MODEL_ASSOCIATOR_MOCK_H__
-#pragma once
 
 #include "base/location.h"
 #include "chrome/browser/sync/glue/model_associator.h"
@@ -22,8 +21,8 @@ class ModelAssociatorMock : public AssociatorInterface {
   ModelAssociatorMock();
   virtual ~ModelAssociatorMock();
 
-  MOCK_METHOD0(AssociateModels, SyncError());
-  MOCK_METHOD0(DisassociateModels, SyncError());
+  MOCK_METHOD0(AssociateModels, syncer::SyncError());
+  MOCK_METHOD0(DisassociateModels, syncer::SyncError());
   MOCK_METHOD1(SyncModelHasUserCreatedNodes, bool(bool* has_nodes));
   MOCK_METHOD0(AbortAssociation, void());
   MOCK_METHOD0(CryptoReadyIfNecessary, bool());

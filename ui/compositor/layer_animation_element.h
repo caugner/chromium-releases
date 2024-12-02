@@ -4,7 +4,6 @@
 
 #ifndef UI_COMPOSITOR_LAYER_ANIMATION_ELEMENT_H_
 #define UI_COMPOSITOR_LAYER_ANIMATION_ELEMENT_H_
-#pragma once
 
 #include <set>
 
@@ -29,7 +28,9 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
     TRANSFORM = 0,
     BOUNDS,
     OPACITY,
-    VISIBILITY
+    VISIBILITY,
+    BRIGHTNESS,
+    GRAYSCALE
   };
 
   struct COMPOSITOR_EXPORT TargetValue {
@@ -41,6 +42,8 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
     Transform transform;
     float opacity;
     bool visibility;
+    float brightness;
+    float grayscale;
   };
 
   typedef std::set<AnimatableProperty> AnimatableProperties;
@@ -82,6 +85,18 @@ class COMPOSITOR_EXPORT LayerAnimationElement {
   // the return value.
   static LayerAnimationElement* CreateVisibilityElement(
       bool visibility,
+      base::TimeDelta duration);
+
+  // Creates an element that transitions to the given brightness.
+  // The caller owns the return value.
+  static LayerAnimationElement* CreateBrightnessElement(
+      float brightness,
+      base::TimeDelta duration);
+
+  // Creates an element that transitions to the given grayscale value.
+  // The caller owns the return value.
+  static LayerAnimationElement* CreateGrayscaleElement(
+      float grayscale,
       base::TimeDelta duration);
 
   // Creates an element that pauses the given properties. The caller owns the

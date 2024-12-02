@@ -11,18 +11,19 @@
 #include "sync/engine/syncer_proto_util.h"
 #include "sync/engine/syncer_types.h"
 #include "sync/engine/syncer_util.h"
-#include "sync/engine/syncproto.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
-#include "sync/syncable/syncable.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/syncable/entry.h"
+#include "sync/syncable/mutable_entry.h"
+#include "sync/syncable/syncable_proto_util.h"
+#include "sync/syncable/write_transaction.h"
 
-namespace browser_sync {
-
-using syncable::WriteTransaction;
+namespace syncer {
 
 using syncable::GET_BY_ID;
-using syncable::ModelTypeSet;
 using syncable::SYNCER;
+using syncable::WriteTransaction;
 
 namespace {
 
@@ -46,13 +47,34 @@ namespace {
 // that both clients will refer to the item using the same ID going forward.  In
 // this case, we're right to assume that the update is not a reflection.
 //
-// For more information, see SyncerUtil::FindLocalIdToUpdate().
+// For more information, see FindLocalIdToUpdate().
 bool UpdateContainsNewVersion(syncable::BaseTransaction *trans,
-                              const SyncEntity &update) {
+                              const sync_pb::SyncEntity &update) {
   int64 existing_version = -1; // The server always sends positive versions.
-  syncable::Entry existing_entry(trans, GET_BY_ID, update.id());
+  syncable::Entry existing_entry(trans, GET_BY_ID,
+                                 SyncableIdFromProto(update.id_string()));
   if (existing_entry.good())
     existing_version = existing_entry.Get(syncable::BASE_VERSION);
+
+  if (!existing_entry.good() && update.deleted()) {
+    // There are several possible explanations for this.  The most common cases
+    // will be first time sync and the redelivery of deletions we've already
+    // synced, accepted, and purged from our database.  In either case, the
+    // update is useless to us.  Let's count them all as "not new", even though
+    // that may not always be entirely accurate.
+    return false;
+  }
+
+  if (existing_entry.good() &&
+      !existing_entry.Get(syncable::UNIQUE_CLIENT_TAG).empty() &&
+      existing_entry.Get(syncable::IS_DEL) &&
+      update.deleted()) {
+    // Unique client tags will have their version set to zero when they're
+    // deleted.  The usual version comparison logic won't be able to detect
+    // reflections of these items.  Instead, we assume any received tombstones
+    // are reflections.  That should be correct most of the time.
+    return false;
+  }
 
   return existing_version < update.version();
 }
@@ -61,7 +83,7 @@ bool UpdateContainsNewVersion(syncable::BaseTransaction *trans,
 // will have refused to unify the update.
 // We should not attempt to apply it at all since it violates consistency
 // rules.
-VerifyResult VerifyTagConsistency(const SyncEntity& entry,
+VerifyResult VerifyTagConsistency(const sync_pb::SyncEntity& entry,
                                   const syncable::MutableEntry& same_id) {
   if (entry.has_client_defined_unique_tag() &&
       entry.client_defined_unique_tag() !=
@@ -79,11 +101,11 @@ std::set<ModelSafeGroup> VerifyUpdatesCommand::GetGroupsToChange(
     const sessions::SyncSession& session) const {
   std::set<ModelSafeGroup> groups_with_updates;
 
-  const GetUpdatesResponse& updates =
+  const sync_pb::GetUpdatesResponse& updates =
       session.status_controller().updates_response().get_updates();
   for (int i = 0; i < updates.entries().size(); i++) {
     groups_with_updates.insert(
-        GetGroupForModelType(syncable::GetModelType(updates.entries(i)),
+        GetGroupForModelType(GetModelType(updates.entries(i)),
                              session.routing_info()));
   }
 
@@ -96,17 +118,17 @@ SyncerError VerifyUpdatesCommand::ModelChangingExecuteImpl(
   syncable::Directory* dir = session->context()->directory();
   WriteTransaction trans(FROM_HERE, SYNCER, dir);
   sessions::StatusController* status = session->mutable_status_controller();
-  const GetUpdatesResponse& updates = status->updates_response().get_updates();
+  const sync_pb::GetUpdatesResponse& updates =
+      status->updates_response().get_updates();
   int update_count = updates.entries().size();
 
-  ModelTypeSet requested_types = browser_sync::GetRoutingInfoTypes(
+  ModelTypeSet requested_types = GetRoutingInfoTypes(
       session->routing_info());
 
   DVLOG(1) << update_count << " entries to verify";
   for (int i = 0; i < update_count; i++) {
-    const SyncEntity& update =
-        *reinterpret_cast<const SyncEntity *>(&(updates.entries(i)));
-    ModelSafeGroup g = GetGroupForModelType(update.GetModelType(),
+    const sync_pb::SyncEntity& update = updates.entries(i);
+    ModelSafeGroup g = GetGroupForModelType(GetModelType(update),
                                             session->routing_info());
     if (g != status->group_restriction())
       continue;
@@ -126,15 +148,15 @@ SyncerError VerifyUpdatesCommand::ModelChangingExecuteImpl(
 }
 
 VerifyUpdatesCommand::VerifyUpdateResult VerifyUpdatesCommand::VerifyUpdate(
-    syncable::WriteTransaction* trans, const SyncEntity& entry,
+    syncable::WriteTransaction* trans, const sync_pb::SyncEntity& entry,
     const ModelTypeSet& requested_types,
     const ModelSafeRoutingInfo& routes) {
-  syncable::Id id = entry.id();
+  syncable::Id id = SyncableIdFromProto(entry.id_string());
   VerifyUpdateResult result = {VERIFY_FAIL, GROUP_PASSIVE};
 
   const bool deleted = entry.has_deleted() && entry.deleted();
-  const bool is_directory = entry.IsFolder();
-  const syncable::ModelType model_type = entry.GetModelType();
+  const bool is_directory = IsFolder(entry);
+  const ModelType model_type = GetModelType(entry);
 
   if (!id.ServerKnows()) {
     LOG(ERROR) << "Illegal negative id in received updates";
@@ -149,10 +171,10 @@ VerifyUpdatesCommand::VerifyUpdateResult VerifyUpdatesCommand::VerifyUpdate(
   }
 
   syncable::MutableEntry same_id(trans, GET_BY_ID, id);
-  result.value = SyncerUtil::VerifyNewEntry(entry, &same_id, deleted);
+  result.value = VerifyNewEntry(entry, &same_id, deleted);
 
-  syncable::ModelType placement_type = !deleted ? entry.GetModelType()
-      : same_id.good() ? same_id.GetModelType() : syncable::UNSPECIFIED;
+  ModelType placement_type = !deleted ? GetModelType(entry)
+      : same_id.good() ? same_id.GetModelType() : UNSPECIFIED;
   result.placement = GetGroupForModelType(placement_type, routes);
 
   if (VERIFY_UNDECIDED == result.value) {
@@ -175,7 +197,7 @@ VerifyUpdatesCommand::VerifyUpdateResult VerifyUpdatesCommand::VerifyUpdate(
   // If we have an existing entry, we check here for updates that break
   // consistency rules.
   if (VERIFY_UNDECIDED == result.value) {
-    result.value = SyncerUtil::VerifyUpdateConsistency(trans, entry, &same_id,
+    result.value = VerifyUpdateConsistency(trans, entry, &same_id,
         deleted, is_directory, model_type);
   }
 
@@ -185,4 +207,4 @@ VerifyUpdatesCommand::VerifyUpdateResult VerifyUpdatesCommand::VerifyUpdate(
   return result;  // This might be VERIFY_SUCCESS as well
 }
 
-}  // namespace browser_sync
+}  // namespace syncer
